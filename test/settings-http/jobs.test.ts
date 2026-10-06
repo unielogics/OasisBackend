@@ -9,6 +9,7 @@ import {
   FEDERAL_HOLIDAYS_JOB,
   emergencyAutoReopenJob,
   emergencySweepJob,
+  enqueueStartupJobs,
   federalHolidaysJob,
   runEmergencyReopen,
   runFederalHolidayJob,
@@ -273,6 +274,32 @@ describe('emergency.auto_reopen and emergency.sweep', () => {
       EMERGENCY_SWEEP_JOB,
     ])
     for (const j of settingsJobs) expect(jobDefinitions).toContain(j)
+  })
+})
+
+describe('startup catch-up', () => {
+  it('enqueues the federal catch-up and an emergency sweep, once per restart, and survives a failing queue', async () => {
+    const calls: { name: string; data: unknown; opts: unknown }[] = []
+    await enqueueStartupJobs({
+      enqueue: async (name, data, opts) => {
+        calls.push({ name, data, opts })
+        return 'id'
+      },
+    })
+    expect(calls).toEqual([
+      { name: 'federal_holidays.generate', data: { catchUp: true }, opts: { singletonKey: 'startup' } },
+      { name: 'emergency.sweep', data: {}, opts: { singletonKey: 'startup' } },
+    ])
+    const failed: string[] = []
+    await enqueueStartupJobs(
+      {
+        enqueue: async () => {
+          throw new Error('queue down')
+        },
+      },
+      (err, job) => failed.push(`${job}: ${err.message}`),
+    )
+    expect(failed).toEqual(['federal_holidays.generate: queue down', 'emergency.sweep: queue down'])
   })
 })
 

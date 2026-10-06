@@ -99,15 +99,17 @@ const WindowIn = {
 }
 
 function timeOf(text: string | undefined, min: number | undefined, path: string): number | undefined {
-  if (min !== undefined) return min
-  if (text === undefined) return undefined
-  const v = tryParseT(text)
-  if (v === null)
+  const parsed = text === undefined ? undefined : tryParseT(text)
+  if (text !== undefined && parsed === null)
     throw new AppError('VALIDATION_FAILED', {
       detail: 'Use a time like 10:00 AM.',
       errors: [{ path, message: 'Use a time like 10:00 AM.' }],
     })
-  return v
+  if (parsed !== undefined && min !== undefined && parsed !== min) {
+    const message = `${path} and ${path}Min disagree. Send only one of them.`
+    throw new AppError('VALIDATION_FAILED', { detail: message, errors: [{ path, message }] })
+  }
+  return min ?? parsed ?? undefined
 }
 
 const windowOf = (b: { from?: string; to?: string; fromMin?: number; toMin?: number }) => ({

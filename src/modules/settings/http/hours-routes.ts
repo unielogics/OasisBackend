@@ -149,6 +149,10 @@ const DayIn = z
     to: Time.optional(),
     fromMin: z.number().int().optional(),
     toMin: z.number().int().optional(),
+    // read-only fields of GET /settings/hours, accepted so a loaded day can be sent back as it is
+    day: z.string().optional(),
+    len: z.string().optional(),
+    lenMinutes: z.number().int().optional(),
   })
   .strict()
 
@@ -184,16 +188,37 @@ function parseTime(label: string, path: string, text: string): number {
   return m
 }
 
-/** Accepts "8:00 AM" strings or minutes; a closed day without times keeps the stored ones. */
+/**
+ * Accepts "8:00 AM" strings or minutes; a closed day without times keeps the stored ones. A day that carries both forms
+ * (a loaded day sent back after editing only one of them) must agree, otherwise one edit would be silently dropped.
+ */
 function mergeDays(current: readonly HoursDay[], input: z.infer<typeof DayIn>[]): HoursDay[] {
+  const pick = (
+    name: string,
+    i: number,
+    key: 'from' | 'to',
+    text: string | undefined,
+    min: number | undefined,
+  ) => {
+    const parsed = text !== undefined ? parseTime(name, `days.${i}.${key}`, text) : undefined
+    if (parsed !== undefined && min !== undefined && parsed !== min) {
+      const message = `${name}: ${key} and ${key}Min disagree. Send only one of them.`
+      throw new AppError('VALIDATION_FAILED', {
+        detail: message,
+        errors: [{ path: `days.${i}.${key}`, message }],
+      })
+    }
+    return min ?? parsed
+  }
   return input.map((d, i) => {
     const cur = current.find((c) => c.weekday === d.weekday)
     const name = DAY_NAMES[d.weekday]!
-    const openMin =
-      d.fromMin ?? (d.from !== undefined ? parseTime(name, `days.${i}.from`, d.from) : (cur?.openMin ?? 480))
-    const closeMin =
-      d.toMin ?? (d.to !== undefined ? parseTime(name, `days.${i}.to`, d.to) : (cur?.closeMin ?? 1080))
-    return { weekday: d.weekday, isOpen: d.open, openMin, closeMin }
+    return {
+      weekday: d.weekday,
+      isOpen: d.open,
+      openMin: pick(name, i, 'from', d.from, d.fromMin) ?? cur?.openMin ?? 480,
+      closeMin: pick(name, i, 'to', d.to, d.toMin) ?? cur?.closeMin ?? 1080,
+    }
   })
 }
 
@@ -236,6 +261,10 @@ export function registerHoursRoutes(rt: SettingsRuntime): void {
             days: z.array(DayIn).max(7),
             rules: RulesIn.optional(),
             version: z.number().int().min(0).optional(),
+            // read-only fields of GET /settings/hours
+            weekHours: z.string().optional(),
+            weekMinutes: z.number().int().optional(),
+            federalAuto: z.boolean().optional(),
           })
           .strict(),
         response: {

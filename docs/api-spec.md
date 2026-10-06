@@ -417,3 +417,79 @@ response carries a warning instead. Email must be unique across employees and lo
 * **Seeds**: `pnpm seed -- --profile people` creates the five roles with the design's grants and limits and the seven design employees (Sofia's `sched.override` exception, Kevin invited, schedules from the design's `sch()`); it creates no passwords. With `SEED_DEV_PASSWORD` set (refused in production) the six active employees also get a login with that password, emails `first@oasisautospa.com`.
 * **Wiring left for later**: pass a real `NotificationPort` (SMS Gate then SES) and the Settings module's `BusinessHoursPort` to `createIdentity()` in `src/server.ts`; until then invite/reset links are not delivered (a Super Admin gets them in the response; a startup warning says so).
 * **Tests**: `test/auth`, `test/rbac`, `test/people`, `test/authz-matrix`; `test/auth/harness.ts` builds the real app with the real authorizer (`useHarness()`).
+
+## 15. Settings: hours, rules, closures, emergency, VIP, arrival and services
+
+Code: `src/modules/settings/http` (routes, runtime, emergency commands), `src/modules/catalog/http` (services),
+`src/modules/customers/http` (VIP clients), `src/modules/settings/db-adapters` (DB ports, recording notifiers, crew alert) and
+`src/modules/settings/jobs`. Services underneath: `src/modules/settings/*.ts`, `src/modules/catalog/service.ts`. ADRs 0030-0033.
+Every mutation runs in one transaction, writes an `audit_log` row and publishes `settings.changed {section}` (the emergency
+also publishes on `ops`). The generated table in section 13 is the endpoint list; this section is the behaviour.
+
+### 15.1 Reading, saving and versions
+
+| Topic | Rule |
+|---|---|
+| Reads | Every `GET` is open to any signed-in user except `GET /vip/clients` (`cli.member`) and `GET /emergency/history`, `GET /emergency/preview`, `GET /emergency/{id}/affected` (`set.emergency`). `GET /services?includeInactive=true` needs `set.services`. |
+| Versions | Each GET sets `ETag: "<version>"`. Hours and rules share one version (`booking_rules.version`). `PUT /settings/hours` **requires** it (body `version` or `If-Match`; 428 `PRECONDITION_REQUIRED` without, 412 `VERSION_CONFLICT` with `meta.currentVersion` when stale). Every other settings write takes it **optionally** and enforces it when sent: rules, VIP, arrival, federal toggle, checklists, catalog edits. |
+| Rules save at once | `PUT /settings/rules` saves one chip (`slot`, `buffer`, `cutoff`; also `onlineLeadMinutes`, `allowOverrun`, `autoPlanBay`) and returns the new shared version. The Save/Discard bar of Working hours only covers the days; a rule click made while hours are unsaved moves the version, so the editor must adopt the returned version (or reload) before its own save. |
+| Times | Hours and closure windows accept `"8:00 AM"` text (`from`/`to`) or minutes (`fromMin`/`toMin`); responses carry both. A day or closure sent with both forms must agree (422), so a loaded object can be edited and sent back. Closed days keep their times. |
+| Round trip | `PUT /settings/hours` ignores the read-only fields of `GET /settings/hours` (`day`, `len`, `lenMinutes`, `weekHours`, `weekMinutes`, `federalAuto`). |
+| Labels | `weekHours` is the design label (`"65 hrs"`, `"58.5 hrs"`), `len` per day likewise (`"0 hrs"` when closed); `weekMinutes`/`lenMinutes` are numbers. |
+
+### 15.2 Working hours and closures
+
+| Endpoint | Behaviour |
+|---|---|
+| `GET /settings/hours` | `{days[7] {weekday, day, open, from, to, fromMin, toMin, len, lenMinutes}, rules {slot, buffer, cutoff, ...}, weekHours, weekMinutes, federalAuto, version}`; `days` is Sunday first, the dashboard orders Monday first. |
+| `PUT /settings/hours` | All seven days; validation messages are `"Tuesday: closing time must be after opening time."`, `"...use 30-minute steps."`, `"...hours must be between 5:00 AM and 11:30 PM."`. Returns the saved view plus `changed` and `warnings {employeeScheduleConflicts[], appointmentsOutsideHours[]}` (employees whose schedule no longer fits; upcoming booked/confirmed/arrived appointments outside the new hours). Nothing is moved. Employee schedules are validated against these stored hours (the people module's `BusinessHoursPort` is the DB adapter). |
+| `GET /closures?from=&to=` | `{federalAuto, upcoming (date asc), past (newest first)}`; each row `{id, date, mon, day, dow, name, type, from, to, fromMin, toMin, notify, source, emergency, federalKey, typeLabel, affectedCount, subLine, past}`. `affectedCount` is real (closed day: non-canceled appointments; reduced: those outside the window; `null` for past rows) and `subLine` the design sentence with it. |
+| `POST /closures/preview` | `{affected}` for `{date, type, from?, to?}`. |
+| `POST /closures` | 201 `{closure, affectedCount, notified}`. 422 `CLOSURE_INCOMPLETE` "Add a date and a name." (title "Check the form") for a missing or blank date or name; 422 `CLOSURE_DATE_TAKEN` "There's already a closure on that date."; `notify` defaults true and messages reachable booked/confirmed customers once, at creation. `Idempotency-Key` optional. |
+| `PATCH /closures/{id}` | `{notify, name, type, from, to}`; `notify` only stores the flag (nothing is sent later); emergency rows answer 409 `CLOSURE_LOCKED`. |
+| `DELETE /closures/{id}` | Soft delete, sends nothing, a removed federal holiday is never regenerated. `{id, name, date, removed: true}`. |
+| `PUT /settings/auto-federal-holidays` | `{enabled}`; enabling generates this year and next in the same transaction (closed days, `notify` off, past dates and holidays that already have a closure skipped). Job `federal_holidays.generate` does the same on Jan 1 and at startup. |
+
+### 15.3 Emergency closing
+
+| Endpoint | Behaviour |
+|---|---|
+| `GET /emergency` | Any signed-in user: `{active, summary, counters {affected, notified, rebooked, booking}, current, strip, history, canClose, closeRoleNames, requirement, options}`. `strip` is live: `{openNow, text, todayHours, appointmentsRemaining, vehiclesOnSite, ...}` with `text` reading `"Open now · Saturday 8:00 AM – 5:00 PM · 6 appointments left today, 3 vehicles on site"`. `canClose`/`closeRoleNames` ("Management", "Super Admin") replace the static access line; `history` is null without `set.emergency`. |
+| `GET /emergency/preview` | `?reason&dur&until&through[&message&notify&link&pause]`; `reason` is the chip label or key, `dur` is `today`/`until`/`days` (`through` is accepted for `days`), `until` is `"2:00 PM"`. `{count, affected[{time, customerName, vehicle, bizDate, dateLabel, status}], onSite[], summary, untilText, renderedMessage, endsAt}`. No contact data is returned. |
+| `POST /emergency/close` | **Idempotency-Key required** (replay: same response, `Idempotent-Replayed: true`; same key, other body: 422 `IDEMPOTENCY_MISMATCH`). One transaction: 409 `EMERGENCY_ACTIVE`; 422 `EMERGENCY_NOTHING_TO_CLOSE` for "rest of today" once the shop has closed or on a day it is not open; 422 for a reopening time that is not later than now and for a last day more than 60 days out. Writes the emergency row and closure rows (replacing planned ones for later restore), flags booked and confirmed appointments in the window (multi-day: every day through the last), records the message per customer (`sms`, `email`, or `skipped_opt_out`/`no_contact`), alerts on-shift crew, schedules `emergency.auto_reopen` at the end time. 201 `{summary, notifiedCount, skipped, affected[], onSite[], closuresCreated[], emergency}`. Vehicles already on site are reported, never touched. |
+| `POST /emergency/reopen` | Soft-deletes today's and future emergency closure rows (days already over stay), restores replaced planned closures, writes history `"Reopened by {name} · {n} notified"` with real counters. 409 `EMERGENCY_NOT_ACTIVE` when nothing is active. Events on `ops`: `emergency.started`, `emergency.ended` (service) and `emergency.reopened` (command), all on one reopen. |
+| `GET /emergency/history`, `GET /emergency/{id}/affected` | `set.emergency`; the second is the "needs rebooking" queue (booked or confirmed appointments of that emergency not yet rebooked). |
+
+Notification fan-out is behind ports (`ClosureNotifier`, `EmergencyNotifier`, `EmergencyEffects`): today they write an
+`activity_log` line per appointment and an audit row and report `queued`; the SMS wave replaces them with
+`configureSettings({...})` in `src/server.ts`. Reschedule links appear in messages only when `RESCHEDULE_LINK_ENABLED=true`.
+
+### 15.4 VIP, arrival and services
+
+| Endpoint | Behaviour |
+|---|---|
+| `GET/PUT /vip` | Flat design keys `{release, windowVip, windowStd, sameDay, waitlist, offerMin, standing, autoConfirm, cadences}` plus `cadenceOptions`, `holds[]` (Monday first), `counts`, `version`. `PUT` is partial (`cli.member`); windows are ranges 7-90 and 7-60, not multiples of 7. |
+| `POST /vip/holds`, `DELETE /vip/holds/{id}` | `{weekday, time | timeMin}`; 201 `{hold, toast: "Sat 11:00 AM held for VIPs"}`; duplicate 409 `VIP_HOLD_EXISTS` with title and detail "That slot is already held". |
+| `GET/POST/DELETE /vip/clients` | By `customerId`, or by `name`: exactly one exact case-insensitive match is added (201, toast "{name} is now VIP"); several matches or only partial ones answer 409 `VIP_CLIENT_AMBIGUOUS` with `meta.candidates` (id, name, vehicles, `alreadyVip`, last-four phone hint only with `cli.contact`); no match is 404 `VIP_CLIENT_NOT_FOUND`; already VIP is 200 `added: false`. |
+| `GET/PUT /arrival-settings` | `{on, radius, prepAt, autoArrive, welcome, crew, vipFirst, version}`; `PUT` partial (`cli.member`). |
+| `GET /services` | Packages and add-ons with `tasks[{id, label, position}]`, `version`, `taskCount`. |
+| `PUT /services/{id}/checklist` | `{tasks: [{id?, label} | string], version?}`: the whole ordered list, trimmed, blanks dropped; ids are stable (rename and reorder keep them; see ADR 0021 for the tie-break); removed tasks are retired. Calls the `ChecklistSync` port (default no-op). |
+| `POST /services`, `PATCH /services/{id}` | Name, price (cents), duration (packages only), `bookableDesk`, `active`, tags, sort. Appointments keep their own snapshot. |
+| `GET /settings/bundle` | `{hours, rules, federalAuto, closures {upcoming, past}, emergency, vip, arrival, services, counts {employees}, omitted[]}`: the Settings screen in one call. Parts that need more than a session are left out and named in `omitted`: `emergency.history` (`set.emergency`), `vip.clients` (`cli.member`), `counts.employees` (`team.view`). |
+
+### 15.5 Jobs
+
+| Job | Trigger | Behaviour |
+|---|---|---|
+| `federal_holidays.generate` | cron `5 0 1 1 *` (business tz), at API startup, on demand | Current and next year per location; years with a `federal_holiday_runs` row are skipped in catch-up mode; idempotent through the unique federal key. |
+| `emergency.auto_reopen` | delayed to `ends_at` when the shop closes (`singletonKey` = emergency id) | Reopens that emergency when its end time has passed. |
+| `emergency.sweep` | hourly cron and at API startup | Backstop: reopens any active emergency whose end time passed. |
+
+Handlers take the injected `Clock`; tests move a `FixedClock` (`test/settings-http/jobs.test.ts`).
+
+### 15.6 Tests and the oracle
+
+`pnpm test:settings` runs `test/settings-http` (real Postgres). `oracle.test.ts` compares the API with values read from the
+original Settings prototype (`test/fixtures/golden/settings-original.json`, produced by
+`test/settings-http/golden/extract-settings-oracle.mts`; commands in `test/fixtures/golden/README.md`).
+

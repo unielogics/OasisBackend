@@ -9773,11 +9773,22 @@
                     "items": {
                       "additionalProperties": false,
                       "properties": {
+                        "day": {
+                          "type": "string"
+                        },
                         "from": {
                           "maxLength": 12,
                           "type": "string"
                         },
                         "fromMin": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "len": {
+                          "type": "string"
+                        },
+                        "lenMinutes": {
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
@@ -9808,6 +9819,9 @@
                     },
                     "maxItems": 7,
                     "type": "array"
+                  },
+                  "federalAuto": {
+                    "type": "boolean"
                   },
                   "rules": {
                     "additionalProperties": false,
@@ -9844,6 +9858,14 @@
                   "version": {
                     "maximum": 9007199254740991,
                     "minimum": 0,
+                    "type": "integer"
+                  },
+                  "weekHours": {
+                    "type": "string"
+                  },
+                  "weekMinutes": {
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
                     "type": "integer"
                   }
                 },

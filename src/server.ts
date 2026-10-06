@@ -9,7 +9,7 @@ import {
   DbBusinessHours,
 } from './modules/settings/db-adapters/index.js'
 import { configureSettings } from './modules/settings/http/runtime.js'
-import { EMERGENCY_SWEEP_JOB, FEDERAL_HOLIDAYS_JOB } from './modules/settings/jobs/names.js'
+import { enqueueStartupJobs } from './modules/settings/jobs/index.js'
 import { createClock, type Clock } from './platform/clock.js'
 import { createDb, type Db, type DbOptions } from './platform/db.js'
 import { createIdGenerator, type NewId } from './platform/ids.js'
@@ -74,14 +74,9 @@ async function main(): Promise<void> {
     tz: env.BUSINESS_TZ,
   })
   await jobs.start({ workers: false })
-  // Catch-up after downtime: holidays for the current and next year, and any emergency whose end time passed.
-  // singletonKey keeps a restart loop from queueing duplicates.
-  for (const name of [FEDERAL_HOLIDAYS_JOB, EMERGENCY_SWEEP_JOB])
-    await jobs
-      .enqueue(name, name === FEDERAL_HOLIDAYS_JOB ? { catchUp: true } : {}, { singletonKey: 'startup' })
-      .catch((err: unknown) =>
-        logger.warn({ err: (err as Error).message, job: name }, 'startup job not enqueued'),
-      )
+  await enqueueStartupJobs(jobs, (err, job) =>
+    logger.warn({ err: err.message, job }, 'startup job not enqueued'),
+  )
   // Settings notifications record to the activity log and audit until the SMS and email wave replaces these two.
   configureSettings({
     closureNotifier: (locationId) => new ActivityClosureNotifier(locationId),

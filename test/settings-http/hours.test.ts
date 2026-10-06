@@ -83,6 +83,23 @@ describe('PUT /settings/hours', () => {
     expect(audit.actor_name).toBe('Amara O.')
   })
 
+  it('accepts what GET returned, read-only fields included, so a loaded screen can be saved as it is', async () => {
+    const s = await h.admin()
+    const loaded = json(await h.get('settings/hours', s))
+    loaded.days[1].to = '5:00 PM'
+    // one edit in two forms that disagree would silently lose one of them: refused
+    const clash = await h.put('settings/hours', s, loaded)
+    expect(clash.statusCode).toBe(422)
+    expect(json(clash)).toMatchObject({
+      detail: 'Monday: to and toMin disagree. Send only one of them.',
+      errors: [{ path: 'days.1.to' }],
+    })
+    loaded.days[1].toMin = 1020
+    const r = await h.put('settings/hours', s, loaded)
+    expect(r.statusCode).toBe(200)
+    expect(json(r).days[1]).toMatchObject({ to: '5:00 PM', len: '9 hrs' })
+  })
+
   it('takes minutes as well as strings, keeps stored times for a closed day sent without them, and reports no change twice', async () => {
     const s = await h.admin()
     const v = await version(s)

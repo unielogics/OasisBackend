@@ -16,3 +16,7 @@
 | [0021](0021-checklist-task-ids.md) | Checklist tasks keep stable ids; the PUT diff rules |
 | [0022](0022-closures-federal-holidays-emergency.md) | Closures, federal holidays, dayInfo and emergency closures |
 | [0023](0023-vip-and-settings-data-rules.md) | VIP, arrival and settings data rules |
+| [0030](0030-settings-http-contract.md) | Settings HTTP contract: versions, time forms, bundle filtering, VIP-by-name, idempotency |
+| [0031](0031-emergency-over-http.md) | Emergency closing over HTTP: B38 guard, auto-reopen and sweep, events, crew alert |
+| [0032](0032-settings-adapters-and-ports.md) | Settings adapters and ports: DB hours port, recording notifiers, ChecklistSync, jobs |
+| [0033](0033-settings-oracle.md) | The original design as an automated oracle for Settings |

@@ -316,6 +316,25 @@ describe('PATCH /closures/:id', () => {
     expect(renamed.name).toBe('Labor Day (observed)')
   })
 
+  it('refuses a time sent in two forms that disagree, and accepts them when they agree', async () => {
+    const s = await h.admin()
+    const id = await create(s, {
+      date: '2026-09-07',
+      name: 'Labor Day',
+      type: 'reduced',
+      from: '10:00 AM',
+      to: '2:00 PM',
+    })
+    const clash = await h.patch(`closures/${id}`, s, { to: '3:00 PM', toMin: 840 })
+    expect(clash.statusCode).toBe(422)
+    expect(json(clash).detail).toBe('to and toMin disagree. Send only one of them.')
+    const same = await h.patch(`closures/${id}`, s, { to: '3:00 PM', toMin: 900 })
+    expect(json(same)).toMatchObject({ to: '3:00 PM', toMin: 900 })
+    expect(json(await h.patch(`closures/${id}`, s, { from: 'soon' })).detail).toBe(
+      'Use a time like 10:00 AM.',
+    )
+  })
+
   it('validates, and answers 404 for an unknown or removed closure', async () => {
     const s = await h.admin()
     const id = await create(s, { date: '2026-09-07', name: 'Labor Day' })
