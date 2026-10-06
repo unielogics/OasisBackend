@@ -1,0 +1,16 @@
+{
+  "_provenance": "Constructed from the payload shapes in docs.sms-gate.app/features/webhooks and the app source (modules/webhooks/payload/*.kt, PayloadSingingPlugin.kt) and signed with the documented scheme (HMAC-SHA256 over body + X-Timestamp). Not captured from a physical device: replace with real captures from the tablet when available.",
+  "name": "mms-received",
+  "description": "Unsupported by Oasis: rejected as unsupported_event after the signature verifies",
+  "secret": "fixture-signing-key",
+  "headers": {
+    "content-type": "application/json",
+    "x-signature": "5394bb7972293079d288aa1fdfb2fbc37871739e34eaec80b08b9a5ed2b54b42",
+    "x-timestamp": "1781366405",
+    "user-agent": "me.capcom.smsgateway/1.77.1"
+  },
+  "body": "{\"id\":\"FxEnvelope0000000013\",\"webhookId\":\"oasis-mms-received\",\"event\":\"mms:received\",\"deviceId\":\"FxDevice0000000001\",\"payload\":{\"messageId\":\"fx-mms-0001\",\"sender\":\"+17865550151\",\"recipient\":\"+17865550100\",\"simNumber\":1,\"transactionId\":\"T1\",\"subject\":\"Photo\",\"size\":12345,\"contentClass\":\"IMAGE_BASIC\",\"receivedAt\":\"2026-06-13T12:00:04.000-04:00\"}}",
+  "expect": {
+    "error": "unsupported_event"
+  }
+}

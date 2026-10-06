@@ -1,0 +1,19 @@
+{
+  "_provenance": "Constructed from the payload shapes in docs.sms-gate.app/features/webhooks and the app source (modules/webhooks/payload/*.kt, PayloadSingingPlugin.kt) and signed with the documented scheme (HMAC-SHA256 over body + X-Timestamp). Not captured from a physical device: replace with real captures from the tablet when available.",
+  "name": "sms-failed",
+  "description": "Transmission failed",
+  "secret": "fixture-signing-key",
+  "headers": {
+    "content-type": "application/json",
+    "x-signature": "fe6424483221eae514bf01a6f638f16c025fc3217056cf090971fdc9f05c67d2",
+    "x-timestamp": "1781366405",
+    "user-agent": "me.capcom.smsgateway/1.77.1"
+  },
+  "body": "{\"id\":\"FxEnvelope0000000008\",\"webhookId\":\"oasis-sms-failed\",\"event\":\"sms:failed\",\"deviceId\":\"FxDevice0000000001\",\"payload\":{\"messageId\":\"fx-msg-0002\",\"sender\":\"+17865550100\",\"recipient\":\"+17865550151\",\"simNumber\":1,\"phoneNumber\":\"+17865550151\",\"failedAt\":\"2026-06-13T12:00:02.000-04:00\",\"reason\":\"Radio off\"}}",
+  "expect": {
+    "kind": "failed",
+    "providerMessageId": "fx-msg-0002",
+    "at": "2026-06-13T16:00:02.000Z",
+    "reason": "Radio off"
+  }
+}

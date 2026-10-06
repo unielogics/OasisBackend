@@ -1,0 +1,18 @@
+{
+  "_provenance": "Constructed from the payload shapes in docs.sms-gate.app/features/webhooks and the app source (modules/webhooks/payload/*.kt, PayloadSingingPlugin.kt) and signed with the documented scheme (HMAC-SHA256 over body + X-Timestamp). Not captured from a physical device: replace with real captures from the tablet when available.",
+  "name": "system-ping-warn",
+  "description": "Heartbeat with a low battery that is not charging",
+  "secret": "fixture-signing-key",
+  "headers": {
+    "content-type": "application/json",
+    "x-signature": "6849f6d26a6f1efc71e18e64161da461581c3aa147162b048e8639ddcdc52107",
+    "x-timestamp": "1781366405",
+    "user-agent": "me.capcom.smsgateway/1.77.1"
+  },
+  "body": "{\"id\":\"FxEnvelope0000000011\",\"webhookId\":\"oasis-system-ping\",\"event\":\"system:ping\",\"deviceId\":\"FxDevice0000000001\",\"payload\":{\"status\":\"warn\",\"version\":\"1.77.1\",\"releaseId\":77100,\"checks\":{\"battery:level\":{\"status\":\"warn\",\"observedValue\":18,\"observedUnit\":\"percent\",\"description\":\"Battery level in percent\"},\"battery:charging\":{\"status\":\"pass\",\"observedValue\":0,\"observedUnit\":\"flags\",\"description\":\"Is the phone charging?\"}}}}",
+  "expect": {
+    "kind": "ping",
+    "deviceId": "FxDevice0000000001",
+    "at": "2026-06-13T16:00:05.000Z"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "_provenance": "Constructed from the payload shapes in docs.sms-gate.app/features/webhooks and the app source (modules/webhooks/payload/*.kt, PayloadSingingPlugin.kt) and signed with the documented scheme (HMAC-SHA256 over body + X-Timestamp). Not captured from a physical device: replace with real captures from the tablet when available.",
+  "name": "sms-batch-received",
+  "description": "Batched inbox export: unsupported by Oasis (we register the individual event only)",
+  "secret": "fixture-signing-key",
+  "headers": {
+    "content-type": "application/json",
+    "x-signature": "feac0b8597d5781e82d0d74e7d6794fd4ffb467a34a5b07eaa31bcec344593c5",
+    "x-timestamp": "1781366405",
+    "user-agent": "me.capcom.smsgateway/1.77.1"
+  },
+  "body": "{\"id\":\"FxEnvelope0000000014\",\"webhookId\":\"oasis-sms-batch-received\",\"event\":\"sms:batch:received\",\"deviceId\":\"FxDevice0000000001\",\"payload\":{\"messages\":[{\"messageId\":\"fx-in-0010\",\"message\":\"one\",\"sender\":\"+17865550151\",\"recipient\":\"+17865550100\",\"simNumber\":1,\"receivedAt\":\"2026-06-13T12:00:04.000-04:00\"}]}}",
+  "expect": {
+    "error": "unsupported_event"
+  }
+}

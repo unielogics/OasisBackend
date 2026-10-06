@@ -1,0 +1,21 @@
+{
+  "_provenance": "Constructed from the payload shapes in docs.sms-gate.app/features/webhooks and the app source (modules/webhooks/payload/*.kt, PayloadSingingPlugin.kt) and signed with the documented scheme (HMAC-SHA256 over body + X-Timestamp). Not captured from a physical device: replace with real captures from the tablet when available.",
+  "name": "sms-received-stop",
+  "description": "Customer opts out",
+  "secret": "fixture-signing-key",
+  "headers": {
+    "content-type": "application/json",
+    "x-signature": "778b9866c7c411f4cf83cf8a225a1cf9790509a77a5e88e6ea994c75a3679e8b",
+    "x-timestamp": "1781366405",
+    "user-agent": "me.capcom.smsgateway/1.77.1"
+  },
+  "body": "{\"id\":\"FxEnvelope0000000004\",\"webhookId\":\"oasis-sms-received\",\"event\":\"sms:received\",\"deviceId\":\"FxDevice0000000001\",\"payload\":{\"messageId\":\"fx-in-0004\",\"sender\":\"+17865550151\",\"recipient\":\"+17865550100\",\"simNumber\":1,\"phoneNumber\":\"+17865550151\",\"message\":\"stop\",\"receivedAt\":\"2026-06-13T12:00:04.000-04:00\"}}",
+  "expect": {
+    "kind": "received",
+    "from": "+17865550151",
+    "body": "stop",
+    "at": "2026-06-13T16:00:04.000Z",
+    "deviceId": "FxDevice0000000001",
+    "providerMessageId": "fx-in-0004"
+  }
+}

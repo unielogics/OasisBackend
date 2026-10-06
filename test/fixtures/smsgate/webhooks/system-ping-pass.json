@@ -1,0 +1,18 @@
+{
+  "_provenance": "Constructed from the payload shapes in docs.sms-gate.app/features/webhooks and the app source (modules/webhooks/payload/*.kt, PayloadSingingPlugin.kt) and signed with the documented scheme (HMAC-SHA256 over body + X-Timestamp). Not captured from a physical device: replace with real captures from the tablet when available.",
+  "name": "system-ping-pass",
+  "description": "Periodic heartbeat; the payload is the device health document",
+  "secret": "fixture-signing-key",
+  "headers": {
+    "content-type": "application/json",
+    "x-signature": "943f02e3a681bb459981b24a0b9073afe5378d3f21a69017eb323e63805252f7",
+    "x-timestamp": "1781366405",
+    "user-agent": "me.capcom.smsgateway/1.77.1"
+  },
+  "body": "{\"id\":\"FxEnvelope0000000010\",\"webhookId\":\"oasis-system-ping\",\"event\":\"system:ping\",\"deviceId\":\"FxDevice0000000001\",\"payload\":{\"status\":\"pass\",\"version\":\"1.77.1\",\"releaseId\":77100,\"checks\":{\"messages:failed\":{\"status\":\"pass\",\"observedValue\":0,\"observedUnit\":\"messages\",\"description\":\"Failed messages for last hour\"},\"connection:status\":{\"status\":\"pass\",\"observedValue\":1,\"observedUnit\":\"boolean\",\"description\":\"Internet connection status\"},\"battery:level\":{\"status\":\"pass\",\"observedValue\":87,\"observedUnit\":\"percent\",\"description\":\"Battery level in percent\"},\"battery:charging\":{\"status\":\"pass\",\"observedValue\":3,\"observedUnit\":\"flags\",\"description\":\"Is the phone charging?\"}}}}",
+  "expect": {
+    "kind": "ping",
+    "deviceId": "FxDevice0000000001",
+    "at": "2026-06-13T16:00:05.000Z"
+  }
+}
