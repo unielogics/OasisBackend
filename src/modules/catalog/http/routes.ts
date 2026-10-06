@@ -218,6 +218,11 @@ export function registerCatalogRoutes(rt: SettingsRuntime): void {
         sqspSku?: string | null
         tasks?: string[]
       }
+      if (b.kind === 'addon' && b.durationMin !== undefined && b.durationMin !== 0)
+        throw new AppError('VALIDATION_FAILED', {
+          detail: 'Add-ons do not have a duration.',
+          errors: [{ path: 'durationMin', message: 'Add-ons do not have a duration.' }],
+        })
       const s = await createService(tx, { ...b, locationId: c.locationId, newId: app.newId, audit: c.audit })
       return { status: 201, body: serviceView(s) }
     }),

@@ -55,6 +55,8 @@ export async function closeCommand(
   cmd: CloseCommand,
 ): Promise<CloseShopResult> {
   const now = d.clock.now()
+  // an active emergency answers 409 first; its own closure row would otherwise read as "already closed"
+  if (await getActiveEmergency(tx, cmd.locationId)) throw new AppError('EMERGENCY_ACTIVE')
   if (cmd.duration.kind === 'today')
     await assertTodayClosable(tx, { locationId: cmd.locationId, now, tz: d.tz })
   return closeShop(tx, {
