@@ -2,6 +2,14 @@ import { buildApp } from './app.js'
 import { loadEnv, type Env } from './config/env.js'
 import { createPermissiveAuthorizer, type Authorizer } from './http/authorizer.js'
 import { createIdentity, bootstrapAdmin, type IdentityAuthorizer } from './modules/auth/index.js'
+import {
+  ActivityClosureNotifier,
+  ActivityEmergencyNotifier,
+  AuditAccountNotifier,
+  DbBusinessHours,
+} from './modules/settings/db-adapters/index.js'
+import { configureSettings } from './modules/settings/http/runtime.js'
+import { EMERGENCY_SWEEP_JOB, FEDERAL_HOLIDAYS_JOB } from './modules/settings/jobs/names.js'
 import { createClock, type Clock } from './platform/clock.js'
 import { createDb, type Db, type DbOptions } from './platform/db.js'
 import { createIdGenerator, type NewId } from './platform/ids.js'
@@ -23,7 +31,15 @@ function makeAuthorizer(
   newId: NewId,
 ): Authorizer | IdentityAuthorizer {
   if (env.DEV_AUTH_BYPASS) return createPermissiveAuthorizer({ locationId })
-  return createIdentity({ db, clock, env, newId, locationId })
+  return createIdentity({
+    db,
+    clock,
+    env,
+    newId,
+    locationId,
+    businessHours: new DbBusinessHours(db),
+    notifier: new AuditAccountNotifier(db, locationId),
+  })
 }
 
 async function main(): Promise<void> {
@@ -58,6 +74,19 @@ async function main(): Promise<void> {
     tz: env.BUSINESS_TZ,
   })
   await jobs.start({ workers: false })
+  // Catch-up after downtime: holidays for the current and next year, and any emergency whose end time passed.
+  // singletonKey keeps a restart loop from queueing duplicates.
+  for (const name of [FEDERAL_HOLIDAYS_JOB, EMERGENCY_SWEEP_JOB])
+    await jobs
+      .enqueue(name, name === FEDERAL_HOLIDAYS_JOB ? { catchUp: true } : {}, { singletonKey: 'startup' })
+      .catch((err: unknown) =>
+        logger.warn({ err: (err as Error).message, job: name }, 'startup job not enqueued'),
+      )
+  // Settings notifications record to the activity log and audit until the SMS and email wave replaces these two.
+  configureSettings({
+    closureNotifier: (locationId) => new ActivityClosureNotifier(locationId),
+    emergencyNotifier: new ActivityEmergencyNotifier(),
+  })
 
   const authorizer = makeAuthorizer(env, location.id, db, clock, newId)
   if ('identity' in authorizer)
