@@ -25,3 +25,9 @@
 | [0042](0042-lifecycle-guards-and-bays.md) | Lifecycle guards, expectedStatus, bay choice and concurrency |
 | [0043](0043-operations-read-models.md) | Operations read models: KPIs, alerts, windows, bay staff, calendar |
 | [0044](0044-ops-oracle-and-parity-seed.md) | Operations oracle tests and the parity-ops seed |
+| [0050](0050-payments-ledger-and-calc.md) | Payments: append-only ledger, invoice_calc in cents, status ladder, void |
+| [0051](0051-payments-limits-approvals-settlement.md) | Payments: limits, approvals (self-approval, re-validation), settlement refund, refund by item |
+| [0052](0052-payments-store-credit.md) | Payments: store-credit lots, FIFO allocation at apply time, expiry |
+| [0053](0053-payments-card-money-under-squarespace.md) | Payments: card money awaiting Squarespace, brand-only labels, payment links |
+| [0054](0054-payments-invoice-lifecycle.md) | Payments: invoice at booking, gap-free numbering, biz_date freeze, canceled statuses |
+| [0055](0055-payments-reports-and-csv.md) | Payments: ranges, KPIs, chart, by-method, list, banner and CSV rules |

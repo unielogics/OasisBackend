@@ -157,6 +157,8 @@ export function registerCatalogRoutes(rt: SettingsRuntime): void {
             created: r.plan.createdIds,
             renamed: r.plan.renamed.map((x) => x.id),
             retired: r.plan.retired.map((x) => x.id),
+            service: r.service,
+            plan: r.plan,
           })
         return r
       })

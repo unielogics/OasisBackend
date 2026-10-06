@@ -9,6 +9,7 @@ import type { Clock } from '../../../platform/clock.js'
 import type { Db, Executor, Tx } from '../../../platform/db.js'
 import { AppError } from '../../../platform/errors.js'
 import type * as audit from '../../../platform/audit.js'
+import type { CatalogService, PutChecklistResult } from '../../catalog/service.js'
 import type { NewId } from '../../../platform/ids.js'
 import { getLocation } from '../../../platform/locations.js'
 import { DEFAULT_TZ } from '../../../platform/time.js'
@@ -27,6 +28,9 @@ export interface ChecklistChange {
   created: string[]
   renamed: string[]
   retired: string[]
+  /** The catalog's own putChecklist result, which the scheduling ChecklistSync consumes as is. */
+  service: CatalogService
+  plan: PutChecklistResult['plan']
 }
 
 export interface SettingsPorts {

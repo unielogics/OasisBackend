@@ -2,14 +2,9 @@ import { buildApp } from './app.js'
 import { loadEnv, type Env } from './config/env.js'
 import { createPermissiveAuthorizer, type Authorizer } from './http/authorizer.js'
 import { createIdentity, bootstrapAdmin, type IdentityAuthorizer } from './modules/auth/index.js'
-import {
-  ActivityClosureNotifier,
-  ActivityEmergencyNotifier,
-  AuditAccountNotifier,
-  DbBusinessHours,
-} from './modules/settings/db-adapters/index.js'
-import { configureSettings } from './modules/settings/http/runtime.js'
+import { AuditAccountNotifier, DbBusinessHours } from './modules/settings/db-adapters/index.js'
 import { enqueueStartupJobs } from './modules/settings/jobs/index.js'
+import { configureProductionSettings } from './composition.js'
 import { createClock, type Clock } from './platform/clock.js'
 import { createDb, type Db, type DbOptions } from './platform/db.js'
 import { createIdGenerator, type NewId } from './platform/ids.js'
@@ -77,11 +72,7 @@ async function main(): Promise<void> {
   await enqueueStartupJobs(jobs, (err, job) =>
     logger.warn({ err: err.message, job }, 'startup job not enqueued'),
   )
-  // Settings notifications record to the activity log and audit until the SMS and email wave replaces these two.
-  configureSettings({
-    closureNotifier: (locationId) => new ActivityClosureNotifier(locationId),
-    emergencyNotifier: new ActivityEmergencyNotifier(),
-  })
+  configureProductionSettings({ clock, newId })
 
   const authorizer = makeAuthorizer(env, location.id, db, clock, newId)
   if ('identity' in authorizer)

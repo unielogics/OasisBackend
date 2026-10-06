@@ -68,19 +68,10 @@ describe('domain_core migration', () => {
     for (const name of DOMAIN_TABLES) expect(have.has(name), name).toBe(true)
   })
 
-  it('creates no payments, ledger, membership or messaging tables', async () => {
-    const tables = await sql<{
-      tablename: string
-    }>`select tablename from pg_tables where schemaname = current_schema()`.execute(t.db)
-    const names = tables.rows.map((r) => r.tablename)
-    for (const banned of [
-      'invoices',
-      'ledger_events',
-      'memberships',
-      'messages',
-      'message_threads',
-    ])
-      expect(names).not.toContain(banned)
+  it('creates no payments, ledger, membership or messaging tables (later migrations own them)', () => {
+    const text = loadMigrationFiles().find((m) => m.name === '20261006150000_domain_core.sql')!.sql
+    for (const banned of ['invoices', 'ledger_events', 'memberships', 'messages', 'message_threads'])
+      expect(text, banned).not.toMatch(new RegExp(`create table ${banned}\\b`, 'i'))
   })
 
   it('links to the people and auth tables (domain_links) but not to membership, messaging or standing-series tables', async () => {

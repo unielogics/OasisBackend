@@ -120,7 +120,7 @@ describe('add-ons', () => {
     const b = await o.book({ at: at('14:00'), serviceName: 'Express Hand Wash', addonIds: [o.svc('Wax').id] })
     o.gateway.payInFull(b.appointment.id)
     const e = await err(run((tx, a) => removeAddon(tx, o.ctx, a, b.appointment.id, o.svc('Wax').id)))
-    expect(e).toMatchObject({ code: 'ADDON_REMOVE_OVERPAID', status: 409, title: 'Can’t remove that add-on' })
+    expect(e).toMatchObject({ code: 'ADDON_REMOVE_OVERPAID', status: 409, title: 'Can’t remove add-on' })
     expect(
       (
         await o.t.db

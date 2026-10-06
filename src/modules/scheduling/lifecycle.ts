@@ -436,6 +436,7 @@ export async function completeAppointment(
     pickup_state: 'pending',
     ready_notified_at: now,
   })
+  await c.ports.invoices.freezeDate?.(tx, a.id, now)
   if (auto.length > 0)
     await logActivity(tx, c, {
       appointmentId: a.id,

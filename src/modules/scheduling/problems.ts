@@ -50,10 +50,11 @@ const defs: Record<string, ProblemDef> = {
     title: 'Too early',
     detail: 'A no-show can be marked {grace} minutes after the start time',
   },
+  // Identical to the payments module's definition (the gateway throws it); one copy, so load order cannot matter.
   ADDON_REMOVE_OVERPAID: {
     status: 409,
-    title: 'Can’t remove that add-on',
-    detail: 'It is already paid. Refund or adjust the invoice instead',
+    title: 'Can’t remove add-on',
+    detail: 'Refund or adjust the invoice first — removing it would leave the invoice overpaid',
   },
   NOT_AN_ADDON: { status: 422, title: 'Not an add-on', detail: 'Pick an add-on from the catalog' },
 }

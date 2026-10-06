@@ -1,0 +1,1319 @@
+{
+ "pending": {
+  "hasPending": true,
+  "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D."
+ },
+ "invoices": {
+  "INV-20603": {
+   "id": "INV-20603",
+   "when": "Today 10:31 AM",
+   "client": "Priya Nair",
+   "vehicle": "2022 Tesla Model Y",
+   "staff": "Lena K.",
+   "status": "Unpaid",
+   "big": [
+    {
+     "label": "Total",
+     "value": "$164.78"
+    },
+    {
+     "label": "Collected",
+     "value": "$0.00"
+    },
+    {
+     "label": "Balance due",
+     "value": "$164.78"
+    }
+   ],
+   "lines": [
+    {
+     "label": "Premium Hand Wash + Interior",
+     "value": "$129.00"
+    },
+    {
+     "label": "Rain repellent",
+     "value": "$25.00"
+    },
+    {
+     "label": "Tax (7%)",
+     "value": "$10.78"
+    },
+    {
+     "label": "Total",
+     "value": "$164.78"
+    },
+    {
+     "label": "Paid",
+     "value": "$0.00"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Collect $164.78",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Apply $20.00 credit",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Refund",
+     "disabled": true,
+     "why": "Nothing left to refund"
+    },
+    {
+     "label": "Adjust",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Issue credit",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Send receipt",
+     "disabled": false,
+     "why": ""
+    }
+   ],
+   "ledger": [],
+   "creditLine": "Priya has $20.00 in store credit"
+  },
+  "INV-20608": {
+   "id": "INV-20608",
+   "when": "Today 10:05 AM",
+   "client": "Aisha Rahman",
+   "vehicle": "2023 Range Rover Sport",
+   "staff": "Marco R.",
+   "status": "Paid",
+   "big": [
+    {
+     "label": "Total",
+     "value": "$577.80"
+    },
+    {
+     "label": "Collected",
+     "value": "$577.80"
+    },
+    {
+     "label": "Refundable",
+     "value": "$577.80"
+    }
+   ],
+   "lines": [
+    {
+     "label": "Executive Detail + Ceramic",
+     "value": "$420.00"
+    },
+    {
+     "label": "Ceramic maintenance",
+     "value": "$120.00"
+    },
+    {
+     "label": "Tax (7%)",
+     "value": "$37.80"
+    },
+    {
+     "label": "Total",
+     "value": "$577.80"
+    },
+    {
+     "label": "Paid",
+     "value": "$577.80"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Refund",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Adjust",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Issue credit",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Send receipt",
+     "disabled": false,
+     "why": ""
+    }
+   ],
+   "ledger": [
+    {
+     "glyph": "$",
+     "title": "Payment · Amex ••3008",
+     "meta": "10:05 AM · System",
+     "amt": "$577.80",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    }
+   ],
+   "creditLine": ""
+  },
+  "INV-20607": {
+   "id": "INV-20607",
+   "when": "Today 10:15 AM",
+   "client": "Marcus Webb",
+   "vehicle": "2017 Jeep Wrangler",
+   "staff": "Unassigned",
+   "status": "Partially paid",
+   "big": [
+    {
+     "label": "Total",
+     "value": "$133.75"
+    },
+    {
+     "label": "Collected",
+     "value": "$20.00"
+    },
+    {
+     "label": "Balance due",
+     "value": "$113.75"
+    }
+   ],
+   "lines": [
+    {
+     "label": "Family Wash + Pet Hair",
+     "value": "$95.00"
+    },
+    {
+     "label": "Odor removal",
+     "value": "$30.00"
+    },
+    {
+     "label": "Tax (7%)",
+     "value": "$8.75"
+    },
+    {
+     "label": "Total",
+     "value": "$133.75"
+    },
+    {
+     "label": "Paid",
+     "value": "$20.00"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Collect $113.75",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Refund",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Adjust",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Issue credit",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Send receipt",
+     "disabled": false,
+     "why": ""
+    }
+   ],
+   "ledger": [
+    {
+     "glyph": "$",
+     "title": "Deposit · Visa ••6610",
+     "meta": "10:15 AM · System",
+     "amt": "$20.00",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    }
+   ],
+   "creditLine": ""
+  },
+  "INV-20606": {
+   "id": "INV-20606",
+   "when": "Today 9:50 AM",
+   "client": "Liam Chen",
+   "vehicle": "2020 BMW M340i",
+   "staff": "Marco R.",
+   "status": "Paid",
+   "big": [
+    {
+     "label": "Total",
+     "value": "$192.60"
+    },
+    {
+     "label": "Collected",
+     "value": "$192.60"
+    },
+    {
+     "label": "Refundable",
+     "value": "$192.60"
+    }
+   ],
+   "lines": [
+    {
+     "label": "Ceramic Maintenance + Wax",
+     "value": "$180.00"
+    },
+    {
+     "label": "Tax (7%)",
+     "value": "$12.60"
+    },
+    {
+     "label": "Total",
+     "value": "$192.60"
+    },
+    {
+     "label": "Paid",
+     "value": "$192.60"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Refund",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Adjust",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Issue credit",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Send receipt",
+     "disabled": false,
+     "why": ""
+    }
+   ],
+   "ledger": [
+    {
+     "glyph": "$",
+     "title": "Payment · Visa ••7731",
+     "meta": "9:50 AM · System",
+     "amt": "$192.60",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    }
+   ],
+   "creditLine": ""
+  },
+  "INV-20605": {
+   "id": "INV-20605",
+   "when": "Today 10:30 AM",
+   "client": "Sofia Marchetti",
+   "vehicle": "2024 Porsche Macan",
+   "staff": "Sofia D.",
+   "status": "Partially paid",
+   "big": [
+    {
+     "label": "Total",
+     "value": "$278.20"
+    },
+    {
+     "label": "Collected",
+     "value": "$50.00"
+    },
+    {
+     "label": "Balance due",
+     "value": "$228.20"
+    }
+   ],
+   "lines": [
+    {
+     "label": "Executive Detail",
+     "value": "$260.00"
+    },
+    {
+     "label": "Tax (7%)",
+     "value": "$18.20"
+    },
+    {
+     "label": "Total",
+     "value": "$278.20"
+    },
+    {
+     "label": "Paid",
+     "value": "$50.00"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Collect $228.20",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Refund",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Adjust",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Issue credit",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Send receipt",
+     "disabled": false,
+     "why": ""
+    }
+   ],
+   "ledger": [
+    {
+     "glyph": "$",
+     "title": "Deposit · Visa ••0092",
+     "meta": "10:30 AM · System",
+     "amt": "$50.00",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    }
+   ],
+   "creditLine": ""
+  },
+  "INV-20604": {
+   "id": "INV-20604",
+   "when": "Today 9:40 AM",
+   "client": "Jonathan Franco",
+   "vehicle": "2023 Mercedes-Benz GLE",
+   "staff": "Marco R.",
+   "status": "Paid",
+   "big": [
+    {
+     "label": "Total",
+     "value": "$196.88"
+    },
+    {
+     "label": "Collected",
+     "value": "$196.88"
+    },
+    {
+     "label": "Refundable",
+     "value": "$196.88"
+    }
+   ],
+   "lines": [
+    {
+     "label": "Premium Hand Wash + Interior Refresh",
+     "value": "$139.00"
+    },
+    {
+     "label": "Leather conditioning",
+     "value": "$45.00"
+    },
+    {
+     "label": "Tax (7%)",
+     "value": "$12.88"
+    },
+    {
+     "label": "Total",
+     "value": "$196.88"
+    },
+    {
+     "label": "Paid",
+     "value": "$196.88"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Refund",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Adjust",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Issue credit",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Send receipt",
+     "disabled": false,
+     "why": ""
+    }
+   ],
+   "ledger": [
+    {
+     "glyph": "$",
+     "title": "Payment · Apple Pay",
+     "meta": "9:40 AM · System",
+     "amt": "$196.88",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    }
+   ],
+   "creditLine": ""
+  },
+  "INV-20602": {
+   "id": "INV-20602",
+   "when": "Today 9:58 AM",
+   "client": "David Okafor",
+   "vehicle": "2019 Ford F-150",
+   "staff": "Marco R.",
+   "status": "Paid",
+   "big": [
+    {
+     "label": "Total",
+     "value": "$394.50"
+    },
+    {
+     "label": "Collected",
+     "value": "$394.50"
+    },
+    {
+     "label": "Refundable",
+     "value": "$394.50"
+    }
+   ],
+   "lines": [
+    {
+     "label": "Full Detail",
+     "value": "$320.00"
+    },
+    {
+     "label": "Engine bay cleaning",
+     "value": "$55.00"
+    },
+    {
+     "label": "Discount · Loyalty",
+     "value": "−$25.00"
+    },
+    {
+     "label": "Tax (7%)",
+     "value": "$24.50"
+    },
+    {
+     "label": "Tip",
+     "value": "$20.00"
+    },
+    {
+     "label": "Total",
+     "value": "$394.50"
+    },
+    {
+     "label": "Paid",
+     "value": "$394.50"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Refund",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Adjust",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Issue credit",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Send receipt",
+     "disabled": false,
+     "why": ""
+    }
+   ],
+   "ledger": [
+    {
+     "glyph": "$",
+     "title": "Payment · Mastercard ••1180",
+     "meta": "9:58 AM · System",
+     "amt": "$394.50",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    },
+    {
+     "glyph": "±",
+     "title": "Discount · Loyalty",
+     "meta": "9:58 AM · Rafael M.",
+     "amt": "$25.00",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    }
+   ],
+   "creditLine": ""
+  },
+  "INV-20601": {
+   "id": "INV-20601",
+   "when": "Today 8:52 AM",
+   "client": "Maria Delgado",
+   "vehicle": "2021 Audi Q5",
+   "staff": "Lena K.",
+   "status": "Paid",
+   "big": [
+    {
+     "label": "Total",
+     "value": "$98.95"
+    },
+    {
+     "label": "Collected",
+     "value": "$98.95"
+    },
+    {
+     "label": "Refundable",
+     "value": "$98.95"
+    }
+   ],
+   "lines": [
+    {
+     "label": "Express Hand Wash",
+     "value": "$45.00"
+    },
+    {
+     "label": "Wax",
+     "value": "$40.00"
+    },
+    {
+     "label": "Tax (7%)",
+     "value": "$5.95"
+    },
+    {
+     "label": "Tip",
+     "value": "$8.00"
+    },
+    {
+     "label": "Total",
+     "value": "$98.95"
+    },
+    {
+     "label": "Paid",
+     "value": "$98.95"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Refund",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Adjust",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Issue credit",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Send receipt",
+     "disabled": false,
+     "why": ""
+    }
+   ],
+   "ledger": [
+    {
+     "glyph": "$",
+     "title": "Payment · Visa ••4421",
+     "meta": "8:52 AM · System",
+     "amt": "$98.95",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    }
+   ],
+   "creditLine": ""
+  },
+  "INV-20579": {
+   "id": "INV-20579",
+   "when": "Yesterday 2:10 PM",
+   "client": "Chloe Bennett",
+   "vehicle": "2022 BMW X5",
+   "staff": "Lena K.",
+   "status": "Refund pending",
+   "big": [
+    {
+     "label": "Total",
+     "value": "$278.20"
+    },
+    {
+     "label": "Collected",
+     "value": "$278.20"
+    },
+    {
+     "label": "Refundable",
+     "value": "$198.20"
+    }
+   ],
+   "lines": [
+    {
+     "label": "Executive Detail",
+     "value": "$260.00"
+    },
+    {
+     "label": "Tax (7%)",
+     "value": "$18.20"
+    },
+    {
+     "label": "Total",
+     "value": "$278.20"
+    },
+    {
+     "label": "Paid",
+     "value": "$278.20"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Refund",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Adjust",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Issue credit",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Send receipt",
+     "disabled": false,
+     "why": ""
+    }
+   ],
+   "ledger": [
+    {
+     "glyph": "↩",
+     "title": "Refund requested · Visa ••5521",
+     "meta": "Yesterday 4:40 PM · Sofia D. (Customer Support) · Service issue · Interior stain not fully removed",
+     "amt": "−$80.00",
+     "pending": true,
+     "approveNote": "You can approve up to $1,000."
+    },
+    {
+     "glyph": "$",
+     "title": "Payment · Visa ••5521",
+     "meta": "2:10 PM · System",
+     "amt": "$278.20",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    }
+   ],
+   "creditLine": ""
+  },
+  "INV-20571": {
+   "id": "INV-20571",
+   "when": "Jun 11 11:00 AM",
+   "client": "Omar Haddad",
+   "vehicle": "2023 Porsche 911 Carrera",
+   "staff": "Marco R.",
+   "status": "Canceled · refunded",
+   "big": [
+    {
+     "label": "Total",
+     "value": "$342.40"
+    },
+    {
+     "label": "Collected",
+     "value": "$0.00"
+    },
+    {
+     "label": "Refundable",
+     "value": "$0.00"
+    }
+   ],
+   "lines": [
+    {
+     "label": "Full Detail",
+     "value": "$320.00"
+    },
+    {
+     "label": "Tax (7%)",
+     "value": "$22.40"
+    },
+    {
+     "label": "Total",
+     "value": "$342.40"
+    },
+    {
+     "label": "Paid",
+     "value": "$50.00"
+    },
+    {
+     "label": "Refunded",
+     "value": "−$50.00"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Refund",
+     "disabled": true,
+     "why": "Nothing left to refund"
+    },
+    {
+     "label": "Adjust",
+     "disabled": true,
+     "why": "Role can’t adjust invoices"
+    },
+    {
+     "label": "Issue credit",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Send receipt",
+     "disabled": false,
+     "why": ""
+    }
+   ],
+   "ledger": [
+    {
+     "glyph": "↩",
+     "title": "Refund · Visa ••2290",
+     "meta": "Jun 11 · 9:12 AM · Sofia D. · Customer canceled",
+     "amt": "−$50.00",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    },
+    {
+     "glyph": "$",
+     "title": "Deposit · Visa ••2290",
+     "meta": "11:00 AM · System",
+     "amt": "$50.00",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    }
+   ],
+   "creditLine": ""
+  },
+  "INV-20566": {
+   "id": "INV-20566",
+   "when": "Jun 10 1:30 PM",
+   "client": "Hannah Kim",
+   "vehicle": "2024 Rivian R1S",
+   "staff": "Marco R.",
+   "status": "Partially refunded",
+   "big": [
+    {
+     "label": "Total",
+     "value": "$185.48"
+    },
+    {
+     "label": "Collected",
+     "value": "$148.03"
+    },
+    {
+     "label": "Refundable",
+     "value": "$148.03"
+    }
+   ],
+   "lines": [
+    {
+     "label": "Premium Hand Wash + Interior",
+     "value": "$129.00"
+    },
+    {
+     "label": "Pet hair removal",
+     "value": "$35.00"
+    },
+    {
+     "label": "Tax (7%)",
+     "value": "$11.48"
+    },
+    {
+     "label": "Tip",
+     "value": "$10.00"
+    },
+    {
+     "label": "Total",
+     "value": "$185.48"
+    },
+    {
+     "label": "Paid",
+     "value": "$185.48"
+    },
+    {
+     "label": "Refunded",
+     "value": "−$37.45"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Refund",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Adjust",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Issue credit",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Send receipt",
+     "disabled": false,
+     "why": ""
+    }
+   ],
+   "ledger": [
+    {
+     "glyph": "↩",
+     "title": "Refund · Visa ••4421",
+     "meta": "Jun 10 · 3:05 PM · Rafael M. · Add-on not performed",
+     "amt": "−$37.45",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    },
+    {
+     "glyph": "$",
+     "title": "Payment · Visa ••4421",
+     "meta": "1:30 PM · System",
+     "amt": "$185.48",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    }
+   ],
+   "creditLine": ""
+  },
+  "INV-20560": {
+   "id": "INV-20560",
+   "when": "Jun 9 10:20 AM",
+   "client": "Victor Nguyen",
+   "vehicle": "2020 Honda Accord",
+   "staff": "Marco R.",
+   "status": "Paid",
+   "big": [
+    {
+     "label": "Total",
+     "value": "$48.15"
+    },
+    {
+     "label": "Collected",
+     "value": "$48.15"
+    },
+    {
+     "label": "Refundable",
+     "value": "$48.15"
+    }
+   ],
+   "lines": [
+    {
+     "label": "Express Hand Wash",
+     "value": "$45.00"
+    },
+    {
+     "label": "Tax (7%)",
+     "value": "$3.15"
+    },
+    {
+     "label": "Total",
+     "value": "$48.15"
+    },
+    {
+     "label": "Store credit applied",
+     "value": "−$25.00"
+    },
+    {
+     "label": "Paid",
+     "value": "$23.15"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Refund",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Adjust",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Issue credit",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Send receipt",
+     "disabled": false,
+     "why": ""
+    }
+   ],
+   "ledger": [
+    {
+     "glyph": "$",
+     "title": "Payment · Visa ••8812",
+     "meta": "10:20 AM · System",
+     "amt": "$23.15",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    },
+    {
+     "glyph": "◆",
+     "title": "Store credit applied",
+     "meta": "10:20 AM · Sofia D.",
+     "amt": "$25.00",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    }
+   ],
+   "creditLine": ""
+  },
+  "INV-20552": {
+   "id": "INV-20552",
+   "when": "Jun 8 3:15 PM",
+   "client": "Mateo Silva",
+   "vehicle": "2022 Ford Bronco",
+   "staff": "Marco R.",
+   "status": "Paid",
+   "big": [
+    {
+     "label": "Total",
+     "value": "$138.03"
+    },
+    {
+     "label": "Collected",
+     "value": "$138.03"
+    },
+    {
+     "label": "Refundable",
+     "value": "$138.03"
+    }
+   ],
+   "lines": [
+    {
+     "label": "Premium Hand Wash + Interior",
+     "value": "$129.00"
+    },
+    {
+     "label": "Tax (7%)",
+     "value": "$9.03"
+    },
+    {
+     "label": "Total",
+     "value": "$138.03"
+    },
+    {
+     "label": "Paid",
+     "value": "$138.03"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Refund",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Adjust",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Issue credit",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Send receipt",
+     "disabled": false,
+     "why": ""
+    }
+   ],
+   "ledger": [
+    {
+     "glyph": "+",
+     "title": "Credit issued · Service recovery",
+     "meta": "Jun 8 · 4:02 PM · Rafael M. · Waited 40 min past slot · Expires: 90 days",
+     "amt": "+$25.00",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    },
+    {
+     "glyph": "$",
+     "title": "Payment · Apple Pay",
+     "meta": "3:15 PM · System",
+     "amt": "$138.03",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    }
+   ],
+   "creditLine": "Mateo has $25.00 in store credit"
+  },
+  "INV-20548": {
+   "id": "INV-20548",
+   "when": "Jun 7 9:00 AM",
+   "client": "Zoe Laurent",
+   "vehicle": "2023 Audi e-tron GT",
+   "staff": "Marco R.",
+   "status": "Paid",
+   "big": [
+    {
+     "label": "Total",
+     "value": "$738.30"
+    },
+    {
+     "label": "Collected",
+     "value": "$738.30"
+    },
+    {
+     "label": "Refundable",
+     "value": "$738.30"
+    }
+   ],
+   "lines": [
+    {
+     "label": "Exotic Detail Package",
+     "value": "$650.00"
+    },
+    {
+     "label": "Surcharge · Extra soil surcharge",
+     "value": "$40.00"
+    },
+    {
+     "label": "Tax (7%)",
+     "value": "$48.30"
+    },
+    {
+     "label": "Total",
+     "value": "$738.30"
+    },
+    {
+     "label": "Paid",
+     "value": "$738.30"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Refund",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Adjust",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Issue credit",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Send receipt",
+     "disabled": false,
+     "why": ""
+    }
+   ],
+   "ledger": [
+    {
+     "glyph": "$",
+     "title": "Payment · Amex ••1005",
+     "meta": "9:00 AM · System",
+     "amt": "$738.30",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    },
+    {
+     "glyph": "±",
+     "title": "Surcharge · Extra soil surcharge",
+     "meta": "9:00 AM · Rafael M.",
+     "amt": "$40.00",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    }
+   ],
+   "creditLine": ""
+  },
+  "INV-20610": {
+   "id": "INV-20610",
+   "when": "May 30 11:30 AM",
+   "client": "Priya Nair",
+   "vehicle": "2022 Tesla Model Y",
+   "staff": "Lena K.",
+   "status": "Paid",
+   "big": [
+    {
+     "label": "Total",
+     "value": "$48.15"
+    },
+    {
+     "label": "Collected",
+     "value": "$48.15"
+    },
+    {
+     "label": "Refundable",
+     "value": "$48.15"
+    }
+   ],
+   "lines": [
+    {
+     "label": "Express Hand Wash",
+     "value": "$45.00"
+    },
+    {
+     "label": "Tax (7%)",
+     "value": "$3.15"
+    },
+    {
+     "label": "Total",
+     "value": "$48.15"
+    },
+    {
+     "label": "Paid",
+     "value": "$48.15"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Refund",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Adjust",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Issue credit",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Send receipt",
+     "disabled": false,
+     "why": ""
+    }
+   ],
+   "ledger": [
+    {
+     "glyph": "+",
+     "title": "Credit issued · Referral reward",
+     "meta": "May 30 · 11:45 AM · Rafael M. · Expires: No expiry",
+     "amt": "+$20.00",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    },
+    {
+     "glyph": "$",
+     "title": "Payment · Visa ••4421",
+     "meta": "11:30 AM · System",
+     "amt": "$48.15",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    }
+   ],
+   "creditLine": "Priya has $20.00 in store credit"
+  },
+  "INV-20609": {
+   "id": "INV-20609",
+   "when": "May 24 12:00 PM",
+   "client": "Victor Nguyen",
+   "vehicle": "2020 Honda Accord",
+   "staff": "Marco R.",
+   "status": "Paid",
+   "big": [
+    {
+     "label": "Total",
+     "value": "$48.15"
+    },
+    {
+     "label": "Collected",
+     "value": "$48.15"
+    },
+    {
+     "label": "Refundable",
+     "value": "$48.15"
+    }
+   ],
+   "lines": [
+    {
+     "label": "Express Hand Wash",
+     "value": "$45.00"
+    },
+    {
+     "label": "Tax (7%)",
+     "value": "$3.15"
+    },
+    {
+     "label": "Total",
+     "value": "$48.15"
+    },
+    {
+     "label": "Paid",
+     "value": "$48.15"
+    }
+   ],
+   "actions": [
+    {
+     "label": "Refund",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Adjust",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Issue credit",
+     "disabled": false,
+     "why": ""
+    },
+    {
+     "label": "Send receipt",
+     "disabled": false,
+     "why": ""
+    }
+   ],
+   "ledger": [
+    {
+     "glyph": "+",
+     "title": "Credit issued · Weather closure",
+     "meta": "May 24 · 12:10 PM · Rafael M. · Expires: 90 days",
+     "amt": "+$25.00",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    },
+    {
+     "glyph": "$",
+     "title": "Payment · Visa ••4421",
+     "meta": "12:00 PM · System",
+     "amt": "$48.15",
+     "pending": false,
+     "approveNote": "You can approve up to $1,000."
+    }
+   ],
+   "creditLine": ""
+  }
+ }
+}

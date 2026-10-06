@@ -79,6 +79,8 @@ export interface InvoiceGateway {
     actor: ActorRef,
   ): Promise<InvoiceSummary | null>
   summariesFor(db: Executor, appointmentIds: string[]): Promise<Map<string, InvoiceSummary>>
+  /** Freezes the invoice's business date at the service date when the job completes (payments implements it). */
+  freezeDate?(tx: Tx, appointmentId: string, serviceAt: Date): Promise<void>
 }
 
 /**
