@@ -22,11 +22,16 @@
     ]
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1146.0",
+    "@aws-sdk/client-sesv2": "3.1146.0",
+    "@aws-sdk/s3-presigned-post": "3.1146.0",
+    "@aws-sdk/s3-request-presigner": "3.1146.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "@types/node": "^22.20.5",
+    "aws-sdk-client-mock": "4.1.0",
     "eslint": "^9.39.5",
     "globals": "^16.5.0",
     "prettier": "^3.9.9",
@@ -34,5 +39,8 @@
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.71.1",
     "vitest": "^3.2.7"
+  },
+  "optionalDependencies": {
+    "sharp": "0.35.5"
   }
 }
