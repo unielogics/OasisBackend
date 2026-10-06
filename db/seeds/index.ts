@@ -92,7 +92,13 @@ async function main(): Promise<void> {
   }
   const env = loadEnv({ ...process.env, ...(flag('--url') ? { DATABASE_URL: flag('--url')! } : {}) })
   const clock = createClock(env.CLOCK_FREEZE_AT)
-  const db = createDb({ url: env.DATABASE_URL, clock, poolMax: 2, applicationName: 'oasis-seed' })
+  const db = createDb({
+    url: env.DATABASE_URL,
+    searchPath: env.DB_SEARCH_PATH,
+    clock,
+    poolMax: 2,
+    applicationName: 'oasis-seed',
+  })
   try {
     const ran = await runSeed({
       db,
