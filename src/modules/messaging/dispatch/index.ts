@@ -1,4 +1,5 @@
 export * from './budget.js'
+export * from './config.js'
 export * from './dispatcher.js'
 export * from './eta.js'
 export * from './health.js'
