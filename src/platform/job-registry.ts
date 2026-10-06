@@ -2,5 +2,12 @@
 // both the API process (producer) and the worker (consumer, which also registers handlers and cron schedules).
 import type { JobDefinition } from './jobs.js'
 import { maintenancePurgeJob } from './maintenance.js'
+import { alertsScanJob } from '../modules/scheduling/jobs.js'
+import { photoFinalizeJob, photoThumbnailJob } from '../modules/scheduling/photo-jobs.js'
 
-export const jobDefinitions: readonly JobDefinition<never>[] = [maintenancePurgeJob]
+export const jobDefinitions: readonly JobDefinition<never>[] = [
+  maintenancePurgeJob,
+  alertsScanJob,
+  photoThumbnailJob,
+  photoFinalizeJob,
+]

@@ -696,6 +696,17 @@ CREATE TABLE public.notifications (
 );
 
 --
+-- Name: ops_alert_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ops_alert_state (
+    location_id uuid NOT NULL,
+    alerts_hash text NOT NULL,
+    alert_keys text[] DEFAULT '{}'::text[] NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL
+);
+
+--
 -- Name: password_resets; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1252,6 +1263,13 @@ ALTER TABLE ONLY public.notifications
     ADD CONSTRAINT notifications_pkey PRIMARY KEY (id);
 
 --
+-- Name: ops_alert_state ops_alert_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ops_alert_state
+    ADD CONSTRAINT ops_alert_state_pkey PRIMARY KEY (location_id);
+
+--
 -- Name: password_resets password_resets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1473,6 +1491,12 @@ CREATE INDEX appointment_addons_appointment_idx ON public.appointment_addons USI
 CREATE INDEX appointment_overrides_appointment_idx ON public.appointment_overrides USING btree (appointment_id);
 
 --
+-- Name: appointment_overrides_kind_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX appointment_overrides_kind_idx ON public.appointment_overrides USING btree (kind, created_at);
+
+--
 -- Name: appointment_photos_appointment_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1501,6 +1525,18 @@ CREATE INDEX appointments_emergency_idx ON public.appointments USING btree (emer
 --
 
 CREATE INDEX appointments_location_start_idx ON public.appointments USING btree (location_id, scheduled_start);
+
+--
+-- Name: appointments_location_status_start_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX appointments_location_status_start_idx ON public.appointments USING btree (location_id, status, scheduled_start);
+
+--
+-- Name: appointments_planned_bay_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX appointments_planned_bay_idx ON public.appointments USING btree (planned_bay_id, scheduled_start) WHERE (planned_bay_id IS NOT NULL);
 
 --
 -- Name: audit_log_actor_idx; Type: INDEX; Schema: public; Owner: -
@@ -2121,6 +2157,13 @@ ALTER TABLE ONLY public.job_checklist_items
 
 ALTER TABLE ONLY public.notifications
     ADD CONSTRAINT notifications_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: ops_alert_state ops_alert_state_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ops_alert_state
+    ADD CONSTRAINT ops_alert_state_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 -- Name: password_resets password_resets_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

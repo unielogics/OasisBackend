@@ -246,6 +246,31 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 <!-- openapi:start -->
 | Method | Path | Access | Idempotency-Key |
 |---|---|---|---|
+| GET | `/api/v1/appointments` | sched.view |  |
+| POST | `/api/v1/appointments` | sched.edit | required |
+| GET | `/api/v1/appointments/:id` | sched.view |  |
+| PATCH | `/api/v1/appointments/:id` | sched.edit |  |
+| DELETE | `/api/v1/appointments/:id/addons/:serviceId` | sched.edit |  |
+| PUT | `/api/v1/appointments/:id/addons/:serviceId` | sched.edit |  |
+| POST | `/api/v1/appointments/:id/advance` | jobs.status | sched.edit |  |
+| POST | `/api/v1/appointments/:id/arrive` | jobs.status | sched.edit |  |
+| POST | `/api/v1/appointments/:id/assign-bay` | jobs.status |  |
+| POST | `/api/v1/appointments/:id/cancel` | sched.cancel | required |
+| POST | `/api/v1/appointments/:id/checklist/bulk` | jobs.checklist |  |
+| PUT | `/api/v1/appointments/:id/checklist/items/:itemId` | jobs.checklist |  |
+| POST | `/api/v1/appointments/:id/complete` | jobs.status |  |
+| POST | `/api/v1/appointments/:id/confirm` | sched.edit | jobs.status |  |
+| POST | `/api/v1/appointments/:id/no-show` | sched.cancel | required |
+| POST | `/api/v1/appointments/:id/notify-ready` | msg.send |  |
+| DELETE | `/api/v1/appointments/:id/photos/:photoId` | jobs.checklist |  |
+| POST | `/api/v1/appointments/:id/photos/:photoId/complete` | jobs.checklist |  |
+| POST | `/api/v1/appointments/:id/photos/note` | jobs.checklist |  |
+| POST | `/api/v1/appointments/:id/photos/presign` | jobs.checklist |  |
+| POST | `/api/v1/appointments/:id/pickup` | jobs.status |  |
+| POST | `/api/v1/appointments/:id/prep-bay` | jobs.status | sched.edit |  |
+| POST | `/api/v1/appointments/:id/reopen` | sched.cancel |  |
+| POST | `/api/v1/appointments/:id/reschedule` | sched.edit |  |
+| POST | `/api/v1/appointments/:id/start` | jobs.status |  |
 | GET | `/api/v1/auth/csrf` | authenticated |  |
 | POST | `/api/v1/auth/invite/accept` | public |  |
 | POST | `/api/v1/auth/login` | public |  |
@@ -253,6 +278,13 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/auth/password/change` | authenticated |  |
 | POST | `/api/v1/auth/password/forgot` | public |  |
 | POST | `/api/v1/auth/password/reset` | public |  |
+| GET | `/api/v1/availability` | sched.view |  |
+| GET | `/api/v1/bays` | sched.view |  |
+| PATCH | `/api/v1/bays/:id` | sched.override |  |
+| GET | `/api/v1/calendar/day` | sched.view |  |
+| GET | `/api/v1/calendar/summary` | sched.view |  |
+| GET | `/api/v1/customers` | cli.view |  |
+| POST | `/api/v1/customers` | sched.edit |  |
 | GET | `/api/v1/employees` | team.view |  |
 | POST | `/api/v1/employees` | team.edit |  |
 | GET | `/api/v1/employees/:id` | team.view |  |
@@ -268,12 +300,16 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/me/view-as` | authenticated |  |
 | GET | `/api/v1/meta/now` | public |  |
 | GET | `/api/v1/openapi.json` | public |  |
+| GET | `/api/v1/ops/alerts` | sched.view |  |
+| GET | `/api/v1/ops/kpis` | sched.view |  |
+| GET | `/api/v1/ops/snapshot` | sched.view |  |
 | GET | `/api/v1/roles` | team.view |  |
 | POST | `/api/v1/roles` | team.roles |  |
 | DELETE | `/api/v1/roles/:id` | team.roles |  |
 | PATCH | `/api/v1/roles/:id` | team.roles |  |
 | PUT | `/api/v1/roles/:id/limits/:kind` | team.roles |  |
 | PUT | `/api/v1/roles/:id/permissions/:key` | team.roles |  |
+| GET | `/api/v1/staff` | sched.view |  |
 <!-- openapi:end -->
 
 ## 14. Identity: sign-in, sessions, RBAC, employees and roles
