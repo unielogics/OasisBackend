@@ -4102,7 +4102,7 @@
                     "type": "string"
                   },
                   "value": {
-                    "maximum": 100000000000,
+                    "maximum": 2000000000,
                     "minimum": 1,
                     "type": "integer"
                   }
@@ -6918,7 +6918,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "amountCents": {
-                    "maximum": 100000000000,
+                    "maximum": 2000000000,
                     "minimum": 1,
                     "type": "integer"
                   },
@@ -8183,7 +8183,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "amountCents": {
-                    "maximum": 100000000000,
+                    "maximum": 2000000000,
                     "minimum": 1,
                     "type": "integer"
                   },
@@ -11294,7 +11294,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "amountCents": {
-                    "maximum": 100000000000,
+                    "maximum": 2000000000,
                     "minimum": 1,
                     "type": "integer"
                   },
@@ -15059,7 +15059,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "tipCents": {
-                    "maximum": 100000000000,
+                    "maximum": 2000000000,
                     "minimum": 0,
                     "type": "integer"
                   }

@@ -45,7 +45,8 @@ export function calcFromRow(r: InvoiceCalcRow): InvoiceCalc {
 export async function calcOf(db: Executor, invoiceId: string): Promise<InvoiceCalc> {
   const r = await sql<InvoiceCalcRow>`select * from invoice_calc_of(${invoiceId}::uuid)`.execute(db)
   const row = r.rows[0]
-  if (!row || row.invoice_id === null) throw new AppError('NOT_FOUND', { detail: 'That invoice does not exist' })
+  if (!row || row.invoice_id === null)
+    throw new AppError('NOT_FOUND', { detail: 'That invoice does not exist' })
   return calcFromRow(row)
 }
 

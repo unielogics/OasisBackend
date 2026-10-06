@@ -116,9 +116,22 @@ function build(): DesignInvoice[] {
     }).total
     const method = o.method ?? 'Visa ••4421'
     if (o.pay === 'full')
-      events.push({ type: 'pay', amountCents: total - dollars(o.creditUsed ?? 0), method, by: 'System', t: o.time })
+      events.push({
+        type: 'pay',
+        amountCents: total - dollars(o.creditUsed ?? 0),
+        method,
+        by: 'System',
+        t: o.time,
+      })
     else if (o.pay && o.pay > 0)
-      events.push({ type: 'pay', amountCents: dollars(o.pay), method, by: 'System', t: o.time, deposit: true })
+      events.push({
+        type: 'pay',
+        amountCents: dollars(o.pay),
+        method,
+        by: 'System',
+        t: o.time,
+        deposit: true,
+      })
     for (const e of o.post ?? []) {
       const { amt, ...rest } = e
       events.push({ t: o.time, by: 'Rafael M.', ...rest, amountCents: dollars(amt) } as SeedEvent)
@@ -139,28 +152,276 @@ function build(): DesignInvoice[] {
   }
 
   // today
-  mk({ id: 'INV-20608', off: 0, time: '10:05 AM', client: 'Aisha Rahman', veh: '2023 Range Rover Sport', svc: 'Executive Detail + Ceramic', add: ['Ceramic maintenance'], pay: 'full', method: 'Amex ••3008' })
-  mk({ id: 'INV-20607', off: 0, time: '10:15 AM', client: 'Marcus Webb', veh: '2017 Jeep Wrangler', staff: 'Unassigned', svc: 'Family Wash + Pet Hair', add: ['Odor removal'], pay: 20, method: 'Visa ••6610' })
-  mk({ id: 'INV-20606', off: 0, time: '9:50 AM', client: 'Liam Chen', veh: '2020 BMW M340i', svc: 'Ceramic Maintenance + Wax', pay: 'full', method: 'Visa ••7731' })
-  mk({ id: 'INV-20605', off: 0, time: '10:30 AM', client: 'Sofia Marchetti', veh: '2024 Porsche Macan', staff: 'Sofia D.', svc: 'Executive Detail', pay: 50, method: 'Visa ••0092' })
-  mk({ id: 'INV-20604', off: 0, time: '9:40 AM', client: 'Jonathan Franco', veh: '2023 Mercedes-Benz GLE', svc: 'Premium Hand Wash + Interior Refresh', add: ['Leather conditioning'], pay: 'full', method: 'Apple Pay' })
-  mk({ id: 'INV-20603', off: 0, time: '10:31 AM', client: 'Priya Nair', veh: '2022 Tesla Model Y', staff: 'Lena K.', svc: 'Premium Hand Wash + Interior', add: ['Rain repellent'], pay: 0 })
-  mk({ id: 'INV-20602', off: 0, time: '9:58 AM', client: 'David Okafor', veh: '2019 Ford F-150', svc: 'Full Detail', add: ['Engine bay cleaning'], tip: 20, adj: [[-25, 'Loyalty']], pay: 'full', method: 'Mastercard ••1180' })
-  mk({ id: 'INV-20601', off: 0, time: '8:52 AM', client: 'Maria Delgado', veh: '2021 Audi Q5', staff: 'Lena K.', svc: 'Express Hand Wash', add: ['Wax'], tip: 8, pay: 'full', method: 'Visa ••4421' })
+  mk({
+    id: 'INV-20608',
+    off: 0,
+    time: '10:05 AM',
+    client: 'Aisha Rahman',
+    veh: '2023 Range Rover Sport',
+    svc: 'Executive Detail + Ceramic',
+    add: ['Ceramic maintenance'],
+    pay: 'full',
+    method: 'Amex ••3008',
+  })
+  mk({
+    id: 'INV-20607',
+    off: 0,
+    time: '10:15 AM',
+    client: 'Marcus Webb',
+    veh: '2017 Jeep Wrangler',
+    staff: 'Unassigned',
+    svc: 'Family Wash + Pet Hair',
+    add: ['Odor removal'],
+    pay: 20,
+    method: 'Visa ••6610',
+  })
+  mk({
+    id: 'INV-20606',
+    off: 0,
+    time: '9:50 AM',
+    client: 'Liam Chen',
+    veh: '2020 BMW M340i',
+    svc: 'Ceramic Maintenance + Wax',
+    pay: 'full',
+    method: 'Visa ••7731',
+  })
+  mk({
+    id: 'INV-20605',
+    off: 0,
+    time: '10:30 AM',
+    client: 'Sofia Marchetti',
+    veh: '2024 Porsche Macan',
+    staff: 'Sofia D.',
+    svc: 'Executive Detail',
+    pay: 50,
+    method: 'Visa ••0092',
+  })
+  mk({
+    id: 'INV-20604',
+    off: 0,
+    time: '9:40 AM',
+    client: 'Jonathan Franco',
+    veh: '2023 Mercedes-Benz GLE',
+    svc: 'Premium Hand Wash + Interior Refresh',
+    add: ['Leather conditioning'],
+    pay: 'full',
+    method: 'Apple Pay',
+  })
+  mk({
+    id: 'INV-20603',
+    off: 0,
+    time: '10:31 AM',
+    client: 'Priya Nair',
+    veh: '2022 Tesla Model Y',
+    staff: 'Lena K.',
+    svc: 'Premium Hand Wash + Interior',
+    add: ['Rain repellent'],
+    pay: 0,
+  })
+  mk({
+    id: 'INV-20602',
+    off: 0,
+    time: '9:58 AM',
+    client: 'David Okafor',
+    veh: '2019 Ford F-150',
+    svc: 'Full Detail',
+    add: ['Engine bay cleaning'],
+    tip: 20,
+    adj: [[-25, 'Loyalty']],
+    pay: 'full',
+    method: 'Mastercard ••1180',
+  })
+  mk({
+    id: 'INV-20601',
+    off: 0,
+    time: '8:52 AM',
+    client: 'Maria Delgado',
+    veh: '2021 Audi Q5',
+    staff: 'Lena K.',
+    svc: 'Express Hand Wash',
+    add: ['Wax'],
+    tip: 8,
+    pay: 'full',
+    method: 'Visa ••4421',
+  })
   // specials
-  mk({ id: 'INV-20579', off: -1, time: '2:10 PM', client: 'Chloe Bennett', veh: '2022 BMW X5', staff: 'Lena K.', svc: 'Executive Detail', pay: 'full', method: 'Visa ••5521', post: [{ type: 'refund', amt: 80, dest: 'card', method: 'Visa ••5521', reason: 'Service issue', note: 'Interior stain not fully removed', by: 'Sofia D.', byRole: 'Customer Support', status: 'pending', t: 'Yesterday 4:40 PM' }] })
-  mk({ id: 'INV-20571', off: -2, time: '11:00 AM', client: 'Omar Haddad', veh: '2023 Porsche 911 Carrera', svc: 'Full Detail', canceled: true, pay: 50, method: 'Visa ••2290', post: [{ type: 'refund', amt: 50, dest: 'card', method: 'Visa ••2290', reason: 'Customer canceled', by: 'Sofia D.', status: 'done', t: 'Jun 11 · 9:12 AM' }] })
-  mk({ id: 'INV-20566', off: -3, time: '1:30 PM', client: 'Hannah Kim', veh: '2024 Rivian R1S', svc: 'Premium Hand Wash + Interior', add: ['Pet hair removal'], tip: 10, pay: 'full', post: [{ type: 'refund', amt: 37.45, dest: 'card', method: 'Visa ••4421', reason: 'Add-on not performed', by: 'Rafael M.', status: 'done', t: 'Jun 10 · 3:05 PM' }] })
-  mk({ id: 'INV-20560', off: -4, time: '10:20 AM', client: 'Victor Nguyen', veh: '2020 Honda Accord', svc: 'Express Hand Wash', creditUsed: 25, pre: [{ type: 'credit_apply', amountCents: 2500, method: 'Store credit', by: 'Sofia D.', t: '10:20 AM' }], pay: 'full', method: 'Visa ••8812' })
-  mk({ id: 'INV-20552', off: -5, time: '3:15 PM', client: 'Mateo Silva', veh: '2022 Ford Bronco', svc: 'Premium Hand Wash + Interior', pay: 'full', method: 'Apple Pay', post: [{ type: 'credit_issue', amt: 25, reason: 'Service recovery', note: 'Waited 40 min past slot', expiry: '90 days', t: 'Jun 8 · 4:02 PM' }] })
-  mk({ id: 'INV-20548', off: -6, time: '9:00 AM', client: 'Zoe Laurent', veh: '2023 Audi e-tron GT', svc: 'Exotic Detail Package', adj: [[40, 'Extra soil surcharge']], pay: 'full', method: 'Amex ••1005' })
-  mk({ off: -14, time: '11:30 AM', client: 'Priya Nair', veh: '2022 Tesla Model Y', staff: 'Lena K.', svc: 'Express Hand Wash', pay: 'full', post: [{ type: 'credit_issue', amt: 20, reason: 'Referral reward', expiry: 'No expiry', t: 'May 30 · 11:45 AM' }] })
-  mk({ off: -20, time: '12:00 PM', client: 'Victor Nguyen', veh: '2020 Honda Accord', svc: 'Express Hand Wash', pay: 'full', post: [{ type: 'credit_issue', amt: 25, reason: 'Weather closure', expiry: '90 days', t: 'May 24 · 12:10 PM' }] })
+  mk({
+    id: 'INV-20579',
+    off: -1,
+    time: '2:10 PM',
+    client: 'Chloe Bennett',
+    veh: '2022 BMW X5',
+    staff: 'Lena K.',
+    svc: 'Executive Detail',
+    pay: 'full',
+    method: 'Visa ••5521',
+    post: [
+      {
+        type: 'refund',
+        amt: 80,
+        dest: 'card',
+        method: 'Visa ••5521',
+        reason: 'Service issue',
+        note: 'Interior stain not fully removed',
+        by: 'Sofia D.',
+        byRole: 'Customer Support',
+        status: 'pending',
+        t: 'Yesterday 4:40 PM',
+      },
+    ],
+  })
+  mk({
+    id: 'INV-20571',
+    off: -2,
+    time: '11:00 AM',
+    client: 'Omar Haddad',
+    veh: '2023 Porsche 911 Carrera',
+    svc: 'Full Detail',
+    canceled: true,
+    pay: 50,
+    method: 'Visa ••2290',
+    post: [
+      {
+        type: 'refund',
+        amt: 50,
+        dest: 'card',
+        method: 'Visa ••2290',
+        reason: 'Customer canceled',
+        by: 'Sofia D.',
+        status: 'done',
+        t: 'Jun 11 · 9:12 AM',
+      },
+    ],
+  })
+  mk({
+    id: 'INV-20566',
+    off: -3,
+    time: '1:30 PM',
+    client: 'Hannah Kim',
+    veh: '2024 Rivian R1S',
+    svc: 'Premium Hand Wash + Interior',
+    add: ['Pet hair removal'],
+    tip: 10,
+    pay: 'full',
+    post: [
+      {
+        type: 'refund',
+        amt: 37.45,
+        dest: 'card',
+        method: 'Visa ••4421',
+        reason: 'Add-on not performed',
+        by: 'Rafael M.',
+        status: 'done',
+        t: 'Jun 10 · 3:05 PM',
+      },
+    ],
+  })
+  mk({
+    id: 'INV-20560',
+    off: -4,
+    time: '10:20 AM',
+    client: 'Victor Nguyen',
+    veh: '2020 Honda Accord',
+    svc: 'Express Hand Wash',
+    creditUsed: 25,
+    pre: [{ type: 'credit_apply', amountCents: 2500, method: 'Store credit', by: 'Sofia D.', t: '10:20 AM' }],
+    pay: 'full',
+    method: 'Visa ••8812',
+  })
+  mk({
+    id: 'INV-20552',
+    off: -5,
+    time: '3:15 PM',
+    client: 'Mateo Silva',
+    veh: '2022 Ford Bronco',
+    svc: 'Premium Hand Wash + Interior',
+    pay: 'full',
+    method: 'Apple Pay',
+    post: [
+      {
+        type: 'credit_issue',
+        amt: 25,
+        reason: 'Service recovery',
+        note: 'Waited 40 min past slot',
+        expiry: '90 days',
+        t: 'Jun 8 · 4:02 PM',
+      },
+    ],
+  })
+  mk({
+    id: 'INV-20548',
+    off: -6,
+    time: '9:00 AM',
+    client: 'Zoe Laurent',
+    veh: '2023 Audi e-tron GT',
+    svc: 'Exotic Detail Package',
+    adj: [[40, 'Extra soil surcharge']],
+    pay: 'full',
+    method: 'Amex ••1005',
+  })
+  mk({
+    off: -14,
+    time: '11:30 AM',
+    client: 'Priya Nair',
+    veh: '2022 Tesla Model Y',
+    staff: 'Lena K.',
+    svc: 'Express Hand Wash',
+    pay: 'full',
+    post: [
+      {
+        type: 'credit_issue',
+        amt: 20,
+        reason: 'Referral reward',
+        expiry: 'No expiry',
+        t: 'May 30 · 11:45 AM',
+      },
+    ],
+  })
+  mk({
+    off: -20,
+    time: '12:00 PM',
+    client: 'Victor Nguyen',
+    veh: '2020 Honda Accord',
+    svc: 'Express Hand Wash',
+    pay: 'full',
+    post: [
+      { type: 'credit_issue', amt: 25, reason: 'Weather closure', expiry: '90 days', t: 'May 24 · 12:10 PM' },
+    ],
+  })
 
   // generated history: mulberry32(987654), the design's exact call order
   const rnd = mulberry32(987654)
-  const names = ['Olivia Hart', 'Ethan Morales', 'Isaac Patel', 'Andre Thompson', 'Camila Reyes', 'Noah Fischer', 'Leah Goldberg', 'Ruby Castillo', 'Ava Sinclair', 'Diego Ramos', 'Nina Petrova', 'Caleb Owens', 'Mia Torres', 'Julian Brooks', 'Grace Adeyemi', 'Tom Bradley', 'Nathan Brooks']
-  const vehs = ['2022 BMW X5', '2021 Toyota 4Runner', '2020 Honda Accord', '2024 Rivian R1S', '2019 Mercedes-Benz C300', '2021 Kia Telluride', '2022 Tesla Model 3', '2024 Lexus GX 550', '2023 Genesis GV80', '2018 Lexus RX 350']
+  const names = [
+    'Olivia Hart',
+    'Ethan Morales',
+    'Isaac Patel',
+    'Andre Thompson',
+    'Camila Reyes',
+    'Noah Fischer',
+    'Leah Goldberg',
+    'Ruby Castillo',
+    'Ava Sinclair',
+    'Diego Ramos',
+    'Nina Petrova',
+    'Caleb Owens',
+    'Mia Torres',
+    'Julian Brooks',
+    'Grace Adeyemi',
+    'Tom Bradley',
+    'Nathan Brooks',
+  ]
+  const vehs = [
+    '2022 BMW X5',
+    '2021 Toyota 4Runner',
+    '2020 Honda Accord',
+    '2024 Rivian R1S',
+    '2019 Mercedes-Benz C300',
+    '2021 Kia Telluride',
+    '2022 Tesla Model 3',
+    '2024 Lexus GX 550',
+    '2023 Genesis GV80',
+    '2018 Lexus RX 350',
+  ]
   const svcs = Object.keys(PRICE)
   const adds = Object.keys(ADD)
   const methods = ['Visa ••4421', 'Mastercard ••1180', 'Apple Pay', 'Apple Pay', 'Cash', 'Amex ••3008']
@@ -190,7 +451,21 @@ function build(): DesignInvoice[] {
         adj: r < 0.08 ? [[-15, 'Loyalty']] : [],
         pay: 'full',
         method,
-        post: r > 0.95 ? [{ type: 'refund', amt: 20, dest: 'credit', method: 'Store credit', reason: 'Goodwill', by: 'Sofia D.', status: 'done', t: '' }] : [],
+        post:
+          r > 0.95
+            ? [
+                {
+                  type: 'refund',
+                  amt: 20,
+                  dest: 'credit',
+                  method: 'Store credit',
+                  reason: 'Goodwill',
+                  by: 'Sofia D.',
+                  status: 'done',
+                  t: '',
+                },
+              ]
+            : [],
       })
     }
   }
@@ -215,7 +490,13 @@ export const designInvoices = (): DesignInvoice[] => build()
 // --- time strings -------------------------------------------------------------------------------------------------------
 
 /** The instant behind a design event time ("" / "10:20 AM" = that day; "Yesterday 4:40 PM"; "Jun 11 · 9:12 AM"). */
-export function eventInstant(t: string, invoiceInstant: Date, invoiceBizDate: string, today: string, tz: string): Date {
+export function eventInstant(
+  t: string,
+  invoiceInstant: Date,
+  invoiceBizDate: string,
+  today: string,
+  tz: string,
+): Date {
   if (!t) return invoiceInstant
   const m = /^(?:(Today|Yesterday|[A-Z][a-z]{2} \d{1,2})(?: · | ))?(\d{1,2}:\d{2} [AP]M)$/.exec(t)
   if (!m) throw new Error(`Unrecognised design time "${t}"`)
@@ -255,9 +536,13 @@ export async function seedParityPay(ctx: SeedContext): Promise<void> {
   const invoices = designInvoices()
 
   const services = new Map(
-    (await tx.selectFrom('services').select(['id', 'name', 'kind']).where('location_id', '=', location.id).execute()).map(
-      (s) => [`${s.kind}|${s.name.toLowerCase()}`, s.id],
-    ),
+    (
+      await tx
+        .selectFrom('services')
+        .select(['id', 'name', 'kind'])
+        .where('location_id', '=', location.id)
+        .execute()
+    ).map((s) => [`${s.kind}|${s.name.toLowerCase()}`, s.id]),
   )
 
   // customers: reuse a live customer with the same name (the design customers), else create one with a synthetic phone
@@ -279,7 +564,11 @@ export async function seedParityPay(ctx: SeedContext): Promise<void> {
     for (;;) {
       if (phoneNo > 199) throw new Error('parity-pay: out of synthetic phone numbers')
       phone = `+1954555${String(phoneNo++).padStart(4, '0')}`
-      const taken = await tx.selectFrom('customers').select('id').where('phone_e164', '=', phone).executeTakeFirst()
+      const taken = await tx
+        .selectFrom('customers')
+        .select('id')
+        .where('phone_e164', '=', phone)
+        .executeTakeFirst()
       if (!taken) break
     }
     const id = ctx.newId()
@@ -349,7 +638,8 @@ export async function seedParityPay(ctx: SeedContext): Promise<void> {
           invoice_id: invoiceId,
           position,
           kind: position === 0 ? 'package' : 'addon',
-          service_id: services.get(`${position === 0 ? 'package' : 'addon'}|${it.name.toLowerCase()}`) ?? null,
+          service_id:
+            services.get(`${position === 0 ? 'package' : 'addon'}|${it.name.toLowerCase()}`) ?? null,
           name: it.name,
           price_cents: it.priceCents,
           appointment_addon_id: null,
@@ -412,13 +702,23 @@ export async function seedParityPay(ctx: SeedContext): Promise<void> {
     for (const al of allocateFifo(lots, a.at, a.cents)) {
       await tx
         .insertInto('credit_allocations')
-        .values({ id: ctx.newId(), apply_event_id: a.eventId, lot_event_id: al.lotId, customer_id: a.customerId, cents: al.cents })
+        .values({
+          id: ctx.newId(),
+          apply_event_id: a.eventId,
+          lot_event_id: al.lotId,
+          customer_id: a.customerId,
+          cents: al.cents,
+        })
         .execute()
     }
   }
 
   // the counter continues after the seeded range (20610 is the highest design id)
-  await tx.insertInto('invoice_counters').values({ location_id: location.id }).onConflict((oc) => oc.doNothing()).execute()
+  await tx
+    .insertInto('invoice_counters')
+    .values({ location_id: location.id })
+    .onConflict((oc) => oc.doNothing())
+    .execute()
   const max = Math.max(...invoices.map((i) => i.no))
   await tx
     .updateTable('invoice_counters')
@@ -430,8 +730,9 @@ export async function seedParityPay(ctx: SeedContext): Promise<void> {
 
 export const paymentsSeedProfiles: Record<string, SeedProfile> = {
   'parity-pay': {
-    description: 'The Payments design fixtures: 105 invoices with ledger events, store credit and the pending refund',
-    dependsOn: ['base'],
+    description:
+      'The Payments design fixtures: 105 invoices with ledger events, store credit and the pending refund',
+    dependsOn: ['domain'],
     run: seedParityPay,
   },
 }

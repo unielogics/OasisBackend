@@ -1,10 +1,9 @@
 // Read models of one invoice: the ledger events as the UI needs them and the full invoice detail (items, adjustment lines,
 // calc, client credit, per-event approval rights for the caller). Shared by GET /invoices/:id and every command response.
 import type { Executor } from '../../platform/db.js'
-import { AppError } from '../../platform/errors.js'
-import { atLabel, clockLabel, DEFAULT_TZ, toBizDate } from '../../platform/time.js'
+import { atLabel, clockLabel, toBizDate } from '../../platform/time.js'
 import type { PayActor } from './actor.js'
-import { calcInvoice, statusLabel, type InvoiceCalc } from './calc.js'
+import { statusLabel, type InvoiceCalc } from './calc.js'
 import { clientCreditSummary, type ClientCreditSummary } from './credit-summary.js'
 import { dayLabel } from './ranges.js'
 import {
@@ -18,7 +17,11 @@ import {
 } from './repository.js'
 import type { CreditExpiry, InvoiceStatus } from './schema.js'
 
-export const EXPIRY_LABELS: Record<CreditExpiry, string> = { none: 'No expiry', d30: '30 days', d90: '90 days' }
+export const EXPIRY_LABELS: Record<CreditExpiry, string> = {
+  none: 'No expiry',
+  d30: '30 days',
+  d90: '90 days',
+}
 
 export type ApproveBlock = 'permission' | 'limit' | 'self' | null
 
@@ -172,8 +175,12 @@ export function toEventDto(
     voided: o.voidedIds.has(e.id),
     by: e.actor_name,
     byRole: e.actor_roles,
-    approvedBy: e.approved_by_name ? `${e.approved_by_name}${e.approved_by_roles ? ` · ${e.approved_by_roles}` : ''}` : null,
-    deniedBy: e.denied_by_name ? `${e.denied_by_name}${e.denied_by_roles ? ` · ${e.denied_by_roles}` : ''}` : null,
+    approvedBy: e.approved_by_name
+      ? `${e.approved_by_name}${e.approved_by_roles ? ` · ${e.approved_by_roles}` : ''}`
+      : null,
+    deniedBy: e.denied_by_name
+      ? `${e.denied_by_name}${e.denied_by_roles ? ` · ${e.denied_by_roles}` : ''}`
+      : null,
     at: e.occurred_at.toISOString(),
     atLabel: atLabel(e.occurred_at, o.now, o.tz),
     resolvedAt: e.resolved_at ? e.resolved_at.toISOString() : null,
@@ -210,7 +217,11 @@ export interface DetailContext {
   rules: ApprovalRules
 }
 
-export async function invoiceDetail(db: Executor, c: DetailContext, invoiceId: string): Promise<InvoiceDetail> {
+export async function invoiceDetail(
+  db: Executor,
+  c: DetailContext,
+  invoiceId: string,
+): Promise<InvoiceDetail> {
   const inv = await getInvoice(db, c.locationId, invoiceId)
   return buildDetail(db, c, inv)
 }
@@ -222,10 +233,15 @@ export async function buildDetail(db: Executor, c: DetailContext, inv: InvoiceRo
     calcOf(db, inv.id),
     clientCreditSummary(db, inv.customer_id, c.now),
   ])
-  if (!calc) throw new AppError('NOT_FOUND')
-  const voidedIds = new Set(events.filter((e) => e.type === 'void' && e.voids_event_id).map((e) => e.voids_event_id!))
-  const claimed = new Set(events.filter((e) => e.type === 'refund' && e.status !== 'denied').flatMap((e) => e.item_ids))
-  const dto = events.map((e) => toEventDto(e, { now: c.now, tz: c.tz, actor: c.actor, rules: c.rules, voidedIds }))
+  const voidedIds = new Set(
+    events.filter((e) => e.type === 'void' && e.voids_event_id).map((e) => e.voids_event_id!),
+  )
+  const claimed = new Set(
+    events.filter((e) => e.type === 'refund' && e.status !== 'denied').flatMap((e) => e.item_ids),
+  )
+  const dto = events.map((e) =>
+    toEventDto(e, { now: c.now, tz: c.tz, actor: c.actor, rules: c.rules, voidedIds }),
+  )
   const refundPending = calc.pendingN > 0
   const today = toBizDate(c.now, c.tz)
   return {
@@ -274,5 +290,3 @@ export async function buildDetail(db: Executor, c: DetailContext, inv: InvoiceRo
     caller: callerDto(c.actor),
   }
 }
-
-export { calcInvoice, DEFAULT_TZ }

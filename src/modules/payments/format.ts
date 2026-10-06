@@ -23,7 +23,12 @@ export const firstName = (full: string): string => full.trim().split(/\s+/)[0] ?
 /** "INV-20603": the number zero-padded to at least five digits. */
 export const invoiceLabel = (no: number): string => `INV-${String(no).padStart(5, '0')}`
 
-export function pendingBannerText(count: number, amountCents: number, client: string, requestedBy: string): string {
+export function pendingBannerText(
+  count: number,
+  amountCents: number,
+  client: string,
+  requestedBy: string,
+): string {
   const noun = count === 1 ? 'refund' : 'refunds'
   return `${count} ${noun} awaiting approval — ${formatUsd(amountCents)} · ${client} · requested by ${requestedBy}`
 }

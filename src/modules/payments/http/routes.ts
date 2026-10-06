@@ -8,13 +8,20 @@ import type { AppInstance } from '../../../http/types.js'
 import { z } from '../../../http/zod.js'
 import { AppError } from '../../../platform/errors.js'
 import { getSetting } from '../../../platform/settings.js'
-import { actorFromAuth, type PayActor } from '../actor.js'
+import { actorFromAuth } from '../actor.js'
 import { PaymentsService, type CommandContext } from '../commands.js'
 import { creditEntries, summarize } from '../credit-summary.js'
 import { loadCreditLots } from '../credit.js'
 import { invoiceDetail, type DetailContext } from '../detail.js'
 import type { PaymentsPorts } from '../ports.js'
-import { approvalsQueue, invoiceList, invoicesCsv, reconciliation, summary, type ReportContext } from '../reports.js'
+import {
+  approvalsQueue,
+  invoiceList,
+  invoicesCsv,
+  reconciliation,
+  summary,
+  type ReportContext,
+} from '../reports.js'
 import type { CreditExpiry } from '../schema.js'
 import {
   AdjustBody,
@@ -52,14 +59,18 @@ const TAG = 'payments'
 const expiryOf = (v: string): CreditExpiry =>
   v === 'none' || v === 'No expiry' ? 'none' : v === 'd30' || v === '30 days' ? 'd30' : 'd90'
 
-export function registerPaymentsRoutes(app: AppInstance, service: PaymentsService, ports: PaymentsPorts): void {
+export function registerPaymentsRoutes(
+  app: AppInstance,
+  service: PaymentsService,
+  ports: PaymentsPorts,
+): void {
   const auth = (req: FastifyRequest) => {
     if (!req.auth) throw new AppError('UNAUTHENTICATED')
     return req.auth
   }
   const tzOf = async (locationId: string): Promise<string> =>
-    (await app.db.selectFrom('locations').select('timezone').where('id', '=', locationId).executeTakeFirst())?.timezone ??
-    'America/New_York'
+    (await app.db.selectFrom('locations').select('timezone').where('id', '=', locationId).executeTakeFirst())
+      ?.timezone ?? 'America/New_York'
   const reportCtx = async (req: FastifyRequest): Promise<ReportContext> => {
     const a = auth(req)
     return { locationId: a.locationId, now: app.clock.now(), tz: await tzOf(a.locationId) }
@@ -83,7 +94,8 @@ export function registerPaymentsRoutes(app: AppInstance, service: PaymentsServic
   }
   const mutate = { idempotency: 'required' as const }
   // The wrapper writes the reply itself (status, replay header), which the response-schema typing of the route cannot see.
-  const idem = (fn: Parameters<typeof idempotentHandler<FastifyRequest>>[0]): never => idempotentHandler(fn) as never
+  const idem = (fn: Parameters<typeof idempotentHandler<FastifyRequest>>[0]): never =>
+    idempotentHandler(fn) as never
 
   // --- reads --------------------------------------------------------------------------------------------------------
 
@@ -182,7 +194,8 @@ export function registerPaymentsRoutes(app: AppInstance, service: PaymentsServic
       config: { access: access.anyPerm('pay.reports', 'set.billing') },
       schema: {
         tags: [TAG],
-        summary: 'Card money waiting on Squarespace for more than 2 hours, unmatched Squarespace records, overpaid invoices',
+        summary:
+          'Card money waiting on Squarespace for more than 2 hours, unmatched Squarespace records, overpaid invoices',
         response: { 200: ReconciliationResult },
       },
     },
@@ -201,6 +214,12 @@ export function registerPaymentsRoutes(app: AppInstance, service: PaymentsServic
       },
     },
     async (req) => {
+      const known = await app.db
+        .selectFrom('customers')
+        .select('id')
+        .where('id', '=', req.params.id)
+        .executeTakeFirst()
+      if (!known) throw new AppError('NOT_FOUND', { detail: 'That client does not exist' })
       const now = app.clock.now()
       const lots = await loadCreditLots(app.db, req.params.id)
       const s = summarize(lots, now)
@@ -229,7 +248,12 @@ export function registerPaymentsRoutes(app: AppInstance, service: PaymentsServic
       },
     },
     idem(async (req, tx) => {
-      const r = await service.collect(tx, commandCtx(req), (req.params as P).id, req.body as z.infer<typeof CollectBody>)
+      const r = await service.collect(
+        tx,
+        commandCtx(req),
+        (req.params as P).id,
+        req.body as z.infer<typeof CollectBody>,
+      )
       return { status: 201, body: r }
     }),
   )
@@ -260,7 +284,7 @@ export function registerPaymentsRoutes(app: AppInstance, service: PaymentsServic
         tags: [TAG],
         summary: 'Refund (full, by item or custom) to the original card, store credit or cash',
         description:
-          'Pending (waiting for approval) exactly when the amount is strictly greater than the caller\'s refund limit; otherwise done. ' +
+          "Pending (waiting for approval) exactly when the amount is strictly greater than the caller's refund limit; otherwise done. " +
           'Errors: 422 `REFUND_EXCEEDS_CARD` (card cap), `REFUND_EXCEEDS_REFUNDABLE`, `ITEM_ALREADY_REFUNDED`, `PAY_AMOUNT_INVALID`.',
         params: IdParams,
         body: RefundBody,
@@ -269,7 +293,12 @@ export function registerPaymentsRoutes(app: AppInstance, service: PaymentsServic
     },
     idem(async (req, tx) => ({
       status: 201,
-      body: await service.refund(tx, commandCtx(req), (req.params as P).id, req.body as z.infer<typeof RefundBody>),
+      body: await service.refund(
+        tx,
+        commandCtx(req),
+        (req.params as P).id,
+        req.body as z.infer<typeof RefundBody>,
+      ),
     })),
   )
 
@@ -282,7 +311,7 @@ export function registerPaymentsRoutes(app: AppInstance, service: PaymentsServic
         summary: 'Approve a pending refund',
         description:
           'Needs pay.refund and a limit of at least the amount (403 `CANT_APPROVE`); the requester cannot approve their own request unless they have no limit or approvals.allow_self is on (403 `SELF_APPROVAL`). ' +
-          'Refundable and card cap are re-validated without this request\'s own reservation. 409 `REFUND_NOT_PENDING`.',
+          "Refundable and card cap are re-validated without this request's own reservation. 409 `REFUND_NOT_PENDING`.",
         params: EventParams,
         body: ApproveBody,
         response: { 200: EventResult },
@@ -310,7 +339,13 @@ export function registerPaymentsRoutes(app: AppInstance, service: PaymentsServic
       const p = req.params as PE
       return {
         status: 200,
-        body: await service.denyRefund(tx, commandCtx(req), p.id, p.eventId, req.body as z.infer<typeof DenyBody>),
+        body: await service.denyRefund(
+          tx,
+          commandCtx(req),
+          p.id,
+          p.eventId,
+          req.body as z.infer<typeof DenyBody>,
+        ),
       }
     }),
   )
@@ -331,7 +366,12 @@ export function registerPaymentsRoutes(app: AppInstance, service: PaymentsServic
     },
     idem(async (req, tx) => ({
       status: 201,
-      body: await service.adjust(tx, commandCtx(req), (req.params as P).id, req.body as z.infer<typeof AdjustBody>),
+      body: await service.adjust(
+        tx,
+        commandCtx(req),
+        (req.params as P).id,
+        req.body as z.infer<typeof AdjustBody>,
+      ),
     })),
   )
 
@@ -377,7 +417,12 @@ export function registerPaymentsRoutes(app: AppInstance, service: PaymentsServic
     },
     idem(async (req, tx) => ({
       status: 201,
-      body: await service.voidPayment(tx, commandCtx(req), (req.params as P).id, req.body as z.infer<typeof VoidBody>),
+      body: await service.voidPayment(
+        tx,
+        commandCtx(req),
+        (req.params as P).id,
+        req.body as z.infer<typeof VoidBody>,
+      ),
     })),
   )
 
@@ -395,7 +440,12 @@ export function registerPaymentsRoutes(app: AppInstance, service: PaymentsServic
     },
     idem(async (req, tx) => ({
       status: 200,
-      body: await service.setTip(tx, commandCtx(req), (req.params as P).id, (req.body as z.infer<typeof TipBody>).tipCents),
+      body: await service.setTip(
+        tx,
+        commandCtx(req),
+        (req.params as P).id,
+        (req.body as z.infer<typeof TipBody>).tipCents,
+      ),
     })),
   )
 
@@ -433,7 +483,12 @@ export function registerPaymentsRoutes(app: AppInstance, service: PaymentsServic
     },
     idem(async (req, tx) => ({
       status: 201,
-      body: await service.attachPaymentLink(tx, commandCtx(req), (req.params as P).id, req.body as z.infer<typeof PaymentLinkBody>),
+      body: await service.attachPaymentLink(
+        tx,
+        commandCtx(req),
+        (req.params as P).id,
+        req.body as z.infer<typeof PaymentLinkBody>,
+      ),
     })),
   )
 
@@ -444,7 +499,8 @@ export function registerPaymentsRoutes(app: AppInstance, service: PaymentsServic
       schema: {
         tags: [TAG],
         summary: 'Confirm that a card payment or refund was completed in Squarespace',
-        description: 'Needs the permission of the original action: pay.collect for a payment, pay.refund for a refund.',
+        description:
+          'Needs the permission of the original action: pay.collect for a payment, pay.refund for a refund.',
         params: z.object({ id: z.string().uuid() }),
         body: ConfirmBody,
         response: { 200: EventResult },
@@ -452,9 +508,12 @@ export function registerPaymentsRoutes(app: AppInstance, service: PaymentsServic
     },
     idem(async (req, tx) => ({
       status: 200,
-      body: await service.confirmProcessor(tx, commandCtx(req), (req.params as P).id, req.body as z.infer<typeof ConfirmBody>),
+      body: await service.confirmProcessor(
+        tx,
+        commandCtx(req),
+        (req.params as P).id,
+        req.body as z.infer<typeof ConfirmBody>,
+      ),
     })),
   )
 }
-
-export type { PayActor }

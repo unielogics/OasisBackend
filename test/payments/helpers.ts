@@ -64,7 +64,11 @@ export async function makeInvoice(
   } = {},
 ): Promise<MadeInvoice> {
   const customerId = o.customerId ?? (await makeCustomer(db, env, { name: o.client }))
-  const customer = await db.selectFrom('customers').select('full_name').where('id', '=', customerId).executeTakeFirstOrThrow()
+  const customer = await db
+    .selectFrom('customers')
+    .select('full_name')
+    .where('id', '=', customerId)
+    .executeTakeFirstOrThrow()
   const id = env.newId()
   const no = o.no ?? ++invNo
   const at = o.occurredAt ?? new Date('2026-06-13T10:31:00-04:00')
@@ -134,7 +138,12 @@ export interface RawEvent {
 }
 
 /** Writes a ledger row directly (bypassing the commands), for guard, calc and credit tests. */
-export async function addEvent(db: Executor, env: Env, inv: Pick<MadeInvoice, 'id' | 'customerId'>, e: RawEvent): Promise<string> {
+export async function addEvent(
+  db: Executor,
+  env: Env,
+  inv: Pick<MadeInvoice, 'id' | 'customerId'>,
+  e: RawEvent,
+): Promise<string> {
   const id = env.newId()
   const at = e.at ?? new Date('2026-06-13T10:36:00-04:00')
   const status = e.status ?? 'done'

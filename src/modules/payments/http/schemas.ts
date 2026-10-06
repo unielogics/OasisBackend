@@ -8,7 +8,8 @@ export const IdParams = z.object({ id: Uuid })
 export const EventParams = z.object({ id: Uuid, eventId: Uuid })
 export const EventOnlyParams = z.object({ id: Uuid })
 
-const Cents = z.number().int().max(1_000_000_000_00)
+/** Columns are int4: $21M is far above any invoice and keeps every sum inside the type. */
+const Cents = z.number().int().max(2_000_000_000)
 const PositiveCents = Cents.min(1)
 const Reason = z.string().trim().min(1).max(80)
 const Note = z.string().trim().max(500).nullable()
@@ -338,7 +339,12 @@ export const ListRow = z.object({
 export const ListResult = z.object({ items: z.array(ListRow), nextCursor: z.string().nullable() })
 
 export const ApprovalsResult = z.object({
-  items: z.array(PendingApproval.extend({ canApprove: z.boolean(), approveBlock: z.enum(['permission', 'limit', 'self']).nullable() })),
+  items: z.array(
+    PendingApproval.extend({
+      canApprove: z.boolean(),
+      approveBlock: z.enum(['permission', 'limit', 'self']).nullable(),
+    }),
+  ),
 })
 
 export const ReconciliationResult = z.object({

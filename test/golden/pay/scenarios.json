@@ -1,0 +1,1765 @@
+{
+ "refund_full_card": {
+  "selId": "INV-20606",
+  "role": "mgmt",
+  "log": [
+   {
+    "op": "sheet",
+    "summary": [
+     {
+      "label": "Refundable",
+      "value": "$192.60"
+     },
+     {
+      "label": "This refund",
+      "value": "$192.60"
+     },
+     {
+      "label": "Collected after",
+      "value": "$0.00"
+     }
+    ],
+    "blocked": false,
+    "permText": "Within your $1,000 limit as Management.",
+    "submitLabel": "Refund $192.60",
+    "hasReasons": true,
+    "reasons": [
+     "Service issue",
+     "Customer canceled",
+     "Duplicate charge",
+     "Pricing error",
+     "Goodwill",
+     "Add-on not performed"
+    ]
+   },
+   {
+    "op": "submit",
+    "approveNote": null,
+    "toast": "Refunded $192.60 to Visa ••7731",
+    "after": {
+     "status": "Refunded",
+     "big": [
+      {
+       "label": "Total",
+       "value": "$192.60"
+      },
+      {
+       "label": "Collected",
+       "value": "$0.00"
+      },
+      {
+       "label": "Refundable",
+       "value": "$0.00"
+      }
+     ],
+     "lines": [
+      {
+       "label": "Ceramic Maintenance + Wax",
+       "value": "$180.00"
+      },
+      {
+       "label": "Tax (7%)",
+       "value": "$12.60"
+      },
+      {
+       "label": "Total",
+       "value": "$192.60"
+      },
+      {
+       "label": "Paid",
+       "value": "$192.60"
+      },
+      {
+       "label": "Refunded",
+       "value": "−$192.60"
+      }
+     ],
+     "ledger": [
+      {
+       "title": "Refund · Visa ••7731",
+       "amt": "−$192.60",
+       "meta": "Today 10:36 AM · Rafael M. (Management) · Service issue",
+       "pending": false
+      },
+      {
+       "title": "Payment · Visa ••7731",
+       "amt": "$192.60",
+       "meta": "9:50 AM · System",
+       "pending": false
+      }
+     ],
+     "creditLine": "",
+     "calc": {
+      "total": 192.6,
+      "paid": 192.6,
+      "refunded": 192.6,
+      "balance": 0,
+      "refundable": 0,
+      "toOrigMax": 0,
+      "pending": []
+     }
+    }
+   }
+  ]
+ },
+ "refund_items_card": {
+  "selId": "INV-20601",
+  "role": "mgmt",
+  "log": [
+   {
+    "op": "sheet",
+    "summary": [
+     {
+      "label": "Refundable",
+      "value": "$98.95"
+     },
+     {
+      "label": "This refund",
+      "value": "$42.80"
+     },
+     {
+      "label": "Collected after",
+      "value": "$56.15"
+     }
+    ],
+    "blocked": false,
+    "permText": "Within your $1,000 limit as Management.",
+    "submitLabel": "Refund $42.80",
+    "hasReasons": true,
+    "reasons": [
+     "Service issue",
+     "Customer canceled",
+     "Duplicate charge",
+     "Pricing error",
+     "Goodwill",
+     "Add-on not performed"
+    ]
+   },
+   {
+    "op": "submit",
+    "approveNote": null,
+    "toast": "Refunded $42.80 to Visa ••4421",
+    "after": {
+     "status": "Partially refunded",
+     "big": [
+      {
+       "label": "Total",
+       "value": "$98.95"
+      },
+      {
+       "label": "Collected",
+       "value": "$56.15"
+      },
+      {
+       "label": "Refundable",
+       "value": "$56.15"
+      }
+     ],
+     "lines": [
+      {
+       "label": "Express Hand Wash",
+       "value": "$45.00"
+      },
+      {
+       "label": "Wax",
+       "value": "$40.00"
+      },
+      {
+       "label": "Tax (7%)",
+       "value": "$5.95"
+      },
+      {
+       "label": "Tip",
+       "value": "$8.00"
+      },
+      {
+       "label": "Total",
+       "value": "$98.95"
+      },
+      {
+       "label": "Paid",
+       "value": "$98.95"
+      },
+      {
+       "label": "Refunded",
+       "value": "−$42.80"
+      }
+     ],
+     "ledger": [
+      {
+       "title": "Refund · Visa ••4421",
+       "amt": "−$42.80",
+       "meta": "Today 10:36 AM · Rafael M. (Management) · Service issue",
+       "pending": false
+      },
+      {
+       "title": "Payment · Visa ••4421",
+       "amt": "$98.95",
+       "meta": "8:52 AM · System",
+       "pending": false
+      }
+     ],
+     "creditLine": "",
+     "calc": {
+      "total": 98.95,
+      "paid": 98.95,
+      "refunded": 42.8,
+      "balance": 0,
+      "refundable": 56.15,
+      "toOrigMax": 56.15,
+      "pending": []
+     }
+    }
+   }
+  ]
+ },
+ "refund_items_credit": {
+  "selId": "INV-20608",
+  "role": "mgmt",
+  "log": [
+   {
+    "op": "sheet",
+    "summary": [
+     {
+      "label": "Refundable",
+      "value": "$577.80"
+     },
+     {
+      "label": "This refund",
+      "value": "$577.80"
+     },
+     {
+      "label": "Collected after",
+      "value": "$0.00"
+     },
+     {
+      "label": "Aisha’s credit after",
+      "value": "$577.80"
+     }
+    ],
+    "blocked": false,
+    "permText": "Within your $1,000 limit as Management.",
+    "submitLabel": "Refund $577.80",
+    "hasReasons": true,
+    "reasons": [
+     "Service issue",
+     "Customer canceled",
+     "Duplicate charge",
+     "Pricing error",
+     "Goodwill",
+     "Add-on not performed"
+    ]
+   },
+   {
+    "op": "submit",
+    "approveNote": null,
+    "toast": "Refunded $577.80 to store credit",
+    "after": {
+     "status": "Refunded",
+     "big": [
+      {
+       "label": "Total",
+       "value": "$577.80"
+      },
+      {
+       "label": "Collected",
+       "value": "$0.00"
+      },
+      {
+       "label": "Refundable",
+       "value": "$0.00"
+      }
+     ],
+     "lines": [
+      {
+       "label": "Executive Detail + Ceramic",
+       "value": "$420.00"
+      },
+      {
+       "label": "Ceramic maintenance",
+       "value": "$120.00"
+      },
+      {
+       "label": "Tax (7%)",
+       "value": "$37.80"
+      },
+      {
+       "label": "Total",
+       "value": "$577.80"
+      },
+      {
+       "label": "Paid",
+       "value": "$577.80"
+      },
+      {
+       "label": "Refunded",
+       "value": "−$577.80"
+      }
+     ],
+     "ledger": [
+      {
+       "title": "Refund · to store credit",
+       "amt": "−$577.80",
+       "meta": "Today 10:36 AM · Rafael M. (Management) · Service issue",
+       "pending": false
+      },
+      {
+       "title": "Payment · Amex ••3008",
+       "amt": "$577.80",
+       "meta": "10:05 AM · System",
+       "pending": false
+      }
+     ],
+     "creditLine": "Aisha has $577.80 in store credit",
+     "calc": {
+      "total": 577.8,
+      "paid": 577.8,
+      "refunded": 577.8,
+      "balance": 0,
+      "refundable": 0,
+      "toOrigMax": 577.8,
+      "pending": []
+     }
+    }
+   }
+  ]
+ },
+ "refund_full_card_blocked": {
+  "selId": "INV-20560",
+  "role": "mgmt",
+  "log": [
+   {
+    "op": "sheet",
+    "summary": [
+     {
+      "label": "Refundable",
+      "value": "$48.15"
+     },
+     {
+      "label": "This refund",
+      "value": "$48.15"
+     },
+     {
+      "label": "Collected after",
+      "value": "$0.00"
+     }
+    ],
+    "blocked": true,
+    "permText": "Only $23.15 was paid by card — refund the rest to store credit.",
+    "submitLabel": "Refund $48.15",
+    "hasReasons": true,
+    "reasons": [
+     "Service issue",
+     "Customer canceled",
+     "Duplicate charge",
+     "Pricing error",
+     "Goodwill",
+     "Add-on not performed"
+    ]
+   }
+  ]
+ },
+ "refund_custom_over_refundable": {
+  "selId": "INV-20606",
+  "role": "mgmt",
+  "log": [
+   {
+    "op": "sheet",
+    "summary": [
+     {
+      "label": "Refundable",
+      "value": "$192.60"
+     },
+     {
+      "label": "This refund",
+      "value": "$500.00"
+     },
+     {
+      "label": "Collected after",
+      "value": "−$307.40"
+     }
+    ],
+    "blocked": true,
+    "permText": "Only $192.60 was paid by card — refund the rest to store credit.",
+    "submitLabel": "Refund $500.00",
+    "hasReasons": true,
+    "reasons": [
+     "Service issue",
+     "Customer canceled",
+     "Duplicate charge",
+     "Pricing error",
+     "Goodwill",
+     "Add-on not performed"
+    ]
+   }
+  ]
+ },
+ "refund_support_over_limit": {
+  "selId": "INV-20608",
+  "role": "support",
+  "log": [
+   {
+    "op": "sheet",
+    "summary": [
+     {
+      "label": "Refundable",
+      "value": "$577.80"
+     },
+     {
+      "label": "This refund",
+      "value": "$80.00"
+     },
+     {
+      "label": "Collected after",
+      "value": "$497.80"
+     }
+    ],
+    "blocked": false,
+    "permText": "Over your $50 limit as Customer Support. This will be sent for approval.",
+    "submitLabel": "Request approval · $80.00",
+    "hasReasons": true,
+    "reasons": [
+     "Service issue",
+     "Customer canceled",
+     "Duplicate charge",
+     "Pricing error",
+     "Goodwill",
+     "Add-on not performed"
+    ]
+   },
+   {
+    "op": "submit",
+    "approveNote": null,
+    "toast": "Sent for approval · $80.00",
+    "after": {
+     "status": "Refund pending",
+     "big": [
+      {
+       "label": "Total",
+       "value": "$577.80"
+      },
+      {
+       "label": "Collected",
+       "value": "$577.80"
+      },
+      {
+       "label": "Refundable",
+       "value": "$497.80"
+      }
+     ],
+     "lines": [
+      {
+       "label": "Executive Detail + Ceramic",
+       "value": "$420.00"
+      },
+      {
+       "label": "Ceramic maintenance",
+       "value": "$120.00"
+      },
+      {
+       "label": "Tax (7%)",
+       "value": "$37.80"
+      },
+      {
+       "label": "Total",
+       "value": "$577.80"
+      },
+      {
+       "label": "Paid",
+       "value": "$577.80"
+      }
+     ],
+     "ledger": [
+      {
+       "title": "Refund requested · Amex ••3008",
+       "amt": "−$80.00",
+       "meta": "Today 10:36 AM · Rafael M. (Customer Support) · Goodwill · x",
+       "pending": true
+      },
+      {
+       "title": "Payment · Amex ••3008",
+       "amt": "$577.80",
+       "meta": "10:05 AM · System",
+       "pending": false
+      }
+     ],
+     "creditLine": "",
+     "calc": {
+      "total": 577.8,
+      "paid": 577.8,
+      "refunded": 0,
+      "balance": 0,
+      "refundable": 497.8,
+      "toOrigMax": 577.8,
+      "pending": [
+       80
+      ]
+     }
+    }
+   }
+  ]
+ },
+ "refund_support_at_limit": {
+  "selId": "INV-20608",
+  "role": "support",
+  "log": [
+   {
+    "op": "sheet",
+    "summary": [
+     {
+      "label": "Refundable",
+      "value": "$577.80"
+     },
+     {
+      "label": "This refund",
+      "value": "$50.00"
+     },
+     {
+      "label": "Collected after",
+      "value": "$527.80"
+     }
+    ],
+    "blocked": false,
+    "permText": "Within your $50 limit as Customer Support.",
+    "submitLabel": "Refund $50.00",
+    "hasReasons": true,
+    "reasons": [
+     "Service issue",
+     "Customer canceled",
+     "Duplicate charge",
+     "Pricing error",
+     "Goodwill",
+     "Add-on not performed"
+    ]
+   },
+   {
+    "op": "submit",
+    "approveNote": null,
+    "toast": "Refunded $50.00 to Amex ••3008",
+    "after": {
+     "status": "Partially refunded",
+     "big": [
+      {
+       "label": "Total",
+       "value": "$577.80"
+      },
+      {
+       "label": "Collected",
+       "value": "$527.80"
+      },
+      {
+       "label": "Refundable",
+       "value": "$527.80"
+      }
+     ],
+     "lines": [
+      {
+       "label": "Executive Detail + Ceramic",
+       "value": "$420.00"
+      },
+      {
+       "label": "Ceramic maintenance",
+       "value": "$120.00"
+      },
+      {
+       "label": "Tax (7%)",
+       "value": "$37.80"
+      },
+      {
+       "label": "Total",
+       "value": "$577.80"
+      },
+      {
+       "label": "Paid",
+       "value": "$577.80"
+      },
+      {
+       "label": "Refunded",
+       "value": "−$50.00"
+      }
+     ],
+     "ledger": [
+      {
+       "title": "Refund · Amex ••3008",
+       "amt": "−$50.00",
+       "meta": "Today 10:36 AM · Rafael M. (Customer Support) · Service issue",
+       "pending": false
+      },
+      {
+       "title": "Payment · Amex ••3008",
+       "amt": "$577.80",
+       "meta": "10:05 AM · System",
+       "pending": false
+      }
+     ],
+     "creditLine": "",
+     "calc": {
+      "total": 577.8,
+      "paid": 577.8,
+      "refunded": 50,
+      "balance": 0,
+      "refundable": 527.8,
+      "toOrigMax": 527.8,
+      "pending": []
+     }
+    }
+   }
+  ]
+ },
+ "refund_cash_custom": {
+  "selId": "INV-20602",
+  "role": "mgmt",
+  "log": [
+   {
+    "op": "sheet",
+    "summary": [
+     {
+      "label": "Refundable",
+      "value": "$394.50"
+     },
+     {
+      "label": "This refund",
+      "value": "$100.00"
+     },
+     {
+      "label": "Collected after",
+      "value": "$294.50"
+     }
+    ],
+    "blocked": false,
+    "permText": "Within your $1,000 limit as Management.",
+    "submitLabel": "Refund $100.00",
+    "hasReasons": true,
+    "reasons": [
+     "Service issue",
+     "Customer canceled",
+     "Duplicate charge",
+     "Pricing error",
+     "Goodwill",
+     "Add-on not performed"
+    ]
+   },
+   {
+    "op": "submit",
+    "approveNote": null,
+    "toast": "Refunded $100.00 to Cash",
+    "after": {
+     "status": "Partially refunded",
+     "big": [
+      {
+       "label": "Total",
+       "value": "$394.50"
+      },
+      {
+       "label": "Collected",
+       "value": "$294.50"
+      },
+      {
+       "label": "Refundable",
+       "value": "$294.50"
+      }
+     ],
+     "lines": [
+      {
+       "label": "Full Detail",
+       "value": "$320.00"
+      },
+      {
+       "label": "Engine bay cleaning",
+       "value": "$55.00"
+      },
+      {
+       "label": "Discount · Loyalty",
+       "value": "−$25.00"
+      },
+      {
+       "label": "Tax (7%)",
+       "value": "$24.50"
+      },
+      {
+       "label": "Tip",
+       "value": "$20.00"
+      },
+      {
+       "label": "Total",
+       "value": "$394.50"
+      },
+      {
+       "label": "Paid",
+       "value": "$394.50"
+      },
+      {
+       "label": "Refunded",
+       "value": "−$100.00"
+      }
+     ],
+     "ledger": [
+      {
+       "title": "Refund · cash",
+       "amt": "−$100.00",
+       "meta": "Today 10:36 AM · Rafael M. (Management) · Service issue",
+       "pending": false
+      },
+      {
+       "title": "Payment · Mastercard ••1180",
+       "amt": "$394.50",
+       "meta": "9:58 AM · System",
+       "pending": false
+      },
+      {
+       "title": "Discount · Loyalty",
+       "amt": "$25.00",
+       "meta": "9:58 AM · Rafael M.",
+       "pending": false
+      }
+     ],
+     "creditLine": "",
+     "calc": {
+      "total": 394.5,
+      "paid": 394.5,
+      "refunded": 100,
+      "balance": 0,
+      "refundable": 294.5,
+      "toOrigMax": 294.5,
+      "pending": []
+     }
+    }
+   }
+  ]
+ },
+ "adjust_pct_settle_credit": {
+  "selId": "INV-20608",
+  "role": "mgmt",
+  "log": [
+   {
+    "op": "sheet",
+    "summary": [
+     {
+      "label": "Current total",
+      "value": "$577.80"
+     },
+     {
+      "label": "Discount (pre-tax)",
+      "value": "−$54.00"
+     },
+     {
+      "label": "New total",
+      "value": "$520.02"
+     },
+     {
+      "label": "Overpaid — returned as store credit",
+      "value": "$57.78"
+     }
+    ],
+    "blocked": false,
+    "permText": "Within your $500 limit as Management.",
+    "submitLabel": "Apply discount",
+    "hasReasons": true,
+    "reasons": [
+     "Service recovery",
+     "Loyalty",
+     "Price match",
+     "Manager discretion"
+    ]
+   },
+   {
+    "op": "submit",
+    "approveNote": null,
+    "toast": "Discount applied · new total $520.02",
+    "after": {
+     "status": "Partially refunded",
+     "big": [
+      {
+       "label": "Total",
+       "value": "$520.02"
+      },
+      {
+       "label": "Collected",
+       "value": "$520.02"
+      },
+      {
+       "label": "Refundable",
+       "value": "$520.02"
+      }
+     ],
+     "lines": [
+      {
+       "label": "Executive Detail + Ceramic",
+       "value": "$420.00"
+      },
+      {
+       "label": "Ceramic maintenance",
+       "value": "$120.00"
+      },
+      {
+       "label": "Discount · Service recovery",
+       "value": "−$54.00"
+      },
+      {
+       "label": "Tax (7%)",
+       "value": "$34.02"
+      },
+      {
+       "label": "Total",
+       "value": "$520.02"
+      },
+      {
+       "label": "Paid",
+       "value": "$577.80"
+      },
+      {
+       "label": "Refunded",
+       "value": "−$57.78"
+      }
+     ],
+     "ledger": [
+      {
+       "title": "Refund · to store credit",
+       "amt": "−$57.78",
+       "meta": "Today 10:36 AM · Rafael M. · Adjustment settlement",
+       "pending": false
+      },
+      {
+       "title": "Discount · Service recovery",
+       "amt": "$54.00",
+       "meta": "Today 10:36 AM · Rafael M.",
+       "pending": false
+      },
+      {
+       "title": "Payment · Amex ••3008",
+       "amt": "$577.80",
+       "meta": "10:05 AM · System",
+       "pending": false
+      }
+     ],
+     "creditLine": "Aisha has $57.78 in store credit",
+     "calc": {
+      "total": 520.02,
+      "paid": 577.8,
+      "refunded": 57.78,
+      "balance": 0,
+      "refundable": 520.02,
+      "toOrigMax": 577.8,
+      "pending": []
+     }
+    }
+   }
+  ]
+ },
+ "adjust_pct_settle_card": {
+  "selId": "INV-20608",
+  "role": "mgmt",
+  "log": [
+   {
+    "op": "sheet",
+    "summary": [
+     {
+      "label": "Current total",
+      "value": "$577.80"
+     },
+     {
+      "label": "Discount (pre-tax)",
+      "value": "−$54.00"
+     },
+     {
+      "label": "New total",
+      "value": "$520.02"
+     },
+     {
+      "label": "Overpaid — returned as card refund",
+      "value": "$57.78"
+     }
+    ],
+    "blocked": false,
+    "permText": "Within your $500 limit as Management.",
+    "submitLabel": "Apply discount",
+    "hasReasons": true,
+    "reasons": [
+     "Service recovery",
+     "Loyalty",
+     "Price match",
+     "Manager discretion"
+    ]
+   },
+   {
+    "op": "submit",
+    "approveNote": null,
+    "toast": "Discount applied · new total $520.02",
+    "after": {
+     "status": "Partially refunded",
+     "big": [
+      {
+       "label": "Total",
+       "value": "$520.02"
+      },
+      {
+       "label": "Collected",
+       "value": "$520.02"
+      },
+      {
+       "label": "Refundable",
+       "value": "$520.02"
+      }
+     ],
+     "lines": [
+      {
+       "label": "Executive Detail + Ceramic",
+       "value": "$420.00"
+      },
+      {
+       "label": "Ceramic maintenance",
+       "value": "$120.00"
+      },
+      {
+       "label": "Discount · Service recovery",
+       "value": "−$54.00"
+      },
+      {
+       "label": "Tax (7%)",
+       "value": "$34.02"
+      },
+      {
+       "label": "Total",
+       "value": "$520.02"
+      },
+      {
+       "label": "Paid",
+       "value": "$577.80"
+      },
+      {
+       "label": "Refunded",
+       "value": "−$57.78"
+      }
+     ],
+     "ledger": [
+      {
+       "title": "Refund · Amex ••3008",
+       "amt": "−$57.78",
+       "meta": "Today 10:36 AM · Rafael M. · Adjustment settlement",
+       "pending": false
+      },
+      {
+       "title": "Discount · Service recovery",
+       "amt": "$54.00",
+       "meta": "Today 10:36 AM · Rafael M.",
+       "pending": false
+      },
+      {
+       "title": "Payment · Amex ••3008",
+       "amt": "$577.80",
+       "meta": "10:05 AM · System",
+       "pending": false
+      }
+     ],
+     "creditLine": "",
+     "calc": {
+      "total": 520.02,
+      "paid": 577.8,
+      "refunded": 57.78,
+      "balance": 0,
+      "refundable": 520.02,
+      "toOrigMax": 520.02,
+      "pending": []
+     }
+    }
+   }
+  ]
+ },
+ "adjust_surcharge_unpaid": {
+  "selId": "INV-20603",
+  "role": "mgmt",
+  "log": [
+   {
+    "op": "sheet",
+    "summary": [
+     {
+      "label": "Current total",
+      "value": "$164.78"
+     },
+     {
+      "label": "Surcharge (pre-tax)",
+      "value": "$10.00"
+     },
+     {
+      "label": "New total",
+      "value": "$175.48"
+     },
+     {
+      "label": "New balance due",
+      "value": "$175.48"
+     }
+    ],
+    "blocked": false,
+    "permText": "Within your $500 limit as Management.",
+    "submitLabel": "Apply surcharge",
+    "hasReasons": true,
+    "reasons": [
+     "Extra soil surcharge",
+     "Pet hair surcharge",
+     "Oversize vehicle"
+    ]
+   },
+   {
+    "op": "submit",
+    "approveNote": null,
+    "toast": "Surcharge applied · new total $175.48",
+    "after": {
+     "status": "Unpaid",
+     "big": [
+      {
+       "label": "Total",
+       "value": "$175.48"
+      },
+      {
+       "label": "Collected",
+       "value": "$0.00"
+      },
+      {
+       "label": "Balance due",
+       "value": "$175.48"
+      }
+     ],
+     "lines": [
+      {
+       "label": "Premium Hand Wash + Interior",
+       "value": "$129.00"
+      },
+      {
+       "label": "Rain repellent",
+       "value": "$25.00"
+      },
+      {
+       "label": "Surcharge · Oversize vehicle",
+       "value": "$10.00"
+      },
+      {
+       "label": "Tax (7%)",
+       "value": "$11.48"
+      },
+      {
+       "label": "Total",
+       "value": "$175.48"
+      },
+      {
+       "label": "Paid",
+       "value": "$0.00"
+      }
+     ],
+     "ledger": [
+      {
+       "title": "Surcharge · Oversize vehicle",
+       "amt": "$10.00",
+       "meta": "Today 10:36 AM · Rafael M.",
+       "pending": false
+      }
+     ],
+     "creditLine": "Priya has $20.00 in store credit",
+     "calc": {
+      "total": 175.48,
+      "paid": 0,
+      "refunded": 0,
+      "balance": 175.48,
+      "refundable": 0,
+      "toOrigMax": 0,
+      "pending": []
+     }
+    }
+   }
+  ]
+ },
+ "adjust_discount_unpaid": {
+  "selId": "INV-20603",
+  "role": "mgmt",
+  "log": [
+   {
+    "op": "sheet",
+    "summary": [
+     {
+      "label": "Current total",
+      "value": "$164.78"
+     },
+     {
+      "label": "Discount (pre-tax)",
+      "value": "−$20.00"
+     },
+     {
+      "label": "New total",
+      "value": "$143.38"
+     },
+     {
+      "label": "New balance due",
+      "value": "$143.38"
+     }
+    ],
+    "blocked": false,
+    "permText": "Within your $500 limit as Management.",
+    "submitLabel": "Apply discount",
+    "hasReasons": true,
+    "reasons": [
+     "Service recovery",
+     "Loyalty",
+     "Price match",
+     "Manager discretion"
+    ]
+   },
+   {
+    "op": "submit",
+    "approveNote": null,
+    "toast": "Discount applied · new total $143.38",
+    "after": {
+     "status": "Unpaid",
+     "big": [
+      {
+       "label": "Total",
+       "value": "$143.38"
+      },
+      {
+       "label": "Collected",
+       "value": "$0.00"
+      },
+      {
+       "label": "Balance due",
+       "value": "$143.38"
+      }
+     ],
+     "lines": [
+      {
+       "label": "Premium Hand Wash + Interior",
+       "value": "$129.00"
+      },
+      {
+       "label": "Rain repellent",
+       "value": "$25.00"
+      },
+      {
+       "label": "Discount · Service recovery",
+       "value": "−$20.00"
+      },
+      {
+       "label": "Tax (7%)",
+       "value": "$9.38"
+      },
+      {
+       "label": "Total",
+       "value": "$143.38"
+      },
+      {
+       "label": "Paid",
+       "value": "$0.00"
+      }
+     ],
+     "ledger": [
+      {
+       "title": "Discount · Service recovery",
+       "amt": "$20.00",
+       "meta": "Today 10:36 AM · Rafael M.",
+       "pending": false
+      }
+     ],
+     "creditLine": "Priya has $20.00 in store credit",
+     "calc": {
+      "total": 143.38,
+      "paid": 0,
+      "refunded": 0,
+      "balance": 143.38,
+      "refundable": 0,
+      "toOrigMax": 0,
+      "pending": []
+     }
+    }
+   }
+  ]
+ },
+ "adjust_support_over_limit": {
+  "selId": "INV-20603",
+  "role": "support",
+  "log": [
+   {
+    "op": "sheet",
+    "summary": [
+     {
+      "label": "Current total",
+      "value": "$164.78"
+     },
+     {
+      "label": "Discount (pre-tax)",
+      "value": "−$30.00"
+     },
+     {
+      "label": "New total",
+      "value": "$132.68"
+     },
+     {
+      "label": "New balance due",
+      "value": "$132.68"
+     }
+    ],
+    "blocked": true,
+    "permText": "Over your $25 limit as Customer Support. Ask Management or a Super Admin.",
+    "submitLabel": "Apply discount",
+    "hasReasons": true,
+    "reasons": [
+     "Service recovery",
+     "Loyalty",
+     "Price match",
+     "Manager discretion"
+    ]
+   }
+  ]
+ },
+ "adjust_larger_than_invoice": {
+  "selId": "INV-20603",
+  "role": "super",
+  "log": [
+   {
+    "op": "sheet",
+    "summary": [
+     {
+      "label": "Current total",
+      "value": "$164.78"
+     },
+     {
+      "label": "Discount (pre-tax)",
+      "value": "−$500.00"
+     },
+     {
+      "label": "New total",
+      "value": "−$370.22"
+     }
+    ],
+    "blocked": true,
+    "permText": "Discount is larger than the invoice.",
+    "submitLabel": "Apply discount",
+    "hasReasons": true,
+    "reasons": [
+     "Service recovery",
+     "Loyalty",
+     "Price match",
+     "Manager discretion"
+    ]
+   }
+  ]
+ },
+ "credit_issue_30d": {
+  "selId": "INV-20603",
+  "role": "mgmt",
+  "log": [
+   {
+    "op": "sheet",
+    "summary": [
+     {
+      "label": "Current credit",
+      "value": "$20.00"
+     },
+     {
+      "label": "Issuing",
+      "value": "+$25.00"
+     },
+     {
+      "label": "New balance",
+      "value": "$45.00"
+     }
+    ],
+    "blocked": false,
+    "permText": "Within your $500 limit as Management. Credit can be applied to any future invoice.",
+    "submitLabel": "Issue $25.00 credit",
+    "hasReasons": true,
+    "reasons": [
+     "Service recovery",
+     "Referral reward",
+     "Weather closure",
+     "Goodwill",
+     "Promotion"
+    ]
+   },
+   {
+    "op": "submit",
+    "approveNote": null,
+    "toast": "$25.00 credit issued to Priya Nair",
+    "after": {
+     "status": "Unpaid",
+     "big": [
+      {
+       "label": "Total",
+       "value": "$164.78"
+      },
+      {
+       "label": "Collected",
+       "value": "$0.00"
+      },
+      {
+       "label": "Balance due",
+       "value": "$164.78"
+      }
+     ],
+     "lines": [
+      {
+       "label": "Premium Hand Wash + Interior",
+       "value": "$129.00"
+      },
+      {
+       "label": "Rain repellent",
+       "value": "$25.00"
+      },
+      {
+       "label": "Tax (7%)",
+       "value": "$10.78"
+      },
+      {
+       "label": "Total",
+       "value": "$164.78"
+      },
+      {
+       "label": "Paid",
+       "value": "$0.00"
+      }
+     ],
+     "ledger": [
+      {
+       "title": "Credit issued · Goodwill",
+       "amt": "+$25.00",
+       "meta": "Today 10:36 AM · Rafael M. · Expires: 30 days",
+       "pending": false
+      }
+     ],
+     "creditLine": "Priya has $45.00 in store credit",
+     "calc": {
+      "total": 164.78,
+      "paid": 0,
+      "refunded": 0,
+      "balance": 164.78,
+      "refundable": 0,
+      "toOrigMax": 0,
+      "pending": []
+     }
+    }
+   }
+  ]
+ },
+ "credit_issue_support_over": {
+  "selId": "INV-20603",
+  "role": "support",
+  "log": [
+   {
+    "op": "sheet",
+    "summary": [
+     {
+      "label": "Current credit",
+      "value": "$20.00"
+     },
+     {
+      "label": "Issuing",
+      "value": "+$60.00"
+     },
+     {
+      "label": "New balance",
+      "value": "$80.00"
+     }
+    ],
+    "blocked": true,
+    "permText": "Over your $50 limit as Customer Support.",
+    "submitLabel": "Issue $60.00 credit",
+    "hasReasons": true,
+    "reasons": [
+     "Service recovery",
+     "Referral reward",
+     "Weather closure",
+     "Goodwill",
+     "Promotion"
+    ]
+   }
+  ]
+ },
+ "credit_apply": {
+  "selId": "INV-20603",
+  "role": "mgmt",
+  "log": [
+   {
+    "op": "sheet",
+    "summary": [
+     {
+      "label": "Available credit",
+      "value": "$20.00"
+     },
+     {
+      "label": "Applying",
+      "value": "$20.00"
+     },
+     {
+      "label": "Balance after",
+      "value": "$144.78"
+     }
+    ],
+    "blocked": false,
+    "permText": "Store credit is used as a payment on this invoice.",
+    "submitLabel": "Apply $20.00",
+    "hasReasons": false,
+    "reasons": []
+   },
+   {
+    "op": "submit",
+    "approveNote": null,
+    "toast": "$20.00 credit applied",
+    "after": {
+     "status": "Partially paid",
+     "big": [
+      {
+       "label": "Total",
+       "value": "$164.78"
+      },
+      {
+       "label": "Collected",
+       "value": "$20.00"
+      },
+      {
+       "label": "Balance due",
+       "value": "$144.78"
+      }
+     ],
+     "lines": [
+      {
+       "label": "Premium Hand Wash + Interior",
+       "value": "$129.00"
+      },
+      {
+       "label": "Rain repellent",
+       "value": "$25.00"
+      },
+      {
+       "label": "Tax (7%)",
+       "value": "$10.78"
+      },
+      {
+       "label": "Total",
+       "value": "$164.78"
+      },
+      {
+       "label": "Store credit applied",
+       "value": "−$20.00"
+      },
+      {
+       "label": "Paid",
+       "value": "$0.00"
+      }
+     ],
+     "ledger": [
+      {
+       "title": "Store credit applied",
+       "amt": "$20.00",
+       "meta": "Today 10:36 AM · Rafael M.",
+       "pending": false
+      }
+     ],
+     "creditLine": "",
+     "calc": {
+      "total": 164.78,
+      "paid": 20,
+      "refunded": 0,
+      "balance": 144.78,
+      "refundable": 20,
+      "toOrigMax": 0,
+      "pending": []
+     }
+    }
+   }
+  ]
+ },
+ "collect_cash": {
+  "selId": "INV-20603",
+  "role": "mgmt",
+  "log": [
+   {
+    "op": "sheet",
+    "summary": [
+     {
+      "label": "Balance due",
+      "value": "$164.78"
+     }
+    ],
+    "blocked": false,
+    "permText": "Receipt goes out by WhatsApp and email.",
+    "submitLabel": "Collect $164.78",
+    "hasReasons": false,
+    "reasons": []
+   },
+   {
+    "op": "submit",
+    "approveNote": null,
+    "toast": "Collected $164.78",
+    "after": {
+     "status": "Paid",
+     "big": [
+      {
+       "label": "Total",
+       "value": "$164.78"
+      },
+      {
+       "label": "Collected",
+       "value": "$164.78"
+      },
+      {
+       "label": "Refundable",
+       "value": "$164.78"
+      }
+     ],
+     "lines": [
+      {
+       "label": "Premium Hand Wash + Interior",
+       "value": "$129.00"
+      },
+      {
+       "label": "Rain repellent",
+       "value": "$25.00"
+      },
+      {
+       "label": "Tax (7%)",
+       "value": "$10.78"
+      },
+      {
+       "label": "Total",
+       "value": "$164.78"
+      },
+      {
+       "label": "Paid",
+       "value": "$164.78"
+      }
+     ],
+     "ledger": [
+      {
+       "title": "Payment · Cash",
+       "amt": "$164.78",
+       "meta": "Today 10:36 AM · Rafael M.",
+       "pending": false
+      }
+     ],
+     "creditLine": "Priya has $20.00 in store credit",
+     "calc": {
+      "total": 164.78,
+      "paid": 164.78,
+      "refunded": 0,
+      "balance": 0,
+      "refundable": 164.78,
+      "toOrigMax": 164.78,
+      "pending": []
+     }
+    }
+   }
+  ]
+ },
+ "approve_mgmt": {
+  "selId": "INV-20579",
+  "role": "mgmt",
+  "log": [
+   {
+    "op": "approve",
+    "approveNote": "You can approve up to $1,000.",
+    "toast": "Refund approved · $80.00 to Visa ••5521",
+    "after": {
+     "status": "Partially refunded",
+     "big": [
+      {
+       "label": "Total",
+       "value": "$278.20"
+      },
+      {
+       "label": "Collected",
+       "value": "$198.20"
+      },
+      {
+       "label": "Refundable",
+       "value": "$198.20"
+      }
+     ],
+     "lines": [
+      {
+       "label": "Executive Detail",
+       "value": "$260.00"
+      },
+      {
+       "label": "Tax (7%)",
+       "value": "$18.20"
+      },
+      {
+       "label": "Total",
+       "value": "$278.20"
+      },
+      {
+       "label": "Paid",
+       "value": "$278.20"
+      },
+      {
+       "label": "Refunded",
+       "value": "−$80.00"
+      }
+     ],
+     "ledger": [
+      {
+       "title": "Refund · Visa ••5521",
+       "amt": "−$80.00",
+       "meta": "Yesterday 4:40 PM · Sofia D. (Customer Support) · Service issue · Interior stain not fully removed · Approved by Rafael M. · Management",
+       "pending": false
+      },
+      {
+       "title": "Payment · Visa ••5521",
+       "amt": "$278.20",
+       "meta": "2:10 PM · System",
+       "pending": false
+      }
+     ],
+     "creditLine": "",
+     "calc": {
+      "total": 278.2,
+      "paid": 278.2,
+      "refunded": 80,
+      "balance": 0,
+      "refundable": 198.2,
+      "toOrigMax": 198.2,
+      "pending": []
+     }
+    }
+   }
+  ]
+ },
+ "approve_support": {
+  "selId": "INV-20579",
+  "role": "support",
+  "log": [
+   {
+    "op": "approve",
+    "approveNote": "Needs a role with a refund limit of at least $80.",
+    "toast": "Your role can’t approve $80.00",
+    "after": {
+     "status": "Refund pending",
+     "big": [
+      {
+       "label": "Total",
+       "value": "$278.20"
+      },
+      {
+       "label": "Collected",
+       "value": "$278.20"
+      },
+      {
+       "label": "Refundable",
+       "value": "$198.20"
+      }
+     ],
+     "lines": [
+      {
+       "label": "Executive Detail",
+       "value": "$260.00"
+      },
+      {
+       "label": "Tax (7%)",
+       "value": "$18.20"
+      },
+      {
+       "label": "Total",
+       "value": "$278.20"
+      },
+      {
+       "label": "Paid",
+       "value": "$278.20"
+      }
+     ],
+     "ledger": [
+      {
+       "title": "Refund requested · Visa ••5521",
+       "amt": "−$80.00",
+       "meta": "Yesterday 4:40 PM · Sofia D. (Customer Support) · Service issue · Interior stain not fully removed",
+       "pending": true
+      },
+      {
+       "title": "Payment · Visa ••5521",
+       "amt": "$278.20",
+       "meta": "2:10 PM · System",
+       "pending": false
+      }
+     ],
+     "creditLine": "",
+     "calc": {
+      "total": 278.2,
+      "paid": 278.2,
+      "refunded": 0,
+      "balance": 0,
+      "refundable": 198.2,
+      "toOrigMax": 278.2,
+      "pending": [
+       80
+      ]
+     }
+    }
+   }
+  ]
+ },
+ "deny_mgmt": {
+  "selId": "INV-20579",
+  "role": "mgmt",
+  "log": [
+   {
+    "op": "deny",
+    "approveNote": "You can approve up to $1,000.",
+    "toast": "Refund request denied",
+    "after": {
+     "status": "Paid",
+     "big": [
+      {
+       "label": "Total",
+       "value": "$278.20"
+      },
+      {
+       "label": "Collected",
+       "value": "$278.20"
+      },
+      {
+       "label": "Refundable",
+       "value": "$278.20"
+      }
+     ],
+     "lines": [
+      {
+       "label": "Executive Detail",
+       "value": "$260.00"
+      },
+      {
+       "label": "Tax (7%)",
+       "value": "$18.20"
+      },
+      {
+       "label": "Total",
+       "value": "$278.20"
+      },
+      {
+       "label": "Paid",
+       "value": "$278.20"
+      }
+     ],
+     "ledger": [
+      {
+       "title": "Refund denied · Visa ••5521",
+       "amt": "−$80.00",
+       "meta": "Yesterday 4:40 PM · Sofia D. (Customer Support) · Service issue · Interior stain not fully removed",
+       "pending": false
+      },
+      {
+       "title": "Payment · Visa ••5521",
+       "amt": "$278.20",
+       "meta": "2:10 PM · System",
+       "pending": false
+      }
+     ],
+     "creditLine": "",
+     "calc": {
+      "total": 278.2,
+      "paid": 278.2,
+      "refunded": 0,
+      "balance": 0,
+      "refundable": 278.2,
+      "toOrigMax": 278.2,
+      "pending": []
+     }
+    }
+   }
+  ]
+ }
+}

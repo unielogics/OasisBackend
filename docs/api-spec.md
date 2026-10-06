@@ -406,3 +406,73 @@ response carries a warning instead. Email must be unique across employees and lo
 * **Seeds**: `pnpm seed -- --profile people` creates the five roles with the design's grants and limits and the seven design employees (Sofia's `sched.override` exception, Kevin invited, schedules from the design's `sch()`); it creates no passwords. With `SEED_DEV_PASSWORD` set (refused in production) the six active employees also get a login with that password, emails `first@oasisautospa.com`.
 * **Wiring left for later**: pass a real `NotificationPort` (SMS Gate then SES) and the Settings module's `BusinessHoursPort` to `createIdentity()` in `src/server.ts`; until then invite/reset links are not delivered (a Super Admin gets them in the response; a startup warning says so).
 * **Tests**: `test/auth`, `test/rbac`, `test/people`, `test/authz-matrix`; `test/auth/harness.ts` builds the real app with the real authorizer (`useHarness()`).
+
+## 20. Payments: invoices, ledger, store credit, reports
+
+Code: `src/modules/payments/**` (routes in `http/`), migration `20261006190000_payments.sql`, seed `db/seeds/payments.ts`
+(profile `parity-pay`), decisions [0050](decisions/0050-payments-ledger-and-calc.md) to
+[0055](decisions/0055-payments-reports-and-csv.md). All amounts are integer cents; every money command needs an
+`Idempotency-Key` (replays answer from the stored response with `Idempotent-Replayed: true`; same key, different body is
+422 `IDEMPOTENCY_MISMATCH`), runs in one transaction that locks the invoice row, writes an audit row and publishes on the
+`payments` SSE channel, and answers with the refreshed invoice detail.
+
+### 20.1 Endpoints
+
+| Endpoint | Permission | Notes |
+|---|---|---|
+| `GET /payments/summary?range=today\|7d\|30d\|mtd` | `pay.reports` | Inclusive business days ending today (business tz). `{range{key,from,to,label}, kpis{grossSales,netRevenue,refunds,adjustments,creditsIssued,outstanding,counts{invoices,refunded,adjusted,creditInvoices,creditClients,openBalances}}, chart{granularity,buckets[{key,label,title,netCents,lossCents}],maxCents}, byMethod{card,applePay,cash,storeCredit,other}, filterCounts{all,unpaid,refunds,adjusted,credits}, pendingApprovals{count,text,first,all[]}, awaitingProcessor{count,cents}}`. An invoice belongs to a range by `biz_date`. |
+| `GET /payments/invoices?range&filter&q&limit&cursor` | `pay.reports` | Sorted `bizDate desc, invoiceNo desc`; keyset `nextCursor`. `filter`: `all`, `unpaid` (balance > 0), `refunds` (refunded or pending), `adjusted`, `credits` (issued or applied). `q` matches the joined text of invoice id, client, vehicle and item names, case-insensitive. Rows: `{id,invoiceNo,label,bizDate,date,time,client,vehicle,staff,items{first,more},totalCents,paidCents,balanceCents,status,statusLabel,refundPending,adjusted}`. |
+| `GET /invoices/:id` | `pay.reports` | Items (with `refunded` flag), adjustment lines, full `calc`, `clientCredit{balanceCents,nextExpiry}`, `ledger[]` newest first (`occurredAt desc, seq desc`, `atLabel` Today / Yesterday / `Jun 11 · 9:12 AM`), per pending refund `canApprove` and `approveBlock` (`permission`, `limit`, `self`) for the caller, `caller{canCollect,canRefund,...,refundLimitCents}`. |
+| `GET /payments/approvals` | `pay.reports` | Pending refunds oldest first with the caller's approval rights. |
+| `GET /payments/export.csv?range&filter&q` | `pay.reports` | UTF-8 BOM, CRLF, RFC 4180, plain decimals, dates in the business tz, text cells starting with `= + - @` get a leading apostrophe (numeric columns never). Scope = range and filter and search. `oasis-invoices_{from}_{to}.csv`, at most 20,000 rows (422 `EXPORT_TOO_LARGE`). Columns: `Invoice, Date, Time, Client, Vehicle, Staff, Items, Tip, Adjustments, Subtotal, Tax, Total, Paid, Credit applied, Refunded, Refund pending, Balance, Credits issued, Net revenue, Status`. |
+| `GET /payments/reconciliation` | `pay.reports` or `set.billing` | `awaitingProcessor[]` (card money older than 2 h), `unmatchedOrders[]` and `unmatchedTransactions[]` (from the sync's queues through `UnmatchedSource`; empty until wired), `overpaid[]` (last 90 days). |
+| `GET /clients/:id/credit` | `pay.reports` | Balance, next expiry and the lots (`state` active / used / expired). |
+| `POST /invoices/:id/payments` `{method: card\|cash\|payment_link, url?}` | `pay.collect` | Collects the full balance. Cash: `pay` event, `processorState na`. Card: `pay` event that counts immediately with `processorState awaiting_processor`; label is the card brand only (`Card`, or `Visa` from a `CardHintProvider`), never invented digits. `payment_link`: needs an https URL on an allowed host (`PAYMENT_LINK_HOST`), creates a `payment_links` row, queues the SMS, no ledger event. 422 `PAY_NOTHING_TO_COLLECT`. |
+| `POST /invoices/:id/credit-applications` | `pay.collect` | `min(usable credit, balance)`; FIFO allocation. 422 `PAY_NOTHING_TO_APPLY`. |
+| `POST /invoices/:id/refunds` `{mode: full\|items\|custom, itemIds?, amountCents?, dest: card\|credit\|cash, reason?, note?}` | `pay.refund` | Value: full = refundable; items = selected lines plus tax at the invoice rate, capped at refundable, each item at most once (`ITEM_ALREADY_REFUNDED`); custom = amount. Checks in the design's order: `REFUND_EXCEEDS_CARD` (`Only $X was paid by card — refund the rest to store credit.`), `REFUND_EXCEEDS_REFUNDABLE`. **Pending exactly when the amount is strictly greater than the caller's refund limit**, else done; a done card refund is `awaiting_processor`. |
+| `POST /invoices/:id/refunds/:eventId/approve` | `pay.refund` | Limit of at least the amount (403 `CANT_APPROVE`, title `Your role can’t approve $80.00`); the requester cannot approve their own request unless unlimited or `approvals.allow_self` (403 `SELF_APPROVAL`); refundable and card cap are re-validated without the request's own reservation; 409 `REFUND_NOT_PENDING`. The event keeps its time; `approvedBy` is `Name · Roles`. |
+| `POST /invoices/:id/refunds/:eventId/deny` `{note?}` | `pay.refund` | The requester may withdraw. |
+| `POST /invoices/:id/adjustments` `{kind, unit: $\|%, value, reason?, note?, settle?}` | `pay.adjust` | `value` is cents for `$`, basis points of the items subtotal for `%` (1000 = 10%); applied before tax. Over the limit: 422 `OVER_LIMIT` with `Over your $25 limit as Customer Support. Ask Management or a Super Admin.` (no approval path). `ADJUST_EXCEEDS_INVOICE`, 409 `INVOICE_CANCELED`. A discount that leaves a paid invoice overpaid adds a settlement **refund event** (`settle` credit by default or card) under the normal refund rules (pending above the caller's refund limit, card settlements await Squarespace); `{event, settlement, invoice}`. |
+| `POST /invoices/:id/credits` `{amountCents, reason?, note?, expiry: none\|d30\|d90 (or the design labels)}` | `pay.credit` | Expires at the end of the business day 30 or 90 days out. Over the limit: 422 `OVER_LIMIT` (`Over your $50 limit as Customer Support.`). |
+| `POST /invoices/:id/void` `{eventId, note?}` | `pay.void` | Cash, or card still awaiting Squarespace; 422 `VOID_NOT_ALLOWED`, 409 `PAYMENT_ALREADY_VOIDED`. |
+| `PUT /invoices/:id/tip` `{tipCents}` | `pay.collect` | Untaxed; reopens a balance when the invoice was settled. |
+| `POST /invoices/:id/receipt` | `msg.send` or `pay.collect` | SMS to opted-in clients and email, through the `PaymentMessenger` port; audited; not a ledger event. |
+| `POST /invoices/:id/payment-links` `{kind: balance\|deposit, amountCents?, url?}` | `pay.collect` | Attach and text a Squarespace checkout or invoice link. |
+| `POST /ledger-events/:id/confirm-processor` `{processorRef?, sqspOrderId?}` | `pay.collect` for a payment, `pay.refund` for a refund | `awaiting_processor` to `confirmed`; 409 `EVENT_NOT_AWAITING`. |
+
+Limits and roles: the limit of a kind is the highest among the roles that grant the permission (`null` unlimited, no row 2500
+cents); ledger `by` is the real person and `byRole` the names of the granting roles (`Management + Accounting`); under
+view-as the real user is recorded with `view_as_role_id` and the viewed role decides permission and limit.
+
+### 20.2 Realtime (`payments` channel)
+
+`invoice.updated {invoiceId, version}`, `ledger.event {invoiceId, eventId, type}`, `refund.pending`, `refund.resolved`
+(`{invoiceId, eventId}`), `reconciliation.stale {count, cents, oldestMinutes}` (job `payments.lag-scan`, every 15 minutes).
+
+### 20.3 InvoiceGateway (for scheduling)
+
+`createGatewayFor({clock, newId})` / `createInvoiceGateway()` in `src/modules/payments/gateway.ts` implement the shared
+contract (`ensureForAppointment`, `syncItems`, `cancelForAppointment`, `summariesFor`) plus `freezeDate(tx, appointmentId, at)`.
+Numbers are INV-20611 upward, gap-free (the counter row is incremented in the caller's transaction). `biz_date` follows the
+appointment's service date until `freezeDate` (call it on completion); a deposit at booking never moves it. `syncItems` keeps
+the ids of lines that stay and answers 409 `ADDON_REMOVE_OVERPAID` when a removal would leave `paid - refunded > total`.
+Canceling or a no-show cancels the invoice: `canceled` (nothing paid), `canceled_kept` (a deposit stays), `canceled_refunded`.
+
+### 20.4 Wiring and configuration
+
+* `src/http/modules.ts` registers `paymentsModule()`; pass `paymentsModule({ports: {messenger, cardHints, unmatched, linkHosts}})`
+  to wire the Messaging outbox (`createPaymentMessenger(outbox)` with a real `PaymentOutbox`), the Squarespace card-brand hint
+  and the sync's unmatched queues. Outside production the default outbox is in memory (`devOutbox`); **in production the
+  default fails with 503 until a real outbox is passed**, so a receipt or payment link is never reported as sent when it was not.
+* `PAYMENT_LINK_HOSTS` (optional, comma separated, default `squarespace.com`; a host matches itself and its subdomains) is the
+  allow-list for payment link URLs. It is read directly from the environment (it is not part of `loadEnv`).
+* Settings used: `tax.rate_bp` (snapshotted on each invoice), `approvals.allow_self`.
+* Job `payments.lag-scan` (every 15 minutes) is registered in `src/platform/job-registry.ts`.
+
+### 20.5 Seeds, oracle and tests
+
+`pnpm seed -- --profile parity-pay` (depends on `domain`) loads the design's 105 invoices (16 explicit, 89 generated with
+`mulberry32(987654)` in the design's RNG call order, generated ids renumbered down from 20608 skipping used ids; the lowest
+is INV-20506), ledger events with real instants relative to the clock, store credit with allocations, and the pending refund
+INV-20579. Oracle values come from the ORIGINAL bundle (`test/golden/pay/extract-oracle.mjs`, see `test/golden/pay/README.md`);
+intentional differences are in `test/golden/pay/DEVIATIONS.md`. Tests: `test/payments/*` (`pnpm vitest run test/payments`).

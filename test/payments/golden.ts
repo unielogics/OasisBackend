@@ -60,13 +60,28 @@ export interface OracleView {
   bars: { label: string; title: string; netHeight: string; netMin: string; lossHeight: string }[]
   methods: { label: string; value: string; width: string }[]
   filters: { label: string; count: string }[]
-  rows: { id: string; date: string; client: string; vehicle: string; items: string; total: string; status: string; adjusted: boolean }[]
+  rows: {
+    id: string
+    date: string
+    client: string
+    vehicle: string
+    items: string
+    total: string
+    status: string
+    adjusted: boolean
+  }[]
   noRows: boolean
   hasPending: boolean
   pendingText: string
   raw: {
     agg: { gross: number; adj: number; refunds: number; credits: number; outstanding: number; net: number }
-    counts: { invoices: number; refunded: number; adjusted: number; creditInvoices: number; openBalances: number }
+    counts: {
+      invoices: number
+      refunded: number
+      adjusted: number
+      creditInvoices: number
+      openBalances: number
+    }
     chart: { key: number; net: number; loss: number; n: number }[]
     methods: Record<string, number>
     droppedFromChart: number
@@ -89,8 +104,10 @@ export interface OracleDetail {
 
 export const oracleFixtures = (): OracleInvoice[] => read('fixtures.json')
 export const oracleCalcs = (): OracleCalc[] => read('calcs.json')
-export const oracleViews = (): { meta: Record<string, string>; views: Record<string, Record<string, OracleView>> } =>
-  read('views.json')
+export const oracleViews = (): {
+  meta: Record<string, string>
+  views: Record<string, Record<string, OracleView>>
+} => read('views.json')
 export const oracleDetails = (): {
   pending: { hasPending: boolean; pendingText: string }
   invoices: Record<string, OracleDetail>
@@ -107,3 +124,33 @@ export const STATUS_KEY: Record<string, InvoiceStatus> = {
 }
 
 export const cents = (dollars: number): number => Math.round(dollars * 100)
+
+export interface OracleScenarioStep {
+  op: 'sheet' | 'submit' | 'approve' | 'deny'
+  summary?: { label: string; value: string }[]
+  blocked?: boolean
+  permText?: string
+  submitLabel?: string
+  toast?: string
+  approveNote?: string | null
+  after?: {
+    status: string
+    big: { label: string; value: string }[]
+    lines: { label: string; value: string }[]
+    ledger: { title: string; amt: string; meta: string; pending: boolean }[]
+    creditLine: string
+    calc: {
+      total: number
+      paid: number
+      refunded: number
+      balance: number
+      refundable: number
+      toOrigMax: number
+      pending: number[]
+    }
+  }
+}
+export const oracleScenarios = (): Record<
+  string,
+  { selId: string; role: string; log: OracleScenarioStep[] }
+> => read('scenarios.json')

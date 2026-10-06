@@ -129,7 +129,11 @@ export const statusLabel = (status: InvoiceStatus, refundPending: boolean): stri
   refundPending ? REFUND_PENDING_LABEL : STATUS_LABELS[status]
 
 /** By-item refund value: the selected lines with the invoice tax rate, never more than what is refundable. */
-export function itemsRefundValue(selectedPrices: readonly number[], taxBp: number, refundable: number): number {
+export function itemsRefundValue(
+  selectedPrices: readonly number[],
+  taxBp: number,
+  refundable: number,
+): number {
   return Math.min(refundable, divHalfUp(sum(selectedPrices) * (10_000 + taxBp), 10_000))
 }
 

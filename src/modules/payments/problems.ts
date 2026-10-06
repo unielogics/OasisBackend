@@ -66,7 +66,8 @@ registerProblems({
   VOID_NOT_ALLOWED: {
     status: 422,
     title: 'Can’t void this payment',
-    detail: 'Only a cash payment or a card payment still waiting on Squarespace can be voided. Refund confirmed card payments instead',
+    detail:
+      'Only a cash payment or a card payment still waiting on Squarespace can be voided. Refund confirmed card payments instead',
   },
   PAYMENT_ALREADY_VOIDED: {
     status: 409,

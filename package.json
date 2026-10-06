@@ -26,6 +26,7 @@
     "test": "vitest run --passWithNoTests",
     "test:unit": "vitest run test/unit test/platform.test.ts",
     "test:int": "vitest run test/integration",
+    "test:payments": "vitest run test/payments",
     "bootstrap:verify": "bash scripts/bootstrap/verify.sh",
     "sim:smsgate": "tsx scripts/sim-smsgate.ts",
     "sim:squarespace": "tsx scripts/sim-squarespace.ts",

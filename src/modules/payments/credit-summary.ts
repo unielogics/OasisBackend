@@ -1,6 +1,13 @@
 // The client credit block of the invoice detail and GET /clients/:id/credit.
 import type { Executor } from '../../platform/db.js'
-import { creditBalance, isExpired, loadCreditLots, lotRemaining, usableLots, type CreditLot } from './credit.js'
+import {
+  creditBalance,
+  isExpired,
+  loadCreditLots,
+  lotRemaining,
+  usableLots,
+  type CreditLot,
+} from './credit.js'
 
 export interface ClientCreditSummary {
   balanceCents: number
@@ -22,20 +29,28 @@ export interface CreditEntryDto {
 
 export function summarize(lots: readonly CreditLot[], now: Date): ClientCreditSummary {
   const usable = usableLots(lots, now)
-  const expiring = usable.filter((l) => l.expiresAt !== null).sort((a, b) => a.expiresAt!.getTime() - b.expiresAt!.getTime())
+  const expiring = usable
+    .filter((l) => l.expiresAt !== null)
+    .sort((a, b) => a.expiresAt!.getTime() - b.expiresAt!.getTime())
   const first = expiring[0]
   return {
     balanceCents: creditBalance(lots, now),
     nextExpiry: first
       ? {
           at: first.expiresAt!.toISOString(),
-          cents: expiring.filter((l) => l.expiresAt!.getTime() === first.expiresAt!.getTime()).reduce((a, l) => a + lotRemaining(l), 0),
+          cents: expiring
+            .filter((l) => l.expiresAt!.getTime() === first.expiresAt!.getTime())
+            .reduce((a, l) => a + lotRemaining(l), 0),
         }
       : null,
   }
 }
 
-export async function clientCreditSummary(db: Executor, customerId: string, now: Date): Promise<ClientCreditSummary> {
+export async function clientCreditSummary(
+  db: Executor,
+  customerId: string,
+  now: Date,
+): Promise<ClientCreditSummary> {
   return summarize(await loadCreditLots(db, customerId), now)
 }
 

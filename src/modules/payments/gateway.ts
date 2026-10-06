@@ -73,9 +73,15 @@ export interface PaymentsGateway extends InvoiceGateway {
 
 /** The counter starts at 20611 (20610 is the highest design id) and is incremented under a row lock. */
 export async function nextInvoiceNo(tx: Tx, locationId: string): Promise<number> {
-  await tx.insertInto('invoice_counters').values({ location_id: locationId }).onConflict((oc) => oc.doNothing()).execute()
+  await tx
+    .insertInto('invoice_counters')
+    .values({ location_id: locationId })
+    .onConflict((oc) => oc.doNothing())
+    .execute()
   const r = await sql<{ no: number }>`
-    update invoice_counters set next_no = next_no + 1 where location_id = ${locationId} returning next_no - 1 as no`.execute(tx)
+    update invoice_counters set next_no = next_no + 1 where location_id = ${locationId} returning next_no - 1 as no`.execute(
+    tx,
+  )
   return r.rows[0]!.no
 }
 
@@ -84,7 +90,10 @@ interface SummaryRow extends InvoiceCalcRow {
   invoice_no: number
 }
 
-export async function summariesByAppointment(db: Executor, appointmentIds: string[]): Promise<Map<string, InvoiceSummary>> {
+export async function summariesByAppointment(
+  db: Executor,
+  appointmentIds: string[],
+): Promise<Map<string, InvoiceSummary>> {
   const out = new Map<string, InvoiceSummary>()
   if (appointmentIds.length === 0) return out
   const r = await sql<SummaryRow>`
@@ -142,8 +151,8 @@ export interface GatewayDeps {
 
 export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
   const tzOf = async (tx: Executor, locationId: string): Promise<string> =>
-    (await tx.selectFrom('locations').select('timezone').where('id', '=', locationId).executeTakeFirst())?.timezone ??
-    'America/New_York'
+    (await tx.selectFrom('locations').select('timezone').where('id', '=', locationId).executeTakeFirst())
+      ?.timezone ?? 'America/New_York'
 
   const summaryOf = async (tx: Executor, appointmentId: string): Promise<InvoiceSummary> => {
     const s = (await summariesByAppointment(tx, [appointmentId])).get(appointmentId)
@@ -152,10 +161,20 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
   }
 
   const byAppointment = async (tx: Tx, appointmentId: string): Promise<InvoiceRow | undefined> =>
-    tx.selectFrom('invoices').selectAll().where('appointment_id', '=', appointmentId).forUpdate().executeTakeFirst()
+    tx
+      .selectFrom('invoices')
+      .selectAll()
+      .where('appointment_id', '=', appointmentId)
+      .forUpdate()
+      .executeTakeFirst()
 
   const publish = (tx: Tx, locationId: string, invoiceId: string, version: number): Promise<number> =>
-    realtime.publish(tx, { locationId, channel: 'payments', type: 'invoice.updated', payload: { invoiceId, version } })
+    realtime.publish(tx, {
+      locationId,
+      channel: 'payments',
+      type: 'invoice.updated',
+      payload: { invoiceId, version },
+    })
 
   return {
     async ensureForAppointment(tx, a) {
@@ -168,7 +187,9 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
             client_name: a.clientName,
             vehicle_label: a.vehicleLabel,
             staff_label: a.staffLabel,
-            ...(existing.date_frozen_at ? {} : { occurred_at: a.occurredAt, biz_date: toBizDate(a.occurredAt, tz) }),
+            ...(existing.date_frozen_at
+              ? {}
+              : { occurred_at: a.occurredAt, biz_date: toBizDate(a.occurredAt, tz) }),
           })
           .where('id', '=', existing.id)
           .execute()
@@ -216,7 +237,12 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
         action: 'payments.invoice_created',
         entityType: 'invoice',
         entityId: id,
-        after: { invoiceNo, label: invoiceLabel(invoiceNo), appointmentId: a.appointmentId, lines: lines.length },
+        after: {
+          invoiceNo,
+          label: invoiceLabel(invoiceNo),
+          appointmentId: a.appointmentId,
+          lines: lines.length,
+        },
       })
       await publish(tx, a.locationId, id, 1)
       return summaryOf(tx, a.appointmentId)
@@ -225,8 +251,14 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
     async syncItems(tx, appointmentId, items) {
       const inv = await byAppointment(tx, appointmentId)
       if (!inv) throw new AppError('NOT_FOUND', { detail: 'That appointment has no invoice' })
-      const current = await tx.selectFrom('invoice_items').selectAll().where('invoice_id', '=', inv.id).orderBy('position').execute()
-      const key = (x: { kind: string; name: string; price: number }): string => `${x.kind}|${x.name}|${x.price}`
+      const current = await tx
+        .selectFrom('invoice_items')
+        .selectAll()
+        .where('invoice_id', '=', inv.id)
+        .orderBy('position')
+        .execute()
+      const key = (x: { kind: string; name: string; price: number }): string =>
+        `${x.kind}|${x.name}|${x.price}`
       const pool = new Map<string, string[]>()
       for (const row of current) {
         const k = key({ kind: row.kind, name: row.name, price: row.price_cents })
@@ -246,7 +278,12 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
           .select(['type', 'amount_cents', 'status', 'dest'])
           .where('invoice_id', '=', inv.id)
           .execute()
-        const events: CalcEvent[] = ev.map((e) => ({ type: e.type, amountCents: e.amount_cents, status: e.status, dest: e.dest }))
+        const events: CalcEvent[] = ev.map((e) => ({
+          type: e.type,
+          amountCents: e.amount_cents,
+          status: e.status,
+          dest: e.dest,
+        }))
         const next: InvoiceCalc = calcInvoice({
           itemPrices: items.map((i) => i.priceCents),
           events,
@@ -258,7 +295,14 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
       }
 
       if (removed.length > 0) {
-        await tx.deleteFrom('invoice_items').where('id', 'in', removed.map((r) => r.id)).execute()
+        await tx
+          .deleteFrom('invoice_items')
+          .where(
+            'id',
+            'in',
+            removed.map((r) => r.id),
+          )
+          .execute()
       }
       for (const [position, p] of plan.entries()) {
         if (p.keep) {

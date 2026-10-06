@@ -73,7 +73,23 @@ describe('parity-pay seed', () => {
       const r = byNo.get(d.no)!
       const o = orig[i]!
       expect(
-        [r.items, r.adj, r.sub, r.tax, r.total, r.paid, r.paid_orig, r.credit_applied, r.refunded, r.balance, r.refundable, r.to_orig_max, r.issued, r.net, r.status],
+        [
+          r.items,
+          r.adj,
+          r.sub,
+          r.tax,
+          r.total,
+          r.paid,
+          r.paid_orig,
+          r.credit_applied,
+          r.refunded,
+          r.balance,
+          r.refundable,
+          r.to_orig_max,
+          r.issued,
+          r.net,
+          r.status,
+        ],
         `${d.designId} -> INV-${d.no}`,
       ).toEqual([
         cents(o.items),
@@ -99,7 +115,11 @@ describe('parity-pay seed', () => {
     await seed()
     const now = t.clock.now()
     const balance = async (name: string): Promise<number> => {
-      const c = await t.db.selectFrom('customers').select('id').where('full_name', '=', name).executeTakeFirstOrThrow()
+      const c = await t.db
+        .selectFrom('customers')
+        .select('id')
+        .where('full_name', '=', name)
+        .executeTakeFirstOrThrow()
       return clientCreditBalance(t.db, c.id, now)
     }
     expect(await balance('Priya Nair')).toBe(2000)
@@ -107,7 +127,11 @@ describe('parity-pay seed', () => {
     expect(await balance('Victor Nguyen')).toBe(0)
     expect(await balance('Ruby Castillo')).toBe(2000)
     expect(await balance('Grace Adeyemi')).toBe(2000)
-    const victor = await t.db.selectFrom('customers').select('id').where('full_name', '=', 'Victor Nguyen').executeTakeFirstOrThrow()
+    const victor = await t.db
+      .selectFrom('customers')
+      .select('id')
+      .where('full_name', '=', 'Victor Nguyen')
+      .executeTakeFirstOrThrow()
     const lots = await loadCreditLots(t.db, victor.id)
     expect(lots).toHaveLength(1)
     expect([lots[0]!.cents, lots[0]!.allocated]).toEqual([2500, 2500])
@@ -119,11 +143,19 @@ describe('parity-pay seed', () => {
       select e.occurred_at, e.actor_name, e.actor_roles from ledger_events e join invoices i on i.id = e.invoice_id
       where i.invoice_no = 20579 and e.status = 'pending'`.execute(t.db)
     expect(isoInTz(pending.rows[0]!.occurred_at)).toBe('2026-06-12T16:40:00-04:00')
-    expect([pending.rows[0]!.actor_name, pending.rows[0]!.actor_roles]).toEqual(['Sofia D.', 'Customer Support'])
+    expect([pending.rows[0]!.actor_name, pending.rows[0]!.actor_roles]).toEqual([
+      'Sofia D.',
+      'Customer Support',
+    ])
     const refund = await sql<{ occurred_at: Date }>`
-      select e.occurred_at from ledger_events e join invoices i on i.id = e.invoice_id where i.invoice_no = 20571 and e.type = 'refund'`.execute(t.db)
+      select e.occurred_at from ledger_events e join invoices i on i.id = e.invoice_id where i.invoice_no = 20571 and e.type = 'refund'`.execute(
+      t.db,
+    )
     expect(isoInTz(refund.rows[0]!.occurred_at)).toBe('2026-06-11T09:12:00-04:00')
-    const inv = await sql<{ biz_date: string; occurred_at: Date }>`select biz_date, occurred_at from invoices where invoice_no = 20603`.execute(t.db)
+    const inv = await sql<{
+      biz_date: string
+      occurred_at: Date
+    }>`select biz_date, occurred_at from invoices where invoice_no = 20603`.execute(t.db)
     expect(inv.rows[0]!.biz_date).toBe('2026-06-13')
     expect(isoInTz(inv.rows[0]!.occurred_at)).toBe('2026-06-13T10:31:00-04:00')
   })

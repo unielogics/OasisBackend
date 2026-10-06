@@ -27,7 +27,9 @@ export const isExpired = (l: Pick<CreditLot, 'expiresAt'>, at: Date): boolean =>
 
 /** Lots that can pay something at `at`: effective, not expired, with a remainder. */
 export function usableLots(lots: readonly CreditLot[], at: Date): CreditLot[] {
-  return lots.filter((l) => l.effectiveAt.getTime() <= at.getTime() && !isExpired(l, at) && lotRemaining(l) > 0)
+  return lots.filter(
+    (l) => l.effectiveAt.getTime() <= at.getTime() && !isExpired(l, at) && lotRemaining(l) > 0,
+  )
 }
 
 export function creditBalance(lots: readonly CreditLot[], at: Date): number {

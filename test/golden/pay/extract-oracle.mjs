@@ -31,8 +31,22 @@ const FILTERS = [
   ['credits', 'Credits'],
 ]
 const DETAIL_IDS = [
-  'INV-20603', 'INV-20608', 'INV-20607', 'INV-20606', 'INV-20605', 'INV-20604', 'INV-20602', 'INV-20601',
-  'INV-20579', 'INV-20571', 'INV-20566', 'INV-20560', 'INV-20552', 'INV-20548', 'INV-20610', 'INV-20609',
+  'INV-20603',
+  'INV-20608',
+  'INV-20607',
+  'INV-20606',
+  'INV-20605',
+  'INV-20604',
+  'INV-20602',
+  'INV-20601',
+  'INV-20579',
+  'INV-20571',
+  'INV-20566',
+  'INV-20560',
+  'INV-20552',
+  'INV-20548',
+  'INV-20610',
+  'INV-20609',
 ]
 
 // Runs in the page: finds the logic instance through React (same walk as OriginalDriver.readVals).
@@ -57,9 +71,13 @@ try {
     await actions.settle()
   }
   const read = (body) =>
-    page.evaluate(`(() => { const logic = ${FIND}; const ser = ${ser}; ${body} })()`).then((s) => JSON.parse(s))
+    page
+      .evaluate(`(() => { const logic = ${FIND}; const ser = ${ser}; ${body} })()`)
+      .then((s) => JSON.parse(s))
 
-  const fixtures = await read(`return JSON.stringify(logic.state.txs.map((t) => ({ ...t, events: t.events.map((e) => ({ ...e })) })))`)
+  const fixtures = await read(
+    `return JSON.stringify(logic.state.txs.map((t) => ({ ...t, events: t.events.map((e) => ({ ...e })) })))`,
+  )
   const calcs = await read(
     `return JSON.stringify(logic.state.txs.map((t) => { const c = logic.calc(t); return { ...c, pending: c.pending.map((e) => e.amt) }; }))`,
   )
@@ -108,12 +126,20 @@ try {
   // details: selected invoices (range 30d so every explicit one is visible), light theme
   await click0(/^\s*30 days/)
   await click0(/^\s*All\s*\d+/)
-  const details = { pending: await read(`const v = ser(logic.renderVals()); return JSON.stringify({ hasPending: v.hasPending, pendingText: v.pendingText })`) }
+  const details = {
+    pending: await read(
+      `const v = ser(logic.renderVals()); return JSON.stringify({ hasPending: v.hasPending, pendingText: v.pendingText })`,
+    ),
+  }
   const pickD = `const v = ser(logic.renderVals()); const d = v.d;
     return JSON.stringify({ id: d.id, when: d.when, client: d.client, vehicle: d.vehicle, staff: d.staff, status: d.status,
       big: d.big.map((b) => ({ label: b.label, value: b.value })), lines: d.lines.map((l) => ({ label: l.label, value: l.value })),
       actions: d.actions.map((a) => ({ label: a.label, disabled: a.disabled, why: a.why })),
       ledger: d.ledger.map((e) => ({ glyph: e.glyph, title: e.title, meta: e.meta, amt: e.amt, pending: e.pending, approveNote: e.approveNote })), creditLine: d.creditLine })`
+  const pickAfter = `const d = ser(logic.renderVals()).d; const c = logic.calc(logic.state.txs.find((t) => t.id === d.id));
+    return JSON.stringify({ status: d.status, big: d.big.map((b) => ({ label: b.label, value: b.value })), lines: d.lines.map((l) => ({ label: l.label, value: l.value })),
+      ledger: d.ledger.map((e) => ({ title: e.title, amt: e.amt, meta: e.meta, pending: e.pending })), creditLine: d.creditLine,
+      calc: { total: c.total, paid: c.paid, refunded: c.refunded, balance: c.balance, refundable: c.refundable, toOrigMax: c.toOrigMax, pending: c.pending.map((e) => e.amt) } })`
   details.invoices = {}
   for (const id of DETAIL_IDS) {
     const loc = actions.btn(new RegExp(`${id}(?!\\d)`), 0)
@@ -121,6 +147,166 @@ try {
     await actions.settle()
     details.invoices[id] = await read(pickD)
   }
+
+  // --- command scenarios: the original's own sheet logic driven in a fresh page per scenario ---------------------------------
+  const SCENARIOS = [
+    [
+      'refund_full_card',
+      'INV-20606',
+      'mgmt',
+      [['open', 'refund', { dest: 'card', mode: 'full' }], ['sheet'], ['submit']],
+    ],
+    [
+      'refund_items_card',
+      'INV-20601',
+      'mgmt',
+      [['open', 'refund', { mode: 'items', items: [1], dest: 'card' }], ['sheet'], ['submit']],
+    ],
+    [
+      'refund_items_credit',
+      'INV-20608',
+      'mgmt',
+      [['open', 'refund', { mode: 'items', items: [0, 1], dest: 'credit' }], ['sheet'], ['submit']],
+    ],
+    [
+      'refund_full_card_blocked',
+      'INV-20560',
+      'mgmt',
+      [['open', 'refund', { dest: 'card', mode: 'full' }], ['sheet']],
+    ],
+    [
+      'refund_custom_over_refundable',
+      'INV-20606',
+      'mgmt',
+      [['open', 'refund', { dest: 'card', mode: 'custom', amount: '500' }], ['sheet']],
+    ],
+    [
+      'refund_support_over_limit',
+      'INV-20608',
+      'support',
+      [
+        ['open', 'refund', { dest: 'card', mode: 'custom', amount: '80', reason: 'Goodwill', note: 'x' }],
+        ['sheet'],
+        ['submit'],
+      ],
+    ],
+    [
+      'refund_support_at_limit',
+      'INV-20608',
+      'support',
+      [['open', 'refund', { dest: 'card', mode: 'custom', amount: '50' }], ['sheet'], ['submit']],
+    ],
+    [
+      'refund_cash_custom',
+      'INV-20602',
+      'mgmt',
+      [['open', 'refund', { dest: 'cash', mode: 'custom', amount: '100' }], ['sheet'], ['submit']],
+    ],
+    [
+      'adjust_pct_settle_credit',
+      'INV-20608',
+      'mgmt',
+      [
+        ['open', 'adjust', { kind: 'discount', unit: '%', amount: '10', settle: 'credit' }],
+        ['sheet'],
+        ['submit'],
+      ],
+    ],
+    [
+      'adjust_pct_settle_card',
+      'INV-20608',
+      'mgmt',
+      [
+        ['open', 'adjust', { kind: 'discount', unit: '%', amount: '10', settle: 'card' }],
+        ['sheet'],
+        ['submit'],
+      ],
+    ],
+    [
+      'adjust_surcharge_unpaid',
+      'INV-20603',
+      'mgmt',
+      [
+        ['open', 'adjust', { kind: 'surcharge', unit: '$', amount: '10', reason: 'Oversize vehicle' }],
+        ['sheet'],
+        ['submit'],
+      ],
+    ],
+    [
+      'adjust_discount_unpaid',
+      'INV-20603',
+      'mgmt',
+      [['open', 'adjust', { kind: 'discount', unit: '$', amount: '20' }], ['sheet'], ['submit']],
+    ],
+    [
+      'adjust_support_over_limit',
+      'INV-20603',
+      'support',
+      [['open', 'adjust', { kind: 'discount', unit: '$', amount: '30' }], ['sheet']],
+    ],
+    [
+      'adjust_larger_than_invoice',
+      'INV-20603',
+      'super',
+      [['open', 'adjust', { kind: 'discount', unit: '$', amount: '500' }], ['sheet']],
+    ],
+    [
+      'credit_issue_30d',
+      'INV-20603',
+      'mgmt',
+      [['open', 'credit', { amount: '25', expiry: '30 days', reason: 'Goodwill' }], ['sheet'], ['submit']],
+    ],
+    ['credit_issue_support_over', 'INV-20603', 'support', [['open', 'credit', { amount: '60' }], ['sheet']]],
+    ['credit_apply', 'INV-20603', 'mgmt', [['open', 'apply', {}], ['sheet'], ['submit']]],
+    ['collect_cash', 'INV-20603', 'mgmt', [['open', 'collect', { method: 'Cash' }], ['sheet'], ['submit']]],
+    ['approve_mgmt', 'INV-20579', 'mgmt', [['approve']]],
+    ['approve_support', 'INV-20579', 'support', [['approve']]],
+    ['deny_mgmt', 'INV-20579', 'mgmt', [['deny']]],
+  ]
+  const scenarios = {}
+  for (const [name, selId, role, steps] of SCENARIOS) {
+    const d2 = new OriginalDriver(browser, server)
+    await d2.open({ screen: 'payments', theme: 'light' })
+    const rd = (body) =>
+      d2.page
+        .evaluate(`(() => { const logic = ${FIND}; const ser = ${ser}; ${body} })()`)
+        .then((s) => JSON.parse(s))
+    await rd(
+      `logic.setState({ selId: ${JSON.stringify(selId)}, role: ${JSON.stringify(role)}, range: '30d' }); return 'null'`,
+    )
+    const log = []
+    for (const [op, kind, preset] of steps) {
+      if (op === 'open')
+        await rd(`logic.openSheet(${JSON.stringify(kind)}, ${JSON.stringify(preset)}); return 'null'`)
+      if (op === 'sheet') {
+        log.push({
+          op,
+          ...(await rd(
+            `const sh = ser(logic.renderVals()).sh; return JSON.stringify({ summary: sh.summary.map((x) => ({ label: x.label, value: x.value })), blocked: sh.blocked, permText: sh.permText, submitLabel: sh.submitLabel, hasReasons: sh.hasReasons, reasons: (sh.reasons || []).map((r) => r.label) })`,
+          )),
+        })
+      }
+      if (op === 'submit' || op === 'approve' || op === 'deny') {
+        const call =
+          op === 'submit'
+            ? `logic.renderVals().sh.submit()`
+            : `logic.renderVals().d.ledger.find((e) => e.pending)[${JSON.stringify(op)}]()`
+        const approveNote =
+          op === 'submit' ? 'null' : `logic.renderVals().d.ledger.find((e) => e.pending).approveNote`
+        const note = await rd(`return JSON.stringify(${approveNote})`)
+        await rd(`${call}; return 'null'`)
+        log.push({
+          op,
+          approveNote: note,
+          toast: await rd(`return JSON.stringify(logic.state.toast)`),
+          after: await rd(pickAfter),
+        })
+      }
+    }
+    scenarios[name] = { selId, role, log }
+    await d2.close()
+  }
+  fs.writeFileSync(path.join(out, 'scenarios.json'), JSON.stringify(scenarios, null, 1) + '\n')
 
   fs.writeFileSync(path.join(out, 'fixtures.json'), JSON.stringify(fixtures, null, 1) + '\n')
   fs.writeFileSync(path.join(out, 'calcs.json'), JSON.stringify(calcs, null, 1) + '\n')

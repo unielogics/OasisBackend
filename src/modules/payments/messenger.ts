@@ -2,6 +2,7 @@
 // vertical's dispatcher and SES adapter can be handed over at composition time. The messenger decides WHO may be reached
 // (opt-in, opt-out, a number or an address on file); the outbox queues the message and applies the full SMS policy
 // (quiet hours, allowlist, synthetic numbers) when the real implementation is wired.
+import { randomUUID } from 'node:crypto'
 import type { Tx } from '../../platform/db.js'
 import { formatUsd } from '../../platform/money.js'
 import { invoiceLabel } from './format.js'
@@ -33,14 +34,13 @@ export interface PaymentOutbox {
 export class InMemoryOutbox implements PaymentOutbox {
   readonly sms: QueuedSms[] = []
   readonly email: QueuedEmail[] = []
-  private n = 0
   async queueSms(_tx: Tx, m: QueuedSms): Promise<{ messageId: string | null }> {
     this.sms.push(m)
-    return { messageId: `mem-sms-${++this.n}` }
+    return { messageId: randomUUID() }
   }
   async queueEmail(_tx: Tx, m: QueuedEmail): Promise<{ messageId: string | null }> {
     this.email.push(m)
-    return { messageId: `mem-email-${++this.n}` }
+    return { messageId: randomUUID() }
   }
   clear(): void {
     this.sms.length = 0
@@ -93,7 +93,9 @@ async function contactOf(tx: Tx, customerId: string): Promise<Contact> {
   }
 }
 
-export function receiptSmsBody(n: Pick<ReceiptNotice, 'invoiceNo' | 'totalCents' | 'paidCents' | 'refundedCents'>): string {
+export function receiptSmsBody(
+  n: Pick<ReceiptNotice, 'invoiceNo' | 'totalCents' | 'paidCents' | 'refundedCents'>,
+): string {
   const net = n.paidCents - n.refundedCents
   return `Oasis Auto Spa receipt ${invoiceLabel(n.invoiceNo)}: total ${formatUsd(n.totalCents)}, paid ${formatUsd(net)}. Thank you!`
 }

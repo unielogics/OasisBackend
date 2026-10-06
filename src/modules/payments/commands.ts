@@ -8,21 +8,14 @@ import type { Clock } from '../../platform/clock.js'
 import type { Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
 import type { NewId } from '../../platform/ids.js'
-import { percentOfCents } from '../../platform/money.js'
 import * as realtime from '../../platform/realtime.js'
 import { getSetting } from '../../platform/settings.js'
 import { addDays, bizDayBounds, toBizDate } from '../../platform/time.js'
 import type { PayActor } from './actor.js'
 import { adjustPreview, itemsRefundValue, type AdjustInput, type InvoiceCalc } from './calc.js'
-import {
-  allocateFifo,
-  creditBalance,
-  loadCreditLots,
-  lockCustomerCredit,
-  recordAllocations,
-} from './credit.js'
+import { creditBalance, loadCreditLots, lockCustomerCredit, recordAllocations } from './credit.js'
 import { buildDetail, type InvoiceDetail, type LedgerEventDto } from './detail.js'
-import { limitText, money, money0 } from './format.js'
+import { limitText, money } from './format.js'
 import type { PaymentsPorts } from './ports.js'
 import {
   calcOf,
@@ -136,7 +129,11 @@ export class PaymentsService {
   // --- shared plumbing ----------------------------------------------------------------------------------------------
 
   private async tzOf(tx: Tx, locationId: string): Promise<string> {
-    const loc = await tx.selectFrom('locations').select('timezone').where('id', '=', locationId).executeTakeFirst()
+    const loc = await tx
+      .selectFrom('locations')
+      .select('timezone')
+      .where('id', '=', locationId)
+      .executeTakeFirst()
     return loc?.timezone ?? 'America/New_York'
   }
 
@@ -199,7 +196,12 @@ export class PaymentsService {
       entityId: inv.id,
       before: o.before,
       after: {
-        events: o.events.map((e) => ({ id: e.id, type: e.type, amountCents: e.amount_cents, status: e.status })),
+        events: o.events.map((e) => ({
+          id: e.id,
+          type: e.type,
+          amountCents: e.amount_cents,
+          status: e.status,
+        })),
         status: calc.status,
         paid: calc.paid,
         refunded: calc.refunded,
@@ -290,7 +292,12 @@ export class PaymentsService {
     const use = Math.min(creditBalance(lots, now), calc.balance)
     if (use <= 0) throw new AppError('PAY_NOTHING_TO_APPLY')
     const e = this.base(c, inv, 'pay.collect', now)
-    Object.assign(e, { type: 'credit_apply', amount_cents: use, method: 'Store credit', method_kind: 'store_credit' })
+    Object.assign(e, {
+      type: 'credit_apply',
+      amount_cents: use,
+      method: 'Store credit',
+      method_kind: 'store_credit',
+    })
     const row = await insertEvent(tx, e)
     await recordAllocations(tx, {
       applyEventId: row.id,
@@ -317,8 +324,7 @@ export class PaymentsService {
     }
     const host = u.hostname.toLowerCase()
     const ok =
-      u.protocol === 'https:' &&
-      this.d.ports.linkHosts.some((h) => host === h || host.endsWith(`.${h}`))
+      u.protocol === 'https:' && this.d.ports.linkHosts.some((h) => host === h || host.endsWith(`.${h}`))
     if (!ok) throw new AppError('PAYMENT_LINK_HOST', { params: { hosts: this.d.ports.linkHosts.join(', ') } })
   }
 
@@ -363,7 +369,10 @@ export class PaymentsService {
       .execute()
     await tx
       .updateTable('invoices')
-      .set({ payment_link_url: url, payment_link_sent_at: sent.state === 'queued' ? now : inv.payment_link_sent_at })
+      .set({
+        payment_link_url: url,
+        payment_link_sent_at: sent.state === 'queued' ? now : inv.payment_link_sent_at,
+      })
       .where('id', '=', inv.id)
       .execute()
     const invoice = await this.finish(tx, c, inv, {
@@ -375,7 +384,12 @@ export class PaymentsService {
     return { invoice, paymentLink: { id, url, expectedCents: expected, purpose: o.kind, sms: sent.state } }
   }
 
-  async attachPaymentLink(tx: Tx, c: CommandContext, invoiceId: string, input: PaymentLinkInput): Promise<PaymentLinkResult> {
+  async attachPaymentLink(
+    tx: Tx,
+    c: CommandContext,
+    invoiceId: string,
+    input: PaymentLinkInput,
+  ): Promise<PaymentLinkResult> {
     assertCan(c.actor, 'pay.collect')
     const inv = await lockInvoice(tx, c.locationId, invoiceId)
     const calc = await calcOf(tx, inv.id)
@@ -427,14 +441,17 @@ export class PaymentsService {
 
     const limit = c.actor.limit('refund')
     const pending = limit !== null && val > limit
-    const row = await insertEvent(tx, this.refundRow(c, inv, now, await this.refundMethod(tx, inv, input.dest), {
-      amount: val,
-      dest: input.dest,
-      reason: input.reason ?? REFUND_REASONS[0],
-      note: input.note ?? null,
-      pending,
-      itemIds,
-    }))
+    const row = await insertEvent(
+      tx,
+      this.refundRow(c, inv, now, await this.refundMethod(tx, inv, input.dest), {
+        amount: val,
+        dest: input.dest,
+        reason: input.reason ?? REFUND_REASONS[0],
+        note: input.note ?? null,
+        pending,
+        itemIds,
+      }),
+    )
     const invoice = await this.finish(tx, c, inv, {
       action: pending ? 'payments.refund_requested' : 'payments.refund',
       before: this.snapshot(calc),
@@ -499,7 +516,8 @@ export class PaymentsService {
       throw new AppError('CANT_APPROVE', { params: { amount: money(ev.amount_cents) } })
     }
     const allowSelf = (await getSetting(tx, c.locationId, 'approvals.allow_self')).value
-    if (ev.actor_user_id === c.actor.userId && limit !== null && !allowSelf) throw new AppError('SELF_APPROVAL')
+    if (ev.actor_user_id === c.actor.userId && limit !== null && !allowSelf)
+      throw new AppError('SELF_APPROVAL')
     const calc = await calcOf(tx, inv.id)
     // Re-validate without this request's own reservation: other refunds may have been resolved since it was requested.
     const refundableWithout = Math.max(0, calc.paid - calc.refunded - (calc.pendingAmt - ev.amount_cents))
@@ -570,7 +588,12 @@ export class PaymentsService {
     return { event: this.pick(invoice, row.id), invoice }
   }
 
-  private async pendingRefund(tx: Tx, c: CommandContext, inv: InvoiceRow, eventId: string): Promise<EventRow> {
+  private async pendingRefund(
+    tx: Tx,
+    c: CommandContext,
+    inv: InvoiceRow,
+    eventId: string,
+  ): Promise<EventRow> {
     const ev = await getEventForUpdate(tx, c.locationId, eventId)
     if (ev.invoice_id !== inv.id || ev.type !== 'refund') {
       throw new AppError('NOT_FOUND', { detail: 'That refund request does not exist' })
@@ -589,7 +612,8 @@ export class PaymentsService {
   async adjust(tx: Tx, c: CommandContext, invoiceId: string, input: AdjustCommand): Promise<AdjustResult> {
     assertCan(c.actor, 'pay.adjust')
     const inv = await lockInvoice(tx, c.locationId, invoiceId)
-    if (inv.canceled_at) throw new AppError('INVOICE_CANCELED', { detail: 'A canceled invoice can’t be adjusted' })
+    if (inv.canceled_at)
+      throw new AppError('INVOICE_CANCELED', { detail: 'A canceled invoice can’t be adjusted' })
     const calc = await calcOf(tx, inv.id)
     const p = adjustPreview(calc, inv.tax_bp, input)
     if (p.pre <= 0) throw new AppError('PAY_AMOUNT_INVALID')
@@ -741,7 +765,8 @@ export class PaymentsService {
   async setTip(tx: Tx, c: CommandContext, invoiceId: string, tipCents: number): Promise<CommandResult> {
     assertCan(c.actor, 'pay.collect')
     const inv = await lockInvoice(tx, c.locationId, invoiceId)
-    if (inv.canceled_at) throw new AppError('INVOICE_CANCELED', { detail: 'A canceled invoice can’t take a tip' })
+    if (inv.canceled_at)
+      throw new AppError('INVOICE_CANCELED', { detail: 'A canceled invoice can’t take a tip' })
     const calc = await calcOf(tx, inv.id)
     await tx.updateTable('invoices').set({ tip_cents: tipCents }).where('id', '=', inv.id).execute()
     const invoice = await this.finish(tx, c, inv, {
@@ -814,5 +839,3 @@ export class PaymentsService {
     return { event: this.pick(invoice, row.id), invoice }
   }
 }
-
-export { percentOfCents, money0, allocateFifo }

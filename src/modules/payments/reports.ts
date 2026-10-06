@@ -126,7 +126,11 @@ export interface Summary {
   awaitingProcessor: { count: number; cents: number }
 }
 
-export async function pendingApprovals(db: Executor, locationId: string, c: { now: Date; tz: string }): Promise<PendingApproval[]> {
+export async function pendingApprovals(
+  db: Executor,
+  locationId: string,
+  c: { now: Date; tz: string },
+): Promise<PendingApproval[]> {
   const r = await sql<{
     id: string
     invoice_id: string
@@ -250,7 +254,14 @@ export async function summary(db: Executor, c: ReportContext, key: RangeKey): Pr
     },
     pendingApprovals: {
       count: pend.length,
-      text: pend[0] ? pendingBannerText(pend.length, pend[0].amountCents, pend[0].client, pend[0].requestedBy ?? 'Unknown') : '',
+      text: pend[0]
+        ? pendingBannerText(
+            pend.length,
+            pend[0].amountCents,
+            pend[0].client,
+            pend[0].requestedBy ?? 'Unknown',
+          )
+        : '',
       first: pend[0] ?? null,
       all: pend,
     },
@@ -307,7 +318,13 @@ const FILTER_SQL: Record<FilterKey, ReturnType<typeof sql>> = {
   credits: sql`(t.issued > 0 or t.credit_applied > 0)`,
 }
 
-function listSql(c: ReportContext, range: ResolvedRange, q: ListQuery, extra: ReturnType<typeof sql>, limit: number) {
+function listSql(
+  c: ReportContext,
+  range: ResolvedRange,
+  q: ListQuery,
+  extra: ReturnType<typeof sql>,
+  limit: number,
+) {
   const needle = q.q?.trim().toLowerCase()
   const search = needle
     ? sql`and lower(concat_ws(' ', 'INV-' || lpad(t.invoice_no::text, 5, '0'), t.client_name, t.vehicle_label,
@@ -350,7 +367,11 @@ function toListRow(r: RangeRow & { id: string }, today: string, tz: string): Inv
   }
 }
 
-export async function invoiceList(db: Executor, c: ReportContext, q: ListQuery): Promise<Page<InvoiceListRow>> {
+export async function invoiceList(
+  db: Executor,
+  c: ReportContext,
+  q: ListQuery,
+): Promise<Page<InvoiceListRow>> {
   const range = resolveRange(q.range, c.now, c.tz)
   let extra = sql``
   if (q.cursor) {
@@ -369,7 +390,11 @@ export async function invoiceList(db: Executor, c: ReportContext, q: ListQuery):
 
 // --- CSV --------------------------------------------------------------------------------------------------------------
 
-const CSV_COLUMNS: Array<{ header: string; kind: CsvKind; value: (r: RangeRow & { id: string }, c: ReportContext) => string | number }> = [
+const CSV_COLUMNS: Array<{
+  header: string
+  kind: CsvKind
+  value: (r: RangeRow & { id: string }, c: ReportContext) => string | number
+}> = [
   { header: 'Invoice', kind: 'text', value: (r) => invoiceLabel(r.invoice_no) },
   { header: 'Date', kind: 'text', value: (r) => r.biz_date },
   { header: 'Time', kind: 'text', value: (r, c) => clock24(r.occurred_at, c.tz) },
@@ -404,7 +429,11 @@ export interface CsvExport {
 }
 
 /** One row per invoice in the range, narrowed by the filter and the search box (a flagged improvement on the design). */
-export async function invoicesCsv(db: Executor, c: ReportContext, q: Omit<ListQuery, 'limit' | 'cursor'>): Promise<CsvExport> {
+export async function invoicesCsv(
+  db: Executor,
+  c: ReportContext,
+  q: Omit<ListQuery, 'limit' | 'cursor'>,
+): Promise<CsvExport> {
   const range = resolveRange(q.range, c.now, c.tz)
   const r = await listSql(c, range, { ...q, limit: CSV_MAX_ROWS + 1 }, sql``, CSV_MAX_ROWS + 1).execute(db)
   if (r.rows.length > CSV_MAX_ROWS) throw new AppError('EXPORT_TOO_LARGE', { params: { max: CSV_MAX_ROWS } })
@@ -428,12 +457,19 @@ export async function approvalsQueue(
 ): Promise<ApprovalRow[]> {
   const pend = await pendingApprovals(db, c.locationId, c)
   const actorIds = await sql<{ id: string; actor_user_id: string | null }>`
-    select id, actor_user_id from ledger_events where location_id = ${c.locationId} and type = 'refund' and status = 'pending'`.execute(db)
+    select id, actor_user_id from ledger_events where location_id = ${c.locationId} and type = 'refund' and status = 'pending'`.execute(
+    db,
+  )
   const byId = new Map(actorIds.rows.map((x) => [x.id, x.actor_user_id]))
   return pend.map((p) => {
     const rights = approvalRights(
       actor,
-      { type: 'refund', status: 'pending', amount_cents: p.amountCents, actor_user_id: byId.get(p.eventId) ?? null },
+      {
+        type: 'refund',
+        status: 'pending',
+        amount_cents: p.amountCents,
+        actor_user_id: byId.get(p.eventId) ?? null,
+      },
       rules,
     )
     return { ...p, canApprove: rights.canApprove, approveBlock: rights.block }
@@ -457,7 +493,13 @@ export interface ReconciliationReport {
   }>
   unmatchedOrders: Array<Omit<UnmatchedOrder, 'createdAt'> & { createdAt: string }>
   unmatchedTransactions: Array<Omit<UnmatchedTransaction, 'createdAt'> & { createdAt: string }>
-  overpaid: Array<{ invoiceId: string; label: string; client: string; overpaidCents: number; bizDate: string }>
+  overpaid: Array<{
+    invoiceId: string
+    label: string
+    client: string
+    overpaidCents: number
+    bizDate: string
+  }>
 }
 
 export async function reconciliation(
@@ -481,7 +523,13 @@ export async function reconciliation(
     where e.location_id = ${c.locationId} and e.processor_state = 'awaiting_processor' and e.occurred_at <= ${cutoff}
     order by e.occurred_at, e.seq`.execute(db)
   const since = addDays(toBizDate(c.now, c.tz), -90)
-  const over = await sql<{ id: string; invoice_no: number; client_name: string; overpaid: number; biz_date: string }>`
+  const over = await sql<{
+    id: string
+    invoice_no: number
+    client_name: string
+    overpaid: number
+    biz_date: string
+  }>`
     select i.id, i.invoice_no, i.client_name, c.overpaid, i.biz_date
     from invoices i cross join lateral invoice_calc_of(i.id) c
     where i.location_id = ${c.locationId} and i.biz_date >= ${since}::date and c.overpaid > 0
@@ -499,7 +547,10 @@ export async function reconciliation(
       occurredAt: x.occurred_at.toISOString(),
       ageMinutes: Math.floor((c.now.getTime() - x.occurred_at.getTime()) / 60_000),
     })),
-    unmatchedOrders: (await unmatched.unmatchedOrders(db)).map((o) => ({ ...o, createdAt: o.createdAt.toISOString() })),
+    unmatchedOrders: (await unmatched.unmatchedOrders(db)).map((o) => ({
+      ...o,
+      createdAt: o.createdAt.toISOString(),
+    })),
     unmatchedTransactions: (await unmatched.unmatchedTransactions(db)).map((t) => ({
       ...t,
       createdAt: t.createdAt.toISOString(),
@@ -513,4 +564,3 @@ export async function reconciliation(
     })),
   }
 }
-
