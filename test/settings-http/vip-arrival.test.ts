@@ -124,8 +124,12 @@ describe('VIP holds', () => {
   it('validates the slot and removes by id', async () => {
     const s = await h.admin()
     expect(json(await h.post('vip/holds', s, { weekday: 6 })).detail).toBe('Pick a time like 11:00 AM.')
-    expect(json(await h.post('vip/holds', s, { weekday: 6, time: 'noon' })).detail).toBe('Pick a time like 11:00 AM.')
-    expect(json(await h.post('vip/holds', s, { weekday: 6, time: '11:15 AM' })).detail).toMatch(/30-minute steps/)
+    expect(json(await h.post('vip/holds', s, { weekday: 6, time: 'noon' })).detail).toBe(
+      'Pick a time like 11:00 AM.',
+    )
+    expect(json(await h.post('vip/holds', s, { weekday: 6, time: '11:15 AM' })).detail).toMatch(
+      /30-minute steps/,
+    )
     expect((await h.post('vip/holds', s, { weekday: 9, time: '11:00 AM' })).statusCode).toBe(422)
     const id = json(await h.post('vip/holds', s, { weekday: 1, time: '8:00 AM' })).hold.id as string
     const del = await h.del(`vip/holds/${id}`, s)
@@ -143,14 +147,20 @@ describe('VIP holds', () => {
 })
 
 describe('VIP clients', () => {
-  const names = async () => json(await h.get('vip/clients', await h.admin())).items.map((c: { fullName: string }) => c.fullName)
+  const names = async () =>
+    json(await h.get('vip/clients', await h.admin())).items.map((c: { fullName: string }) => c.fullName)
 
   it('adds by customer id (201, then 200 with added false), lists and removes', async () => {
     const s = await h.admin()
     const liam = await makeCustomer(h.db, h.fx, { name: 'Liam Chen' })
     const a = await h.post('vip/clients', s, { customerId: liam })
     expect(a.statusCode).toBe(201)
-    expect(json(a)).toEqual({ customerId: liam, fullName: 'Liam Chen', added: true, toast: 'Liam Chen is now VIP' })
+    expect(json(a)).toEqual({
+      customerId: liam,
+      fullName: 'Liam Chen',
+      added: true,
+      toast: 'Liam Chen is now VIP',
+    })
     const again = await h.post('vip/clients', s, { customerId: liam })
     expect(again.statusCode).toBe(200)
     expect(json(again)).toMatchObject({ added: false, toast: null })
@@ -163,7 +173,9 @@ describe('VIP clients', () => {
     expect(json(del)).toEqual({ customerId: liam, removed: true })
     expect((await h.del(`vip/clients/${liam}`, s)).statusCode).toBe(404)
     expect(await names()).toEqual([])
-    expect(await auditActions(h.db)).toEqual(expect.arrayContaining(['settings.vip.client.add', 'settings.vip.client.remove']))
+    expect(await auditActions(h.db)).toEqual(
+      expect.arrayContaining(['settings.vip.client.add', 'settings.vip.client.remove']),
+    )
     expect((await settingsEvents('vip')).length).toBe(2)
   })
 
@@ -190,7 +202,9 @@ describe('VIP clients', () => {
     expect(exact.statusCode).toBe(409)
     const body = json(exact)
     expect(body).toMatchObject({ code: 'VIP_CLIENT_AMBIGUOUS', title: 'Which client?' })
-    expect(body.meta.candidates.map((c: { customerId: string }) => c.customerId).sort()).toEqual([a, b].sort())
+    expect(body.meta.candidates.map((c: { customerId: string }) => c.customerId).sort()).toEqual(
+      [a, b].sort(),
+    )
     const withCar = body.meta.candidates.find((c: { customerId: string }) => c.customerId === a)
     expect(withCar.vehicles).toEqual(['2021 Audi Q5'])
     expect(withCar.alreadyVip).toBe(false)
@@ -203,7 +217,9 @@ describe('VIP clients', () => {
     const picked = await h.post('vip/clients', s, { customerId: b })
     expect(picked.statusCode).toBe(201)
     const again = json(await h.post('vip/clients', s, { name: 'Jordan Lee' }))
-    expect(again.meta.candidates.find((c: { customerId: string }) => c.customerId === b).alreadyVip).toBe(true)
+    expect(again.meta.candidates.find((c: { customerId: string }) => c.customerId === b).alreadyVip).toBe(
+      true,
+    )
   })
 
   it('shows the phone hint only to callers who hold cli.contact', async () => {
@@ -227,10 +243,14 @@ describe('VIP clients', () => {
     expect(json(nf)).toMatchObject({ code: 'VIP_CLIENT_NOT_FOUND', title: 'No such client' })
     expect(json(await h.post('vip/clients', s, {})).errors[0].path).toBe('body.name')
     expect((await h.post('vip/clients', s, { name: '   ' })).statusCode).toBe(422)
-    expect((await h.post('vip/clients', s, { customerId: '00000000-0000-7000-8000-000000000001' })).statusCode).toBe(404)
+    expect(
+      (await h.post('vip/clients', s, { customerId: '00000000-0000-7000-8000-000000000001' })).statusCode,
+    ).toBe(404)
     const gone = await makeCustomer(h.db, h.fx, { name: 'Gone Away' })
     await h.db.updateTable('customers').set({ deleted_at: h.clock.now() }).where('id', '=', gone).execute()
-    expect(json(await h.post('vip/clients', s, { customerId: gone })).detail).toBe('That customer is no longer active.')
+    expect(json(await h.post('vip/clients', s, { customerId: gone })).detail).toBe(
+      'That customer is no longer active.',
+    )
   })
 
   it('needs cli.member', async () => {
@@ -261,10 +281,22 @@ describe('arrival settings', () => {
     const s = await h.admin()
     const v = json(await h.get('arrival-settings', s)).version as number
     const r = await h.put('arrival-settings', s, { radius: 500, prepAt: 20, welcome: false, on: false })
-    expect(json(r)).toMatchObject({ radius: 500, prepAt: 20, welcome: false, on: false, autoArrive: true, changed: true, version: v + 1 })
+    expect(json(r)).toMatchObject({
+      radius: 500,
+      prepAt: 20,
+      welcome: false,
+      on: false,
+      autoArrive: true,
+      changed: true,
+      version: v + 1,
+    })
     expect(json(await h.put('arrival-settings', s, { radius: 500 })).changed).toBe(false)
-    expect(json(await h.put('arrival-settings', s, { radius: 200 })).detail).toBe('The check-in radius is 150, 300 or 500 m.')
-    expect(json(await h.put('arrival-settings', s, { prepAt: 5 })).detail).toBe('The prep alert is 10, 15 or 20 minutes out.')
+    expect(json(await h.put('arrival-settings', s, { radius: 200 })).detail).toBe(
+      'The check-in radius is 150, 300 or 500 m.',
+    )
+    expect(json(await h.put('arrival-settings', s, { prepAt: 5 })).detail).toBe(
+      'The prep alert is 10, 15 or 20 minutes out.',
+    )
     expect((await h.put('arrival-settings', s, { vipFirst: false, version: v })).statusCode).toBe(412)
     expect((await h.put('arrival-settings', s, { vipFirst: false, version: v + 1 })).statusCode).toBe(200)
     expect(await settingsEvents('arrival')).toHaveLength(2)

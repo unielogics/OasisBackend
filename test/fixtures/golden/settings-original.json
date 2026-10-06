@@ -1,0 +1,2532 @@
+{
+  "extractedFrom": "design/original/settings.bundle.html (renderVals of the live logic instance), frozen 2026-06-13 10:36 America/New_York",
+  "initial": {
+    "weekHours": "65 hrs",
+    "hourRows": [
+      {
+        "day": "Monday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Tuesday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Wednesday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Thursday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Friday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Saturday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "5:00 PM",
+        "len": "9 hrs"
+      },
+      {
+        "day": "Sunday",
+        "open": true,
+        "closed": false,
+        "from": "9:00 AM",
+        "to": "3:00 PM",
+        "len": "6 hrs"
+      }
+    ],
+    "rules": [
+      {
+        "label": "Slot length",
+        "opts": [
+          "15 min",
+          "30 min",
+          "60 min"
+        ]
+      },
+      {
+        "label": "Buffer between jobs",
+        "opts": [
+          "0 min",
+          "10 min",
+          "15 min",
+          "20 min"
+        ]
+      },
+      {
+        "label": "Last booking before close",
+        "opts": [
+          "30 min",
+          "60 min",
+          "90 min"
+        ]
+      }
+    ],
+    "upcoming": [
+      {
+        "mon": "JUL",
+        "day": "4",
+        "dow": "SAT",
+        "name": "Independence Day",
+        "typeLabel": "Closed all day",
+        "past": false
+      },
+      {
+        "mon": "SEP",
+        "day": "7",
+        "dow": "MON",
+        "name": "Labor Day",
+        "typeLabel": "Reduced · 10:00 AM – 2:00 PM",
+        "past": false
+      },
+      {
+        "mon": "NOV",
+        "day": "26",
+        "dow": "THU",
+        "name": "Thanksgiving",
+        "typeLabel": "Closed all day",
+        "past": false
+      },
+      {
+        "mon": "DEC",
+        "day": "24",
+        "dow": "THU",
+        "name": "Christmas Eve",
+        "typeLabel": "Reduced · 8:00 AM – 1:00 PM",
+        "past": false
+      },
+      {
+        "mon": "DEC",
+        "day": "25",
+        "dow": "FRI",
+        "name": "Christmas Day",
+        "typeLabel": "Closed all day",
+        "past": false
+      }
+    ],
+    "past": [
+      {
+        "mon": "JUN",
+        "day": "3",
+        "dow": "WED",
+        "name": "Weather closure",
+        "typeLabel": "Emergency",
+        "past": true
+      },
+      {
+        "mon": "MAY",
+        "day": "25",
+        "dow": "MON",
+        "name": "Memorial Day",
+        "typeLabel": "Closed all day",
+        "past": true
+      }
+    ],
+    "emActive": false,
+    "emSummary": "",
+    "emPreview": "Hi Liam, due to severe weather Oasis Auto Spa is closed for the rest of today. We’re sorry for the inconvenience. Pick a new time here: oasis.spa/r/8KQ2",
+    "emReasons": [
+      "Severe weather",
+      "Power outage",
+      "Equipment failure",
+      "Staff shortage",
+      "Other"
+    ],
+    "emDurations": [
+      "Rest of today",
+      "Until a time",
+      "Multiple days"
+    ],
+    "emOpts": [
+      {
+        "label": "Notify affected customers",
+        "sub": "WhatsApp, with SMS fallback"
+      },
+      {
+        "label": "Include one-tap reschedule link",
+        "sub": "Customers pick a new slot themselves"
+      },
+      {
+        "label": "Protect member credits",
+        "sub": "Missed visits don’t use a credit"
+      },
+      {
+        "label": "Pause online booking",
+        "sub": "Until you reopen"
+      },
+      {
+        "label": "Alert on-shift crew",
+        "sub": "Push notification to the team"
+      }
+    ],
+    "emAffected": [
+      {
+        "time": "10:15 AM",
+        "name": "Marcus Webb",
+        "veh": "Jeep Wrangler"
+      },
+      {
+        "time": "10:45 AM",
+        "name": "Liam Chen",
+        "veh": "BMW M340i"
+      },
+      {
+        "time": "11:00 AM",
+        "name": "Grace Adeyemi",
+        "veh": "Lexus RX 350"
+      },
+      {
+        "time": "12:00 PM",
+        "name": "Aisha Rahman",
+        "veh": "Range Rover Sport"
+      },
+      {
+        "time": "1:30 PM",
+        "name": "Tom Bradley",
+        "veh": "Honda Civic"
+      },
+      {
+        "time": "3:00 PM",
+        "name": "Elena Volkov",
+        "veh": "Lamborghini Urus"
+      }
+    ],
+    "emAffectedCount": "6 customers",
+    "emHistory": [
+      {
+        "date": "Jun 3, 2026",
+        "reason": "Severe weather",
+        "detail": "Full day · 7 customers notified · 6 rebooked"
+      },
+      {
+        "date": "Feb 18, 2026",
+        "reason": "Power outage",
+        "detail": "11:20 AM – 3:00 PM · 4 notified"
+      }
+    ],
+    "confirmText": "6 customers will be messaged, online booking pauses and the closure shows on the Operations screen. Reason: severe weather, for the rest of today.",
+    "vipHolds": [
+      "Friday · 4:00 PM",
+      "Saturday · 8:00 AM",
+      "Saturday · 9:00 AM",
+      "Saturday · 10:00 AM",
+      "Sunday · 9:00 AM"
+    ],
+    "vipSteppers": [
+      {
+        "label": "VIP booking window",
+        "sub": "How far ahead VIPs can book",
+        "val": "30 days"
+      },
+      {
+        "label": "Standard booking window",
+        "sub": "Everyone else",
+        "val": "14 days"
+      },
+      {
+        "label": "Same-day guarantee",
+        "sub": "Per VIP, per month — we fit them in even when full",
+        "val": "2 / mo"
+      }
+    ],
+    "releaseOpts": [
+      "24h before",
+      "48h before",
+      "72h before"
+    ],
+    "offerOpts": [
+      "10 min",
+      "15 min",
+      "30 min"
+    ],
+    "cadenceOpts": [
+      "Weekly",
+      "Every 2 weeks",
+      "Every 3 weeks",
+      "Monthly"
+    ],
+    "vipToggles": [
+      {
+        "label": "Waitlist priority",
+        "sub": "Cancellations are offered to VIPs first"
+      },
+      {
+        "label": "Standing appointments",
+        "sub": "VIPs can set a repeating slot"
+      },
+      {
+        "label": "Auto-confirm standing visits",
+        "sub": "Confirmed 48h before without a reply"
+      }
+    ],
+    "vipClients": [
+      "Jonathan Franco",
+      "Liam Chen",
+      "Aisha Rahman",
+      "Elena Volkov"
+    ],
+    "vipCount": "4 clients",
+    "arrToggles": [
+      {
+        "label": "Geofence auto check-in",
+        "sub": "Turn off to require check-in at the desk"
+      },
+      {
+        "label": "Mark as Arrived automatically",
+        "sub": "Job moves to Arrived on the Operations screen"
+      },
+      {
+        "label": "Send welcome message",
+        "sub": "“You’re checked in — pull into Bay 2”"
+      },
+      {
+        "label": "Alert the crew",
+        "sub": "Push notification to whoever is on shift"
+      },
+      {
+        "label": "VIP arrivals first",
+        "sub": "VIP arrivals sit at the top of alerts"
+      }
+    ],
+    "radiusOpts": [
+      "150 m",
+      "300 m",
+      "500 m"
+    ],
+    "prepOpts": [
+      "10 min away",
+      "15 min away",
+      "20 min away"
+    ],
+    "arrSteps": [
+      {
+        "n": "1",
+        "title": "15 min out",
+        "desc": "Operations gets an “Arriving” alert with a Prep bay button. VIPs show in purple at the top."
+      },
+      {
+        "n": "2",
+        "title": "Within 300 m",
+        "desc": "Checked in automatically and the job moves to Arrived. Customer gets a welcome message."
+      },
+      {
+        "n": "3",
+        "title": "Ready to start",
+        "desc": "Crew sees “Auto checked in” with a Start cleaning button."
+      }
+    ],
+    "toast": null
+  },
+  "emergencyText": {
+    "idleStrip": "Open now · Saturday 8:00 AM – 5:00 PM · 6 appointments left today, 3 vehicles on site",
+    "access": "Requires Management or Super Admin · you have access",
+    "closeButton": "Close the shop now"
+  },
+  "state": {
+    "hours": [
+      {
+        "open": true,
+        "from": "9:00 AM",
+        "to": "3:00 PM"
+      },
+      {
+        "open": true,
+        "from": "8:00 AM",
+        "to": "6:00 PM"
+      },
+      {
+        "open": true,
+        "from": "8:00 AM",
+        "to": "6:00 PM"
+      },
+      {
+        "open": true,
+        "from": "8:00 AM",
+        "to": "6:00 PM"
+      },
+      {
+        "open": true,
+        "from": "8:00 AM",
+        "to": "6:00 PM"
+      },
+      {
+        "open": true,
+        "from": "8:00 AM",
+        "to": "6:00 PM"
+      },
+      {
+        "open": true,
+        "from": "8:00 AM",
+        "to": "5:00 PM"
+      }
+    ],
+    "federal": true,
+    "vip": {
+      "holds": [
+        {
+          "d": 6,
+          "t": "8:00 AM"
+        },
+        {
+          "d": 6,
+          "t": "9:00 AM"
+        },
+        {
+          "d": 6,
+          "t": "10:00 AM"
+        },
+        {
+          "d": 5,
+          "t": "4:00 PM"
+        },
+        {
+          "d": 0,
+          "t": "9:00 AM"
+        }
+      ],
+      "release": 48,
+      "windowVip": 30,
+      "windowStd": 14,
+      "sameDay": 2,
+      "waitlist": true,
+      "offerMin": 15,
+      "standing": true,
+      "autoConfirm": true,
+      "cadences": [
+        "Weekly",
+        "Every 2 weeks",
+        "Monthly"
+      ],
+      "clients": [
+        "Jonathan Franco",
+        "Liam Chen",
+        "Aisha Rahman",
+        "Elena Volkov"
+      ]
+    },
+    "arrival": {
+      "on": true,
+      "radius": 300,
+      "prepAt": 15,
+      "autoArrive": true,
+      "welcome": true,
+      "crew": true,
+      "vipFirst": true
+    },
+    "em": {
+      "active": false,
+      "summary": "",
+      "reason": "Severe weather",
+      "dur": "today",
+      "until": "2:00 PM",
+      "through": "2026-06-15",
+      "notify": true,
+      "link": true,
+      "credits": true,
+      "pause": true,
+      "crew": true,
+      "msg": "Hi {first}, due to {reason} Oasis Auto Spa is closed {until}. We’re sorry for the inconvenience. Pick a new time here: {link}"
+    },
+    "rules": {
+      "slot": 30,
+      "buffer": 10,
+      "cutoff": 60
+    },
+    "packages": {
+      "Express Hand Wash": {
+        "price": 45,
+        "dur": 35,
+        "tasks": [
+          "Exterior rinse",
+          "Hand wash",
+          "Wheel cleaning",
+          "Hand dry & towel",
+          "Glass & windows"
+        ]
+      },
+      "Premium Hand Wash + Interior": {
+        "price": 129,
+        "dur": 75,
+        "tasks": [
+          "Exterior pre-rinse",
+          "Two-bucket hand wash",
+          "Wheel & tire cleaning",
+          "Tire shine",
+          "Interior vacuum",
+          "Dashboard & console wipe",
+          "Streak-free windows"
+        ]
+      },
+      "Premium Hand Wash + Interior Refresh": {
+        "price": 139,
+        "dur": 75,
+        "tasks": [
+          "Exterior pre-rinse",
+          "Two-bucket hand wash",
+          "Wheel & tire cleaning",
+          "Tire shine",
+          "Interior vacuum",
+          "Dashboard & vents wipe",
+          "Leather seat refresh",
+          "Streak-free windows"
+        ]
+      },
+      "Executive Detail": {
+        "price": 260,
+        "dur": 90,
+        "tasks": [
+          "Foam pre-soak",
+          "Two-bucket hand wash",
+          "Clay bar treatment",
+          "Wheel & caliper detail",
+          "Tire dressing",
+          "Full interior vacuum",
+          "Leather conditioning",
+          "Dashboard & vents detail",
+          "Streak-free glass",
+          "Spray sealant"
+        ]
+      },
+      "Executive Detail + Ceramic": {
+        "price": 420,
+        "dur": 120,
+        "tasks": [
+          "Foam pre-soak",
+          "Two-bucket hand wash",
+          "Iron decontamination",
+          "Clay bar treatment",
+          "Ceramic spray coat",
+          "Wheel & caliper detail",
+          "Full interior detail",
+          "Leather conditioning",
+          "Streak-free glass"
+        ]
+      },
+      "Full Detail": {
+        "price": 320,
+        "dur": 120,
+        "tasks": [
+          "Engine bay degrease",
+          "Foam pre-soak",
+          "Hand wash",
+          "Clay bar",
+          "Wheel deep clean",
+          "Carpet shampoo",
+          "Full interior vacuum",
+          "Leather treatment",
+          "Glass polish",
+          "Wax & seal"
+        ]
+      },
+      "Ceramic Maintenance + Wax": {
+        "price": 180,
+        "dur": 60,
+        "tasks": [
+          "Pre-rinse",
+          "pH-neutral hand wash",
+          "Ceramic boost spray",
+          "Hand-applied wax",
+          "Wheel cleaning",
+          "Tire dressing",
+          "Glass treatment"
+        ]
+      },
+      "Exotic Detail Package": {
+        "price": 650,
+        "dur": 150,
+        "tasks": [
+          "Waterless decon",
+          "Two-bucket hand wash",
+          "Paint correction pass",
+          "Ceramic seal",
+          "Wheel & caliper detail",
+          "Full interior detail",
+          "Leather conditioning",
+          "Glass & trim restore",
+          "Photographic handover"
+        ]
+      },
+      "Family Wash + Pet Hair": {
+        "price": 95,
+        "dur": 50,
+        "tasks": [
+          "Exterior rinse",
+          "Hand wash",
+          "Pet hair removal",
+          "Interior vacuum",
+          "Dashboard wipe",
+          "Windows",
+          "Odor neutralize"
+        ]
+      }
+    },
+    "addons": {
+      "Interior deep clean": {
+        "price": 60,
+        "tasks": [
+          "Deep vacuum seats & carpets",
+          "Steam clean vents & cupholders",
+          "Wipe door jambs & panels"
+        ]
+      },
+      "Pet hair removal": {
+        "price": 35,
+        "tasks": [
+          "Rubber-brush pet hair",
+          "Lint-roll upholstery",
+          "Vacuum seat seams"
+        ]
+      },
+      "Leather conditioning": {
+        "price": 45,
+        "tasks": [
+          "Clean leather surfaces",
+          "Apply conditioner",
+          "Buff to matte finish"
+        ]
+      },
+      "Wax": {
+        "price": 40,
+        "tasks": [
+          "Apply carnauba wax",
+          "Buff off haze"
+        ]
+      },
+      "Clay bar": {
+        "price": 50,
+        "tasks": [
+          "Lubricate panels",
+          "Clay bar paint",
+          "Wipe residue"
+        ]
+      },
+      "Odor removal": {
+        "price": 30,
+        "tasks": [
+          "Enzyme treatment on fabrics",
+          "Odor neutralizer cycle"
+        ]
+      },
+      "Engine bay cleaning": {
+        "price": 55,
+        "tasks": [
+          "Cover electricals",
+          "Degrease engine bay",
+          "Dress plastics"
+        ]
+      },
+      "Ceramic maintenance": {
+        "price": 120,
+        "tasks": [
+          "Ceramic boost spray",
+          "Buff & level coating"
+        ]
+      },
+      "Rain repellent": {
+        "price": 25,
+        "tasks": [
+          "Clean glass",
+          "Apply rain repellent to windshield"
+        ]
+      },
+      "Wheel deep clean": {
+        "price": 40,
+        "tasks": [
+          "Remove wheel fallout",
+          "Clean barrels & calipers",
+          "Seal wheel faces"
+        ]
+      }
+    },
+    "closures": [
+      {
+        "notify": true,
+        "from": "10:00 AM",
+        "to": "2:00 PM",
+        "date": "2026-05-25",
+        "name": "Memorial Day",
+        "type": "closed",
+        "id": "c0"
+      },
+      {
+        "notify": true,
+        "from": "10:00 AM",
+        "to": "2:00 PM",
+        "date": "2026-06-03",
+        "name": "Weather closure",
+        "type": "closed",
+        "emergency": true,
+        "id": "c1"
+      },
+      {
+        "notify": true,
+        "from": "10:00 AM",
+        "to": "2:00 PM",
+        "date": "2026-07-04",
+        "name": "Independence Day",
+        "type": "closed",
+        "id": "c2"
+      },
+      {
+        "notify": true,
+        "from": "10:00 AM",
+        "to": "2:00 PM",
+        "date": "2026-09-07",
+        "name": "Labor Day",
+        "type": "reduced",
+        "id": "c3"
+      },
+      {
+        "notify": true,
+        "from": "10:00 AM",
+        "to": "2:00 PM",
+        "date": "2026-11-26",
+        "name": "Thanksgiving",
+        "type": "closed",
+        "id": "c4"
+      },
+      {
+        "notify": true,
+        "from": "8:00 AM",
+        "to": "1:00 PM",
+        "date": "2026-12-24",
+        "name": "Christmas Eve",
+        "type": "reduced",
+        "id": "c5"
+      },
+      {
+        "notify": true,
+        "from": "10:00 AM",
+        "to": "2:00 PM",
+        "date": "2026-12-25",
+        "name": "Christmas Day",
+        "type": "closed",
+        "id": "c6"
+      }
+    ],
+    "remaining": [
+      [
+        "10:15 AM",
+        "Marcus Webb",
+        "Jeep Wrangler"
+      ],
+      [
+        "10:45 AM",
+        "Liam Chen",
+        "BMW M340i"
+      ],
+      [
+        "11:00 AM",
+        "Grace Adeyemi",
+        "Lexus RX 350"
+      ],
+      [
+        "12:00 PM",
+        "Aisha Rahman",
+        "Range Rover Sport"
+      ],
+      [
+        "1:30 PM",
+        "Tom Bradley",
+        "Honda Civic"
+      ],
+      [
+        "3:00 PM",
+        "Elena Volkov",
+        "Lamborghini Urus"
+      ]
+    ],
+    "holdDay": 6,
+    "holdTime": "11:00 AM"
+  },
+  "hoursEdited": {
+    "weekHours": "58.5 hrs",
+    "hourRows": [
+      {
+        "day": "Monday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Tuesday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Wednesday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Thursday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Friday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Saturday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "4:30 PM",
+        "len": "8.5 hrs"
+      },
+      {
+        "day": "Sunday",
+        "open": false,
+        "closed": true,
+        "from": "9:00 AM",
+        "to": "3:00 PM",
+        "len": "0 hrs"
+      }
+    ],
+    "rules": [
+      {
+        "label": "Slot length",
+        "opts": [
+          "15 min",
+          "30 min",
+          "60 min"
+        ]
+      },
+      {
+        "label": "Buffer between jobs",
+        "opts": [
+          "0 min",
+          "10 min",
+          "15 min",
+          "20 min"
+        ]
+      },
+      {
+        "label": "Last booking before close",
+        "opts": [
+          "30 min",
+          "60 min",
+          "90 min"
+        ]
+      }
+    ],
+    "upcoming": [
+      {
+        "mon": "JUL",
+        "day": "4",
+        "dow": "SAT",
+        "name": "Independence Day",
+        "typeLabel": "Closed all day",
+        "past": false
+      },
+      {
+        "mon": "SEP",
+        "day": "7",
+        "dow": "MON",
+        "name": "Labor Day",
+        "typeLabel": "Reduced · 10:00 AM – 2:00 PM",
+        "past": false
+      },
+      {
+        "mon": "NOV",
+        "day": "26",
+        "dow": "THU",
+        "name": "Thanksgiving",
+        "typeLabel": "Closed all day",
+        "past": false
+      },
+      {
+        "mon": "DEC",
+        "day": "24",
+        "dow": "THU",
+        "name": "Christmas Eve",
+        "typeLabel": "Reduced · 8:00 AM – 1:00 PM",
+        "past": false
+      },
+      {
+        "mon": "DEC",
+        "day": "25",
+        "dow": "FRI",
+        "name": "Christmas Day",
+        "typeLabel": "Closed all day",
+        "past": false
+      }
+    ],
+    "past": [
+      {
+        "mon": "JUN",
+        "day": "3",
+        "dow": "WED",
+        "name": "Weather closure",
+        "typeLabel": "Emergency",
+        "past": true
+      },
+      {
+        "mon": "MAY",
+        "day": "25",
+        "dow": "MON",
+        "name": "Memorial Day",
+        "typeLabel": "Closed all day",
+        "past": true
+      }
+    ],
+    "emActive": false,
+    "emSummary": "",
+    "emPreview": "Hi Liam, due to severe weather Oasis Auto Spa is closed for the rest of today. We’re sorry for the inconvenience. Pick a new time here: oasis.spa/r/8KQ2",
+    "emReasons": [
+      "Severe weather",
+      "Power outage",
+      "Equipment failure",
+      "Staff shortage",
+      "Other"
+    ],
+    "emDurations": [
+      "Rest of today",
+      "Until a time",
+      "Multiple days"
+    ],
+    "emOpts": [
+      {
+        "label": "Notify affected customers",
+        "sub": "WhatsApp, with SMS fallback"
+      },
+      {
+        "label": "Include one-tap reschedule link",
+        "sub": "Customers pick a new slot themselves"
+      },
+      {
+        "label": "Protect member credits",
+        "sub": "Missed visits don’t use a credit"
+      },
+      {
+        "label": "Pause online booking",
+        "sub": "Until you reopen"
+      },
+      {
+        "label": "Alert on-shift crew",
+        "sub": "Push notification to the team"
+      }
+    ],
+    "emAffected": [
+      {
+        "time": "10:15 AM",
+        "name": "Marcus Webb",
+        "veh": "Jeep Wrangler"
+      },
+      {
+        "time": "10:45 AM",
+        "name": "Liam Chen",
+        "veh": "BMW M340i"
+      },
+      {
+        "time": "11:00 AM",
+        "name": "Grace Adeyemi",
+        "veh": "Lexus RX 350"
+      },
+      {
+        "time": "12:00 PM",
+        "name": "Aisha Rahman",
+        "veh": "Range Rover Sport"
+      },
+      {
+        "time": "1:30 PM",
+        "name": "Tom Bradley",
+        "veh": "Honda Civic"
+      },
+      {
+        "time": "3:00 PM",
+        "name": "Elena Volkov",
+        "veh": "Lamborghini Urus"
+      }
+    ],
+    "emAffectedCount": "6 customers",
+    "emHistory": [
+      {
+        "date": "Jun 3, 2026",
+        "reason": "Severe weather",
+        "detail": "Full day · 7 customers notified · 6 rebooked"
+      },
+      {
+        "date": "Feb 18, 2026",
+        "reason": "Power outage",
+        "detail": "11:20 AM – 3:00 PM · 4 notified"
+      }
+    ],
+    "confirmText": "6 customers will be messaged, online booking pauses and the closure shows on the Operations screen. Reason: severe weather, for the rest of today.",
+    "vipHolds": [
+      "Friday · 4:00 PM",
+      "Saturday · 8:00 AM",
+      "Saturday · 9:00 AM",
+      "Saturday · 10:00 AM",
+      "Sunday · 9:00 AM"
+    ],
+    "vipSteppers": [
+      {
+        "label": "VIP booking window",
+        "sub": "How far ahead VIPs can book",
+        "val": "30 days"
+      },
+      {
+        "label": "Standard booking window",
+        "sub": "Everyone else",
+        "val": "14 days"
+      },
+      {
+        "label": "Same-day guarantee",
+        "sub": "Per VIP, per month — we fit them in even when full",
+        "val": "2 / mo"
+      }
+    ],
+    "releaseOpts": [
+      "24h before",
+      "48h before",
+      "72h before"
+    ],
+    "offerOpts": [
+      "10 min",
+      "15 min",
+      "30 min"
+    ],
+    "cadenceOpts": [
+      "Weekly",
+      "Every 2 weeks",
+      "Every 3 weeks",
+      "Monthly"
+    ],
+    "vipToggles": [
+      {
+        "label": "Waitlist priority",
+        "sub": "Cancellations are offered to VIPs first"
+      },
+      {
+        "label": "Standing appointments",
+        "sub": "VIPs can set a repeating slot"
+      },
+      {
+        "label": "Auto-confirm standing visits",
+        "sub": "Confirmed 48h before without a reply"
+      }
+    ],
+    "vipClients": [
+      "Jonathan Franco",
+      "Liam Chen",
+      "Aisha Rahman",
+      "Elena Volkov"
+    ],
+    "vipCount": "4 clients",
+    "arrToggles": [
+      {
+        "label": "Geofence auto check-in",
+        "sub": "Turn off to require check-in at the desk"
+      },
+      {
+        "label": "Mark as Arrived automatically",
+        "sub": "Job moves to Arrived on the Operations screen"
+      },
+      {
+        "label": "Send welcome message",
+        "sub": "“You’re checked in — pull into Bay 2”"
+      },
+      {
+        "label": "Alert the crew",
+        "sub": "Push notification to whoever is on shift"
+      },
+      {
+        "label": "VIP arrivals first",
+        "sub": "VIP arrivals sit at the top of alerts"
+      }
+    ],
+    "radiusOpts": [
+      "150 m",
+      "300 m",
+      "500 m"
+    ],
+    "prepOpts": [
+      "10 min away",
+      "15 min away",
+      "20 min away"
+    ],
+    "arrSteps": [
+      {
+        "n": "1",
+        "title": "15 min out",
+        "desc": "Operations gets an “Arriving” alert with a Prep bay button. VIPs show in purple at the top."
+      },
+      {
+        "n": "2",
+        "title": "Within 300 m",
+        "desc": "Checked in automatically and the job moves to Arrived. Customer gets a welcome message."
+      },
+      {
+        "n": "3",
+        "title": "Ready to start",
+        "desc": "Crew sees “Auto checked in” with a Start cleaning button."
+      }
+    ],
+    "toast": null
+  },
+  "hoursEdited2": {
+    "weekHours": "58 hrs",
+    "hourRows": [
+      {
+        "day": "Monday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "5:30 PM",
+        "len": "9.5 hrs"
+      },
+      {
+        "day": "Tuesday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Wednesday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Thursday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Friday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Saturday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "4:30 PM",
+        "len": "8.5 hrs"
+      },
+      {
+        "day": "Sunday",
+        "open": false,
+        "closed": true,
+        "from": "9:00 AM",
+        "to": "3:00 PM",
+        "len": "0 hrs"
+      }
+    ],
+    "rules": [
+      {
+        "label": "Slot length",
+        "opts": [
+          "15 min",
+          "30 min",
+          "60 min"
+        ]
+      },
+      {
+        "label": "Buffer between jobs",
+        "opts": [
+          "0 min",
+          "10 min",
+          "15 min",
+          "20 min"
+        ]
+      },
+      {
+        "label": "Last booking before close",
+        "opts": [
+          "30 min",
+          "60 min",
+          "90 min"
+        ]
+      }
+    ],
+    "upcoming": [
+      {
+        "mon": "JUL",
+        "day": "4",
+        "dow": "SAT",
+        "name": "Independence Day",
+        "typeLabel": "Closed all day",
+        "past": false
+      },
+      {
+        "mon": "SEP",
+        "day": "7",
+        "dow": "MON",
+        "name": "Labor Day",
+        "typeLabel": "Reduced · 10:00 AM – 2:00 PM",
+        "past": false
+      },
+      {
+        "mon": "NOV",
+        "day": "26",
+        "dow": "THU",
+        "name": "Thanksgiving",
+        "typeLabel": "Closed all day",
+        "past": false
+      },
+      {
+        "mon": "DEC",
+        "day": "24",
+        "dow": "THU",
+        "name": "Christmas Eve",
+        "typeLabel": "Reduced · 8:00 AM – 1:00 PM",
+        "past": false
+      },
+      {
+        "mon": "DEC",
+        "day": "25",
+        "dow": "FRI",
+        "name": "Christmas Day",
+        "typeLabel": "Closed all day",
+        "past": false
+      }
+    ],
+    "past": [
+      {
+        "mon": "JUN",
+        "day": "3",
+        "dow": "WED",
+        "name": "Weather closure",
+        "typeLabel": "Emergency",
+        "past": true
+      },
+      {
+        "mon": "MAY",
+        "day": "25",
+        "dow": "MON",
+        "name": "Memorial Day",
+        "typeLabel": "Closed all day",
+        "past": true
+      }
+    ],
+    "emActive": false,
+    "emSummary": "",
+    "emPreview": "Hi Liam, due to severe weather Oasis Auto Spa is closed for the rest of today. We’re sorry for the inconvenience. Pick a new time here: oasis.spa/r/8KQ2",
+    "emReasons": [
+      "Severe weather",
+      "Power outage",
+      "Equipment failure",
+      "Staff shortage",
+      "Other"
+    ],
+    "emDurations": [
+      "Rest of today",
+      "Until a time",
+      "Multiple days"
+    ],
+    "emOpts": [
+      {
+        "label": "Notify affected customers",
+        "sub": "WhatsApp, with SMS fallback"
+      },
+      {
+        "label": "Include one-tap reschedule link",
+        "sub": "Customers pick a new slot themselves"
+      },
+      {
+        "label": "Protect member credits",
+        "sub": "Missed visits don’t use a credit"
+      },
+      {
+        "label": "Pause online booking",
+        "sub": "Until you reopen"
+      },
+      {
+        "label": "Alert on-shift crew",
+        "sub": "Push notification to the team"
+      }
+    ],
+    "emAffected": [
+      {
+        "time": "10:15 AM",
+        "name": "Marcus Webb",
+        "veh": "Jeep Wrangler"
+      },
+      {
+        "time": "10:45 AM",
+        "name": "Liam Chen",
+        "veh": "BMW M340i"
+      },
+      {
+        "time": "11:00 AM",
+        "name": "Grace Adeyemi",
+        "veh": "Lexus RX 350"
+      },
+      {
+        "time": "12:00 PM",
+        "name": "Aisha Rahman",
+        "veh": "Range Rover Sport"
+      },
+      {
+        "time": "1:30 PM",
+        "name": "Tom Bradley",
+        "veh": "Honda Civic"
+      },
+      {
+        "time": "3:00 PM",
+        "name": "Elena Volkov",
+        "veh": "Lamborghini Urus"
+      }
+    ],
+    "emAffectedCount": "6 customers",
+    "emHistory": [
+      {
+        "date": "Jun 3, 2026",
+        "reason": "Severe weather",
+        "detail": "Full day · 7 customers notified · 6 rebooked"
+      },
+      {
+        "date": "Feb 18, 2026",
+        "reason": "Power outage",
+        "detail": "11:20 AM – 3:00 PM · 4 notified"
+      }
+    ],
+    "confirmText": "6 customers will be messaged, online booking pauses and the closure shows on the Operations screen. Reason: severe weather, for the rest of today.",
+    "vipHolds": [
+      "Friday · 4:00 PM",
+      "Saturday · 8:00 AM",
+      "Saturday · 9:00 AM",
+      "Saturday · 10:00 AM",
+      "Sunday · 9:00 AM"
+    ],
+    "vipSteppers": [
+      {
+        "label": "VIP booking window",
+        "sub": "How far ahead VIPs can book",
+        "val": "30 days"
+      },
+      {
+        "label": "Standard booking window",
+        "sub": "Everyone else",
+        "val": "14 days"
+      },
+      {
+        "label": "Same-day guarantee",
+        "sub": "Per VIP, per month — we fit them in even when full",
+        "val": "2 / mo"
+      }
+    ],
+    "releaseOpts": [
+      "24h before",
+      "48h before",
+      "72h before"
+    ],
+    "offerOpts": [
+      "10 min",
+      "15 min",
+      "30 min"
+    ],
+    "cadenceOpts": [
+      "Weekly",
+      "Every 2 weeks",
+      "Every 3 weeks",
+      "Monthly"
+    ],
+    "vipToggles": [
+      {
+        "label": "Waitlist priority",
+        "sub": "Cancellations are offered to VIPs first"
+      },
+      {
+        "label": "Standing appointments",
+        "sub": "VIPs can set a repeating slot"
+      },
+      {
+        "label": "Auto-confirm standing visits",
+        "sub": "Confirmed 48h before without a reply"
+      }
+    ],
+    "vipClients": [
+      "Jonathan Franco",
+      "Liam Chen",
+      "Aisha Rahman",
+      "Elena Volkov"
+    ],
+    "vipCount": "4 clients",
+    "arrToggles": [
+      {
+        "label": "Geofence auto check-in",
+        "sub": "Turn off to require check-in at the desk"
+      },
+      {
+        "label": "Mark as Arrived automatically",
+        "sub": "Job moves to Arrived on the Operations screen"
+      },
+      {
+        "label": "Send welcome message",
+        "sub": "“You’re checked in — pull into Bay 2”"
+      },
+      {
+        "label": "Alert the crew",
+        "sub": "Push notification to whoever is on shift"
+      },
+      {
+        "label": "VIP arrivals first",
+        "sub": "VIP arrivals sit at the top of alerts"
+      }
+    ],
+    "radiusOpts": [
+      "150 m",
+      "300 m",
+      "500 m"
+    ],
+    "prepOpts": [
+      "10 min away",
+      "15 min away",
+      "20 min away"
+    ],
+    "arrSteps": [
+      {
+        "n": "1",
+        "title": "15 min out",
+        "desc": "Operations gets an “Arriving” alert with a Prep bay button. VIPs show in purple at the top."
+      },
+      {
+        "n": "2",
+        "title": "Within 300 m",
+        "desc": "Checked in automatically and the job moves to Arrived. Customer gets a welcome message."
+      },
+      {
+        "n": "3",
+        "title": "Ready to start",
+        "desc": "Crew sees “Auto checked in” with a Start cleaning button."
+      }
+    ],
+    "toast": null
+  },
+  "emergency": [
+    {
+      "config": {
+        "reason": "Severe weather",
+        "dur": "today",
+        "notify": true,
+        "pause": true
+      },
+      "preview": {
+        "emPreview": "Hi Liam, due to severe weather Oasis Auto Spa is closed for the rest of today. We’re sorry for the inconvenience. Pick a new time here: oasis.spa/r/8KQ2",
+        "emAffected": [
+          {
+            "time": "10:15 AM",
+            "name": "Marcus Webb",
+            "veh": "Jeep Wrangler"
+          },
+          {
+            "time": "10:45 AM",
+            "name": "Liam Chen",
+            "veh": "BMW M340i"
+          },
+          {
+            "time": "11:00 AM",
+            "name": "Grace Adeyemi",
+            "veh": "Lexus RX 350"
+          },
+          {
+            "time": "12:00 PM",
+            "name": "Aisha Rahman",
+            "veh": "Range Rover Sport"
+          },
+          {
+            "time": "1:30 PM",
+            "name": "Tom Bradley",
+            "veh": "Honda Civic"
+          },
+          {
+            "time": "3:00 PM",
+            "name": "Elena Volkov",
+            "veh": "Lamborghini Urus"
+          }
+        ],
+        "emAffectedCount": "6 customers",
+        "confirmText": "6 customers will be messaged, online booking pauses and the closure shows on the Operations screen. Reason: severe weather, for the rest of today."
+      },
+      "closed": {
+        "emSummary": "Severe weather · closed for the rest of today · online booking paused",
+        "toast": "Shop closed · 6 customers notified"
+      },
+      "reopened": {
+        "toast": "Shop reopened · online booking resumed",
+        "history": {
+          "date": "Jun 13, 2026",
+          "reason": "Severe weather",
+          "detail": "Reopened by Rafael M. · 6 notified"
+        }
+      }
+    },
+    {
+      "config": {
+        "reason": "Power outage",
+        "dur": "until",
+        "until": "3:30 PM",
+        "notify": true,
+        "pause": false
+      },
+      "preview": {
+        "emPreview": "Hi Liam, due to a power outage Oasis Auto Spa is closed until 3:30 PM today. We’re sorry for the inconvenience. Pick a new time here: oasis.spa/r/8KQ2",
+        "emAffected": [
+          {
+            "time": "10:15 AM",
+            "name": "Marcus Webb",
+            "veh": "Jeep Wrangler"
+          },
+          {
+            "time": "10:45 AM",
+            "name": "Liam Chen",
+            "veh": "BMW M340i"
+          },
+          {
+            "time": "11:00 AM",
+            "name": "Grace Adeyemi",
+            "veh": "Lexus RX 350"
+          },
+          {
+            "time": "12:00 PM",
+            "name": "Aisha Rahman",
+            "veh": "Range Rover Sport"
+          },
+          {
+            "time": "1:30 PM",
+            "name": "Tom Bradley",
+            "veh": "Honda Civic"
+          },
+          {
+            "time": "3:00 PM",
+            "name": "Elena Volkov",
+            "veh": "Lamborghini Urus"
+          }
+        ],
+        "emAffectedCount": "6 customers",
+        "confirmText": "6 customers will be messaged and the closure shows on the Operations screen. Reason: power outage, until 3:30 PM today."
+      },
+      "closed": {
+        "emSummary": "Power outage · closed until 3:30 PM today",
+        "toast": "Shop closed · 6 customers notified"
+      },
+      "reopened": {
+        "toast": "Shop reopened · online booking resumed",
+        "history": {
+          "date": "Jun 13, 2026",
+          "reason": "Power outage",
+          "detail": "Reopened by Rafael M. · 6 notified"
+        }
+      }
+    },
+    {
+      "config": {
+        "reason": "Equipment failure",
+        "dur": "days",
+        "through": "2026-06-15",
+        "notify": false,
+        "pause": true
+      },
+      "preview": {
+        "emPreview": "Hi Liam, due to an equipment failure Oasis Auto Spa is closed through Monday, Jun 15. We’re sorry for the inconvenience. Pick a new time here: oasis.spa/r/8KQ2",
+        "emAffected": [
+          {
+            "time": "10:15 AM",
+            "name": "Marcus Webb",
+            "veh": "Jeep Wrangler"
+          },
+          {
+            "time": "10:45 AM",
+            "name": "Liam Chen",
+            "veh": "BMW M340i"
+          },
+          {
+            "time": "11:00 AM",
+            "name": "Grace Adeyemi",
+            "veh": "Lexus RX 350"
+          },
+          {
+            "time": "12:00 PM",
+            "name": "Aisha Rahman",
+            "veh": "Range Rover Sport"
+          },
+          {
+            "time": "1:30 PM",
+            "name": "Tom Bradley",
+            "veh": "Honda Civic"
+          },
+          {
+            "time": "3:00 PM",
+            "name": "Elena Volkov",
+            "veh": "Lamborghini Urus"
+          }
+        ],
+        "emAffectedCount": "6 customers",
+        "confirmText": "No customers will be messaged, online booking pauses and the closure shows on the Operations screen. Reason: equipment failure, through Monday, Jun 15."
+      },
+      "closed": {
+        "emSummary": "Equipment failure · closed through Monday, Jun 15 · online booking paused",
+        "toast": "Shop closed · no messages sent"
+      },
+      "reopened": {
+        "toast": "Shop reopened · online booking resumed",
+        "history": {
+          "date": "Jun 13, 2026",
+          "reason": "Equipment failure",
+          "detail": "Reopened by Rafael M. · 6 notified"
+        }
+      }
+    },
+    {
+      "config": {
+        "reason": "Staff shortage",
+        "dur": "until",
+        "until": "11:00 AM",
+        "notify": true,
+        "pause": true
+      },
+      "preview": {
+        "emPreview": "Hi Liam, due to a staffing issue Oasis Auto Spa is closed until 11:00 AM today. We’re sorry for the inconvenience. Pick a new time here: oasis.spa/r/8KQ2",
+        "emAffected": [
+          {
+            "time": "10:15 AM",
+            "name": "Marcus Webb",
+            "veh": "Jeep Wrangler"
+          },
+          {
+            "time": "10:45 AM",
+            "name": "Liam Chen",
+            "veh": "BMW M340i"
+          }
+        ],
+        "emAffectedCount": "2 customers",
+        "confirmText": "2 customers will be messaged, online booking pauses and the closure shows on the Operations screen. Reason: staff shortage, until 11:00 AM today."
+      },
+      "closed": {
+        "emSummary": "Staff shortage · closed until 11:00 AM today · online booking paused",
+        "toast": "Shop closed · 2 customers notified"
+      },
+      "reopened": {
+        "toast": "Shop reopened · online booking resumed",
+        "history": {
+          "date": "Jun 13, 2026",
+          "reason": "Staff shortage",
+          "detail": "Reopened by Rafael M. · 6 notified"
+        }
+      }
+    },
+    {
+      "config": {
+        "reason": "Other",
+        "dur": "days",
+        "through": "2026-12-25",
+        "notify": true,
+        "pause": false
+      },
+      "preview": {
+        "emPreview": "Hi Liam, due to unforeseen circumstances Oasis Auto Spa is closed through Friday, Dec 25. We’re sorry for the inconvenience. Pick a new time here: oasis.spa/r/8KQ2",
+        "emAffected": [
+          {
+            "time": "10:15 AM",
+            "name": "Marcus Webb",
+            "veh": "Jeep Wrangler"
+          },
+          {
+            "time": "10:45 AM",
+            "name": "Liam Chen",
+            "veh": "BMW M340i"
+          },
+          {
+            "time": "11:00 AM",
+            "name": "Grace Adeyemi",
+            "veh": "Lexus RX 350"
+          },
+          {
+            "time": "12:00 PM",
+            "name": "Aisha Rahman",
+            "veh": "Range Rover Sport"
+          },
+          {
+            "time": "1:30 PM",
+            "name": "Tom Bradley",
+            "veh": "Honda Civic"
+          },
+          {
+            "time": "3:00 PM",
+            "name": "Elena Volkov",
+            "veh": "Lamborghini Urus"
+          }
+        ],
+        "emAffectedCount": "6 customers",
+        "confirmText": "6 customers will be messaged and the closure shows on the Operations screen. Reason: other, through Friday, Dec 25."
+      },
+      "closed": {
+        "emSummary": "Other · closed through Friday, Dec 25",
+        "toast": "Shop closed · 6 customers notified"
+      },
+      "reopened": {
+        "toast": "Shop reopened · online booking resumed",
+        "history": {
+          "date": "Jun 13, 2026",
+          "reason": "Other",
+          "detail": "Reopened by Rafael M. · 6 notified"
+        }
+      }
+    },
+    {
+      "config": {
+        "reason": "Severe weather",
+        "dur": "until",
+        "until": "10:30 AM",
+        "notify": true,
+        "pause": true
+      },
+      "preview": {
+        "emPreview": "Hi Liam, due to severe weather Oasis Auto Spa is closed until 10:30 AM today. We’re sorry for the inconvenience. Pick a new time here: oasis.spa/r/8KQ2",
+        "emAffected": [
+          {
+            "time": "10:15 AM",
+            "name": "Marcus Webb",
+            "veh": "Jeep Wrangler"
+          }
+        ],
+        "emAffectedCount": "1 customers",
+        "confirmText": "1 customers will be messaged, online booking pauses and the closure shows on the Operations screen. Reason: severe weather, until 10:30 AM today."
+      },
+      "closed": {
+        "emSummary": "Severe weather · closed until 10:30 AM today · online booking paused",
+        "toast": "Shop closed · 1 customers notified"
+      },
+      "reopened": {
+        "toast": "Shop reopened · online booking resumed",
+        "history": {
+          "date": "Jun 13, 2026",
+          "reason": "Severe weather",
+          "detail": "Reopened by Rafael M. · 6 notified"
+        }
+      }
+    }
+  ],
+  "holdAdded": {
+    "weekHours": "58 hrs",
+    "hourRows": [
+      {
+        "day": "Monday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "5:30 PM",
+        "len": "9.5 hrs"
+      },
+      {
+        "day": "Tuesday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Wednesday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Thursday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Friday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Saturday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "4:30 PM",
+        "len": "8.5 hrs"
+      },
+      {
+        "day": "Sunday",
+        "open": false,
+        "closed": true,
+        "from": "9:00 AM",
+        "to": "3:00 PM",
+        "len": "0 hrs"
+      }
+    ],
+    "rules": [
+      {
+        "label": "Slot length",
+        "opts": [
+          "15 min",
+          "30 min",
+          "60 min"
+        ]
+      },
+      {
+        "label": "Buffer between jobs",
+        "opts": [
+          "0 min",
+          "10 min",
+          "15 min",
+          "20 min"
+        ]
+      },
+      {
+        "label": "Last booking before close",
+        "opts": [
+          "30 min",
+          "60 min",
+          "90 min"
+        ]
+      }
+    ],
+    "upcoming": [
+      {
+        "mon": "JUL",
+        "day": "4",
+        "dow": "SAT",
+        "name": "Independence Day",
+        "typeLabel": "Closed all day",
+        "past": false
+      },
+      {
+        "mon": "SEP",
+        "day": "7",
+        "dow": "MON",
+        "name": "Labor Day",
+        "typeLabel": "Reduced · 10:00 AM – 2:00 PM",
+        "past": false
+      },
+      {
+        "mon": "NOV",
+        "day": "26",
+        "dow": "THU",
+        "name": "Thanksgiving",
+        "typeLabel": "Closed all day",
+        "past": false
+      },
+      {
+        "mon": "DEC",
+        "day": "24",
+        "dow": "THU",
+        "name": "Christmas Eve",
+        "typeLabel": "Reduced · 8:00 AM – 1:00 PM",
+        "past": false
+      },
+      {
+        "mon": "DEC",
+        "day": "25",
+        "dow": "FRI",
+        "name": "Christmas Day",
+        "typeLabel": "Closed all day",
+        "past": false
+      }
+    ],
+    "past": [
+      {
+        "mon": "JUN",
+        "day": "3",
+        "dow": "WED",
+        "name": "Weather closure",
+        "typeLabel": "Emergency",
+        "past": true
+      },
+      {
+        "mon": "MAY",
+        "day": "25",
+        "dow": "MON",
+        "name": "Memorial Day",
+        "typeLabel": "Closed all day",
+        "past": true
+      }
+    ],
+    "emActive": false,
+    "emSummary": "Severe weather · closed until 10:30 AM today · online booking paused",
+    "emPreview": "Hi Liam, due to severe weather Oasis Auto Spa is closed until 10:30 AM today. We’re sorry for the inconvenience. Pick a new time here: oasis.spa/r/8KQ2",
+    "emReasons": [
+      "Severe weather",
+      "Power outage",
+      "Equipment failure",
+      "Staff shortage",
+      "Other"
+    ],
+    "emDurations": [
+      "Rest of today",
+      "Until a time",
+      "Multiple days"
+    ],
+    "emOpts": [
+      {
+        "label": "Notify affected customers",
+        "sub": "WhatsApp, with SMS fallback"
+      },
+      {
+        "label": "Include one-tap reschedule link",
+        "sub": "Customers pick a new slot themselves"
+      },
+      {
+        "label": "Protect member credits",
+        "sub": "Missed visits don’t use a credit"
+      },
+      {
+        "label": "Pause online booking",
+        "sub": "Until you reopen"
+      },
+      {
+        "label": "Alert on-shift crew",
+        "sub": "Push notification to the team"
+      }
+    ],
+    "emAffected": [
+      {
+        "time": "10:15 AM",
+        "name": "Marcus Webb",
+        "veh": "Jeep Wrangler"
+      }
+    ],
+    "emAffectedCount": "1 customers",
+    "emHistory": [
+      {
+        "date": "Jun 13, 2026",
+        "reason": "Severe weather",
+        "detail": "Reopened by Rafael M. · 6 notified"
+      },
+      {
+        "date": "Jun 13, 2026",
+        "reason": "Other",
+        "detail": "Reopened by Rafael M. · 6 notified"
+      },
+      {
+        "date": "Jun 13, 2026",
+        "reason": "Staff shortage",
+        "detail": "Reopened by Rafael M. · 6 notified"
+      },
+      {
+        "date": "Jun 13, 2026",
+        "reason": "Equipment failure",
+        "detail": "Reopened by Rafael M. · 6 notified"
+      },
+      {
+        "date": "Jun 13, 2026",
+        "reason": "Power outage",
+        "detail": "Reopened by Rafael M. · 6 notified"
+      },
+      {
+        "date": "Jun 13, 2026",
+        "reason": "Severe weather",
+        "detail": "Reopened by Rafael M. · 6 notified"
+      },
+      {
+        "date": "Jun 3, 2026",
+        "reason": "Severe weather",
+        "detail": "Full day · 7 customers notified · 6 rebooked"
+      },
+      {
+        "date": "Feb 18, 2026",
+        "reason": "Power outage",
+        "detail": "11:20 AM – 3:00 PM · 4 notified"
+      }
+    ],
+    "confirmText": "1 customers will be messaged, online booking pauses and the closure shows on the Operations screen. Reason: severe weather, until 10:30 AM today.",
+    "vipHolds": [
+      "Friday · 4:00 PM",
+      "Saturday · 8:00 AM",
+      "Saturday · 9:00 AM",
+      "Saturday · 10:00 AM",
+      "Saturday · 11:00 AM",
+      "Sunday · 9:00 AM"
+    ],
+    "vipSteppers": [
+      {
+        "label": "VIP booking window",
+        "sub": "How far ahead VIPs can book",
+        "val": "30 days"
+      },
+      {
+        "label": "Standard booking window",
+        "sub": "Everyone else",
+        "val": "14 days"
+      },
+      {
+        "label": "Same-day guarantee",
+        "sub": "Per VIP, per month — we fit them in even when full",
+        "val": "2 / mo"
+      }
+    ],
+    "releaseOpts": [
+      "24h before",
+      "48h before",
+      "72h before"
+    ],
+    "offerOpts": [
+      "10 min",
+      "15 min",
+      "30 min"
+    ],
+    "cadenceOpts": [
+      "Weekly",
+      "Every 2 weeks",
+      "Every 3 weeks",
+      "Monthly"
+    ],
+    "vipToggles": [
+      {
+        "label": "Waitlist priority",
+        "sub": "Cancellations are offered to VIPs first"
+      },
+      {
+        "label": "Standing appointments",
+        "sub": "VIPs can set a repeating slot"
+      },
+      {
+        "label": "Auto-confirm standing visits",
+        "sub": "Confirmed 48h before without a reply"
+      }
+    ],
+    "vipClients": [
+      "Jonathan Franco",
+      "Liam Chen",
+      "Aisha Rahman",
+      "Elena Volkov"
+    ],
+    "vipCount": "4 clients",
+    "arrToggles": [
+      {
+        "label": "Geofence auto check-in",
+        "sub": "Turn off to require check-in at the desk"
+      },
+      {
+        "label": "Mark as Arrived automatically",
+        "sub": "Job moves to Arrived on the Operations screen"
+      },
+      {
+        "label": "Send welcome message",
+        "sub": "“You’re checked in — pull into Bay 2”"
+      },
+      {
+        "label": "Alert the crew",
+        "sub": "Push notification to whoever is on shift"
+      },
+      {
+        "label": "VIP arrivals first",
+        "sub": "VIP arrivals sit at the top of alerts"
+      }
+    ],
+    "radiusOpts": [
+      "150 m",
+      "300 m",
+      "500 m"
+    ],
+    "prepOpts": [
+      "10 min away",
+      "15 min away",
+      "20 min away"
+    ],
+    "arrSteps": [
+      {
+        "n": "1",
+        "title": "15 min out",
+        "desc": "Operations gets an “Arriving” alert with a Prep bay button. VIPs show in purple at the top."
+      },
+      {
+        "n": "2",
+        "title": "Within 300 m",
+        "desc": "Checked in automatically and the job moves to Arrived. Customer gets a welcome message."
+      },
+      {
+        "n": "3",
+        "title": "Ready to start",
+        "desc": "Crew sees “Auto checked in” with a Start cleaning button."
+      }
+    ],
+    "toast": "Sat 11:00 AM held for VIPs"
+  },
+  "holdDuplicate": {
+    "toast": "That slot is already held"
+  },
+  "vipAdded": {
+    "weekHours": "58 hrs",
+    "hourRows": [
+      {
+        "day": "Monday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "5:30 PM",
+        "len": "9.5 hrs"
+      },
+      {
+        "day": "Tuesday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Wednesday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Thursday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Friday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "6:00 PM",
+        "len": "10 hrs"
+      },
+      {
+        "day": "Saturday",
+        "open": true,
+        "closed": false,
+        "from": "8:00 AM",
+        "to": "4:30 PM",
+        "len": "8.5 hrs"
+      },
+      {
+        "day": "Sunday",
+        "open": false,
+        "closed": true,
+        "from": "9:00 AM",
+        "to": "3:00 PM",
+        "len": "0 hrs"
+      }
+    ],
+    "rules": [
+      {
+        "label": "Slot length",
+        "opts": [
+          "15 min",
+          "30 min",
+          "60 min"
+        ]
+      },
+      {
+        "label": "Buffer between jobs",
+        "opts": [
+          "0 min",
+          "10 min",
+          "15 min",
+          "20 min"
+        ]
+      },
+      {
+        "label": "Last booking before close",
+        "opts": [
+          "30 min",
+          "60 min",
+          "90 min"
+        ]
+      }
+    ],
+    "upcoming": [
+      {
+        "mon": "JUL",
+        "day": "4",
+        "dow": "SAT",
+        "name": "Independence Day",
+        "typeLabel": "Closed all day",
+        "past": false
+      },
+      {
+        "mon": "SEP",
+        "day": "7",
+        "dow": "MON",
+        "name": "Labor Day",
+        "typeLabel": "Reduced · 10:00 AM – 2:00 PM",
+        "past": false
+      },
+      {
+        "mon": "NOV",
+        "day": "26",
+        "dow": "THU",
+        "name": "Thanksgiving",
+        "typeLabel": "Closed all day",
+        "past": false
+      },
+      {
+        "mon": "DEC",
+        "day": "24",
+        "dow": "THU",
+        "name": "Christmas Eve",
+        "typeLabel": "Reduced · 8:00 AM – 1:00 PM",
+        "past": false
+      },
+      {
+        "mon": "DEC",
+        "day": "25",
+        "dow": "FRI",
+        "name": "Christmas Day",
+        "typeLabel": "Closed all day",
+        "past": false
+      }
+    ],
+    "past": [
+      {
+        "mon": "JUN",
+        "day": "3",
+        "dow": "WED",
+        "name": "Weather closure",
+        "typeLabel": "Emergency",
+        "past": true
+      },
+      {
+        "mon": "MAY",
+        "day": "25",
+        "dow": "MON",
+        "name": "Memorial Day",
+        "typeLabel": "Closed all day",
+        "past": true
+      }
+    ],
+    "emActive": false,
+    "emSummary": "Severe weather · closed until 10:30 AM today · online booking paused",
+    "emPreview": "Hi Liam, due to severe weather Oasis Auto Spa is closed until 10:30 AM today. We’re sorry for the inconvenience. Pick a new time here: oasis.spa/r/8KQ2",
+    "emReasons": [
+      "Severe weather",
+      "Power outage",
+      "Equipment failure",
+      "Staff shortage",
+      "Other"
+    ],
+    "emDurations": [
+      "Rest of today",
+      "Until a time",
+      "Multiple days"
+    ],
+    "emOpts": [
+      {
+        "label": "Notify affected customers",
+        "sub": "WhatsApp, with SMS fallback"
+      },
+      {
+        "label": "Include one-tap reschedule link",
+        "sub": "Customers pick a new slot themselves"
+      },
+      {
+        "label": "Protect member credits",
+        "sub": "Missed visits don’t use a credit"
+      },
+      {
+        "label": "Pause online booking",
+        "sub": "Until you reopen"
+      },
+      {
+        "label": "Alert on-shift crew",
+        "sub": "Push notification to the team"
+      }
+    ],
+    "emAffected": [
+      {
+        "time": "10:15 AM",
+        "name": "Marcus Webb",
+        "veh": "Jeep Wrangler"
+      }
+    ],
+    "emAffectedCount": "1 customers",
+    "emHistory": [
+      {
+        "date": "Jun 13, 2026",
+        "reason": "Severe weather",
+        "detail": "Reopened by Rafael M. · 6 notified"
+      },
+      {
+        "date": "Jun 13, 2026",
+        "reason": "Other",
+        "detail": "Reopened by Rafael M. · 6 notified"
+      },
+      {
+        "date": "Jun 13, 2026",
+        "reason": "Staff shortage",
+        "detail": "Reopened by Rafael M. · 6 notified"
+      },
+      {
+        "date": "Jun 13, 2026",
+        "reason": "Equipment failure",
+        "detail": "Reopened by Rafael M. · 6 notified"
+      },
+      {
+        "date": "Jun 13, 2026",
+        "reason": "Power outage",
+        "detail": "Reopened by Rafael M. · 6 notified"
+      },
+      {
+        "date": "Jun 13, 2026",
+        "reason": "Severe weather",
+        "detail": "Reopened by Rafael M. · 6 notified"
+      },
+      {
+        "date": "Jun 3, 2026",
+        "reason": "Severe weather",
+        "detail": "Full day · 7 customers notified · 6 rebooked"
+      },
+      {
+        "date": "Feb 18, 2026",
+        "reason": "Power outage",
+        "detail": "11:20 AM – 3:00 PM · 4 notified"
+      }
+    ],
+    "confirmText": "1 customers will be messaged, online booking pauses and the closure shows on the Operations screen. Reason: severe weather, until 10:30 AM today.",
+    "vipHolds": [
+      "Friday · 4:00 PM",
+      "Saturday · 8:00 AM",
+      "Saturday · 9:00 AM",
+      "Saturday · 10:00 AM",
+      "Saturday · 11:00 AM",
+      "Sunday · 9:00 AM"
+    ],
+    "vipSteppers": [
+      {
+        "label": "VIP booking window",
+        "sub": "How far ahead VIPs can book",
+        "val": "30 days"
+      },
+      {
+        "label": "Standard booking window",
+        "sub": "Everyone else",
+        "val": "14 days"
+      },
+      {
+        "label": "Same-day guarantee",
+        "sub": "Per VIP, per month — we fit them in even when full",
+        "val": "2 / mo"
+      }
+    ],
+    "releaseOpts": [
+      "24h before",
+      "48h before",
+      "72h before"
+    ],
+    "offerOpts": [
+      "10 min",
+      "15 min",
+      "30 min"
+    ],
+    "cadenceOpts": [
+      "Weekly",
+      "Every 2 weeks",
+      "Every 3 weeks",
+      "Monthly"
+    ],
+    "vipToggles": [
+      {
+        "label": "Waitlist priority",
+        "sub": "Cancellations are offered to VIPs first"
+      },
+      {
+        "label": "Standing appointments",
+        "sub": "VIPs can set a repeating slot"
+      },
+      {
+        "label": "Auto-confirm standing visits",
+        "sub": "Confirmed 48h before without a reply"
+      }
+    ],
+    "vipClients": [
+      "Jonathan Franco",
+      "Liam Chen",
+      "Aisha Rahman",
+      "Elena Volkov",
+      "Test Person"
+    ],
+    "vipCount": "5 clients",
+    "arrToggles": [
+      {
+        "label": "Geofence auto check-in",
+        "sub": "Turn off to require check-in at the desk"
+      },
+      {
+        "label": "Mark as Arrived automatically",
+        "sub": "Job moves to Arrived on the Operations screen"
+      },
+      {
+        "label": "Send welcome message",
+        "sub": "“You’re checked in — pull into Bay 2”"
+      },
+      {
+        "label": "Alert the crew",
+        "sub": "Push notification to whoever is on shift"
+      },
+      {
+        "label": "VIP arrivals first",
+        "sub": "VIP arrivals sit at the top of alerts"
+      }
+    ],
+    "radiusOpts": [
+      "150 m",
+      "300 m",
+      "500 m"
+    ],
+    "prepOpts": [
+      "10 min away",
+      "15 min away",
+      "20 min away"
+    ],
+    "arrSteps": [
+      {
+        "n": "1",
+        "title": "15 min out",
+        "desc": "Operations gets an “Arriving” alert with a Prep bay button. VIPs show in purple at the top."
+      },
+      {
+        "n": "2",
+        "title": "Within 300 m",
+        "desc": "Checked in automatically and the job moves to Arrived. Customer gets a welcome message."
+      },
+      {
+        "n": "3",
+        "title": "Ready to start",
+        "desc": "Crew sees “Auto checked in” with a Start cleaning button."
+      }
+    ],
+    "toast": "Test Person is now VIP"
+  },
+  "arrival": [
+    {
+      "config": {
+        "prepAt": 20,
+        "radius": 500,
+        "autoArrive": false,
+        "welcome": false
+      },
+      "arrSteps": [
+        {
+          "n": "1",
+          "title": "20 min out",
+          "desc": "Operations gets an “Arriving” alert with a Prep bay button. VIPs show in purple at the top."
+        },
+        {
+          "n": "2",
+          "title": "Within 500 m",
+          "desc": "Staff confirm the check-in. "
+        },
+        {
+          "n": "3",
+          "title": "Ready to start",
+          "desc": "Crew sees “Auto checked in” with a Start cleaning button."
+        }
+      ]
+    },
+    {
+      "config": {
+        "prepAt": 10,
+        "radius": 150,
+        "autoArrive": true,
+        "welcome": false
+      },
+      "arrSteps": [
+        {
+          "n": "1",
+          "title": "10 min out",
+          "desc": "Operations gets an “Arriving” alert with a Prep bay button. VIPs show in purple at the top."
+        },
+        {
+          "n": "2",
+          "title": "Within 150 m",
+          "desc": "Checked in automatically and the job moves to Arrived. "
+        },
+        {
+          "n": "3",
+          "title": "Ready to start",
+          "desc": "Crew sees “Auto checked in” with a Start cleaning button."
+        }
+      ]
+    },
+    {
+      "config": {
+        "prepAt": 15,
+        "radius": 300,
+        "autoArrive": false,
+        "welcome": true
+      },
+      "arrSteps": [
+        {
+          "n": "1",
+          "title": "15 min out",
+          "desc": "Operations gets an “Arriving” alert with a Prep bay button. VIPs show in purple at the top."
+        },
+        {
+          "n": "2",
+          "title": "Within 300 m",
+          "desc": "Staff confirm the check-in. Customer gets a welcome message."
+        },
+        {
+          "n": "3",
+          "title": "Ready to start",
+          "desc": "Crew sees “Auto checked in” with a Start cleaning button."
+        }
+      ]
+    }
+  ]
+}

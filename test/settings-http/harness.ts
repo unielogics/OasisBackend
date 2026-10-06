@@ -24,6 +24,7 @@ import type { Db } from '../../src/platform/db.js'
 import { createIdGenerator } from '../../src/platform/ids.js'
 import type { EnqueueOptions, Jobs } from '../../src/platform/jobs.js'
 import { ensureLocation } from '../../src/platform/locations.js'
+import { RealtimeHub } from '../../src/platform/realtime.js'
 import { createTestApp, type TestApp } from '../helpers/app.js'
 import { createTestDb, truncateAll, type TestDb } from '../helpers/db.js'
 import { setupLocation, type Fixture } from '../domain-schema/helpers.js'
@@ -95,12 +96,13 @@ export interface SettingsHarness {
 
 let counter = 0
 
-export function useSettingsHarness(o: { hub?: boolean } = {}): SettingsHarness {
+export function useSettingsHarness(o: { hub?: boolean; env?: Record<string, string> } = {}): SettingsHarness {
   let testDb: TestDb
   let t: TestApp
   let identity: Identity
   let locationId = ''
   let fx: Fixture
+  let hub: RealtimeHub | null = null
   let origin = 'http://localhost:3000'
   let cookieName = 'oasis_sid'
   const queued: QueuedJob[] = []
@@ -121,7 +123,7 @@ export function useSettingsHarness(o: { hub?: boolean } = {}): SettingsHarness {
     const deps: Partial<AppDeps> = { jobs }
     t = await createTestApp({
       testDb,
-      hub: o.hub,
+      env: o.env,
       modules: [authModule, peopleModule, createSettingsModule(ports)],
       deps,
       authorizer: (location) => {
@@ -156,9 +158,17 @@ export function useSettingsHarness(o: { hub?: boolean } = {}): SettingsHarness {
     fx = await setupLocation({ db: testDb.db, clock: testDb.clock })
     identity.rbac.clear()
     identity.throttle.reset()
+    if (o.hub) {
+      // truncating restarts the event ids; a hub remembers the ids it delivered, so each test gets a fresh one
+      await hub?.close()
+      hub = new RealtimeHub({ db: testDb.db, connection: testDb.connection, pollMs: 200 })
+      await hub.start()
+      t.app.hub = hub
+    }
   })
 
   afterAll(async () => {
+    await hub?.close()
     await t?.close()
     await testDb?.close()
   })

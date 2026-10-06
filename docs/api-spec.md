@@ -246,6 +246,8 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 <!-- openapi:start -->
 | Method | Path | Access | Idempotency-Key |
 |---|---|---|---|
+| GET | `/api/v1/arrival-settings` | authenticated |  |
+| PUT | `/api/v1/arrival-settings` | cli.member |  |
 | GET | `/api/v1/auth/csrf` | authenticated |  |
 | POST | `/api/v1/auth/invite/accept` | public |  |
 | POST | `/api/v1/auth/login` | public |  |
@@ -253,6 +255,17 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/auth/password/change` | authenticated |  |
 | POST | `/api/v1/auth/password/forgot` | public |  |
 | POST | `/api/v1/auth/password/reset` | public |  |
+| GET | `/api/v1/closures` | authenticated |  |
+| POST | `/api/v1/closures` | set.hours | optional |
+| DELETE | `/api/v1/closures/:id` | set.hours |  |
+| PATCH | `/api/v1/closures/:id` | set.hours |  |
+| POST | `/api/v1/closures/preview` | set.hours |  |
+| GET | `/api/v1/emergency` | authenticated |  |
+| GET | `/api/v1/emergency/:id/affected` | set.emergency |  |
+| POST | `/api/v1/emergency/close` | set.emergency | required |
+| GET | `/api/v1/emergency/history` | set.emergency |  |
+| GET | `/api/v1/emergency/preview` | set.emergency |  |
+| POST | `/api/v1/emergency/reopen` | set.emergency | optional |
 | GET | `/api/v1/employees` | team.view |  |
 | POST | `/api/v1/employees` | team.edit |  |
 | GET | `/api/v1/employees/:id` | team.view |  |
@@ -274,6 +287,23 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | PATCH | `/api/v1/roles/:id` | team.roles |  |
 | PUT | `/api/v1/roles/:id/limits/:kind` | team.roles |  |
 | PUT | `/api/v1/roles/:id/permissions/:key` | team.roles |  |
+| GET | `/api/v1/services` | authenticated |  |
+| POST | `/api/v1/services` | set.services | optional |
+| PATCH | `/api/v1/services/:id` | set.services |  |
+| PUT | `/api/v1/services/:id/checklist` | set.services |  |
+| PUT | `/api/v1/settings/auto-federal-holidays` | set.hours |  |
+| GET | `/api/v1/settings/bundle` | authenticated |  |
+| GET | `/api/v1/settings/hours` | authenticated |  |
+| PUT | `/api/v1/settings/hours` | set.hours |  |
+| GET | `/api/v1/settings/rules` | authenticated |  |
+| PUT | `/api/v1/settings/rules` | set.hours |  |
+| GET | `/api/v1/vip` | authenticated |  |
+| PUT | `/api/v1/vip` | cli.member |  |
+| GET | `/api/v1/vip/clients` | cli.member |  |
+| POST | `/api/v1/vip/clients` | cli.member |  |
+| DELETE | `/api/v1/vip/clients/:customerId` | cli.member |  |
+| POST | `/api/v1/vip/holds` | cli.member |  |
+| DELETE | `/api/v1/vip/holds/:id` | cli.member |  |
 <!-- openapi:end -->
 
 ## 14. Identity: sign-in, sessions, RBAC, employees and roles

@@ -40,12 +40,16 @@ export async function bookCustomer(
     make?: string
     model?: string
     customer?: Parameters<typeof makeCustomer>[2]
+    serviceId?: string
     pickupState?: 'pending' | 'collected' | null
   },
 ): Promise<Booked> {
   const customerId = await makeCustomer(db, fx, { name: o.name, ...o.customer })
-  const vehicleId = await makeVehicle(db, fx, customerId, { make: o.make ?? 'Honda', model: o.model ?? 'Civic' })
-  const serviceId = await makeService(db, fx, { name: `Wash for ${o.name}` })
+  const vehicleId = await makeVehicle(db, fx, customerId, {
+    make: o.make ?? 'Honda',
+    model: o.model ?? 'Civic',
+  })
+  const serviceId = o.serviceId ?? (await makeService(db, fx, { name: `Wash for ${o.name}` }))
   // a job in a bay needs the bay (check constraint: cleaning implies bay_id)
   const bayId = o.status === 'cleaning' ? await makeBay(db, fx, (bayNumber += 1)) : null
   const id = await makeAppointment(db, fx, {
@@ -73,6 +77,11 @@ export async function seedDesignDay(db: Db, fx: Fixture): Promise<Booked[]> {
     status: 'completed',
     pickupState: 'pending',
   })
-  await bookCustomer(db, fx, { name: 'Canceled Early', date: '2026-06-13', time: '09:30', status: 'canceled' })
+  await bookCustomer(db, fx, {
+    name: 'Canceled Early',
+    date: '2026-06-13',
+    time: '09:30',
+    status: 'canceled',
+  })
   return out
 }
