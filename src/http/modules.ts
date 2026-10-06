@@ -2,9 +2,10 @@
 // every route must declare config.access (see ./access.ts). Webhook modules are mounted under /hooks.
 import type { AppDeps } from '../app.js'
 import { authModule, peopleModule } from '../modules/auth/module.js'
+import { paymentsModule } from '../modules/payments/module.js'
 import type { AppInstance } from './types.js'
 
 export type ApiModule = (app: AppInstance, deps: AppDeps) => void | Promise<void>
 
-export const apiModules: ApiModule[] = [authModule, peopleModule]
+export const apiModules: ApiModule[] = [authModule, peopleModule, paymentsModule()]
 export const hookModules: ApiModule[] = []

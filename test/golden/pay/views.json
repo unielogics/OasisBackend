@@ -1,0 +1,8768 @@
+{
+ "meta": {
+  "role": "mgmt",
+  "range": "7d",
+  "filter": "all",
+  "selId": "INV-20603",
+  "theme": "light",
+  "now": "1781361360000"
+ },
+ "views": {
+  "today": {
+   "all": {
+    "state": {
+     "range": "today",
+     "filter": "all"
+    },
+    "rangeLabel": "Saturday, June 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$1,903",
+      "sub": "8 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$1,878",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$0",
+      "sub": "0 refunded",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$25",
+      "sub": "1 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$0",
+      "sub": "0 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "8a",
+      "title": "8a · net $85",
+      "netHeight": "7.877664504170529%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "9a",
+      "title": "9a · net $714",
+      "netHeight": "66.17238183503244%",
+      "netMin": "3px",
+      "lossHeight": "2.3169601482854496%"
+     },
+     {
+      "label": "10a",
+      "title": "10a · net $1,079",
+      "netHeight": "100%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "11a",
+      "title": "11a · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "12p",
+      "title": "12p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "1p",
+      "title": "1p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "2p",
+      "title": "2p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "3p",
+      "title": "3p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "4p",
+      "title": "4p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "5p",
+      "title": "5p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$1,334",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$197",
+      "width": "14.760280391348351%"
+     },
+     {
+      "label": "Cash",
+      "value": "$0",
+      "width": "0%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$0",
+      "width": "0%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "8"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "0"
+     },
+     {
+      "label": "Adjusted",
+      "count": "1"
+     },
+     {
+      "label": "Credits",
+      "count": "0"
+     }
+    ],
+    "rows": [
+     {
+      "id": "INV-20608",
+      "date": "Today · 10:05 AM",
+      "client": "Aisha Rahman",
+      "vehicle": "2023 Range Rover Sport",
+      "items": "Executive Detail + Ceramic +1",
+      "total": "$577.80",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20607",
+      "date": "Today · 10:15 AM",
+      "client": "Marcus Webb",
+      "vehicle": "2017 Jeep Wrangler",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$133.75",
+      "status": "Partially paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20606",
+      "date": "Today · 9:50 AM",
+      "client": "Liam Chen",
+      "vehicle": "2020 BMW M340i",
+      "items": "Ceramic Maintenance + Wax",
+      "total": "$192.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20605",
+      "date": "Today · 10:30 AM",
+      "client": "Sofia Marchetti",
+      "vehicle": "2024 Porsche Macan",
+      "items": "Executive Detail",
+      "total": "$278.20",
+      "status": "Partially paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20604",
+      "date": "Today · 9:40 AM",
+      "client": "Jonathan Franco",
+      "vehicle": "2023 Mercedes-Benz GLE",
+      "items": "Premium Hand Wash + Interior Refresh +1",
+      "total": "$196.88",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20603",
+      "date": "Today · 10:31 AM",
+      "client": "Priya Nair",
+      "vehicle": "2022 Tesla Model Y",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$164.78",
+      "status": "Unpaid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20602",
+      "date": "Today · 9:58 AM",
+      "client": "David Okafor",
+      "vehicle": "2019 Ford F-150",
+      "items": "Full Detail +1",
+      "total": "$394.50",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20601",
+      "date": "Today · 8:52 AM",
+      "client": "Maria Delgado",
+      "vehicle": "2021 Audi Q5",
+      "items": "Express Hand Wash +1",
+      "total": "$98.95",
+      "status": "Paid",
+      "adjusted": false
+     }
+    ],
+    "noRows": false,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 1903,
+      "adj": -25,
+      "refunds": 0,
+      "credits": 0,
+      "outstanding": 506.73,
+      "net": 1878
+     },
+     "counts": {
+      "invoices": 8,
+      "refunded": 0,
+      "adjusted": 1,
+      "creditInvoices": 0,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": 8,
+       "net": 85,
+       "loss": 0,
+       "n": 1
+      },
+      {
+       "key": 9,
+       "net": 714,
+       "loss": 25,
+       "n": 3
+      },
+      {
+       "key": 10,
+       "net": 1079,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": 11,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 12,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 13,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 14,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 15,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 16,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 17,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      }
+     ],
+     "methods": {
+      "Card": 1333.8500000000001,
+      "Apple Pay": 196.88,
+      "Cash": 0,
+      "Store credit": 0
+     },
+     "droppedFromChart": 0
+    }
+   },
+   "unpaid": {
+    "state": {
+     "range": "today",
+     "filter": "unpaid"
+    },
+    "rangeLabel": "Saturday, June 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$1,903",
+      "sub": "8 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$1,878",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$0",
+      "sub": "0 refunded",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$25",
+      "sub": "1 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$0",
+      "sub": "0 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "8a",
+      "title": "8a · net $85",
+      "netHeight": "7.877664504170529%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "9a",
+      "title": "9a · net $714",
+      "netHeight": "66.17238183503244%",
+      "netMin": "3px",
+      "lossHeight": "2.3169601482854496%"
+     },
+     {
+      "label": "10a",
+      "title": "10a · net $1,079",
+      "netHeight": "100%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "11a",
+      "title": "11a · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "12p",
+      "title": "12p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "1p",
+      "title": "1p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "2p",
+      "title": "2p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "3p",
+      "title": "3p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "4p",
+      "title": "4p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "5p",
+      "title": "5p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$1,334",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$197",
+      "width": "14.760280391348351%"
+     },
+     {
+      "label": "Cash",
+      "value": "$0",
+      "width": "0%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$0",
+      "width": "0%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "8"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "0"
+     },
+     {
+      "label": "Adjusted",
+      "count": "1"
+     },
+     {
+      "label": "Credits",
+      "count": "0"
+     }
+    ],
+    "rows": [
+     {
+      "id": "INV-20607",
+      "date": "Today · 10:15 AM",
+      "client": "Marcus Webb",
+      "vehicle": "2017 Jeep Wrangler",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$133.75",
+      "status": "Partially paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20605",
+      "date": "Today · 10:30 AM",
+      "client": "Sofia Marchetti",
+      "vehicle": "2024 Porsche Macan",
+      "items": "Executive Detail",
+      "total": "$278.20",
+      "status": "Partially paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20603",
+      "date": "Today · 10:31 AM",
+      "client": "Priya Nair",
+      "vehicle": "2022 Tesla Model Y",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$164.78",
+      "status": "Unpaid",
+      "adjusted": false
+     }
+    ],
+    "noRows": false,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 1903,
+      "adj": -25,
+      "refunds": 0,
+      "credits": 0,
+      "outstanding": 506.73,
+      "net": 1878
+     },
+     "counts": {
+      "invoices": 8,
+      "refunded": 0,
+      "adjusted": 1,
+      "creditInvoices": 0,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": 8,
+       "net": 85,
+       "loss": 0,
+       "n": 1
+      },
+      {
+       "key": 9,
+       "net": 714,
+       "loss": 25,
+       "n": 3
+      },
+      {
+       "key": 10,
+       "net": 1079,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": 11,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 12,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 13,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 14,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 15,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 16,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 17,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      }
+     ],
+     "methods": {
+      "Card": 1333.8500000000001,
+      "Apple Pay": 196.88,
+      "Cash": 0,
+      "Store credit": 0
+     },
+     "droppedFromChart": 0
+    }
+   },
+   "refunds": {
+    "state": {
+     "range": "today",
+     "filter": "refunds"
+    },
+    "rangeLabel": "Saturday, June 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$1,903",
+      "sub": "8 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$1,878",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$0",
+      "sub": "0 refunded",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$25",
+      "sub": "1 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$0",
+      "sub": "0 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "8a",
+      "title": "8a · net $85",
+      "netHeight": "7.877664504170529%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "9a",
+      "title": "9a · net $714",
+      "netHeight": "66.17238183503244%",
+      "netMin": "3px",
+      "lossHeight": "2.3169601482854496%"
+     },
+     {
+      "label": "10a",
+      "title": "10a · net $1,079",
+      "netHeight": "100%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "11a",
+      "title": "11a · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "12p",
+      "title": "12p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "1p",
+      "title": "1p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "2p",
+      "title": "2p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "3p",
+      "title": "3p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "4p",
+      "title": "4p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "5p",
+      "title": "5p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$1,334",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$197",
+      "width": "14.760280391348351%"
+     },
+     {
+      "label": "Cash",
+      "value": "$0",
+      "width": "0%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$0",
+      "width": "0%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "8"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "0"
+     },
+     {
+      "label": "Adjusted",
+      "count": "1"
+     },
+     {
+      "label": "Credits",
+      "count": "0"
+     }
+    ],
+    "rows": [],
+    "noRows": true,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 1903,
+      "adj": -25,
+      "refunds": 0,
+      "credits": 0,
+      "outstanding": 506.73,
+      "net": 1878
+     },
+     "counts": {
+      "invoices": 8,
+      "refunded": 0,
+      "adjusted": 1,
+      "creditInvoices": 0,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": 8,
+       "net": 85,
+       "loss": 0,
+       "n": 1
+      },
+      {
+       "key": 9,
+       "net": 714,
+       "loss": 25,
+       "n": 3
+      },
+      {
+       "key": 10,
+       "net": 1079,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": 11,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 12,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 13,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 14,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 15,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 16,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 17,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      }
+     ],
+     "methods": {
+      "Card": 1333.8500000000001,
+      "Apple Pay": 196.88,
+      "Cash": 0,
+      "Store credit": 0
+     },
+     "droppedFromChart": 0
+    }
+   },
+   "adjusted": {
+    "state": {
+     "range": "today",
+     "filter": "adjusted"
+    },
+    "rangeLabel": "Saturday, June 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$1,903",
+      "sub": "8 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$1,878",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$0",
+      "sub": "0 refunded",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$25",
+      "sub": "1 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$0",
+      "sub": "0 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "8a",
+      "title": "8a · net $85",
+      "netHeight": "7.877664504170529%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "9a",
+      "title": "9a · net $714",
+      "netHeight": "66.17238183503244%",
+      "netMin": "3px",
+      "lossHeight": "2.3169601482854496%"
+     },
+     {
+      "label": "10a",
+      "title": "10a · net $1,079",
+      "netHeight": "100%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "11a",
+      "title": "11a · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "12p",
+      "title": "12p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "1p",
+      "title": "1p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "2p",
+      "title": "2p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "3p",
+      "title": "3p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "4p",
+      "title": "4p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "5p",
+      "title": "5p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$1,334",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$197",
+      "width": "14.760280391348351%"
+     },
+     {
+      "label": "Cash",
+      "value": "$0",
+      "width": "0%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$0",
+      "width": "0%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "8"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "0"
+     },
+     {
+      "label": "Adjusted",
+      "count": "1"
+     },
+     {
+      "label": "Credits",
+      "count": "0"
+     }
+    ],
+    "rows": [
+     {
+      "id": "INV-20602",
+      "date": "Today · 9:58 AM",
+      "client": "David Okafor",
+      "vehicle": "2019 Ford F-150",
+      "items": "Full Detail +1",
+      "total": "$394.50",
+      "status": "Paid",
+      "adjusted": true
+     }
+    ],
+    "noRows": false,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 1903,
+      "adj": -25,
+      "refunds": 0,
+      "credits": 0,
+      "outstanding": 506.73,
+      "net": 1878
+     },
+     "counts": {
+      "invoices": 8,
+      "refunded": 0,
+      "adjusted": 1,
+      "creditInvoices": 0,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": 8,
+       "net": 85,
+       "loss": 0,
+       "n": 1
+      },
+      {
+       "key": 9,
+       "net": 714,
+       "loss": 25,
+       "n": 3
+      },
+      {
+       "key": 10,
+       "net": 1079,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": 11,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 12,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 13,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 14,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 15,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 16,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 17,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      }
+     ],
+     "methods": {
+      "Card": 1333.8500000000001,
+      "Apple Pay": 196.88,
+      "Cash": 0,
+      "Store credit": 0
+     },
+     "droppedFromChart": 0
+    }
+   },
+   "credits": {
+    "state": {
+     "range": "today",
+     "filter": "credits"
+    },
+    "rangeLabel": "Saturday, June 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$1,903",
+      "sub": "8 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$1,878",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$0",
+      "sub": "0 refunded",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$25",
+      "sub": "1 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$0",
+      "sub": "0 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "8a",
+      "title": "8a · net $85",
+      "netHeight": "7.877664504170529%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "9a",
+      "title": "9a · net $714",
+      "netHeight": "66.17238183503244%",
+      "netMin": "3px",
+      "lossHeight": "2.3169601482854496%"
+     },
+     {
+      "label": "10a",
+      "title": "10a · net $1,079",
+      "netHeight": "100%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "11a",
+      "title": "11a · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "12p",
+      "title": "12p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "1p",
+      "title": "1p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "2p",
+      "title": "2p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "3p",
+      "title": "3p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "4p",
+      "title": "4p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "5p",
+      "title": "5p · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$1,334",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$197",
+      "width": "14.760280391348351%"
+     },
+     {
+      "label": "Cash",
+      "value": "$0",
+      "width": "0%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$0",
+      "width": "0%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "8"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "0"
+     },
+     {
+      "label": "Adjusted",
+      "count": "1"
+     },
+     {
+      "label": "Credits",
+      "count": "0"
+     }
+    ],
+    "rows": [],
+    "noRows": true,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 1903,
+      "adj": -25,
+      "refunds": 0,
+      "credits": 0,
+      "outstanding": 506.73,
+      "net": 1878
+     },
+     "counts": {
+      "invoices": 8,
+      "refunded": 0,
+      "adjusted": 1,
+      "creditInvoices": 0,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": 8,
+       "net": 85,
+       "loss": 0,
+       "n": 1
+      },
+      {
+       "key": 9,
+       "net": 714,
+       "loss": 25,
+       "n": 3
+      },
+      {
+       "key": 10,
+       "net": 1079,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": 11,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 12,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 13,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 14,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 15,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 16,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": 17,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      }
+     ],
+     "methods": {
+      "Card": 1333.8500000000001,
+      "Apple Pay": 196.88,
+      "Cash": 0,
+      "Store credit": 0
+     },
+     "droppedFromChart": 0
+    }
+   }
+  },
+  "7d": {
+   "all": {
+    "state": {
+     "range": "7d",
+     "filter": "all"
+    },
+    "rangeLabel": "Jun 7 – Jun 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$7,166",
+      "sub": "32 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$7,069",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$87",
+      "sub": "2 refunded",
+      "color": "var(--red)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$15",
+      "sub": "4 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$25",
+      "sub": "1 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "S 7",
+      "title": "Sun Jun 07 2026 · net $950",
+      "netHeight": "49.92117708880714%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "M 8",
+      "title": "Mon Jun 08 2026 · net $897",
+      "netHeight": "47.13610089332633%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "T 9",
+      "title": "Tue Jun 09 2026 · net $928",
+      "netHeight": "48.7651077246453%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "W 10",
+      "title": "Wed Jun 10 2026 · net $1,189",
+      "netHeight": "62.48029427220179%",
+      "netMin": "3px",
+      "lossHeight": "1.96794534944824%"
+     },
+     {
+      "label": "T 11",
+      "title": "Thu Jun 11 2026 · net $478",
+      "netHeight": "25.13242249080399%",
+      "netMin": "3px",
+      "lossHeight": "3.415659485023647%"
+     },
+     {
+      "label": "F 12",
+      "title": "Fri Jun 12 2026 · net $749",
+      "netHeight": "39.35890698896479%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 13",
+      "title": "Sat Jun 13 2026 · net $1,878",
+      "netHeight": "98.68628481345245%",
+      "netMin": "3px",
+      "lossHeight": "1.3137151865475565%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$4,739",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$1,675",
+      "width": "35.342997615581005%"
+     },
+     {
+      "label": "Cash",
+      "value": "$571",
+      "width": "12.0571416513684%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$25",
+      "width": "0.5275263235635457%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "32"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "3"
+     },
+     {
+      "label": "Adjusted",
+      "count": "4"
+     },
+     {
+      "label": "Credits",
+      "count": "2"
+     }
+    ],
+    "rows": [
+     {
+      "id": "INV-20608",
+      "date": "Today · 10:05 AM",
+      "client": "Aisha Rahman",
+      "vehicle": "2023 Range Rover Sport",
+      "items": "Executive Detail + Ceramic +1",
+      "total": "$577.80",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20607",
+      "date": "Today · 10:15 AM",
+      "client": "Marcus Webb",
+      "vehicle": "2017 Jeep Wrangler",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$133.75",
+      "status": "Partially paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20606",
+      "date": "Today · 9:50 AM",
+      "client": "Liam Chen",
+      "vehicle": "2020 BMW M340i",
+      "items": "Ceramic Maintenance + Wax",
+      "total": "$192.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20605",
+      "date": "Today · 10:30 AM",
+      "client": "Sofia Marchetti",
+      "vehicle": "2024 Porsche Macan",
+      "items": "Executive Detail",
+      "total": "$278.20",
+      "status": "Partially paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20604",
+      "date": "Today · 9:40 AM",
+      "client": "Jonathan Franco",
+      "vehicle": "2023 Mercedes-Benz GLE",
+      "items": "Premium Hand Wash + Interior Refresh +1",
+      "total": "$196.88",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20603",
+      "date": "Today · 10:31 AM",
+      "client": "Priya Nair",
+      "vehicle": "2022 Tesla Model Y",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$164.78",
+      "status": "Unpaid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20602",
+      "date": "Today · 9:58 AM",
+      "client": "David Okafor",
+      "vehicle": "2019 Ford F-150",
+      "items": "Full Detail +1",
+      "total": "$394.50",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20601",
+      "date": "Today · 8:52 AM",
+      "client": "Maria Delgado",
+      "vehicle": "2021 Audi Q5",
+      "items": "Express Hand Wash +1",
+      "total": "$98.95",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20608",
+      "date": "Yesterday · 11:00 AM",
+      "client": "Leah Goldberg",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Executive Detail +1",
+      "total": "$347.05",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20607",
+      "date": "Yesterday · 1:00 PM",
+      "client": "Noah Fischer",
+      "vehicle": "2023 Genesis GV80",
+      "items": "Premium Hand Wash + Interior Refresh +1",
+      "total": "$191.18",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20579",
+      "date": "Yesterday · 2:10 PM",
+      "client": "Chloe Bennett",
+      "vehicle": "2022 BMW X5",
+      "items": "Executive Detail",
+      "total": "$278.20",
+      "status": "Refund pending",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20606",
+      "date": "Jun 11 · 1:30 PM",
+      "client": "Ava Sinclair",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$138.05",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20605",
+      "date": "Jun 11 · 8:00 AM",
+      "client": "Isaac Patel",
+      "vehicle": "2019 Mercedes-Benz C300",
+      "items": "Express Hand Wash",
+      "total": "$63.15",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20604",
+      "date": "Jun 11 · 3:30 PM",
+      "client": "Mia Torres",
+      "vehicle": "2024 Lexus GX 550",
+      "items": "Express Hand Wash",
+      "total": "$58.15",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20571",
+      "date": "Jun 11 · 11:00 AM",
+      "client": "Omar Haddad",
+      "vehicle": "2023 Porsche 911 Carrera",
+      "items": "Full Detail",
+      "total": "$342.40",
+      "status": "Canceled · refunded",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20603",
+      "date": "Jun 10 · 3:30 PM",
+      "client": "Ethan Morales",
+      "vehicle": "2021 Kia Telluride",
+      "items": "Executive Detail + Ceramic",
+      "total": "$454.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20602",
+      "date": "Jun 10 · 8:00 AM",
+      "client": "Tom Bradley",
+      "vehicle": "2022 BMW X5",
+      "items": "Executive Detail",
+      "total": "$288.20",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20601",
+      "date": "Jun 10 · 4:30 PM",
+      "client": "Ava Sinclair",
+      "vehicle": "2023 Genesis GV80",
+      "items": "Executive Detail +1",
+      "total": "$406.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20566",
+      "date": "Jun 10 · 1:30 PM",
+      "client": "Hannah Kim",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$185.48",
+      "status": "Partially refunded",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20600",
+      "date": "Jun 9 · 12:30 PM",
+      "client": "Andre Thompson",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Executive Detail + Ceramic +1",
+      "total": "$508.25",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20599",
+      "date": "Jun 9 · 1:30 PM",
+      "client": "Leah Goldberg",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Family Wash + Pet Hair",
+      "total": "$101.65",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20598",
+      "date": "Jun 9 · 3:30 PM",
+      "client": "Mia Torres",
+      "vehicle": "2022 BMW X5",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$206.88",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20597",
+      "date": "Jun 9 · 9:00 AM",
+      "client": "Noah Fischer",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Premium Hand Wash + Interior",
+      "total": "$143.03",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20560",
+      "date": "Jun 9 · 10:20 AM",
+      "client": "Victor Nguyen",
+      "vehicle": "2020 Honda Accord",
+      "items": "Express Hand Wash",
+      "total": "$48.15",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20596",
+      "date": "Jun 8 · 12:00 PM",
+      "client": "Ruby Castillo",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Premium Hand Wash + Interior",
+      "total": "$143.03",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20595",
+      "date": "Jun 8 · 4:30 PM",
+      "client": "Andre Thompson",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Premium Hand Wash + Interior Refresh",
+      "total": "$137.68",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20594",
+      "date": "Jun 8 · 11:00 AM",
+      "client": "Tom Bradley",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Family Wash + Pet Hair",
+      "total": "$116.65",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20593",
+      "date": "Jun 8 · 1:30 PM",
+      "client": "Diego Ramos",
+      "vehicle": "2022 BMW X5",
+      "items": "Executive Detail + Ceramic",
+      "total": "$449.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20552",
+      "date": "Jun 8 · 3:15 PM",
+      "client": "Mateo Silva",
+      "vehicle": "2022 Ford Bronco",
+      "items": "Premium Hand Wash + Interior",
+      "total": "$138.03",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20592",
+      "date": "Jun 7 · 10:00 AM",
+      "client": "Caleb Owens",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Ceramic Maintenance + Wax",
+      "total": "$202.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20591",
+      "date": "Jun 7 · 12:30 PM",
+      "client": "Tom Bradley",
+      "vehicle": "2019 Mercedes-Benz C300",
+      "items": "Express Hand Wash +1",
+      "total": "$85.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20548",
+      "date": "Jun 7 · 9:00 AM",
+      "client": "Zoe Laurent",
+      "vehicle": "2023 Audi e-tron GT",
+      "items": "Exotic Detail Package",
+      "total": "$738.30",
+      "status": "Paid",
+      "adjusted": true
+     }
+    ],
+    "noRows": false,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 7166,
+      "adj": -15,
+      "refunds": 87.45,
+      "credits": 25,
+      "outstanding": 506.73,
+      "net": 7069.271028037383
+     },
+     "counts": {
+      "invoices": 32,
+      "refunded": 2,
+      "adjusted": 4,
+      "creditInvoices": 1,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": -6,
+       "net": 950,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -5,
+       "net": 897,
+       "loss": 15,
+       "n": 5
+      },
+      {
+       "key": -4,
+       "net": 928,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -3,
+       "net": 1189,
+       "loss": 37.45,
+       "n": 4
+      },
+      {
+       "key": -2,
+       "net": 478.27,
+       "loss": 65,
+       "n": 4
+      },
+      {
+       "key": -1,
+       "net": 749,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": 0,
+       "net": 1878,
+       "loss": 25,
+       "n": 8
+      }
+     ],
+     "methods": {
+      "Card": 4739.100000000001,
+      "Apple Pay": 1674.94,
+      "Cash": 571.4,
+      "Store credit": 25
+     },
+     "droppedFromChart": 0
+    }
+   },
+   "unpaid": {
+    "state": {
+     "range": "7d",
+     "filter": "unpaid"
+    },
+    "rangeLabel": "Jun 7 – Jun 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$7,166",
+      "sub": "32 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$7,069",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$87",
+      "sub": "2 refunded",
+      "color": "var(--red)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$15",
+      "sub": "4 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$25",
+      "sub": "1 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "S 7",
+      "title": "Sun Jun 07 2026 · net $950",
+      "netHeight": "49.92117708880714%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "M 8",
+      "title": "Mon Jun 08 2026 · net $897",
+      "netHeight": "47.13610089332633%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "T 9",
+      "title": "Tue Jun 09 2026 · net $928",
+      "netHeight": "48.7651077246453%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "W 10",
+      "title": "Wed Jun 10 2026 · net $1,189",
+      "netHeight": "62.48029427220179%",
+      "netMin": "3px",
+      "lossHeight": "1.96794534944824%"
+     },
+     {
+      "label": "T 11",
+      "title": "Thu Jun 11 2026 · net $478",
+      "netHeight": "25.13242249080399%",
+      "netMin": "3px",
+      "lossHeight": "3.415659485023647%"
+     },
+     {
+      "label": "F 12",
+      "title": "Fri Jun 12 2026 · net $749",
+      "netHeight": "39.35890698896479%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 13",
+      "title": "Sat Jun 13 2026 · net $1,878",
+      "netHeight": "98.68628481345245%",
+      "netMin": "3px",
+      "lossHeight": "1.3137151865475565%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$4,739",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$1,675",
+      "width": "35.342997615581005%"
+     },
+     {
+      "label": "Cash",
+      "value": "$571",
+      "width": "12.0571416513684%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$25",
+      "width": "0.5275263235635457%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "32"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "3"
+     },
+     {
+      "label": "Adjusted",
+      "count": "4"
+     },
+     {
+      "label": "Credits",
+      "count": "2"
+     }
+    ],
+    "rows": [
+     {
+      "id": "INV-20607",
+      "date": "Today · 10:15 AM",
+      "client": "Marcus Webb",
+      "vehicle": "2017 Jeep Wrangler",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$133.75",
+      "status": "Partially paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20605",
+      "date": "Today · 10:30 AM",
+      "client": "Sofia Marchetti",
+      "vehicle": "2024 Porsche Macan",
+      "items": "Executive Detail",
+      "total": "$278.20",
+      "status": "Partially paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20603",
+      "date": "Today · 10:31 AM",
+      "client": "Priya Nair",
+      "vehicle": "2022 Tesla Model Y",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$164.78",
+      "status": "Unpaid",
+      "adjusted": false
+     }
+    ],
+    "noRows": false,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 7166,
+      "adj": -15,
+      "refunds": 87.45,
+      "credits": 25,
+      "outstanding": 506.73,
+      "net": 7069.271028037383
+     },
+     "counts": {
+      "invoices": 32,
+      "refunded": 2,
+      "adjusted": 4,
+      "creditInvoices": 1,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": -6,
+       "net": 950,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -5,
+       "net": 897,
+       "loss": 15,
+       "n": 5
+      },
+      {
+       "key": -4,
+       "net": 928,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -3,
+       "net": 1189,
+       "loss": 37.45,
+       "n": 4
+      },
+      {
+       "key": -2,
+       "net": 478.27,
+       "loss": 65,
+       "n": 4
+      },
+      {
+       "key": -1,
+       "net": 749,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": 0,
+       "net": 1878,
+       "loss": 25,
+       "n": 8
+      }
+     ],
+     "methods": {
+      "Card": 4739.100000000001,
+      "Apple Pay": 1674.94,
+      "Cash": 571.4,
+      "Store credit": 25
+     },
+     "droppedFromChart": 0
+    }
+   },
+   "refunds": {
+    "state": {
+     "range": "7d",
+     "filter": "refunds"
+    },
+    "rangeLabel": "Jun 7 – Jun 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$7,166",
+      "sub": "32 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$7,069",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$87",
+      "sub": "2 refunded",
+      "color": "var(--red)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$15",
+      "sub": "4 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$25",
+      "sub": "1 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "S 7",
+      "title": "Sun Jun 07 2026 · net $950",
+      "netHeight": "49.92117708880714%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "M 8",
+      "title": "Mon Jun 08 2026 · net $897",
+      "netHeight": "47.13610089332633%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "T 9",
+      "title": "Tue Jun 09 2026 · net $928",
+      "netHeight": "48.7651077246453%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "W 10",
+      "title": "Wed Jun 10 2026 · net $1,189",
+      "netHeight": "62.48029427220179%",
+      "netMin": "3px",
+      "lossHeight": "1.96794534944824%"
+     },
+     {
+      "label": "T 11",
+      "title": "Thu Jun 11 2026 · net $478",
+      "netHeight": "25.13242249080399%",
+      "netMin": "3px",
+      "lossHeight": "3.415659485023647%"
+     },
+     {
+      "label": "F 12",
+      "title": "Fri Jun 12 2026 · net $749",
+      "netHeight": "39.35890698896479%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 13",
+      "title": "Sat Jun 13 2026 · net $1,878",
+      "netHeight": "98.68628481345245%",
+      "netMin": "3px",
+      "lossHeight": "1.3137151865475565%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$4,739",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$1,675",
+      "width": "35.342997615581005%"
+     },
+     {
+      "label": "Cash",
+      "value": "$571",
+      "width": "12.0571416513684%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$25",
+      "width": "0.5275263235635457%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "32"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "3"
+     },
+     {
+      "label": "Adjusted",
+      "count": "4"
+     },
+     {
+      "label": "Credits",
+      "count": "2"
+     }
+    ],
+    "rows": [
+     {
+      "id": "INV-20579",
+      "date": "Yesterday · 2:10 PM",
+      "client": "Chloe Bennett",
+      "vehicle": "2022 BMW X5",
+      "items": "Executive Detail",
+      "total": "$278.20",
+      "status": "Refund pending",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20571",
+      "date": "Jun 11 · 11:00 AM",
+      "client": "Omar Haddad",
+      "vehicle": "2023 Porsche 911 Carrera",
+      "items": "Full Detail",
+      "total": "$342.40",
+      "status": "Canceled · refunded",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20566",
+      "date": "Jun 10 · 1:30 PM",
+      "client": "Hannah Kim",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$185.48",
+      "status": "Partially refunded",
+      "adjusted": false
+     }
+    ],
+    "noRows": false,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 7166,
+      "adj": -15,
+      "refunds": 87.45,
+      "credits": 25,
+      "outstanding": 506.73,
+      "net": 7069.271028037383
+     },
+     "counts": {
+      "invoices": 32,
+      "refunded": 2,
+      "adjusted": 4,
+      "creditInvoices": 1,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": -6,
+       "net": 950,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -5,
+       "net": 897,
+       "loss": 15,
+       "n": 5
+      },
+      {
+       "key": -4,
+       "net": 928,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -3,
+       "net": 1189,
+       "loss": 37.45,
+       "n": 4
+      },
+      {
+       "key": -2,
+       "net": 478.27,
+       "loss": 65,
+       "n": 4
+      },
+      {
+       "key": -1,
+       "net": 749,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": 0,
+       "net": 1878,
+       "loss": 25,
+       "n": 8
+      }
+     ],
+     "methods": {
+      "Card": 4739.100000000001,
+      "Apple Pay": 1674.94,
+      "Cash": 571.4,
+      "Store credit": 25
+     },
+     "droppedFromChart": 0
+    }
+   },
+   "adjusted": {
+    "state": {
+     "range": "7d",
+     "filter": "adjusted"
+    },
+    "rangeLabel": "Jun 7 – Jun 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$7,166",
+      "sub": "32 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$7,069",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$87",
+      "sub": "2 refunded",
+      "color": "var(--red)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$15",
+      "sub": "4 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$25",
+      "sub": "1 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "S 7",
+      "title": "Sun Jun 07 2026 · net $950",
+      "netHeight": "49.92117708880714%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "M 8",
+      "title": "Mon Jun 08 2026 · net $897",
+      "netHeight": "47.13610089332633%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "T 9",
+      "title": "Tue Jun 09 2026 · net $928",
+      "netHeight": "48.7651077246453%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "W 10",
+      "title": "Wed Jun 10 2026 · net $1,189",
+      "netHeight": "62.48029427220179%",
+      "netMin": "3px",
+      "lossHeight": "1.96794534944824%"
+     },
+     {
+      "label": "T 11",
+      "title": "Thu Jun 11 2026 · net $478",
+      "netHeight": "25.13242249080399%",
+      "netMin": "3px",
+      "lossHeight": "3.415659485023647%"
+     },
+     {
+      "label": "F 12",
+      "title": "Fri Jun 12 2026 · net $749",
+      "netHeight": "39.35890698896479%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 13",
+      "title": "Sat Jun 13 2026 · net $1,878",
+      "netHeight": "98.68628481345245%",
+      "netMin": "3px",
+      "lossHeight": "1.3137151865475565%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$4,739",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$1,675",
+      "width": "35.342997615581005%"
+     },
+     {
+      "label": "Cash",
+      "value": "$571",
+      "width": "12.0571416513684%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$25",
+      "width": "0.5275263235635457%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "32"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "3"
+     },
+     {
+      "label": "Adjusted",
+      "count": "4"
+     },
+     {
+      "label": "Credits",
+      "count": "2"
+     }
+    ],
+    "rows": [
+     {
+      "id": "INV-20602",
+      "date": "Today · 9:58 AM",
+      "client": "David Okafor",
+      "vehicle": "2019 Ford F-150",
+      "items": "Full Detail +1",
+      "total": "$394.50",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20606",
+      "date": "Jun 11 · 1:30 PM",
+      "client": "Ava Sinclair",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$138.05",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20595",
+      "date": "Jun 8 · 4:30 PM",
+      "client": "Andre Thompson",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Premium Hand Wash + Interior Refresh",
+      "total": "$137.68",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20548",
+      "date": "Jun 7 · 9:00 AM",
+      "client": "Zoe Laurent",
+      "vehicle": "2023 Audi e-tron GT",
+      "items": "Exotic Detail Package",
+      "total": "$738.30",
+      "status": "Paid",
+      "adjusted": true
+     }
+    ],
+    "noRows": false,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 7166,
+      "adj": -15,
+      "refunds": 87.45,
+      "credits": 25,
+      "outstanding": 506.73,
+      "net": 7069.271028037383
+     },
+     "counts": {
+      "invoices": 32,
+      "refunded": 2,
+      "adjusted": 4,
+      "creditInvoices": 1,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": -6,
+       "net": 950,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -5,
+       "net": 897,
+       "loss": 15,
+       "n": 5
+      },
+      {
+       "key": -4,
+       "net": 928,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -3,
+       "net": 1189,
+       "loss": 37.45,
+       "n": 4
+      },
+      {
+       "key": -2,
+       "net": 478.27,
+       "loss": 65,
+       "n": 4
+      },
+      {
+       "key": -1,
+       "net": 749,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": 0,
+       "net": 1878,
+       "loss": 25,
+       "n": 8
+      }
+     ],
+     "methods": {
+      "Card": 4739.100000000001,
+      "Apple Pay": 1674.94,
+      "Cash": 571.4,
+      "Store credit": 25
+     },
+     "droppedFromChart": 0
+    }
+   },
+   "credits": {
+    "state": {
+     "range": "7d",
+     "filter": "credits"
+    },
+    "rangeLabel": "Jun 7 – Jun 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$7,166",
+      "sub": "32 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$7,069",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$87",
+      "sub": "2 refunded",
+      "color": "var(--red)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$15",
+      "sub": "4 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$25",
+      "sub": "1 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "S 7",
+      "title": "Sun Jun 07 2026 · net $950",
+      "netHeight": "49.92117708880714%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "M 8",
+      "title": "Mon Jun 08 2026 · net $897",
+      "netHeight": "47.13610089332633%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "T 9",
+      "title": "Tue Jun 09 2026 · net $928",
+      "netHeight": "48.7651077246453%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "W 10",
+      "title": "Wed Jun 10 2026 · net $1,189",
+      "netHeight": "62.48029427220179%",
+      "netMin": "3px",
+      "lossHeight": "1.96794534944824%"
+     },
+     {
+      "label": "T 11",
+      "title": "Thu Jun 11 2026 · net $478",
+      "netHeight": "25.13242249080399%",
+      "netMin": "3px",
+      "lossHeight": "3.415659485023647%"
+     },
+     {
+      "label": "F 12",
+      "title": "Fri Jun 12 2026 · net $749",
+      "netHeight": "39.35890698896479%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 13",
+      "title": "Sat Jun 13 2026 · net $1,878",
+      "netHeight": "98.68628481345245%",
+      "netMin": "3px",
+      "lossHeight": "1.3137151865475565%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$4,739",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$1,675",
+      "width": "35.342997615581005%"
+     },
+     {
+      "label": "Cash",
+      "value": "$571",
+      "width": "12.0571416513684%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$25",
+      "width": "0.5275263235635457%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "32"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "3"
+     },
+     {
+      "label": "Adjusted",
+      "count": "4"
+     },
+     {
+      "label": "Credits",
+      "count": "2"
+     }
+    ],
+    "rows": [
+     {
+      "id": "INV-20560",
+      "date": "Jun 9 · 10:20 AM",
+      "client": "Victor Nguyen",
+      "vehicle": "2020 Honda Accord",
+      "items": "Express Hand Wash",
+      "total": "$48.15",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20552",
+      "date": "Jun 8 · 3:15 PM",
+      "client": "Mateo Silva",
+      "vehicle": "2022 Ford Bronco",
+      "items": "Premium Hand Wash + Interior",
+      "total": "$138.03",
+      "status": "Paid",
+      "adjusted": false
+     }
+    ],
+    "noRows": false,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 7166,
+      "adj": -15,
+      "refunds": 87.45,
+      "credits": 25,
+      "outstanding": 506.73,
+      "net": 7069.271028037383
+     },
+     "counts": {
+      "invoices": 32,
+      "refunded": 2,
+      "adjusted": 4,
+      "creditInvoices": 1,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": -6,
+       "net": 950,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -5,
+       "net": 897,
+       "loss": 15,
+       "n": 5
+      },
+      {
+       "key": -4,
+       "net": 928,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -3,
+       "net": 1189,
+       "loss": 37.45,
+       "n": 4
+      },
+      {
+       "key": -2,
+       "net": 478.27,
+       "loss": 65,
+       "n": 4
+      },
+      {
+       "key": -1,
+       "net": 749,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": 0,
+       "net": 1878,
+       "loss": 25,
+       "n": 8
+      }
+     ],
+     "methods": {
+      "Card": 4739.100000000001,
+      "Apple Pay": 1674.94,
+      "Cash": 571.4,
+      "Store credit": 25
+     },
+     "droppedFromChart": 0
+    }
+   }
+  },
+  "30d": {
+   "all": {
+    "state": {
+     "range": "30d",
+     "filter": "all"
+    },
+    "rangeLabel": "May 15 – Jun 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$27,149",
+      "sub": "105 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$26,970",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$127",
+      "sub": "4 refunded",
+      "color": "var(--red)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$60",
+      "sub": "7 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$70",
+      "sub": "3 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "",
+      "title": "Fri May 15 2026 · net $465",
+      "netHeight": "24.43510246978455%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "16",
+      "title": "Sat May 16 2026 · net $669",
+      "netHeight": "35.15501839201261%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "",
+      "title": "Sun May 17 2026 · net $1,560",
+      "netHeight": "81.97582764056752%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Mon May 18 2026 · net $1,085",
+      "netHeight": "57.01523909616395%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "19",
+      "title": "Tue May 19 2026 · net $630",
+      "netHeight": "33.105622700998424%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Wed May 20 2026 · net $931",
+      "netHeight": "48.93904361534419%",
+      "netMin": "3px",
+      "lossHeight": "1.0509721492380453%"
+     },
+     {
+      "label": "",
+      "title": "Thu May 21 2026 · net $1,049",
+      "netHeight": "55.12348922753547%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "22",
+      "title": "Fri May 22 2026 · net $836",
+      "netHeight": "43.94692590646348%",
+      "netMin": "3px",
+      "lossHeight": "1.0509721492380453%"
+     },
+     {
+      "label": "",
+      "title": "Sat May 23 2026 · net $1,040",
+      "netHeight": "54.65055176037835%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "",
+      "title": "Sun May 24 2026 · net $949",
+      "netHeight": "49.86862848134525%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "25",
+      "title": "Mon May 25 2026 · net $435",
+      "netHeight": "22.858644245927483%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Tue May 26 2026 · net $470",
+      "netHeight": "24.697845507094062%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Wed May 27 2026 · net $184",
+      "netHeight": "9.668943772990016%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "28",
+      "title": "Thu May 28 2026 · net $985",
+      "netHeight": "51.76037834997372%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Fri May 29 2026 · net $1,125",
+      "netHeight": "59.11718339464004%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Sat May 30 2026 · net $940",
+      "netHeight": "49.395691014188124%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "31",
+      "title": "Sun May 31 2026 · net $1,679",
+      "netHeight": "88.2291119285339%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "1",
+      "title": "Mon Jun 01 2026 · net $1,199",
+      "netHeight": "63.005780346820806%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Tue Jun 02 2026 · net $1,058",
+      "netHeight": "55.59642669469259%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Wed Jun 03 2026 · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "4",
+      "title": "Thu Jun 04 2026 · net $523",
+      "netHeight": "27.48292170257488%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Fri Jun 05 2026 · net $513",
+      "netHeight": "26.95743562795586%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Sat Jun 06 2026 · net $1,575",
+      "netHeight": "82.76405675249606%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "7",
+      "title": "Sun Jun 07 2026 · net $950",
+      "netHeight": "49.92117708880714%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Mon Jun 08 2026 · net $897",
+      "netHeight": "47.13610089332633%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "",
+      "title": "Tue Jun 09 2026 · net $928",
+      "netHeight": "48.7651077246453%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "10",
+      "title": "Wed Jun 10 2026 · net $1,189",
+      "netHeight": "62.48029427220179%",
+      "netMin": "3px",
+      "lossHeight": "1.96794534944824%"
+     },
+     {
+      "label": "",
+      "title": "Thu Jun 11 2026 · net $478",
+      "netHeight": "25.13242249080399%",
+      "netMin": "3px",
+      "lossHeight": "3.415659485023647%"
+     },
+     {
+      "label": "",
+      "title": "Fri Jun 12 2026 · net $749",
+      "netHeight": "39.35890698896479%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "13",
+      "title": "Sat Jun 13 2026 · net $1,878",
+      "netHeight": "98.68628481345245%",
+      "netMin": "3px",
+      "lossHeight": "1.3137151865475565%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$14,297",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$10,919",
+      "width": "76.37629277723454%"
+     },
+     {
+      "label": "Cash",
+      "value": "$3,718",
+      "width": "26.00620840835044%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$25",
+      "width": "0.17486503916277418%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "105"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "5"
+     },
+     {
+      "label": "Adjusted",
+      "count": "7"
+     },
+     {
+      "label": "Credits",
+      "count": "4"
+     }
+    ],
+    "rows": [
+     {
+      "id": "INV-20608",
+      "date": "Today · 10:05 AM",
+      "client": "Aisha Rahman",
+      "vehicle": "2023 Range Rover Sport",
+      "items": "Executive Detail + Ceramic +1",
+      "total": "$577.80",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20607",
+      "date": "Today · 10:15 AM",
+      "client": "Marcus Webb",
+      "vehicle": "2017 Jeep Wrangler",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$133.75",
+      "status": "Partially paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20606",
+      "date": "Today · 9:50 AM",
+      "client": "Liam Chen",
+      "vehicle": "2020 BMW M340i",
+      "items": "Ceramic Maintenance + Wax",
+      "total": "$192.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20605",
+      "date": "Today · 10:30 AM",
+      "client": "Sofia Marchetti",
+      "vehicle": "2024 Porsche Macan",
+      "items": "Executive Detail",
+      "total": "$278.20",
+      "status": "Partially paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20604",
+      "date": "Today · 9:40 AM",
+      "client": "Jonathan Franco",
+      "vehicle": "2023 Mercedes-Benz GLE",
+      "items": "Premium Hand Wash + Interior Refresh +1",
+      "total": "$196.88",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20603",
+      "date": "Today · 10:31 AM",
+      "client": "Priya Nair",
+      "vehicle": "2022 Tesla Model Y",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$164.78",
+      "status": "Unpaid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20602",
+      "date": "Today · 9:58 AM",
+      "client": "David Okafor",
+      "vehicle": "2019 Ford F-150",
+      "items": "Full Detail +1",
+      "total": "$394.50",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20601",
+      "date": "Today · 8:52 AM",
+      "client": "Maria Delgado",
+      "vehicle": "2021 Audi Q5",
+      "items": "Express Hand Wash +1",
+      "total": "$98.95",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20608",
+      "date": "Yesterday · 11:00 AM",
+      "client": "Leah Goldberg",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Executive Detail +1",
+      "total": "$347.05",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20607",
+      "date": "Yesterday · 1:00 PM",
+      "client": "Noah Fischer",
+      "vehicle": "2023 Genesis GV80",
+      "items": "Premium Hand Wash + Interior Refresh +1",
+      "total": "$191.18",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20579",
+      "date": "Yesterday · 2:10 PM",
+      "client": "Chloe Bennett",
+      "vehicle": "2022 BMW X5",
+      "items": "Executive Detail",
+      "total": "$278.20",
+      "status": "Refund pending",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20606",
+      "date": "Jun 11 · 1:30 PM",
+      "client": "Ava Sinclair",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$138.05",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20605",
+      "date": "Jun 11 · 8:00 AM",
+      "client": "Isaac Patel",
+      "vehicle": "2019 Mercedes-Benz C300",
+      "items": "Express Hand Wash",
+      "total": "$63.15",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20604",
+      "date": "Jun 11 · 3:30 PM",
+      "client": "Mia Torres",
+      "vehicle": "2024 Lexus GX 550",
+      "items": "Express Hand Wash",
+      "total": "$58.15",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20571",
+      "date": "Jun 11 · 11:00 AM",
+      "client": "Omar Haddad",
+      "vehicle": "2023 Porsche 911 Carrera",
+      "items": "Full Detail",
+      "total": "$342.40",
+      "status": "Canceled · refunded",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20603",
+      "date": "Jun 10 · 3:30 PM",
+      "client": "Ethan Morales",
+      "vehicle": "2021 Kia Telluride",
+      "items": "Executive Detail + Ceramic",
+      "total": "$454.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20602",
+      "date": "Jun 10 · 8:00 AM",
+      "client": "Tom Bradley",
+      "vehicle": "2022 BMW X5",
+      "items": "Executive Detail",
+      "total": "$288.20",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20601",
+      "date": "Jun 10 · 4:30 PM",
+      "client": "Ava Sinclair",
+      "vehicle": "2023 Genesis GV80",
+      "items": "Executive Detail +1",
+      "total": "$406.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20566",
+      "date": "Jun 10 · 1:30 PM",
+      "client": "Hannah Kim",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$185.48",
+      "status": "Partially refunded",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20600",
+      "date": "Jun 9 · 12:30 PM",
+      "client": "Andre Thompson",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Executive Detail + Ceramic +1",
+      "total": "$508.25",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20599",
+      "date": "Jun 9 · 1:30 PM",
+      "client": "Leah Goldberg",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Family Wash + Pet Hair",
+      "total": "$101.65",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20598",
+      "date": "Jun 9 · 3:30 PM",
+      "client": "Mia Torres",
+      "vehicle": "2022 BMW X5",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$206.88",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20597",
+      "date": "Jun 9 · 9:00 AM",
+      "client": "Noah Fischer",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Premium Hand Wash + Interior",
+      "total": "$143.03",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20560",
+      "date": "Jun 9 · 10:20 AM",
+      "client": "Victor Nguyen",
+      "vehicle": "2020 Honda Accord",
+      "items": "Express Hand Wash",
+      "total": "$48.15",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20596",
+      "date": "Jun 8 · 12:00 PM",
+      "client": "Ruby Castillo",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Premium Hand Wash + Interior",
+      "total": "$143.03",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20595",
+      "date": "Jun 8 · 4:30 PM",
+      "client": "Andre Thompson",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Premium Hand Wash + Interior Refresh",
+      "total": "$137.68",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20594",
+      "date": "Jun 8 · 11:00 AM",
+      "client": "Tom Bradley",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Family Wash + Pet Hair",
+      "total": "$116.65",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20593",
+      "date": "Jun 8 · 1:30 PM",
+      "client": "Diego Ramos",
+      "vehicle": "2022 BMW X5",
+      "items": "Executive Detail + Ceramic",
+      "total": "$449.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20552",
+      "date": "Jun 8 · 3:15 PM",
+      "client": "Mateo Silva",
+      "vehicle": "2022 Ford Bronco",
+      "items": "Premium Hand Wash + Interior",
+      "total": "$138.03",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20592",
+      "date": "Jun 7 · 10:00 AM",
+      "client": "Caleb Owens",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Ceramic Maintenance + Wax",
+      "total": "$202.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20591",
+      "date": "Jun 7 · 12:30 PM",
+      "client": "Tom Bradley",
+      "vehicle": "2019 Mercedes-Benz C300",
+      "items": "Express Hand Wash +1",
+      "total": "$85.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20548",
+      "date": "Jun 7 · 9:00 AM",
+      "client": "Zoe Laurent",
+      "vehicle": "2023 Audi e-tron GT",
+      "items": "Exotic Detail Package",
+      "total": "$738.30",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20590",
+      "date": "Jun 6 · 11:30 AM",
+      "client": "Mia Torres",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Full Detail",
+      "total": "$347.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20589",
+      "date": "Jun 6 · 3:00 PM",
+      "client": "Nathan Brooks",
+      "vehicle": "2021 Kia Telluride",
+      "items": "Executive Detail + Ceramic +1",
+      "total": "$592.80",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20588",
+      "date": "Jun 6 · 1:30 PM",
+      "client": "Mia Torres",
+      "vehicle": "2021 Kia Telluride",
+      "items": "Executive Detail + Ceramic +1",
+      "total": "$496.85",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20587",
+      "date": "Jun 6 · 11:00 AM",
+      "client": "Ethan Morales",
+      "vehicle": "2024 Lexus GX 550",
+      "items": "Executive Detail",
+      "total": "$293.20",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20586",
+      "date": "Jun 5 · 1:00 PM",
+      "client": "Tom Bradley",
+      "vehicle": "2022 BMW X5",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$175.13",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20585",
+      "date": "Jun 5 · 1:00 PM",
+      "client": "Diego Ramos",
+      "vehicle": "2024 Lexus GX 550",
+      "items": "Family Wash + Pet Hair",
+      "total": "$116.65",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20584",
+      "date": "Jun 5 · 1:30 PM",
+      "client": "Isaac Patel",
+      "vehicle": "2018 Lexus RX 350",
+      "items": "Premium Hand Wash + Interior Refresh +1",
+      "total": "$277.13",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20583",
+      "date": "Jun 4 · 1:30 PM",
+      "client": "Grace Adeyemi",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Ceramic Maintenance + Wax +1",
+      "total": "$250.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20582",
+      "date": "Jun 4 · 10:30 AM",
+      "client": "Andre Thompson",
+      "vehicle": "2020 Honda Accord",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$190.48",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20581",
+      "date": "Jun 4 · 12:00 PM",
+      "client": "Grace Adeyemi",
+      "vehicle": "2018 Lexus RX 350",
+      "items": "Premium Hand Wash + Interior Refresh",
+      "total": "$153.73",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20580",
+      "date": "Jun 2 · 10:00 AM",
+      "client": "Tom Bradley",
+      "vehicle": "2020 Honda Accord",
+      "items": "Full Detail",
+      "total": "$357.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20579",
+      "date": "Jun 2 · 12:30 PM",
+      "client": "Leah Goldberg",
+      "vehicle": "2023 Genesis GV80",
+      "items": "Premium Hand Wash + Interior",
+      "total": "$148.03",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20578",
+      "date": "Jun 2 · 12:00 PM",
+      "client": "Andre Thompson",
+      "vehicle": "2019 Mercedes-Benz C300",
+      "items": "Premium Hand Wash + Interior",
+      "total": "$153.03",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20577",
+      "date": "Jun 2 · 2:30 PM",
+      "client": "Caleb Owens",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Executive Detail + Ceramic +1",
+      "total": "$513.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20576",
+      "date": "Jun 1 · 10:00 AM",
+      "client": "Ava Sinclair",
+      "vehicle": "2024 Lexus GX 550",
+      "items": "Exotic Detail Package",
+      "total": "$700.50",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20575",
+      "date": "Jun 1 · 12:00 PM",
+      "client": "Mia Torres",
+      "vehicle": "2023 Genesis GV80",
+      "items": "Executive Detail + Ceramic",
+      "total": "$464.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20574",
+      "date": "Jun 1 · 8:00 AM",
+      "client": "Ruby Castillo",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Premium Hand Wash + Interior",
+      "total": "$138.03",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20573",
+      "date": "May 31 · 8:30 AM",
+      "client": "Isaac Patel",
+      "vehicle": "2023 Genesis GV80",
+      "items": "Premium Hand Wash + Interior Refresh",
+      "total": "$153.73",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20572",
+      "date": "May 31 · 2:00 PM",
+      "client": "Olivia Hart",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Executive Detail + Ceramic +1",
+      "total": "$502.90",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20571",
+      "date": "May 31 · 10:30 AM",
+      "client": "Noah Fischer",
+      "vehicle": "2022 BMW X5",
+      "items": "Exotic Detail Package",
+      "total": "$695.50",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20570",
+      "date": "May 31 · 2:00 PM",
+      "client": "Leah Goldberg",
+      "vehicle": "2024 Lexus GX 550",
+      "items": "Executive Detail + Ceramic",
+      "total": "$459.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20610",
+      "date": "May 30 · 11:30 AM",
+      "client": "Priya Nair",
+      "vehicle": "2022 Tesla Model Y",
+      "items": "Express Hand Wash",
+      "total": "$48.15",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20569",
+      "date": "May 30 · 8:00 AM",
+      "client": "Isaac Patel",
+      "vehicle": "2023 Genesis GV80",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$148.75",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20568",
+      "date": "May 30 · 11:30 AM",
+      "client": "Tom Bradley",
+      "vehicle": "2018 Lexus RX 350",
+      "items": "Executive Detail",
+      "total": "$283.20",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20567",
+      "date": "May 30 · 4:00 PM",
+      "client": "Mia Torres",
+      "vehicle": "2018 Lexus RX 350",
+      "items": "Executive Detail + Ceramic +1",
+      "total": "$502.55",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20566",
+      "date": "May 30 · 2:00 PM",
+      "client": "Ruby Castillo",
+      "vehicle": "2022 BMW X5",
+      "items": "Express Hand Wash",
+      "total": "$63.15",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20565",
+      "date": "May 29 · 10:00 AM",
+      "client": "Isaac Patel",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Exotic Detail Package",
+      "total": "$700.50",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20564",
+      "date": "May 29 · 9:30 AM",
+      "client": "Tom Bradley",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Executive Detail + Ceramic +1",
+      "total": "$513.25",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20563",
+      "date": "May 28 · 9:00 AM",
+      "client": "Ruby Castillo",
+      "vehicle": "2021 Kia Telluride",
+      "items": "Express Hand Wash",
+      "total": "$58.15",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20562",
+      "date": "May 28 · 3:00 PM",
+      "client": "Julian Brooks",
+      "vehicle": "2024 Lexus GX 550",
+      "items": "Executive Detail + Ceramic",
+      "total": "$459.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20561",
+      "date": "May 28 · 3:30 PM",
+      "client": "Leah Goldberg",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Executive Detail",
+      "total": "$293.20",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20560",
+      "date": "May 28 · 10:30 AM",
+      "client": "Julian Brooks",
+      "vehicle": "2019 Mercedes-Benz C300",
+      "items": "Executive Detail",
+      "total": "$288.20",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20559",
+      "date": "May 27 · 12:30 PM",
+      "client": "Grace Adeyemi",
+      "vehicle": "2020 Honda Accord",
+      "items": "Premium Hand Wash + Interior Refresh",
+      "total": "$163.73",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20558",
+      "date": "May 27 · 1:30 PM",
+      "client": "Julian Brooks",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Express Hand Wash",
+      "total": "$58.15",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20557",
+      "date": "May 26 · 2:30 PM",
+      "client": "Diego Ramos",
+      "vehicle": "2022 BMW X5",
+      "items": "Ceramic Maintenance + Wax",
+      "total": "$197.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20556",
+      "date": "May 26 · 9:00 AM",
+      "client": "Camila Reyes",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Executive Detail +1",
+      "total": "$320.30",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20555",
+      "date": "May 25 · 8:30 AM",
+      "client": "Noah Fischer",
+      "vehicle": "2021 Kia Telluride",
+      "items": "Express Hand Wash +1",
+      "total": "$122.35",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20554",
+      "date": "May 25 · 12:30 PM",
+      "client": "Noah Fischer",
+      "vehicle": "2018 Lexus RX 350",
+      "items": "Ceramic Maintenance + Wax +1",
+      "total": "$251.45",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20553",
+      "date": "May 25 · 11:30 AM",
+      "client": "Isaac Patel",
+      "vehicle": "2021 Kia Telluride",
+      "items": "Family Wash + Pet Hair",
+      "total": "$106.65",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20609",
+      "date": "May 24 · 12:00 PM",
+      "client": "Victor Nguyen",
+      "vehicle": "2020 Honda Accord",
+      "items": "Express Hand Wash",
+      "total": "$48.15",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20552",
+      "date": "May 24 · 10:00 AM",
+      "client": "Andre Thompson",
+      "vehicle": "2020 Honda Accord",
+      "items": "Exotic Detail Package",
+      "total": "$710.50",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20551",
+      "date": "May 24 · 11:00 AM",
+      "client": "Grace Adeyemi",
+      "vehicle": "2019 Mercedes-Benz C300",
+      "items": "Premium Hand Wash + Interior",
+      "total": "$138.03",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20550",
+      "date": "May 24 · 4:00 PM",
+      "client": "Isaac Patel",
+      "vehicle": "2019 Mercedes-Benz C300",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$148.75",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20549",
+      "date": "May 23 · 3:30 PM",
+      "client": "Ruby Castillo",
+      "vehicle": "2018 Lexus RX 350",
+      "items": "Executive Detail + Ceramic",
+      "total": "$464.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20548",
+      "date": "May 23 · 8:00 AM",
+      "client": "Andre Thompson",
+      "vehicle": "2019 Mercedes-Benz C300",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$245.05",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20547",
+      "date": "May 23 · 3:00 PM",
+      "client": "Julian Brooks",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Executive Detail + Ceramic",
+      "total": "$448.35",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20546",
+      "date": "May 22 · 1:30 PM",
+      "client": "Ethan Morales",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Executive Detail",
+      "total": "$278.20",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20545",
+      "date": "May 22 · 11:00 AM",
+      "client": "Ruby Castillo",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$159.45",
+      "status": "Partially refunded",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20544",
+      "date": "May 22 · 11:30 AM",
+      "client": "Caleb Owens",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Family Wash + Pet Hair",
+      "total": "$106.65",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20543",
+      "date": "May 22 · 12:00 PM",
+      "client": "Ava Sinclair",
+      "vehicle": "2023 Genesis GV80",
+      "items": "Full Detail +1",
+      "total": "$400.55",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20542",
+      "date": "May 21 · 2:00 PM",
+      "client": "Nathan Brooks",
+      "vehicle": "2020 Honda Accord",
+      "items": "Premium Hand Wash + Interior Refresh +1",
+      "total": "$217.23",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20541",
+      "date": "May 21 · 3:30 PM",
+      "client": "Grace Adeyemi",
+      "vehicle": "2020 Honda Accord",
+      "items": "Exotic Detail Package +1",
+      "total": "$742.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20540",
+      "date": "May 21 · 8:00 AM",
+      "client": "Caleb Owens",
+      "vehicle": "2022 BMW X5",
+      "items": "Ceramic Maintenance + Wax",
+      "total": "$207.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20539",
+      "date": "May 20 · 11:00 AM",
+      "client": "Camila Reyes",
+      "vehicle": "2022 BMW X5",
+      "items": "Express Hand Wash +1",
+      "total": "$85.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20538",
+      "date": "May 20 · 3:30 PM",
+      "client": "Leah Goldberg",
+      "vehicle": "2023 Genesis GV80",
+      "items": "Executive Detail",
+      "total": "$278.20",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20537",
+      "date": "May 20 · 3:00 PM",
+      "client": "Grace Adeyemi",
+      "vehicle": "2021 Kia Telluride",
+      "items": "Full Detail +1",
+      "total": "$389.50",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20536",
+      "date": "May 20 · 3:00 PM",
+      "client": "Grace Adeyemi",
+      "vehicle": "2024 Lexus GX 550",
+      "items": "Executive Detail",
+      "total": "$293.20",
+      "status": "Partially refunded",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20535",
+      "date": "May 19 · 3:00 PM",
+      "client": "Camila Reyes",
+      "vehicle": "2020 Honda Accord",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$235.05",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20534",
+      "date": "May 19 · 8:00 AM",
+      "client": "Julian Brooks",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Full Detail",
+      "total": "$352.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20533",
+      "date": "May 19 · 4:30 PM",
+      "client": "Isaac Patel",
+      "vehicle": "2024 Lexus GX 550",
+      "items": "Family Wash + Pet Hair",
+      "total": "$106.65",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20532",
+      "date": "May 18 · 11:30 AM",
+      "client": "Diego Ramos",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Ceramic Maintenance + Wax +1",
+      "total": "$245.75",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20531",
+      "date": "May 18 · 3:30 PM",
+      "client": "Caleb Owens",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Executive Detail",
+      "total": "$283.20",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20530",
+      "date": "May 18 · 2:00 PM",
+      "client": "Leah Goldberg",
+      "vehicle": "2023 Genesis GV80",
+      "items": "Ceramic Maintenance + Wax",
+      "total": "$192.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20529",
+      "date": "May 18 · 12:00 PM",
+      "client": "Julian Brooks",
+      "vehicle": "2018 Lexus RX 350",
+      "items": "Executive Detail + Ceramic",
+      "total": "$459.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20528",
+      "date": "May 17 · 10:00 AM",
+      "client": "Isaac Patel",
+      "vehicle": "2024 Lexus GX 550",
+      "items": "Ceramic Maintenance + Wax +1",
+      "total": "$240.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20527",
+      "date": "May 17 · 4:30 PM",
+      "client": "Nina Petrova",
+      "vehicle": "2021 Kia Telluride",
+      "items": "Executive Detail + Ceramic +1",
+      "total": "$502.20",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20526",
+      "date": "May 17 · 3:00 PM",
+      "client": "Andre Thompson",
+      "vehicle": "2022 BMW X5",
+      "items": "Executive Detail + Ceramic +1",
+      "total": "$502.20",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20525",
+      "date": "May 17 · 10:00 AM",
+      "client": "Caleb Owens",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Executive Detail + Ceramic",
+      "total": "$459.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20524",
+      "date": "May 16 · 11:00 AM",
+      "client": "Olivia Hart",
+      "vehicle": "2021 Kia Telluride",
+      "items": "Executive Detail +1",
+      "total": "$303.90",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20523",
+      "date": "May 16 · 11:30 AM",
+      "client": "Ruby Castillo",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Premium Hand Wash + Interior Refresh",
+      "total": "$153.73",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20522",
+      "date": "May 16 · 1:00 PM",
+      "client": "Camila Reyes",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Executive Detail",
+      "total": "$278.20",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20521",
+      "date": "May 15 · 12:00 PM",
+      "client": "Caleb Owens",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Express Hand Wash",
+      "total": "$48.15",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20520",
+      "date": "May 15 · 3:00 PM",
+      "client": "Isaac Patel",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Executive Detail + Ceramic",
+      "total": "$464.40",
+      "status": "Paid",
+      "adjusted": false
+     }
+    ],
+    "noRows": false,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 27149,
+      "adj": -60,
+      "refunds": 127.45,
+      "credits": 70,
+      "outstanding": 506.73,
+      "net": 26969.88785046729
+     },
+     "counts": {
+      "invoices": 105,
+      "refunded": 4,
+      "adjusted": 7,
+      "creditInvoices": 3,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": -29,
+       "net": 465,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -28,
+       "net": 669,
+       "loss": 15,
+       "n": 3
+      },
+      {
+       "key": -27,
+       "net": 1560,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -26,
+       "net": 1085,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -25,
+       "net": 630,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -24,
+       "net": 931.31,
+       "loss": 20,
+       "n": 4
+      },
+      {
+       "key": -23,
+       "net": 1049,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -22,
+       "net": 836.31,
+       "loss": 20,
+       "n": 4
+      },
+      {
+       "key": -21,
+       "net": 1040,
+       "loss": 15,
+       "n": 3
+      },
+      {
+       "key": -20,
+       "net": 949,
+       "loss": 15,
+       "n": 4
+      },
+      {
+       "key": -19,
+       "net": 435,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -18,
+       "net": 470,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -17,
+       "net": 184,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -16,
+       "net": 985,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -15,
+       "net": 1125,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -14,
+       "net": 940,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -13,
+       "net": 1679,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -12,
+       "net": 1199,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -11,
+       "net": 1058,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -10,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": -9,
+       "net": 523,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -8,
+       "net": 513,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -7,
+       "net": 1575,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -6,
+       "net": 950,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -5,
+       "net": 897,
+       "loss": 15,
+       "n": 5
+      },
+      {
+       "key": -4,
+       "net": 928,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -3,
+       "net": 1189,
+       "loss": 37.45,
+       "n": 4
+      },
+      {
+       "key": -2,
+       "net": 478.27,
+       "loss": 65,
+       "n": 4
+      },
+      {
+       "key": -1,
+       "net": 749,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": 0,
+       "net": 1878,
+       "loss": 25,
+       "n": 8
+      }
+     ],
+     "methods": {
+      "Card": 14296.74,
+      "Apple Pay": 10919.32,
+      "Cash": 3718.0400000000004,
+      "Store credit": 25
+     },
+     "droppedFromChart": 0
+    }
+   },
+   "unpaid": {
+    "state": {
+     "range": "30d",
+     "filter": "unpaid"
+    },
+    "rangeLabel": "May 15 – Jun 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$27,149",
+      "sub": "105 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$26,970",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$127",
+      "sub": "4 refunded",
+      "color": "var(--red)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$60",
+      "sub": "7 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$70",
+      "sub": "3 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "",
+      "title": "Fri May 15 2026 · net $465",
+      "netHeight": "24.43510246978455%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "16",
+      "title": "Sat May 16 2026 · net $669",
+      "netHeight": "35.15501839201261%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "",
+      "title": "Sun May 17 2026 · net $1,560",
+      "netHeight": "81.97582764056752%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Mon May 18 2026 · net $1,085",
+      "netHeight": "57.01523909616395%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "19",
+      "title": "Tue May 19 2026 · net $630",
+      "netHeight": "33.105622700998424%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Wed May 20 2026 · net $931",
+      "netHeight": "48.93904361534419%",
+      "netMin": "3px",
+      "lossHeight": "1.0509721492380453%"
+     },
+     {
+      "label": "",
+      "title": "Thu May 21 2026 · net $1,049",
+      "netHeight": "55.12348922753547%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "22",
+      "title": "Fri May 22 2026 · net $836",
+      "netHeight": "43.94692590646348%",
+      "netMin": "3px",
+      "lossHeight": "1.0509721492380453%"
+     },
+     {
+      "label": "",
+      "title": "Sat May 23 2026 · net $1,040",
+      "netHeight": "54.65055176037835%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "",
+      "title": "Sun May 24 2026 · net $949",
+      "netHeight": "49.86862848134525%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "25",
+      "title": "Mon May 25 2026 · net $435",
+      "netHeight": "22.858644245927483%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Tue May 26 2026 · net $470",
+      "netHeight": "24.697845507094062%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Wed May 27 2026 · net $184",
+      "netHeight": "9.668943772990016%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "28",
+      "title": "Thu May 28 2026 · net $985",
+      "netHeight": "51.76037834997372%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Fri May 29 2026 · net $1,125",
+      "netHeight": "59.11718339464004%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Sat May 30 2026 · net $940",
+      "netHeight": "49.395691014188124%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "31",
+      "title": "Sun May 31 2026 · net $1,679",
+      "netHeight": "88.2291119285339%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "1",
+      "title": "Mon Jun 01 2026 · net $1,199",
+      "netHeight": "63.005780346820806%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Tue Jun 02 2026 · net $1,058",
+      "netHeight": "55.59642669469259%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Wed Jun 03 2026 · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "4",
+      "title": "Thu Jun 04 2026 · net $523",
+      "netHeight": "27.48292170257488%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Fri Jun 05 2026 · net $513",
+      "netHeight": "26.95743562795586%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Sat Jun 06 2026 · net $1,575",
+      "netHeight": "82.76405675249606%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "7",
+      "title": "Sun Jun 07 2026 · net $950",
+      "netHeight": "49.92117708880714%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Mon Jun 08 2026 · net $897",
+      "netHeight": "47.13610089332633%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "",
+      "title": "Tue Jun 09 2026 · net $928",
+      "netHeight": "48.7651077246453%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "10",
+      "title": "Wed Jun 10 2026 · net $1,189",
+      "netHeight": "62.48029427220179%",
+      "netMin": "3px",
+      "lossHeight": "1.96794534944824%"
+     },
+     {
+      "label": "",
+      "title": "Thu Jun 11 2026 · net $478",
+      "netHeight": "25.13242249080399%",
+      "netMin": "3px",
+      "lossHeight": "3.415659485023647%"
+     },
+     {
+      "label": "",
+      "title": "Fri Jun 12 2026 · net $749",
+      "netHeight": "39.35890698896479%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "13",
+      "title": "Sat Jun 13 2026 · net $1,878",
+      "netHeight": "98.68628481345245%",
+      "netMin": "3px",
+      "lossHeight": "1.3137151865475565%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$14,297",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$10,919",
+      "width": "76.37629277723454%"
+     },
+     {
+      "label": "Cash",
+      "value": "$3,718",
+      "width": "26.00620840835044%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$25",
+      "width": "0.17486503916277418%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "105"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "5"
+     },
+     {
+      "label": "Adjusted",
+      "count": "7"
+     },
+     {
+      "label": "Credits",
+      "count": "4"
+     }
+    ],
+    "rows": [
+     {
+      "id": "INV-20607",
+      "date": "Today · 10:15 AM",
+      "client": "Marcus Webb",
+      "vehicle": "2017 Jeep Wrangler",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$133.75",
+      "status": "Partially paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20605",
+      "date": "Today · 10:30 AM",
+      "client": "Sofia Marchetti",
+      "vehicle": "2024 Porsche Macan",
+      "items": "Executive Detail",
+      "total": "$278.20",
+      "status": "Partially paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20603",
+      "date": "Today · 10:31 AM",
+      "client": "Priya Nair",
+      "vehicle": "2022 Tesla Model Y",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$164.78",
+      "status": "Unpaid",
+      "adjusted": false
+     }
+    ],
+    "noRows": false,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 27149,
+      "adj": -60,
+      "refunds": 127.45,
+      "credits": 70,
+      "outstanding": 506.73,
+      "net": 26969.88785046729
+     },
+     "counts": {
+      "invoices": 105,
+      "refunded": 4,
+      "adjusted": 7,
+      "creditInvoices": 3,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": -29,
+       "net": 465,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -28,
+       "net": 669,
+       "loss": 15,
+       "n": 3
+      },
+      {
+       "key": -27,
+       "net": 1560,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -26,
+       "net": 1085,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -25,
+       "net": 630,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -24,
+       "net": 931.31,
+       "loss": 20,
+       "n": 4
+      },
+      {
+       "key": -23,
+       "net": 1049,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -22,
+       "net": 836.31,
+       "loss": 20,
+       "n": 4
+      },
+      {
+       "key": -21,
+       "net": 1040,
+       "loss": 15,
+       "n": 3
+      },
+      {
+       "key": -20,
+       "net": 949,
+       "loss": 15,
+       "n": 4
+      },
+      {
+       "key": -19,
+       "net": 435,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -18,
+       "net": 470,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -17,
+       "net": 184,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -16,
+       "net": 985,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -15,
+       "net": 1125,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -14,
+       "net": 940,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -13,
+       "net": 1679,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -12,
+       "net": 1199,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -11,
+       "net": 1058,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -10,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": -9,
+       "net": 523,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -8,
+       "net": 513,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -7,
+       "net": 1575,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -6,
+       "net": 950,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -5,
+       "net": 897,
+       "loss": 15,
+       "n": 5
+      },
+      {
+       "key": -4,
+       "net": 928,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -3,
+       "net": 1189,
+       "loss": 37.45,
+       "n": 4
+      },
+      {
+       "key": -2,
+       "net": 478.27,
+       "loss": 65,
+       "n": 4
+      },
+      {
+       "key": -1,
+       "net": 749,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": 0,
+       "net": 1878,
+       "loss": 25,
+       "n": 8
+      }
+     ],
+     "methods": {
+      "Card": 14296.74,
+      "Apple Pay": 10919.32,
+      "Cash": 3718.0400000000004,
+      "Store credit": 25
+     },
+     "droppedFromChart": 0
+    }
+   },
+   "refunds": {
+    "state": {
+     "range": "30d",
+     "filter": "refunds"
+    },
+    "rangeLabel": "May 15 – Jun 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$27,149",
+      "sub": "105 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$26,970",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$127",
+      "sub": "4 refunded",
+      "color": "var(--red)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$60",
+      "sub": "7 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$70",
+      "sub": "3 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "",
+      "title": "Fri May 15 2026 · net $465",
+      "netHeight": "24.43510246978455%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "16",
+      "title": "Sat May 16 2026 · net $669",
+      "netHeight": "35.15501839201261%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "",
+      "title": "Sun May 17 2026 · net $1,560",
+      "netHeight": "81.97582764056752%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Mon May 18 2026 · net $1,085",
+      "netHeight": "57.01523909616395%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "19",
+      "title": "Tue May 19 2026 · net $630",
+      "netHeight": "33.105622700998424%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Wed May 20 2026 · net $931",
+      "netHeight": "48.93904361534419%",
+      "netMin": "3px",
+      "lossHeight": "1.0509721492380453%"
+     },
+     {
+      "label": "",
+      "title": "Thu May 21 2026 · net $1,049",
+      "netHeight": "55.12348922753547%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "22",
+      "title": "Fri May 22 2026 · net $836",
+      "netHeight": "43.94692590646348%",
+      "netMin": "3px",
+      "lossHeight": "1.0509721492380453%"
+     },
+     {
+      "label": "",
+      "title": "Sat May 23 2026 · net $1,040",
+      "netHeight": "54.65055176037835%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "",
+      "title": "Sun May 24 2026 · net $949",
+      "netHeight": "49.86862848134525%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "25",
+      "title": "Mon May 25 2026 · net $435",
+      "netHeight": "22.858644245927483%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Tue May 26 2026 · net $470",
+      "netHeight": "24.697845507094062%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Wed May 27 2026 · net $184",
+      "netHeight": "9.668943772990016%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "28",
+      "title": "Thu May 28 2026 · net $985",
+      "netHeight": "51.76037834997372%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Fri May 29 2026 · net $1,125",
+      "netHeight": "59.11718339464004%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Sat May 30 2026 · net $940",
+      "netHeight": "49.395691014188124%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "31",
+      "title": "Sun May 31 2026 · net $1,679",
+      "netHeight": "88.2291119285339%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "1",
+      "title": "Mon Jun 01 2026 · net $1,199",
+      "netHeight": "63.005780346820806%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Tue Jun 02 2026 · net $1,058",
+      "netHeight": "55.59642669469259%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Wed Jun 03 2026 · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "4",
+      "title": "Thu Jun 04 2026 · net $523",
+      "netHeight": "27.48292170257488%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Fri Jun 05 2026 · net $513",
+      "netHeight": "26.95743562795586%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Sat Jun 06 2026 · net $1,575",
+      "netHeight": "82.76405675249606%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "7",
+      "title": "Sun Jun 07 2026 · net $950",
+      "netHeight": "49.92117708880714%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Mon Jun 08 2026 · net $897",
+      "netHeight": "47.13610089332633%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "",
+      "title": "Tue Jun 09 2026 · net $928",
+      "netHeight": "48.7651077246453%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "10",
+      "title": "Wed Jun 10 2026 · net $1,189",
+      "netHeight": "62.48029427220179%",
+      "netMin": "3px",
+      "lossHeight": "1.96794534944824%"
+     },
+     {
+      "label": "",
+      "title": "Thu Jun 11 2026 · net $478",
+      "netHeight": "25.13242249080399%",
+      "netMin": "3px",
+      "lossHeight": "3.415659485023647%"
+     },
+     {
+      "label": "",
+      "title": "Fri Jun 12 2026 · net $749",
+      "netHeight": "39.35890698896479%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "13",
+      "title": "Sat Jun 13 2026 · net $1,878",
+      "netHeight": "98.68628481345245%",
+      "netMin": "3px",
+      "lossHeight": "1.3137151865475565%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$14,297",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$10,919",
+      "width": "76.37629277723454%"
+     },
+     {
+      "label": "Cash",
+      "value": "$3,718",
+      "width": "26.00620840835044%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$25",
+      "width": "0.17486503916277418%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "105"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "5"
+     },
+     {
+      "label": "Adjusted",
+      "count": "7"
+     },
+     {
+      "label": "Credits",
+      "count": "4"
+     }
+    ],
+    "rows": [
+     {
+      "id": "INV-20579",
+      "date": "Yesterday · 2:10 PM",
+      "client": "Chloe Bennett",
+      "vehicle": "2022 BMW X5",
+      "items": "Executive Detail",
+      "total": "$278.20",
+      "status": "Refund pending",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20571",
+      "date": "Jun 11 · 11:00 AM",
+      "client": "Omar Haddad",
+      "vehicle": "2023 Porsche 911 Carrera",
+      "items": "Full Detail",
+      "total": "$342.40",
+      "status": "Canceled · refunded",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20566",
+      "date": "Jun 10 · 1:30 PM",
+      "client": "Hannah Kim",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$185.48",
+      "status": "Partially refunded",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20545",
+      "date": "May 22 · 11:00 AM",
+      "client": "Ruby Castillo",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$159.45",
+      "status": "Partially refunded",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20536",
+      "date": "May 20 · 3:00 PM",
+      "client": "Grace Adeyemi",
+      "vehicle": "2024 Lexus GX 550",
+      "items": "Executive Detail",
+      "total": "$293.20",
+      "status": "Partially refunded",
+      "adjusted": false
+     }
+    ],
+    "noRows": false,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 27149,
+      "adj": -60,
+      "refunds": 127.45,
+      "credits": 70,
+      "outstanding": 506.73,
+      "net": 26969.88785046729
+     },
+     "counts": {
+      "invoices": 105,
+      "refunded": 4,
+      "adjusted": 7,
+      "creditInvoices": 3,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": -29,
+       "net": 465,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -28,
+       "net": 669,
+       "loss": 15,
+       "n": 3
+      },
+      {
+       "key": -27,
+       "net": 1560,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -26,
+       "net": 1085,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -25,
+       "net": 630,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -24,
+       "net": 931.31,
+       "loss": 20,
+       "n": 4
+      },
+      {
+       "key": -23,
+       "net": 1049,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -22,
+       "net": 836.31,
+       "loss": 20,
+       "n": 4
+      },
+      {
+       "key": -21,
+       "net": 1040,
+       "loss": 15,
+       "n": 3
+      },
+      {
+       "key": -20,
+       "net": 949,
+       "loss": 15,
+       "n": 4
+      },
+      {
+       "key": -19,
+       "net": 435,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -18,
+       "net": 470,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -17,
+       "net": 184,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -16,
+       "net": 985,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -15,
+       "net": 1125,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -14,
+       "net": 940,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -13,
+       "net": 1679,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -12,
+       "net": 1199,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -11,
+       "net": 1058,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -10,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": -9,
+       "net": 523,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -8,
+       "net": 513,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -7,
+       "net": 1575,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -6,
+       "net": 950,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -5,
+       "net": 897,
+       "loss": 15,
+       "n": 5
+      },
+      {
+       "key": -4,
+       "net": 928,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -3,
+       "net": 1189,
+       "loss": 37.45,
+       "n": 4
+      },
+      {
+       "key": -2,
+       "net": 478.27,
+       "loss": 65,
+       "n": 4
+      },
+      {
+       "key": -1,
+       "net": 749,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": 0,
+       "net": 1878,
+       "loss": 25,
+       "n": 8
+      }
+     ],
+     "methods": {
+      "Card": 14296.74,
+      "Apple Pay": 10919.32,
+      "Cash": 3718.0400000000004,
+      "Store credit": 25
+     },
+     "droppedFromChart": 0
+    }
+   },
+   "adjusted": {
+    "state": {
+     "range": "30d",
+     "filter": "adjusted"
+    },
+    "rangeLabel": "May 15 – Jun 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$27,149",
+      "sub": "105 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$26,970",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$127",
+      "sub": "4 refunded",
+      "color": "var(--red)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$60",
+      "sub": "7 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$70",
+      "sub": "3 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "",
+      "title": "Fri May 15 2026 · net $465",
+      "netHeight": "24.43510246978455%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "16",
+      "title": "Sat May 16 2026 · net $669",
+      "netHeight": "35.15501839201261%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "",
+      "title": "Sun May 17 2026 · net $1,560",
+      "netHeight": "81.97582764056752%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Mon May 18 2026 · net $1,085",
+      "netHeight": "57.01523909616395%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "19",
+      "title": "Tue May 19 2026 · net $630",
+      "netHeight": "33.105622700998424%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Wed May 20 2026 · net $931",
+      "netHeight": "48.93904361534419%",
+      "netMin": "3px",
+      "lossHeight": "1.0509721492380453%"
+     },
+     {
+      "label": "",
+      "title": "Thu May 21 2026 · net $1,049",
+      "netHeight": "55.12348922753547%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "22",
+      "title": "Fri May 22 2026 · net $836",
+      "netHeight": "43.94692590646348%",
+      "netMin": "3px",
+      "lossHeight": "1.0509721492380453%"
+     },
+     {
+      "label": "",
+      "title": "Sat May 23 2026 · net $1,040",
+      "netHeight": "54.65055176037835%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "",
+      "title": "Sun May 24 2026 · net $949",
+      "netHeight": "49.86862848134525%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "25",
+      "title": "Mon May 25 2026 · net $435",
+      "netHeight": "22.858644245927483%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Tue May 26 2026 · net $470",
+      "netHeight": "24.697845507094062%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Wed May 27 2026 · net $184",
+      "netHeight": "9.668943772990016%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "28",
+      "title": "Thu May 28 2026 · net $985",
+      "netHeight": "51.76037834997372%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Fri May 29 2026 · net $1,125",
+      "netHeight": "59.11718339464004%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Sat May 30 2026 · net $940",
+      "netHeight": "49.395691014188124%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "31",
+      "title": "Sun May 31 2026 · net $1,679",
+      "netHeight": "88.2291119285339%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "1",
+      "title": "Mon Jun 01 2026 · net $1,199",
+      "netHeight": "63.005780346820806%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Tue Jun 02 2026 · net $1,058",
+      "netHeight": "55.59642669469259%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Wed Jun 03 2026 · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "4",
+      "title": "Thu Jun 04 2026 · net $523",
+      "netHeight": "27.48292170257488%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Fri Jun 05 2026 · net $513",
+      "netHeight": "26.95743562795586%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Sat Jun 06 2026 · net $1,575",
+      "netHeight": "82.76405675249606%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "7",
+      "title": "Sun Jun 07 2026 · net $950",
+      "netHeight": "49.92117708880714%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Mon Jun 08 2026 · net $897",
+      "netHeight": "47.13610089332633%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "",
+      "title": "Tue Jun 09 2026 · net $928",
+      "netHeight": "48.7651077246453%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "10",
+      "title": "Wed Jun 10 2026 · net $1,189",
+      "netHeight": "62.48029427220179%",
+      "netMin": "3px",
+      "lossHeight": "1.96794534944824%"
+     },
+     {
+      "label": "",
+      "title": "Thu Jun 11 2026 · net $478",
+      "netHeight": "25.13242249080399%",
+      "netMin": "3px",
+      "lossHeight": "3.415659485023647%"
+     },
+     {
+      "label": "",
+      "title": "Fri Jun 12 2026 · net $749",
+      "netHeight": "39.35890698896479%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "13",
+      "title": "Sat Jun 13 2026 · net $1,878",
+      "netHeight": "98.68628481345245%",
+      "netMin": "3px",
+      "lossHeight": "1.3137151865475565%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$14,297",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$10,919",
+      "width": "76.37629277723454%"
+     },
+     {
+      "label": "Cash",
+      "value": "$3,718",
+      "width": "26.00620840835044%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$25",
+      "width": "0.17486503916277418%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "105"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "5"
+     },
+     {
+      "label": "Adjusted",
+      "count": "7"
+     },
+     {
+      "label": "Credits",
+      "count": "4"
+     }
+    ],
+    "rows": [
+     {
+      "id": "INV-20602",
+      "date": "Today · 9:58 AM",
+      "client": "David Okafor",
+      "vehicle": "2019 Ford F-150",
+      "items": "Full Detail +1",
+      "total": "$394.50",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20606",
+      "date": "Jun 11 · 1:30 PM",
+      "client": "Ava Sinclair",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$138.05",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20595",
+      "date": "Jun 8 · 4:30 PM",
+      "client": "Andre Thompson",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Premium Hand Wash + Interior Refresh",
+      "total": "$137.68",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20548",
+      "date": "Jun 7 · 9:00 AM",
+      "client": "Zoe Laurent",
+      "vehicle": "2023 Audi e-tron GT",
+      "items": "Exotic Detail Package",
+      "total": "$738.30",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20550",
+      "date": "May 24 · 4:00 PM",
+      "client": "Isaac Patel",
+      "vehicle": "2019 Mercedes-Benz C300",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$148.75",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20547",
+      "date": "May 23 · 3:00 PM",
+      "client": "Julian Brooks",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Executive Detail + Ceramic",
+      "total": "$448.35",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20524",
+      "date": "May 16 · 11:00 AM",
+      "client": "Olivia Hart",
+      "vehicle": "2021 Kia Telluride",
+      "items": "Executive Detail +1",
+      "total": "$303.90",
+      "status": "Paid",
+      "adjusted": true
+     }
+    ],
+    "noRows": false,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 27149,
+      "adj": -60,
+      "refunds": 127.45,
+      "credits": 70,
+      "outstanding": 506.73,
+      "net": 26969.88785046729
+     },
+     "counts": {
+      "invoices": 105,
+      "refunded": 4,
+      "adjusted": 7,
+      "creditInvoices": 3,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": -29,
+       "net": 465,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -28,
+       "net": 669,
+       "loss": 15,
+       "n": 3
+      },
+      {
+       "key": -27,
+       "net": 1560,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -26,
+       "net": 1085,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -25,
+       "net": 630,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -24,
+       "net": 931.31,
+       "loss": 20,
+       "n": 4
+      },
+      {
+       "key": -23,
+       "net": 1049,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -22,
+       "net": 836.31,
+       "loss": 20,
+       "n": 4
+      },
+      {
+       "key": -21,
+       "net": 1040,
+       "loss": 15,
+       "n": 3
+      },
+      {
+       "key": -20,
+       "net": 949,
+       "loss": 15,
+       "n": 4
+      },
+      {
+       "key": -19,
+       "net": 435,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -18,
+       "net": 470,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -17,
+       "net": 184,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -16,
+       "net": 985,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -15,
+       "net": 1125,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -14,
+       "net": 940,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -13,
+       "net": 1679,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -12,
+       "net": 1199,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -11,
+       "net": 1058,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -10,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": -9,
+       "net": 523,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -8,
+       "net": 513,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -7,
+       "net": 1575,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -6,
+       "net": 950,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -5,
+       "net": 897,
+       "loss": 15,
+       "n": 5
+      },
+      {
+       "key": -4,
+       "net": 928,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -3,
+       "net": 1189,
+       "loss": 37.45,
+       "n": 4
+      },
+      {
+       "key": -2,
+       "net": 478.27,
+       "loss": 65,
+       "n": 4
+      },
+      {
+       "key": -1,
+       "net": 749,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": 0,
+       "net": 1878,
+       "loss": 25,
+       "n": 8
+      }
+     ],
+     "methods": {
+      "Card": 14296.74,
+      "Apple Pay": 10919.32,
+      "Cash": 3718.0400000000004,
+      "Store credit": 25
+     },
+     "droppedFromChart": 0
+    }
+   },
+   "credits": {
+    "state": {
+     "range": "30d",
+     "filter": "credits"
+    },
+    "rangeLabel": "May 15 – Jun 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$27,149",
+      "sub": "105 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$26,970",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$127",
+      "sub": "4 refunded",
+      "color": "var(--red)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$60",
+      "sub": "7 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$70",
+      "sub": "3 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "",
+      "title": "Fri May 15 2026 · net $465",
+      "netHeight": "24.43510246978455%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "16",
+      "title": "Sat May 16 2026 · net $669",
+      "netHeight": "35.15501839201261%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "",
+      "title": "Sun May 17 2026 · net $1,560",
+      "netHeight": "81.97582764056752%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Mon May 18 2026 · net $1,085",
+      "netHeight": "57.01523909616395%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "19",
+      "title": "Tue May 19 2026 · net $630",
+      "netHeight": "33.105622700998424%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Wed May 20 2026 · net $931",
+      "netHeight": "48.93904361534419%",
+      "netMin": "3px",
+      "lossHeight": "1.0509721492380453%"
+     },
+     {
+      "label": "",
+      "title": "Thu May 21 2026 · net $1,049",
+      "netHeight": "55.12348922753547%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "22",
+      "title": "Fri May 22 2026 · net $836",
+      "netHeight": "43.94692590646348%",
+      "netMin": "3px",
+      "lossHeight": "1.0509721492380453%"
+     },
+     {
+      "label": "",
+      "title": "Sat May 23 2026 · net $1,040",
+      "netHeight": "54.65055176037835%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "",
+      "title": "Sun May 24 2026 · net $949",
+      "netHeight": "49.86862848134525%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "25",
+      "title": "Mon May 25 2026 · net $435",
+      "netHeight": "22.858644245927483%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Tue May 26 2026 · net $470",
+      "netHeight": "24.697845507094062%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Wed May 27 2026 · net $184",
+      "netHeight": "9.668943772990016%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "28",
+      "title": "Thu May 28 2026 · net $985",
+      "netHeight": "51.76037834997372%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Fri May 29 2026 · net $1,125",
+      "netHeight": "59.11718339464004%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Sat May 30 2026 · net $940",
+      "netHeight": "49.395691014188124%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "31",
+      "title": "Sun May 31 2026 · net $1,679",
+      "netHeight": "88.2291119285339%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "1",
+      "title": "Mon Jun 01 2026 · net $1,199",
+      "netHeight": "63.005780346820806%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Tue Jun 02 2026 · net $1,058",
+      "netHeight": "55.59642669469259%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Wed Jun 03 2026 · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "4",
+      "title": "Thu Jun 04 2026 · net $523",
+      "netHeight": "27.48292170257488%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Fri Jun 05 2026 · net $513",
+      "netHeight": "26.95743562795586%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Sat Jun 06 2026 · net $1,575",
+      "netHeight": "82.76405675249606%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "7",
+      "title": "Sun Jun 07 2026 · net $950",
+      "netHeight": "49.92117708880714%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "",
+      "title": "Mon Jun 08 2026 · net $897",
+      "netHeight": "47.13610089332633%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "",
+      "title": "Tue Jun 09 2026 · net $928",
+      "netHeight": "48.7651077246453%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "10",
+      "title": "Wed Jun 10 2026 · net $1,189",
+      "netHeight": "62.48029427220179%",
+      "netMin": "3px",
+      "lossHeight": "1.96794534944824%"
+     },
+     {
+      "label": "",
+      "title": "Thu Jun 11 2026 · net $478",
+      "netHeight": "25.13242249080399%",
+      "netMin": "3px",
+      "lossHeight": "3.415659485023647%"
+     },
+     {
+      "label": "",
+      "title": "Fri Jun 12 2026 · net $749",
+      "netHeight": "39.35890698896479%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "13",
+      "title": "Sat Jun 13 2026 · net $1,878",
+      "netHeight": "98.68628481345245%",
+      "netMin": "3px",
+      "lossHeight": "1.3137151865475565%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$14,297",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$10,919",
+      "width": "76.37629277723454%"
+     },
+     {
+      "label": "Cash",
+      "value": "$3,718",
+      "width": "26.00620840835044%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$25",
+      "width": "0.17486503916277418%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "105"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "5"
+     },
+     {
+      "label": "Adjusted",
+      "count": "7"
+     },
+     {
+      "label": "Credits",
+      "count": "4"
+     }
+    ],
+    "rows": [
+     {
+      "id": "INV-20560",
+      "date": "Jun 9 · 10:20 AM",
+      "client": "Victor Nguyen",
+      "vehicle": "2020 Honda Accord",
+      "items": "Express Hand Wash",
+      "total": "$48.15",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20552",
+      "date": "Jun 8 · 3:15 PM",
+      "client": "Mateo Silva",
+      "vehicle": "2022 Ford Bronco",
+      "items": "Premium Hand Wash + Interior",
+      "total": "$138.03",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20610",
+      "date": "May 30 · 11:30 AM",
+      "client": "Priya Nair",
+      "vehicle": "2022 Tesla Model Y",
+      "items": "Express Hand Wash",
+      "total": "$48.15",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20609",
+      "date": "May 24 · 12:00 PM",
+      "client": "Victor Nguyen",
+      "vehicle": "2020 Honda Accord",
+      "items": "Express Hand Wash",
+      "total": "$48.15",
+      "status": "Paid",
+      "adjusted": false
+     }
+    ],
+    "noRows": false,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 27149,
+      "adj": -60,
+      "refunds": 127.45,
+      "credits": 70,
+      "outstanding": 506.73,
+      "net": 26969.88785046729
+     },
+     "counts": {
+      "invoices": 105,
+      "refunded": 4,
+      "adjusted": 7,
+      "creditInvoices": 3,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": -29,
+       "net": 465,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -28,
+       "net": 669,
+       "loss": 15,
+       "n": 3
+      },
+      {
+       "key": -27,
+       "net": 1560,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -26,
+       "net": 1085,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -25,
+       "net": 630,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -24,
+       "net": 931.31,
+       "loss": 20,
+       "n": 4
+      },
+      {
+       "key": -23,
+       "net": 1049,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -22,
+       "net": 836.31,
+       "loss": 20,
+       "n": 4
+      },
+      {
+       "key": -21,
+       "net": 1040,
+       "loss": 15,
+       "n": 3
+      },
+      {
+       "key": -20,
+       "net": 949,
+       "loss": 15,
+       "n": 4
+      },
+      {
+       "key": -19,
+       "net": 435,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -18,
+       "net": 470,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -17,
+       "net": 184,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -16,
+       "net": 985,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -15,
+       "net": 1125,
+       "loss": 0,
+       "n": 2
+      },
+      {
+       "key": -14,
+       "net": 940,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -13,
+       "net": 1679,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -12,
+       "net": 1199,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -11,
+       "net": 1058,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -10,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": -9,
+       "net": 523,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -8,
+       "net": 513,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -7,
+       "net": 1575,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -6,
+       "net": 950,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -5,
+       "net": 897,
+       "loss": 15,
+       "n": 5
+      },
+      {
+       "key": -4,
+       "net": 928,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -3,
+       "net": 1189,
+       "loss": 37.45,
+       "n": 4
+      },
+      {
+       "key": -2,
+       "net": 478.27,
+       "loss": 65,
+       "n": 4
+      },
+      {
+       "key": -1,
+       "net": 749,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": 0,
+       "net": 1878,
+       "loss": 25,
+       "n": 8
+      }
+     ],
+     "methods": {
+      "Card": 14296.74,
+      "Apple Pay": 10919.32,
+      "Cash": 3718.0400000000004,
+      "Store credit": 25
+     },
+     "droppedFromChart": 0
+    }
+   }
+  },
+  "mtd": {
+   "all": {
+    "state": {
+     "range": "mtd",
+     "filter": "all"
+    },
+    "rangeLabel": "Jun 1 – Jun 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$12,034",
+      "sub": "49 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$11,937",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$87",
+      "sub": "2 refunded",
+      "color": "var(--red)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$15",
+      "sub": "4 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$25",
+      "sub": "1 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "M 1",
+      "title": "Mon Jun 01 2026 · net $1,199",
+      "netHeight": "63.005780346820806%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "T 2",
+      "title": "Tue Jun 02 2026 · net $1,058",
+      "netHeight": "55.59642669469259%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "W 3",
+      "title": "Wed Jun 03 2026 · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "T 4",
+      "title": "Thu Jun 04 2026 · net $523",
+      "netHeight": "27.48292170257488%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "F 5",
+      "title": "Fri Jun 05 2026 · net $513",
+      "netHeight": "26.95743562795586%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 6",
+      "title": "Sat Jun 06 2026 · net $1,575",
+      "netHeight": "82.76405675249606%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 7",
+      "title": "Sun Jun 07 2026 · net $950",
+      "netHeight": "49.92117708880714%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "M 8",
+      "title": "Mon Jun 08 2026 · net $897",
+      "netHeight": "47.13610089332633%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "T 9",
+      "title": "Tue Jun 09 2026 · net $928",
+      "netHeight": "48.7651077246453%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "W 10",
+      "title": "Wed Jun 10 2026 · net $1,189",
+      "netHeight": "62.48029427220179%",
+      "netMin": "3px",
+      "lossHeight": "1.96794534944824%"
+     },
+     {
+      "label": "T 11",
+      "title": "Thu Jun 11 2026 · net $478",
+      "netHeight": "25.13242249080399%",
+      "netMin": "3px",
+      "lossHeight": "3.415659485023647%"
+     },
+     {
+      "label": "F 12",
+      "title": "Fri Jun 12 2026 · net $749",
+      "netHeight": "39.35890698896479%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 13",
+      "title": "Sat Jun 13 2026 · net $1,878",
+      "netHeight": "98.68628481345245%",
+      "netMin": "3px",
+      "lossHeight": "1.3137151865475565%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$6,543",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$4,441",
+      "width": "67.87323538942182%"
+     },
+     {
+      "label": "Cash",
+      "value": "$1,371",
+      "width": "20.956145338493425%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$25",
+      "width": "0.38211575967669953%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "49"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "3"
+     },
+     {
+      "label": "Adjusted",
+      "count": "4"
+     },
+     {
+      "label": "Credits",
+      "count": "2"
+     }
+    ],
+    "rows": [
+     {
+      "id": "INV-20608",
+      "date": "Today · 10:05 AM",
+      "client": "Aisha Rahman",
+      "vehicle": "2023 Range Rover Sport",
+      "items": "Executive Detail + Ceramic +1",
+      "total": "$577.80",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20607",
+      "date": "Today · 10:15 AM",
+      "client": "Marcus Webb",
+      "vehicle": "2017 Jeep Wrangler",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$133.75",
+      "status": "Partially paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20606",
+      "date": "Today · 9:50 AM",
+      "client": "Liam Chen",
+      "vehicle": "2020 BMW M340i",
+      "items": "Ceramic Maintenance + Wax",
+      "total": "$192.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20605",
+      "date": "Today · 10:30 AM",
+      "client": "Sofia Marchetti",
+      "vehicle": "2024 Porsche Macan",
+      "items": "Executive Detail",
+      "total": "$278.20",
+      "status": "Partially paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20604",
+      "date": "Today · 9:40 AM",
+      "client": "Jonathan Franco",
+      "vehicle": "2023 Mercedes-Benz GLE",
+      "items": "Premium Hand Wash + Interior Refresh +1",
+      "total": "$196.88",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20603",
+      "date": "Today · 10:31 AM",
+      "client": "Priya Nair",
+      "vehicle": "2022 Tesla Model Y",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$164.78",
+      "status": "Unpaid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20602",
+      "date": "Today · 9:58 AM",
+      "client": "David Okafor",
+      "vehicle": "2019 Ford F-150",
+      "items": "Full Detail +1",
+      "total": "$394.50",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20601",
+      "date": "Today · 8:52 AM",
+      "client": "Maria Delgado",
+      "vehicle": "2021 Audi Q5",
+      "items": "Express Hand Wash +1",
+      "total": "$98.95",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20608",
+      "date": "Yesterday · 11:00 AM",
+      "client": "Leah Goldberg",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Executive Detail +1",
+      "total": "$347.05",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20607",
+      "date": "Yesterday · 1:00 PM",
+      "client": "Noah Fischer",
+      "vehicle": "2023 Genesis GV80",
+      "items": "Premium Hand Wash + Interior Refresh +1",
+      "total": "$191.18",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20579",
+      "date": "Yesterday · 2:10 PM",
+      "client": "Chloe Bennett",
+      "vehicle": "2022 BMW X5",
+      "items": "Executive Detail",
+      "total": "$278.20",
+      "status": "Refund pending",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20606",
+      "date": "Jun 11 · 1:30 PM",
+      "client": "Ava Sinclair",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$138.05",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20605",
+      "date": "Jun 11 · 8:00 AM",
+      "client": "Isaac Patel",
+      "vehicle": "2019 Mercedes-Benz C300",
+      "items": "Express Hand Wash",
+      "total": "$63.15",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20604",
+      "date": "Jun 11 · 3:30 PM",
+      "client": "Mia Torres",
+      "vehicle": "2024 Lexus GX 550",
+      "items": "Express Hand Wash",
+      "total": "$58.15",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20571",
+      "date": "Jun 11 · 11:00 AM",
+      "client": "Omar Haddad",
+      "vehicle": "2023 Porsche 911 Carrera",
+      "items": "Full Detail",
+      "total": "$342.40",
+      "status": "Canceled · refunded",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20603",
+      "date": "Jun 10 · 3:30 PM",
+      "client": "Ethan Morales",
+      "vehicle": "2021 Kia Telluride",
+      "items": "Executive Detail + Ceramic",
+      "total": "$454.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20602",
+      "date": "Jun 10 · 8:00 AM",
+      "client": "Tom Bradley",
+      "vehicle": "2022 BMW X5",
+      "items": "Executive Detail",
+      "total": "$288.20",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20601",
+      "date": "Jun 10 · 4:30 PM",
+      "client": "Ava Sinclair",
+      "vehicle": "2023 Genesis GV80",
+      "items": "Executive Detail +1",
+      "total": "$406.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20566",
+      "date": "Jun 10 · 1:30 PM",
+      "client": "Hannah Kim",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$185.48",
+      "status": "Partially refunded",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20600",
+      "date": "Jun 9 · 12:30 PM",
+      "client": "Andre Thompson",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Executive Detail + Ceramic +1",
+      "total": "$508.25",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20599",
+      "date": "Jun 9 · 1:30 PM",
+      "client": "Leah Goldberg",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Family Wash + Pet Hair",
+      "total": "$101.65",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20598",
+      "date": "Jun 9 · 3:30 PM",
+      "client": "Mia Torres",
+      "vehicle": "2022 BMW X5",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$206.88",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20597",
+      "date": "Jun 9 · 9:00 AM",
+      "client": "Noah Fischer",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Premium Hand Wash + Interior",
+      "total": "$143.03",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20560",
+      "date": "Jun 9 · 10:20 AM",
+      "client": "Victor Nguyen",
+      "vehicle": "2020 Honda Accord",
+      "items": "Express Hand Wash",
+      "total": "$48.15",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20596",
+      "date": "Jun 8 · 12:00 PM",
+      "client": "Ruby Castillo",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Premium Hand Wash + Interior",
+      "total": "$143.03",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20595",
+      "date": "Jun 8 · 4:30 PM",
+      "client": "Andre Thompson",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Premium Hand Wash + Interior Refresh",
+      "total": "$137.68",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20594",
+      "date": "Jun 8 · 11:00 AM",
+      "client": "Tom Bradley",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Family Wash + Pet Hair",
+      "total": "$116.65",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20593",
+      "date": "Jun 8 · 1:30 PM",
+      "client": "Diego Ramos",
+      "vehicle": "2022 BMW X5",
+      "items": "Executive Detail + Ceramic",
+      "total": "$449.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20552",
+      "date": "Jun 8 · 3:15 PM",
+      "client": "Mateo Silva",
+      "vehicle": "2022 Ford Bronco",
+      "items": "Premium Hand Wash + Interior",
+      "total": "$138.03",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20592",
+      "date": "Jun 7 · 10:00 AM",
+      "client": "Caleb Owens",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Ceramic Maintenance + Wax",
+      "total": "$202.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20591",
+      "date": "Jun 7 · 12:30 PM",
+      "client": "Tom Bradley",
+      "vehicle": "2019 Mercedes-Benz C300",
+      "items": "Express Hand Wash +1",
+      "total": "$85.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20548",
+      "date": "Jun 7 · 9:00 AM",
+      "client": "Zoe Laurent",
+      "vehicle": "2023 Audi e-tron GT",
+      "items": "Exotic Detail Package",
+      "total": "$738.30",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20590",
+      "date": "Jun 6 · 11:30 AM",
+      "client": "Mia Torres",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Full Detail",
+      "total": "$347.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20589",
+      "date": "Jun 6 · 3:00 PM",
+      "client": "Nathan Brooks",
+      "vehicle": "2021 Kia Telluride",
+      "items": "Executive Detail + Ceramic +1",
+      "total": "$592.80",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20588",
+      "date": "Jun 6 · 1:30 PM",
+      "client": "Mia Torres",
+      "vehicle": "2021 Kia Telluride",
+      "items": "Executive Detail + Ceramic +1",
+      "total": "$496.85",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20587",
+      "date": "Jun 6 · 11:00 AM",
+      "client": "Ethan Morales",
+      "vehicle": "2024 Lexus GX 550",
+      "items": "Executive Detail",
+      "total": "$293.20",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20586",
+      "date": "Jun 5 · 1:00 PM",
+      "client": "Tom Bradley",
+      "vehicle": "2022 BMW X5",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$175.13",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20585",
+      "date": "Jun 5 · 1:00 PM",
+      "client": "Diego Ramos",
+      "vehicle": "2024 Lexus GX 550",
+      "items": "Family Wash + Pet Hair",
+      "total": "$116.65",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20584",
+      "date": "Jun 5 · 1:30 PM",
+      "client": "Isaac Patel",
+      "vehicle": "2018 Lexus RX 350",
+      "items": "Premium Hand Wash + Interior Refresh +1",
+      "total": "$277.13",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20583",
+      "date": "Jun 4 · 1:30 PM",
+      "client": "Grace Adeyemi",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Ceramic Maintenance + Wax +1",
+      "total": "$250.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20582",
+      "date": "Jun 4 · 10:30 AM",
+      "client": "Andre Thompson",
+      "vehicle": "2020 Honda Accord",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$190.48",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20581",
+      "date": "Jun 4 · 12:00 PM",
+      "client": "Grace Adeyemi",
+      "vehicle": "2018 Lexus RX 350",
+      "items": "Premium Hand Wash + Interior Refresh",
+      "total": "$153.73",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20580",
+      "date": "Jun 2 · 10:00 AM",
+      "client": "Tom Bradley",
+      "vehicle": "2020 Honda Accord",
+      "items": "Full Detail",
+      "total": "$357.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20579",
+      "date": "Jun 2 · 12:30 PM",
+      "client": "Leah Goldberg",
+      "vehicle": "2023 Genesis GV80",
+      "items": "Premium Hand Wash + Interior",
+      "total": "$148.03",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20578",
+      "date": "Jun 2 · 12:00 PM",
+      "client": "Andre Thompson",
+      "vehicle": "2019 Mercedes-Benz C300",
+      "items": "Premium Hand Wash + Interior",
+      "total": "$153.03",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20577",
+      "date": "Jun 2 · 2:30 PM",
+      "client": "Caleb Owens",
+      "vehicle": "2022 Tesla Model 3",
+      "items": "Executive Detail + Ceramic +1",
+      "total": "$513.60",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20576",
+      "date": "Jun 1 · 10:00 AM",
+      "client": "Ava Sinclair",
+      "vehicle": "2024 Lexus GX 550",
+      "items": "Exotic Detail Package",
+      "total": "$700.50",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20575",
+      "date": "Jun 1 · 12:00 PM",
+      "client": "Mia Torres",
+      "vehicle": "2023 Genesis GV80",
+      "items": "Executive Detail + Ceramic",
+      "total": "$464.40",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20574",
+      "date": "Jun 1 · 8:00 AM",
+      "client": "Ruby Castillo",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Premium Hand Wash + Interior",
+      "total": "$138.03",
+      "status": "Paid",
+      "adjusted": false
+     }
+    ],
+    "noRows": false,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 12034,
+      "adj": -15,
+      "refunds": 87.45,
+      "credits": 25,
+      "outstanding": 506.73,
+      "net": 11937.271028037383
+     },
+     "counts": {
+      "invoices": 49,
+      "refunded": 2,
+      "adjusted": 4,
+      "creditInvoices": 1,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": -12,
+       "net": 1199,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -11,
+       "net": 1058,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -10,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": -9,
+       "net": 523,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -8,
+       "net": 513,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -7,
+       "net": 1575,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -6,
+       "net": 950,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -5,
+       "net": 897,
+       "loss": 15,
+       "n": 5
+      },
+      {
+       "key": -4,
+       "net": 928,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -3,
+       "net": 1189,
+       "loss": 37.45,
+       "n": 4
+      },
+      {
+       "key": -2,
+       "net": 478.27,
+       "loss": 65,
+       "n": 4
+      },
+      {
+       "key": -1,
+       "net": 749,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": 0,
+       "net": 1878,
+       "loss": 25,
+       "n": 8
+      }
+     ],
+     "methods": {
+      "Card": 6542.5199999999995,
+      "Apple Pay": 4440.62,
+      "Cash": 1371.06,
+      "Store credit": 25
+     },
+     "droppedFromChart": 0
+    }
+   },
+   "unpaid": {
+    "state": {
+     "range": "mtd",
+     "filter": "unpaid"
+    },
+    "rangeLabel": "Jun 1 – Jun 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$12,034",
+      "sub": "49 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$11,937",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$87",
+      "sub": "2 refunded",
+      "color": "var(--red)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$15",
+      "sub": "4 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$25",
+      "sub": "1 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "M 1",
+      "title": "Mon Jun 01 2026 · net $1,199",
+      "netHeight": "63.005780346820806%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "T 2",
+      "title": "Tue Jun 02 2026 · net $1,058",
+      "netHeight": "55.59642669469259%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "W 3",
+      "title": "Wed Jun 03 2026 · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "T 4",
+      "title": "Thu Jun 04 2026 · net $523",
+      "netHeight": "27.48292170257488%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "F 5",
+      "title": "Fri Jun 05 2026 · net $513",
+      "netHeight": "26.95743562795586%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 6",
+      "title": "Sat Jun 06 2026 · net $1,575",
+      "netHeight": "82.76405675249606%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 7",
+      "title": "Sun Jun 07 2026 · net $950",
+      "netHeight": "49.92117708880714%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "M 8",
+      "title": "Mon Jun 08 2026 · net $897",
+      "netHeight": "47.13610089332633%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "T 9",
+      "title": "Tue Jun 09 2026 · net $928",
+      "netHeight": "48.7651077246453%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "W 10",
+      "title": "Wed Jun 10 2026 · net $1,189",
+      "netHeight": "62.48029427220179%",
+      "netMin": "3px",
+      "lossHeight": "1.96794534944824%"
+     },
+     {
+      "label": "T 11",
+      "title": "Thu Jun 11 2026 · net $478",
+      "netHeight": "25.13242249080399%",
+      "netMin": "3px",
+      "lossHeight": "3.415659485023647%"
+     },
+     {
+      "label": "F 12",
+      "title": "Fri Jun 12 2026 · net $749",
+      "netHeight": "39.35890698896479%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 13",
+      "title": "Sat Jun 13 2026 · net $1,878",
+      "netHeight": "98.68628481345245%",
+      "netMin": "3px",
+      "lossHeight": "1.3137151865475565%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$6,543",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$4,441",
+      "width": "67.87323538942182%"
+     },
+     {
+      "label": "Cash",
+      "value": "$1,371",
+      "width": "20.956145338493425%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$25",
+      "width": "0.38211575967669953%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "49"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "3"
+     },
+     {
+      "label": "Adjusted",
+      "count": "4"
+     },
+     {
+      "label": "Credits",
+      "count": "2"
+     }
+    ],
+    "rows": [
+     {
+      "id": "INV-20607",
+      "date": "Today · 10:15 AM",
+      "client": "Marcus Webb",
+      "vehicle": "2017 Jeep Wrangler",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$133.75",
+      "status": "Partially paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20605",
+      "date": "Today · 10:30 AM",
+      "client": "Sofia Marchetti",
+      "vehicle": "2024 Porsche Macan",
+      "items": "Executive Detail",
+      "total": "$278.20",
+      "status": "Partially paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20603",
+      "date": "Today · 10:31 AM",
+      "client": "Priya Nair",
+      "vehicle": "2022 Tesla Model Y",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$164.78",
+      "status": "Unpaid",
+      "adjusted": false
+     }
+    ],
+    "noRows": false,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 12034,
+      "adj": -15,
+      "refunds": 87.45,
+      "credits": 25,
+      "outstanding": 506.73,
+      "net": 11937.271028037383
+     },
+     "counts": {
+      "invoices": 49,
+      "refunded": 2,
+      "adjusted": 4,
+      "creditInvoices": 1,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": -12,
+       "net": 1199,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -11,
+       "net": 1058,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -10,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": -9,
+       "net": 523,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -8,
+       "net": 513,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -7,
+       "net": 1575,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -6,
+       "net": 950,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -5,
+       "net": 897,
+       "loss": 15,
+       "n": 5
+      },
+      {
+       "key": -4,
+       "net": 928,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -3,
+       "net": 1189,
+       "loss": 37.45,
+       "n": 4
+      },
+      {
+       "key": -2,
+       "net": 478.27,
+       "loss": 65,
+       "n": 4
+      },
+      {
+       "key": -1,
+       "net": 749,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": 0,
+       "net": 1878,
+       "loss": 25,
+       "n": 8
+      }
+     ],
+     "methods": {
+      "Card": 6542.5199999999995,
+      "Apple Pay": 4440.62,
+      "Cash": 1371.06,
+      "Store credit": 25
+     },
+     "droppedFromChart": 0
+    }
+   },
+   "refunds": {
+    "state": {
+     "range": "mtd",
+     "filter": "refunds"
+    },
+    "rangeLabel": "Jun 1 – Jun 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$12,034",
+      "sub": "49 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$11,937",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$87",
+      "sub": "2 refunded",
+      "color": "var(--red)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$15",
+      "sub": "4 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$25",
+      "sub": "1 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "M 1",
+      "title": "Mon Jun 01 2026 · net $1,199",
+      "netHeight": "63.005780346820806%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "T 2",
+      "title": "Tue Jun 02 2026 · net $1,058",
+      "netHeight": "55.59642669469259%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "W 3",
+      "title": "Wed Jun 03 2026 · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "T 4",
+      "title": "Thu Jun 04 2026 · net $523",
+      "netHeight": "27.48292170257488%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "F 5",
+      "title": "Fri Jun 05 2026 · net $513",
+      "netHeight": "26.95743562795586%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 6",
+      "title": "Sat Jun 06 2026 · net $1,575",
+      "netHeight": "82.76405675249606%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 7",
+      "title": "Sun Jun 07 2026 · net $950",
+      "netHeight": "49.92117708880714%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "M 8",
+      "title": "Mon Jun 08 2026 · net $897",
+      "netHeight": "47.13610089332633%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "T 9",
+      "title": "Tue Jun 09 2026 · net $928",
+      "netHeight": "48.7651077246453%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "W 10",
+      "title": "Wed Jun 10 2026 · net $1,189",
+      "netHeight": "62.48029427220179%",
+      "netMin": "3px",
+      "lossHeight": "1.96794534944824%"
+     },
+     {
+      "label": "T 11",
+      "title": "Thu Jun 11 2026 · net $478",
+      "netHeight": "25.13242249080399%",
+      "netMin": "3px",
+      "lossHeight": "3.415659485023647%"
+     },
+     {
+      "label": "F 12",
+      "title": "Fri Jun 12 2026 · net $749",
+      "netHeight": "39.35890698896479%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 13",
+      "title": "Sat Jun 13 2026 · net $1,878",
+      "netHeight": "98.68628481345245%",
+      "netMin": "3px",
+      "lossHeight": "1.3137151865475565%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$6,543",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$4,441",
+      "width": "67.87323538942182%"
+     },
+     {
+      "label": "Cash",
+      "value": "$1,371",
+      "width": "20.956145338493425%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$25",
+      "width": "0.38211575967669953%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "49"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "3"
+     },
+     {
+      "label": "Adjusted",
+      "count": "4"
+     },
+     {
+      "label": "Credits",
+      "count": "2"
+     }
+    ],
+    "rows": [
+     {
+      "id": "INV-20579",
+      "date": "Yesterday · 2:10 PM",
+      "client": "Chloe Bennett",
+      "vehicle": "2022 BMW X5",
+      "items": "Executive Detail",
+      "total": "$278.20",
+      "status": "Refund pending",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20571",
+      "date": "Jun 11 · 11:00 AM",
+      "client": "Omar Haddad",
+      "vehicle": "2023 Porsche 911 Carrera",
+      "items": "Full Detail",
+      "total": "$342.40",
+      "status": "Canceled · refunded",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20566",
+      "date": "Jun 10 · 1:30 PM",
+      "client": "Hannah Kim",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Premium Hand Wash + Interior +1",
+      "total": "$185.48",
+      "status": "Partially refunded",
+      "adjusted": false
+     }
+    ],
+    "noRows": false,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 12034,
+      "adj": -15,
+      "refunds": 87.45,
+      "credits": 25,
+      "outstanding": 506.73,
+      "net": 11937.271028037383
+     },
+     "counts": {
+      "invoices": 49,
+      "refunded": 2,
+      "adjusted": 4,
+      "creditInvoices": 1,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": -12,
+       "net": 1199,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -11,
+       "net": 1058,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -10,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": -9,
+       "net": 523,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -8,
+       "net": 513,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -7,
+       "net": 1575,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -6,
+       "net": 950,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -5,
+       "net": 897,
+       "loss": 15,
+       "n": 5
+      },
+      {
+       "key": -4,
+       "net": 928,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -3,
+       "net": 1189,
+       "loss": 37.45,
+       "n": 4
+      },
+      {
+       "key": -2,
+       "net": 478.27,
+       "loss": 65,
+       "n": 4
+      },
+      {
+       "key": -1,
+       "net": 749,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": 0,
+       "net": 1878,
+       "loss": 25,
+       "n": 8
+      }
+     ],
+     "methods": {
+      "Card": 6542.5199999999995,
+      "Apple Pay": 4440.62,
+      "Cash": 1371.06,
+      "Store credit": 25
+     },
+     "droppedFromChart": 0
+    }
+   },
+   "adjusted": {
+    "state": {
+     "range": "mtd",
+     "filter": "adjusted"
+    },
+    "rangeLabel": "Jun 1 – Jun 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$12,034",
+      "sub": "49 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$11,937",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$87",
+      "sub": "2 refunded",
+      "color": "var(--red)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$15",
+      "sub": "4 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$25",
+      "sub": "1 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "M 1",
+      "title": "Mon Jun 01 2026 · net $1,199",
+      "netHeight": "63.005780346820806%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "T 2",
+      "title": "Tue Jun 02 2026 · net $1,058",
+      "netHeight": "55.59642669469259%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "W 3",
+      "title": "Wed Jun 03 2026 · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "T 4",
+      "title": "Thu Jun 04 2026 · net $523",
+      "netHeight": "27.48292170257488%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "F 5",
+      "title": "Fri Jun 05 2026 · net $513",
+      "netHeight": "26.95743562795586%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 6",
+      "title": "Sat Jun 06 2026 · net $1,575",
+      "netHeight": "82.76405675249606%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 7",
+      "title": "Sun Jun 07 2026 · net $950",
+      "netHeight": "49.92117708880714%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "M 8",
+      "title": "Mon Jun 08 2026 · net $897",
+      "netHeight": "47.13610089332633%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "T 9",
+      "title": "Tue Jun 09 2026 · net $928",
+      "netHeight": "48.7651077246453%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "W 10",
+      "title": "Wed Jun 10 2026 · net $1,189",
+      "netHeight": "62.48029427220179%",
+      "netMin": "3px",
+      "lossHeight": "1.96794534944824%"
+     },
+     {
+      "label": "T 11",
+      "title": "Thu Jun 11 2026 · net $478",
+      "netHeight": "25.13242249080399%",
+      "netMin": "3px",
+      "lossHeight": "3.415659485023647%"
+     },
+     {
+      "label": "F 12",
+      "title": "Fri Jun 12 2026 · net $749",
+      "netHeight": "39.35890698896479%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 13",
+      "title": "Sat Jun 13 2026 · net $1,878",
+      "netHeight": "98.68628481345245%",
+      "netMin": "3px",
+      "lossHeight": "1.3137151865475565%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$6,543",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$4,441",
+      "width": "67.87323538942182%"
+     },
+     {
+      "label": "Cash",
+      "value": "$1,371",
+      "width": "20.956145338493425%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$25",
+      "width": "0.38211575967669953%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "49"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "3"
+     },
+     {
+      "label": "Adjusted",
+      "count": "4"
+     },
+     {
+      "label": "Credits",
+      "count": "2"
+     }
+    ],
+    "rows": [
+     {
+      "id": "INV-20602",
+      "date": "Today · 9:58 AM",
+      "client": "David Okafor",
+      "vehicle": "2019 Ford F-150",
+      "items": "Full Detail +1",
+      "total": "$394.50",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20606",
+      "date": "Jun 11 · 1:30 PM",
+      "client": "Ava Sinclair",
+      "vehicle": "2021 Toyota 4Runner",
+      "items": "Family Wash + Pet Hair +1",
+      "total": "$138.05",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20595",
+      "date": "Jun 8 · 4:30 PM",
+      "client": "Andre Thompson",
+      "vehicle": "2024 Rivian R1S",
+      "items": "Premium Hand Wash + Interior Refresh",
+      "total": "$137.68",
+      "status": "Paid",
+      "adjusted": true
+     },
+     {
+      "id": "INV-20548",
+      "date": "Jun 7 · 9:00 AM",
+      "client": "Zoe Laurent",
+      "vehicle": "2023 Audi e-tron GT",
+      "items": "Exotic Detail Package",
+      "total": "$738.30",
+      "status": "Paid",
+      "adjusted": true
+     }
+    ],
+    "noRows": false,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 12034,
+      "adj": -15,
+      "refunds": 87.45,
+      "credits": 25,
+      "outstanding": 506.73,
+      "net": 11937.271028037383
+     },
+     "counts": {
+      "invoices": 49,
+      "refunded": 2,
+      "adjusted": 4,
+      "creditInvoices": 1,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": -12,
+       "net": 1199,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -11,
+       "net": 1058,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -10,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": -9,
+       "net": 523,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -8,
+       "net": 513,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -7,
+       "net": 1575,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -6,
+       "net": 950,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -5,
+       "net": 897,
+       "loss": 15,
+       "n": 5
+      },
+      {
+       "key": -4,
+       "net": 928,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -3,
+       "net": 1189,
+       "loss": 37.45,
+       "n": 4
+      },
+      {
+       "key": -2,
+       "net": 478.27,
+       "loss": 65,
+       "n": 4
+      },
+      {
+       "key": -1,
+       "net": 749,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": 0,
+       "net": 1878,
+       "loss": 25,
+       "n": 8
+      }
+     ],
+     "methods": {
+      "Card": 6542.5199999999995,
+      "Apple Pay": 4440.62,
+      "Cash": 1371.06,
+      "Store credit": 25
+     },
+     "droppedFromChart": 0
+    }
+   },
+   "credits": {
+    "state": {
+     "range": "mtd",
+     "filter": "credits"
+    },
+    "rangeLabel": "Jun 1 – Jun 13",
+    "kpis": [
+     {
+      "label": "Gross sales",
+      "value": "$12,034",
+      "sub": "49 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Net revenue",
+      "value": "$11,937",
+      "sub": "after refunds & discounts",
+      "color": "var(--accentInk)"
+     },
+     {
+      "label": "Refunds",
+      "value": "$87",
+      "sub": "2 refunded",
+      "color": "var(--red)"
+     },
+     {
+      "label": "Adjustments",
+      "value": "−$15",
+      "sub": "4 invoices",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Credits issued",
+      "value": "$25",
+      "sub": "1 clients",
+      "color": "var(--ink)"
+     },
+     {
+      "label": "Outstanding",
+      "value": "$507",
+      "sub": "3 open balances",
+      "color": "var(--amber)"
+     }
+    ],
+    "bars": [
+     {
+      "label": "M 1",
+      "title": "Mon Jun 01 2026 · net $1,199",
+      "netHeight": "63.005780346820806%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "T 2",
+      "title": "Tue Jun 02 2026 · net $1,058",
+      "netHeight": "55.59642669469259%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "W 3",
+      "title": "Wed Jun 03 2026 · net $0",
+      "netHeight": "0%",
+      "netMin": "0",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "T 4",
+      "title": "Thu Jun 04 2026 · net $523",
+      "netHeight": "27.48292170257488%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "F 5",
+      "title": "Fri Jun 05 2026 · net $513",
+      "netHeight": "26.95743562795586%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 6",
+      "title": "Sat Jun 06 2026 · net $1,575",
+      "netHeight": "82.76405675249606%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 7",
+      "title": "Sun Jun 07 2026 · net $950",
+      "netHeight": "49.92117708880714%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "M 8",
+      "title": "Mon Jun 08 2026 · net $897",
+      "netHeight": "47.13610089332633%",
+      "netMin": "3px",
+      "lossHeight": "0.7882291119285338%"
+     },
+     {
+      "label": "T 9",
+      "title": "Tue Jun 09 2026 · net $928",
+      "netHeight": "48.7651077246453%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "W 10",
+      "title": "Wed Jun 10 2026 · net $1,189",
+      "netHeight": "62.48029427220179%",
+      "netMin": "3px",
+      "lossHeight": "1.96794534944824%"
+     },
+     {
+      "label": "T 11",
+      "title": "Thu Jun 11 2026 · net $478",
+      "netHeight": "25.13242249080399%",
+      "netMin": "3px",
+      "lossHeight": "3.415659485023647%"
+     },
+     {
+      "label": "F 12",
+      "title": "Fri Jun 12 2026 · net $749",
+      "netHeight": "39.35890698896479%",
+      "netMin": "3px",
+      "lossHeight": "0%"
+     },
+     {
+      "label": "S 13",
+      "title": "Sat Jun 13 2026 · net $1,878",
+      "netHeight": "98.68628481345245%",
+      "netMin": "3px",
+      "lossHeight": "1.3137151865475565%"
+     }
+    ],
+    "methods": [
+     {
+      "label": "Card",
+      "value": "$6,543",
+      "width": "100%"
+     },
+     {
+      "label": "Apple Pay",
+      "value": "$4,441",
+      "width": "67.87323538942182%"
+     },
+     {
+      "label": "Cash",
+      "value": "$1,371",
+      "width": "20.956145338493425%"
+     },
+     {
+      "label": "Store credit",
+      "value": "$25",
+      "width": "0.38211575967669953%"
+     }
+    ],
+    "filters": [
+     {
+      "label": "All",
+      "count": "49"
+     },
+     {
+      "label": "Open balance",
+      "count": "3"
+     },
+     {
+      "label": "Refunds",
+      "count": "3"
+     },
+     {
+      "label": "Adjusted",
+      "count": "4"
+     },
+     {
+      "label": "Credits",
+      "count": "2"
+     }
+    ],
+    "rows": [
+     {
+      "id": "INV-20560",
+      "date": "Jun 9 · 10:20 AM",
+      "client": "Victor Nguyen",
+      "vehicle": "2020 Honda Accord",
+      "items": "Express Hand Wash",
+      "total": "$48.15",
+      "status": "Paid",
+      "adjusted": false
+     },
+     {
+      "id": "INV-20552",
+      "date": "Jun 8 · 3:15 PM",
+      "client": "Mateo Silva",
+      "vehicle": "2022 Ford Bronco",
+      "items": "Premium Hand Wash + Interior",
+      "total": "$138.03",
+      "status": "Paid",
+      "adjusted": false
+     }
+    ],
+    "noRows": false,
+    "hasPending": true,
+    "pendingText": "1 refund awaiting approval — $80.00 · Chloe Bennett · requested by Sofia D.",
+    "raw": {
+     "agg": {
+      "gross": 12034,
+      "adj": -15,
+      "refunds": 87.45,
+      "credits": 25,
+      "outstanding": 506.73,
+      "net": 11937.271028037383
+     },
+     "counts": {
+      "invoices": 49,
+      "refunded": 2,
+      "adjusted": 4,
+      "creditInvoices": 1,
+      "openBalances": 3
+     },
+     "chart": [
+      {
+       "key": -12,
+       "net": 1199,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -11,
+       "net": 1058,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -10,
+       "net": 0,
+       "loss": 0,
+       "n": 0
+      },
+      {
+       "key": -9,
+       "net": 523,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -8,
+       "net": 513,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -7,
+       "net": 1575,
+       "loss": 0,
+       "n": 4
+      },
+      {
+       "key": -6,
+       "net": 950,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": -5,
+       "net": 897,
+       "loss": 15,
+       "n": 5
+      },
+      {
+       "key": -4,
+       "net": 928,
+       "loss": 0,
+       "n": 5
+      },
+      {
+       "key": -3,
+       "net": 1189,
+       "loss": 37.45,
+       "n": 4
+      },
+      {
+       "key": -2,
+       "net": 478.27,
+       "loss": 65,
+       "n": 4
+      },
+      {
+       "key": -1,
+       "net": 749,
+       "loss": 0,
+       "n": 3
+      },
+      {
+       "key": 0,
+       "net": 1878,
+       "loss": 25,
+       "n": 8
+      }
+     ],
+     "methods": {
+      "Card": 6542.5199999999995,
+      "Apple Pay": 4440.62,
+      "Cash": 1371.06,
+      "Store credit": 25
+     },
+     "droppedFromChart": 0
+    }
+   }
+  }
+ }
+}

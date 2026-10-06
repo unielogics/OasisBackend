@@ -10,6 +10,7 @@ import { ensureLocation, type Location } from '../../src/platform/locations.js'
 import { mulberry32, type Rng } from '../../src/platform/random.js'
 import { peopleProfile } from './people.js'
 import { domainSeedProfiles } from './domain.js'
+import { paymentsSeedProfiles } from './payments.js'
 
 export interface SeedContext {
   tx: Tx
@@ -44,6 +45,7 @@ export function registerSeedProfile(name: string, profile: SeedProfile): void {
 
 registerSeedProfile('people', peopleProfile)
 for (const [name, profile] of Object.entries(domainSeedProfiles)) registerSeedProfile(name, profile)
+for (const [name, profile] of Object.entries(paymentsSeedProfiles)) registerSeedProfile(name, profile)
 
 function resolveOrder(name: string, seen: string[] = []): string[] {
   const p = profiles[name]

@@ -1,0 +1,2923 @@
+[
+ {
+  "id": "INV-20608",
+  "off": 0,
+  "time": "10:05 AM",
+  "client": "Aisha Rahman",
+  "vehicle": "2023 Range Rover Sport",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   },
+   {
+    "name": "Ceramic maintenance",
+    "price": 120
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 577.8,
+    "method": "Amex ••3008",
+    "by": "System",
+    "t": "10:05 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20607",
+  "off": 0,
+  "time": "10:15 AM",
+  "client": "Marcus Webb",
+  "vehicle": "2017 Jeep Wrangler",
+  "staff": "Unassigned",
+  "items": [
+   {
+    "name": "Family Wash + Pet Hair",
+    "price": 95
+   },
+   {
+    "name": "Odor removal",
+    "price": 30
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 20,
+    "method": "Visa ••6610",
+    "by": "System",
+    "t": "10:15 AM",
+    "deposit": true
+   }
+  ]
+ },
+ {
+  "id": "INV-20606",
+  "off": 0,
+  "time": "9:50 AM",
+  "client": "Liam Chen",
+  "vehicle": "2020 BMW M340i",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Ceramic Maintenance + Wax",
+    "price": 180
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 192.6,
+    "method": "Visa ••7731",
+    "by": "System",
+    "t": "9:50 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20605",
+  "off": 0,
+  "time": "10:30 AM",
+  "client": "Sofia Marchetti",
+  "vehicle": "2024 Porsche Macan",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Executive Detail",
+    "price": 260
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 50,
+    "method": "Visa ••0092",
+    "by": "System",
+    "t": "10:30 AM",
+    "deposit": true
+   }
+  ]
+ },
+ {
+  "id": "INV-20604",
+  "off": 0,
+  "time": "9:40 AM",
+  "client": "Jonathan Franco",
+  "vehicle": "2023 Mercedes-Benz GLE",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior Refresh",
+    "price": 139
+   },
+   {
+    "name": "Leather conditioning",
+    "price": 45
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 196.88,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "9:40 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20603",
+  "off": 0,
+  "time": "10:31 AM",
+  "client": "Priya Nair",
+  "vehicle": "2022 Tesla Model Y",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior",
+    "price": 129
+   },
+   {
+    "name": "Rain repellent",
+    "price": 25
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": []
+ },
+ {
+  "id": "INV-20602",
+  "off": 0,
+  "time": "9:58 AM",
+  "client": "David Okafor",
+  "vehicle": "2019 Ford F-150",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Full Detail",
+    "price": 320
+   },
+   {
+    "name": "Engine bay cleaning",
+    "price": 55
+   }
+  ],
+  "tip": 20,
+  "canceled": false,
+  "events": [
+   {
+    "type": "adjust",
+    "amt": -25,
+    "reason": "Loyalty",
+    "by": "Rafael M.",
+    "t": "9:58 AM"
+   },
+   {
+    "type": "pay",
+    "amt": 394.5,
+    "method": "Mastercard ••1180",
+    "by": "System",
+    "t": "9:58 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20601",
+  "off": 0,
+  "time": "8:52 AM",
+  "client": "Maria Delgado",
+  "vehicle": "2021 Audi Q5",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Express Hand Wash",
+    "price": 45
+   },
+   {
+    "name": "Wax",
+    "price": 40
+   }
+  ],
+  "tip": 8,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 98.95,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "8:52 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20579",
+  "off": -1,
+  "time": "2:10 PM",
+  "client": "Chloe Bennett",
+  "vehicle": "2022 BMW X5",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Executive Detail",
+    "price": 260
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 278.2,
+    "method": "Visa ••5521",
+    "by": "System",
+    "t": "2:10 PM"
+   },
+   {
+    "t": "Yesterday 4:40 PM",
+    "by": "Sofia D.",
+    "type": "refund",
+    "amt": 80,
+    "dest": "card",
+    "method": "Visa ••5521",
+    "reason": "Service issue",
+    "note": "Interior stain not fully removed",
+    "byRole": "Customer Support",
+    "status": "pending"
+   }
+  ]
+ },
+ {
+  "id": "INV-20571",
+  "off": -2,
+  "time": "11:00 AM",
+  "client": "Omar Haddad",
+  "vehicle": "2023 Porsche 911 Carrera",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Full Detail",
+    "price": 320
+   }
+  ],
+  "tip": 0,
+  "canceled": true,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 50,
+    "method": "Visa ••2290",
+    "by": "System",
+    "t": "11:00 AM",
+    "deposit": true
+   },
+   {
+    "t": "Jun 11 · 9:12 AM",
+    "by": "Sofia D.",
+    "type": "refund",
+    "amt": 50,
+    "dest": "card",
+    "method": "Visa ••2290",
+    "reason": "Customer canceled",
+    "status": "done"
+   }
+  ]
+ },
+ {
+  "id": "INV-20566",
+  "off": -3,
+  "time": "1:30 PM",
+  "client": "Hannah Kim",
+  "vehicle": "2024 Rivian R1S",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior",
+    "price": 129
+   },
+   {
+    "name": "Pet hair removal",
+    "price": 35
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 185.48,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "1:30 PM"
+   },
+   {
+    "t": "Jun 10 · 3:05 PM",
+    "by": "Rafael M.",
+    "type": "refund",
+    "amt": 37.45,
+    "dest": "card",
+    "method": "Visa ••4421",
+    "reason": "Add-on not performed",
+    "status": "done"
+   }
+  ]
+ },
+ {
+  "id": "INV-20560",
+  "off": -4,
+  "time": "10:20 AM",
+  "client": "Victor Nguyen",
+  "vehicle": "2020 Honda Accord",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Express Hand Wash",
+    "price": 45
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "credit_apply",
+    "amt": 25,
+    "method": "Store credit",
+    "by": "Sofia D.",
+    "t": "10:20 AM"
+   },
+   {
+    "type": "pay",
+    "amt": 23.15,
+    "method": "Visa ••8812",
+    "by": "System",
+    "t": "10:20 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20552",
+  "off": -5,
+  "time": "3:15 PM",
+  "client": "Mateo Silva",
+  "vehicle": "2022 Ford Bronco",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior",
+    "price": 129
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 138.03,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "3:15 PM"
+   },
+   {
+    "t": "Jun 8 · 4:02 PM",
+    "by": "Rafael M.",
+    "type": "credit_issue",
+    "amt": 25,
+    "reason": "Service recovery",
+    "note": "Waited 40 min past slot",
+    "expiry": "90 days"
+   }
+  ]
+ },
+ {
+  "id": "INV-20548",
+  "off": -6,
+  "time": "9:00 AM",
+  "client": "Zoe Laurent",
+  "vehicle": "2023 Audi e-tron GT",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Exotic Detail Package",
+    "price": 650
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "adjust",
+    "amt": 40,
+    "reason": "Extra soil surcharge",
+    "by": "Rafael M.",
+    "t": "9:00 AM"
+   },
+   {
+    "type": "pay",
+    "amt": 738.3,
+    "method": "Amex ••1005",
+    "by": "System",
+    "t": "9:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20610",
+  "off": -14,
+  "time": "11:30 AM",
+  "client": "Priya Nair",
+  "vehicle": "2022 Tesla Model Y",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Express Hand Wash",
+    "price": 45
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 48.15,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "11:30 AM"
+   },
+   {
+    "t": "May 30 · 11:45 AM",
+    "by": "Rafael M.",
+    "type": "credit_issue",
+    "amt": 20,
+    "reason": "Referral reward",
+    "expiry": "No expiry"
+   }
+  ]
+ },
+ {
+  "id": "INV-20609",
+  "off": -20,
+  "time": "12:00 PM",
+  "client": "Victor Nguyen",
+  "vehicle": "2020 Honda Accord",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Express Hand Wash",
+    "price": 45
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 48.15,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "12:00 PM"
+   },
+   {
+    "t": "May 24 · 12:10 PM",
+    "by": "Rafael M.",
+    "type": "credit_issue",
+    "amt": 25,
+    "reason": "Weather closure",
+    "expiry": "90 days"
+   }
+  ]
+ },
+ {
+  "id": "INV-20608",
+  "off": -1,
+  "time": "11:00 AM",
+  "client": "Leah Goldberg",
+  "vehicle": "2024 Rivian R1S",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Executive Detail",
+    "price": 260
+   },
+   {
+    "name": "Engine bay cleaning",
+    "price": 55
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 347.05,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "11:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20607",
+  "off": -1,
+  "time": "1:00 PM",
+  "client": "Noah Fischer",
+  "vehicle": "2023 Genesis GV80",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior Refresh",
+    "price": 139
+   },
+   {
+    "name": "Pet hair removal",
+    "price": 35
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 191.18,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "1:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20606",
+  "off": -2,
+  "time": "1:30 PM",
+  "client": "Ava Sinclair",
+  "vehicle": "2021 Toyota 4Runner",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Family Wash + Pet Hair",
+    "price": 95
+   },
+   {
+    "name": "Pet hair removal",
+    "price": 35
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "adjust",
+    "amt": -15,
+    "reason": "Loyalty",
+    "by": "Rafael M.",
+    "t": "1:30 PM"
+   },
+   {
+    "type": "pay",
+    "amt": 138.05,
+    "method": "Mastercard ••1180",
+    "by": "System",
+    "t": "1:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20605",
+  "off": -2,
+  "time": "8:00 AM",
+  "client": "Isaac Patel",
+  "vehicle": "2019 Mercedes-Benz C300",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Express Hand Wash",
+    "price": 45
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 63.15,
+    "method": "Cash",
+    "by": "System",
+    "t": "8:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20604",
+  "off": -2,
+  "time": "3:30 PM",
+  "client": "Mia Torres",
+  "vehicle": "2024 Lexus GX 550",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Express Hand Wash",
+    "price": 45
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 58.15,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "3:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20603",
+  "off": -3,
+  "time": "3:30 PM",
+  "client": "Ethan Morales",
+  "vehicle": "2021 Kia Telluride",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 454.4,
+    "method": "Amex ••3008",
+    "by": "System",
+    "t": "3:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20602",
+  "off": -3,
+  "time": "8:00 AM",
+  "client": "Tom Bradley",
+  "vehicle": "2022 BMW X5",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Executive Detail",
+    "price": 260
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 288.2,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "8:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20601",
+  "off": -3,
+  "time": "4:30 PM",
+  "client": "Ava Sinclair",
+  "vehicle": "2023 Genesis GV80",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Executive Detail",
+    "price": 260
+   },
+   {
+    "name": "Ceramic maintenance",
+    "price": 120
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 406.6,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "4:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20600",
+  "off": -4,
+  "time": "12:30 PM",
+  "client": "Andre Thompson",
+  "vehicle": "2024 Rivian R1S",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   },
+   {
+    "name": "Engine bay cleaning",
+    "price": 55
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 508.25,
+    "method": "Cash",
+    "by": "System",
+    "t": "12:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20599",
+  "off": -4,
+  "time": "1:30 PM",
+  "client": "Leah Goldberg",
+  "vehicle": "2022 Tesla Model 3",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Family Wash + Pet Hair",
+    "price": 95
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 101.65,
+    "method": "Mastercard ••1180",
+    "by": "System",
+    "t": "1:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20598",
+  "off": -4,
+  "time": "3:30 PM",
+  "client": "Mia Torres",
+  "vehicle": "2022 BMW X5",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior",
+    "price": 129
+   },
+   {
+    "name": "Engine bay cleaning",
+    "price": 55
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 206.88,
+    "method": "Mastercard ••1180",
+    "by": "System",
+    "t": "3:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20597",
+  "off": -4,
+  "time": "9:00 AM",
+  "client": "Noah Fischer",
+  "vehicle": "2022 Tesla Model 3",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior",
+    "price": 129
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 143.03,
+    "method": "Mastercard ••1180",
+    "by": "System",
+    "t": "9:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20596",
+  "off": -5,
+  "time": "12:00 PM",
+  "client": "Ruby Castillo",
+  "vehicle": "2021 Toyota 4Runner",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior",
+    "price": 129
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 143.03,
+    "method": "Mastercard ••1180",
+    "by": "System",
+    "t": "12:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20595",
+  "off": -5,
+  "time": "4:30 PM",
+  "client": "Andre Thompson",
+  "vehicle": "2024 Rivian R1S",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior Refresh",
+    "price": 139
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "adjust",
+    "amt": -15,
+    "reason": "Loyalty",
+    "by": "Rafael M.",
+    "t": "4:30 PM"
+   },
+   {
+    "type": "pay",
+    "amt": 137.68,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "4:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20594",
+  "off": -5,
+  "time": "11:00 AM",
+  "client": "Tom Bradley",
+  "vehicle": "2022 Tesla Model 3",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Family Wash + Pet Hair",
+    "price": 95
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 116.65,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "11:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20593",
+  "off": -5,
+  "time": "1:30 PM",
+  "client": "Diego Ramos",
+  "vehicle": "2022 BMW X5",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 449.4,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "1:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20592",
+  "off": -6,
+  "time": "10:00 AM",
+  "client": "Caleb Owens",
+  "vehicle": "2022 Tesla Model 3",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Ceramic Maintenance + Wax",
+    "price": 180
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 202.6,
+    "method": "Mastercard ••1180",
+    "by": "System",
+    "t": "10:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20591",
+  "off": -6,
+  "time": "12:30 PM",
+  "client": "Tom Bradley",
+  "vehicle": "2019 Mercedes-Benz C300",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Express Hand Wash",
+    "price": 45
+   },
+   {
+    "name": "Pet hair removal",
+    "price": 35
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 85.6,
+    "method": "Mastercard ••1180",
+    "by": "System",
+    "t": "12:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20590",
+  "off": -7,
+  "time": "11:30 AM",
+  "client": "Mia Torres",
+  "vehicle": "2021 Toyota 4Runner",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Full Detail",
+    "price": 320
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 347.4,
+    "method": "Cash",
+    "by": "System",
+    "t": "11:30 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20589",
+  "off": -7,
+  "time": "3:00 PM",
+  "client": "Nathan Brooks",
+  "vehicle": "2021 Kia Telluride",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   },
+   {
+    "name": "Ceramic maintenance",
+    "price": 120
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 592.8,
+    "method": "Mastercard ••1180",
+    "by": "System",
+    "t": "3:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20588",
+  "off": -7,
+  "time": "1:30 PM",
+  "client": "Mia Torres",
+  "vehicle": "2021 Kia Telluride",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   },
+   {
+    "name": "Pet hair removal",
+    "price": 35
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 496.85,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "1:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20587",
+  "off": -7,
+  "time": "11:00 AM",
+  "client": "Ethan Morales",
+  "vehicle": "2024 Lexus GX 550",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Executive Detail",
+    "price": 260
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 293.2,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "11:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20586",
+  "off": -8,
+  "time": "1:00 PM",
+  "client": "Tom Bradley",
+  "vehicle": "2022 BMW X5",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior",
+    "price": 129
+   },
+   {
+    "name": "Odor removal",
+    "price": 30
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 175.13,
+    "method": "Cash",
+    "by": "System",
+    "t": "1:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20585",
+  "off": -8,
+  "time": "1:00 PM",
+  "client": "Diego Ramos",
+  "vehicle": "2024 Lexus GX 550",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Family Wash + Pet Hair",
+    "price": 95
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 116.65,
+    "method": "Amex ••3008",
+    "by": "System",
+    "t": "1:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20584",
+  "off": -8,
+  "time": "1:30 PM",
+  "client": "Isaac Patel",
+  "vehicle": "2018 Lexus RX 350",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior Refresh",
+    "price": 139
+   },
+   {
+    "name": "Ceramic maintenance",
+    "price": 120
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 277.13,
+    "method": "Cash",
+    "by": "System",
+    "t": "1:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20583",
+  "off": -9,
+  "time": "1:30 PM",
+  "client": "Grace Adeyemi",
+  "vehicle": "2022 Tesla Model 3",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Ceramic Maintenance + Wax",
+    "price": 180
+   },
+   {
+    "name": "Wheel deep clean",
+    "price": 40
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 250.4,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "1:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20582",
+  "off": -9,
+  "time": "10:30 AM",
+  "client": "Andre Thompson",
+  "vehicle": "2020 Honda Accord",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior",
+    "price": 129
+   },
+   {
+    "name": "Pet hair removal",
+    "price": 35
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 190.48,
+    "method": "Amex ••3008",
+    "by": "System",
+    "t": "10:30 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20581",
+  "off": -9,
+  "time": "12:00 PM",
+  "client": "Grace Adeyemi",
+  "vehicle": "2018 Lexus RX 350",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior Refresh",
+    "price": 139
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 153.73,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "12:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20580",
+  "off": -11,
+  "time": "10:00 AM",
+  "client": "Tom Bradley",
+  "vehicle": "2020 Honda Accord",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Full Detail",
+    "price": 320
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 357.4,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "10:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20579",
+  "off": -11,
+  "time": "12:30 PM",
+  "client": "Leah Goldberg",
+  "vehicle": "2023 Genesis GV80",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior",
+    "price": 129
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 148.03,
+    "method": "Mastercard ••1180",
+    "by": "System",
+    "t": "12:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20578",
+  "off": -11,
+  "time": "12:00 PM",
+  "client": "Andre Thompson",
+  "vehicle": "2019 Mercedes-Benz C300",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior",
+    "price": 129
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 153.03,
+    "method": "Mastercard ••1180",
+    "by": "System",
+    "t": "12:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20577",
+  "off": -11,
+  "time": "2:30 PM",
+  "client": "Caleb Owens",
+  "vehicle": "2022 Tesla Model 3",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   },
+   {
+    "name": "Interior deep clean",
+    "price": 60
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 513.6,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "2:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20576",
+  "off": -12,
+  "time": "10:00 AM",
+  "client": "Ava Sinclair",
+  "vehicle": "2024 Lexus GX 550",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Exotic Detail Package",
+    "price": 650
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 700.5,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "10:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20575",
+  "off": -12,
+  "time": "12:00 PM",
+  "client": "Mia Torres",
+  "vehicle": "2023 Genesis GV80",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 464.4,
+    "method": "Mastercard ••1180",
+    "by": "System",
+    "t": "12:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20574",
+  "off": -12,
+  "time": "8:00 AM",
+  "client": "Ruby Castillo",
+  "vehicle": "2024 Rivian R1S",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior",
+    "price": 129
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 138.03,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "8:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20573",
+  "off": -13,
+  "time": "8:30 AM",
+  "client": "Isaac Patel",
+  "vehicle": "2023 Genesis GV80",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior Refresh",
+    "price": 139
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 153.73,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "8:30 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20572",
+  "off": -13,
+  "time": "2:00 PM",
+  "client": "Olivia Hart",
+  "vehicle": "2021 Toyota 4Runner",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   },
+   {
+    "name": "Clay bar",
+    "price": 50
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 502.9,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "2:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20571",
+  "off": -13,
+  "time": "10:30 AM",
+  "client": "Noah Fischer",
+  "vehicle": "2022 BMW X5",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Exotic Detail Package",
+    "price": 650
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 695.5,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "10:30 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20570",
+  "off": -13,
+  "time": "2:00 PM",
+  "client": "Leah Goldberg",
+  "vehicle": "2024 Lexus GX 550",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 459.4,
+    "method": "Cash",
+    "by": "System",
+    "t": "2:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20569",
+  "off": -14,
+  "time": "8:00 AM",
+  "client": "Isaac Patel",
+  "vehicle": "2023 Genesis GV80",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Family Wash + Pet Hair",
+    "price": 95
+   },
+   {
+    "name": "Odor removal",
+    "price": 30
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 148.75,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "8:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20568",
+  "off": -14,
+  "time": "11:30 AM",
+  "client": "Tom Bradley",
+  "vehicle": "2018 Lexus RX 350",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Executive Detail",
+    "price": 260
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 283.2,
+    "method": "Cash",
+    "by": "System",
+    "t": "11:30 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20567",
+  "off": -14,
+  "time": "4:00 PM",
+  "client": "Mia Torres",
+  "vehicle": "2018 Lexus RX 350",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   },
+   {
+    "name": "Leather conditioning",
+    "price": 45
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 502.55,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "4:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20566",
+  "off": -14,
+  "time": "2:00 PM",
+  "client": "Ruby Castillo",
+  "vehicle": "2022 BMW X5",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Express Hand Wash",
+    "price": 45
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 63.15,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "2:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20565",
+  "off": -15,
+  "time": "10:00 AM",
+  "client": "Isaac Patel",
+  "vehicle": "2022 Tesla Model 3",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Exotic Detail Package",
+    "price": 650
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 700.5,
+    "method": "Amex ••3008",
+    "by": "System",
+    "t": "10:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20564",
+  "off": -15,
+  "time": "9:30 AM",
+  "client": "Tom Bradley",
+  "vehicle": "2022 Tesla Model 3",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   },
+   {
+    "name": "Engine bay cleaning",
+    "price": 55
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 513.25,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "9:30 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20563",
+  "off": -16,
+  "time": "9:00 AM",
+  "client": "Ruby Castillo",
+  "vehicle": "2021 Kia Telluride",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Express Hand Wash",
+    "price": 45
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 58.15,
+    "method": "Mastercard ••1180",
+    "by": "System",
+    "t": "9:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20562",
+  "off": -16,
+  "time": "3:00 PM",
+  "client": "Julian Brooks",
+  "vehicle": "2024 Lexus GX 550",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 459.4,
+    "method": "Mastercard ••1180",
+    "by": "System",
+    "t": "3:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20561",
+  "off": -16,
+  "time": "3:30 PM",
+  "client": "Leah Goldberg",
+  "vehicle": "2024 Rivian R1S",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Executive Detail",
+    "price": 260
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 293.2,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "3:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20560",
+  "off": -16,
+  "time": "10:30 AM",
+  "client": "Julian Brooks",
+  "vehicle": "2019 Mercedes-Benz C300",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Executive Detail",
+    "price": 260
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 288.2,
+    "method": "Amex ••3008",
+    "by": "System",
+    "t": "10:30 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20559",
+  "off": -17,
+  "time": "12:30 PM",
+  "client": "Grace Adeyemi",
+  "vehicle": "2020 Honda Accord",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior Refresh",
+    "price": 139
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 163.73,
+    "method": "Amex ••3008",
+    "by": "System",
+    "t": "12:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20558",
+  "off": -17,
+  "time": "1:30 PM",
+  "client": "Julian Brooks",
+  "vehicle": "2021 Toyota 4Runner",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Express Hand Wash",
+    "price": 45
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 58.15,
+    "method": "Cash",
+    "by": "System",
+    "t": "1:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20557",
+  "off": -18,
+  "time": "2:30 PM",
+  "client": "Diego Ramos",
+  "vehicle": "2022 BMW X5",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Ceramic Maintenance + Wax",
+    "price": 180
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 197.6,
+    "method": "Cash",
+    "by": "System",
+    "t": "2:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20556",
+  "off": -18,
+  "time": "9:00 AM",
+  "client": "Camila Reyes",
+  "vehicle": "2024 Rivian R1S",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Executive Detail",
+    "price": 260
+   },
+   {
+    "name": "Odor removal",
+    "price": 30
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 320.3,
+    "method": "Cash",
+    "by": "System",
+    "t": "9:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20555",
+  "off": -19,
+  "time": "8:30 AM",
+  "client": "Noah Fischer",
+  "vehicle": "2021 Kia Telluride",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Express Hand Wash",
+    "price": 45
+   },
+   {
+    "name": "Interior deep clean",
+    "price": 60
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 122.35,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "8:30 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20554",
+  "off": -19,
+  "time": "12:30 PM",
+  "client": "Noah Fischer",
+  "vehicle": "2018 Lexus RX 350",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Ceramic Maintenance + Wax",
+    "price": 180
+   },
+   {
+    "name": "Engine bay cleaning",
+    "price": 55
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 251.45,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "12:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20553",
+  "off": -19,
+  "time": "11:30 AM",
+  "client": "Isaac Patel",
+  "vehicle": "2021 Kia Telluride",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Family Wash + Pet Hair",
+    "price": 95
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 106.65,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "11:30 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20552",
+  "off": -20,
+  "time": "10:00 AM",
+  "client": "Andre Thompson",
+  "vehicle": "2020 Honda Accord",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Exotic Detail Package",
+    "price": 650
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 710.5,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "10:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20551",
+  "off": -20,
+  "time": "11:00 AM",
+  "client": "Grace Adeyemi",
+  "vehicle": "2019 Mercedes-Benz C300",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior",
+    "price": 129
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 138.03,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "11:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20550",
+  "off": -20,
+  "time": "4:00 PM",
+  "client": "Isaac Patel",
+  "vehicle": "2019 Mercedes-Benz C300",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Family Wash + Pet Hair",
+    "price": 95
+   },
+   {
+    "name": "Leather conditioning",
+    "price": 45
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "adjust",
+    "amt": -15,
+    "reason": "Loyalty",
+    "by": "Rafael M.",
+    "t": "4:00 PM"
+   },
+   {
+    "type": "pay",
+    "amt": 148.75,
+    "method": "Amex ••3008",
+    "by": "System",
+    "t": "4:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20549",
+  "off": -21,
+  "time": "3:30 PM",
+  "client": "Ruby Castillo",
+  "vehicle": "2018 Lexus RX 350",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 464.4,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "3:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20548",
+  "off": -21,
+  "time": "8:00 AM",
+  "client": "Andre Thompson",
+  "vehicle": "2019 Mercedes-Benz C300",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Family Wash + Pet Hair",
+    "price": 95
+   },
+   {
+    "name": "Ceramic maintenance",
+    "price": 120
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 245.05,
+    "method": "Mastercard ••1180",
+    "by": "System",
+    "t": "8:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20547",
+  "off": -21,
+  "time": "3:00 PM",
+  "client": "Julian Brooks",
+  "vehicle": "2024 Rivian R1S",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "adjust",
+    "amt": -15,
+    "reason": "Loyalty",
+    "by": "Rafael M.",
+    "t": "3:00 PM"
+   },
+   {
+    "type": "pay",
+    "amt": 448.35,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "3:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20546",
+  "off": -22,
+  "time": "1:30 PM",
+  "client": "Ethan Morales",
+  "vehicle": "2024 Rivian R1S",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Executive Detail",
+    "price": 260
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 278.2,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "1:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20545",
+  "off": -22,
+  "time": "11:00 AM",
+  "client": "Ruby Castillo",
+  "vehicle": "2021 Toyota 4Runner",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Family Wash + Pet Hair",
+    "price": 95
+   },
+   {
+    "name": "Wax",
+    "price": 40
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 159.45,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "11:00 AM"
+   },
+   {
+    "t": "",
+    "by": "Sofia D.",
+    "type": "refund",
+    "amt": 20,
+    "dest": "credit",
+    "method": "Store credit",
+    "reason": "Goodwill",
+    "status": "done"
+   }
+  ]
+ },
+ {
+  "id": "INV-20544",
+  "off": -22,
+  "time": "11:30 AM",
+  "client": "Caleb Owens",
+  "vehicle": "2021 Toyota 4Runner",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Family Wash + Pet Hair",
+    "price": 95
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 106.65,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "11:30 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20543",
+  "off": -22,
+  "time": "12:00 PM",
+  "client": "Ava Sinclair",
+  "vehicle": "2023 Genesis GV80",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Full Detail",
+    "price": 320
+   },
+   {
+    "name": "Leather conditioning",
+    "price": 45
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 400.55,
+    "method": "Cash",
+    "by": "System",
+    "t": "12:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20542",
+  "off": -23,
+  "time": "2:00 PM",
+  "client": "Nathan Brooks",
+  "vehicle": "2020 Honda Accord",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior Refresh",
+    "price": 139
+   },
+   {
+    "name": "Clay bar",
+    "price": 50
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 217.23,
+    "method": "Cash",
+    "by": "System",
+    "t": "2:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20541",
+  "off": -23,
+  "time": "3:30 PM",
+  "client": "Grace Adeyemi",
+  "vehicle": "2020 Honda Accord",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Exotic Detail Package",
+    "price": 650
+   },
+   {
+    "name": "Odor removal",
+    "price": 30
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 742.6,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "3:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20540",
+  "off": -23,
+  "time": "8:00 AM",
+  "client": "Caleb Owens",
+  "vehicle": "2022 BMW X5",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Ceramic Maintenance + Wax",
+    "price": 180
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 207.6,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "8:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20539",
+  "off": -24,
+  "time": "11:00 AM",
+  "client": "Camila Reyes",
+  "vehicle": "2022 BMW X5",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Express Hand Wash",
+    "price": 45
+   },
+   {
+    "name": "Pet hair removal",
+    "price": 35
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 85.6,
+    "method": "Amex ••3008",
+    "by": "System",
+    "t": "11:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20538",
+  "off": -24,
+  "time": "3:30 PM",
+  "client": "Leah Goldberg",
+  "vehicle": "2023 Genesis GV80",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Executive Detail",
+    "price": 260
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 278.2,
+    "method": "Amex ••3008",
+    "by": "System",
+    "t": "3:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20537",
+  "off": -24,
+  "time": "3:00 PM",
+  "client": "Grace Adeyemi",
+  "vehicle": "2021 Kia Telluride",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Full Detail",
+    "price": 320
+   },
+   {
+    "name": "Odor removal",
+    "price": 30
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 389.5,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "3:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20536",
+  "off": -24,
+  "time": "3:00 PM",
+  "client": "Grace Adeyemi",
+  "vehicle": "2024 Lexus GX 550",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Executive Detail",
+    "price": 260
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 293.2,
+    "method": "Mastercard ••1180",
+    "by": "System",
+    "t": "3:00 PM"
+   },
+   {
+    "t": "",
+    "by": "Sofia D.",
+    "type": "refund",
+    "amt": 20,
+    "dest": "credit",
+    "method": "Store credit",
+    "reason": "Goodwill",
+    "status": "done"
+   }
+  ]
+ },
+ {
+  "id": "INV-20535",
+  "off": -25,
+  "time": "3:00 PM",
+  "client": "Camila Reyes",
+  "vehicle": "2020 Honda Accord",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Family Wash + Pet Hair",
+    "price": 95
+   },
+   {
+    "name": "Ceramic maintenance",
+    "price": 120
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 235.05,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "3:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20534",
+  "off": -25,
+  "time": "8:00 AM",
+  "client": "Julian Brooks",
+  "vehicle": "2022 Tesla Model 3",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Full Detail",
+    "price": 320
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 352.4,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "8:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20533",
+  "off": -25,
+  "time": "4:30 PM",
+  "client": "Isaac Patel",
+  "vehicle": "2024 Lexus GX 550",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Family Wash + Pet Hair",
+    "price": 95
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 106.65,
+    "method": "Cash",
+    "by": "System",
+    "t": "4:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20532",
+  "off": -26,
+  "time": "11:30 AM",
+  "client": "Diego Ramos",
+  "vehicle": "2021 Toyota 4Runner",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Ceramic Maintenance + Wax",
+    "price": 180
+   },
+   {
+    "name": "Leather conditioning",
+    "price": 45
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 245.75,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "11:30 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20531",
+  "off": -26,
+  "time": "3:30 PM",
+  "client": "Caleb Owens",
+  "vehicle": "2024 Rivian R1S",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Executive Detail",
+    "price": 260
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 283.2,
+    "method": "Mastercard ••1180",
+    "by": "System",
+    "t": "3:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20530",
+  "off": -26,
+  "time": "2:00 PM",
+  "client": "Leah Goldberg",
+  "vehicle": "2023 Genesis GV80",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Ceramic Maintenance + Wax",
+    "price": 180
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 192.6,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "2:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20529",
+  "off": -26,
+  "time": "12:00 PM",
+  "client": "Julian Brooks",
+  "vehicle": "2018 Lexus RX 350",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 459.4,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "12:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20528",
+  "off": -27,
+  "time": "10:00 AM",
+  "client": "Isaac Patel",
+  "vehicle": "2024 Lexus GX 550",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Ceramic Maintenance + Wax",
+    "price": 180
+   },
+   {
+    "name": "Wheel deep clean",
+    "price": 40
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 240.4,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "10:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20527",
+  "off": -27,
+  "time": "4:30 PM",
+  "client": "Nina Petrova",
+  "vehicle": "2021 Kia Telluride",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   },
+   {
+    "name": "Wheel deep clean",
+    "price": 40
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 502.2,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "4:30 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20526",
+  "off": -27,
+  "time": "3:00 PM",
+  "client": "Andre Thompson",
+  "vehicle": "2022 BMW X5",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   },
+   {
+    "name": "Wheel deep clean",
+    "price": 40
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 502.2,
+    "method": "Apple Pay",
+    "by": "System",
+    "t": "3:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20525",
+  "off": -27,
+  "time": "10:00 AM",
+  "client": "Caleb Owens",
+  "vehicle": "2024 Rivian R1S",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   }
+  ],
+  "tip": 10,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 459.4,
+    "method": "Mastercard ••1180",
+    "by": "System",
+    "t": "10:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20524",
+  "off": -28,
+  "time": "11:00 AM",
+  "client": "Olivia Hart",
+  "vehicle": "2021 Kia Telluride",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Executive Detail",
+    "price": 260
+   },
+   {
+    "name": "Rain repellent",
+    "price": 25
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "adjust",
+    "amt": -15,
+    "reason": "Loyalty",
+    "by": "Rafael M.",
+    "t": "11:00 AM"
+   },
+   {
+    "type": "pay",
+    "amt": 303.9,
+    "method": "Cash",
+    "by": "System",
+    "t": "11:00 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20523",
+  "off": -28,
+  "time": "11:30 AM",
+  "client": "Ruby Castillo",
+  "vehicle": "2022 Tesla Model 3",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Premium Hand Wash + Interior Refresh",
+    "price": 139
+   }
+  ],
+  "tip": 5,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 153.73,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "11:30 AM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20522",
+  "off": -28,
+  "time": "1:00 PM",
+  "client": "Camila Reyes",
+  "vehicle": "2021 Toyota 4Runner",
+  "staff": "Sofia D.",
+  "items": [
+   {
+    "name": "Executive Detail",
+    "price": 260
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 278.2,
+    "method": "Mastercard ••1180",
+    "by": "System",
+    "t": "1:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20521",
+  "off": -29,
+  "time": "12:00 PM",
+  "client": "Caleb Owens",
+  "vehicle": "2021 Toyota 4Runner",
+  "staff": "Marco R.",
+  "items": [
+   {
+    "name": "Express Hand Wash",
+    "price": 45
+   }
+  ],
+  "tip": 0,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 48.15,
+    "method": "Visa ••4421",
+    "by": "System",
+    "t": "12:00 PM"
+   }
+  ]
+ },
+ {
+  "id": "INV-20520",
+  "off": -29,
+  "time": "3:00 PM",
+  "client": "Isaac Patel",
+  "vehicle": "2021 Toyota 4Runner",
+  "staff": "Lena K.",
+  "items": [
+   {
+    "name": "Executive Detail + Ceramic",
+    "price": 420
+   }
+  ],
+  "tip": 15,
+  "canceled": false,
+  "events": [
+   {
+    "type": "pay",
+    "amt": 464.4,
+    "method": "Amex ••3008",
+    "by": "System",
+    "t": "3:00 PM"
+   }
+  ]
+ }
+]

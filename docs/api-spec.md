@@ -253,6 +253,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/auth/password/change` | authenticated |  |
 | POST | `/api/v1/auth/password/forgot` | public |  |
 | POST | `/api/v1/auth/password/reset` | public |  |
+| GET | `/api/v1/clients/:id/credit` | pay.reports |  |
 | GET | `/api/v1/employees` | team.view |  |
 | POST | `/api/v1/employees` | team.edit |  |
 | GET | `/api/v1/employees/:id` | team.view |  |
@@ -263,11 +264,29 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/employees/:id/password-reset` | team.edit |  |
 | POST | `/api/v1/employees/:id/reactivate` | team.edit |  |
 | GET | `/api/v1/events` | authenticated |  |
+| GET | `/api/v1/invoices/:id` | pay.reports |  |
+| POST | `/api/v1/invoices/:id/adjustments` | pay.adjust | required |
+| POST | `/api/v1/invoices/:id/credit-applications` | pay.collect | required |
+| POST | `/api/v1/invoices/:id/credits` | pay.credit | required |
+| POST | `/api/v1/invoices/:id/payment-links` | pay.collect | required |
+| POST | `/api/v1/invoices/:id/payments` | pay.collect | required |
+| POST | `/api/v1/invoices/:id/receipt` | msg.send | pay.collect | required |
+| POST | `/api/v1/invoices/:id/refunds` | pay.refund | required |
+| POST | `/api/v1/invoices/:id/refunds/:eventId/approve` | pay.refund | required |
+| POST | `/api/v1/invoices/:id/refunds/:eventId/deny` | pay.refund | required |
+| PUT | `/api/v1/invoices/:id/tip` | pay.collect | required |
+| POST | `/api/v1/invoices/:id/void` | pay.void | required |
+| POST | `/api/v1/ledger-events/:id/confirm-processor` | pay.collect | pay.refund | required |
 | GET | `/api/v1/me` | authenticated |  |
 | PUT | `/api/v1/me/preferences` | authenticated |  |
 | POST | `/api/v1/me/view-as` | authenticated |  |
 | GET | `/api/v1/meta/now` | public |  |
 | GET | `/api/v1/openapi.json` | public |  |
+| GET | `/api/v1/payments/approvals` | pay.reports |  |
+| GET | `/api/v1/payments/export.csv` | pay.reports |  |
+| GET | `/api/v1/payments/invoices` | pay.reports |  |
+| GET | `/api/v1/payments/reconciliation` | pay.reports | set.billing |  |
+| GET | `/api/v1/payments/summary` | pay.reports |  |
 | GET | `/api/v1/roles` | team.view |  |
 | POST | `/api/v1/roles` | team.roles |  |
 | DELETE | `/api/v1/roles/:id` | team.roles |  |

@@ -38,6 +38,17 @@ end
 $$;
 
 --
+-- Name: credit_allocations_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.credit_allocations_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  raise exception 'credit_allocations is append-only' using errcode = 'restrict_violation';
+end $$;
+
+--
 -- Name: ensure_location(uuid, text, text, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -53,6 +64,104 @@ begin
   return v_id;
 end
 $$;
+
+--
+-- Name: invoice_calc_of(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.invoice_calc_of(p_invoice uuid) RETURNS TABLE(invoice_id uuid, items bigint, adj bigint, sub bigint, tax bigint, tip bigint, total bigint, paid_orig bigint, credit_applied bigint, paid bigint, refunded bigint, ref_orig bigint, pending_amt bigint, pending_n bigint, issued bigint, balance bigint, refundable bigint, to_orig_max bigint, net bigint, overpaid bigint, status text)
+    LANGUAGE sql STABLE
+    AS $$
+  with i as (
+    select id, tax_bp, tip_cents, canceled_at from invoices where id = p_invoice
+  ),
+  it as (
+    select coalesce(sum(price_cents), 0)::bigint as items from invoice_items where invoice_id = p_invoice
+  ),
+  e as (
+    select
+      coalesce(sum(amount_cents) filter (where type = 'adjust'), 0)::bigint as adj,
+      (coalesce(sum(amount_cents) filter (where type = 'pay'), 0)
+        - coalesce(sum(amount_cents) filter (where type = 'void'), 0))::bigint as paid_orig,
+      coalesce(sum(amount_cents) filter (where type = 'credit_apply'), 0)::bigint as credit_applied,
+      coalesce(sum(amount_cents) filter (where type = 'refund' and status = 'done'), 0)::bigint as refunded,
+      coalesce(sum(amount_cents) filter (where type = 'refund' and status = 'done' and dest <> 'credit'), 0)::bigint as ref_orig,
+      coalesce(sum(amount_cents) filter (where type = 'refund' and status = 'pending'), 0)::bigint as pending_amt,
+      count(*) filter (where type = 'refund' and status = 'pending')::bigint as pending_n,
+      coalesce(sum(amount_cents) filter (where type = 'credit_issue'), 0)::bigint as issued
+    from ledger_events where invoice_id = p_invoice
+  ),
+  b as (
+    select i.id as invoice_id, i.tax_bp, i.tip_cents::bigint as tip, i.canceled_at,
+      it.items, e.adj, greatest(it.items + e.adj, 0) as sub,
+      e.paid_orig, e.credit_applied, e.paid_orig + e.credit_applied as paid,
+      e.refunded, e.ref_orig, e.pending_amt, e.pending_n, e.issued
+    from i cross join it cross join e
+  ),
+  c as (
+    select b.*, (b.sub * b.tax_bp + 5000) / 10000 as tax from b
+  ),
+  d as (
+    select c.*, c.sub + c.tax + c.tip as total from c
+  ),
+  f as (
+    select d.*, case when d.canceled_at is not null then 0 else greatest(0, d.total - d.paid) end as balance from d
+  )
+  select f.invoice_id, f.items, f.adj, f.sub, f.tax, f.tip, f.total,
+    f.paid_orig, f.credit_applied, f.paid, f.refunded, f.ref_orig,
+    f.pending_amt, f.pending_n, f.issued, f.balance,
+    greatest(0, f.paid - f.refunded - f.pending_amt) as refundable,
+    greatest(0, f.paid_orig - f.ref_orig) as to_orig_max,
+    f.items + f.adj - ((f.refunded * 10000 + (10000 + f.tax_bp) / 2) / (10000 + f.tax_bp)) as net,
+    greatest(0, f.paid - f.refunded - f.total) as overpaid,
+    case
+      when f.canceled_at is not null and f.paid = 0 and f.refunded = 0 then 'canceled'
+      when f.canceled_at is not null and f.refunded >= f.paid then 'canceled_refunded'
+      when f.canceled_at is not null then 'canceled_kept'
+      when f.refunded > 0 and f.refunded >= f.paid - 1 then 'refunded'
+      when f.paid = 0 then 'unpaid'
+      when f.balance > 0 then 'partially_paid'
+      when f.refunded > 0 then 'partially_refunded'
+      else 'paid'
+    end as status
+  from f
+$$;
+
+--
+-- Name: ledger_events_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.ledger_events_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+declare
+  mutable text[] := array[
+    'status', 'resolved_at',
+    'approved_by_user_id', 'approved_by_employee_id', 'approved_by_name', 'approved_by_roles', 'approved_at',
+    'denied_by_user_id', 'denied_by_employee_id', 'denied_by_name', 'denied_by_roles', 'denied_at', 'denied_note',
+    'processor_state', 'processor_ref', 'sqsp_order_id', 'processor_confirmed_at', 'processor_confirmed_by'
+  ];
+begin
+  if tg_op = 'DELETE' then
+    raise exception 'ledger_events is append-only: rows cannot be deleted' using errcode = 'restrict_violation';
+  end if;
+  if (to_jsonb(new) - mutable) is distinct from (to_jsonb(old) - mutable) then
+    raise exception 'ledger_events is append-only: only the refund resolution and processor fields can change'
+      using errcode = 'restrict_violation';
+  end if;
+  if new.status is distinct from old.status then
+    if not (old.type = 'refund' and old.status = 'pending' and new.status in ('done', 'denied')) then
+      raise exception 'ledger_events: a status can only move from pending to done or denied' using errcode = 'restrict_violation';
+    end if;
+    if new.resolved_at is null then
+      raise exception 'ledger_events: resolving a refund must set resolved_at' using errcode = 'restrict_violation';
+    end if;
+  elsif (new.approved_at is distinct from old.approved_at or new.denied_at is distinct from old.denied_at
+         or new.resolved_at is distinct from old.resolved_at) then
+    raise exception 'ledger_events: approval fields change only together with the status' using errcode = 'restrict_violation';
+  end if;
+  return new;
+end $$;
 
 --
 -- Name: realtime_channel_name(); Type: FUNCTION; Schema: public; Owner: -
@@ -417,6 +526,20 @@ CREATE TABLE public.closures (
 );
 
 --
+-- Name: credit_allocations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.credit_allocations (
+    id uuid NOT NULL,
+    apply_event_id uuid NOT NULL,
+    lot_event_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    cents integer NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT credit_allocations_cents_check CHECK ((cents > 0))
+);
+
+--
 -- Name: customers; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -634,6 +757,99 @@ CREATE TABLE public.invites (
 );
 
 --
+-- Name: invoices; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.invoices (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    invoice_no integer NOT NULL,
+    appointment_id uuid,
+    customer_id uuid NOT NULL,
+    client_name text NOT NULL,
+    vehicle_label text DEFAULT ''::text NOT NULL,
+    staff_label text DEFAULT 'Unassigned'::text NOT NULL,
+    occurred_at timestamp with time zone NOT NULL,
+    biz_date date NOT NULL,
+    date_frozen_at timestamp with time zone,
+    tax_bp integer NOT NULL,
+    tip_cents integer DEFAULT 0 NOT NULL,
+    canceled_at timestamp with time zone,
+    canceled_by uuid,
+    canceled_by_name text,
+    cancel_reason text,
+    payment_link_url text,
+    payment_link_sent_at timestamp with time zone,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT invoices_cancel_reason_check CHECK (((cancel_reason IS NULL) OR (cancel_reason = ANY (ARRAY['canceled'::text, 'no_show'::text])))),
+    CONSTRAINT invoices_check CHECK (((canceled_at IS NULL) = (cancel_reason IS NULL))),
+    CONSTRAINT invoices_client_name_check CHECK ((btrim(client_name) <> ''::text)),
+    CONSTRAINT invoices_invoice_no_check CHECK ((invoice_no > 0)),
+    CONSTRAINT invoices_tax_bp_check CHECK (((tax_bp >= 0) AND (tax_bp <= 10000))),
+    CONSTRAINT invoices_tip_cents_check CHECK ((tip_cents >= 0))
+);
+
+--
+-- Name: invoice_calc; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.invoice_calc AS
+ SELECT c.invoice_id,
+    c.items,
+    c.adj,
+    c.sub,
+    c.tax,
+    c.tip,
+    c.total,
+    c.paid_orig,
+    c.credit_applied,
+    c.paid,
+    c.refunded,
+    c.ref_orig,
+    c.pending_amt,
+    c.pending_n,
+    c.issued,
+    c.balance,
+    c.refundable,
+    c.to_orig_max,
+    c.net,
+    c.overpaid,
+    c.status
+   FROM (public.invoices i
+     CROSS JOIN LATERAL public.invoice_calc_of(i.id) c(invoice_id, items, adj, sub, tax, tip, total, paid_orig, credit_applied, paid, refunded, ref_orig, pending_amt, pending_n, issued, balance, refundable, to_orig_max, net, overpaid, status));
+
+--
+-- Name: invoice_counters; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.invoice_counters (
+    location_id uuid NOT NULL,
+    next_no integer DEFAULT 20611 NOT NULL,
+    CONSTRAINT invoice_counters_next_no_check CHECK ((next_no > 0))
+);
+
+--
+-- Name: invoice_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.invoice_items (
+    id uuid NOT NULL,
+    invoice_id uuid NOT NULL,
+    "position" integer NOT NULL,
+    kind text NOT NULL,
+    service_id uuid,
+    name text NOT NULL,
+    price_cents integer NOT NULL,
+    appointment_addon_id uuid,
+    CONSTRAINT invoice_items_kind_check CHECK ((kind = ANY (ARRAY['package'::text, 'addon'::text]))),
+    CONSTRAINT invoice_items_name_check CHECK ((btrim(name) <> ''::text)),
+    CONSTRAINT invoice_items_position_check CHECK (("position" >= 0)),
+    CONSTRAINT invoice_items_price_cents_check CHECK ((price_cents >= 0))
+);
+
+--
 -- Name: job_checklist_items; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -656,6 +872,93 @@ CREATE TABLE public.job_checklist_items (
     CONSTRAINT job_checklist_items_position_check CHECK (("position" >= 0)),
     CONSTRAINT job_checklist_items_section_kind_check CHECK ((section_kind = ANY (ARRAY['package'::text, 'addon'::text]))),
     CONSTRAINT job_checklist_items_section_title_check CHECK ((btrim(section_title) <> ''::text))
+);
+
+--
+-- Name: ledger_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ledger_events (
+    id uuid NOT NULL,
+    seq bigint NOT NULL,
+    location_id uuid NOT NULL,
+    invoice_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    type text NOT NULL,
+    amount_cents integer NOT NULL,
+    status text DEFAULT 'done'::text NOT NULL,
+    method text,
+    method_kind text,
+    brand text,
+    last4 text,
+    dest text,
+    deposit boolean DEFAULT false NOT NULL,
+    reason text,
+    note text,
+    expiry text,
+    expires_at timestamp with time zone,
+    item_ids uuid[] DEFAULT '{}'::uuid[] NOT NULL,
+    parent_event_id uuid,
+    voids_event_id uuid,
+    actor_user_id uuid,
+    actor_employee_id uuid,
+    actor_name text,
+    actor_roles text,
+    view_as_role_id uuid,
+    approved_by_user_id uuid,
+    approved_by_employee_id uuid,
+    approved_by_name text,
+    approved_by_roles text,
+    approved_at timestamp with time zone,
+    denied_by_user_id uuid,
+    denied_by_employee_id uuid,
+    denied_by_name text,
+    denied_by_roles text,
+    denied_at timestamp with time zone,
+    denied_note text,
+    occurred_at timestamp with time zone NOT NULL,
+    resolved_at timestamp with time zone,
+    source text DEFAULT 'oasis'::text NOT NULL,
+    processor_state text DEFAULT 'na'::text NOT NULL,
+    processor_ref text,
+    sqsp_order_id text,
+    processor_confirmed_at timestamp with time zone,
+    processor_confirmed_by text,
+    needs_review boolean DEFAULT false NOT NULL,
+    idempotency_key text,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT ledger_events_check CHECK ((((type = 'adjust'::text) AND (amount_cents <> 0)) OR ((type <> 'adjust'::text) AND (amount_cents > 0)))),
+    CONSTRAINT ledger_events_check1 CHECK (((type = 'refund'::text) OR (status = 'done'::text))),
+    CONSTRAINT ledger_events_check10 CHECK (((type = 'refund'::text) OR (processor_state = 'na'::text) OR (type = 'pay'::text))),
+    CONSTRAINT ledger_events_check2 CHECK (((type = 'refund'::text) = (dest IS NOT NULL))),
+    CONSTRAINT ledger_events_check3 CHECK (((type <> 'void'::text) OR (voids_event_id IS NOT NULL))),
+    CONSTRAINT ledger_events_check4 CHECK (((type = 'credit_issue'::text) = (expiry IS NOT NULL))),
+    CONSTRAINT ledger_events_check5 CHECK (((expiry IS NULL) OR ((expiry = 'none'::text) = (expires_at IS NULL)))),
+    CONSTRAINT ledger_events_check6 CHECK (((status <> 'pending'::text) OR (resolved_at IS NULL))),
+    CONSTRAINT ledger_events_check7 CHECK (((approved_at IS NULL) OR (status = 'done'::text))),
+    CONSTRAINT ledger_events_check8 CHECK (((denied_at IS NULL) OR (status = 'denied'::text))),
+    CONSTRAINT ledger_events_check9 CHECK (((type = 'refund'::text) OR (cardinality(item_ids) = 0))),
+    CONSTRAINT ledger_events_dest_check CHECK (((dest IS NULL) OR (dest = ANY (ARRAY['card'::text, 'credit'::text, 'cash'::text])))),
+    CONSTRAINT ledger_events_expiry_check CHECK (((expiry IS NULL) OR (expiry = ANY (ARRAY['none'::text, 'd30'::text, 'd90'::text])))),
+    CONSTRAINT ledger_events_last4_check CHECK (((last4 IS NULL) OR (last4 ~ '^[0-9]{4}$'::text))),
+    CONSTRAINT ledger_events_method_kind_check CHECK (((method_kind IS NULL) OR (method_kind = ANY (ARRAY['card'::text, 'apple_pay'::text, 'cash'::text, 'store_credit'::text, 'other'::text])))),
+    CONSTRAINT ledger_events_processor_state_check CHECK ((processor_state = ANY (ARRAY['na'::text, 'awaiting_processor'::text, 'confirmed'::text, 'failed'::text]))),
+    CONSTRAINT ledger_events_source_check CHECK ((source = ANY (ARRAY['oasis'::text, 'squarespace'::text, 'system'::text, 'seed'::text]))),
+    CONSTRAINT ledger_events_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'done'::text, 'denied'::text]))),
+    CONSTRAINT ledger_events_type_check CHECK ((type = ANY (ARRAY['pay'::text, 'adjust'::text, 'refund'::text, 'credit_issue'::text, 'credit_apply'::text, 'void'::text])))
+);
+
+--
+-- Name: ledger_events_seq_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+ALTER TABLE public.ledger_events ALTER COLUMN seq ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.ledger_events_seq_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
 );
 
 --
@@ -707,6 +1010,32 @@ CREATE TABLE public.password_resets (
     used_at timestamp with time zone,
     requested_by uuid,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL
+);
+
+--
+-- Name: payment_links; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.payment_links (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    invoice_id uuid NOT NULL,
+    kind text DEFAULT 'checkout'::text NOT NULL,
+    purpose text DEFAULT 'balance'::text NOT NULL,
+    url text NOT NULL,
+    expected_cents integer NOT NULL,
+    created_by uuid,
+    sent_message_id uuid,
+    sent_at timestamp with time zone,
+    expires_at timestamp with time zone,
+    state text DEFAULT 'active'::text NOT NULL,
+    matched_sqsp_order_id text,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT payment_links_expected_cents_check CHECK ((expected_cents > 0)),
+    CONSTRAINT payment_links_kind_check CHECK ((kind = ANY (ARRAY['checkout'::text, 'invoice'::text]))),
+    CONSTRAINT payment_links_purpose_check CHECK ((purpose = ANY (ARRAY['balance'::text, 'deposit'::text]))),
+    CONSTRAINT payment_links_state_check CHECK ((state = ANY (ARRAY['active'::text, 'paid'::text, 'expired'::text, 'canceled'::text]))),
+    CONSTRAINT payment_links_url_check CHECK ((url ~ '^https://'::text))
 );
 
 --
@@ -1126,6 +1455,20 @@ ALTER TABLE ONLY public.closures
     ADD CONSTRAINT closures_pkey PRIMARY KEY (id);
 
 --
+-- Name: credit_allocations credit_allocations_apply_event_id_lot_event_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.credit_allocations
+    ADD CONSTRAINT credit_allocations_apply_event_id_lot_event_id_key UNIQUE (apply_event_id, lot_event_id);
+
+--
+-- Name: credit_allocations credit_allocations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.credit_allocations
+    ADD CONSTRAINT credit_allocations_pkey PRIMARY KEY (id);
+
+--
 -- Name: customers customers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1224,11 +1567,67 @@ ALTER TABLE ONLY public.invites
     ADD CONSTRAINT invites_token_hash_key UNIQUE (token_hash);
 
 --
+-- Name: invoice_counters invoice_counters_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invoice_counters
+    ADD CONSTRAINT invoice_counters_pkey PRIMARY KEY (location_id);
+
+--
+-- Name: invoice_items invoice_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invoice_items
+    ADD CONSTRAINT invoice_items_pkey PRIMARY KEY (id);
+
+--
+-- Name: invoices invoices_appointment_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invoices
+    ADD CONSTRAINT invoices_appointment_id_key UNIQUE (appointment_id);
+
+--
+-- Name: invoices invoices_location_id_invoice_no_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invoices
+    ADD CONSTRAINT invoices_location_id_invoice_no_key UNIQUE (location_id, invoice_no);
+
+--
+-- Name: invoices invoices_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invoices
+    ADD CONSTRAINT invoices_pkey PRIMARY KEY (id);
+
+--
 -- Name: job_checklist_items job_checklist_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.job_checklist_items
     ADD CONSTRAINT job_checklist_items_pkey PRIMARY KEY (id);
+
+--
+-- Name: ledger_events ledger_events_idempotency_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_events
+    ADD CONSTRAINT ledger_events_idempotency_key_key UNIQUE (idempotency_key);
+
+--
+-- Name: ledger_events ledger_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_events
+    ADD CONSTRAINT ledger_events_pkey PRIMARY KEY (id);
+
+--
+-- Name: ledger_events ledger_events_seq_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_events
+    ADD CONSTRAINT ledger_events_seq_key UNIQUE (seq);
 
 --
 -- Name: locations locations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -1264,6 +1663,13 @@ ALTER TABLE ONLY public.password_resets
 
 ALTER TABLE ONLY public.password_resets
     ADD CONSTRAINT password_resets_token_hash_key UNIQUE (token_hash);
+
+--
+-- Name: payment_links payment_links_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.payment_links
+    ADD CONSTRAINT payment_links_pkey PRIMARY KEY (id);
 
 --
 -- Name: permissions permissions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -1533,6 +1939,18 @@ CREATE INDEX checklist_tasks_service_idx ON public.checklist_tasks USING btree (
 CREATE INDEX closures_emergency_idx ON public.closures USING btree (emergency_closure_id) WHERE (emergency_closure_id IS NOT NULL);
 
 --
+-- Name: credit_allocations_customer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX credit_allocations_customer_idx ON public.credit_allocations USING btree (customer_id);
+
+--
+-- Name: credit_allocations_lot_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX credit_allocations_lot_idx ON public.credit_allocations USING btree (lot_event_id);
+
+--
 -- Name: customers_email_trgm; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1605,6 +2023,24 @@ CREATE INDEX idempotency_keys_expires_idx ON public.idempotency_keys USING btree
 CREATE INDEX invites_employee_idx ON public.invites USING btree (employee_id);
 
 --
+-- Name: invoice_items_invoice_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX invoice_items_invoice_idx ON public.invoice_items USING btree (invoice_id, "position");
+
+--
+-- Name: invoices_biz_date_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX invoices_biz_date_idx ON public.invoices USING btree (location_id, biz_date DESC, invoice_no DESC);
+
+--
+-- Name: invoices_customer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX invoices_customer_idx ON public.invoices USING btree (customer_id, biz_date DESC);
+
+--
 -- Name: job_checklist_items_appointment_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1615,6 +2051,36 @@ CREATE INDEX job_checklist_items_appointment_idx ON public.job_checklist_items U
 --
 
 CREATE INDEX job_checklist_items_task_idx ON public.job_checklist_items USING btree (source_task_id) WHERE (source_task_id IS NOT NULL);
+
+--
+-- Name: ledger_events_awaiting_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ledger_events_awaiting_idx ON public.ledger_events USING btree (location_id, occurred_at) WHERE (processor_state = 'awaiting_processor'::text);
+
+--
+-- Name: ledger_events_customer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ledger_events_customer_idx ON public.ledger_events USING btree (customer_id, type, occurred_at);
+
+--
+-- Name: ledger_events_invoice_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ledger_events_invoice_idx ON public.ledger_events USING btree (invoice_id, occurred_at DESC, seq DESC);
+
+--
+-- Name: ledger_events_pending_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ledger_events_pending_idx ON public.ledger_events USING btree (location_id, occurred_at) WHERE (status = 'pending'::text);
+
+--
+-- Name: ledger_events_sqsp_order_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ledger_events_sqsp_order_idx ON public.ledger_events USING btree (sqsp_order_id) WHERE (sqsp_order_id IS NOT NULL);
 
 --
 -- Name: notifications_location_idx; Type: INDEX; Schema: public; Owner: -
@@ -1633,6 +2099,18 @@ CREATE INDEX notifications_unread_idx ON public.notifications USING btree (emplo
 --
 
 CREATE INDEX password_resets_user_idx ON public.password_resets USING btree (user_id, created_at DESC);
+
+--
+-- Name: payment_links_active_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX payment_links_active_idx ON public.payment_links USING btree (location_id, created_at) WHERE (state = 'active'::text);
+
+--
+-- Name: payment_links_invoice_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX payment_links_invoice_idx ON public.payment_links USING btree (invoice_id, created_at DESC);
 
 --
 -- Name: realtime_events_at_idx; Type: INDEX; Schema: public; Owner: -
@@ -1765,6 +2243,18 @@ CREATE INDEX webhook_log_received_idx ON public.webhook_log USING btree (receive
 --
 
 CREATE TRIGGER audit_log_no_update_delete BEFORE DELETE OR UPDATE ON public.audit_log FOR EACH ROW EXECUTE FUNCTION public.audit_log_immutable();
+
+--
+-- Name: credit_allocations credit_allocations_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER credit_allocations_guard BEFORE DELETE OR UPDATE ON public.credit_allocations FOR EACH ROW EXECUTE FUNCTION public.credit_allocations_guard();
+
+--
+-- Name: ledger_events ledger_events_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER ledger_events_guard BEFORE DELETE OR UPDATE ON public.ledger_events FOR EACH ROW EXECUTE FUNCTION public.ledger_events_guard();
 
 --
 -- Name: realtime_events realtime_events_notify; Type: TRIGGER; Schema: public; Owner: -
@@ -1969,6 +2459,27 @@ ALTER TABLE ONLY public.closures
     ADD CONSTRAINT closures_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
+-- Name: credit_allocations credit_allocations_apply_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.credit_allocations
+    ADD CONSTRAINT credit_allocations_apply_event_id_fkey FOREIGN KEY (apply_event_id) REFERENCES public.ledger_events(id);
+
+--
+-- Name: credit_allocations credit_allocations_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.credit_allocations
+    ADD CONSTRAINT credit_allocations_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: credit_allocations credit_allocations_lot_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.credit_allocations
+    ADD CONSTRAINT credit_allocations_lot_event_id_fkey FOREIGN KEY (lot_event_id) REFERENCES public.ledger_events(id);
+
+--
 -- Name: customers customers_merged_into_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2088,6 +2599,62 @@ ALTER TABLE ONLY public.invites
     ADD CONSTRAINT invites_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE;
 
 --
+-- Name: invoice_counters invoice_counters_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invoice_counters
+    ADD CONSTRAINT invoice_counters_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: invoice_items invoice_items_appointment_addon_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invoice_items
+    ADD CONSTRAINT invoice_items_appointment_addon_id_fkey FOREIGN KEY (appointment_addon_id) REFERENCES public.appointment_addons(id);
+
+--
+-- Name: invoice_items invoice_items_invoice_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invoice_items
+    ADD CONSTRAINT invoice_items_invoice_id_fkey FOREIGN KEY (invoice_id) REFERENCES public.invoices(id) ON DELETE CASCADE;
+
+--
+-- Name: invoice_items invoice_items_service_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invoice_items
+    ADD CONSTRAINT invoice_items_service_id_fkey FOREIGN KEY (service_id) REFERENCES public.services(id);
+
+--
+-- Name: invoices invoices_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invoices
+    ADD CONSTRAINT invoices_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id);
+
+--
+-- Name: invoices invoices_canceled_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invoices
+    ADD CONSTRAINT invoices_canceled_by_fkey FOREIGN KEY (canceled_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: invoices invoices_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invoices
+    ADD CONSTRAINT invoices_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: invoices invoices_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invoices
+    ADD CONSTRAINT invoices_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
 -- Name: job_checklist_items job_checklist_items_appointment_addon_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2116,6 +2683,83 @@ ALTER TABLE ONLY public.job_checklist_items
     ADD CONSTRAINT job_checklist_items_source_task_id_fkey FOREIGN KEY (source_task_id) REFERENCES public.checklist_tasks(id) ON DELETE SET NULL;
 
 --
+-- Name: ledger_events ledger_events_actor_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_events
+    ADD CONSTRAINT ledger_events_actor_employee_id_fkey FOREIGN KEY (actor_employee_id) REFERENCES public.employees(id) ON DELETE SET NULL;
+
+--
+-- Name: ledger_events ledger_events_actor_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_events
+    ADD CONSTRAINT ledger_events_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: ledger_events ledger_events_approved_by_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_events
+    ADD CONSTRAINT ledger_events_approved_by_employee_id_fkey FOREIGN KEY (approved_by_employee_id) REFERENCES public.employees(id) ON DELETE SET NULL;
+
+--
+-- Name: ledger_events ledger_events_approved_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_events
+    ADD CONSTRAINT ledger_events_approved_by_user_id_fkey FOREIGN KEY (approved_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: ledger_events ledger_events_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_events
+    ADD CONSTRAINT ledger_events_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: ledger_events ledger_events_denied_by_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_events
+    ADD CONSTRAINT ledger_events_denied_by_employee_id_fkey FOREIGN KEY (denied_by_employee_id) REFERENCES public.employees(id) ON DELETE SET NULL;
+
+--
+-- Name: ledger_events ledger_events_denied_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_events
+    ADD CONSTRAINT ledger_events_denied_by_user_id_fkey FOREIGN KEY (denied_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: ledger_events ledger_events_invoice_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_events
+    ADD CONSTRAINT ledger_events_invoice_id_fkey FOREIGN KEY (invoice_id) REFERENCES public.invoices(id);
+
+--
+-- Name: ledger_events ledger_events_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_events
+    ADD CONSTRAINT ledger_events_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: ledger_events ledger_events_parent_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_events
+    ADD CONSTRAINT ledger_events_parent_event_id_fkey FOREIGN KEY (parent_event_id) REFERENCES public.ledger_events(id);
+
+--
+-- Name: ledger_events ledger_events_voids_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_events
+    ADD CONSTRAINT ledger_events_voids_event_id_fkey FOREIGN KEY (voids_event_id) REFERENCES public.ledger_events(id);
+
+--
 -- Name: notifications notifications_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2128,6 +2772,27 @@ ALTER TABLE ONLY public.notifications
 
 ALTER TABLE ONLY public.password_resets
     ADD CONSTRAINT password_resets_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+--
+-- Name: payment_links payment_links_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.payment_links
+    ADD CONSTRAINT payment_links_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: payment_links payment_links_invoice_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.payment_links
+    ADD CONSTRAINT payment_links_invoice_id_fkey FOREIGN KEY (invoice_id) REFERENCES public.invoices(id);
+
+--
+-- Name: payment_links payment_links_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.payment_links
+    ADD CONSTRAINT payment_links_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 -- Name: realtime_events realtime_events_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
