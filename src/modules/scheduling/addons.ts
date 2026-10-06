@@ -7,7 +7,12 @@ import { requireService } from '../catalog/service.js'
 import '../customers/schema.js'
 import { invalidTransition, lockAppointment, logActivity, publishOps } from './appointments.js'
 import { audit } from './audit-helper.js'
-import { addAddonChecklist, checklistProgress, hideAddonChecklist, type ChecklistProgress } from './checklist.js'
+import {
+  addAddonChecklist,
+  checklistProgress,
+  hideAddonChecklist,
+  type ChecklistProgress,
+} from './checklist.js'
 import type { Actor, SchedulingCtx } from './context.js'
 import { liveAddons, syncInvoiceItems } from './invoicing.js'
 import type { InvoiceSummary } from './ports.js'
@@ -67,7 +72,11 @@ export async function addAddon(
       channels: ['internal'],
       actor,
     })
-    await audit(tx, c, actor, 'addon.add', a.id, null, { serviceId: svc.id, name: svc.name, priceCents: svc.priceCents })
+    await audit(tx, c, actor, 'addon.add', a.id, null, {
+      serviceId: svc.id,
+      name: svc.name,
+      priceCents: svc.priceCents,
+    })
     await publishOps(tx, c.locationId, {
       appointment: { id: a.id, version: a.version + 1, status: a.status, change: 'addons' },
     })
@@ -121,7 +130,15 @@ export async function removeAddon(
     channels: ['internal'],
     actor,
   })
-  await audit(tx, c, actor, 'addon.remove', a.id, { serviceId, name: live.name, priceCents: live.priceCents }, null)
+  await audit(
+    tx,
+    c,
+    actor,
+    'addon.remove',
+    a.id,
+    { serviceId, name: live.name, priceCents: live.priceCents },
+    null,
+  )
   await publishOps(tx, c.locationId, {
     appointment: { id: a.id, version: a.version + 1, status: a.status, change: 'addons' },
   })

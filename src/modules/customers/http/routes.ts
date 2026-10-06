@@ -127,7 +127,10 @@ export function registerCustomerBookingRoutes(app: AppInstance): void {
           smsOptIn: req.body.smsOptIn ? 'dashboard' : null,
         })
         const v = req.body.vehicle
-        if (v && [v.make, v.model, v.plate, v.color, v.year].some((x) => x !== undefined && x !== null && x !== ''))
+        if (
+          v &&
+          [v.make, v.model, v.plate, v.color, v.year].some((x) => x !== undefined && x !== null && x !== '')
+        )
           await upsertVehicleByPlate(tx, { newId: app.newId, customerId: r.customer.id, ...v })
         if (r.created)
           await audit.record(tx, {

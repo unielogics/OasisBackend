@@ -11,7 +11,11 @@ export function actorOf(req: FastifyRequest): Actor {
   return { auth: req.auth, audit: auditContextOf(req) }
 }
 
-export async function ctxOf(app: AppInstance, req: FastifyRequest, ports: SchedulingPorts): Promise<SchedulingCtx> {
+export async function ctxOf(
+  app: AppInstance,
+  req: FastifyRequest,
+  ports: SchedulingPorts,
+): Promise<SchedulingCtx> {
   if (!req.auth) throw new AppError('UNAUTHENTICATED')
   return {
     clock: app.clock,

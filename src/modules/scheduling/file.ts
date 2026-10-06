@@ -58,7 +58,14 @@ export interface AppointmentFile {
     smsOptedIn: boolean
     smsOptedOut: boolean
   }
-  vehicle: { id: string; year: number | null; make: string | null; model: string | null; color: string | null; plate: string | null } | null
+  vehicle: {
+    id: string
+    year: number | null
+    make: string | null
+    model: string | null
+    color: string | null
+    plate: string | null
+  } | null
   overview: {
     startsAt: string
     endsAt: string
@@ -119,30 +126,43 @@ export async function loadAppointmentFile(
 ): Promise<AppointmentFile> {
   const a = await requireAppointment(db, c.locationId, id)
   const now = c.clock.now()
-  const [customer, vehicle, bays, settings, addons, catalog, checklist, photos, invoiceMap, activityRows, vip, memberMap, staff] =
-    await Promise.all([
-      customerBrief(db, a.customerId),
-      vehicleBrief(db, a.vehicleId),
-      listBays(db, c.locationId),
-      loadSettingsBundle(db, c.locationId),
-      liveAddons(db, a.id),
-      listCatalog(db, c.locationId),
-      loadChecklist(db, a.id),
-      photoSummary(db, c.ports.storage, a.id),
-      c.ports.invoices.summariesFor(db, [a.id]),
-      db
-        .selectFrom('activity_log')
-        .select(['id', 'at', 'text', 'channels', 'actor_type', 'actor_name'])
-        .where('appointment_id', '=', a.id)
-        .orderBy('at')
-        .orderBy('id')
-        .execute(),
-      isVipCustomer(db, c.locationId, a.customerId),
-      c.ports.memberships.forAppointments(db, [
-        { appointmentId: a.id, customerId: a.customerId, membershipId: a.membershipId },
-      ]),
-      staffLabel(db, a.assignedEmployeeId),
-    ])
+  const [
+    customer,
+    vehicle,
+    bays,
+    settings,
+    addons,
+    catalog,
+    checklist,
+    photos,
+    invoiceMap,
+    activityRows,
+    vip,
+    memberMap,
+    staff,
+  ] = await Promise.all([
+    customerBrief(db, a.customerId),
+    vehicleBrief(db, a.vehicleId),
+    listBays(db, c.locationId),
+    loadSettingsBundle(db, c.locationId),
+    liveAddons(db, a.id),
+    listCatalog(db, c.locationId),
+    loadChecklist(db, a.id),
+    photoSummary(db, c.ports.storage, a.id),
+    c.ports.invoices.summariesFor(db, [a.id]),
+    db
+      .selectFrom('activity_log')
+      .select(['id', 'at', 'text', 'channels', 'actor_type', 'actor_name'])
+      .where('appointment_id', '=', a.id)
+      .orderBy('at')
+      .orderBy('id')
+      .execute(),
+    isVipCustomer(db, c.locationId, a.customerId),
+    c.ports.memberships.forAppointments(db, [
+      { appointmentId: a.id, customerId: a.customerId, membershipId: a.membershipId },
+    ]),
+    staffLabel(db, a.assignedEmployeeId),
+  ])
   const history = await db
     .selectFrom('appointments')
     .select(['id', 'scheduled_start', 'package_name', 'status', 'price_cents'])

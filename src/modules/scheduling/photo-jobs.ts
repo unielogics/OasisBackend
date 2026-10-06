@@ -27,7 +27,11 @@ export const photoThumbnailJob: JobDefinition<{ photoId: string }> = {
     const storage = createStorageProvider(loadEnv(), { clock: ctx.clock })
     const r = await generateAndStoreThumbnail(storage, new ThumbnailService(), row.s3_key)
     if (r.status === 'created')
-      await ctx.db.updateTable('appointment_photos').set({ thumb_key: r.thumbKey }).where('id', '=', row.id).execute()
+      await ctx.db
+        .updateTable('appointment_photos')
+        .set({ thumb_key: r.thumbKey })
+        .where('id', '=', row.id)
+        .execute()
     else ctx.logger.warn({ photoId: row.id, result: r.status }, 'photo thumbnail not created')
   },
 }

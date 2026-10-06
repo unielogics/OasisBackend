@@ -122,7 +122,9 @@ const sameDayAllowance = (i: AvailabilityInput): boolean =>
   i.isVip && (i.sameDayUsed ?? 0) < (i.sameDayLimit ?? 0)
 
 /** The hold intervals that still take a bay for a non-VIP caller. */
-export function virtualHoldIntervals(i: AvailabilityInput): { interval: BusyInterval; hold: VipHold; releasesAt: Date }[] {
+export function virtualHoldIntervals(
+  i: AvailabilityInput,
+): { interval: BusyInterval; hold: VipHold; releasesAt: Date }[] {
   if (i.isVip || i.day.closed || i.day.openMin === null || i.day.closeMin === null) return []
   const weekday = bizWeekday(i.date)
   const out: { interval: BusyInterval; hold: VipHold; releasesAt: Date }[] = []
@@ -199,7 +201,9 @@ export function evaluateStart(i: AvailabilityInput, start: Date): Evaluation {
     return {
       ...base,
       state: 'past',
-      reason: desk ? 'That time has passed' : `Online booking needs ${i.rules.onlineLeadMinutes} minutes notice`,
+      reason: desk
+        ? 'That time has passed'
+        : `Online booking needs ${i.rules.onlineLeadMinutes} minutes notice`,
       overrideKind: null,
     }
   }

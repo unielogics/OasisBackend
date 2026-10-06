@@ -15,7 +15,18 @@ import { listBayStaff } from '../staff.js'
 import { audit } from '../audit-helper.js'
 import { publishOps } from '../appointments.js'
 import { advisoryXactLock } from '../../../platform/db.js'
-import { Alert, Availability, BayView, BizDate, CalendarDay, CalendarSummary, Kpi, OpsSnapshot, StaffView, Uuid } from './schemas.js'
+import {
+  Alert,
+  Availability,
+  BayView,
+  BizDate,
+  CalendarDay,
+  CalendarSummary,
+  Kpi,
+  OpsSnapshot,
+  StaffView,
+  Uuid,
+} from './schemas.js'
 import { actorOf, ctxOf } from './shared.js'
 
 const TAGS = ['operations']
@@ -168,7 +179,11 @@ export function registerOpsRoutes(app: AppInstance, ports: SchedulingPorts): voi
     '/bays',
     {
       config: { access: access.perm('sched.view') },
-      schema: { tags: TAGS, summary: 'Bays and their status', response: { 200: z.object({ items: z.array(BayView) }) } },
+      schema: {
+        tags: TAGS,
+        summary: 'Bays and their status',
+        response: { 200: z.object({ items: z.array(BayView) }) },
+      },
     },
     async (req) => ({ items: await listBays(app.db, (await ctxOf(app, req, ports)).locationId) }),
   )
@@ -180,7 +195,8 @@ export function registerOpsRoutes(app: AppInstance, ports: SchedulingPorts): voi
       schema: {
         tags: TAGS,
         summary: 'Put a bay in or out of service',
-        description: 'A bay in maintenance or blocked counts as zero capacity. A bay with a car in it cannot be taken out of service.',
+        description:
+          'A bay in maintenance or blocked counts as zero capacity. A bay with a car in it cannot be taken out of service.',
         params: z.object({ id: Uuid }),
         body: z.object({ status: z.enum(['active', 'maintenance', 'blocked']) }).strict(),
         response: { 200: BayView },
@@ -201,7 +217,10 @@ export function registerOpsRoutes(app: AppInstance, ports: SchedulingPorts): voi
             .where('status', '=', 'cleaning')
             .executeTakeFirst()
           if (occ)
-            throw new AppError('BAY_BUSY', { params: { n: bay.number }, detail: 'Finish the current vehicle first' })
+            throw new AppError('BAY_BUSY', {
+              params: { n: bay.number },
+              detail: 'Finish the current vehicle first',
+            })
         }
         if (bay.status !== req.body.status) {
           await tx.updateTable('bays').set({ status: req.body.status }).where('id', '=', bay.id).execute()
@@ -219,7 +238,8 @@ export function registerOpsRoutes(app: AppInstance, ports: SchedulingPorts): voi
       config: { access: access.perm('sched.view') },
       schema: {
         tags: TAGS,
-        summary: 'Assignable employees (bay staff: Crew role or jobs.status), without the Unassigned pseudo-column',
+        summary:
+          'Assignable employees (bay staff: Crew role or jobs.status), without the Unassigned pseudo-column',
         response: { 200: z.object({ items: z.array(StaffView) }) },
       },
     },

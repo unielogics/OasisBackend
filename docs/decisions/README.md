@@ -16,3 +16,8 @@
 | [0021](0021-checklist-task-ids.md) | Checklist tasks keep stable ids; the PUT diff rules |
 | [0022](0022-closures-federal-holidays-emergency.md) | Closures, federal holidays, dayInfo and emergency closures |
 | [0023](0023-vip-and-settings-data-rules.md) | VIP, arrival and settings data rules |
+| [0040](0040-scheduling-ports-and-wiring.md) | Scheduling ports (invoices, messages, memberships) and wiring |
+| [0041](0041-availability-engine.md) | Availability engine: capacity, VIP holds, overrides, same-day guarantee |
+| [0042](0042-lifecycle-guards-and-bays.md) | Lifecycle guards, expectedStatus, bay choice and concurrency |
+| [0043](0043-operations-read-models.md) | Operations read models: KPIs, alerts, windows, bay staff, calendar |
+| [0044](0044-ops-oracle-and-parity-seed.md) | Operations oracle tests and the parity-ops seed |

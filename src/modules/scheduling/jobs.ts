@@ -56,10 +56,7 @@ export interface ScanResult {
   hash: string
 }
 
-export async function scanAlertsFor(
-  db: Db,
-  c: SchedulingCtx,
-): Promise<ScanResult> {
+export async function scanAlertsFor(db: Db, c: SchedulingCtx): Promise<ScanResult> {
   const alerts = await loadAlerts(db, c, { manager: true })
   const { hash, keys } = alertSetKey(alerts)
   return transaction(db, async (tx) => {
@@ -75,7 +72,9 @@ export async function scanAlertsFor(
       .insertInto('ops_alert_state')
       .values({ location_id: c.locationId, alerts_hash: hash, alert_keys: keys, updated_at: c.clock.now() })
       .onConflict((oc) =>
-        oc.column('location_id').doUpdateSet({ alerts_hash: hash, alert_keys: keys, updated_at: c.clock.now() }),
+        oc
+          .column('location_id')
+          .doUpdateSet({ alerts_hash: hash, alert_keys: keys, updated_at: c.clock.now() }),
       )
       .execute()
     const before = new Set(prev?.alert_keys ?? [])
@@ -95,7 +94,11 @@ export async function scanAlertsFor(
   })
 }
 
-export async function runAlertsScan(db: Db, clock: Clock, ports: SchedulingPorts = jobPorts()): Promise<ScanResult[]> {
+export async function runAlertsScan(
+  db: Db,
+  clock: Clock,
+  ports: SchedulingPorts = jobPorts(),
+): Promise<ScanResult[]> {
   const locations = await db.selectFrom('locations').select('id').orderBy('created_at').execute()
   const newId = createIdGenerator(clock)
   const out: ScanResult[] = []
@@ -113,7 +116,7 @@ export const alertsScanJob: JobDefinition = {
   retryLimit: 0,
   async handler(ctx) {
     const results = await runAlertsScan(ctx.db, ctx.clock)
-    if (results.some((r) => r.changed)) ctx.logger.info({ alerts: results.map((r) => r.count) }, 'alert set changed')
+    if (results.some((r) => r.changed))
+      ctx.logger.info({ alerts: results.map((r) => r.count) }, 'alert set changed')
   },
 }
-

@@ -98,11 +98,7 @@ export interface OpsSnapshot {
   emergency: { active: boolean; summary: string | null; startedAt: string | null }
 }
 
-export function windowRange(
-  c: Pick<SchedulingCtx, 'tz'>,
-  now: Date,
-  w: OpsWindow,
-): { from: Date; to: Date } {
+export function windowRange(c: Pick<SchedulingCtx, 'tz'>, now: Date, w: OpsWindow): { from: Date; to: Date } {
   switch (w) {
     case 'today':
       return dayRange(c, now, 0, 1)
@@ -280,7 +276,15 @@ export async function loadSnapshot(
     }),
     (() => {
       const jobs = pool.filter((r) => !r.staff).map(card)
-      return { employeeId: null, name: 'Unassigned', role: 'Queue', initials: '—', avatarColor: null, count: jobs.length, jobs }
+      return {
+        employeeId: null,
+        name: 'Unassigned',
+        role: 'Queue',
+        initials: '—',
+        avatarColor: null,
+        count: jobs.length,
+        jobs,
+      }
     })(),
   ]
 
@@ -314,4 +318,3 @@ export async function loadSnapshot(
     },
   }
 }
-

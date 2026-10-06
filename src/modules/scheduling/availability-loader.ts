@@ -156,7 +156,11 @@ export async function loadDayData(
       to: end,
       excludeAppointmentId: o.excludeAppointmentId,
     }),
-    db.selectFrom('vip_holds').select(['weekday', 'time_min']).where('location_id', '=', o.locationId).execute(),
+    db
+      .selectFrom('vip_holds')
+      .select(['weekday', 'time_min'])
+      .where('location_id', '=', o.locationId)
+      .execute(),
   ])
   const day = dayInfo({
     date: o.date,
@@ -164,11 +168,7 @@ export async function loadDayData(
     closures,
     emergency: emergencySnapshot(emergency, o.tz),
   })
-  const vipIds = await vipCustomerIds(
-    db,
-    o.locationId,
-    [...new Set(rows.map((r) => r.customerId))],
-  )
+  const vipIds = await vipCustomerIds(db, o.locationId, [...new Set(rows.map((r) => r.customerId))])
   return {
     date: o.date,
     tz: o.tz,
@@ -236,7 +236,9 @@ export async function getAvailability(db: Executor, q: AvailabilityQuery): Promi
       errors: [{ path: 'serviceId', message: 'Pick a package to check availability.' }],
     })
   const data = await loadDayData(db, q)
-  const isVip = q.customerId ? (await vipCustomerIds(db, q.locationId, [q.customerId])).has(q.customerId) : false
+  const isVip = q.customerId
+    ? (await vipCustomerIds(db, q.locationId, [q.customerId])).has(q.customerId)
+    : false
   const sameDayUsed =
     isVip && q.customerId
       ? await sameDayGuaranteesUsed(db, {

@@ -70,7 +70,8 @@ export async function presignPhoto(
   appointmentId: string,
   input: PresignInput,
 ): Promise<{ photoId: string; upload: UploadSlot }> {
-  if (!PHOTO_CATEGORIES.includes(input.category)) throw invalid('category', 'Pick arrival, before, after or issue.')
+  if (!PHOTO_CATEGORIES.includes(input.category))
+    throw invalid('category', 'Pick arrival, before, after or issue.')
   if (!Number.isInteger(input.bytes) || input.bytes < 1 || input.bytes > MAX_UPLOAD_BYTES)
     throw invalid('bytes', `Photos can be up to ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB.`)
   let contentType: string
@@ -136,7 +137,8 @@ export async function completePhoto(
         .forUpdate()
         .executeTakeFirst()
     : undefined
-  if (!row || row.status === 'deleted' || !row.s3_key) throw new AppError('NOT_FOUND', { detail: 'That photo does not exist' })
+  if (!row || row.status === 'deleted' || !row.s3_key)
+    throw new AppError('NOT_FOUND', { detail: 'That photo does not exist' })
   const head = await c.ports.storage.head(row.s3_key)
   if (!head) throw invalid('photoId', 'The file has not been uploaded yet.')
   if (head.bytes > MAX_UPLOAD_BYTES || head.bytes < 1)
@@ -156,7 +158,11 @@ export async function completePhoto(
       actor,
     })
     await audit(tx, c, actor, 'photo.add', appointmentId, null, { photoId: row.id, category: row.category })
-    const a = await tx.selectFrom('appointments').select(['version', 'status']).where('id', '=', appointmentId).executeTakeFirstOrThrow()
+    const a = await tx
+      .selectFrom('appointments')
+      .select(['version', 'status'])
+      .where('id', '=', appointmentId)
+      .executeTakeFirstOrThrow()
     await publishOps(tx, c.locationId, {
       kpi: false,
       appointment: { id: appointmentId, version: a.version, status: a.status, change: 'photo' },
@@ -193,7 +199,13 @@ export async function addIssueNote(
       uploaded_by: actor.auth.userId,
     })
     .execute()
-  await logActivity(tx, c, { appointmentId, text: 'Issue noted', channels: ['internal'], actor, meta: { photoId } })
+  await logActivity(tx, c, {
+    appointmentId,
+    text: 'Issue noted',
+    channels: ['internal'],
+    actor,
+    meta: { photoId },
+  })
   await audit(tx, c, actor, 'photo.note', appointmentId, null, { photoId })
   return { photoId }
 }
@@ -216,9 +228,15 @@ export async function deletePhoto(
         .forUpdate()
         .executeTakeFirst()
     : undefined
-  if (!row || row.status === 'deleted') throw new AppError('NOT_FOUND', { detail: 'That photo does not exist' })
+  if (!row || row.status === 'deleted')
+    throw new AppError('NOT_FOUND', { detail: 'That photo does not exist' })
   await tx.updateTable('appointment_photos').set({ status: 'deleted' }).where('id', '=', row.id).execute()
-  await logActivity(tx, c, { appointmentId, text: `Photo removed · ${row.category}`, channels: ['internal'], actor })
+  await logActivity(tx, c, {
+    appointmentId,
+    text: `Photo removed · ${row.category}`,
+    channels: ['internal'],
+    actor,
+  })
   await audit(tx, c, actor, 'photo.delete', appointmentId, { photoId: row.id }, null)
   return { keys: [row.s3_key, row.thumb_key].filter((k): k is string => k !== null) }
 }

@@ -2,19 +2,18 @@
 import type { Executor, Tx } from '../../platform/db.js'
 import { displayName } from '../auth/context.js'
 import '../people/schema.js'
-import {
-  customerBrief,
-  vehicleBrief,
-  vehicleLabel,
-  type AppointmentRecord,
-} from './appointments.js'
+import { customerBrief, vehicleBrief, vehicleLabel, type AppointmentRecord } from './appointments.js'
 import type { SchedulingCtx } from './context.js'
 import type { InvoiceItem, InvoiceSummary } from './ports.js'
 
 /** "Marco R." for an employee, "Unassigned" for none. */
 export async function staffLabel(db: Executor, employeeId: string | null): Promise<string> {
   if (!employeeId) return 'Unassigned'
-  const e = await db.selectFrom('employees').select(['first', 'last']).where('id', '=', employeeId).executeTakeFirst()
+  const e = await db
+    .selectFrom('employees')
+    .select(['first', 'last'])
+    .where('id', '=', employeeId)
+    .executeTakeFirst()
   return e ? displayName(e.first, e.last) : 'Unassigned'
 }
 
@@ -43,7 +42,11 @@ export async function invoiceItemsOf(db: Executor, a: AppointmentRecord): Promis
 }
 
 /** Creates the appointment's invoice (or refreshes its date and revives it after a reopen). */
-export async function ensureInvoiceFor(tx: Tx, c: SchedulingCtx, a: AppointmentRecord): Promise<InvoiceSummary> {
+export async function ensureInvoiceFor(
+  tx: Tx,
+  c: SchedulingCtx,
+  a: AppointmentRecord,
+): Promise<InvoiceSummary> {
   const [customer, vehicle, staff, addons] = await Promise.all([
     customerBrief(tx, a.customerId),
     vehicleBrief(tx, a.vehicleId),
@@ -64,6 +67,10 @@ export async function ensureInvoiceFor(tx: Tx, c: SchedulingCtx, a: AppointmentR
   })
 }
 
-export async function syncInvoiceItems(tx: Tx, c: SchedulingCtx, a: AppointmentRecord): Promise<InvoiceSummary> {
+export async function syncInvoiceItems(
+  tx: Tx,
+  c: SchedulingCtx,
+  a: AppointmentRecord,
+): Promise<InvoiceSummary> {
   return c.ports.invoices.syncItems(tx, a.id, await invoiceItemsOf(tx, a))
 }

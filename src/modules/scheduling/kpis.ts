@@ -59,7 +59,13 @@ export function bayMinutesFree(i: {
   closeMin: number | null
   activeBays: number
   bufferMin: number
-  jobs: readonly { status: string; start: Date; end: Date; cleaningStartedAt: Date | null; durationMin: number }[]
+  jobs: readonly {
+    status: string
+    start: Date
+    end: Date
+    cleaningStartedAt: Date | null
+    durationMin: number
+  }[]
 }): number {
   if (i.openMin === null || i.closeMin === null || i.activeBays === 0) return 0
   const date = toBizDate(i.now, i.tz)
@@ -119,13 +125,43 @@ export function computeKpis(i: KpiInputs): Kpi[] {
     })),
   })
   return [
-    { key: 'appointments24h', label: 'Appointments 24h', value: String(window.length), sub: `${booked} booked`, raw: window.length },
+    {
+      key: 'appointments24h',
+      label: 'Appointments 24h',
+      value: String(window.length),
+      sub: `${booked} booked`,
+      raw: window.length,
+    },
     { key: 'activeJobs', label: 'Active jobs', value: String(active), sub: 'in bays', raw: active },
-    { key: 'readyForPickup', label: 'Ready for pickup', value: String(ready), sub: ready > 0 ? 'notify' : 'clear', raw: ready },
-    { key: 'pendingPayments', label: 'Pending payments', value: String(pending.length), sub: formatUsdOps(pendingSum), raw: pendingSum },
+    {
+      key: 'readyForPickup',
+      label: 'Ready for pickup',
+      value: String(ready),
+      sub: ready > 0 ? 'notify' : 'clear',
+      raw: ready,
+    },
+    {
+      key: 'pendingPayments',
+      label: 'Pending payments',
+      value: String(pending.length),
+      sub: formatUsdOps(pendingSum),
+      raw: pendingSum,
+    },
     { key: 'bayTimeFree', label: 'Bay time free', value: hoursLabel(free), sub: 'today', raw: free },
-    { key: 'membersToday', label: 'Members today', value: String(members), sub: `of ${todayRows.length}`, raw: members },
-    { key: 'revenueToday', label: 'Revenue today', value: formatUsdOps(i.revenueTodayCents), sub: 'paid', raw: i.revenueTodayCents },
+    {
+      key: 'membersToday',
+      label: 'Members today',
+      value: String(members),
+      sub: `of ${todayRows.length}`,
+      raw: members,
+    },
+    {
+      key: 'revenueToday',
+      label: 'Revenue today',
+      value: formatUsdOps(i.revenueTodayCents),
+      sub: 'paid',
+      raw: i.revenueTodayCents,
+    },
   ]
 }
 
@@ -165,4 +201,3 @@ export async function loadKpis(db: Executor, c: SchedulingCtx, preloaded?: Board
     revenueTodayCents: revenue,
   })
 }
-

@@ -18,12 +18,19 @@ const GOLDEN_TOTALS: Record<string, number> = { a3: 16478, a4: 19688, a5: 27820,
 
 describe.each(original.appointments)('$id ($time, $svc)', (o) => {
   it('checklist progress and sections match the original', async () => {
-    const file = await loadAppointmentFile(w.t.db, w.ctx, { ...auth, locationId: w.locationId }, w.ids.get(o.id)!)
-    expect({ done: file.checklist.done, total: file.checklist.total, pct: `${file.checklist.pct}%` }).toEqual({
-      done: o.checkDone,
-      total: o.checkTotal,
-      pct: o.checkPct,
-    })
+    const file = await loadAppointmentFile(
+      w.t.db,
+      w.ctx,
+      { ...auth, locationId: w.locationId },
+      w.ids.get(o.id)!,
+    )
+    expect({ done: file.checklist.done, total: file.checklist.total, pct: `${file.checklist.pct}%` }).toEqual(
+      {
+        done: o.checkDone,
+        total: o.checkTotal,
+        pct: o.checkPct,
+      },
+    )
     expect(
       file.checklist.sections.map((s) => ({
         title: s.title,
@@ -34,7 +41,12 @@ describe.each(original.appointments)('$id ($time, $svc)', (o) => {
   })
 
   it('photo counts, notes, visits and status match', async () => {
-    const file = await loadAppointmentFile(w.t.db, w.ctx, { ...auth, locationId: w.locationId }, w.ids.get(o.id)!)
+    const file = await loadAppointmentFile(
+      w.t.db,
+      w.ctx,
+      { ...auth, locationId: w.locationId },
+      w.ids.get(o.id)!,
+    )
     expect({
       arrival: file.photos.arrival.count,
       before: file.photos.before.count,
@@ -58,7 +70,8 @@ describe.each(original.appointments)('$id ($time, $svc)', (o) => {
     expect(inv.totalCents).toBe(inv.subtotalCents + inv.taxCents + o.tip * 100)
     if (GOLDEN_TOTALS[o.id]) expect(inv.totalCents).toBe(GOLDEN_TOTALS[o.id])
     // balance: paid in full -> 0; deposit -> total less the deposit; unpaid -> total
-    const expectedBalance = o.pay === 'paid' ? 0 : o.pay === 'deposit' ? inv.totalCents - o.deposit * 100 : inv.totalCents
+    const expectedBalance =
+      o.pay === 'paid' ? 0 : o.pay === 'deposit' ? inv.totalCents - o.deposit * 100 : inv.totalCents
     expect(inv.balanceCents).toBe(expectedBalance)
     expect(Math.round(inv.balanceCents / 100)).toBe(Math.round(o.balance))
   })

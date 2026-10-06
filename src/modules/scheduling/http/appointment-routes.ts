@@ -115,7 +115,10 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
       },
     },
     async (req) =>
-      listAppointments(app.db, await ctxOf(app, req, ports), { ...req.query, canContact: canSeeContact(req.auth!) }),
+      listAppointments(app.db, await ctxOf(app, req, ports), {
+        ...req.query,
+        canContact: canSeeContact(req.auth!),
+      }),
   )
 
   app.get(
@@ -149,25 +152,27 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
         response: { 201: BookingResult },
       },
     },
-    idempotent(idempotentHandler(async (req, tx) => {
-      const c = await ctxOf(app, req, ports)
-      const b = req.body as z.infer<typeof BookingBody>
-      const r = await createAppointment(tx, c, actorOf(req), {
-        customer: b.customer,
-        vehicle: b.vehicle,
-        serviceId: b.serviceId,
-        addonIds: b.addonIds,
-        start: b.start ? instant(b.start) : undefined,
-        walkIn: b.walkIn,
-        source: b.source,
-        assignedEmployeeId: b.assignedEmployeeId,
-        plannedBayId: b.plannedBayId,
-        notes: b.notes,
-        specialInstructions: b.specialInstructions,
-        override: b.override,
-      })
-      return { status: 201, body: r, headers: { Location: `/api/v1/appointments/${r.appointment.id}` } }
-    })),
+    idempotent(
+      idempotentHandler(async (req, tx) => {
+        const c = await ctxOf(app, req, ports)
+        const b = req.body as z.infer<typeof BookingBody>
+        const r = await createAppointment(tx, c, actorOf(req), {
+          customer: b.customer,
+          vehicle: b.vehicle,
+          serviceId: b.serviceId,
+          addonIds: b.addonIds,
+          start: b.start ? instant(b.start) : undefined,
+          walkIn: b.walkIn,
+          source: b.source,
+          assignedEmployeeId: b.assignedEmployeeId,
+          plannedBayId: b.plannedBayId,
+          notes: b.notes,
+          specialInstructions: b.specialInstructions,
+          override: b.override,
+        })
+        return { status: 201, body: r, headers: { Location: `/api/v1/appointments/${r.appointment.id}` } }
+      }),
+    ),
   )
 
   app.patch(
@@ -203,9 +208,15 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
     '/appointments/:id/confirm',
     {
       config: { access: access.anyPerm('sched.edit', 'jobs.status') },
-      schema: { tags: TAGS, summary: 'booked to confirmed (queues the confirmation SMS)', params: IdParams, response: { 200: CommandResult } },
+      schema: {
+        tags: TAGS,
+        summary: 'booked to confirmed (queues the confirmation SMS)',
+        params: IdParams,
+        response: { 200: CommandResult },
+      },
     },
-    async (req) => inTx(async (tx) => confirmAppointment(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id)),
+    async (req) =>
+      inTx(async (tx) => confirmAppointment(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id)),
   )
 
   app.post(
@@ -217,12 +228,19 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
         summary: 'booked or confirmed to arrived',
         description: '`source: geofence` also records the geofence check-in and queues the welcome SMS.',
         params: IdParams,
-        body: z.object({ source: z.enum(['manual', 'geofence']).optional() }).strict().optional(),
+        body: z
+          .object({ source: z.enum(['manual', 'geofence']).optional() })
+          .strict()
+          .optional(),
         response: { 200: CommandResult },
       },
     },
     async (req) =>
-      inTx(async (tx) => arriveAppointment(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id, { source: req.body?.source })),
+      inTx(async (tx) =>
+        arriveAppointment(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id, {
+          source: req.body?.source,
+        }),
+      ),
   )
 
   app.post(
@@ -240,7 +258,11 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
       },
     },
     async (req) =>
-      inTx(async (tx) => startCleaning(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id, { bayId: req.body?.bayId })),
+      inTx(async (tx) =>
+        startCleaning(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id, {
+          bayId: req.body?.bayId,
+        }),
+      ),
   )
 
   app.post(
@@ -258,7 +280,9 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
       },
     },
     async (req) =>
-      inTx(async (tx) => assignToBay(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id, { bayId: req.body.bayId })),
+      inTx(async (tx) =>
+        assignToBay(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id, { bayId: req.body.bayId }),
+      ),
   )
 
   app.post(
@@ -272,7 +296,8 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
         response: { 200: CommandResult },
       },
     },
-    async (req) => inTx(async (tx) => completeAppointment(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id)),
+    async (req) =>
+      inTx(async (tx) => completeAppointment(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id)),
   )
 
   app.post(
@@ -308,16 +333,28 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
           'Reason required; `notify` texts the client. The invoice is canceled through the payments gateway (a deposit stays on it: canceled_kept). `deposit` records the policy; refunding is a payments command.',
         params: IdParams,
         body: z
-          .object({ reason: z.string().trim().min(1).max(300), notify: z.boolean().optional(), deposit: DepositPolicy.optional() })
+          .object({
+            reason: z.string().trim().min(1).max(300),
+            notify: z.boolean().optional(),
+            deposit: DepositPolicy.optional(),
+          })
           .strict(),
         response: { 200: CommandResult },
       },
     },
-    idempotent(idempotentHandler(async (req, tx) => {
-      const b = req.body as { reason: string; notify?: boolean; deposit?: z.infer<typeof DepositPolicy> }
-      const r = await cancelAppointment(tx, await ctxOf(app, req, ports), actorOf(req), (req.params as { id: string }).id, b)
-      return { status: 200, body: r }
-    })),
+    idempotent(
+      idempotentHandler(async (req, tx) => {
+        const b = req.body as { reason: string; notify?: boolean; deposit?: z.infer<typeof DepositPolicy> }
+        const r = await cancelAppointment(
+          tx,
+          await ctxOf(app, req, ports),
+          actorOf(req),
+          (req.params as { id: string }).id,
+          b,
+        )
+        return { status: 200, body: r }
+      }),
+    ),
   )
 
   app.post(
@@ -331,10 +368,17 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
         response: { 200: CommandResult },
       },
     },
-    idempotent(idempotentHandler(async (req, tx) => {
-      const r = await markNoShow(tx, await ctxOf(app, req, ports), actorOf(req), (req.params as { id: string }).id)
-      return { status: 200, body: r }
-    })),
+    idempotent(
+      idempotentHandler(async (req, tx) => {
+        const r = await markNoShow(
+          tx,
+          await ctxOf(app, req, ports),
+          actorOf(req),
+          (req.params as { id: string }).id,
+        )
+        return { status: 200, body: r }
+      }),
+    ),
   )
 
   app.post(
@@ -385,7 +429,12 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
     '/appointments/:id/prep-bay',
     {
       config: { access: access.anyPerm('jobs.status', 'sched.edit') },
-      schema: { tags: TAGS, summary: 'Mark the bay prepped for an arriving car (not reversible)', params: IdParams, response: { 200: CommandResult } },
+      schema: {
+        tags: TAGS,
+        summary: 'Mark the bay prepped for an arriving car (not reversible)',
+        params: IdParams,
+        response: { 200: CommandResult },
+      },
     },
     async (req) => inTx(async (tx) => prepBay(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id)),
   )
@@ -404,16 +453,24 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
       },
     },
     async (req) =>
-      inTx(async (tx) => setPickup(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id, { state: req.body.state })),
+      inTx(async (tx) =>
+        setPickup(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id, { state: req.body.state }),
+      ),
   )
 
   app.post(
     '/appointments/:id/notify-ready',
     {
       config: { access: access.perm('msg.send') },
-      schema: { tags: TAGS, summary: 'Re-send the ready-for-pickup SMS', params: IdParams, response: { 200: CommandResult } },
+      schema: {
+        tags: TAGS,
+        summary: 'Re-send the ready-for-pickup SMS',
+        params: IdParams,
+        response: { 200: CommandResult },
+      },
     },
-    async (req) => inTx(async (tx) => notifyReady(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id)),
+    async (req) =>
+      inTx(async (tx) => notifyReady(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id)),
   )
 
   // Add-ons -------------------------------------------------------------------------------------------------------
@@ -432,7 +489,9 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
       },
     },
     async (req) =>
-      inTx(async (tx) => addAddon(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id, req.params.serviceId)),
+      inTx(async (tx) =>
+        addAddon(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id, req.params.serviceId),
+      ),
   )
 
   app.delete(
@@ -442,13 +501,16 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
       schema: {
         tags: TAGS,
         summary: 'Remove an add-on',
-        description: '409 ADDON_REMOVE_OVERPAID when the invoice would be left overpaid: refund or adjust instead.',
+        description:
+          '409 ADDON_REMOVE_OVERPAID when the invoice would be left overpaid: refund or adjust instead.',
         params: AddonParams,
         response: { 200: AddonChange },
       },
     },
     async (req) =>
-      inTx(async (tx) => removeAddon(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id, req.params.serviceId)),
+      inTx(async (tx) =>
+        removeAddon(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id, req.params.serviceId),
+      ),
   )
 
   // Checklist -----------------------------------------------------------------------------------------------------
@@ -464,14 +526,26 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
         body: z.object({ done: z.boolean() }).strict(),
         response: {
           200: ChecklistChange.extend({
-            item: z.object({ id: z.string(), label: z.string(), done: z.boolean(), position: z.number().int() }),
+            item: z.object({
+              id: z.string(),
+              label: z.string(),
+              done: z.boolean(),
+              position: z.number().int(),
+            }),
           }),
         },
       },
     },
     async (req) =>
       inTx(async (tx) =>
-        setChecklistItem(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id, req.params.itemId, req.body.done),
+        setChecklistItem(
+          tx,
+          await ctxOf(app, req, ports),
+          actorOf(req),
+          req.params.id,
+          req.params.itemId,
+          req.body.done,
+        ),
       ),
   )
 
@@ -489,7 +563,14 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
     },
     async (req) =>
       inTx(async (tx) =>
-        bulkSetChecklist(tx, await ctxOf(app, req, ports), actorOf(req), req.params.id, req.body.itemIds, req.body.done),
+        bulkSetChecklist(
+          tx,
+          await ctxOf(app, req, ports),
+          actorOf(req),
+          req.params.id,
+          req.body.itemIds,
+          req.body.done,
+        ),
       ),
   )
 
@@ -529,7 +610,9 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
     async (req, reply) => {
       const c = await ctxOf(app, req, ports)
       const r = await inTx((tx) => presignPhoto(tx, c, actorOf(req), req.params.id, req.body))
-      return reply.status(201).send({ photoId: r.photoId, upload: { ...r.upload, expiresAt: r.upload.expiresAt.toISOString() } })
+      return reply
+        .status(201)
+        .send({ photoId: r.photoId, upload: { ...r.upload, expiresAt: r.upload.expiresAt.toISOString() } })
     },
   )
 
@@ -541,13 +624,19 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
         tags: TAGS,
         summary: 'Verify the uploaded object (size and type) and mark the photo ready',
         params: z.object({ id: Uuid, photoId: Uuid }),
-        response: { 200: z.object({ photo: z.object({ id: z.string(), category: z.string(), bytes: z.number().int() }) }) },
+        response: {
+          200: z.object({
+            photo: z.object({ id: z.string(), category: z.string(), bytes: z.number().int() }),
+          }),
+        },
       },
     },
     async (req) => {
       const c = await ctxOf(app, req, ports)
       const r = await inTx((tx) => completePhoto(tx, c, actorOf(req), req.params.id, req.params.photoId))
-      await app.jobs?.enqueue(thumbnailJobName, { photoId: r.photo.id }, { singletonKey: r.photo.id }).catch(() => null)
+      await app.jobs
+        ?.enqueue(thumbnailJobName, { photoId: r.photo.id }, { singletonKey: r.photo.id })
+        .catch(() => null)
       return { photo: { id: r.photo.id, category: r.photo.category, bytes: r.photo.bytes } }
     },
   )

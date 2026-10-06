@@ -50,7 +50,12 @@ export interface Alert {
   action: { type: AlertActionType; appointmentId: string | null }
 }
 
-const ARRIVAL_KINDS = new Set<AlertKind>(['arriving_soon', 'arriving_eta', 'auto_checked_in', 'confirm_checkin'])
+const ARRIVAL_KINDS = new Set<AlertKind>([
+  'arriving_soon',
+  'arriving_eta',
+  'auto_checked_in',
+  'confirm_checkin',
+])
 
 const SPECIAL_PREVIEW = 46
 
@@ -104,29 +109,94 @@ export function buildAlerts(i: AlertInputs, bays: ReadonlyMap<string, number>): 
   }
   const name = (r: BoardRow): string => r.customer.fullName
   const make = (r: BoardRow): string => r.vehicle?.make ?? 'vehicle'
-  const makeModel = (r: BoardRow): string => [r.vehicle?.make, r.vehicle?.model].filter(Boolean).join(' ') || 'vehicle'
+  const makeModel = (r: BoardRow): string =>
+    [r.vehicle?.make, r.vehicle?.model].filter(Boolean).join(' ') || 'vehicle'
 
   for (const r of rows) {
     const a = r.a
-    const active = a.status === 'booked' || a.status === 'confirmed' || a.status === 'arrived' || a.status === 'cleaning'
+    const active =
+      a.status === 'booked' || a.status === 'confirmed' || a.status === 'arrived' || a.status === 'cleaning'
     if (a.status === 'completed' && a.pickupState !== 'collected') {
       const due = (r.invoice?.balanceCents ?? 0) > 0
-      push(r, 'ready_for_pickup', 'green', '↑', 'Ready for pickup', `${name(r)}'s ${make(r)} is done${due ? ' · payment due' : ''}`, 'Mark picked up', 'mark_picked_up')
+      push(
+        r,
+        'ready_for_pickup',
+        'green',
+        '↑',
+        'Ready for pickup',
+        `${name(r)}'s ${make(r)} is done${due ? ' · payment due' : ''}`,
+        'Mark picked up',
+        'mark_picked_up',
+      )
     }
     if (!inWindow(r)) continue
     if (isLate(a, i.now, i.ops.lateGraceMin))
-      push(r, 'running_late', 'red', '!', `Running late · ${name(r)}`, `${timeOf(a.scheduledStart, i.tz)} ${makeModel(r)} — no arrival logged`, 'Message customer', 'message_customer')
-    if (dayOf(r) === today && (a.status === 'booked' || a.status === 'confirmed' || a.status === 'arrived') && a.plannedBayId === null)
-      push(r, 'needs_bay', 'amber', '◳', 'Needs bay assignment', `${name(r)} · ${a.packageName}`, 'Assign bay', 'assign_bay')
+      push(
+        r,
+        'running_late',
+        'red',
+        '!',
+        `Running late · ${name(r)}`,
+        `${timeOf(a.scheduledStart, i.tz)} ${makeModel(r)} — no arrival logged`,
+        'Message customer',
+        'message_customer',
+      )
+    if (
+      dayOf(r) === today &&
+      (a.status === 'booked' || a.status === 'confirmed' || a.status === 'arrived') &&
+      a.plannedBayId === null
+    )
+      push(
+        r,
+        'needs_bay',
+        'amber',
+        '◳',
+        'Needs bay assignment',
+        `${name(r)} · ${a.packageName}`,
+        'Assign bay',
+        'assign_bay',
+      )
     const untilStart = a.scheduledStart.getTime() - i.now.getTime()
-    if (a.status === 'confirmed' && a.etaMinutes === null && untilStart > 0 && untilStart <= i.ops.prepAtMin * 60_000)
-      push(r, 'arriving_soon', 'blue', '→', 'Arriving soon', `${name(r)} in ${Math.ceil(untilStart / 60_000)} min · ${makeModel(r)}`, `Prep bay ${bayNo(r, bays) ?? '—'}`, 'prep_bay')
+    if (
+      a.status === 'confirmed' &&
+      a.etaMinutes === null &&
+      untilStart > 0 &&
+      untilStart <= i.ops.prepAtMin * 60_000
+    )
+      push(
+        r,
+        'arriving_soon',
+        'blue',
+        '→',
+        'Arriving soon',
+        `${name(r)} in ${Math.ceil(untilStart / 60_000)} min · ${makeModel(r)}`,
+        `Prep bay ${bayNo(r, bays) ?? '—'}`,
+        'prep_bay',
+      )
     if (a.status === 'booked')
-      push(r, 'unconfirmed', 'amber', '?', 'Unconfirmed', `${name(r)} · ${timeOf(a.scheduledStart, i.tz)} hasn't confirmed`, 'Send reminder', 'send_reminder')
+      push(
+        r,
+        'unconfirmed',
+        'amber',
+        '?',
+        'Unconfirmed',
+        `${name(r)} · ${timeOf(a.scheduledStart, i.tz)} hasn't confirmed`,
+        'Send reminder',
+        'send_reminder',
+      )
     if (a.specialInstructions && active) {
       const s = a.specialInstructions
       const preview = s.length > SPECIAL_PREVIEW ? `${s.slice(0, SPECIAL_PREVIEW)}…` : s
-      push(r, 'special_instructions', 'violet', '★', 'Special instructions', `${name(r)}: ${preview}`, 'View file', 'view_file')
+      push(
+        r,
+        'special_instructions',
+        'violet',
+        '★',
+        'Special instructions',
+        `${name(r)}: ${preview}`,
+        'View file',
+        'view_file',
+      )
     }
   }
   for (const r of rows) {
@@ -147,15 +217,42 @@ export function buildAlerts(i: AlertInputs, bays: ReadonlyMap<string, number>): 
       )
     }
     if (a.geoCheckedInAt && a.status === 'arrived')
-      push(r, 'auto_checked_in', 'green', '✓', `Auto checked in · ${name(r)}`, `Geofence at ${timeOf(a.geoCheckedInAt, i.tz)} · vehicle in the lot`, 'Start cleaning', 'start_cleaning')
+      push(
+        r,
+        'auto_checked_in',
+        'green',
+        '✓',
+        `Auto checked in · ${name(r)}`,
+        `Geofence at ${timeOf(a.geoCheckedInAt, i.tz)} · vehicle in the lot`,
+        'Start cleaning',
+        'start_cleaning',
+      )
     if (a.geoCheckedInAt && upcoming && !i.ops.autoArrive)
-      push(r, 'confirm_checkin', 'green', '✓', `Checked in at the lot · ${name(r)}`, `Geofence at ${timeOf(a.geoCheckedInAt, i.tz)} · confirm the arrival`, 'Mark arrived', 'mark_arrived')
+      push(
+        r,
+        'confirm_checkin',
+        'green',
+        '✓',
+        `Checked in at the lot · ${name(r)}`,
+        `Geofence at ${timeOf(a.geoCheckedInAt, i.tz)} · confirm the arrival`,
+        'Mark arrived',
+        'mark_arrived',
+      )
   }
   const credit = rows.find(
     (r) => r.a.status === 'completed' && (r.invoice?.balanceCents ?? 0) > 0 && r.member?.creditAvailable,
   )
   if (credit)
-    push(credit, 'member_credit', 'blue', '◆', 'Member credit available', `${name(credit)} has 1 unused ${credit.member!.plan.split(' ')[0]} credit this cycle`, 'Apply credit', 'apply_credit')
+    push(
+      credit,
+      'member_credit',
+      'blue',
+      '◆',
+      'Member credit available',
+      `${name(credit)} has 1 unused ${credit.member!.plan.split(' ')[0]} credit this cycle`,
+      'Apply credit',
+      'apply_credit',
+    )
 
   // Stable sort: Array.prototype.sort is stable in Node 22.
   const sorted = [...out].sort((x, y) => y.priority - x.priority)

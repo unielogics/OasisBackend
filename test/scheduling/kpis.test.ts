@@ -18,7 +18,12 @@ const kpis = async () => Object.fromEntries((await loadKpis(o.t.db, o.ctx)).map(
 
 describe('bayMinutesFree (pure)', () => {
   const base = { tz: TZ, openMin: 480, closeMin: 1020, activeBays: 2, bufferMin: 10 }
-  const job = (status: string, from: string, to: string, extra: Partial<{ cleaningStartedAt: Date | null; durationMin: number }> = {}) => ({
+  const job = (
+    status: string,
+    from: string,
+    to: string,
+    extra: Partial<{ cleaningStartedAt: Date | null; durationMin: number }> = {},
+  ) => ({
     status,
     start: wall('2026-06-13', from),
     end: wall('2026-06-13', to),
@@ -35,7 +40,9 @@ describe('bayMinutesFree (pure)', () => {
   })
 
   it('a closed day or no active bay has none', () => {
-    expect(bayMinutesFree({ ...base, openMin: null, closeMin: null, now: wall('2026-06-13', '10:00'), jobs: [] })).toBe(0)
+    expect(
+      bayMinutesFree({ ...base, openMin: null, closeMin: null, now: wall('2026-06-13', '10:00'), jobs: [] }),
+    ).toBe(0)
     expect(bayMinutesFree({ ...base, activeBays: 0, now: wall('2026-06-13', '10:00'), jobs: [] })).toBe(0)
   })
 
@@ -53,9 +60,23 @@ describe('bayMinutesFree (pure)', () => {
     const now = wall('2026-06-13', '10:36')
     const free = (j: ReturnType<typeof job>) => bayMinutesFree({ ...base, now, jobs: [j] })
     const all = 2 * 384
-    expect(free(job('cleaning', '10:00', '11:15', { cleaningStartedAt: wall('2026-06-13', '10:09'), durationMin: 75 }))).toBe(all - (11 * 60 + 24 + 10 - 636))
+    expect(
+      free(
+        job('cleaning', '10:00', '11:15', {
+          cleaningStartedAt: wall('2026-06-13', '10:09'),
+          durationMin: 75,
+        }),
+      ),
+    ).toBe(all - (11 * 60 + 24 + 10 - 636))
     // overrunning: started 9:00 for 60 minutes, still here at 10:36: the bay stays committed through now + buffer
-    expect(free(job('cleaning', '09:00', '10:00', { cleaningStartedAt: wall('2026-06-13', '09:00'), durationMin: 60 }))).toBe(all - 10)
+    expect(
+      free(
+        job('cleaning', '09:00', '10:00', {
+          cleaningStartedAt: wall('2026-06-13', '09:00'),
+          durationMin: 60,
+        }),
+      ),
+    ).toBe(all - 10)
   })
 
   it('what runs past closing is clipped to the open window', () => {
@@ -73,47 +94,165 @@ describe('bayMinutesFree (pure)', () => {
 
 describe('the seven tiles', () => {
   it('Appointments 24h: today and tomorrow, canceled and no-show out; sub = upcoming booked + confirmed', async () => {
-    await o.insert({ customerName: 'Maria Delgado', serviceName: 'Express Hand Wash', at: at('08:30'), status: 'completed', completedAt: at('09:10') })
-    await o.insert({ customerName: 'David Okafor', serviceName: 'Express Hand Wash', at: at('11:00'), status: 'booked' })
-    await o.insert({ customerName: 'Priya Nair', serviceName: 'Express Hand Wash', at: at('12:00'), status: 'confirmed' })
-    await o.insert({ customerName: 'Liam Chen', serviceName: 'Express Hand Wash', at: at('13:00'), status: 'arrived' })
-    await o.insert({ customerName: 'Tom Bradley', serviceName: 'Express Hand Wash', at: at('14:00'), status: 'canceled' })
-    await o.insert({ customerName: 'Grace Adeyemi', serviceName: 'Express Hand Wash', at: at('15:00'), status: 'no_show' })
-    await o.insert({ customerName: 'Nathan Brooks', serviceName: 'Express Hand Wash', at: at('09:00', '2026-06-14'), status: 'confirmed' })
-    await o.insert({ customerName: 'Elena Volkov', serviceName: 'Express Hand Wash', at: at('09:00', '2026-06-15'), status: 'confirmed' }) // the day after tomorrow
+    await o.insert({
+      customerName: 'Maria Delgado',
+      serviceName: 'Express Hand Wash',
+      at: at('08:30'),
+      status: 'completed',
+      completedAt: at('09:10'),
+    })
+    await o.insert({
+      customerName: 'David Okafor',
+      serviceName: 'Express Hand Wash',
+      at: at('11:00'),
+      status: 'booked',
+    })
+    await o.insert({
+      customerName: 'Priya Nair',
+      serviceName: 'Express Hand Wash',
+      at: at('12:00'),
+      status: 'confirmed',
+    })
+    await o.insert({
+      customerName: 'Liam Chen',
+      serviceName: 'Express Hand Wash',
+      at: at('13:00'),
+      status: 'arrived',
+    })
+    await o.insert({
+      customerName: 'Tom Bradley',
+      serviceName: 'Express Hand Wash',
+      at: at('14:00'),
+      status: 'canceled',
+    })
+    await o.insert({
+      customerName: 'Grace Adeyemi',
+      serviceName: 'Express Hand Wash',
+      at: at('15:00'),
+      status: 'no_show',
+    })
+    await o.insert({
+      customerName: 'Nathan Brooks',
+      serviceName: 'Express Hand Wash',
+      at: at('09:00', '2026-06-14'),
+      status: 'confirmed',
+    })
+    await o.insert({
+      customerName: 'Elena Volkov',
+      serviceName: 'Express Hand Wash',
+      at: at('09:00', '2026-06-15'),
+      status: 'confirmed',
+    }) // the day after tomorrow
     const k = await kpis()
     expect(k.appointments24h).toMatchObject({ value: '5', sub: '3 booked', label: 'Appointments 24h' })
   })
 
   it('the window is the business day, not UTC: 11:30 PM Eastern tonight is still today', async () => {
     o.clock.set(at('10:36'))
-    await o.insert({ customerName: 'Maria Delgado', serviceName: 'Express Hand Wash', at: '2026-06-13T23:30:00-04:00', status: 'booked' }) // 03:30 UTC tomorrow
-    await o.insert({ customerName: 'David Okafor', serviceName: 'Express Hand Wash', at: '2026-06-14T00:30:00-04:00', status: 'booked' })
+    await o.insert({
+      customerName: 'Maria Delgado',
+      serviceName: 'Express Hand Wash',
+      at: '2026-06-13T23:30:00-04:00',
+      status: 'booked',
+    }) // 03:30 UTC tomorrow
+    await o.insert({
+      customerName: 'David Okafor',
+      serviceName: 'Express Hand Wash',
+      at: '2026-06-14T00:30:00-04:00',
+      status: 'booked',
+    })
     expect((await kpis()).appointments24h!.value).toBe('2')
     expect((await kpis()).pendingPayments!.value).toBe('1') // only the first is today
   })
 
   it('Active jobs, Ready for pickup (bounded) and Members today', async () => {
-    await o.insert({ customerName: 'Maria Delgado', serviceName: 'Express Hand Wash', at: at('10:00'), status: 'cleaning', bay: 1, cleaningStartedAt: at('10:09') })
-    await o.insert({ customerName: 'David Okafor', serviceName: 'Express Hand Wash', at: at('09:00'), status: 'completed', completedAt: at('09:40'), pickup: 'pending' })
-    await o.insert({ customerName: 'Priya Nair', serviceName: 'Express Hand Wash', at: at('08:30'), status: 'completed', completedAt: at('09:10'), pickup: 'collected' })
-    await o.insert({ customerName: 'Liam Chen', serviceName: 'Express Hand Wash', at: at('16:00', '2026-06-12'), status: 'completed', completedAt: at('16:40', '2026-06-12'), pickup: 'pending' }) // yesterday, still waiting
-    await o.insert({ customerName: 'Tom Bradley', serviceName: 'Express Hand Wash', at: at('16:00', '2026-06-10'), status: 'completed', completedAt: at('16:40', '2026-06-10'), pickup: 'pending' }) // three days ago: not on the board
-    o.memberships.byCustomer.set(o.customer('Maria Delgado'), { plan: 'Essential', creditsLeft: 1, creditAvailable: false })
-    o.memberships.byCustomer.set(o.customer('David Okafor'), { plan: 'Executive', creditsLeft: null, creditAvailable: false })
+    await o.insert({
+      customerName: 'Maria Delgado',
+      serviceName: 'Express Hand Wash',
+      at: at('10:00'),
+      status: 'cleaning',
+      bay: 1,
+      cleaningStartedAt: at('10:09'),
+    })
+    await o.insert({
+      customerName: 'David Okafor',
+      serviceName: 'Express Hand Wash',
+      at: at('09:00'),
+      status: 'completed',
+      completedAt: at('09:40'),
+      pickup: 'pending',
+    })
+    await o.insert({
+      customerName: 'Priya Nair',
+      serviceName: 'Express Hand Wash',
+      at: at('08:30'),
+      status: 'completed',
+      completedAt: at('09:10'),
+      pickup: 'collected',
+    })
+    await o.insert({
+      customerName: 'Liam Chen',
+      serviceName: 'Express Hand Wash',
+      at: at('16:00', '2026-06-12'),
+      status: 'completed',
+      completedAt: at('16:40', '2026-06-12'),
+      pickup: 'pending',
+    }) // yesterday, still waiting
+    await o.insert({
+      customerName: 'Tom Bradley',
+      serviceName: 'Express Hand Wash',
+      at: at('16:00', '2026-06-10'),
+      status: 'completed',
+      completedAt: at('16:40', '2026-06-10'),
+      pickup: 'pending',
+    }) // three days ago: not on the board
+    o.memberships.byCustomer.set(o.customer('Maria Delgado'), {
+      plan: 'Essential',
+      creditsLeft: 1,
+      creditAvailable: false,
+    })
+    o.memberships.byCustomer.set(o.customer('David Okafor'), {
+      plan: 'Executive',
+      creditsLeft: null,
+      creditAvailable: false,
+    })
     const k = await kpis()
     expect(k.activeJobs).toMatchObject({ value: '1', sub: 'in bays' })
     expect(k.readyForPickup).toMatchObject({ value: '2', sub: 'notify' })
     expect(k.membersToday).toMatchObject({ value: '2', sub: 'of 3' })
-    await o.t.db.updateTable('appointments').set({ pickup_state: 'collected' }).where('pickup_state', '=', 'pending').execute()
+    await o.t.db
+      .updateTable('appointments')
+      .set({ pickup_state: 'collected' })
+      .where('pickup_state', '=', 'pending')
+      .execute()
     expect((await kpis()).readyForPickup).toMatchObject({ value: '0', sub: 'clear' })
   })
 
   it('Pending payments: today only, with a balance, in cents; canceled jobs are out', async () => {
-    const a = await o.insert({ customerName: 'Maria Delgado', serviceName: 'Express Hand Wash', at: at('11:00'), status: 'booked' })
-    const b = await o.insert({ customerName: 'David Okafor', serviceName: 'Executive Detail', at: at('12:00'), status: 'confirmed' })
-    const c = await o.insert({ customerName: 'Priya Nair', serviceName: 'Express Hand Wash', at: at('13:00'), status: 'confirmed' })
-    await o.insert({ customerName: 'Tom Bradley', serviceName: 'Express Hand Wash', at: at('09:00', '2026-06-14'), status: 'confirmed' })
+    const a = await o.insert({
+      customerName: 'Maria Delgado',
+      serviceName: 'Express Hand Wash',
+      at: at('11:00'),
+      status: 'booked',
+    })
+    const b = await o.insert({
+      customerName: 'David Okafor',
+      serviceName: 'Executive Detail',
+      at: at('12:00'),
+      status: 'confirmed',
+    })
+    const c = await o.insert({
+      customerName: 'Priya Nair',
+      serviceName: 'Express Hand Wash',
+      at: at('13:00'),
+      status: 'confirmed',
+    })
+    await o.insert({
+      customerName: 'Tom Bradley',
+      serviceName: 'Express Hand Wash',
+      at: at('09:00', '2026-06-14'),
+      status: 'confirmed',
+    })
     o.gateway.payInFull(c)
     o.gateway.recordPayment(b, 5000, { deposit: true })
     void a
@@ -124,9 +263,20 @@ describe('the seven tiles', () => {
     expect((await kpis()).pendingPayments).toMatchObject({ value: '1', sub: '$228.20' })
   })
 
-  it('Revenue today: the payments module\'s cash-basis figure when wired; otherwise fully paid invoices of today\'s jobs', async () => {
-    const a = await o.insert({ customerName: 'Maria Delgado', serviceName: 'Express Hand Wash', at: at('09:00'), status: 'completed', completedAt: at('09:40') })
-    const b = await o.insert({ customerName: 'David Okafor', serviceName: 'Executive Detail', at: at('10:00'), status: 'booked' })
+  it("Revenue today: the payments module's cash-basis figure when wired; otherwise fully paid invoices of today's jobs", async () => {
+    const a = await o.insert({
+      customerName: 'Maria Delgado',
+      serviceName: 'Express Hand Wash',
+      at: at('09:00'),
+      status: 'completed',
+      completedAt: at('09:40'),
+    })
+    const b = await o.insert({
+      customerName: 'David Okafor',
+      serviceName: 'Executive Detail',
+      at: at('10:00'),
+      status: 'booked',
+    })
     o.gateway.setTip(a, 800)
     o.gateway.payInFull(a)
     o.gateway.recordPayment(b, 5000, { deposit: true })

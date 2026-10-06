@@ -3,17 +3,35 @@
 // deviation is tomorrow, which the design counts as 4 procedural jobs + a12 while its board lists only a12.
 import { describe, expect, it } from 'vitest'
 import { addDays, bizWeekday } from '../../../src/platform/time.js'
-import { calendarDay, calendarSummary, type CalendarDaySummary } from '../../../src/modules/scheduling/calendar.js'
+import {
+  calendarDay,
+  calendarSummary,
+  type CalendarDaySummary,
+} from '../../../src/modules/scheduling/calendar.js'
 import { asDeviations, diff } from './diff.js'
 import { original, useParityOps, type CalendarShot } from './parity.js'
 
 const w = useParityOps()
 const BASE = '2026-06-13'
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const MONTHS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+]
 
 const dateOf = (offset: number): string => addDays(BASE, offset)
-const offsetOf = (date: string): number => Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${BASE}T00:00:00Z`)) / 86_400_000)
+const offsetOf = (date: string): number =>
+  Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${BASE}T00:00:00Z`)) / 86_400_000)
 
 async function summary(from: string, to: string): Promise<CalendarDaySummary[]> {
   return (await calendarSummary(w.t.db, w.ctx, { from, to })).days
@@ -87,11 +105,11 @@ describe('the calendar as rendered', () => {
     const dev = asDeviations(diff(want, got))
     // week:+1 is June 14-20: Sunday June 14 is tomorrow
     expect(dev).toEqual(
-      key === 'week:+1'
-        ? { '[0].count': ['5', '1'], '[0].countLabel': ['appointments', 'appointment'] }
-        : {},
+      key === 'week:+1' ? { '[0].count': ['5', '1'], '[0].countLabel': ['appointments', 'appointment'] } : {},
     )
-    expect(shot.calSub).toBe(`${total + (key === 'week:+1' ? 4 : 0)} appointments this week · tap a day to open it`)
+    expect(shot.calSub).toBe(
+      `${total + (key === 'week:+1' ? 4 : 0)} appointments this week · tap a day to open it`,
+    )
   })
 
   it.each(shots.filter(([k]) => k.startsWith('month:')))('%s', async (key, shot: CalendarShot) => {
@@ -105,12 +123,16 @@ describe('the calendar as rendered', () => {
     const from = addDays(first, -lead)
     const days = await summary(from, addDays(from, cells - 1))
     const got = days.map((d) => monthCell(d, d.date.startsWith(first.slice(0, 7))))
-    const inMonthTotal = days.filter((d) => d.date.startsWith(first.slice(0, 7))).reduce((n, d) => n + d.count, 0)
+    const inMonthTotal = days
+      .filter((d) => d.date.startsWith(first.slice(0, 7)))
+      .reduce((n, d) => n + d.count, 0)
     const dev = asDeviations(diff(shot.calMonth, got))
     const june = key === 'month:0'
     const tomorrowCell = days.findIndex((d) => d.date === dateOf(1))
     expect(dev).toEqual(june ? { [`[${tomorrowCell}].countLabel`]: ['5 appts', '1 appt'] } : {})
-    expect(shot.calSub).toBe(`${inMonthTotal + (june ? 4 : 0)} appointments in ${monthName} · tap a date to open it`)
+    expect(shot.calSub).toBe(
+      `${inMonthTotal + (june ? 4 : 0)} appointments in ${monthName} · tap a date to open it`,
+    )
   })
 
   it.each(shots.filter(([k]) => k.startsWith('day:')))('%s', async (key, shot: CalendarShot) => {
@@ -135,8 +157,13 @@ describe('the calendar as rendered', () => {
     if (key === 'day:+1') {
       // the design adds four procedural jobs to tomorrow's grid; the backend has only a12
       expect(want.calRows.flatMap((r) => r.items).length).toBe(5)
-      expect(got.calRows.flatMap((r) => r.items)).toEqual([{ name: 'Nathan Brooks', badgeLabel: 'Confirmed' }])
-      expect(dev['calSub']).toEqual([expect.stringContaining('5 appointments'), expect.stringContaining('1 appointment ·')])
+      expect(got.calRows.flatMap((r) => r.items)).toEqual([
+        { name: 'Nathan Brooks', badgeLabel: 'Confirmed' },
+      ])
+      expect(dev['calSub']).toEqual([
+        expect.stringContaining('5 appointments'),
+        expect.stringContaining('1 appointment ·'),
+      ])
     } else expect(dev).toEqual({})
     expect(day.outsideHours).toEqual([])
   })

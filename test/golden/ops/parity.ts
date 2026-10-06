@@ -25,7 +25,15 @@ export interface Original {
   ranges: Record<'today' | 'tomorrow' | 'week' | 'next24', Board>
   slots: { label: string; opacity: number; cursor: string }[]
   appointments: OriginalAppointment[]
-  dayCounts: { offset: number; iso: string; count: number; closed: string | null; note: string; h0: number | null; h1: number | null }[]
+  dayCounts: {
+    offset: number
+    iso: string
+    count: number
+    closed: string | null
+    note: string
+    h0: number | null
+    h1: number | null
+  }[]
   calendar: Record<string, CalendarShot>
 }
 
@@ -55,11 +63,25 @@ export interface Board {
   alerts: { glyph: string; title: string; desc: string; actionLabel: string; pri: number }[]
   groups: { dividerLabel: string; time: string; ampm: string; items: Card[] }[]
   queue: Card[]
-  completed: { id: string; name: string; time: string; vehicleLine: string; service: string; payChipLabel: string; pickupChipLabel: string }[]
+  completed: {
+    id: string
+    name: string
+    time: string
+    vehicleLine: string
+    service: string
+    payChipLabel: string
+    pickupChipLabel: string
+  }[]
   completedCount: number
   bays: Record<string, unknown>[]
   arrivals: { title: string; desc: string; prepLabel: string }[]
-  staffCols: { name: string; role: string; initials: string; count: number; jobs: { id: string; name: string; time: string }[] }[]
+  staffCols: {
+    name: string
+    role: string
+    initials: string
+    count: number
+    jobs: { id: string; name: string; time: string }[]
+  }[]
 }
 
 export interface OriginalAppointment {
@@ -95,12 +117,22 @@ export interface CalendarShot {
   calSub: string
   calClosed: boolean
   calClosedReason: string
-  calWeek: { dow: string; num: string; count: string; countLabel: string; closed: boolean; reason: string; isToday: boolean }[]
+  calWeek: {
+    dow: string
+    num: string
+    count: string
+    countLabel: string
+    closed: boolean
+    reason: string
+    isToday: boolean
+  }[]
   calMonth: { num: string; showCount: boolean; countLabel: string; closed: boolean; reason: string }[]
   calRows: { time: string; ampm: string; empty: boolean; items: { name: string; badgeLabel: string }[] }[]
 }
 
-export const original: Original = JSON.parse(readFileSync(path.join(import.meta.dirname, 'original.json'), 'utf8'))
+export const original: Original = JSON.parse(
+  readFileSync(path.join(import.meta.dirname, 'original.json'), 'utf8'),
+)
 
 export interface ParityWorld {
   readonly t: TestDb
@@ -141,7 +173,12 @@ export function useParityOps(): ParityWorld {
       tz: 'America/New_York',
       ports: { invoices: gateway, messages: queue, memberships, externalAlerts: noExternalAlerts, storage },
     }
-    const customers = new Map((await t.db.selectFrom('customers').select(['id', 'full_name']).execute()).map((c) => [c.full_name, c.id]))
+    const customers = new Map(
+      (await t.db.selectFrom('customers').select(['id', 'full_name']).execute()).map((c) => [
+        c.full_name,
+        c.id,
+      ]),
+    )
     for (const [name, plan] of Object.entries(PARITY_OPS_MEMBERS))
       memberships.byCustomer.set(customers.get(name)!, {
         plan,
@@ -159,7 +196,11 @@ export function useParityOps(): ParityWorld {
         .where('scheduled_start', '<', new Date('2026-06-15T04:00:00Z'))
         .executeTakeFirstOrThrow()
       ids.set(a.id, row.id)
-      const addons = await t.db.selectFrom('appointment_addons').select(['name', 'price_cents']).where('appointment_id', '=', row.id).execute()
+      const addons = await t.db
+        .selectFrom('appointment_addons')
+        .select(['name', 'price_cents'])
+        .where('appointment_id', '=', row.id)
+        .execute()
       await transaction(t.db, async (tx) => {
         await gateway.ensureForAppointment(tx, {
           appointmentId: row.id,
@@ -177,7 +218,8 @@ export function useParityOps(): ParityWorld {
       const money = PARITY_OPS_MONEY[a.id]!
       if (money.tipCents) gateway.setTip(row.id, money.tipCents)
       if (money.pay === 'paid') gateway.payInFull(row.id)
-      else if (money.pay === 'deposit') gateway.recordPayment(row.id, money.depositCents, { deposit: true, method: 'Visa ••4421' })
+      else if (money.pay === 'deposit')
+        gateway.recordPayment(row.id, money.depositCents, { deposit: true, method: 'Visa ••4421' })
     }
   })
 

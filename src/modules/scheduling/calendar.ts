@@ -3,7 +3,17 @@
 import { sql } from 'kysely'
 import type { Executor } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
-import { addDays, bizDayBounds, bizWeekday, dateLabel, diffDays, fmtT, isValidBizDate, minutesOfDay, toBizDate } from '../../platform/time.js'
+import {
+  addDays,
+  bizDayBounds,
+  bizWeekday,
+  dateLabel,
+  diffDays,
+  fmtT,
+  isValidBizDate,
+  minutesOfDay,
+  toBizDate,
+} from '../../platform/time.js'
 import '../customers/schema.js'
 import { getActiveEmergency, emergencySnapshot } from '../settings/emergency.js'
 import { listLiveClosures } from '../settings/closures.js'
@@ -145,16 +155,29 @@ export async function calendarDay(db: Executor, c: SchedulingCtx, date: string):
     loadBoardRows(db, c, { from: start, to: end }),
     listBays(db, c.locationId),
   ])
-  const info = dayInfo({ date, hours: settings.hours, closures, emergency: emergencySnapshot(emergency, c.tz) })
+  const info = dayInfo({
+    date,
+    hours: settings.hours,
+    closures,
+    emergency: emergencySnapshot(emergency, c.tz),
+  })
   const index = { byId: new Map(bays.map((b) => [b.id, { id: b.id, number: b.number }])) }
-  const cards = sortRows(rows).map((r) => toCard(r, { now, tz: c.tz, lateGraceMin: settings.ops.lateGraceMin, bays: index }))
+  const cards = sortRows(rows).map((r) =>
+    toCard(r, { now, tz: c.tz, lateGraceMin: settings.ops.lateGraceMin, bays: index }),
+  )
   const hourOf = (card: OpsCard): number => Math.floor(minutesOfDay(new Date(card.startsAt), c.tz) / 60)
-  const shown = (card: OpsCard): boolean => !info.closed && hourOf(card) >= info.h0! && hourOf(card) < info.h1!
+  const shown = (card: OpsCard): boolean =>
+    !info.closed && hourOf(card) >= info.h0! && hourOf(card) < info.h1!
   const hourRows: CalendarHourRow[] = []
   if (!info.closed)
     for (let h = info.h0!; h < info.h1!; h++) {
       const hh = h % 12 === 0 ? 12 : h % 12
-      hourRows.push({ hour: h, time: String(hh), ampm: h >= 12 ? 'PM' : 'AM', items: cards.filter((x) => hourOf(x) === h) })
+      hourRows.push({
+        hour: h,
+        time: String(hh),
+        ampm: h >= 12 ? 'PM' : 'AM',
+        items: cards.filter((x) => hourOf(x) === h),
+      })
     }
   const view = toDayView(info)
   const sub = info.closed
@@ -165,7 +188,15 @@ export async function calendarDay(db: Executor, c: SchedulingCtx, date: string):
     // the year is appended only when it is not the current one, as the design does for 2026
     label: `${dateLabel(start, c.tz)}${date.slice(0, 4) === today.slice(0, 4) ? '' : `, ${date.slice(0, 4)}`}`,
     isToday: date === today,
-    dayInfo: { closed: view.closed, reduced: view.reduced, note: view.note, source: info.source, open: view.open, h0: info.h0, h1: info.h1 },
+    dayInfo: {
+      closed: view.closed,
+      reduced: view.reduced,
+      note: view.note,
+      source: info.source,
+      open: view.open,
+      h0: info.h0,
+      h1: info.h1,
+    },
     sub,
     count: cards.length,
     rows: hourRows,

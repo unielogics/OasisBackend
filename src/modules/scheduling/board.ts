@@ -64,7 +64,12 @@ export const LIVE_STATUSES: readonly AppointmentStatus[] = [
 ]
 
 /** Start instants of [today + fromDay, today + toDay) in the business tz. */
-export function dayRange(c: Pick<SchedulingCtx, 'tz'>, now: Date, fromDay: number, toDay: number): { from: Date; to: Date } {
+export function dayRange(
+  c: Pick<SchedulingCtx, 'tz'>,
+  now: Date,
+  fromDay: number,
+  toDay: number,
+): { from: Date; to: Date } {
   const today = toBizDate(now, c.tz)
   return {
     from: bizDayBounds(addDays(today, fromDay), c.tz).start,
@@ -101,12 +106,13 @@ export async function loadBoardRows(db: Executor, c: SchedulingCtx, q: RowQuery)
     ])
     .where('a.location_id', '=', c.locationId)
     .where('a.status', 'in', [...statuses])
-  const rows = await (q.ids
-    ? base.where('a.id', 'in', q.ids.length ? [...q.ids] : [NIL_UUID])
-    : base.where((eb) => {
-        const inRange = eb.and([eb('a.scheduled_start', '>=', q.from), eb('a.scheduled_start', '<', q.to)])
-        return q.includeCleaning ? eb.or([inRange, eb('a.status', '=', 'cleaning')]) : inRange
-      })
+  const rows = await (
+    q.ids
+      ? base.where('a.id', 'in', q.ids.length ? [...q.ids] : [NIL_UUID])
+      : base.where((eb) => {
+          const inRange = eb.and([eb('a.scheduled_start', '>=', q.from), eb('a.scheduled_start', '<', q.to)])
+          return q.includeCleaning ? eb.or([inRange, eb('a.status', '=', 'cleaning')]) : inRange
+        })
   )
     .orderBy('a.scheduled_start')
     .orderBy('a.seq')
@@ -136,7 +142,11 @@ export async function loadBoardRows(db: Executor, c: SchedulingCtx, q: RowQuery)
         ? { year: r.v_year, make: r.v_make, model: r.v_model, color: r.v_color, plate: r.v_plate }
         : null,
       staff: r.e_first
-        ? { id: r.assigned_employee_id!, name: displayName(r.e_first, r.e_last ?? ''), initials: initials(r.e_first, r.e_last ?? '') }
+        ? {
+            id: r.assigned_employee_id!,
+            name: displayName(r.e_first, r.e_last ?? ''),
+            initials: initials(r.e_first, r.e_last ?? ''),
+          }
         : null,
       addonCount: r.addon_count,
       hasPhotos: !!p && p.before + p.after > 0,
@@ -196,7 +206,9 @@ export function nextOf(row: Pick<BoardRow, 'a' | 'invoice'>): { label: string; s
 }
 
 const vehicleLine = (v: BoardRow['vehicle']): string =>
-  v ? `${[v.year, v.make, v.model].filter(Boolean).join(' ')}${v.color ? ` · ${v.color}` : ''}` : 'Vehicle on file'
+  v
+    ? `${[v.year, v.make, v.model].filter(Boolean).join(' ')}${v.color ? ` · ${v.color}` : ''}`
+    : 'Vehicle on file'
 
 export interface OpsCard {
   id: string
@@ -207,7 +219,13 @@ export interface OpsCard {
   customer: { id: string; name: string }
   vip: boolean
   member: { plan: string; label: string } | null
-  vehicle: { year: number | null; make: string | null; model: string | null; color: string | null; plate: string | null } | null
+  vehicle: {
+    year: number | null
+    make: string | null
+    model: string | null
+    color: string | null
+    plate: string | null
+  } | null
   vehicleLine: string
   vehicleShort: string
   service: string
@@ -246,7 +264,9 @@ export function toCard(
   const { a } = row
   const late = isLate(a, o.now, o.lateGraceMin)
   const meta = late ? LATE_META : STATUS_META[a.status]
-  const bayRef = (a.bayId ? o.bays.byId.get(a.bayId) : undefined) ?? (a.plannedBayId ? o.bays.byId.get(a.plannedBayId) : undefined)
+  const bayRef =
+    (a.bayId ? o.bays.byId.get(a.bayId) : undefined) ??
+    (a.plannedBayId ? o.bays.byId.get(a.plannedBayId) : undefined)
   const v = row.vehicle
   return {
     id: a.id,

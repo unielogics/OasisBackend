@@ -127,7 +127,8 @@ async function resolveCustomer(
   const now = c.clock.now()
   if (input.customer.id) {
     let customer = await requireCustomer(tx, input.customer.id)
-    if (customer.deletedAt || customer.mergedInto) throw new AppError('NOT_FOUND', { detail: 'That customer does not exist' })
+    if (customer.deletedAt || customer.mergedInto)
+      throw new AppError('NOT_FOUND', { detail: 'That customer does not exist' })
     if (input.customer.smsOptIn && !customer.smsOptedIn && customer.smsOptedOutAt === null)
       customer = await recordSmsOptIn(tx, customer.id, optIn, now)
     return { customer, created: false }
@@ -178,7 +179,8 @@ export async function createAppointment(
 
   const { customer, created } = await resolveCustomer(tx, c, input)
   const v = input.vehicle
-  const hasVehicle = !!v && [v.make, v.model, v.plate, v.color, v.year].some((x) => x !== undefined && x !== null && x !== '')
+  const hasVehicle =
+    !!v && [v.make, v.model, v.plate, v.color, v.year].some((x) => x !== undefined && x !== null && x !== '')
   const vehicle = hasVehicle
     ? (
         await upsertVehicleByPlate(tx, {

@@ -49,7 +49,8 @@ export function createSchedulingModule(given: Partial<SchedulingPorts> = {}): Ap
     const ports = resolvePorts(deps, given)
     if (deps.env.NODE_ENV === 'production') {
       if (!given.invoices) app.log.warn('scheduling: no InvoiceGateway wired, invoices are held in memory')
-      if (!given.messages) app.log.warn('scheduling: no MessageQueue wired, outbound SMS are only recorded in memory')
+      if (!given.messages)
+        app.log.warn('scheduling: no MessageQueue wired, outbound SMS are only recorded in memory')
     }
     registerSchedulingRoutes(app, ports)
   }

@@ -49,7 +49,9 @@ export function slotError(ev: Evaluation, o: { releaseHours: number; windowDays?
         ? new AppError('SLOT_CLOSED', { params: { reason: ev.reason ?? 'Closed' } })
         : new AppError('SLOT_OUTSIDE_HOURS', { params: { detail: ev.reason ?? 'Outside opening hours' } })
     case 'cutoff':
-      return new AppError('SLOT_OUTSIDE_HOURS', { params: { detail: ev.reason ?? 'Past the booking cutoff' } })
+      return new AppError('SLOT_OUTSIDE_HOURS', {
+        params: { detail: ev.reason ?? 'Past the booking cutoff' },
+      })
     case 'outside_window':
       return new AppError('SLOT_OUTSIDE_WINDOW', { params: { days: o.windowDays ?? 0 } })
     case 'vip_held':
@@ -84,7 +86,12 @@ export async function checkSlot(
   if (input.ignorePast && input.start.getTime() < now.getTime()) data.now = input.start
   const isVip = (await vipCustomerIds(tx, c.locationId, [input.customerId])).has(input.customerId)
   const sameDayUsed = isVip
-    ? await sameDayGuaranteesUsed(tx, { locationId: c.locationId, customerId: input.customerId, now, tz: c.tz })
+    ? await sameDayGuaranteesUsed(tx, {
+        locationId: c.locationId,
+        customerId: input.customerId,
+        now,
+        tz: c.tz,
+      })
     : 0
   const ev = evaluateStart(
     engineInput(data, { durationMin: input.durationMin, channel, isVip, sameDayUsed }),
@@ -136,4 +143,3 @@ export async function recordOverrides(
       .execute()
   }
 }
-

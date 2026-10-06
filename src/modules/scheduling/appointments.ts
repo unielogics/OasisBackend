@@ -8,11 +8,7 @@ import * as realtime from '../../platform/realtime.js'
 import { addDays, dateLabel, fmtT, minutesOfDay, toBizDate } from '../../platform/time.js'
 import { DateTime } from 'luxon'
 import '../customers/schema.js'
-import type {
-  ActivityChannel,
-  AppointmentSource,
-  AppointmentStatus,
-} from '../customers/schema.js'
+import type { ActivityChannel, AppointmentSource, AppointmentStatus } from '../customers/schema.js'
 import { actorName, firstName, type Actor, type SchedulingCtx } from './context.js'
 import './problems.js'
 
@@ -343,7 +339,12 @@ export async function publishOps(tx: Tx, locationId: string, e: OpsEvents): Prom
   for (const bayId of new Set(e.bayIds ?? []))
     await realtime.publish(tx, { locationId, channel: 'ops', type: 'bay.changed', payload: { bayId } })
   for (const date of new Set(e.availability ?? []))
-    await realtime.publish(tx, { locationId, channel: 'ops', type: 'availability.changed', payload: { date } })
+    await realtime.publish(tx, {
+      locationId,
+      channel: 'ops',
+      type: 'availability.changed',
+      payload: { date },
+    })
   if (e.kpi !== false)
     await realtime.publish(tx, { locationId, channel: 'ops', type: 'kpi.dirty', payload: {} })
 }

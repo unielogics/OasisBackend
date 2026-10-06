@@ -40,7 +40,11 @@ const bayShape = (b: BayCard): Record<string, unknown> =>
         name: b.name,
         occupied: true,
         free: false,
-        vehicle: [b.occupant.card.vehicle?.year, b.occupant.card.vehicle?.make, b.occupant.card.vehicle?.model].join(' '),
+        vehicle: [
+          b.occupant.card.vehicle?.year,
+          b.occupant.card.vehicle?.make,
+          b.occupant.card.vehicle?.model,
+        ].join(' '),
         customer: b.occupant.card.customer.name,
         plate: b.occupant.card.vehicle?.plate,
         service: b.occupant.card.service,
@@ -58,7 +62,8 @@ const bayShape = (b: BayCard): Record<string, unknown> =>
 async function board(window: 'next24' | 'today' | 'tomorrow' | 'week') {
   const snap = await loadSnapshot(w.t.db, w.ctx, { window, canContact: true })
   const cards: Record<string, Card> = {}
-  for (const c of [...snap.timeline.groups.flatMap((g) => g.items), ...snap.queue]) cards[designId(c.id)] = card(c)
+  for (const c of [...snap.timeline.groups.flatMap((g) => g.items), ...snap.queue])
+    cards[designId(c.id)] = card(c)
   return { snap, cards }
 }
 
@@ -68,7 +73,12 @@ describe('the board at 10:36 AM (original.initial vs /ops/snapshot next24)', () 
     const o = original.initial
 
     // the lists, as ids in order
-    const groups = snap.timeline.groups.map((g) => ({ dividerLabel: g.divider, time: g.time, ampm: g.ampm, items: g.items.map((i) => designId(i.id)) }))
+    const groups = snap.timeline.groups.map((g) => ({
+      dividerLabel: g.divider,
+      time: g.time,
+      ampm: g.ampm,
+      items: g.items.map((i) => designId(i.id)),
+    }))
     expect(groups).toEqual(o.groups.map((g) => ({ ...g, items: g.items.map((i) => i.id) })))
     expect(snap.timeline.count).toBe(o.apptCount)
     expect(snap.inFacilityLabel).toBe(o.inFacilityLabel)
@@ -78,7 +88,15 @@ describe('the board at 10:36 AM (original.initial vs /ops/snapshot next24)', () 
     expect(snap.queue.map((c) => designId(c.id))).toEqual(['a6', 'a9', 'a11', 'a7', 'a5', 'a8'])
 
     // alerts: titles, descriptions, actions and the order, all identical
-    expect(snap.alerts.map((a) => ({ glyph: a.glyph, title: a.title, desc: a.desc, actionLabel: a.actionLabel, pri: a.priority }))).toEqual(o.alerts)
+    expect(
+      snap.alerts.map((a) => ({
+        glyph: a.glyph,
+        title: a.title,
+        desc: a.desc,
+        actionLabel: a.actionLabel,
+        pri: a.priority,
+      })),
+    ).toEqual(o.alerts)
 
     // cards
     const originalCards: Record<string, Card> = {}
@@ -94,7 +112,12 @@ describe('the board at 10:36 AM (original.initial vs /ops/snapshot next24)', () 
 
     // KPIs
     expect(
-      asDeviations(diff(o.kpis, snap.kpis.map((k) => ({ label: k.label, value: k.value, sub: k.sub })))),
+      asDeviations(
+        diff(
+          o.kpis,
+          snap.kpis.map((k) => ({ label: k.label, value: k.value, sub: k.sub })),
+        ),
+      ),
     ).toEqual({
       '[0].sub': ['12 booked', '7 booked'],
       '[3].sub': ['$1,299', '$1,298.53'],
@@ -139,9 +162,9 @@ describe('the board at 10:36 AM (original.initial vs /ops/snapshot next24)', () 
     expect(asDeviations(diff(o.bays, snap.bays.map(bayShape)))).toEqual({
       '[0].eta': ['11:15 AM', '11:24 AM'],
     })
-    expect(
-      snap.arrivals.map((a) => ({ title: a.title, desc: a.desc, prepLabel: a.prepLabel })),
-    ).toEqual(o.arrivals)
+    expect(snap.arrivals.map((a) => ({ title: a.title, desc: a.desc, prepLabel: a.prepLabel }))).toEqual(
+      o.arrivals,
+    )
     expect(
       snap.staff.map((s) => ({
         name: s.name,
@@ -169,7 +192,9 @@ describe('the range tabs', () => {
     const { snap } = await board('week')
     const o = original.ranges.week
     expect(o.apptCount).toBe(original.ranges.next24.apptCount)
-    const procedural = original.dayCounts.filter((d) => d.offset >= 2 && d.offset <= 6).reduce((n, d) => n + d.count, 0)
+    const procedural = original.dayCounts
+      .filter((d) => d.offset >= 2 && d.offset <= 6)
+      .reduce((n, d) => n + d.count, 0)
     expect(procedural).toBeGreaterThan(0)
     expect(snap.timeline.count).toBe(o.apptCount + procedural)
     expect(snap.completed.count).toBe(o.completedCount)
@@ -178,7 +203,11 @@ describe('the range tabs', () => {
 
 describe('the New Appointment slot grid at 10:36 AM (default package, desk)', () => {
   it('reproduces the blocked slots; the hard-coded VIP holds and the cutoff differ', async () => {
-    const pkg = await w.t.db.selectFrom('services').select('id').where('name', '=', 'Premium Hand Wash + Interior').executeTakeFirstOrThrow()
+    const pkg = await w.t.db
+      .selectFrom('services')
+      .select('id')
+      .where('name', '=', 'Premium Hand Wash + Interior')
+      .executeTakeFirstOrThrow()
     const av = await getAvailability(w.t.db, {
       locationId: w.locationId,
       tz: w.ctx.tz,

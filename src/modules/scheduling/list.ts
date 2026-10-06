@@ -1,12 +1,7 @@
 // GET /appointments: a keyset-paged list of cards for a date range, status, customer or search text.
 import { sql } from 'kysely'
 import type { Executor } from '../../platform/db.js'
-import {
-  decodeCursor,
-  keysetCondition,
-  toPage,
-  type Page,
-} from '../../platform/pagination.js'
+import { decodeCursor, keysetCondition, toPage, type Page } from '../../platform/pagination.js'
 import { bizDayBounds, addDays } from '../../platform/time.js'
 import '../customers/schema.js'
 import type { AppointmentStatus } from '../customers/schema.js'
@@ -47,7 +42,8 @@ export async function listAppointments(db: Executor, c: SchedulingCtx, q: ListQu
         sql<boolean>`(v.make ilike ${pat} or v.model ilike ${pat} or v.color ilike ${pat} or v.plate ilike ${pat})`,
         sql<boolean>`a.package_name ilike ${pat}`,
       ]
-      if (q.canContact) parts.push(sql<boolean>`(cu.phone_display ilike ${pat} or cu.phone_e164 ilike ${pat})`)
+      if (q.canContact)
+        parts.push(sql<boolean>`(cu.phone_display ilike ${pat} or cu.phone_e164 ilike ${pat})`)
       return eb.or(parts)
     })
   }
@@ -55,7 +51,11 @@ export async function listAppointments(db: Executor, c: SchedulingCtx, q: ListQu
     const [start, seq] = decodeCursor(q.cursor, 2)
     ids = ids.where(keysetCondition(['a.scheduled_start', 'a.seq'], [start as string, seq as number], 'asc'))
   }
-  const page = await ids.orderBy('a.scheduled_start').orderBy('a.seq').limit(q.limit + 1).execute()
+  const page = await ids
+    .orderBy('a.scheduled_start')
+    .orderBy('a.seq')
+    .limit(q.limit + 1)
+    .execute()
   const slice = toPage(page, q.limit, (r) => [r.scheduled_start.toISOString(), r.seq])
   const order = new Map(slice.items.map((r, i) => [r.id, i]))
   const rows = await loadBoardRows(db, c, {
@@ -64,7 +64,10 @@ export async function listAppointments(db: Executor, c: SchedulingCtx, q: ListQu
     ids: slice.items.map((r) => r.id),
     statuses: ['booked', 'confirmed', 'arrived', 'cleaning', 'completed', 'canceled', 'no_show'],
   })
-  const [bays, settings] = await Promise.all([listBays(db, c.locationId), loadSettingsBundle(db, c.locationId)])
+  const [bays, settings] = await Promise.all([
+    listBays(db, c.locationId),
+    loadSettingsBundle(db, c.locationId),
+  ])
   const index = { byId: new Map(bays.map((b) => [b.id, { id: b.id, number: b.number }])) }
   const now = c.clock.now()
   const items = rows

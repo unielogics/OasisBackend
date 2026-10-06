@@ -75,7 +75,9 @@ async function main(): Promise<void> {
     const page = d.page
     const exact = (t: string) => new RegExp(`^\\s*${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`)
     const run = <T>(expr: string): Promise<T> =>
-      page.evaluate(`(() => { const h = ${IN_PAGE}; return JSON.parse(JSON.stringify(${expr})); })()`) as Promise<T>
+      page.evaluate(
+        `(() => { const h = ${IN_PAGE}; return JSON.parse(JSON.stringify(${expr})); })()`,
+      ) as Promise<T>
 
     const out: Record<string, unknown> = {
       clock: '2026-06-13T10:36:00-04:00',
@@ -110,7 +112,9 @@ async function main(): Promise<void> {
         checkDone: ck.checkDone, checkTotal: ck.checkTotal, checkPct: ck.checkPctLabel,
         sections: ck.checkSections.map((s) => ({ title: s.title, kind: s.kind, countLabel: s.countLabel })) };
     })`)
-    out.dayCounts = await run(`(() => { const o = []; for (let i = -210; i <= 210; i++) { const d = h.logic.dateFor(i); const inf = h.logic.dayInfo(d); o.push({ offset: i, iso: h.logic.iso(d), count: h.logic.countFor(i), closed: inf.closed || null, note: inf.note || '', h0: inf.h0 ?? null, h1: inf.h1 ?? null }); } return o; })()`)
+    out.dayCounts = await run(
+      `(() => { const o = []; for (let i = -210; i <= 210; i++) { const d = h.logic.dateFor(i); const inf = h.logic.dayInfo(d); o.push({ offset: i, iso: h.logic.iso(d), count: h.logic.countFor(i), closed: inf.closed || null, note: inf.note || '', h0: inf.h0 ?? null, h1: inf.h1 ?? null }); } return o; })()`,
+    )
 
     // the calendar as rendered
     await a.click(a.btn('Calendar'))

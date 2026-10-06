@@ -6,7 +6,15 @@ export const Uuid = z.string().uuid()
 export const Instant = z.string()
 export const BizDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 
-export const Status = z.enum(['booked', 'confirmed', 'arrived', 'cleaning', 'completed', 'canceled', 'no_show'])
+export const Status = z.enum([
+  'booked',
+  'confirmed',
+  'arrived',
+  'cleaning',
+  'completed',
+  'canceled',
+  'no_show',
+])
 export const BayRef = z.object({ id: z.string(), number: z.number().int() })
 export const NextStep = z.enum(['confirm', 'arrive', 'start', 'complete', 'collect']).nullable()
 export const Tone = z.enum(['red', 'amber', 'blue', 'green', 'violet'])
@@ -42,7 +50,9 @@ export const InvoiceSummary = z.object({
     'canceled_refunded',
   ]),
   refundPending: z.boolean(),
-  items: z.array(z.object({ name: z.string(), priceCents: z.number().int(), kind: z.enum(['package', 'addon']) })),
+  items: z.array(
+    z.object({ name: z.string(), priceCents: z.number().int(), kind: z.enum(['package', 'addon']) }),
+  ),
   payMethodLabel: z.string().nullable(),
 })
 
@@ -234,7 +244,9 @@ export const CalendarDay = z.object({
   }),
   sub: z.string(),
   count: z.number().int(),
-  rows: z.array(z.object({ hour: z.number().int(), time: z.string(), ampm: z.string(), items: z.array(OpsCard) })),
+  rows: z.array(
+    z.object({ hour: z.number().int(), time: z.string(), ampm: z.string(), items: z.array(OpsCard) }),
+  ),
   outsideHours: z.array(OpsCard),
   appointments: z.array(OpsCard),
 })
@@ -303,7 +315,12 @@ export const BookingResult = z.object({
   toast: Toast,
 })
 
-const ChecklistItem = z.object({ id: z.string(), label: z.string(), done: z.boolean(), position: z.number().int() })
+const ChecklistItem = z.object({
+  id: z.string(),
+  label: z.string(),
+  done: z.boolean(),
+  position: z.number().int(),
+})
 export const ChecklistProgress = z.object({
   done: z.number().int(),
   total: z.number().int(),
@@ -387,12 +404,22 @@ export const AppointmentFile = z.object({
       z.object({ id: z.string(), serviceId: z.string(), name: z.string(), priceCents: z.number().int() }),
     ),
     catalog: z.array(
-      z.object({ serviceId: z.string(), name: z.string(), priceCents: z.number().int(), selected: z.boolean() }),
+      z.object({
+        serviceId: z.string(),
+        name: z.string(),
+        priceCents: z.number().int(),
+        selected: z.boolean(),
+      }),
     ),
     totalCents: z.number().int(),
   }),
   checklist: ChecklistView,
-  photos: z.object({ arrival: PhotoCategory, before: PhotoCategory, after: PhotoCategory, issue: PhotoCategory }),
+  photos: z.object({
+    arrival: PhotoCategory,
+    before: PhotoCategory,
+    after: PhotoCategory,
+    issue: PhotoCategory,
+  }),
   activity: z.array(
     z.object({
       id: z.number().int(),

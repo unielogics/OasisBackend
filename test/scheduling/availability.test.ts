@@ -78,14 +78,34 @@ describe('candidate starts', () => {
       date: '2026-09-07',
       hours: DEFAULT_HOURS,
       closures: [
-        { id: 'c', date: '2026-09-07', name: 'Labor Day', type: 'reduced', openMin: 600, closeMin: 840, source: 'federal', deletedAt: null },
+        {
+          id: 'c',
+          date: '2026-09-07',
+          name: 'Labor Day',
+          type: 'reduced',
+          openMin: 600,
+          closeMin: 840,
+          source: 'federal',
+          deletedAt: null,
+        },
       ],
     })
     expect(candidateStarts(labor, DEFAULT_RULES)).toEqual([600, 630, 660, 690, 720, 750, 780])
     const xmas = dayInfo({
       date: '2026-12-25',
       hours: DEFAULT_HOURS,
-      closures: [{ id: 'c', date: '2026-12-25', name: 'Christmas Day', type: 'closed', openMin: null, closeMin: null, source: 'federal', deletedAt: null }],
+      closures: [
+        {
+          id: 'c',
+          date: '2026-12-25',
+          name: 'Christmas Day',
+          type: 'closed',
+          openMin: null,
+          closeMin: null,
+          source: 'federal',
+          deletedAt: null,
+        },
+      ],
     })
     const r = computeSlots(input({ date: '2026-12-25', day: xmas, now: at('2026-12-20', '10:00') }))
     expect(r).toMatchObject({ closed: true, reason: 'Christmas Day', slots: [] })
@@ -134,10 +154,17 @@ describe('capacity', () => {
         fc.integer({ min: 1, max: 4 }),
         fc.constantFrom(35, 60, 75, 120),
         fc.constantFrom(0, 10, 20),
-        fc.array(fc.tuple(fc.integer({ min: 480, max: 1000 }), fc.integer({ min: 20, max: 160 })), { maxLength: 14 }),
+        fc.array(fc.tuple(fc.integer({ min: 480, max: 1000 }), fc.integer({ min: 20, max: 160 })), {
+          maxLength: 14,
+        }),
         (bays, duration, buffer, jobs) => {
           const intervals = jobs.map(([s, d]) => iv('2026-06-13', hh(s), hh(s + d + buffer)))
-          const i = input({ activeBays: bays, durationMin: duration, rules: { ...DEFAULT_RULES, bufferMinutes: buffer }, intervals })
+          const i = input({
+            activeBays: bays,
+            durationMin: duration,
+            rules: { ...DEFAULT_RULES, bufferMinutes: buffer },
+            intervals,
+          })
           for (const slot of computeSlots(i).slots) {
             const from = slot.start.getTime()
             const to = from + (duration + buffer) * MS_PER_MIN
@@ -154,23 +181,28 @@ describe('capacity', () => {
 
   it('property: booking an available slot keeps the day within capacity', () => {
     fc.assert(
-      fc.property(fc.integer({ min: 1, max: 3 }), fc.array(fc.integer({ min: 0, max: 16 }), { maxLength: 40 }), (bays, picks) => {
-        const intervals: BusyInterval[] = []
-        for (const p of picks) {
-          const start = 480 + p * 30
-          const i = input({ activeBays: bays, durationMin: 60, intervals })
-          const ev = evaluateStart(i, wallToInstant('2026-06-13', start, TZ))
-          if (ev.state === 'available') intervals.push(iv('2026-06-13', hh(start), hh(start + 70)))
-        }
-        const lo = at('2026-06-13', '00:00').getTime()
-        expect(maxConcurrency(intervals, lo, lo + 86_400_000)).toBeLessThanOrEqual(bays)
-      }),
+      fc.property(
+        fc.integer({ min: 1, max: 3 }),
+        fc.array(fc.integer({ min: 0, max: 16 }), { maxLength: 40 }),
+        (bays, picks) => {
+          const intervals: BusyInterval[] = []
+          for (const p of picks) {
+            const start = 480 + p * 30
+            const i = input({ activeBays: bays, durationMin: 60, intervals })
+            const ev = evaluateStart(i, wallToInstant('2026-06-13', start, TZ))
+            if (ev.state === 'available') intervals.push(iv('2026-06-13', hh(start), hh(start + 70)))
+          }
+          const lo = at('2026-06-13', '00:00').getTime()
+          expect(maxConcurrency(intervals, lo, lo + 86_400_000)).toBeLessThanOrEqual(bays)
+        },
+      ),
       { numRuns: 200 },
     )
   })
 })
 
-const hh = (min: number): string => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
+const hh = (min: number): string =>
+  `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
 
 describe('past slots and the online channel', () => {
   it('past starts today are past; the desk allows start >= now', () => {
@@ -183,7 +215,8 @@ describe('past slots and the online channel', () => {
 
   it('online adds the lead time and the booking windows (VIP 30 days, others 14)', () => {
     const now = at('2026-06-13', '10:36')
-    const online = (over: Partial<AvailabilityInput>) => input({ date: '2026-06-13', now, channel: 'online', ...over })
+    const online = (over: Partial<AvailabilityInput>) =>
+      input({ date: '2026-06-13', now, channel: 'online', ...over })
     const by = Object.fromEntries(computeSlots(online({})).slots.map((s) => [s.label, s.state]))
     expect(by['11:00 AM']).toBe('past') // needs 30 minutes notice: earliest 11:06
     expect(by['11:30 AM']).toBe('available')
@@ -191,7 +224,9 @@ describe('past slots and the online channel', () => {
     expect(evaluateStart(online({ date: far }), at(far, '10:00')).state).toBe('available')
     const farther = '2026-07-04'
     expect(evaluateStart(online({ date: farther }), at(farther, '10:00')).state).toBe('outside_window')
-    expect(evaluateStart(online({ date: farther, isVip: true }), at(farther, '10:00')).state).toBe('available')
+    expect(evaluateStart(online({ date: farther, isVip: true }), at(farther, '10:00')).state).toBe(
+      'available',
+    )
     // the desk ignores windows
     expect(evaluateStart(input({ date: farther, now }), at(farther, '10:00')).state).toBe('available')
   })
@@ -208,7 +243,8 @@ describe('VIP holds', () => {
   const sat = (now: Date, isVip = false) => input({ date: '2026-06-13', now, holds, isVip })
 
   it('golden: a Saturday 8:00 hold with release 48 is vip_held at Thursday 7:59 and available at Thursday 8:00', () => {
-    const slot = (now: Date, isVip = false) => computeSlots(sat(now, isVip)).slots.find((s) => s.label === '8:00 AM')!
+    const slot = (now: Date, isVip = false) =>
+      computeSlots(sat(now, isVip)).slots.find((s) => s.label === '8:00 AM')!
     const held = slot(at('2026-06-11', '07:59'))
     expect(held.state).toBe('vip_held')
     expect(held.releasesAt).toEqual(at('2026-06-11', '08:00'))
@@ -220,10 +256,14 @@ describe('VIP holds', () => {
   it('an unreleased hold takes one bay for its slot, so it also blocks a neighbour that overlaps it', () => {
     const base = { date: '2026-06-13', holds: [{ weekday: 6, timeMin: 540 }], now: at('2026-06-11', '07:00') } // Sat 9:00 AM
     const intervals = [iv('2026-06-13', '08:00', '09:10')] // one real job leaves one bay
-    const non = Object.fromEntries(computeSlots(input({ ...base, intervals })).slots.map((s) => [s.label, s.state]))
+    const non = Object.fromEntries(
+      computeSlots(input({ ...base, intervals })).slots.map((s) => [s.label, s.state]),
+    )
     expect(non['9:00 AM']).toBe('vip_held')
     expect(non['8:30 AM']).toBe('blocked') // real job + the hold's bay between 9:00 and 9:10
-    const vip = Object.fromEntries(computeSlots(input({ ...base, intervals, isVip: true })).slots.map((s) => [s.label, s.state]))
+    const vip = Object.fromEntries(
+      computeSlots(input({ ...base, intervals, isVip: true })).slots.map((s) => [s.label, s.state]),
+    )
     expect(vip['8:30 AM']).toBe('available')
     expect(vip['9:00 AM']).toBe('available')
   })
@@ -237,16 +277,30 @@ describe('VIP holds', () => {
   })
 
   it('holds outside the open window are ignored', () => {
-    const i = input({ date: '2026-06-13', now: at('2026-06-11', '07:00'), holds: [{ weekday: 6, timeMin: 1200 }] })
+    const i = input({
+      date: '2026-06-13',
+      now: at('2026-06-11', '07:00'),
+      holds: [{ weekday: 6, timeMin: 1200 }],
+    })
     expect(computeSlots(i).slots.every((s) => s.state === 'available')).toBe(true)
   })
 })
 
 describe('overrides', () => {
   it('desk callers may override blocked, held and out-of-hours starts; past and windows cannot be overridden', () => {
-    const full = input({ intervals: [iv('2026-06-13', '09:00', '10:10'), iv('2026-06-13', '09:00', '10:10')] })
-    expect(evaluateStart(full, at('2026-06-13', '09:00'))).toMatchObject({ state: 'blocked', overrideKind: 'capacity' })
-    expect(evaluateStart({ ...full, channel: 'online', now: at('2026-06-11', '10:00') }, at('2026-06-13', '09:00'))).toMatchObject({
+    const full = input({
+      intervals: [iv('2026-06-13', '09:00', '10:10'), iv('2026-06-13', '09:00', '10:10')],
+    })
+    expect(evaluateStart(full, at('2026-06-13', '09:00'))).toMatchObject({
+      state: 'blocked',
+      overrideKind: 'capacity',
+    })
+    expect(
+      evaluateStart(
+        { ...full, channel: 'online', now: at('2026-06-11', '10:00') },
+        at('2026-06-13', '09:00'),
+      ),
+    ).toMatchObject({
       state: 'blocked',
       overrideKind: null,
     })
@@ -269,12 +323,19 @@ describe('overrides', () => {
     expect(evaluateStart(base, at('2026-06-13', '09:00')).sameDayEligible).toBe(true)
     expect(evaluateStart({ ...base, sameDayUsed: 2 }, at('2026-06-13', '09:00')).sameDayEligible).toBe(false)
     expect(evaluateStart({ ...base, isVip: false }, at('2026-06-13', '09:00')).sameDayEligible).toBe(false)
-    expect(evaluateStart({ ...base, date: '2026-06-14', now: at('2026-06-13', '08:00') }, at('2026-06-14', '09:00')).sameDayEligible).toBe(false)
+    expect(
+      evaluateStart(
+        { ...base, date: '2026-06-14', now: at('2026-06-13', '08:00') },
+        at('2026-06-14', '09:00'),
+      ).sameDayEligible,
+    ).toBe(false)
   })
 
   it('without allow_overrun a job that would run past closing is cut off', () => {
     const i = input({ rules: { ...DEFAULT_RULES, allowOverrun: false, cutoffMinutes: 30 }, durationMin: 120 })
     expect(evaluateStart(i, at('2026-06-13', '16:00')).state).toBe('cutoff')
-    expect(evaluateStart({ ...i, rules: { ...i.rules, allowOverrun: true } }, at('2026-06-13', '16:00')).state).toBe('available')
+    expect(
+      evaluateStart({ ...i, rules: { ...i.rules, allowOverrun: true } }, at('2026-06-13', '16:00')).state,
+    ).toBe('available')
   })
 })

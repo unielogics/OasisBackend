@@ -86,7 +86,10 @@ export async function loadChecklist(db: Executor, appointmentId: string): Promis
 export async function checklistProgress(db: Executor, appointmentId: string): Promise<ChecklistProgress> {
   const r = await db
     .selectFrom('job_checklist_items')
-    .select([sql<number>`count(*)::int`.as('total'), sql<number>`count(*) filter (where done)::int`.as('done')])
+    .select([
+      sql<number>`count(*)::int`.as('total'),
+      sql<number>`count(*) filter (where done)::int`.as('done'),
+    ])
     .where('appointment_id', '=', appointmentId)
     .where('removed_at', 'is', null)
     .executeTakeFirstOrThrow()
@@ -232,7 +235,11 @@ export async function setChecklistItem(
     changed = 1
   }
   const progress = await checklistProgress(tx, appointmentId)
-  if (changed) await publishOps(tx, c.locationId, { kpi: false, appointment: await versionOf(tx, appointmentId, 'checklist') })
+  if (changed)
+    await publishOps(tx, c.locationId, {
+      kpi: false,
+      appointment: await versionOf(tx, appointmentId, 'checklist'),
+    })
   return { progress, changed, item: { id: row.id, label: row.label, position: row.position, done } }
 }
 
@@ -260,7 +267,8 @@ export async function bulkSetChecklist(
 ): Promise<ChecklistChange> {
   await guardChecklistEdit(tx, c, appointmentId)
   const ids = [...new Set(itemIds)]
-  if (ids.some((i) => !isUuid(i))) throw new AppError('NOT_FOUND', { detail: 'That checklist task does not exist' })
+  if (ids.some((i) => !isUuid(i)))
+    throw new AppError('NOT_FOUND', { detail: 'That checklist task does not exist' })
   const live = ids.length
     ? await tx
         .selectFrom('job_checklist_items')
@@ -271,7 +279,8 @@ export async function bulkSetChecklist(
         .forUpdate()
         .execute()
     : []
-  if (live.length !== ids.length) throw new AppError('NOT_FOUND', { detail: 'That checklist task does not exist' })
+  if (live.length !== ids.length)
+    throw new AppError('NOT_FOUND', { detail: 'That checklist task does not exist' })
   const toChange = live.filter((r) => r.done !== done).map((r) => r.id)
   if (toChange.length > 0) {
     await tx
@@ -292,7 +301,10 @@ export async function bulkSetChecklist(
       actor,
     })
     await audit(tx, c, actor, 'checklist.bulk', appointmentId, null, { done, count: toChange.length })
-    await publishOps(tx, c.locationId, { kpi: false, appointment: await versionOf(tx, appointmentId, 'checklist') })
+    await publishOps(tx, c.locationId, {
+      kpi: false,
+      appointment: await versionOf(tx, appointmentId, 'checklist'),
+    })
   }
   return { progress: await checklistProgress(tx, appointmentId), changed: toChange.length }
 }

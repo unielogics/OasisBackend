@@ -10,7 +10,11 @@ import { createIdGenerator } from '../../src/platform/ids.js'
 import { listCatalog, type CatalogService } from '../../src/modules/catalog/service.js'
 import { PERMISSION_KEYS } from '../../src/modules/rbac/catalog.js'
 import type { Actor, SchedulingCtx } from '../../src/modules/scheduling/context.js'
-import { createAppointment, type BookingInput, type BookingResult } from '../../src/modules/scheduling/booking.js'
+import {
+  createAppointment,
+  type BookingInput,
+  type BookingResult,
+} from '../../src/modules/scheduling/booking.js'
 import {
   InMemoryInvoiceGateway,
   InMemoryMemberships,
@@ -31,7 +35,11 @@ export interface Ops {
   readonly t: TestDb
   readonly clock: FixedClock
   readonly ctx: SchedulingCtx
-  readonly ports: SchedulingPorts & { invoices: InMemoryInvoiceGateway; messages: InMemoryMessageQueue; memberships: InMemoryMemberships }
+  readonly ports: SchedulingPorts & {
+    invoices: InMemoryInvoiceGateway
+    messages: InMemoryMessageQueue
+    memberships: InMemoryMemberships
+  }
   readonly gateway: InMemoryInvoiceGateway
   readonly queue: InMemoryMessageQueue
   readonly memberships: InMemoryMemberships
@@ -46,7 +54,9 @@ export interface Ops {
   actor(perms?: readonly string[]): Promise<Actor>
   /** One transaction, like a request. */
   tx<T>(fn: (tx: Tx) => Promise<T>): Promise<T>
-  book(o: Partial<BookingInput> & { serviceName?: string; customerName?: string; at?: string; actor?: Actor }): Promise<BookingResult>
+  book(
+    o: Partial<BookingInput> & { serviceName?: string; customerName?: string; at?: string; actor?: Actor },
+  ): Promise<BookingResult>
   /** Writes an appointment row directly (any status), the way the seeds do. */
   insert(o: InsertAppointment): Promise<string>
 }
@@ -77,6 +87,8 @@ export function useOps(o: { start?: string } = {}): Ops {
   let clock: FixedClock
   let locationId = ''
   let catalog: CatalogService[] = []
+  let taskRows: { id: string; service_id: string; label: string; position: number }[] = []
+  let serviceRows: { id: string; price_cents: number; active: boolean; name: string }[] = []
   const customers = new Map<string, string>()
   const bays = new Map<number, string>()
   const employees = new Map<string, string>()
@@ -96,10 +108,16 @@ export function useOps(o: { start?: string } = {}): Ops {
     locationId = loc.id
     const all = await listCatalog(t.db, locationId, { includeInactive: true })
     catalog = [...all.packages, ...all.addons]
+    taskRows = await t.db
+      .selectFrom('checklist_tasks')
+      .select(['id', 'service_id', 'label', 'position'])
+      .execute()
+    serviceRows = await t.db.selectFrom('services').select(['id', 'price_cents', 'active', 'name']).execute()
     for (const c of await t.db.selectFrom('customers').select(['id', 'full_name']).execute())
       customers.set(c.full_name, c.id)
     for (const b of await t.db.selectFrom('bays').select(['id', 'number']).execute()) bays.set(b.number, b.id)
-    for (const e of await t.db.selectFrom('employees').select(['id', 'first']).execute()) employees.set(e.first, e.id)
+    for (const e of await t.db.selectFrom('employees').select(['id', 'first']).execute())
+      employees.set(e.first, e.id)
     storage = new FsStorage({
       root: mkdtempSync(path.join(tmpdir(), 'oasis-photos-')),
       clock,
@@ -125,6 +143,16 @@ export function useOps(o: { start?: string } = {}): Ops {
     await sql`delete from realtime_events`.execute(t.db)
     await sql`truncate table audit_log`.execute(t.db)
     await sql`update bays set status = 'active'`.execute(t.db)
+    // the catalog as seeded: tests edit templates and prices
+    await sql`delete from checklist_tasks where id <> all(${taskRows.map((r) => r.id)}::uuid[])`.execute(t.db)
+    await sql`update checklist_tasks c set label = v.label, position = v.position, retired_at = null
+      from unnest(${taskRows.map((r) => r.id)}::uuid[], ${taskRows.map((r) => r.label)}::text[], ${taskRows.map((r) => r.position)}::int[]) as v(id, label, position)
+      where c.id = v.id and (c.label <> v.label or c.position <> v.position or c.retired_at is not null)`.execute(
+      t.db,
+    )
+    await sql`update services s set price_cents = v.price_cents, active = v.active
+      from unnest(${serviceRows.map((r) => r.id)}::uuid[], ${serviceRows.map((r) => r.price_cents)}::int[], ${serviceRows.map((r) => r.active)}::bool[]) as v(id, price_cents, active)
+      where s.id = v.id and (s.price_cents <> v.price_cents or s.active <> v.active)`.execute(t.db)
     await sql`delete from emergency_notifications`.execute(t.db)
     gateway.reset()
   })
@@ -181,14 +209,24 @@ export function useOps(o: { start?: string } = {}): Ops {
         actorName: 'Test User',
         roles: ['test'],
       }
-      return { auth, audit: { actor: { userId: u.userId, employeeId: u.employeeId, name: 'Test User', roles: 'test' }, requestId: 'req-test' } }
+      return {
+        auth,
+        audit: {
+          actor: { userId: u.userId, employeeId: u.employeeId, name: 'Test User', roles: 'test' },
+          requestId: 'req-test',
+        },
+      }
     },
     tx: (fn) => transaction(t.db, fn),
     async book(b) {
       const { serviceName, customerName, at, actor, ...rest } = b
       const a = actor ?? (await self.actor())
       const customerId = self.customer(customerName ?? 'Maria Delgado')
-      const owned = await t.db.selectFrom('vehicles').select('plate').where('customer_id', '=', customerId).executeTakeFirst()
+      const owned = await t.db
+        .selectFrom('vehicles')
+        .select('plate')
+        .where('customer_id', '=', customerId)
+        .executeTakeFirst()
       return self.tx((tx) =>
         createAppointment(tx, ctx, a, {
           customer: { id: customerId },
@@ -202,7 +240,11 @@ export function useOps(o: { start?: string } = {}): Ops {
     async insert(i) {
       const svc = self.svc(i.serviceName)
       const customerId = self.customer(i.customerName)
-      const veh = await t.db.selectFrom('vehicles').select('id').where('customer_id', '=', customerId).executeTakeFirst()
+      const veh = await t.db
+        .selectFrom('vehicles')
+        .select('id')
+        .where('customer_id', '=', customerId)
+        .executeTakeFirst()
       const startAt = new Date(i.at)
       const id = ctx.newId()
       const status = (i.status ?? 'booked') as never

@@ -90,7 +90,8 @@ export async function toCore(db: Executor, c: SchedulingCtx, a: AppointmentRecor
 // Shared helpers -----------------------------------------------------------------------------------------------------
 
 function requireAny(actor: Actor, perms: readonly string[]): void {
-  if (!perms.some((p) => can(actor, p))) throw new AppError('FORBIDDEN', { meta: { required: [...perms], mode: 'any' } })
+  if (!perms.some((p) => can(actor, p)))
+    throw new AppError('FORBIDDEN', { meta: { required: [...perms], mode: 'any' } })
 }
 
 type Patch = Record<string, unknown>
@@ -99,7 +100,10 @@ type Patch = Record<string, unknown>
 async function applyPatch(tx: Tx, a: AppointmentRecord, patch: Patch): Promise<void> {
   await tx
     .updateTable('appointments')
-    .set((eb) => ({ ...(patch as object), version: eb('version', '+', 1), updated_at: eb.fn('app_now', []) }) as never)
+    .set(
+      (eb) =>
+        ({ ...(patch as object), version: eb('version', '+', 1), updated_at: eb.fn('app_now', []) }) as never,
+    )
     .where('id', '=', a.id)
     .execute()
 }
@@ -113,7 +117,12 @@ async function queue(
   c: SchedulingCtx,
   a: AppointmentRecord,
   customer: CustomerBrief,
-  m: { templateKey?: string; text?: string; vars?: Record<string, string | number | null | undefined>; purpose: string },
+  m: {
+    templateKey?: string
+    text?: string
+    vars?: Record<string, string | number | null | undefined>
+    purpose: string
+  },
 ): Promise<QueuedResult> {
   return c.ports.messages.enqueue(tx, {
     customerId: customer.id,
@@ -134,7 +143,9 @@ const SKIP_LABELS: Record<string, string> = {
 
 /** The activity text, annotated when the message was not queued ("... (not sent: customer opted out of SMS)"). */
 const withDelivery = (text: string, r: QueuedResult): string =>
-  r.queued ? text : `${text} (not sent: ${SKIP_LABELS[r.skipped ?? ''] ?? r.skipped ?? 'blocked by SMS policy'})`
+  r.queued
+    ? text
+    : `${text} (not sent: ${SKIP_LABELS[r.skipped ?? ''] ?? r.skipped ?? 'blocked by SMS policy'})`
 
 async function finish(
   tx: Tx,
@@ -239,7 +250,15 @@ export async function arriveAppointment(
   } else {
     await logActivity(tx, c, { appointmentId: a.id, text: 'Arrival logged', channels: ['internal'], actor })
   }
-  await audited(tx, c, actor, 'arrive', a.id, { status: a.status }, { status: 'arrived', source: geofence ? 'geofence' : 'manual' })
+  await audited(
+    tx,
+    c,
+    actor,
+    'arrive',
+    a.id,
+    { status: a.status },
+    { status: 'arrived', source: geofence ? 'geofence' : 'manual' },
+  )
   return finish(tx, c, a, 'arrived', {
     toast: geofence
       ? { title: 'Checked in automatically', detail: `${customer.fullName} · welcome message sent` }
@@ -263,7 +282,9 @@ async function occupantOf(tx: Tx, bayId: string): Promise<{ id: string; name: st
 const busyError = (bay: Pick<BayRecord, 'number'>, occupantName: string | null): AppError =>
   new AppError('BAY_BUSY', {
     params: { n: bay.number },
-    detail: occupantName ? `Finish ${firstName(occupantName)}’s vehicle first` : 'Finish the current vehicle first',
+    detail: occupantName
+      ? `Finish ${firstName(occupantName)}’s vehicle first`
+      : 'Finish the current vehicle first',
   })
 
 const isBayOccupiedViolation = (e: unknown): boolean =>
@@ -335,7 +356,15 @@ async function putInBay(
     actor,
     meta: { bay: bay.number },
   })
-  await audited(tx, c, actor, o.mode === 'assign' ? 'assign_bay' : 'start', a.id, { status: a.status, bayId: a.bayId }, { status: 'cleaning', bayId: bay.id })
+  await audited(
+    tx,
+    c,
+    actor,
+    o.mode === 'assign' ? 'assign_bay' : 'start',
+    a.id,
+    { status: a.status, bayId: a.bayId },
+    { status: 'cleaning', bayId: bay.id },
+  )
   return finish(tx, c, a, 'cleaning', {
     toast:
       o.mode === 'assign'
@@ -422,7 +451,15 @@ export async function completeAppointment(
     channels: ['sms'],
     actor,
   })
-  await audited(tx, c, actor, 'complete', a.id, { status: a.status }, { status: 'completed', autoChecked: auto.length })
+  await audited(
+    tx,
+    c,
+    actor,
+    'complete',
+    a.id,
+    { status: a.status },
+    { status: 'completed', autoChecked: auto.length },
+  )
   return finish(tx, c, a, 'completed', {
     toast: { title: 'Job completed', detail: 'Ready-for-pickup sent · moved to pickup' },
     bayIds: [a.bayId],
@@ -537,12 +574,7 @@ export async function cancelAppointment(
 }
 
 /** Only after the start plus the late grace. Cancels the invoice (reason no_show); no message is sent. */
-export async function markNoShow(
-  tx: Tx,
-  c: SchedulingCtx,
-  actor: Actor,
-  id: string,
-): Promise<CommandResult> {
+export async function markNoShow(tx: Tx, c: SchedulingCtx, actor: Actor, id: string): Promise<CommandResult> {
   const a = await lockAppointment(tx, c.locationId, id)
   if (a.status !== 'booked' && a.status !== 'confirmed') throw invalidTransition(a)
   const { ops } = await loadSettingsBundle(tx, c.locationId)
@@ -594,8 +626,21 @@ export async function reopenAppointment(
   await recordOverrides(tx, c, actor, a.id, decision)
   const fresh = await reload(tx, c, a.id)
   const invoice = await ensureInvoiceFor(tx, c, fresh)
-  await logActivity(tx, c, { appointmentId: a.id, text: 'Appointment reopened', channels: ['internal'], actor })
-  await audited(tx, c, actor, 'reopen', a.id, { status: a.status }, { status: 'booked', start: start.toISOString() })
+  await logActivity(tx, c, {
+    appointmentId: a.id,
+    text: 'Appointment reopened',
+    channels: ['internal'],
+    actor,
+  })
+  await audited(
+    tx,
+    c,
+    actor,
+    'reopen',
+    a.id,
+    { status: a.status },
+    { status: 'booked', start: start.toISOString() },
+  )
   const customer = await customerBrief(tx, a.customerId)
   return finish(tx, c, a, 'reopened', {
     toast: { title: 'Appointment reopened', detail: customer.fullName },
@@ -683,7 +728,8 @@ export async function prepBay(tx: Tx, c: SchedulingCtx, actor: Actor, id: string
   if (!planned) warnings.push('No bay is planned for this job')
   else {
     const occ = await occupantOf(tx, planned.id)
-    if (occ && occ.id !== a.id) warnings.push(`Bay ${planned.number} is still occupied by ${firstName(occ.name)}’s vehicle`)
+    if (occ && occ.id !== a.id)
+      warnings.push(`Bay ${planned.number} is still occupied by ${firstName(occ.name)}’s vehicle`)
   }
   const vip = await tx
     .selectFrom('vip_clients')
@@ -739,7 +785,12 @@ export async function setPickup(
   })
 }
 
-export async function notifyReady(tx: Tx, c: SchedulingCtx, actor: Actor, id: string): Promise<CommandResult> {
+export async function notifyReady(
+  tx: Tx,
+  c: SchedulingCtx,
+  actor: Actor,
+  id: string,
+): Promise<CommandResult> {
   const a = await lockAppointment(tx, c.locationId, id)
   if (a.status !== 'completed') throw invalidTransition(a)
   const customer = await customerBrief(tx, a.customerId)
@@ -822,7 +873,8 @@ export async function updateDetails(
   }
   if (Object.keys(patch).length > 0) {
     await applyPatch(tx, a, patch)
-    for (const text of notes) await logActivity(tx, c, { appointmentId: a.id, text, channels: ['internal'], actor })
+    for (const text of notes)
+      await logActivity(tx, c, { appointmentId: a.id, text, channels: ['internal'], actor })
     await audited(tx, c, actor, 'update', a.id, null, { ...patch })
   }
   return finish(tx, c, a, 'updated', {
