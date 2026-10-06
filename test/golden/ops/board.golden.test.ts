@@ -103,6 +103,23 @@ describe('the board at 10:36 AM (original.initial vs /ops/snapshot next24)', () 
     })
   })
 
+  it('the numbers behind the deviating KPIs (DEVIATIONS.md 2-4): cents and minutes', async () => {
+    const { snap } = await board('next24')
+    const raw = Object.fromEntries(snap.kpis.map((k) => [k.key, k.raw]))
+    expect(raw).toEqual({
+      appointments24h: 12,
+      activeJobs: 1,
+      readyForPickup: 1,
+      // a3 16478 + a5 22820 + a7 11375 + a8 4815 + a10 4815 + a11 69550
+      pendingPayments: 129_853,
+      // 768 bay-minutes left (2 bays x 384) less 601 committed
+      bayTimeFree: 167,
+      membersToday: 6,
+      // a1 9895 + a2 42125 + a4 19688 + a6 19260 + a9 57780
+      revenueToday: 148_748,
+    })
+  })
+
   it('completed column, bays, arrivals and staff columns', async () => {
     const { snap } = await board('next24')
     const o = original.initial

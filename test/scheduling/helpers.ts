@@ -187,9 +187,12 @@ export function useOps(o: { start?: string } = {}): Ops {
     async book(b) {
       const { serviceName, customerName, at, actor, ...rest } = b
       const a = actor ?? (await self.actor())
+      const customerId = self.customer(customerName ?? 'Maria Delgado')
+      const owned = await t.db.selectFrom('vehicles').select('plate').where('customer_id', '=', customerId).executeTakeFirst()
       return self.tx((tx) =>
         createAppointment(tx, ctx, a, {
-          customer: { id: self.customer(customerName ?? 'Maria Delgado') },
+          customer: { id: customerId },
+          vehicle: owned?.plate ? { plate: owned.plate } : undefined,
           serviceId: self.svc(serviceName ?? 'Express Hand Wash').id,
           start: at ? new Date(at) : undefined,
           ...rest,
