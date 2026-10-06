@@ -1,0 +1,1006 @@
+[
+  {
+    "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000011",
+    "createdOn": "2026-08-04T15:12:40.900Z",
+    "modifiedOn": "2026-08-04T15:12:41.002Z",
+    "customerEmail": "maria.alvarez@example.com",
+    "discounts": [],
+    "paymentGatewayError": null,
+    "payments": [
+      {
+        "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000010",
+        "amount": {
+          "currency": "USD",
+          "value": 159.43
+        },
+        "creditCardType": "VISA",
+        "externalCustomerId": null,
+        "externalTransactionId": "ch_3QAAA1",
+        "externalTransactionProperties": [],
+        "giftCardId": null,
+        "netAmount": {
+          "currency": "USD",
+          "value": 154.51
+        },
+        "paidOn": "2026-08-04T15:12:40.900Z",
+        "processingFees": [
+          {
+            "amount": {
+              "currency": "USD",
+              "value": 4.92
+            },
+            "amountGatewayCurrency": {
+              "currency": "USD",
+              "value": 4.92
+            },
+            "exchangeRate": 1,
+            "feeRefunds": [],
+            "id": "fee_AAA1",
+            "netAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "netAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            }
+          }
+        ],
+        "provider": "SQUARESPACE",
+        "refundedAmount": {
+          "currency": "USD",
+          "value": 0
+        },
+        "refunds": []
+      }
+    ],
+    "refunds": [],
+    "salesLineItems": [],
+    "salesOrderId": "64f0a1000000000000000001",
+    "shippingLineItems": [],
+    "total": {
+      "currency": "USD",
+      "value": 159.43
+    },
+    "totalNetPayment": {
+      "currency": "USD",
+      "value": 159.43
+    },
+    "totalNetSales": {
+      "currency": "USD",
+      "value": 149
+    },
+    "totalNetShipping": {
+      "currency": "USD",
+      "value": 0
+    },
+    "totalSales": {
+      "currency": "USD",
+      "value": 149
+    },
+    "totalTaxes": {
+      "currency": "USD",
+      "value": 10.43
+    },
+    "voided": false
+  },
+  {
+    "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000013",
+    "createdOn": "2026-09-04T15:12:11.900Z",
+    "modifiedOn": "2026-09-04T15:12:12.310Z",
+    "customerEmail": "maria.alvarez@example.com",
+    "discounts": [],
+    "paymentGatewayError": null,
+    "payments": [
+      {
+        "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000012",
+        "amount": {
+          "currency": "USD",
+          "value": 159.43
+        },
+        "creditCardType": "VISA",
+        "externalCustomerId": null,
+        "externalTransactionId": "ch_3QAAA2",
+        "externalTransactionProperties": [],
+        "giftCardId": null,
+        "netAmount": {
+          "currency": "USD",
+          "value": 154.51
+        },
+        "paidOn": "2026-09-04T15:12:11.900Z",
+        "processingFees": [
+          {
+            "amount": {
+              "currency": "USD",
+              "value": 4.92
+            },
+            "amountGatewayCurrency": {
+              "currency": "USD",
+              "value": 4.92
+            },
+            "exchangeRate": 1,
+            "feeRefunds": [],
+            "id": "fee_AAA2",
+            "netAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "netAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            }
+          }
+        ],
+        "provider": "SQUARESPACE",
+        "refundedAmount": {
+          "currency": "USD",
+          "value": 0
+        },
+        "refunds": []
+      }
+    ],
+    "refunds": [],
+    "salesLineItems": [],
+    "salesOrderId": "64f0a1000000000000000002",
+    "shippingLineItems": [],
+    "total": {
+      "currency": "USD",
+      "value": 159.43
+    },
+    "totalNetPayment": {
+      "currency": "USD",
+      "value": 159.43
+    },
+    "totalNetSales": {
+      "currency": "USD",
+      "value": 149
+    },
+    "totalNetShipping": {
+      "currency": "USD",
+      "value": 0
+    },
+    "totalSales": {
+      "currency": "USD",
+      "value": 149
+    },
+    "totalTaxes": {
+      "currency": "USD",
+      "value": 10.43
+    },
+    "voided": false
+  },
+  {
+    "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000015",
+    "createdOn": "2026-09-18T18:40:02.800Z",
+    "modifiedOn": "2026-09-18T18:40:03.450Z",
+    "customerEmail": "liam.chen@example.com",
+    "discounts": [],
+    "paymentGatewayError": null,
+    "payments": [
+      {
+        "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000014",
+        "amount": {
+          "currency": "USD",
+          "value": 202.23
+        },
+        "creditCardType": "MASTERCARD",
+        "externalCustomerId": null,
+        "externalTransactionId": "ch_3QAAA3",
+        "externalTransactionProperties": [],
+        "giftCardId": null,
+        "netAmount": {
+          "currency": "USD",
+          "value": 196.07
+        },
+        "paidOn": "2026-09-18T18:40:02.800Z",
+        "processingFees": [
+          {
+            "amount": {
+              "currency": "USD",
+              "value": 6.16
+            },
+            "amountGatewayCurrency": {
+              "currency": "USD",
+              "value": 6.16
+            },
+            "exchangeRate": 1,
+            "feeRefunds": [],
+            "id": "fee_AAA3",
+            "netAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "netAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            }
+          }
+        ],
+        "provider": "SQUARESPACE",
+        "refundedAmount": {
+          "currency": "USD",
+          "value": 0
+        },
+        "refunds": []
+      }
+    ],
+    "refunds": [],
+    "salesLineItems": [],
+    "salesOrderId": "64f0a1000000000000000003",
+    "shippingLineItems": [],
+    "total": {
+      "currency": "USD",
+      "value": 202.23
+    },
+    "totalNetPayment": {
+      "currency": "USD",
+      "value": 202.23
+    },
+    "totalNetSales": {
+      "currency": "USD",
+      "value": 189
+    },
+    "totalNetShipping": {
+      "currency": "USD",
+      "value": 0
+    },
+    "totalSales": {
+      "currency": "USD",
+      "value": 189
+    },
+    "totalTaxes": {
+      "currency": "USD",
+      "value": 13.23
+    },
+    "voided": false
+  },
+  {
+    "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000018",
+    "createdOn": "2026-09-22T13:05:56.000Z",
+    "modifiedOn": "2026-09-24T16:20:10.512Z",
+    "customerEmail": "aisha.rahman@example.com",
+    "discounts": [],
+    "paymentGatewayError": null,
+    "payments": [
+      {
+        "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000016",
+        "amount": {
+          "currency": "USD",
+          "value": 63.13
+        },
+        "creditCardType": "VISA",
+        "externalCustomerId": null,
+        "externalTransactionId": "ch_3QAAA4",
+        "externalTransactionProperties": [],
+        "giftCardId": null,
+        "netAmount": {
+          "currency": "USD",
+          "value": 61
+        },
+        "paidOn": "2026-09-22T13:05:56.000Z",
+        "processingFees": [
+          {
+            "amount": {
+              "currency": "USD",
+              "value": 2.13
+            },
+            "amountGatewayCurrency": {
+              "currency": "USD",
+              "value": 2.13
+            },
+            "exchangeRate": 1,
+            "feeRefunds": [],
+            "id": "fee_AAA4",
+            "netAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "netAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            }
+          }
+        ],
+        "provider": "SQUARESPACE",
+        "refundedAmount": {
+          "currency": "USD",
+          "value": 20
+        },
+        "refunds": [
+          {
+            "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000017",
+            "amount": {
+              "currency": "USD",
+              "value": 20
+            },
+            "externalTransactionId": "re_3QAAA4",
+            "refundedOn": "2026-09-24T16:20:09.000Z"
+          }
+        ]
+      }
+    ],
+    "refunds": [],
+    "salesLineItems": [],
+    "salesOrderId": "64f0a1000000000000000004",
+    "shippingLineItems": [],
+    "total": {
+      "currency": "USD",
+      "value": 63.13
+    },
+    "totalNetPayment": {
+      "currency": "USD",
+      "value": 63.13
+    },
+    "totalNetSales": {
+      "currency": "USD",
+      "value": 59
+    },
+    "totalNetShipping": {
+      "currency": "USD",
+      "value": 0
+    },
+    "totalSales": {
+      "currency": "USD",
+      "value": 59
+    },
+    "totalTaxes": {
+      "currency": "USD",
+      "value": 4.13
+    },
+    "voided": false
+  },
+  {
+    "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000020",
+    "createdOn": "2026-09-25T09:00:00.500Z",
+    "modifiedOn": "2026-09-25T09:00:01.000Z",
+    "customerEmail": "qa.tester@example.com",
+    "discounts": [],
+    "paymentGatewayError": null,
+    "payments": [
+      {
+        "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000019",
+        "amount": {
+          "currency": "USD",
+          "value": 63.13
+        },
+        "creditCardType": "VISA",
+        "externalCustomerId": null,
+        "externalTransactionId": "ch_3QAAA5",
+        "externalTransactionProperties": [],
+        "giftCardId": null,
+        "netAmount": {
+          "currency": "USD",
+          "value": 61
+        },
+        "paidOn": "2026-09-25T09:00:00.500Z",
+        "processingFees": [
+          {
+            "amount": {
+              "currency": "USD",
+              "value": 2.13
+            },
+            "amountGatewayCurrency": {
+              "currency": "USD",
+              "value": 2.13
+            },
+            "exchangeRate": 1,
+            "feeRefunds": [],
+            "id": "fee_AAA5",
+            "netAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "netAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            }
+          }
+        ],
+        "provider": "STRIPE",
+        "refundedAmount": {
+          "currency": "USD",
+          "value": 0
+        },
+        "refunds": []
+      }
+    ],
+    "refunds": [],
+    "salesLineItems": [],
+    "salesOrderId": "64f0a1000000000000000005",
+    "shippingLineItems": [],
+    "total": {
+      "currency": "USD",
+      "value": 63.13
+    },
+    "totalNetPayment": {
+      "currency": "USD",
+      "value": 63.13
+    },
+    "totalNetSales": {
+      "currency": "USD",
+      "value": 59
+    },
+    "totalNetShipping": {
+      "currency": "USD",
+      "value": 0
+    },
+    "totalSales": {
+      "currency": "USD",
+      "value": 59
+    },
+    "totalTaxes": {
+      "currency": "USD",
+      "value": 4.13
+    },
+    "voided": false
+  },
+  {
+    "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000022",
+    "createdOn": "2026-09-28T20:11:19.900Z",
+    "modifiedOn": "2026-09-28T20:11:20.100Z",
+    "customerEmail": "gift.buyer@example.com",
+    "discounts": [],
+    "paymentGatewayError": null,
+    "payments": [
+      {
+        "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000021",
+        "amount": {
+          "currency": "USD",
+          "value": 29.96
+        },
+        "creditCardType": "AMEX",
+        "externalCustomerId": null,
+        "externalTransactionId": "ch_3QAAA6",
+        "externalTransactionProperties": [],
+        "giftCardId": null,
+        "netAmount": {
+          "currency": "USD",
+          "value": 28.79
+        },
+        "paidOn": "2026-09-28T20:11:19.900Z",
+        "processingFees": [
+          {
+            "amount": {
+              "currency": "USD",
+              "value": 1.17
+            },
+            "amountGatewayCurrency": {
+              "currency": "USD",
+              "value": 1.17
+            },
+            "exchangeRate": 1,
+            "feeRefunds": [],
+            "id": "fee_AAA6",
+            "netAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "netAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            }
+          }
+        ],
+        "provider": "SQUARESPACE",
+        "refundedAmount": {
+          "currency": "USD",
+          "value": 0
+        },
+        "refunds": []
+      }
+    ],
+    "refunds": [],
+    "salesLineItems": [],
+    "salesOrderId": "64f0a1000000000000000006",
+    "shippingLineItems": [],
+    "total": {
+      "currency": "USD",
+      "value": 29.96
+    },
+    "totalNetPayment": {
+      "currency": "USD",
+      "value": 29.96
+    },
+    "totalNetSales": {
+      "currency": "USD",
+      "value": 28
+    },
+    "totalNetShipping": {
+      "currency": "USD",
+      "value": 0
+    },
+    "totalSales": {
+      "currency": "USD",
+      "value": 28
+    },
+    "totalTaxes": {
+      "currency": "USD",
+      "value": 1.96
+    },
+    "voided": false
+  },
+  {
+    "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000025",
+    "createdOn": "2026-09-30T14:00:01.000Z",
+    "modifiedOn": "2026-10-02T14:00:05.000Z",
+    "customerEmail": "dmitri.volkov@example.com",
+    "discounts": [],
+    "paymentGatewayError": null,
+    "payments": [
+      {
+        "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000023",
+        "amount": {
+          "currency": "USD",
+          "value": 300
+        },
+        "creditCardType": "DISCOVER",
+        "externalCustomerId": null,
+        "externalTransactionId": "ch_3QAAA7a",
+        "externalTransactionProperties": [],
+        "giftCardId": null,
+        "netAmount": {
+          "currency": "USD",
+          "value": 291
+        },
+        "paidOn": "2026-09-30T14:00:01.000Z",
+        "processingFees": [
+          {
+            "amount": {
+              "currency": "USD",
+              "value": 9
+            },
+            "amountGatewayCurrency": {
+              "currency": "USD",
+              "value": 9
+            },
+            "exchangeRate": 1,
+            "feeRefunds": [],
+            "id": "fee_AAA7a",
+            "netAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "netAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            }
+          }
+        ],
+        "provider": "SQUARESPACE",
+        "refundedAmount": {
+          "currency": "USD",
+          "value": 0
+        },
+        "refunds": []
+      },
+      {
+        "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000024",
+        "amount": {
+          "currency": "USD",
+          "value": 321
+        },
+        "creditCardType": "DISCOVER",
+        "externalCustomerId": null,
+        "externalTransactionId": "ch_3QAAA7b",
+        "externalTransactionProperties": [],
+        "giftCardId": null,
+        "netAmount": {
+          "currency": "USD",
+          "value": 311.39
+        },
+        "paidOn": "2026-10-02T14:00:04.000Z",
+        "processingFees": [
+          {
+            "amount": {
+              "currency": "USD",
+              "value": 9.61
+            },
+            "amountGatewayCurrency": {
+              "currency": "USD",
+              "value": 9.61
+            },
+            "exchangeRate": 1,
+            "feeRefunds": [],
+            "id": "fee_AAA7b",
+            "netAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "netAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            }
+          }
+        ],
+        "provider": "SQUARESPACE",
+        "refundedAmount": {
+          "currency": "USD",
+          "value": 0
+        },
+        "refunds": []
+      }
+    ],
+    "refunds": [],
+    "salesLineItems": [],
+    "salesOrderId": "64f0a1000000000000000007",
+    "shippingLineItems": [],
+    "total": {
+      "currency": "USD",
+      "value": 963
+    },
+    "totalNetPayment": {
+      "currency": "USD",
+      "value": 621
+    },
+    "totalNetSales": {
+      "currency": "USD",
+      "value": 900
+    },
+    "totalNetShipping": {
+      "currency": "USD",
+      "value": 0
+    },
+    "totalSales": {
+      "currency": "USD",
+      "value": 900
+    },
+    "totalTaxes": {
+      "currency": "USD",
+      "value": 63
+    },
+    "voided": false
+  },
+  {
+    "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000027",
+    "createdOn": "2026-10-03T16:45:00.500Z",
+    "modifiedOn": "2026-10-03T16:45:01.000Z",
+    "customerEmail": null,
+    "discounts": [],
+    "paymentGatewayError": null,
+    "payments": [
+      {
+        "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000026",
+        "amount": {
+          "currency": "USD",
+          "value": 63.13
+        },
+        "creditCardType": "OTHER",
+        "externalCustomerId": null,
+        "externalTransactionId": "ch_3QAAA8",
+        "externalTransactionProperties": [],
+        "giftCardId": null,
+        "netAmount": {
+          "currency": "USD",
+          "value": 61
+        },
+        "paidOn": "2026-10-03T16:45:00.500Z",
+        "processingFees": [
+          {
+            "amount": {
+              "currency": "USD",
+              "value": 2.13
+            },
+            "amountGatewayCurrency": {
+              "currency": "USD",
+              "value": 2.13
+            },
+            "exchangeRate": 1,
+            "feeRefunds": [],
+            "id": "fee_AAA8",
+            "netAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "netAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            }
+          }
+        ],
+        "provider": "SQUARESPACE",
+        "refundedAmount": {
+          "currency": "USD",
+          "value": 0
+        },
+        "refunds": []
+      }
+    ],
+    "refunds": [],
+    "salesLineItems": [],
+    "salesOrderId": "64f0a1000000000000000008",
+    "shippingLineItems": [],
+    "total": {
+      "currency": "USD",
+      "value": 63.13
+    },
+    "totalNetPayment": {
+      "currency": "USD",
+      "value": 63.13
+    },
+    "totalNetSales": {
+      "currency": "USD",
+      "value": 59
+    },
+    "totalNetShipping": {
+      "currency": "USD",
+      "value": 0
+    },
+    "totalSales": {
+      "currency": "USD",
+      "value": 59
+    },
+    "totalTaxes": {
+      "currency": "USD",
+      "value": 4.13
+    },
+    "voided": false
+  },
+  {
+    "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000030",
+    "createdOn": "2026-10-04T12:30:01.000Z",
+    "modifiedOn": "2026-10-05T10:02:00.000Z",
+    "customerEmail": "aisha.rahman@example.com",
+    "discounts": [],
+    "paymentGatewayError": null,
+    "payments": [
+      {
+        "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000028",
+        "amount": {
+          "currency": "USD",
+          "value": 202.23
+        },
+        "creditCardType": "VISA",
+        "externalCustomerId": null,
+        "externalTransactionId": "ch_3QAAA9",
+        "externalTransactionProperties": [],
+        "giftCardId": null,
+        "netAmount": {
+          "currency": "USD",
+          "value": 196.07
+        },
+        "paidOn": "2026-10-04T12:30:01.000Z",
+        "processingFees": [
+          {
+            "amount": {
+              "currency": "USD",
+              "value": 6.16
+            },
+            "amountGatewayCurrency": {
+              "currency": "USD",
+              "value": 6.16
+            },
+            "exchangeRate": 1,
+            "feeRefunds": [],
+            "id": "fee_AAA9",
+            "netAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "netAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            }
+          }
+        ],
+        "provider": "SQUARESPACE",
+        "refundedAmount": {
+          "currency": "USD",
+          "value": 0
+        },
+        "refunds": []
+      }
+    ],
+    "refunds": [
+      {
+        "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000029",
+        "amount": {
+          "currency": "USD",
+          "value": 202.23
+        },
+        "externalTransactionId": "re_3QAAA9r",
+        "refundedOn": "2026-10-05T10:01:59.000Z"
+      }
+    ],
+    "salesLineItems": [],
+    "salesOrderId": "64f0a1000000000000000009",
+    "shippingLineItems": [],
+    "total": {
+      "currency": "USD",
+      "value": 202.23
+    },
+    "totalNetPayment": {
+      "currency": "USD",
+      "value": 202.23
+    },
+    "totalNetSales": {
+      "currency": "USD",
+      "value": 189
+    },
+    "totalNetShipping": {
+      "currency": "USD",
+      "value": 0
+    },
+    "totalSales": {
+      "currency": "USD",
+      "value": 189
+    },
+    "totalTaxes": {
+      "currency": "USD",
+      "value": 13.23
+    },
+    "voided": false
+  },
+  {
+    "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000032",
+    "createdOn": "2026-10-01T09:00:00.000Z",
+    "modifiedOn": "2026-10-01T09:00:00.000Z",
+    "customerEmail": "donor@example.com",
+    "discounts": [],
+    "paymentGatewayError": null,
+    "payments": [
+      {
+        "id": "5f2c0a00-1b3d-4c5e-8f9a-000000000031",
+        "amount": {
+          "currency": "USD",
+          "value": 25
+        },
+        "creditCardType": "VISA",
+        "externalCustomerId": null,
+        "externalTransactionId": "ch_3QDON1",
+        "externalTransactionProperties": [],
+        "giftCardId": null,
+        "netAmount": {
+          "currency": "USD",
+          "value": 23.98
+        },
+        "paidOn": "2026-10-01T09:00:00.000Z",
+        "processingFees": [
+          {
+            "amount": {
+              "currency": "USD",
+              "value": 1.03
+            },
+            "amountGatewayCurrency": {
+              "currency": "USD",
+              "value": 1.03
+            },
+            "exchangeRate": 1,
+            "feeRefunds": [],
+            "id": "fee_DON1",
+            "netAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "netAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmount": {
+              "currency": "USD",
+              "value": 0
+            },
+            "refundedAmountGatewayCurrency": {
+              "currency": "USD",
+              "value": 0
+            }
+          }
+        ],
+        "provider": "SQUARESPACE",
+        "refundedAmount": {
+          "currency": "USD",
+          "value": 0
+        },
+        "refunds": []
+      }
+    ],
+    "refunds": [],
+    "salesLineItems": [],
+    "salesOrderId": null,
+    "shippingLineItems": [],
+    "total": {
+      "currency": "USD",
+      "value": 25
+    },
+    "totalNetPayment": {
+      "currency": "USD",
+      "value": 25
+    },
+    "totalNetSales": {
+      "currency": "USD",
+      "value": 25
+    },
+    "totalNetShipping": {
+      "currency": "USD",
+      "value": 0
+    },
+    "totalSales": {
+      "currency": "USD",
+      "value": 25
+    },
+    "totalTaxes": {
+      "currency": "USD",
+      "value": 0
+    },
+    "voided": false
+  }
+]

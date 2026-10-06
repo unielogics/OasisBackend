@@ -1,0 +1,30 @@
+{
+  "unauthorized": {
+    "type": "AUTHORIZATION_ERROR",
+    "subtype": "INVALID_TOKEN",
+    "message": "The provided token is invalid or expired.",
+    "details": null,
+    "contextId": "RUPSUSPOW"
+  },
+  "tooMany": {
+    "type": "TOO_MANY_REQUESTS_ERROR",
+    "subtype": null,
+    "message": "Rate limit exceeded.",
+    "details": null,
+    "contextId": "RUPSUSPOW"
+  },
+  "badRequest": {
+    "type": "INVALID_REQUEST_ERROR",
+    "subtype": "MISSING_ARGUMENT",
+    "message": "modifiedAfter and modifiedBefore must be provided together.",
+    "details": null,
+    "contextId": "RUPSUSPOW"
+  },
+  "server": {
+    "type": "SERVER_ERROR",
+    "subtype": null,
+    "message": "Something went wrong.",
+    "details": null,
+    "contextId": "RUPSUSPOW"
+  }
+}

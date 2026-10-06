@@ -19,8 +19,22 @@ export interface SmsSendResult {
 }
 
 export type SmsEvent =
-  | { kind: 'received'; eventId: string; from: string; body: string; at: Date; deviceId: string; providerMessageId: string }
-  | { kind: 'sent' | 'delivered' | 'failed' | 'cancelled'; eventId: string; providerMessageId: string; at: Date; reason?: string }
+  | {
+      kind: 'received'
+      eventId: string
+      from: string
+      body: string
+      at: Date
+      deviceId: string
+      providerMessageId: string
+    }
+  | {
+      kind: 'sent' | 'delivered' | 'failed' | 'cancelled'
+      eventId: string
+      providerMessageId: string
+      at: Date
+      reason?: string
+    }
   | { kind: 'ping' | 'app_started'; eventId: string; deviceId: string; at: Date }
 
 export interface SmsDeviceHealth {

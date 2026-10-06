@@ -1,0 +1,112 @@
+[
+  {
+    "id": "64e0c0000000000000000001",
+    "createdOn": "2026-01-15T10:00:00Z",
+    "firstName": "Maria",
+    "lastName": "Alvarez",
+    "locale": "en-US",
+    "primaryEmail": {
+      "email": "maria.alvarez@example.com",
+      "createdOn": "2026-01-15T10:00:00Z",
+      "acceptsMarketing": {
+        "acceptsMarketing": true,
+        "joinedOn": "2026-01-15T10:00:00Z",
+        "leftOn": null
+      }
+    },
+    "defaultShippingAddress": {
+      "id": "64e0c000000000000000ad01",
+      "defaultShipping": true,
+      "address": {
+        "firstName": "Maria",
+        "lastName": "Alvarez",
+        "line1": "1200 Brickell Ave",
+        "line2": null,
+        "city": "Miami",
+        "region": "FL",
+        "postalCode": "33131",
+        "countryCode": "US",
+        "phoneNumber": "555-712-0188"
+      }
+    }
+  },
+  {
+    "id": "64e0c0000000000000000002",
+    "createdOn": "2026-01-15T10:00:00Z",
+    "firstName": "Liam",
+    "lastName": "Chen",
+    "locale": "en-US",
+    "primaryEmail": {
+      "email": "liam.chen@example.com",
+      "createdOn": "2026-01-15T10:00:00Z",
+      "acceptsMarketing": {
+        "acceptsMarketing": true,
+        "joinedOn": "2026-01-15T10:00:00Z",
+        "leftOn": null
+      }
+    },
+    "defaultShippingAddress": {
+      "id": "64e0c000000000000000ad01",
+      "defaultShipping": true,
+      "address": {
+        "firstName": "Liam",
+        "lastName": "Chen",
+        "line1": "1200 Brickell Ave",
+        "line2": null,
+        "city": "Miami",
+        "region": "FL",
+        "postalCode": "33131",
+        "countryCode": "US",
+        "phoneNumber": "(555) 301-4420"
+      }
+    }
+  },
+  {
+    "id": "64e0c0000000000000000003",
+    "createdOn": "2026-01-15T10:00:00Z",
+    "firstName": "Aisha",
+    "lastName": "Rahman",
+    "locale": "en-US",
+    "primaryEmail": {
+      "email": "aisha.rahman@example.com",
+      "createdOn": "2026-01-15T10:00:00Z",
+      "acceptsMarketing": {
+        "acceptsMarketing": true,
+        "joinedOn": "2026-01-15T10:00:00Z",
+        "leftOn": null
+      }
+    },
+    "defaultShippingAddress": {
+      "id": "64e0c000000000000000ad01",
+      "defaultShipping": true,
+      "address": {
+        "firstName": "Aisha",
+        "lastName": "Rahman",
+        "line1": "1200 Brickell Ave",
+        "line2": null,
+        "city": "Miami",
+        "region": "FL",
+        "postalCode": "33131",
+        "countryCode": "US",
+        "phoneNumber": "555-208-1177"
+      }
+    }
+  },
+  {
+    "id": "64e0c0000000000000000006",
+    "createdOn": "2026-01-15T10:00:00Z",
+    "firstName": "Dmitri",
+    "lastName": "Volkov",
+    "locale": "en-US",
+    "primaryEmail": {
+      "email": "dmitri.volkov@example.com",
+      "createdOn": "2026-01-15T10:00:00Z",
+      "acceptsMarketing": {
+        "acceptsMarketing": true,
+        "joinedOn": "2026-01-15T10:00:00Z",
+        "leftOn": null
+      }
+    },
+    "defaultShippingAddress": null
+  }
+]
