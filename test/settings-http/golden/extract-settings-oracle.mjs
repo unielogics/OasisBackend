@@ -1,11 +1,11 @@
-// @ts-nocheck: a throwaway script run by the dashboard repo's tsx (browser globals, dashboard modules), not part of this project's build
+/* global document */
 // Throwaway oracle extraction: renders the ORIGINAL Settings bundle offline (the dashboard repo's parity harness) and
 // records the values the backend must reproduce into test/fixtures/golden/settings-original.json.
 //
 //   cd ~/oasis/dashboard
 //   export PATH=$HOME/.local/bin:$PATH NODE_OPTIONS=--max-old-space-size=2048
 //   PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-arm64 pnpm exec tsx \
-//     ~/oasis/wt/s1-settings-api/test/settings-http/golden/extract-settings-oracle.mts \
+//     ~/oasis/wt/s1-settings-api/test/settings-http/golden/extract-settings-oracle.mjs \
 //     ~/oasis/wt/s1-settings-api/test/fixtures/golden/settings-original.json
 //
 // It only reads the dashboard repo; the output goes into the path given as the first argument. The original's own
@@ -15,8 +15,8 @@ import path from 'node:path'
 
 const root = process.cwd()
 const out = process.argv[2]
-if (!out) throw new Error('usage: extract-settings-oracle.mts <output.json>')
-const load = async (rel: string) => import(path.join(root, 'tools/parity', rel))
+if (!out) throw new Error('usage: extract-settings-oracle.mjs <output.json>')
+const load = async (rel) => import(path.join(root, 'tools/parity', rel))
 const { launchBrowser } = await load('browser.ts')
 const { startOriginalServer } = await load('serve-original.ts')
 const { OriginalDriver } = await load('drivers.ts')
@@ -28,16 +28,15 @@ await driver.open({ screen: 'settings', theme: 'light' })
 const page = driver.page
 
 /** Runs `body` with `logic` (the live DCLogic instance) in the page and returns its JSON-serialisable result. */
-async function inLogic(body: string): Promise<any> {
+async function inLogic(body) {
   return page.evaluate(
     ({ code }) => {
-      const host = document.querySelector('#dc-root .sc-host') as any
-      const key = Object.keys(host).find((k) => k.startsWith('__reactFiber$'))!
+      const host = document.querySelector('#dc-root .sc-host')
+      const key = Object.keys(host).find((k) => k.startsWith('__reactFiber$'))
       let fiber = host[key]
       while (fiber) {
         const inst = fiber.stateNode
         if (inst && inst.logic && typeof inst.logic.renderVals === 'function') {
-          // eslint-disable-next-line no-new-func
           return new Function('logic', `return (${code})(logic)`)(inst.logic)
         }
         fiber = fiber.return
@@ -85,7 +84,7 @@ const pick = `(logic) => {
   };
 }`
 
-const golden: Record<string, any> = {
+const golden = {
   extractedFrom:
     'design/original/settings.bundle.html (renderVals of the live logic instance), frozen 2026-06-13 10:36 America/New_York',
 }
@@ -98,7 +97,7 @@ golden.emergencyText = await page.evaluate(() => {
   const leaves = [...document.querySelectorAll('#dc-root *')].filter(
     (e) => e.children.length === 0 || e.querySelectorAll('span.sc-interp').length === e.children.length,
   )
-  const text = (needle: string) =>
+  const text = (needle) =>
     leaves.map((e) => (e.textContent ?? '').trim()).find((t) => t.includes(needle)) ?? null
   return {
     idleStrip: text('Open now'),

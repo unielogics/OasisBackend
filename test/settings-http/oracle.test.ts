@@ -1,5 +1,5 @@
 // The ORIGINAL Settings design is the oracle. test/fixtures/golden/settings-original.json holds values read from the live
-// renderVals() of the original bundle (see golden/extract-settings-oracle.mts); every assertion here compares what the API
+// renderVals() of the original bundle (see golden/extract-settings-oracle.mjs); every assertion here compares what the API
 // returns, for the same inputs, with what the original computed. Deliberate differences are asserted as such.
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'

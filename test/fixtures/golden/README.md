@@ -11,7 +11,7 @@ Regenerate (read-only against the dashboard repo; the output path is the only th
 cd ~/oasis/dashboard
 export PATH=$HOME/.local/bin:$PATH NODE_OPTIONS=--max-old-space-size=2048
 PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-arm64 pnpm exec tsx \
-  ~/oasis/wt/s1-settings-api/test/settings-http/golden/extract-settings-oracle.mts \
+  ~/oasis/wt/s1-settings-api/test/settings-http/golden/extract-settings-oracle.mjs \
   ~/oasis/wt/s1-settings-api/test/fixtures/golden/settings-original.json
 ```
 

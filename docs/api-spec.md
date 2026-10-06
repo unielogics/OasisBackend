@@ -491,5 +491,5 @@ Handlers take the injected `Clock`; tests move a `FixedClock` (`test/settings-ht
 
 `pnpm test:settings` runs `test/settings-http` (real Postgres). `oracle.test.ts` compares the API with values read from the
 original Settings prototype (`test/fixtures/golden/settings-original.json`, produced by
-`test/settings-http/golden/extract-settings-oracle.mts`; commands in `test/fixtures/golden/README.md`).
+`test/settings-http/golden/extract-settings-oracle.mjs`; commands in `test/fixtures/golden/README.md`).
 
