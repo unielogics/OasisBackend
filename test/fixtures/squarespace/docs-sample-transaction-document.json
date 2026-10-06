@@ -1,7 +1,13 @@
 {
   "createdOn": "2019-11-18T21:20:05.354Z",
   "customerEmail": "bob@example.com",
-  "discounts": [{ "amount": { "currency": "USD", "value": 49.99 }, "description": "Discount description", "name": "Sales Discount" }],
+  "discounts": [
+    {
+      "amount": { "currency": "USD", "value": 49.99 },
+      "description": "Discount description",
+      "name": "Sales Discount"
+    }
+  ],
   "id": "a7e4c6b5-d1fe-4e42-a932-f185b4b86829",
   "modifiedOn": "2019-11-18T21:23:02.87Z",
   "paymentGatewayError": "GATEWAY_FEE_PROCEESING_ERROR",
@@ -23,7 +29,12 @@
   "provider": "STRIPE",
   "refundedAmount": { "currency": "USD", "value": 49.99 },
   "refunds": [
-    { "amount": { "currency": "USD", "value": 49.99 }, "externalTransactionId": "re_1Flhp8J4wh083J8f7qYtzU9m", "id": "cfdb6b87-64bf-461a-b48b-eca7bd2389fc", "refundedOn": "2019-11-18T21:22:06.5Z" }
+    {
+      "amount": { "currency": "USD", "value": 49.99 },
+      "externalTransactionId": "re_1Flhp8J4wh083J8f7qYtzU9m",
+      "id": "cfdb6b87-64bf-461a-b48b-eca7bd2389fc",
+      "refundedOn": "2019-11-18T21:22:06.5Z"
+    }
   ],
   "salesLineItems": [],
   "salesOrderId": "5d71991aac180c3e7857e1df",

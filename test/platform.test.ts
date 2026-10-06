@@ -32,20 +32,33 @@ describe('env contract', () => {
   const base = { DATABASE_URL: 'postgres://u:p@127.0.0.1:5432/db' }
   it('parses defaults with simulators and America/New_York', () => {
     const e = loadEnv(base)
-    expect(e).toMatchObject({ SMS_PROVIDER: 'sim', EMAIL_PROVIDER: 'sim', STORAGE_PROVIDER: 'fs', BUSINESS_TZ: 'America/New_York', PORT: 4000 })
+    expect(e).toMatchObject({
+      SMS_PROVIDER: 'sim',
+      EMAIL_PROVIDER: 'sim',
+      STORAGE_PROVIDER: 'fs',
+      BUSINESS_TZ: 'America/New_York',
+      PORT: 4000,
+    })
     expect(e.SMSGATE_MAX_PER_WINDOW).toBe(30)
   })
   it('requires smsgate credentials when SMS_PROVIDER=smsgate', () => {
     expect(() => loadEnv({ ...base, SMS_PROVIDER: 'smsgate' })).toThrow(/SMSGATE_DEVICE_URL/)
   })
   it('refuses a frozen clock and missing secret in production', () => {
-    expect(() => loadEnv({ ...base, NODE_ENV: 'production', CLOCK_FREEZE_AT: PARITY_NOW })).toThrow(/CLOCK_FREEZE_AT/)
+    expect(() => loadEnv({ ...base, NODE_ENV: 'production', CLOCK_FREEZE_AT: PARITY_NOW })).toThrow(
+      /CLOCK_FREEZE_AT/,
+    )
     expect(() => loadEnv({ ...base, NODE_ENV: 'production' })).toThrow(/SESSION_SECRET/)
   })
 })
 
 describe('squarespace capabilities', () => {
   it('states honestly that Squarespace cannot charge, refund or create links', () => {
-    expect(squarespaceCapabilities).toEqual({ chargeCard: false, refundCard: false, paymentLink: 'manual', savedCards: 'hint' })
+    expect(squarespaceCapabilities).toEqual({
+      chargeCard: false,
+      refundCard: false,
+      paymentLink: 'manual',
+      savedCards: 'hint',
+    })
   })
 })

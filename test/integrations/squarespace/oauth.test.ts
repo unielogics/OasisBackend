@@ -136,3 +136,31 @@ describe('loadSquarespaceEnv', () => {
     expect(() => loadSquarespaceEnv({ SQSP_REQUESTS_PER_MINUTE: '1000' })).toThrow()
   })
 })
+
+describe('paymentsSyncConfigFromEnv', () => {
+  it('maps the environment onto sync, matcher, membership and the product map', async () => {
+    const { paymentsSyncConfigFromEnv } = await import('../../../src/modules/payments-sync/config.js')
+    const env = loadSquarespaceEnv({
+      SQSP_OVERLAP_SECONDS: '600',
+      SQSP_MEMBERSHIP_GRACE_DAYS: '3',
+      SQSP_LINK_WINDOW_DAYS: '7',
+      SQSP_INCLUDE_TEST_ORDERS: '1',
+      SQSP_PRODUCT_MAP: '[{"sku":"MEM-PREMIUM","kind":"membership","tierLabel":"Premium Care"}]',
+    })
+    const c = paymentsSyncConfigFromEnv(env)
+    expect(c.sync).toMatchObject({
+      overlapMs: 600_000,
+      maxRequestsPerRun: 120,
+      reconcileDays: 45,
+      includeTestMode: true,
+    })
+    expect(c.matcher).toMatchObject({
+      confidenceThreshold: 0.8,
+      linkWindowMs: 7 * 86_400_000,
+      linkAmountToleranceCents: 1,
+      includeTestMode: true,
+    })
+    expect(c.membership).toMatchObject({ graceDays: 3, includeTestMode: true })
+    expect(c.productMap.resolve({ sku: 'MEM-PREMIUM' })?.tier).toBe('premium')
+  })
+})

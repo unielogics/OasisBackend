@@ -56,15 +56,13 @@ describe('SyncEngine.pollOrders / pollTransactions', () => {
 
   it('keeps chunk progress when a later chunk fails, and resumes from there', async () => {
     const r = syncRig({ pageSize: 50 })
-    r.source.failNext.push({ fn: 'listOrders', error: new Error('network down'), times: 1 })
-    // let the first chunk through, then fail the second
+    // let two chunks through, then fail the third
     const real = r.source.listOrders.bind(r.source)
     let n = 0
     r.source.listOrders = async (p) => {
       if (++n === 3) throw new Error('boom on chunk 3')
       return real(p)
     }
-    r.source.failNext.length = 0
     const res = await r.engine.pollOrders()
     expect(res.status).toBe('error')
     const state = await r.repos.state.get('orders')

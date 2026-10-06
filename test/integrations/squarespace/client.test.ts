@@ -4,6 +4,7 @@ import { SquarespaceClient } from '../../../src/integrations/squarespace/client.
 import {
   SquarespaceApiError,
   SquarespaceAuthError,
+  SquarespaceMappingError,
   SquarespaceNetworkError,
   SquarespacePermissionError,
   SquarespaceRateLimitError,
@@ -134,6 +135,15 @@ describe('request construction', () => {
     const t = await client.listTransactions(WINDOW)
     expect(t.items).toHaveLength(1)
     expect(t.rejected![0]!.id).toBe('baddoc')
+  })
+})
+
+describe('malformed responses', () => {
+  it('raises a mapping error for a non-JSON 200 and for a list envelope of the wrong shape', async () => {
+    const html = make([new Response('<html>maintenance</html>', { status: 200 })])
+    await expect(html.client.listOrders(WINDOW)).rejects.toBeInstanceOf(SquarespaceMappingError)
+    const shape = make([json({ result: 'nope' })])
+    await expect(shape.client.listOrders(WINDOW)).rejects.toBeInstanceOf(SquarespaceMappingError)
   })
 })
 

@@ -1,17 +1,42 @@
 {
-  "billingAddress": { "address1": "459 Broadway", "address2": "address2", "city": "New York", "countryCode": "US", "firstName": "Bob", "lastName": "Loblaw", "phone": "5553334444", "postalCode": "10003", "state": "NY" },
+  "billingAddress": {
+    "address1": "459 Broadway",
+    "address2": "address2",
+    "city": "New York",
+    "countryCode": "US",
+    "firstName": "Bob",
+    "lastName": "Loblaw",
+    "phone": "5553334444",
+    "postalCode": "10003",
+    "state": "NY"
+  },
   "channel": "web",
   "channelName": "Faire Wholesale",
   "createdOn": "2016-12-23T15:58:07.187Z",
   "customerEmail": "bob@example.com",
   "customerId": "585d498fdee9f31a60284a38",
-  "discountLines": [{ "amount": { "currency": "USD", "value": 49.99 }, "description": "20% off all orders over $50", "name": "Summer Sale - 20% Off", "promoCode": "SUMMER20" }],
+  "discountLines": [
+    {
+      "amount": { "currency": "USD", "value": 49.99 },
+      "description": "20% off all orders over $50",
+      "name": "Summer Sale - 20% Off",
+      "promoCode": "SUMMER20"
+    }
+  ],
   "discountTotal": { "currency": "USD", "value": 49.99 },
   "externalOrderReference": "EXT-98765",
   "formSubmission": [{ "label": "How did you hear about us?", "value": "Facebook" }],
   "fulfilledOn": "2024-08-25T15:00:00Z",
   "fulfillmentStatus": "PENDING",
-  "fulfillments": [{ "carrierName": "FedEx", "service": "Same-Day Delivery", "shipDate": "2017-01-29T22:19:26.98Z", "trackingNumber": "103932814692659", "trackingUrl": "https://www.fedex.com/apps/fedextrack/?tracknumbers=103932814692659" }],
+  "fulfillments": [
+    {
+      "carrierName": "FedEx",
+      "service": "Same-Day Delivery",
+      "shipDate": "2017-01-29T22:19:26.98Z",
+      "trackingNumber": "103932814692659",
+      "trackingUrl": "https://www.fedex.com/apps/fedextrack/?tracknumbers=103932814692659"
+    }
+  ],
   "grandTotal": { "currency": "USD", "value": 49.99 },
   "id": "585d498fdee9f31a60284a37",
   "internalNotes": [{ "content": "First note" }],
@@ -39,7 +64,17 @@
   "paymentState": "NOT_CHARGED",
   "priceTaxInterpretation": "EXCLUSIVE",
   "refundedTotal": { "currency": "USD", "value": 49.99 },
-  "shippingAddress": { "address1": "459 Broadway", "address2": "address2", "city": "New York", "countryCode": "US", "firstName": "Bob", "lastName": "Loblaw", "phone": "5553334444", "postalCode": "10003", "state": "NY" },
+  "shippingAddress": {
+    "address1": "459 Broadway",
+    "address2": "address2",
+    "city": "New York",
+    "countryCode": "US",
+    "firstName": "Bob",
+    "lastName": "Loblaw",
+    "phone": "5553334444",
+    "postalCode": "10003",
+    "state": "NY"
+  },
   "shippingLines": [{ "amount": { "currency": "USD", "value": 49.99 }, "method": "UPS Ground" }],
   "shippingOptionName": "shippingOptionName",
   "shippingOptionServiceType": "FEDEX_GROUND",

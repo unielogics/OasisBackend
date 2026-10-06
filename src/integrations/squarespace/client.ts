@@ -1,3 +1,4 @@
+import type { z } from 'zod'
 import type { Clock } from '../../platform/clock.js'
 import type {
   Page,
@@ -10,6 +11,7 @@ import { bearerFor, type SquarespaceAuth } from './auth.js'
 import {
   SquarespaceApiError,
   SquarespaceAuthError,
+  SquarespaceMappingError,
   SquarespaceNetworkError,
   SquarespaceNotFoundError,
   SquarespacePermissionError,
@@ -126,7 +128,7 @@ export class SquarespaceClient implements SquarespaceSource {
           modifiedBefore: p.modifiedBefore.toISOString(),
           paymentStates: this.orderPaymentStates?.join(','),
         }
-    const body = wireOrderList.parse(await this.get(API_PATHS.orders, query))
+    const body = envelope(wireOrderList, await this.get(API_PATHS.orders, query), 'orders')
     return this.page(body.result, body.pagination, (raw) => mapOrder(raw, this.opts), 'order')
   }
 
@@ -152,12 +154,12 @@ export class SquarespaceClient implements SquarespaceSource {
 
   async listContacts(p: { cursor?: string }): Promise<Page<SqspContact>> {
     const query: Query = p.cursor ? { cursor: p.cursor } : { pageSize: String(this.contactsPageSize) }
-    const body = wireContactList.parse(await this.get(API_PATHS.contacts, query))
+    const body = envelope(wireContactList, await this.get(API_PATHS.contacts, query), 'contacts')
     return this.page(body.contacts, body.pagination, mapContact, 'contact')
   }
 
   private async transactionPage(query: Query): Promise<Page<SqspTransaction>> {
-    const body = wireTransactionList.parse(await this.get(API_PATHS.transactions, query))
+    const body = envelope(wireTransactionList, await this.get(API_PATHS.transactions, query), 'transactions')
     const items: SqspTransaction[] = []
     const rejected: NonNullable<Page<SqspTransaction>['rejected']> = []
     for (const raw of body.documents ?? []) {
@@ -224,7 +226,16 @@ export class SquarespaceClient implements SquarespaceSource {
         continue
       }
       this.opts.onRequest?.({ method, path, attempt, status: res.status })
-      if (res.ok) return res.status === 204 ? null : await res.json()
+      if (res.ok) {
+        if (res.status === 204) return null
+        try {
+          return await res.json()
+        } catch (e) {
+          throw new SquarespaceMappingError(`Squarespace ${method} ${path}: response body is not JSON`, {
+            cause: e,
+          })
+        }
+      }
 
       const body = await readErrorBody(res)
       if (res.status === 429) {
@@ -258,6 +269,15 @@ export class SquarespaceClient implements SquarespaceSource {
   private backoff(attempt: number): number {
     return Math.min(this.backoffMaxMs, this.backoffBaseMs * 2 ** (attempt - 1))
   }
+}
+
+function envelope<S extends z.ZodTypeAny>(schema: S, body: unknown, what: string): z.infer<S> {
+  const parsed = schema.safeParse(body)
+  if (!parsed.success)
+    throw new SquarespaceMappingError(
+      `${what} list response does not match the documented envelope: ${parsed.error.message}`,
+    )
+  return parsed.data
 }
 
 function nextCursor(p: WirePagination | null | undefined): string | undefined {
