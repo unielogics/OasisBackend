@@ -1,0 +1,176 @@
+{
+  "components": {
+    "schemas": {
+      "Problem": {
+        "description": "RFC 9457 problem details. For guard failures title and detail are the exact strings the dashboard toasts.",
+        "properties": {
+          "code": {
+            "description": "Machine-readable code, e.g. SLOT_UNAVAILABLE, OVER_LIMIT, VERSION_CONFLICT",
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "errors": {
+            "items": {
+              "properties": {
+                "message": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "meta": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "description": "urn:oasis:problem:<code in kebab-case>",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "code",
+          "detail"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "cookieAuth": {
+        "in": "cookie",
+        "name": "oasis_sid",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "description": "Dashboard and back-office API. Errors are application/problem+json; money is integer cents; instants are ISO-8601 UTC; business dates are YYYY-MM-DD in the business timezone.",
+    "title": "Oasis Auto Spa API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/events": {
+      "get": {
+        "description": "Query `channels` (comma separated: ops, payments, messages, settings, notifications; default all permitted). Resume with the `Last-Event-ID` header (or `lastEventId`). Channels the caller lacks permission for are dropped and listed in `ready.denied`.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "channels",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lastEventId",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "summary": "Server-Sent Events stream (text/event-stream)",
+        "tags": [
+          "realtime"
+        ],
+        "x-oasis-access": "authenticated"
+      }
+    },
+    "/api/v1/meta/now": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "bizDate": {
+                      "type": "string"
+                    },
+                    "dateLabel": {
+                      "type": "string"
+                    },
+                    "minutes": {
+                      "maximum": 1439,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "now": {
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-]\\d{2}:\\d{2})))$",
+                      "type": "string"
+                    },
+                    "tz": {
+                      "type": "string"
+                    },
+                    "weekday": {
+                      "maximum": 6,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "now",
+                    "tz",
+                    "bizDate",
+                    "weekday",
+                    "minutes",
+                    "dateLabel"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Server time in the business timezone",
+        "tags": [
+          "meta"
+        ],
+        "x-oasis-access": "public"
+      }
+    }
+  },
+  "security": [
+    {
+      "cookieAuth": []
+    }
+  ],
+  "servers": [
+    {
+      "url": "/"
+    }
+  ]
+}
