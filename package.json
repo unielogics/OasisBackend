@@ -26,6 +26,7 @@
     "test:unit": "vitest run test/unit test/platform.test.ts",
     "test:int": "vitest run test/integration",
     "bootstrap:verify": "bash scripts/bootstrap/verify.sh",
+    "sim:smsgate": "tsx scripts/sim-smsgate.ts",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm openapi --check"
   },
   "pnpm": {

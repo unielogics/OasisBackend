@@ -1,0 +1,18 @@
+{
+  "_provenance": "Constructed from the payload shapes in docs.sms-gate.app/features/webhooks and the app source (modules/webhooks/payload/*.kt, PayloadSingingPlugin.kt) and signed with the documented scheme (HMAC-SHA256 over body + X-Timestamp). Not captured from a physical device: replace with real captures from the tablet when available.",
+  "name": "app-started",
+  "description": "The app (re)started; carries the SIM cards",
+  "secret": "fixture-signing-key",
+  "headers": {
+    "content-type": "application/json",
+    "x-signature": "d4a0f0f0f081c2d4e26565f1e821f1fac78d02146f339d62d8dfc3c6e7393802",
+    "x-timestamp": "1781366405",
+    "user-agent": "me.capcom.smsgateway/1.77.1"
+  },
+  "body": "{\"id\":\"FxEnvelope0000000012\",\"webhookId\":\"oasis-app-started\",\"event\":\"app:started\",\"deviceId\":\"FxDevice0000000001\",\"payload\":{\"simCards\":[{\"slotIndex\":0,\"simNumber\":1,\"phoneNumber\":\"+17865550100\",\"carrierName\":\"Example Wireless\",\"iccid\":\"8901260000000000001\"}]}}",
+  "expect": {
+    "kind": "app_started",
+    "deviceId": "FxDevice0000000001",
+    "at": "2026-06-13T16:00:05.000Z"
+  }
+}

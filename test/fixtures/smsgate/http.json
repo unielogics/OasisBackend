@@ -1,0 +1,260 @@
+{
+  "_provenance": "Constructed from the payload shapes in docs.sms-gate.app/features/the OpenAPI document and app routes (MessagesRoutes.kt, WebhooksRoutes.kt, WebService.kt) and the app source (modules/webhooks/payload/*.kt, PayloadSingingPlugin.kt) and signed with the documented scheme (HMAC-SHA256 over body + X-Timestamp). Not captured from a physical device: replace with real captures from the tablet when available.",
+  "post-message-accepted": {
+    "request": {
+      "method": "POST",
+      "path": "/messages",
+      "body": {
+        "id": "fx-msg-0001",
+        "textMessage": {
+          "text": "Your vehicle is ready for pickup!"
+        },
+        "phoneNumbers": [
+          "+17865550151"
+        ],
+        "withDeliveryReport": true,
+        "ttl": 600,
+        "priority": 50
+      }
+    },
+    "response": {
+      "status": 202,
+      "headers": {
+        "location": "/messages/fx-msg-0001"
+      },
+      "body": {
+        "id": "fx-msg-0001",
+        "deviceId": "FxDevice0000000001",
+        "state": "Pending",
+        "recipients": [
+          {
+            "phoneNumber": "+17865550151",
+            "state": "Pending"
+          }
+        ],
+        "states": {
+          "Pending": "2026-06-13T12:00:00.000-04:00"
+        },
+        "isHashed": false,
+        "isEncrypted": false,
+        "createdAt": "2026-06-13T12:00:00.000-04:00"
+      }
+    }
+  },
+  "post-message-duplicate": {
+    "request": {
+      "method": "POST",
+      "path": "/messages",
+      "body": {
+        "id": "fx-msg-0001"
+      }
+    },
+    "response": {
+      "status": 409,
+      "body": {
+        "message": "Message with the same ID already exists"
+      }
+    }
+  },
+  "post-message-conflicting-ttl": {
+    "request": {
+      "method": "POST",
+      "path": "/messages"
+    },
+    "response": {
+      "status": 400,
+      "body": {
+        "message": "fields conflict: ttl and validUntil"
+      }
+    }
+  },
+  "post-message-unauthorized": {
+    "request": {
+      "method": "POST",
+      "path": "/messages"
+    },
+    "response": {
+      "status": 401,
+      "headers": {
+        "www-authenticate": "Basic realm=\"Access to SMS Gateway\""
+      }
+    }
+  },
+  "get-message-after-accept": {
+    "request": {
+      "method": "GET",
+      "path": "/messages/fx-msg-0001"
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "id": "fx-msg-0001",
+        "deviceId": "FxDevice0000000001",
+        "state": "Sent",
+        "recipients": [
+          {
+            "phoneNumber": "+17865550151",
+            "state": "Sent"
+          }
+        ],
+        "states": {
+          "Pending": "2026-06-13T12:00:00.000-04:00"
+        },
+        "isHashed": false,
+        "isEncrypted": false,
+        "createdAt": "2026-06-13T12:00:00.000-04:00"
+      }
+    }
+  },
+  "get-message-failed": {
+    "request": {
+      "method": "GET",
+      "path": "/messages/fx-msg-0002"
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "id": "fx-msg-0002",
+        "deviceId": "FxDevice0000000001",
+        "state": "Failed",
+        "recipients": [
+          {
+            "phoneNumber": "+17865550151",
+            "state": "Failed",
+            "error": "Radio off"
+          }
+        ],
+        "states": {
+          "Pending": "2026-06-13T12:00:00.000-04:00"
+        },
+        "isHashed": false,
+        "isEncrypted": false,
+        "createdAt": "2026-06-13T12:00:00.000-04:00"
+      }
+    }
+  },
+  "get-message-unknown": {
+    "request": {
+      "method": "GET",
+      "path": "/messages/fx-unknown-0000"
+    },
+    "response": {
+      "status": 404
+    }
+  },
+  "get-health-pass": {
+    "request": {
+      "method": "GET",
+      "path": "/health"
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "status": "pass",
+        "version": "1.77.1",
+        "releaseId": 77100,
+        "checks": {
+          "messages:failed": {
+            "status": "pass",
+            "observedValue": 0,
+            "observedUnit": "messages",
+            "description": "Failed messages for last hour"
+          },
+          "connection:status": {
+            "status": "pass",
+            "observedValue": 1,
+            "observedUnit": "boolean",
+            "description": "Internet connection status"
+          },
+          "battery:level": {
+            "status": "pass",
+            "observedValue": 87,
+            "observedUnit": "percent",
+            "description": "Battery level in percent"
+          },
+          "battery:charging": {
+            "status": "pass",
+            "observedValue": 3,
+            "observedUnit": "flags",
+            "description": "Is the phone charging?"
+          }
+        }
+      }
+    }
+  },
+  "get-health-fail": {
+    "request": {
+      "method": "GET",
+      "path": "/health"
+    },
+    "response": {
+      "status": 500,
+      "body": {
+        "status": "fail",
+        "version": "1.77.1",
+        "releaseId": 77100,
+        "checks": {
+          "battery:level": {
+            "status": "fail",
+            "observedValue": 8,
+            "observedUnit": "percent",
+            "description": "Battery level in percent"
+          },
+          "battery:charging": {
+            "status": "pass",
+            "observedValue": 0,
+            "observedUnit": "flags",
+            "description": "Is the phone charging?"
+          }
+        }
+      }
+    }
+  },
+  "get-webhooks-empty": {
+    "request": {
+      "method": "GET",
+      "path": "/webhooks"
+    },
+    "response": {
+      "status": 200,
+      "body": []
+    }
+  },
+  "post-webhook-created": {
+    "request": {
+      "method": "POST",
+      "path": "/webhooks",
+      "body": {
+        "id": "oasis-sms-received",
+        "url": "https://oasis-api.example.ts.net/hooks/smsgate/tablet-1",
+        "event": "sms:received"
+      }
+    },
+    "response": {
+      "status": 201,
+      "body": {
+        "id": "oasis-sms-received",
+        "url": "https://oasis-api.example.ts.net/hooks/smsgate/tablet-1",
+        "event": "sms:received",
+        "deviceId": null
+      }
+    }
+  },
+  "post-webhook-http-rejected": {
+    "request": {
+      "method": "POST",
+      "path": "/webhooks",
+      "body": {
+        "id": "oasis-sms-received",
+        "url": "http://oasis-api.example.ts.net/hooks",
+        "event": "sms:received"
+      }
+    },
+    "response": {
+      "status": 400,
+      "body": {
+        "message": "url must start with https:// or http://127.0.0.1"
+      }
+    }
+  }
+}
