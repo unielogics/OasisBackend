@@ -1,9 +1,7 @@
 import { z } from 'zod'
 
 const provider = <T extends [string, ...string[]]>(...v: T) => z.enum(v)
-const bool = z
-  .enum(['true', 'false', '1', '0'])
-  .transform((v) => v === 'true' || v === '1')
+const bool = z.enum(['true', 'false', '1', '0']).transform((v) => v === 'true' || v === '1')
 
 // Fail-fast, typed environment contract. `*_PROVIDER=sim` needs no other variable for that integration.
 export const envSchema = z
@@ -52,14 +50,26 @@ export const envSchema = z
   .superRefine((e, ctx) => {
     const need = (cond: boolean, path: string, msg: string) =>
       cond && ctx.addIssue({ code: 'custom', path: [path], message: msg })
-    need(e.NODE_ENV === 'production' && !!e.CLOCK_FREEZE_AT, 'CLOCK_FREEZE_AT', 'must not be set in production')
+    need(
+      e.NODE_ENV === 'production' && !!e.CLOCK_FREEZE_AT,
+      'CLOCK_FREEZE_AT',
+      'must not be set in production',
+    )
     need(e.NODE_ENV === 'production' && !e.SESSION_SECRET, 'SESSION_SECRET', 'required in production')
     need(e.SQSP_PROVIDER === 'live' && !e.SQSP_API_KEY, 'SQSP_API_KEY', 'required when SQSP_PROVIDER=live')
     need(e.SMS_PROVIDER === 'smsgate' && !e.SMSGATE_DEVICE_URL, 'SMSGATE_DEVICE_URL', 'required for smsgate')
     need(e.SMS_PROVIDER === 'smsgate' && !e.SMSGATE_USERNAME, 'SMSGATE_USERNAME', 'required for smsgate')
     need(e.SMS_PROVIDER === 'smsgate' && !e.SMSGATE_PASSWORD, 'SMSGATE_PASSWORD', 'required for smsgate')
-    need(e.SMS_PROVIDER === 'smsgate' && !e.SMSGATE_WEBHOOK_SECRET, 'SMSGATE_WEBHOOK_SECRET', 'required for smsgate')
-    need(e.EMAIL_PROVIDER === 'ses' && !e.SES_FROM_ADDRESS, 'SES_FROM_ADDRESS', 'required when EMAIL_PROVIDER=ses')
+    need(
+      e.SMS_PROVIDER === 'smsgate' && !e.SMSGATE_WEBHOOK_SECRET,
+      'SMSGATE_WEBHOOK_SECRET',
+      'required for smsgate',
+    )
+    need(
+      e.EMAIL_PROVIDER === 'ses' && !e.SES_FROM_ADDRESS,
+      'SES_FROM_ADDRESS',
+      'required when EMAIL_PROVIDER=ses',
+    )
     need(e.STORAGE_PROVIDER === 's3' && !e.S3_BUCKET, 'S3_BUCKET', 'required when STORAGE_PROVIDER=s3')
   })
 

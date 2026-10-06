@@ -34,7 +34,8 @@ const entrySchema = z
     'a membership entry needs a tier or a tierLabel that names one',
   )
 
-export type ProductMapEntry = z.infer<typeof entrySchema>
+export type ProductMapEntry = z.input<typeof entrySchema>
+type ParsedEntry = z.output<typeof entrySchema>
 
 export interface ResolvedProduct {
   kind: 'membership' | 'service'
@@ -46,8 +47,8 @@ export interface ResolvedProduct {
 }
 
 export class ProductMap {
-  private readonly byProduct = new Map<string, ProductMapEntry>()
-  private readonly bySku = new Map<string, ProductMapEntry>()
+  private readonly byProduct = new Map<string, ParsedEntry>()
+  private readonly bySku = new Map<string, ParsedEntry>()
 
   constructor(entries: readonly ProductMapEntry[] = []) {
     for (const raw of entries) {

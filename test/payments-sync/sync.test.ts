@@ -302,7 +302,7 @@ describe('failures and dead letter', () => {
     const r = syncRig()
     expect(
       () =>
-        new SyncEngine({ ...({} as never), source: r.source } as never, {
+        new SyncEngine({ source: r.source } as never, {
           maxWindowMs: MIN,
           overlapMs: 5 * MIN,
         }),

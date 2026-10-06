@@ -14,7 +14,8 @@
     "format": "prettier --write .",
     "test": "vitest run --passWithNoTests",
     "bootstrap:verify": "bash scripts/bootstrap/verify.sh",
-    "check": "pnpm lint && pnpm typecheck && pnpm test"
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
+    "sim:squarespace": "tsx scripts/sim-squarespace.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
