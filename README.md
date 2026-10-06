@@ -17,5 +17,5 @@ pnpm bootstrap:verify       # asserts the box toolchain (node 22, postgres 15, c
 - All time goes through the injected `Clock` (`src/platform/clock.ts`) / SQL `app_now()`; `Date.now()`, `new Date()` and
   `Math.random()` are lint-banned outside the platform modules.
 - Every integration is a port in `src/integrations/ports/` with a real adapter and a simulator, selected by `*_PROVIDER`.
-- Squarespace is the card processor but its API is read-only for payments; Oasis owns the ledger (see ADR 0006).
+- Squarespace is the card processor but its API is read-only for payments; Oasis owns the ledger (see ADR 0003).
 - Decisions live in [`docs/decisions/`](docs/decisions). Small commits straight to `main`; every commit passes `pnpm check`.
