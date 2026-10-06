@@ -1,17 +1,23 @@
 import { z } from 'zod'
 
 const provider = <T extends [string, ...string[]]>(...v: T) => z.enum(v)
-const bool = z
-  .enum(['true', 'false', '1', '0'])
-  .transform((v) => v === 'true' || v === '1')
+const bool = z.enum(['true', 'false', '1', '0']).transform((v) => v === 'true' || v === '1')
 
 // Fail-fast, typed environment contract. `*_PROVIDER=sim` needs no other variable for that integration.
 export const envSchema = z
   .object({
     NODE_ENV: provider('development', 'test', 'production').default('development'),
     PORT: z.coerce.number().int().default(4000),
+    HOST: z.string().default('127.0.0.1'),
     LOG_LEVEL: provider('fatal', 'error', 'warn', 'info', 'debug', 'trace').default('info'),
     DATABASE_URL: z.string().url(),
+    DB_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
+    DB_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(0).default(30_000),
+    DB_SEARCH_PATH: z.string().optional(), // per-worker test schemas only; leave unset elsewhere
+    PGBOSS_SCHEMA: z
+      .string()
+      .regex(/^[a-z_][a-z0-9_]*$/i)
+      .default('pgboss'),
     SESSION_SECRET: z.string().min(32).optional(),
     SESSION_COOKIE_NAME: z.string().default('oasis_sid'),
     SECRETS_KEY: z.string().optional(), // base64 32 bytes; encrypts integration credentials at rest
@@ -19,11 +25,15 @@ export const envSchema = z
     TRUST_PROXY: bool.default('false'),
     PUBLIC_API_URL: z.string().url().default('http://localhost:4000'),
     PUBLIC_DASHBOARD_URL: z.string().url().default('http://localhost:3000'),
+    ALLOWED_ORIGINS: z.string().default(''), // extra comma-separated browser origins allowed on unsafe methods
+    RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(300),
+    SSE_HEARTBEAT_MS: z.coerce.number().int().min(50).default(20_000),
     BUSINESS_TZ: z.string().default('America/New_York'),
     BOOTSTRAP_ADMIN_EMAIL: z.string().email().optional(),
     BOOTSTRAP_ADMIN_PASSWORD: z.string().min(12).optional(),
     CLOCK_FREEZE_AT: z.string().optional(), // parity/test only; refused when NODE_ENV=production
     ALLOW_DEV_ENDPOINTS: bool.default('false'),
+    DEV_AUTH_BYPASS: bool.default('false'), // local development only: every request is a signed-in user with all permissions
     JOBS_ENABLED: bool.default('true'),
     RESCHEDULE_LINK_ENABLED: bool.default('false'),
 
@@ -52,14 +62,32 @@ export const envSchema = z
   .superRefine((e, ctx) => {
     const need = (cond: boolean, path: string, msg: string) =>
       cond && ctx.addIssue({ code: 'custom', path: [path], message: msg })
-    need(e.NODE_ENV === 'production' && !!e.CLOCK_FREEZE_AT, 'CLOCK_FREEZE_AT', 'must not be set in production')
+    need(
+      e.NODE_ENV === 'production' && !!e.CLOCK_FREEZE_AT,
+      'CLOCK_FREEZE_AT',
+      'must not be set in production',
+    )
+    need(
+      !!e.CLOCK_FREEZE_AT && Number.isNaN(Date.parse(e.CLOCK_FREEZE_AT)),
+      'CLOCK_FREEZE_AT',
+      'must be an ISO-8601 instant',
+    )
+    need(e.NODE_ENV === 'production' && e.DEV_AUTH_BYPASS, 'DEV_AUTH_BYPASS', 'must not be set in production')
     need(e.NODE_ENV === 'production' && !e.SESSION_SECRET, 'SESSION_SECRET', 'required in production')
     need(e.SQSP_PROVIDER === 'live' && !e.SQSP_API_KEY, 'SQSP_API_KEY', 'required when SQSP_PROVIDER=live')
     need(e.SMS_PROVIDER === 'smsgate' && !e.SMSGATE_DEVICE_URL, 'SMSGATE_DEVICE_URL', 'required for smsgate')
     need(e.SMS_PROVIDER === 'smsgate' && !e.SMSGATE_USERNAME, 'SMSGATE_USERNAME', 'required for smsgate')
     need(e.SMS_PROVIDER === 'smsgate' && !e.SMSGATE_PASSWORD, 'SMSGATE_PASSWORD', 'required for smsgate')
-    need(e.SMS_PROVIDER === 'smsgate' && !e.SMSGATE_WEBHOOK_SECRET, 'SMSGATE_WEBHOOK_SECRET', 'required for smsgate')
-    need(e.EMAIL_PROVIDER === 'ses' && !e.SES_FROM_ADDRESS, 'SES_FROM_ADDRESS', 'required when EMAIL_PROVIDER=ses')
+    need(
+      e.SMS_PROVIDER === 'smsgate' && !e.SMSGATE_WEBHOOK_SECRET,
+      'SMSGATE_WEBHOOK_SECRET',
+      'required for smsgate',
+    )
+    need(
+      e.EMAIL_PROVIDER === 'ses' && !e.SES_FROM_ADDRESS,
+      'SES_FROM_ADDRESS',
+      'required when EMAIL_PROVIDER=ses',
+    )
     need(e.STORAGE_PROVIDER === 's3' && !e.S3_BUCKET, 'S3_BUCKET', 'required when STORAGE_PROVIDER=s3')
   })
 

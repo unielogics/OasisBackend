@@ -4,3 +4,6 @@ coverage
 pnpm-lock.yaml
 docs/reference
 docs/plan.md
+docs/api-spec.md
+docs/openapi.json
+db/schema.sql
