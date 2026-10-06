@@ -20,3 +20,8 @@
 | [0031](0031-emergency-over-http.md) | Emergency closing over HTTP: B38 guard, auto-reopen and sweep, events, crew alert |
 | [0032](0032-settings-adapters-and-ports.md) | Settings adapters and ports: DB hours port, recording notifiers, ChecklistSync, jobs |
 | [0033](0033-settings-oracle.md) | The original design as an automated oracle for Settings |
+| [0040](0040-scheduling-ports-and-wiring.md) | Scheduling ports (invoices, messages, memberships) and wiring |
+| [0041](0041-availability-engine.md) | Availability engine: capacity, VIP holds, overrides, same-day guarantee |
+| [0042](0042-lifecycle-guards-and-bays.md) | Lifecycle guards, expectedStatus, bay choice and concurrency |
+| [0043](0043-operations-read-models.md) | Operations read models: KPIs, alerts, windows, bay staff, calendar |
+| [0044](0044-ops-oracle-and-parity-seed.md) | Operations oracle tests and the parity-ops seed |

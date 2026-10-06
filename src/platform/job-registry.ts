@@ -3,5 +3,13 @@
 import type { JobDefinition } from './jobs.js'
 import { settingsJobs } from '../modules/settings/jobs/index.js'
 import { maintenancePurgeJob } from './maintenance.js'
+import { alertsScanJob } from '../modules/scheduling/jobs.js'
+import { photoFinalizeJob, photoThumbnailJob } from '../modules/scheduling/photo-jobs.js'
 
-export const jobDefinitions: readonly JobDefinition<never>[] = [maintenancePurgeJob, ...settingsJobs]
+export const jobDefinitions: readonly JobDefinition<never>[] = [
+  maintenancePurgeJob,
+  ...settingsJobs,
+  alertsScanJob,
+  photoThumbnailJob,
+  photoFinalizeJob,
+]

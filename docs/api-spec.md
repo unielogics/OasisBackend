@@ -248,6 +248,31 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 |---|---|---|---|
 | GET | `/api/v1/arrival-settings` | authenticated |  |
 | PUT | `/api/v1/arrival-settings` | cli.member |  |
+| GET | `/api/v1/appointments` | sched.view |  |
+| POST | `/api/v1/appointments` | sched.edit | required |
+| GET | `/api/v1/appointments/:id` | sched.view |  |
+| PATCH | `/api/v1/appointments/:id` | sched.edit |  |
+| DELETE | `/api/v1/appointments/:id/addons/:serviceId` | sched.edit |  |
+| PUT | `/api/v1/appointments/:id/addons/:serviceId` | sched.edit |  |
+| POST | `/api/v1/appointments/:id/advance` | jobs.status | sched.edit |  |
+| POST | `/api/v1/appointments/:id/arrive` | jobs.status | sched.edit |  |
+| POST | `/api/v1/appointments/:id/assign-bay` | jobs.status |  |
+| POST | `/api/v1/appointments/:id/cancel` | sched.cancel | required |
+| POST | `/api/v1/appointments/:id/checklist/bulk` | jobs.checklist |  |
+| PUT | `/api/v1/appointments/:id/checklist/items/:itemId` | jobs.checklist |  |
+| POST | `/api/v1/appointments/:id/complete` | jobs.status |  |
+| POST | `/api/v1/appointments/:id/confirm` | sched.edit | jobs.status |  |
+| POST | `/api/v1/appointments/:id/no-show` | sched.cancel | required |
+| POST | `/api/v1/appointments/:id/notify-ready` | msg.send |  |
+| DELETE | `/api/v1/appointments/:id/photos/:photoId` | jobs.checklist |  |
+| POST | `/api/v1/appointments/:id/photos/:photoId/complete` | jobs.checklist |  |
+| POST | `/api/v1/appointments/:id/photos/note` | jobs.checklist |  |
+| POST | `/api/v1/appointments/:id/photos/presign` | jobs.checklist |  |
+| POST | `/api/v1/appointments/:id/pickup` | jobs.status |  |
+| POST | `/api/v1/appointments/:id/prep-bay` | jobs.status | sched.edit |  |
+| POST | `/api/v1/appointments/:id/reopen` | sched.cancel |  |
+| POST | `/api/v1/appointments/:id/reschedule` | sched.edit |  |
+| POST | `/api/v1/appointments/:id/start` | jobs.status |  |
 | GET | `/api/v1/auth/csrf` | authenticated |  |
 | POST | `/api/v1/auth/invite/accept` | public |  |
 | POST | `/api/v1/auth/login` | public |  |
@@ -266,6 +291,13 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/api/v1/emergency/history` | set.emergency |  |
 | GET | `/api/v1/emergency/preview` | set.emergency |  |
 | POST | `/api/v1/emergency/reopen` | set.emergency | optional |
+| GET | `/api/v1/availability` | sched.view |  |
+| GET | `/api/v1/bays` | sched.view |  |
+| PATCH | `/api/v1/bays/:id` | sched.override |  |
+| GET | `/api/v1/calendar/day` | sched.view |  |
+| GET | `/api/v1/calendar/summary` | sched.view |  |
+| GET | `/api/v1/customers` | cli.view |  |
+| POST | `/api/v1/customers` | sched.edit |  |
 | GET | `/api/v1/employees` | team.view |  |
 | POST | `/api/v1/employees` | team.edit |  |
 | GET | `/api/v1/employees/:id` | team.view |  |
@@ -281,6 +313,9 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/me/view-as` | authenticated |  |
 | GET | `/api/v1/meta/now` | public |  |
 | GET | `/api/v1/openapi.json` | public |  |
+| GET | `/api/v1/ops/alerts` | sched.view |  |
+| GET | `/api/v1/ops/kpis` | sched.view |  |
+| GET | `/api/v1/ops/snapshot` | sched.view |  |
 | GET | `/api/v1/roles` | team.view |  |
 | POST | `/api/v1/roles` | team.roles |  |
 | DELETE | `/api/v1/roles/:id` | team.roles |  |
@@ -304,6 +339,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | DELETE | `/api/v1/vip/clients/:customerId` | cli.member |  |
 | POST | `/api/v1/vip/holds` | cli.member |  |
 | DELETE | `/api/v1/vip/holds/:id` | cli.member |  |
+| GET | `/api/v1/staff` | sched.view |  |
 <!-- openapi:end -->
 
 ## 14. Identity: sign-in, sessions, RBAC, employees and roles
@@ -493,3 +529,91 @@ Handlers take the injected `Clock`; tests move a `FixedClock` (`test/settings-ht
 original Settings prototype (`test/fixtures/golden/settings-original.json`, produced by
 `test/settings-http/golden/extract-settings-oracle.mjs`; commands in `test/fixtures/golden/README.md`).
 
+## 20. Operations: appointments, availability, board, calendar
+
+Code: `src/modules/scheduling` (routes in `http/`), customer search and create in `src/modules/customers/http`. Design: backend
+design 4.1, 4.2, 4.4, 4.5, 5.3, 7.4; decisions in ADRs 0040-0044. Every transition is one transaction: row lock, guard,
+update, `activity_log`, a queued message (`MessageQueue`, never sent inline), `audit_log`, ops events. Guard failures are
+problem+json whose `title` and `detail` are the design's toast strings (curly apostrophes included). Success responses carry
+the toast for the command (`toast: {title, detail}`) and the changed appointment (`appointment`, a compact core with
+`version`, `status`, bays, `late`, `canDrag`); the dashboard refetches the board on the ops events.
+
+### 20.1 Endpoints
+
+| Endpoint | Permission | Notes |
+|---|---|---|
+| `GET /ops/snapshot?window=next24\|today\|tomorrow\|week&q=` | `sched.view` | The whole board: `kpis[7]`, `alerts[]`, `timeline{count,groups[{divider,time,ampm,items[card]}]}`, `completed`, `queue` (Up Next: VIP first, top 6), `bays[]` (occupant elapsed, progress, estimated completion), `arrivals[]`, `staff[]` (derived columns plus Unassigned), `emergency`, `now`. `next24` = today + tomorrow, `week` = today through today + 6. `q` searches name, vehicle, plate, package, and the phone only with `cli.contact`. KPIs, alerts, bays and arrivals ignore `q` and `window`. |
+| `GET /ops/kpis`, `GET /ops/alerts` | `sched.view` | The same values on their own. |
+| `GET /calendar/summary?from&to` | `sched.view` | Up to 70 inclusive dates: `{date, weekday, count, closed, reduced, note, open{openMin,closeMin,from,to}, needsRebook, isToday}`. Real counts; closed days include today; `needsRebook` = active bookings on a closed day. |
+| `GET /calendar/day?date` | `sched.view` | `dayInfo`, `sub` label, hour `rows[]`, and `outsideHours[]` (closed day, before opening, after closing) so nothing is dropped. |
+| `GET /availability?date&serviceId&channel=desk\|online&customerId&excludeAppointmentId` | `sched.view` | Slots with `state` (`available`, `blocked`, `vip_held` + `releasesAt`, `closed`, `past`, `cutoff`, `outside_window`), `baysFree`, `overridable`, `overrideKind`, `sameDayEligible`. `customerId` makes VIP holds and windows apply to that client. |
+| `GET /bays`, `PATCH /bays/:id {status}` | `sched.view` / `sched.override` | Maintenance or blocked bays count as zero capacity; a bay with a car in it cannot leave service (409 `BAY_BUSY`). |
+| `GET /staff` | `sched.view` | Assignable employees (Crew role, or a custom role granting `jobs.status`, or a per-person Allow; no Deny; active). |
+| `GET /appointments?from&to&status&customerId&q&cursor&limit` | `sched.view` | Cards, keyset paged by start. |
+| `GET /appointments/:id` | `sched.view` | The file: overview, add-ons with the catalog, checklist sections, photo counts with presigned thumbnails (10 min), activity, invoice summary, membership, history. Phone and email masked without `cli.contact`. |
+| `POST /appointments` | `sched.edit` (+ `sched.override` with `override`) | **Idempotency-Key required.** `{customer{id? name phone email smsOptIn}, vehicle{year make model color plate}, serviceId, addonIds[], start (ISO with offset) or walkIn:true, source, assignedEmployeeId, plannedBayId, notes, specialInstructions, override{reason}}`. Upserts the customer by phone and the vehicle by plate, validates the slot under an advisory lock, plans a bay, snapshots the checklist, creates the invoice through the gateway, queues `booking_thanks`. 201 `{appointment, customer, invoice, overrides[], messageQueued, toast}`. A walk-in starts at the next slot on the grid. |
+| `PATCH /appointments/:id` | `sched.edit` | `{plannedBayId, assignedEmployeeId, notes, specialInstructions, version?}` (412 on a stale `version`). |
+| `POST /appointments/:id/confirm` | `sched.edit` or `jobs.status` | booked to confirmed; queues `confirmed`. |
+| `POST /appointments/:id/arrive {source?}` | `jobs.status` or `sched.edit` | booked or confirmed to arrived; `geofence` also records the check-in and queues `welcome`. |
+| `POST /appointments/:id/start {bayId?}` | `jobs.status` | arrived to cleaning: `bayId`, else the planned bay, else the lowest free active bay. |
+| `POST /appointments/:id/assign-bay {bayId}` | `jobs.status` | Drag onto a bay: booked, confirmed or arrived jobs of today; arrives implicitly. |
+| `POST /appointments/:id/complete` | `jobs.status` | cleaning to completed; remaining tasks are checked, pickup pending, `ready` queued, the bay frees. |
+| `POST /appointments/:id/advance {expectedStatus}` | `jobs.status` or `sched.edit` (per step) | The next step of the status the screen showed. A completed job has no next step (collect payment on the invoice). |
+| `POST /appointments/:id/cancel {reason, notify?, deposit?}` | `sched.cancel` | **Idempotency-Key required.** Booked or confirmed only; the invoice is canceled through the gateway. `deposit` (`keep`, `refund_card`, `refund_credit`) is recorded and echoed (`depositPolicy`); refunding is a payments command. |
+| `POST /appointments/:id/no-show` | `sched.cancel` | **Idempotency-Key required.** Only after start + `ops.late_grace_min`; cancels the invoice (`no_show`). |
+| `POST /appointments/:id/reopen {start?, override?}` | `sched.cancel` | canceled or no-show back to booked; the slot is revalidated. |
+| `POST /appointments/:id/reschedule {start, override?}` | `sched.edit` (+ `sched.override`) | Capacity-checked, may cross days; queues `reschedule`. |
+| `POST /appointments/:id/prep-bay` | `jobs.status` or `sched.edit` | Not reversible; warns when the planned bay is occupied. |
+| `POST /appointments/:id/pickup {state}` | `jobs.status` | `collected` or `pending`; not gated on payment; no SMS. |
+| `POST /appointments/:id/notify-ready` | `msg.send` | Re-sends the ready SMS. |
+| `PUT` / `DELETE /appointments/:id/addons/:serviceId` | `sched.edit` | Price from the catalog. `{added, changed, addon, invoice, checklist, toast}`; 409 `ADDON_REMOVE_OVERPAID`. |
+| `PUT /appointments/:id/checklist/items/:itemId {done}` | `jobs.checklist` | Records who and when. |
+| `POST /appointments/:id/checklist/bulk {itemIds, done}` | `jobs.checklist` | A section, or every id for "Check all". |
+| `POST /appointments/:id/photos/presign {category, contentType, bytes, note?}` | `jobs.checklist` | Presigned POST (5 min, size policy). JPEG, PNG, WebP up to 15 MB; HEIC is 422. |
+| `POST /appointments/:id/photos/:photoId/complete`, `POST .../photos/note {note}`, `DELETE .../photos/:photoId` | `jobs.checklist` | `complete` HEAD-verifies the object and queues the thumbnail job; a note is an issue with no file. |
+| `GET /customers?q=` / `POST /customers` | `cli.view` / `sched.edit` | Search (a phone or email token cannot match without `cli.contact`; contact fields are null) and find-or-create by phone with a vehicle. |
+
+### 20.2 Errors added
+
+| Code | Status | Title / detail |
+|---|---|---|
+| `ALREADY_IN_BAY` | 409 | `Already in a bay` / `That vehicle is in Bay {n}` |
+| `BAY_BUSY` (platform) | 409 | `Bay {n} is busy` / `Finish {First}’s vehicle first` |
+| `BAY_UNAVAILABLE` | 409 | `Bay {n} is unavailable` / `It is out of service right now. Pick another bay` |
+| `NO_BAY_FREE` (platform) | 409 | `No bay free` |
+| `NOT_TODAY` | 409 | `Not today` / `Only jobs booked for today can go into a bay` |
+| `CANT_MOVE_JOB` | 409 | `Can’t move this job` / `It’s already in progress or done` |
+| `INVALID_TRANSITION` | 409 | `Can’t do that now` / `This job is {status}` (`meta.currentStatus`) |
+| `STALE_STATE` (platform) | 409 | `meta.currentStatus`, `meta.expectedStatus`; the detail names the current status |
+| `NO_NEXT_STEP` | 409 | `Nothing to advance` |
+| `SLOT_UNAVAILABLE` (platform) | 409 | `Slot unavailable` / `Would overbook a bay — override required` |
+| `SLOT_VIP_HELD` (platform) | 409 | `Held for VIP clients` / `Releases to everyone {release}h before · VIP clients can book it now` |
+| `SLOT_CLOSED`, `SLOT_OUTSIDE_HOURS`, `SLOT_PAST`, `SLOT_OUTSIDE_WINDOW` | 409 | `Shop is closed`, `Outside opening hours`, `Time has passed`, `Too far ahead` |
+| `OVERRIDE_NOT_ALLOWED` / `OVERRIDE_REASON_REQUIRED` | 403 / 422 | `Override not allowed` / `Reason required` |
+| `TOO_EARLY_FOR_NO_SHOW` | 409 | `Too early` |
+| `ADDON_REMOVE_OVERPAID` | 409 | `Can’t remove that add-on` (registered if the payments module has not) |
+| `NOT_AN_ADDON` | 422 | |
+
+### 20.3 Realtime (channel `ops`)
+
+`appointment.updated {id, version, status, change}` (`change`: created, confirmed, arrived, cleaning, completed, canceled,
+no_show, reopened, moved, prepped, pickup, notified, updated, addons, checklist, photo), `bay.changed {bayId}`,
+`availability.changed {date}`, `kpi.dirty`, and `alerts.changed {count, added, removed}` from the per-minute scan
+`appointments.late_scan`, which compares the alert set with the one it last announced (`ops_alert_state`) and publishes only
+on a difference.
+
+### 20.4 Ports and wiring
+
+`src/modules/scheduling/ports.ts` holds the contracts the other verticals implement: `InvoiceGateway` (payments; the shared
+contract), `MessageQueue` (messaging outbox), `MembershipPort`, `ExternalAlertSource` (alerts 10-12), `RevenueSource`
+(cash-basis revenue). `createSchedulingModule({ invoices, messages, memberships, externalAlerts, revenue, storage })` takes
+the real ones; the default `schedulingModule` in `src/http/modules.ts` uses in-memory implementations and logs a warning in
+production. The worker wires the same ports for the scan with `configureSchedulingJobs(...)`. `syncChecklistTemplate` is
+called by the Settings checklist route after `putChecklist`.
+
+### 20.5 Tests and goldens
+
+`pnpm test:ops` runs `test/scheduling` and `test/golden/ops`. The oracle values come from the original Operations bundle
+(`test/golden/ops/original.json`, re-extract with `test/golden/ops/extract/extract-original.ts`, see
+`test/golden/ops/DEVIATIONS.md` for every deliberate difference). The seed profile `parity-ops` (`db/seeds/scheduling.ts`)
+is the design's day as data.

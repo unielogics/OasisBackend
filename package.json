@@ -27,6 +27,7 @@
     "test:unit": "vitest run test/unit test/platform.test.ts",
     "test:int": "vitest run test/integration",
     "test:settings": "vitest run test/settings-http",
+    "test:ops": "vitest run test/scheduling test/golden/ops",
     "bootstrap:verify": "bash scripts/bootstrap/verify.sh",
     "sim:smsgate": "tsx scripts/sim-smsgate.ts",
     "sim:squarespace": "tsx scripts/sim-squarespace.ts",
