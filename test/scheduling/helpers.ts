@@ -123,6 +123,7 @@ export function useOps(o: { start?: string } = {}): Ops {
     await sql`delete from appointments`.execute(t.db)
     await sql`delete from ops_alert_state`.execute(t.db)
     await sql`delete from realtime_events`.execute(t.db)
+    await sql`truncate table audit_log`.execute(t.db)
     await sql`update bays set status = 'active'`.execute(t.db)
     await sql`delete from emergency_notifications`.execute(t.db)
     gateway.reset()
