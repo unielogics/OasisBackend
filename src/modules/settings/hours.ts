@@ -87,9 +87,11 @@ export function validateHours(days: readonly HoursDay[]): ValidationIssue[] {
         path,
         message: `${name}: hours must be between ${fmtT(HOURS_MIN)} and ${fmtT(HOURS_MAX)}.`,
       })
-    if (d.openMin >= d.closeMin) issues.push({ path, message: `${name}: closing time must be after opening time.` })
+    if (d.openMin >= d.closeMin)
+      issues.push({ path, message: `${name}: closing time must be after opening time.` })
   })
-  if (seen.size !== 7 || days.length !== 7) issues.push({ path: 'days', message: 'Send all seven days, Sunday to Saturday.' })
+  if (seen.size !== 7 || days.length !== 7)
+    issues.push({ path: 'days', message: 'Send all seven days, Sunday to Saturday.' })
   return issues
 }
 
@@ -102,17 +104,23 @@ export function validateRules(rules: Partial<BookingRules>): ValidationIssue[] {
   if (rules.bufferMinutes !== undefined && !inSet(BUFFER_MINUTES, rules.bufferMinutes))
     issues.push({ path: 'rules.bufferMinutes', message: 'Buffer must be 0, 10, 15 or 20 minutes.' })
   if (rules.cutoffMinutes !== undefined && !inSet(CUTOFF_MINUTES, rules.cutoffMinutes))
-    issues.push({ path: 'rules.cutoffMinutes', message: 'Last booking before close must be 30, 60 or 90 minutes.' })
+    issues.push({
+      path: 'rules.cutoffMinutes',
+      message: 'Last booking before close must be 30, 60 or 90 minutes.',
+    })
   if (
     rules.onlineLeadMinutes !== undefined &&
-    (!Number.isInteger(rules.onlineLeadMinutes) || rules.onlineLeadMinutes < 0 || rules.onlineLeadMinutes > 240)
+    (!Number.isInteger(rules.onlineLeadMinutes) ||
+      rules.onlineLeadMinutes < 0 ||
+      rules.onlineLeadMinutes > 240)
   )
     issues.push({ path: 'rules.onlineLeadMinutes', message: 'Online lead time must be 0 to 240 minutes.' })
   return issues
 }
 
 export function throwIfInvalid(issues: ValidationIssue[]): void {
-  if (issues.length > 0) throw new AppError('VALIDATION_FAILED', { detail: issues[0]!.message, errors: issues })
+  if (issues.length > 0)
+    throw new AppError('VALIDATION_FAILED', { detail: issues[0]!.message, errors: issues })
 }
 
 export async function getHours(db: Executor, locationId: string): Promise<HoursDay[]> {
@@ -125,7 +133,9 @@ export async function getHours(db: Executor, locationId: string): Promise<HoursD
   const byDay = new Map(rows.map((r) => [r.weekday, r]))
   return DEFAULT_HOURS.map((def) => {
     const r = byDay.get(def.weekday)
-    return r ? { weekday: r.weekday, isOpen: r.is_open, openMin: r.open_min, closeMin: r.close_min } : { ...def }
+    return r
+      ? { weekday: r.weekday, isOpen: r.is_open, openMin: r.open_min, closeMin: r.close_min }
+      : { ...def }
   })
 }
 
@@ -161,7 +171,10 @@ export async function getBookingRules(
 }
 
 export async function getHoursAndRules(db: Executor, locationId: string): Promise<HoursAndRules> {
-  const [days, { rules, version }] = await Promise.all([getHours(db, locationId), getBookingRules(db, locationId)])
+  const [days, { rules, version }] = await Promise.all([
+    getHours(db, locationId),
+    getBookingRules(db, locationId),
+  ])
   return { days, rules, version, weekMinutes: weekMinutes(days) }
 }
 
@@ -187,7 +200,10 @@ export interface HoursWarnings {
 
 /** The people tables arrive in another branch: the employees vertical plugs its schedule check in here. */
 export interface HoursWarningHooks {
-  employeeScheduleConflicts?(tx: Tx, ctx: { locationId: string; days: HoursDay[] }): Promise<EmployeeScheduleConflict[]>
+  employeeScheduleConflicts?(
+    tx: Tx,
+    ctx: { locationId: string; days: HoursDay[] },
+  ): Promise<EmployeeScheduleConflict[]>
 }
 
 /**
@@ -246,7 +262,9 @@ const sameDays = (a: readonly HoursDay[], b: readonly HoursDay[]): boolean =>
   a.length === b.length &&
   a.every((d, i) => {
     const o = b[i]!
-    return d.weekday === o.weekday && d.isOpen === o.isOpen && d.openMin === o.openMin && d.closeMin === o.closeMin
+    return (
+      d.weekday === o.weekday && d.isOpen === o.isOpen && d.openMin === o.openMin && d.closeMin === o.closeMin
+    )
   })
 
 /**
@@ -255,7 +273,10 @@ const sameDays = (a: readonly HoursDay[], b: readonly HoursDay[]): boolean =>
  */
 export async function saveHoursAndRules(tx: Tx, input: SaveHoursInput): Promise<SaveHoursResult> {
   const sorted = input.days ? [...input.days].sort((a, b) => a.weekday - b.weekday) : undefined
-  const issues = [...(sorted ? validateHours(sorted) : []), ...(input.rules ? validateRules(input.rules) : [])]
+  const issues = [
+    ...(sorted ? validateHours(sorted) : []),
+    ...(input.rules ? validateRules(input.rules) : []),
+  ]
   throwIfInvalid(issues)
 
   await ensureDomainDefaults(tx, input.locationId)
@@ -271,7 +292,9 @@ export async function saveHoursAndRules(tx: Tx, input: SaveHoursInput): Promise<
   const before = await getHoursAndRules(tx, input.locationId)
   const nextDays = sorted ?? before.days
   const nextRules: BookingRules = { ...before.rules, ...(input.rules ?? {}) }
-  const rulesChanged = (Object.keys(nextRules) as (keyof BookingRules)[]).some((k) => nextRules[k] !== before.rules[k])
+  const rulesChanged = (Object.keys(nextRules) as (keyof BookingRules)[]).some(
+    (k) => nextRules[k] !== before.rules[k],
+  )
   const daysChanged = !sameDays(nextDays, before.days)
   const warnings = await collectWarnings(tx, input, nextDays)
 
@@ -334,7 +357,11 @@ export async function saveHoursAndRules(tx: Tx, input: SaveHoursInput): Promise<
   return { ...after, changed: true, warnings }
 }
 
-async function collectWarnings(tx: Tx, input: SaveHoursInput, days: readonly HoursDay[]): Promise<HoursWarnings> {
+async function collectWarnings(
+  tx: Tx,
+  input: SaveHoursInput,
+  days: readonly HoursDay[],
+): Promise<HoursWarnings> {
   const [employeeScheduleConflicts, outside] = await Promise.all([
     input.hooks?.employeeScheduleConflicts?.(tx, { locationId: input.locationId, days: [...days] }) ?? [],
     appointmentsOutsideHours(tx, { locationId: input.locationId, days, now: input.now, tz: input.tz }),

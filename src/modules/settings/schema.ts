@@ -62,7 +62,8 @@ export interface FederalHolidayRunsTable {
   ran_at: Generated<Date>
 }
 
-export type EmergencyReason = 'severe_weather' | 'power_outage' | 'equipment_failure' | 'staff_shortage' | 'other'
+export type EmergencyReason =
+  'severe_weather' | 'power_outage' | 'equipment_failure' | 'staff_shortage' | 'other'
 export type EmergencyDurationKind = 'today' | 'until' | 'days'
 
 export interface EmergencyClosuresTable {
@@ -96,13 +97,7 @@ export interface EmergencyClosuresTable {
   created_at: Generated<Date>
 }
 
-export type NotificationState =
-  | 'queued'
-  | 'sent'
-  | 'delivered'
-  | 'failed'
-  | 'skipped_opt_out'
-  | 'no_contact'
+export type NotificationState = 'queued' | 'sent' | 'delivered' | 'failed' | 'skipped_opt_out' | 'no_contact'
 
 export interface EmergencyNotificationsTable {
   id: string

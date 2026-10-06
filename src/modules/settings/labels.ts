@@ -3,7 +3,15 @@ import { DateTime } from 'luxon'
 import { fmtT } from '../../platform/time.js'
 import type { EmergencyDurationKind, EmergencyReason } from './schema.js'
 
-export const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const
+export const DAY_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+] as const
 export const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
 /** Display order in the hours and schedule lists (Monday first). */
 export const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0] as const
