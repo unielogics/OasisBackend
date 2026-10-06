@@ -55,7 +55,11 @@ describe('catalog and design defaults', () => {
   it('has the 27 permission keys, 3 of them money-limited', () => {
     expect(PERMISSION_KEYS).toHaveLength(27)
     expect(new Set(PERMISSION_KEYS).size).toBe(27)
-    expect(LIMITED_PERMISSION).toEqual({ 'pay.refund': 'refund', 'pay.adjust': 'adjust', 'pay.credit': 'credit' })
+    expect(LIMITED_PERMISSION).toEqual({
+      'pay.refund': 'refund',
+      'pay.adjust': 'adjust',
+      'pay.credit': 'credit',
+    })
   })
 
   it('default role grants match Settings: super 27, mgmt 26 (all but set.billing), acct 13, support 13, crew 4', () => {
@@ -70,7 +74,11 @@ describe('catalog and design defaults', () => {
 describe('effective permissions (set-domain 2.1)', () => {
   it('Rafael = mgmt + acct: refund limit is the highest of the roles that grant it (1000 > 500)', () => {
     const m = effectiveAll([role('mgmt'), role('acct')])
-    expect(m['pay.refund']).toMatchObject({ on: true, limit: 100_000, src: 'via Management + Accounting · ≤ $1,000' })
+    expect(m['pay.refund']).toMatchObject({
+      on: true,
+      limit: 100_000,
+      src: 'via Management + Accounting · ≤ $1,000',
+    })
     expect(m['pay.adjust']).toMatchObject({ on: true, limit: 50_000 })
     expect(m['pay.credit']).toMatchObject({ on: true, limit: 50_000 })
     expect(m['set.billing']).toMatchObject({ on: true, src: 'via Accounting' })
@@ -110,17 +118,33 @@ describe('effective permissions (set-domain 2.1)', () => {
 
   it('allow with no granting role gets the 2500 default; allow with granting roles keeps the roles limit', () => {
     const noRole = effectiveAll([role('crew')], { 'pay.refund': 'allow' })
-    expect(noRole['pay.refund']).toEqual({ on: true, limit: 2500, src: 'Exception · allowed · ≤ $25', ov: 'allow' })
+    expect(noRole['pay.refund']).toEqual({
+      on: true,
+      limit: 2500,
+      src: 'Exception · allowed · ≤ $25',
+      ov: 'allow',
+    })
     const withRole = effectiveAll([role('support')], { 'pay.refund': 'allow' })
-    expect(withRole['pay.refund']).toMatchObject({ on: true, limit: 5000, src: 'Exception · allowed · ≤ $50', ov: 'allow', via: ['Customer Support'] })
+    expect(withRole['pay.refund']).toMatchObject({
+      on: true,
+      limit: 5000,
+      src: 'Exception · allowed · ≤ $50',
+      ov: 'allow',
+      via: ['Customer Support'],
+    })
     // an allow for a non-limited permission has no limit
-    expect(effectiveAll([role('crew')], { 'sched.override': 'allow' })['sched.override']).not.toHaveProperty('limit')
+    expect(effectiveAll([role('crew')], { 'sched.override': 'allow' })['sched.override']).not.toHaveProperty(
+      'limit',
+    )
   })
 
   it('unlimited (null) wins over any number', () => {
     const m = effectiveAll([role('super'), role('mgmt')])
     expect(m['pay.refund']).toMatchObject({ limit: null, src: 'via Super Admin + Management · No limit' })
-    const viaCustom = effectiveAll([custom('A', ['pay.credit'], { credit: null }), custom('B', ['pay.credit'], { credit: 100_000 })])
+    const viaCustom = effectiveAll([
+      custom('A', ['pay.credit'], { credit: null }),
+      custom('B', ['pay.credit'], { credit: 100_000 }),
+    ])
     expect(viaCustom['pay.credit']!.limit).toBeNull()
   })
 
@@ -135,19 +159,36 @@ describe('effective permissions (set-domain 2.1)', () => {
   })
 
   it('the locked role is unlimited and grants everything whatever rows it has (keyed off is_locked, not the name)', () => {
-    const owner: RoleGrant = { id: 'x', key: null, name: 'Owner', locked: true, perms: new Set(), limits: { refund: 1 } }
+    const owner: RoleGrant = {
+      id: 'x',
+      key: null,
+      name: 'Owner',
+      locked: true,
+      perms: new Set(),
+      limits: { refund: 1 },
+    }
     const m = effectiveAll([owner])
     expect(allowedKeys(m)).toHaveLength(27)
     expect(m['pay.refund']!.limit).toBeNull()
     expect(roleLimit(owner, 'refund')).toBeNull()
     // a role merely named "Super Admin" that is not locked gets no special treatment
-    const fake: RoleGrant = { id: 'y', key: null, name: 'Super Admin', locked: false, perms: new Set(), limits: {} }
+    const fake: RoleGrant = {
+      id: 'y',
+      key: null,
+      name: 'Super Admin',
+      locked: false,
+      perms: new Set(),
+      limits: {},
+    }
     expect(allowedKeys(effectiveAll([fake]))).toHaveLength(0)
   })
 
   it('no roles and no overrides is everything off; an override alone can switch a permission on', () => {
     expect(allowedKeys(effectiveAll([]))).toHaveLength(0)
-    expect(effectiveAll([], { 'cli.export': 'allow' })['cli.export']).toMatchObject({ on: true, src: 'Exception · allowed' })
+    expect(effectiveAll([], { 'cli.export': 'allow' })['cli.export']).toMatchObject({
+      on: true,
+      src: 'Exception · allowed',
+    })
   })
 
   it('formats limits the way the matrix chips do', () => {
@@ -159,20 +200,36 @@ describe('effective permissions (set-domain 2.1)', () => {
 
   it('limitsOf only lists kinds whose permission is on', () => {
     expect(limitsOf(effectiveAll([role('acct')]))).toEqual({ refund: 50_000, adjust: 25_000, credit: 25_000 })
-    expect(limitsOf(effectiveAll([role('acct')], { 'pay.credit': 'deny' }))).toEqual({ refund: 50_000, adjust: 25_000 })
+    expect(limitsOf(effectiveAll([role('acct')], { 'pay.credit': 'deny' }))).toEqual({
+      refund: 50_000,
+      adjust: 25_000,
+    })
+    // unlimited stays null (it must not fall back to the default)
+    expect(limitsOf(effectiveAll([role('super')]))).toEqual({ refund: null, adjust: null, credit: null })
   })
 })
 
 describe('effective permissions: properties', () => {
   const permArb = fc.constantFrom(...PERMISSION_KEYS)
-  const limitArb = fc.constantFrom<number | null | undefined>(undefined, null, 2500, 5000, 10_000, 25_000, 100_000)
+  const limitArb = fc.constantFrom<number | null | undefined>(
+    undefined,
+    null,
+    2500,
+    5000,
+    10_000,
+    25_000,
+    100_000,
+  )
   const roleArb = fc.record({
     perms: fc.uniqueArray(permArb, { maxLength: 20 }),
     refund: limitArb,
     adjust: limitArb,
     credit: limitArb,
   })
-  const toGrant = (r: { perms: string[]; refund?: number | null; adjust?: number | null; credit?: number | null }, i: number): RoleGrant => ({
+  const toGrant = (
+    r: { perms: string[]; refund?: number | null; adjust?: number | null; credit?: number | null },
+    i: number,
+  ): RoleGrant => ({
     id: `r${i}`,
     key: null,
     name: `R${i}`,
@@ -239,6 +296,7 @@ describe('effective permissions: properties', () => {
 
   it('effectivePermission agrees with effectiveAll', () => {
     const roles = [role('support'), role('crew')]
-    for (const p of PERMISSIONS) expect(effectivePermission(p.key, roles, undefined)).toEqual(effectiveAll(roles)[p.key])
+    for (const p of PERMISSIONS)
+      expect(effectivePermission(p.key, roles, undefined)).toEqual(effectiveAll(roles)[p.key])
   })
 })
