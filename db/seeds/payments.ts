@@ -14,6 +14,9 @@ import { getSetting } from '../../src/platform/settings.js'
 import { addDays, bizDayBounds, parseT, toBizDate, wallToInstant } from '../../src/platform/time.js'
 import type { SeedContext, SeedProfile } from './index.js'
 
+/** The calendar day the design's fixtures are written on (its frozen "today"). */
+const DESIGN_DAY = '2026-06-13'
+
 const PRICE: Record<string, number> = {
   'Express Hand Wash': 4500,
   'Premium Hand Wash + Interior': 12900,
@@ -505,10 +508,12 @@ export function eventInstant(
   if (dayWord === 'Today') day = today
   else if (dayWord === 'Yesterday') day = addDays(today, -1)
   else if (dayWord) {
-    const year = DateTime.fromISO(today).year
-    const d = DateTime.fromFormat(`${dayWord} ${year}`, 'LLL d yyyy', { locale: 'en-US', zone: 'utc' })
+    // An explicit date in the fixtures ("Jun 11") is a date of the design's own day (2026-06-13): keep its distance
+    // from "today", so the history stays coherent whatever clock the seed runs with (credit lots expire relative to it).
+    const designDay = DateTime.fromISO(DESIGN_DAY, { zone: 'utc' })
+    const d = DateTime.fromFormat(`${dayWord} ${designDay.year}`, 'LLL d yyyy', { locale: 'en-US', zone: 'utc' })
     if (!d.isValid) throw new Error(`Bad design date "${dayWord}"`)
-    day = d.toFormat('yyyy-LL-dd')
+    day = addDays(today, Math.round(d.diff(designDay, 'days').days))
   }
   return wallToInstant(day, parseT(clock!), tz)
 }
