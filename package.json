@@ -14,7 +14,8 @@
     "format": "prettier --write .",
     "test": "vitest run --passWithNoTests",
     "bootstrap:verify": "bash scripts/bootstrap/verify.sh",
-    "check": "pnpm lint && pnpm typecheck && pnpm test"
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
+    "sim:smsgate": "tsx scripts/sim-smsgate.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

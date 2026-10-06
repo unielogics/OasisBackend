@@ -135,12 +135,14 @@ export class SimDevice {
       parts: Math.max(1, Math.ceil(content.length / 153)),
     }
     this.messages.set(id, msg)
+    // The real app answers 202 with the message still Pending; its later states arrive by webhook and GET.
+    const accepted = this.view(msg)
     if (this.autoProgress === 'instant') {
       this.markProcessed(id)
       this.markSent(id)
       if (msg.withDeliveryReport) this.markDelivered(id)
     }
-    return { status: 202, body: this.view(this.messages.get(id) as SimMessage) }
+    return { status: 202, body: accepted }
   }
 
   private view(m: SimMessage): SmsGateMessageState {
@@ -149,7 +151,7 @@ export class SimDevice {
       deviceId: this.deviceId,
       state: m.state,
       recipients: [{ phoneNumber: m.phone, state: m.state, ...(m.error ? { error: m.error } : {}) }],
-      states: m.states,
+      states: { ...m.states },
       isHashed: false,
       isEncrypted: false,
       createdAt: offsetIso(m.createdAt),
