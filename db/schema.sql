@@ -144,6 +144,81 @@ CREATE SEQUENCE public.audit_log_id_seq
 ALTER SEQUENCE public.audit_log_id_seq OWNED BY public.audit_log.id;
 
 --
+-- Name: employee_locations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.employee_locations (
+    employee_id uuid NOT NULL,
+    location_id uuid NOT NULL
+);
+
+--
+-- Name: employee_permission_overrides; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.employee_permission_overrides (
+    employee_id uuid NOT NULL,
+    permission_key text NOT NULL,
+    effect text NOT NULL,
+    CONSTRAINT employee_permission_overrides_effect_check CHECK ((effect = ANY (ARRAY['allow'::text, 'deny'::text])))
+);
+
+--
+-- Name: employee_roles; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.employee_roles (
+    employee_id uuid NOT NULL,
+    role_id uuid NOT NULL
+);
+
+--
+-- Name: employee_schedules; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.employee_schedules (
+    employee_id uuid NOT NULL,
+    weekday smallint NOT NULL,
+    is_on boolean DEFAULT false NOT NULL,
+    from_min smallint NOT NULL,
+    to_min smallint NOT NULL,
+    CONSTRAINT employee_schedules_check CHECK (((NOT is_on) OR (from_min < to_min))),
+    CONSTRAINT employee_schedules_from_min_check CHECK (((from_min >= 0) AND (from_min <= 1439))),
+    CONSTRAINT employee_schedules_to_min_check CHECK (((to_min >= 1) AND (to_min <= 1440))),
+    CONSTRAINT employee_schedules_weekday_check CHECK (((weekday >= 0) AND (weekday <= 6)))
+);
+
+--
+-- Name: employees; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.employees (
+    id uuid NOT NULL,
+    first text NOT NULL,
+    last text DEFAULT ''::text NOT NULL,
+    title text DEFAULT ''::text NOT NULL,
+    phone text DEFAULT ''::text NOT NULL,
+    phone_e164 text,
+    email public.citext,
+    status text DEFAULT 'invited'::text NOT NULL,
+    employment_type text DEFAULT 'full_time'::text NOT NULL,
+    pay_type text DEFAULT 'hourly'::text NOT NULL,
+    rate_text text DEFAULT ''::text NOT NULL,
+    skills text[] DEFAULT '{}'::text[] NOT NULL,
+    avatar_color text,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    deactivated_at timestamp with time zone,
+    CONSTRAINT employees_check CHECK (((status = 'inactive'::text) = (deactivated_at IS NOT NULL))),
+    CONSTRAINT employees_employment_type_check CHECK ((employment_type = ANY (ARRAY['full_time'::text, 'part_time'::text, 'contractor'::text]))),
+    CONSTRAINT employees_first_check CHECK ((btrim(first) <> ''::text)),
+    CONSTRAINT employees_pay_type_check CHECK ((pay_type = ANY (ARRAY['hourly'::text, 'commission'::text, 'salary'::text]))),
+    CONSTRAINT employees_skills_check CHECK ((skills <@ ARRAY['Interior detailing'::text, 'Paint correction'::text, 'Ceramic coating'::text, 'Exotic vehicles'::text, 'Front desk'::text, 'Mobile service'::text])),
+    CONSTRAINT employees_status_check CHECK ((status = ANY (ARRAY['active'::text, 'invited'::text, 'inactive'::text])))
+);
+
+--
 -- Name: idempotency_keys; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -161,6 +236,23 @@ CREATE TABLE public.idempotency_keys (
     lock_expires_at timestamp with time zone NOT NULL,
     expires_at timestamp with time zone NOT NULL,
     CONSTRAINT idempotency_keys_state_check CHECK ((state = ANY (ARRAY['in_flight'::text, 'done'::text])))
+);
+
+--
+-- Name: invites; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.invites (
+    id uuid NOT NULL,
+    employee_id uuid NOT NULL,
+    token_hash text NOT NULL,
+    channel text DEFAULT 'sms'::text NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    accepted_at timestamp with time zone,
+    revoked_at timestamp with time zone,
+    created_by uuid,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT invites_channel_check CHECK ((channel = ANY (ARRAY['sms'::text, 'email'::text, 'link'::text])))
 );
 
 --
@@ -198,6 +290,42 @@ CREATE TABLE public.notifications (
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     read_at timestamp with time zone,
     CONSTRAINT notifications_check CHECK (((employee_id IS NULL) OR (role_target IS NULL)))
+);
+
+--
+-- Name: password_resets; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.password_resets (
+    id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    token_hash text NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    used_at timestamp with time zone,
+    requested_by uuid,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL
+);
+
+--
+-- Name: permissions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.permissions (
+    key text NOT NULL,
+    module text NOT NULL,
+    label text NOT NULL,
+    has_limit boolean DEFAULT false NOT NULL,
+    sort smallint NOT NULL
+);
+
+--
+-- Name: rbac_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.rbac_state (
+    id boolean DEFAULT true NOT NULL,
+    version bigint DEFAULT 1 NOT NULL,
+    CONSTRAINT rbac_state_id_check CHECK (id)
 );
 
 --
@@ -242,6 +370,47 @@ CREATE TABLE public.realtime_state (
 );
 
 --
+-- Name: role_limits; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.role_limits (
+    role_id uuid NOT NULL,
+    kind text NOT NULL,
+    unlimited boolean DEFAULT false NOT NULL,
+    limit_cents bigint,
+    CONSTRAINT role_limits_check CHECK (((unlimited AND (limit_cents IS NULL)) OR ((NOT unlimited) AND (limit_cents IS NOT NULL) AND (limit_cents >= 0)))),
+    CONSTRAINT role_limits_kind_check CHECK ((kind = ANY (ARRAY['refund'::text, 'adjust'::text, 'credit'::text])))
+);
+
+--
+-- Name: role_permissions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.role_permissions (
+    role_id uuid NOT NULL,
+    permission_key text NOT NULL
+);
+
+--
+-- Name: roles; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.roles (
+    id uuid NOT NULL,
+    key text,
+    name text NOT NULL,
+    description text DEFAULT ''::text NOT NULL,
+    is_locked boolean DEFAULT false NOT NULL,
+    is_custom boolean DEFAULT false NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT roles_check CHECK ((NOT (is_locked AND is_custom))),
+    CONSTRAINT roles_check1 CHECK (((key IS NULL) OR (NOT is_custom))),
+    CONSTRAINT roles_key_check CHECK ((key = ANY (ARRAY['super'::text, 'mgmt'::text, 'acct'::text, 'support'::text, 'crew'::text]))),
+    CONSTRAINT roles_name_check CHECK ((btrim(name) <> ''::text))
+);
+
+--
 -- Name: schema_migrations; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -249,6 +418,26 @@ CREATE TABLE public.schema_migrations (
     name text NOT NULL,
     checksum text NOT NULL,
     applied_at timestamp with time zone NOT NULL
+);
+
+--
+-- Name: sessions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sessions (
+    id text NOT NULL,
+    user_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    last_seen_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    idle_expires_at timestamp with time zone NOT NULL,
+    absolute_expires_at timestamp with time zone NOT NULL,
+    ip inet,
+    ua text,
+    csrf_secret text NOT NULL,
+    view_as_role_id uuid,
+    revoked_at timestamp with time zone,
+    CONSTRAINT sessions_check CHECK ((idle_expires_at <= absolute_expires_at)),
+    CONSTRAINT sessions_id_check CHECK ((id ~ '^[0-9a-f]{64}$'::text))
 );
 
 --
@@ -262,6 +451,33 @@ CREATE TABLE public.settings (
     version integer DEFAULT 1 NOT NULL,
     updated_by uuid,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL
+);
+
+--
+-- Name: user_preferences; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.user_preferences (
+    user_id uuid NOT NULL,
+    theme text,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT user_preferences_theme_check CHECK ((theme = ANY (ARRAY['light'::text, 'dark'::text])))
+);
+
+--
+-- Name: users; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.users (
+    id uuid NOT NULL,
+    employee_id uuid NOT NULL,
+    email public.citext NOT NULL,
+    password_hash text NOT NULL,
+    failed_attempts integer DEFAULT 0 NOT NULL,
+    last_login_at timestamp with time zone,
+    password_changed_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    disabled_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL
 );
 
 --
@@ -303,11 +519,67 @@ ALTER TABLE ONLY public.audit_log
     ADD CONSTRAINT audit_log_pkey PRIMARY KEY (id);
 
 --
+-- Name: employee_locations employee_locations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_locations
+    ADD CONSTRAINT employee_locations_pkey PRIMARY KEY (employee_id, location_id);
+
+--
+-- Name: employee_permission_overrides employee_permission_overrides_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_permission_overrides
+    ADD CONSTRAINT employee_permission_overrides_pkey PRIMARY KEY (employee_id, permission_key);
+
+--
+-- Name: employee_roles employee_roles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_roles
+    ADD CONSTRAINT employee_roles_pkey PRIMARY KEY (employee_id, role_id);
+
+--
+-- Name: employee_schedules employee_schedules_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_schedules
+    ADD CONSTRAINT employee_schedules_pkey PRIMARY KEY (employee_id, weekday);
+
+--
+-- Name: employees employees_email_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employees
+    ADD CONSTRAINT employees_email_key UNIQUE (email);
+
+--
+-- Name: employees employees_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employees
+    ADD CONSTRAINT employees_pkey PRIMARY KEY (id);
+
+--
 -- Name: idempotency_keys idempotency_keys_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.idempotency_keys
     ADD CONSTRAINT idempotency_keys_pkey PRIMARY KEY (key, actor);
+
+--
+-- Name: invites invites_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invites
+    ADD CONSTRAINT invites_pkey PRIMARY KEY (id);
+
+--
+-- Name: invites invites_token_hash_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invites
+    ADD CONSTRAINT invites_token_hash_key UNIQUE (token_hash);
 
 --
 -- Name: locations locations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -331,6 +603,41 @@ ALTER TABLE ONLY public.notifications
     ADD CONSTRAINT notifications_pkey PRIMARY KEY (id);
 
 --
+-- Name: password_resets password_resets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.password_resets
+    ADD CONSTRAINT password_resets_pkey PRIMARY KEY (id);
+
+--
+-- Name: password_resets password_resets_token_hash_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.password_resets
+    ADD CONSTRAINT password_resets_token_hash_key UNIQUE (token_hash);
+
+--
+-- Name: permissions permissions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.permissions
+    ADD CONSTRAINT permissions_pkey PRIMARY KEY (key);
+
+--
+-- Name: permissions permissions_sort_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.permissions
+    ADD CONSTRAINT permissions_sort_key UNIQUE (sort);
+
+--
+-- Name: rbac_state rbac_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.rbac_state
+    ADD CONSTRAINT rbac_state_pkey PRIMARY KEY (id);
+
+--
 -- Name: realtime_events realtime_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -345,6 +652,34 @@ ALTER TABLE ONLY public.realtime_state
     ADD CONSTRAINT realtime_state_pkey PRIMARY KEY (id);
 
 --
+-- Name: role_limits role_limits_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.role_limits
+    ADD CONSTRAINT role_limits_pkey PRIMARY KEY (role_id, kind);
+
+--
+-- Name: role_permissions role_permissions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.role_permissions
+    ADD CONSTRAINT role_permissions_pkey PRIMARY KEY (role_id, permission_key);
+
+--
+-- Name: roles roles_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.roles
+    ADD CONSTRAINT roles_key_key UNIQUE (key);
+
+--
+-- Name: roles roles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.roles
+    ADD CONSTRAINT roles_pkey PRIMARY KEY (id);
+
+--
 -- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -352,11 +687,46 @@ ALTER TABLE ONLY public.schema_migrations
     ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (name);
 
 --
+-- Name: sessions sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sessions
+    ADD CONSTRAINT sessions_pkey PRIMARY KEY (id);
+
+--
 -- Name: settings settings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.settings
     ADD CONSTRAINT settings_pkey PRIMARY KEY (location_id, key);
+
+--
+-- Name: user_preferences user_preferences_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_preferences
+    ADD CONSTRAINT user_preferences_pkey PRIMARY KEY (user_id);
+
+--
+-- Name: users users_email_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_email_key UNIQUE (email);
+
+--
+-- Name: users users_employee_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_employee_id_key UNIQUE (employee_id);
+
+--
+-- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_pkey PRIMARY KEY (id);
 
 --
 -- Name: webhook_log webhook_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -391,10 +761,40 @@ CREATE INDEX audit_log_entity_idx ON public.audit_log USING btree (entity_type, 
 CREATE INDEX audit_log_location_at_idx ON public.audit_log USING btree (location_id, at DESC);
 
 --
+-- Name: employee_locations_location_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX employee_locations_location_idx ON public.employee_locations USING btree (location_id);
+
+--
+-- Name: employee_roles_role_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX employee_roles_role_idx ON public.employee_roles USING btree (role_id);
+
+--
+-- Name: employees_phone_e164_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX employees_phone_e164_idx ON public.employees USING btree (phone_e164) WHERE (phone_e164 IS NOT NULL);
+
+--
+-- Name: employees_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX employees_status_idx ON public.employees USING btree (status);
+
+--
 -- Name: idempotency_keys_expires_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idempotency_keys_expires_idx ON public.idempotency_keys USING btree (expires_at);
+
+--
+-- Name: invites_employee_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX invites_employee_idx ON public.invites USING btree (employee_id);
 
 --
 -- Name: notifications_location_idx; Type: INDEX; Schema: public; Owner: -
@@ -409,6 +809,12 @@ CREATE INDEX notifications_location_idx ON public.notifications USING btree (loc
 CREATE INDEX notifications_unread_idx ON public.notifications USING btree (employee_id) WHERE (read_at IS NULL);
 
 --
+-- Name: password_resets_user_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX password_resets_user_idx ON public.password_resets USING btree (user_id, created_at DESC);
+
+--
 -- Name: realtime_events_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -419,6 +825,36 @@ CREATE INDEX realtime_events_at_idx ON public.realtime_events USING btree (at);
 --
 
 CREATE INDEX realtime_events_location_idx ON public.realtime_events USING btree (location_id, id);
+
+--
+-- Name: role_permissions_key_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX role_permissions_key_idx ON public.role_permissions USING btree (permission_key);
+
+--
+-- Name: roles_name_lower_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX roles_name_lower_idx ON public.roles USING btree (lower(name));
+
+--
+-- Name: roles_one_locked_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX roles_one_locked_idx ON public.roles USING btree (is_locked) WHERE is_locked;
+
+--
+-- Name: sessions_absolute_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sessions_absolute_idx ON public.sessions USING btree (absolute_expires_at);
+
+--
+-- Name: sessions_user_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sessions_user_idx ON public.sessions USING btree (user_id) WHERE (revoked_at IS NULL);
 
 --
 -- Name: webhook_log_received_idx; Type: INDEX; Schema: public; Owner: -
@@ -446,11 +882,74 @@ ALTER TABLE ONLY public.audit_log
     ADD CONSTRAINT audit_log_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id);
 
 --
+-- Name: employee_locations employee_locations_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_locations
+    ADD CONSTRAINT employee_locations_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE;
+
+--
+-- Name: employee_locations employee_locations_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_locations
+    ADD CONSTRAINT employee_locations_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: employee_permission_overrides employee_permission_overrides_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_permission_overrides
+    ADD CONSTRAINT employee_permission_overrides_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE;
+
+--
+-- Name: employee_permission_overrides employee_permission_overrides_permission_key_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_permission_overrides
+    ADD CONSTRAINT employee_permission_overrides_permission_key_fkey FOREIGN KEY (permission_key) REFERENCES public.permissions(key);
+
+--
+-- Name: employee_roles employee_roles_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_roles
+    ADD CONSTRAINT employee_roles_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE;
+
+--
+-- Name: employee_roles employee_roles_role_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_roles
+    ADD CONSTRAINT employee_roles_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE;
+
+--
+-- Name: employee_schedules employee_schedules_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.employee_schedules
+    ADD CONSTRAINT employee_schedules_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE;
+
+--
+-- Name: invites invites_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.invites
+    ADD CONSTRAINT invites_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE;
+
+--
 -- Name: notifications notifications_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.notifications
     ADD CONSTRAINT notifications_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: password_resets password_resets_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.password_resets
+    ADD CONSTRAINT password_resets_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 --
 -- Name: realtime_events realtime_events_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -460,11 +959,60 @@ ALTER TABLE ONLY public.realtime_events
     ADD CONSTRAINT realtime_events_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
+-- Name: role_limits role_limits_role_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.role_limits
+    ADD CONSTRAINT role_limits_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE;
+
+--
+-- Name: role_permissions role_permissions_permission_key_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.role_permissions
+    ADD CONSTRAINT role_permissions_permission_key_fkey FOREIGN KEY (permission_key) REFERENCES public.permissions(key);
+
+--
+-- Name: role_permissions role_permissions_role_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.role_permissions
+    ADD CONSTRAINT role_permissions_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE;
+
+--
+-- Name: sessions sessions_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sessions
+    ADD CONSTRAINT sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+--
+-- Name: sessions sessions_view_as_role_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sessions
+    ADD CONSTRAINT sessions_view_as_role_id_fkey FOREIGN KEY (view_as_role_id) REFERENCES public.roles(id) ON DELETE SET NULL;
+
+--
 -- Name: settings settings_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.settings
     ADD CONSTRAINT settings_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: user_preferences user_preferences_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_preferences
+    ADD CONSTRAINT user_preferences_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+--
+-- Name: users users_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE;
 
 --
 --
