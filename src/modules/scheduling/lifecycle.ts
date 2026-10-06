@@ -96,7 +96,7 @@ function requireAny(actor: Actor, perms: readonly string[]): void {
 
 type Patch = Record<string, unknown>
 
-/** Applies the patch with a version bump and returns nothing; callers re-read through patched(). */
+/** Applies the patch with a version bump; callers re-read the row (finish) for the new state. */
 async function applyPatch(tx: Tx, a: AppointmentRecord, patch: Patch): Promise<void> {
   await tx
     .updateTable('appointments')
