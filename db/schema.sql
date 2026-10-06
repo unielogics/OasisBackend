@@ -104,6 +104,180 @@ SET default_tablespace = '';
 SET default_table_access_method = heap;
 
 --
+-- Name: activity_log; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.activity_log (
+    id bigint NOT NULL,
+    appointment_id uuid NOT NULL,
+    at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    text text NOT NULL,
+    channels text[] DEFAULT '{}'::text[] NOT NULL,
+    actor_type text DEFAULT 'staff'::text NOT NULL,
+    actor_name text,
+    meta jsonb DEFAULT '{}'::jsonb NOT NULL,
+    CONSTRAINT activity_log_actor_type_check CHECK ((actor_type = ANY (ARRAY['staff'::text, 'system'::text, 'automation'::text, 'customer'::text]))),
+    CONSTRAINT activity_log_channels_check CHECK ((channels <@ ARRAY['sms'::text, 'email'::text, 'internal'::text, 'automation'::text, 'system'::text])),
+    CONSTRAINT activity_log_text_check CHECK ((btrim(text) <> ''::text))
+);
+
+--
+-- Name: activity_log_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+ALTER TABLE public.activity_log ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.activity_log_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+--
+-- Name: appointment_addons; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.appointment_addons (
+    id uuid NOT NULL,
+    appointment_id uuid NOT NULL,
+    service_id uuid NOT NULL,
+    name text NOT NULL,
+    price_cents integer NOT NULL,
+    added_by uuid,
+    added_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    removed_at timestamp with time zone,
+    CONSTRAINT appointment_addons_name_check CHECK ((btrim(name) <> ''::text)),
+    CONSTRAINT appointment_addons_price_cents_check CHECK ((price_cents >= 0))
+);
+
+--
+-- Name: appointment_overrides; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.appointment_overrides (
+    id uuid NOT NULL,
+    appointment_id uuid NOT NULL,
+    kind text NOT NULL,
+    reason text NOT NULL,
+    employee_id uuid,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT appointment_overrides_kind_check CHECK ((kind = ANY (ARRAY['capacity'::text, 'hours'::text, 'closure'::text, 'vip_hold'::text, 'same_day_guarantee'::text]))),
+    CONSTRAINT appointment_overrides_reason_check CHECK ((btrim(reason) <> ''::text))
+);
+
+--
+-- Name: appointment_photos; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.appointment_photos (
+    id uuid NOT NULL,
+    appointment_id uuid NOT NULL,
+    category text NOT NULL,
+    s3_key text,
+    thumb_key text,
+    content_type text,
+    bytes integer,
+    note text,
+    status text NOT NULL,
+    taken_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    uploaded_by uuid,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT appointment_photos_bytes_check CHECK (((bytes IS NULL) OR (bytes >= 0))),
+    CONSTRAINT appointment_photos_category_check CHECK ((category = ANY (ARRAY['arrival'::text, 'before'::text, 'after'::text, 'issue'::text]))),
+    CONSTRAINT appointment_photos_check CHECK (((s3_key IS NOT NULL) OR ((category = 'issue'::text) AND (note IS NOT NULL) AND (btrim(note) <> ''::text)))),
+    CONSTRAINT appointment_photos_status_check CHECK ((status = ANY (ARRAY['pending_upload'::text, 'ready'::text, 'deleted'::text])))
+);
+
+--
+-- Name: appointments; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.appointments (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    seq bigint NOT NULL,
+    customer_id uuid NOT NULL,
+    vehicle_id uuid,
+    service_id uuid NOT NULL,
+    package_name text NOT NULL,
+    price_cents integer NOT NULL,
+    duration_min integer NOT NULL,
+    status text DEFAULT 'booked'::text NOT NULL,
+    scheduled_start timestamp with time zone NOT NULL,
+    scheduled_end timestamp with time zone NOT NULL,
+    assigned_employee_id uuid,
+    planned_bay_id uuid,
+    bay_id uuid,
+    source text DEFAULT 'dashboard'::text NOT NULL,
+    eta_minutes integer,
+    eta_at timestamp with time zone,
+    geo_checked_in_at timestamp with time zone,
+    bay_prepped_at timestamp with time zone,
+    arrived_at timestamp with time zone,
+    cleaning_started_at timestamp with time zone,
+    completed_at timestamp with time zone,
+    pickup_state text,
+    picked_up_at timestamp with time zone,
+    ready_notified_at timestamp with time zone,
+    canceled_at timestamp with time zone,
+    cancel_reason text,
+    no_show_at timestamp with time zone,
+    notes text,
+    special_instructions text,
+    membership_id uuid,
+    emergency_closure_id uuid,
+    standing_series_id uuid,
+    arrival_token_hash text,
+    version integer DEFAULT 1 NOT NULL,
+    created_by uuid,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT appointments_check CHECK ((scheduled_end > scheduled_start)),
+    CONSTRAINT appointments_check1 CHECK (((status <> 'cleaning'::text) OR (bay_id IS NOT NULL))),
+    CONSTRAINT appointments_duration_min_check CHECK ((duration_min > 0)),
+    CONSTRAINT appointments_eta_minutes_check CHECK (((eta_minutes IS NULL) OR (eta_minutes >= 0))),
+    CONSTRAINT appointments_package_name_check CHECK ((btrim(package_name) <> ''::text)),
+    CONSTRAINT appointments_pickup_state_check CHECK (((pickup_state IS NULL) OR (pickup_state = ANY (ARRAY['pending'::text, 'collected'::text])))),
+    CONSTRAINT appointments_price_cents_check CHECK ((price_cents >= 0)),
+    CONSTRAINT appointments_source_check CHECK ((source = ANY (ARRAY['dashboard'::text, 'walk_in'::text, 'online'::text, 'phone'::text, 'standing'::text, 'reschedule_link'::text]))),
+    CONSTRAINT appointments_status_check CHECK ((status = ANY (ARRAY['booked'::text, 'confirmed'::text, 'arrived'::text, 'cleaning'::text, 'completed'::text, 'canceled'::text, 'no_show'::text])))
+);
+
+--
+-- Name: appointments_seq_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+ALTER TABLE public.appointments ALTER COLUMN seq ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.appointments_seq_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+--
+-- Name: arrival_settings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.arrival_settings (
+    location_id uuid NOT NULL,
+    enabled boolean DEFAULT true NOT NULL,
+    radius_m smallint DEFAULT 300 NOT NULL,
+    prep_at_min smallint DEFAULT 15 NOT NULL,
+    auto_arrive boolean DEFAULT true NOT NULL,
+    welcome boolean DEFAULT true NOT NULL,
+    alert_crew boolean DEFAULT true NOT NULL,
+    vip_first boolean DEFAULT true NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    updated_by uuid,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT arrival_settings_prep_at_min_check CHECK ((prep_at_min = ANY (ARRAY[10, 15, 20]))),
+    CONSTRAINT arrival_settings_radius_m_check CHECK ((radius_m = ANY (ARRAY[150, 300, 500])))
+);
+
+--
 -- Name: audit_log; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -142,6 +316,200 @@ CREATE SEQUENCE public.audit_log_id_seq
 --
 
 ALTER SEQUENCE public.audit_log_id_seq OWNED BY public.audit_log.id;
+
+--
+-- Name: bays; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.bays (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    number smallint NOT NULL,
+    name text NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    sort integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT bays_name_check CHECK ((btrim(name) <> ''::text)),
+    CONSTRAINT bays_number_check CHECK ((number > 0)),
+    CONSTRAINT bays_status_check CHECK ((status = ANY (ARRAY['active'::text, 'maintenance'::text, 'blocked'::text])))
+);
+
+--
+-- Name: booking_rules; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.booking_rules (
+    location_id uuid NOT NULL,
+    slot_minutes smallint DEFAULT 30 NOT NULL,
+    buffer_minutes smallint DEFAULT 10 NOT NULL,
+    cutoff_minutes smallint DEFAULT 60 NOT NULL,
+    online_lead_minutes smallint DEFAULT 30 NOT NULL,
+    allow_overrun boolean DEFAULT true NOT NULL,
+    auto_plan_bay boolean DEFAULT true NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    updated_by uuid,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT booking_rules_buffer_minutes_check CHECK ((buffer_minutes = ANY (ARRAY[0, 10, 15, 20]))),
+    CONSTRAINT booking_rules_cutoff_minutes_check CHECK ((cutoff_minutes = ANY (ARRAY[30, 60, 90]))),
+    CONSTRAINT booking_rules_online_lead_minutes_check CHECK (((online_lead_minutes >= 0) AND (online_lead_minutes <= 240))),
+    CONSTRAINT booking_rules_slot_minutes_check CHECK ((slot_minutes = ANY (ARRAY[15, 30, 60])))
+);
+
+--
+-- Name: business_hours; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.business_hours (
+    location_id uuid NOT NULL,
+    weekday smallint NOT NULL,
+    is_open boolean NOT NULL,
+    open_min smallint NOT NULL,
+    close_min smallint NOT NULL,
+    CONSTRAINT business_hours_check CHECK ((open_min < close_min)),
+    CONSTRAINT business_hours_check1 CHECK (((open_min >= 300) AND (close_min <= 1410))),
+    CONSTRAINT business_hours_check2 CHECK (((((open_min)::integer % 30) = 0) AND (((close_min)::integer % 30) = 0))),
+    CONSTRAINT business_hours_weekday_check CHECK (((weekday >= 0) AND (weekday <= 6)))
+);
+
+--
+-- Name: checklist_tasks; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.checklist_tasks (
+    id uuid NOT NULL,
+    service_id uuid NOT NULL,
+    label text NOT NULL,
+    "position" integer NOT NULL,
+    retired_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT checklist_tasks_label_check CHECK ((btrim(label) <> ''::text)),
+    CONSTRAINT checklist_tasks_position_check CHECK (("position" >= 0))
+);
+
+--
+-- Name: closures; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.closures (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    date date NOT NULL,
+    name text NOT NULL,
+    type text NOT NULL,
+    open_min smallint,
+    close_min smallint,
+    notify boolean DEFAULT true NOT NULL,
+    source text DEFAULT 'manual'::text NOT NULL,
+    federal_key text,
+    federal_year smallint,
+    emergency_closure_id uuid,
+    created_by uuid,
+    deleted_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT closures_check CHECK ((((type = 'closed'::text) AND (open_min IS NULL) AND (close_min IS NULL)) OR ((type = 'reduced'::text) AND (open_min IS NOT NULL) AND (close_min IS NOT NULL) AND (open_min >= 0) AND (close_min <= 1440) AND (open_min < close_min)))),
+    CONSTRAINT closures_check1 CHECK (((federal_key IS NULL) = (federal_year IS NULL))),
+    CONSTRAINT closures_check2 CHECK (((source = 'federal'::text) OR (federal_key IS NULL))),
+    CONSTRAINT closures_check3 CHECK (((source = 'emergency'::text) = (emergency_closure_id IS NOT NULL))),
+    CONSTRAINT closures_name_check CHECK ((btrim(name) <> ''::text)),
+    CONSTRAINT closures_source_check CHECK ((source = ANY (ARRAY['manual'::text, 'federal'::text, 'emergency'::text]))),
+    CONSTRAINT closures_type_check CHECK ((type = ANY (ARRAY['closed'::text, 'reduced'::text])))
+);
+
+--
+-- Name: customers; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customers (
+    id uuid NOT NULL,
+    full_name text NOT NULL,
+    phone_e164 text,
+    phone_display text,
+    email public.citext,
+    notes text,
+    sms_opted_in boolean DEFAULT false NOT NULL,
+    sms_opt_in_source text,
+    sms_opt_in_at timestamp with time zone,
+    sms_opted_out_at timestamp with time zone,
+    email_bounced_at timestamp with time zone,
+    source text DEFAULT 'dashboard'::text NOT NULL,
+    synthetic boolean DEFAULT false NOT NULL,
+    needs_details boolean DEFAULT false NOT NULL,
+    merged_into uuid,
+    deleted_at timestamp with time zone,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT customers_check CHECK (((NOT synthetic) OR (phone_e164 IS NULL) OR (phone_e164 ~ '^\+1[0-9]{3}55501[0-9]{2}$'::text))),
+    CONSTRAINT customers_check1 CHECK (((merged_into IS NULL) OR (merged_into <> id))),
+    CONSTRAINT customers_email_check CHECK (((email IS NULL) OR (btrim((email)::text) <> ''::text))),
+    CONSTRAINT customers_full_name_check CHECK ((btrim(full_name) <> ''::text)),
+    CONSTRAINT customers_phone_e164_check CHECK (((phone_e164 IS NULL) OR (phone_e164 ~ '^\+[1-9][0-9]{6,14}$'::text))),
+    CONSTRAINT customers_sms_opt_in_source_check CHECK (((sms_opt_in_source IS NULL) OR (sms_opt_in_source = ANY (ARRAY['dashboard'::text, 'walk_in'::text, 'online'::text, 'squarespace'::text, 'inbound_sms'::text, 'import'::text, 'keyword'::text])))),
+    CONSTRAINT customers_source_check CHECK ((source = ANY (ARRAY['dashboard'::text, 'walk_in'::text, 'online'::text, 'squarespace'::text, 'inbound_sms'::text, 'import'::text])))
+);
+
+--
+-- Name: emergency_closures; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.emergency_closures (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    reason text NOT NULL,
+    duration_kind text NOT NULL,
+    until_min smallint,
+    through_date date,
+    ends_at timestamp with time zone,
+    message text DEFAULT ''::text NOT NULL,
+    notify boolean DEFAULT true NOT NULL,
+    link boolean DEFAULT true NOT NULL,
+    credits boolean DEFAULT true NOT NULL,
+    pause boolean DEFAULT true NOT NULL,
+    crew boolean DEFAULT true NOT NULL,
+    summary text DEFAULT ''::text NOT NULL,
+    started_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    started_by uuid,
+    started_by_name text,
+    reopened_at timestamp with time zone,
+    reopened_by uuid,
+    reopened_by_name text,
+    auto_reopened boolean DEFAULT false NOT NULL,
+    affected_count integer DEFAULT 0 NOT NULL,
+    notified_count integer DEFAULT 0 NOT NULL,
+    rebooked_count integer DEFAULT 0 NOT NULL,
+    detail text,
+    replaced_closure_ids uuid[] DEFAULT '{}'::uuid[] NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT emergency_closures_affected_count_check CHECK ((affected_count >= 0)),
+    CONSTRAINT emergency_closures_check CHECK (((duration_kind <> 'until'::text) OR (until_min IS NOT NULL))),
+    CONSTRAINT emergency_closures_check1 CHECK ((active OR (reopened_at IS NOT NULL))),
+    CONSTRAINT emergency_closures_duration_kind_check CHECK ((duration_kind = ANY (ARRAY['today'::text, 'until'::text, 'days'::text]))),
+    CONSTRAINT emergency_closures_notified_count_check CHECK ((notified_count >= 0)),
+    CONSTRAINT emergency_closures_reason_check CHECK ((reason = ANY (ARRAY['severe_weather'::text, 'power_outage'::text, 'equipment_failure'::text, 'staff_shortage'::text, 'other'::text]))),
+    CONSTRAINT emergency_closures_rebooked_count_check CHECK ((rebooked_count >= 0)),
+    CONSTRAINT emergency_closures_until_min_check CHECK (((until_min IS NULL) OR ((until_min >= 0) AND (until_min <= 1439))))
+);
+
+--
+-- Name: emergency_notifications; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.emergency_notifications (
+    id uuid NOT NULL,
+    emergency_closure_id uuid NOT NULL,
+    appointment_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    message_id uuid,
+    channel text NOT NULL,
+    state text NOT NULL,
+    reschedule_link_id uuid,
+    rebooked_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT emergency_notifications_channel_check CHECK ((channel = ANY (ARRAY['sms'::text, 'email'::text, 'none'::text]))),
+    CONSTRAINT emergency_notifications_state_check CHECK ((state = ANY (ARRAY['queued'::text, 'sent'::text, 'delivered'::text, 'failed'::text, 'skipped_opt_out'::text, 'no_contact'::text])))
+);
 
 --
 -- Name: employee_locations; Type: TABLE; Schema: public; Owner: -
@@ -219,6 +587,16 @@ CREATE TABLE public.employees (
 );
 
 --
+-- Name: federal_holiday_runs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.federal_holiday_runs (
+    location_id uuid NOT NULL,
+    year smallint NOT NULL,
+    ran_at timestamp with time zone DEFAULT public.app_now() NOT NULL
+);
+
+--
 -- Name: idempotency_keys; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -253,6 +631,31 @@ CREATE TABLE public.invites (
     created_by uuid,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     CONSTRAINT invites_channel_check CHECK ((channel = ANY (ARRAY['sms'::text, 'email'::text, 'link'::text])))
+);
+
+--
+-- Name: job_checklist_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.job_checklist_items (
+    id uuid NOT NULL,
+    appointment_id uuid NOT NULL,
+    section_kind text NOT NULL,
+    section_title text NOT NULL,
+    source_task_id uuid,
+    appointment_addon_id uuid,
+    label text NOT NULL,
+    "position" integer NOT NULL,
+    done boolean DEFAULT false NOT NULL,
+    done_at timestamp with time zone,
+    done_by_employee_id uuid,
+    removed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT job_checklist_items_check CHECK ((done OR (done_at IS NULL))),
+    CONSTRAINT job_checklist_items_label_check CHECK ((btrim(label) <> ''::text)),
+    CONSTRAINT job_checklist_items_position_check CHECK (("position" >= 0)),
+    CONSTRAINT job_checklist_items_section_kind_check CHECK ((section_kind = ANY (ARRAY['package'::text, 'addon'::text]))),
+    CONSTRAINT job_checklist_items_section_title_check CHECK ((btrim(section_title) <> ''::text))
 );
 
 --
@@ -370,6 +773,23 @@ CREATE TABLE public.realtime_state (
 );
 
 --
+-- Name: reschedule_links; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.reschedule_links (
+    id uuid NOT NULL,
+    code text NOT NULL,
+    appointment_id uuid NOT NULL,
+    emergency_closure_id uuid,
+    closure_id uuid,
+    expires_at timestamp with time zone NOT NULL,
+    used_at timestamp with time zone,
+    result_appointment_id uuid,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT reschedule_links_code_check CHECK ((length(code) >= 8))
+);
+
+--
 -- Name: role_limits; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -418,6 +838,33 @@ CREATE TABLE public.schema_migrations (
     name text NOT NULL,
     checksum text NOT NULL,
     applied_at timestamp with time zone NOT NULL
+);
+
+--
+-- Name: services; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.services (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    kind text NOT NULL,
+    name text NOT NULL,
+    short_name text,
+    price_cents integer NOT NULL,
+    duration_min integer NOT NULL,
+    tags text[] DEFAULT '{}'::text[] NOT NULL,
+    bookable_desk boolean DEFAULT true NOT NULL,
+    sort integer DEFAULT 0 NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    sqsp_sku text,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT services_check CHECK ((((kind = 'addon'::text) AND (duration_min = 0)) OR ((kind = 'package'::text) AND ((duration_min >= 1) AND (duration_min <= 720))))),
+    CONSTRAINT services_kind_check CHECK ((kind = ANY (ARRAY['package'::text, 'addon'::text]))),
+    CONSTRAINT services_name_check CHECK ((btrim(name) <> ''::text)),
+    CONSTRAINT services_price_cents_check CHECK ((price_cents >= 0)),
+    CONSTRAINT services_short_name_check CHECK (((short_name IS NULL) OR (btrim(short_name) <> ''::text)))
 );
 
 --
@@ -481,6 +928,75 @@ CREATE TABLE public.users (
 );
 
 --
+-- Name: vehicles; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.vehicles (
+    id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    year smallint,
+    make text,
+    model text,
+    color text,
+    plate text,
+    deleted_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT vehicles_plate_check CHECK (((plate IS NULL) OR (btrim(plate) <> ''::text))),
+    CONSTRAINT vehicles_year_check CHECK (((year IS NULL) OR ((year >= 1900) AND (year <= 2100))))
+);
+
+--
+-- Name: vip_clients; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.vip_clients (
+    location_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    added_by uuid,
+    added_at timestamp with time zone DEFAULT public.app_now() NOT NULL
+);
+
+--
+-- Name: vip_holds; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.vip_holds (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    weekday smallint NOT NULL,
+    time_min smallint NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT vip_holds_time_min_check CHECK ((((time_min >= 300) AND (time_min <= 1410)) AND (((time_min)::integer % 30) = 0))),
+    CONSTRAINT vip_holds_weekday_check CHECK (((weekday >= 0) AND (weekday <= 6)))
+);
+
+--
+-- Name: vip_settings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.vip_settings (
+    location_id uuid NOT NULL,
+    release_hours smallint DEFAULT 48 NOT NULL,
+    window_vip_days smallint DEFAULT 30 NOT NULL,
+    window_std_days smallint DEFAULT 14 NOT NULL,
+    same_day_per_month smallint DEFAULT 2 NOT NULL,
+    waitlist boolean DEFAULT true NOT NULL,
+    offer_minutes smallint DEFAULT 15 NOT NULL,
+    standing boolean DEFAULT true NOT NULL,
+    auto_confirm boolean DEFAULT true NOT NULL,
+    cadences text[] DEFAULT '{weekly,biweekly,monthly}'::text[] NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    updated_by uuid,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT vip_settings_cadences_check CHECK ((cadences <@ ARRAY['weekly'::text, 'biweekly'::text, 'triweekly'::text, 'monthly'::text])),
+    CONSTRAINT vip_settings_offer_minutes_check CHECK ((offer_minutes = ANY (ARRAY[10, 15, 30]))),
+    CONSTRAINT vip_settings_release_hours_check CHECK ((release_hours = ANY (ARRAY[24, 48, 72]))),
+    CONSTRAINT vip_settings_same_day_per_month_check CHECK (((same_day_per_month >= 0) AND (same_day_per_month <= 8))),
+    CONSTRAINT vip_settings_window_std_days_check CHECK (((window_std_days >= 7) AND (window_std_days <= 60))),
+    CONSTRAINT vip_settings_window_vip_days_check CHECK (((window_vip_days >= 7) AND (window_vip_days <= 90)))
+);
+
+--
 -- Name: webhook_log; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -512,11 +1028,130 @@ ALTER TABLE ONLY public.audit_log ALTER COLUMN id SET DEFAULT nextval('public.au
 ALTER TABLE ONLY public.realtime_events ALTER COLUMN id SET DEFAULT nextval('public.realtime_events_id_seq'::regclass);
 
 --
+-- Name: activity_log activity_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.activity_log
+    ADD CONSTRAINT activity_log_pkey PRIMARY KEY (id);
+
+--
+-- Name: appointment_addons appointment_addons_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointment_addons
+    ADD CONSTRAINT appointment_addons_pkey PRIMARY KEY (id);
+
+--
+-- Name: appointment_overrides appointment_overrides_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointment_overrides
+    ADD CONSTRAINT appointment_overrides_pkey PRIMARY KEY (id);
+
+--
+-- Name: appointment_photos appointment_photos_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointment_photos
+    ADD CONSTRAINT appointment_photos_pkey PRIMARY KEY (id);
+
+--
+-- Name: appointments appointments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointments
+    ADD CONSTRAINT appointments_pkey PRIMARY KEY (id);
+
+--
+-- Name: appointments appointments_seq_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointments
+    ADD CONSTRAINT appointments_seq_key UNIQUE (seq);
+
+--
+-- Name: arrival_settings arrival_settings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.arrival_settings
+    ADD CONSTRAINT arrival_settings_pkey PRIMARY KEY (location_id);
+
+--
 -- Name: audit_log audit_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.audit_log
     ADD CONSTRAINT audit_log_pkey PRIMARY KEY (id);
+
+--
+-- Name: bays bays_location_id_number_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.bays
+    ADD CONSTRAINT bays_location_id_number_key UNIQUE (location_id, number);
+
+--
+-- Name: bays bays_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.bays
+    ADD CONSTRAINT bays_pkey PRIMARY KEY (id);
+
+--
+-- Name: booking_rules booking_rules_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.booking_rules
+    ADD CONSTRAINT booking_rules_pkey PRIMARY KEY (location_id);
+
+--
+-- Name: business_hours business_hours_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.business_hours
+    ADD CONSTRAINT business_hours_pkey PRIMARY KEY (location_id, weekday);
+
+--
+-- Name: checklist_tasks checklist_tasks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checklist_tasks
+    ADD CONSTRAINT checklist_tasks_pkey PRIMARY KEY (id);
+
+--
+-- Name: closures closures_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.closures
+    ADD CONSTRAINT closures_pkey PRIMARY KEY (id);
+
+--
+-- Name: customers customers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customers
+    ADD CONSTRAINT customers_pkey PRIMARY KEY (id);
+
+--
+-- Name: emergency_closures emergency_closures_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.emergency_closures
+    ADD CONSTRAINT emergency_closures_pkey PRIMARY KEY (id);
+
+--
+-- Name: emergency_notifications emergency_notifications_emergency_closure_id_appointment_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.emergency_notifications
+    ADD CONSTRAINT emergency_notifications_emergency_closure_id_appointment_id_key UNIQUE (emergency_closure_id, appointment_id);
+
+--
+-- Name: emergency_notifications emergency_notifications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.emergency_notifications
+    ADD CONSTRAINT emergency_notifications_pkey PRIMARY KEY (id);
 
 --
 -- Name: employee_locations employee_locations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -561,6 +1196,13 @@ ALTER TABLE ONLY public.employees
     ADD CONSTRAINT employees_pkey PRIMARY KEY (id);
 
 --
+-- Name: federal_holiday_runs federal_holiday_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.federal_holiday_runs
+    ADD CONSTRAINT federal_holiday_runs_pkey PRIMARY KEY (location_id, year);
+
+--
 -- Name: idempotency_keys idempotency_keys_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -580,6 +1222,13 @@ ALTER TABLE ONLY public.invites
 
 ALTER TABLE ONLY public.invites
     ADD CONSTRAINT invites_token_hash_key UNIQUE (token_hash);
+
+--
+-- Name: job_checklist_items job_checklist_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.job_checklist_items
+    ADD CONSTRAINT job_checklist_items_pkey PRIMARY KEY (id);
 
 --
 -- Name: locations locations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -652,6 +1301,20 @@ ALTER TABLE ONLY public.realtime_state
     ADD CONSTRAINT realtime_state_pkey PRIMARY KEY (id);
 
 --
+-- Name: reschedule_links reschedule_links_code_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reschedule_links
+    ADD CONSTRAINT reschedule_links_code_key UNIQUE (code);
+
+--
+-- Name: reschedule_links reschedule_links_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reschedule_links
+    ADD CONSTRAINT reschedule_links_pkey PRIMARY KEY (id);
+
+--
 -- Name: role_limits role_limits_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -687,6 +1350,13 @@ ALTER TABLE ONLY public.schema_migrations
     ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (name);
 
 --
+-- Name: services services_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.services
+    ADD CONSTRAINT services_pkey PRIMARY KEY (id);
+
+--
 -- Name: sessions sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -699,6 +1369,13 @@ ALTER TABLE ONLY public.sessions
 
 ALTER TABLE ONLY public.settings
     ADD CONSTRAINT settings_pkey PRIMARY KEY (location_id, key);
+
+--
+-- Name: closures uq_closures_federal; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.closures
+    ADD CONSTRAINT uq_closures_federal UNIQUE (location_id, federal_key, federal_year);
 
 --
 -- Name: user_preferences user_preferences_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -729,6 +1406,41 @@ ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_pkey PRIMARY KEY (id);
 
 --
+-- Name: vehicles vehicles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vehicles
+    ADD CONSTRAINT vehicles_pkey PRIMARY KEY (id);
+
+--
+-- Name: vip_clients vip_clients_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vip_clients
+    ADD CONSTRAINT vip_clients_pkey PRIMARY KEY (location_id, customer_id);
+
+--
+-- Name: vip_holds vip_holds_location_id_weekday_time_min_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vip_holds
+    ADD CONSTRAINT vip_holds_location_id_weekday_time_min_key UNIQUE (location_id, weekday, time_min);
+
+--
+-- Name: vip_holds vip_holds_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vip_holds
+    ADD CONSTRAINT vip_holds_pkey PRIMARY KEY (id);
+
+--
+-- Name: vip_settings vip_settings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vip_settings
+    ADD CONSTRAINT vip_settings_pkey PRIMARY KEY (location_id);
+
+--
 -- Name: webhook_log webhook_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -741,6 +1453,54 @@ ALTER TABLE ONLY public.webhook_log
 
 ALTER TABLE ONLY public.webhook_log
     ADD CONSTRAINT webhook_log_provider_external_id_key UNIQUE (provider, external_id);
+
+--
+-- Name: activity_log_appointment_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX activity_log_appointment_idx ON public.activity_log USING btree (appointment_id, at, id);
+
+--
+-- Name: appointment_addons_appointment_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX appointment_addons_appointment_idx ON public.appointment_addons USING btree (appointment_id);
+
+--
+-- Name: appointment_overrides_appointment_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX appointment_overrides_appointment_idx ON public.appointment_overrides USING btree (appointment_id);
+
+--
+-- Name: appointment_photos_appointment_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX appointment_photos_appointment_idx ON public.appointment_photos USING btree (appointment_id, category);
+
+--
+-- Name: appointments_active_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX appointments_active_idx ON public.appointments USING btree (status) WHERE (status = ANY (ARRAY['booked'::text, 'confirmed'::text, 'arrived'::text, 'cleaning'::text]));
+
+--
+-- Name: appointments_customer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX appointments_customer_idx ON public.appointments USING btree (customer_id, scheduled_start DESC);
+
+--
+-- Name: appointments_emergency_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX appointments_emergency_idx ON public.appointments USING btree (emergency_closure_id) WHERE (emergency_closure_id IS NOT NULL);
+
+--
+-- Name: appointments_location_start_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX appointments_location_start_idx ON public.appointments USING btree (location_id, scheduled_start);
 
 --
 -- Name: audit_log_actor_idx; Type: INDEX; Schema: public; Owner: -
@@ -759,6 +1519,54 @@ CREATE INDEX audit_log_entity_idx ON public.audit_log USING btree (entity_type, 
 --
 
 CREATE INDEX audit_log_location_at_idx ON public.audit_log USING btree (location_id, at DESC);
+
+--
+-- Name: checklist_tasks_service_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX checklist_tasks_service_idx ON public.checklist_tasks USING btree (service_id, "position") WHERE (retired_at IS NULL);
+
+--
+-- Name: closures_emergency_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX closures_emergency_idx ON public.closures USING btree (emergency_closure_id) WHERE (emergency_closure_id IS NOT NULL);
+
+--
+-- Name: customers_email_trgm; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX customers_email_trgm ON public.customers USING gin (((email)::text) public.gin_trgm_ops);
+
+--
+-- Name: customers_full_name_trgm; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX customers_full_name_trgm ON public.customers USING gin (full_name public.gin_trgm_ops);
+
+--
+-- Name: customers_merged_into_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX customers_merged_into_idx ON public.customers USING btree (merged_into) WHERE (merged_into IS NOT NULL);
+
+--
+-- Name: customers_phone_trgm; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX customers_phone_trgm ON public.customers USING gin (phone_e164 public.gin_trgm_ops);
+
+--
+-- Name: emergency_closures_history_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX emergency_closures_history_idx ON public.emergency_closures USING btree (location_id, started_at DESC);
+
+--
+-- Name: emergency_notifications_state_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX emergency_notifications_state_idx ON public.emergency_notifications USING btree (emergency_closure_id, state);
 
 --
 -- Name: employee_locations_location_idx; Type: INDEX; Schema: public; Owner: -
@@ -797,6 +1605,18 @@ CREATE INDEX idempotency_keys_expires_idx ON public.idempotency_keys USING btree
 CREATE INDEX invites_employee_idx ON public.invites USING btree (employee_id);
 
 --
+-- Name: job_checklist_items_appointment_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX job_checklist_items_appointment_idx ON public.job_checklist_items USING btree (appointment_id, "position");
+
+--
+-- Name: job_checklist_items_task_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX job_checklist_items_task_idx ON public.job_checklist_items USING btree (source_task_id) WHERE (source_task_id IS NOT NULL);
+
+--
 -- Name: notifications_location_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -827,6 +1647,18 @@ CREATE INDEX realtime_events_at_idx ON public.realtime_events USING btree (at);
 CREATE INDEX realtime_events_location_idx ON public.realtime_events USING btree (location_id, id);
 
 --
+-- Name: reschedule_links_appointment_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX reschedule_links_appointment_idx ON public.reschedule_links USING btree (appointment_id);
+
+--
+-- Name: reschedule_links_emergency_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX reschedule_links_emergency_idx ON public.reschedule_links USING btree (emergency_closure_id) WHERE (emergency_closure_id IS NOT NULL);
+
+--
 -- Name: role_permissions_key_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -845,6 +1677,12 @@ CREATE UNIQUE INDEX roles_name_lower_idx ON public.roles USING btree (lower(name
 CREATE UNIQUE INDEX roles_one_locked_idx ON public.roles USING btree (is_locked) WHERE is_locked;
 
 --
+-- Name: services_listing_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX services_listing_idx ON public.services USING btree (location_id, kind, sort, id);
+
+--
 -- Name: sessions_absolute_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -855,6 +1693,66 @@ CREATE INDEX sessions_absolute_idx ON public.sessions USING btree (absolute_expi
 --
 
 CREATE INDEX sessions_user_idx ON public.sessions USING btree (user_id) WHERE (revoked_at IS NULL);
+
+--
+-- Name: uq_appointment_addons_live; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_appointment_addons_live ON public.appointment_addons USING btree (appointment_id, service_id) WHERE (removed_at IS NULL);
+
+--
+-- Name: uq_bay_occupied; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_bay_occupied ON public.appointments USING btree (bay_id) WHERE (status = 'cleaning'::text);
+
+--
+-- Name: uq_closures_date_live; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_closures_date_live ON public.closures USING btree (location_id, date) WHERE (deleted_at IS NULL);
+
+--
+-- Name: uq_customers_phone; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_customers_phone ON public.customers USING btree (phone_e164) WHERE ((phone_e164 IS NOT NULL) AND (merged_into IS NULL) AND (deleted_at IS NULL));
+
+--
+-- Name: uq_emergency_one_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_emergency_one_active ON public.emergency_closures USING btree (location_id) WHERE active;
+
+--
+-- Name: uq_services_name; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_services_name ON public.services USING btree (location_id, kind, lower(name));
+
+--
+-- Name: uq_vehicles_customer_plate; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_vehicles_customer_plate ON public.vehicles USING btree (customer_id, upper(plate));
+
+--
+-- Name: vehicles_customer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX vehicles_customer_idx ON public.vehicles USING btree (customer_id);
+
+--
+-- Name: vehicles_plate_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX vehicles_plate_idx ON public.vehicles USING btree (upper(plate)) WHERE (plate IS NOT NULL);
+
+--
+-- Name: vip_clients_customer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX vip_clients_customer_idx ON public.vip_clients USING btree (customer_id);
 
 --
 -- Name: webhook_log_received_idx; Type: INDEX; Schema: public; Owner: -
@@ -875,11 +1773,256 @@ CREATE TRIGGER audit_log_no_update_delete BEFORE DELETE OR UPDATE ON public.audi
 CREATE TRIGGER realtime_events_notify AFTER INSERT ON public.realtime_events FOR EACH ROW EXECUTE FUNCTION public.realtime_events_notify();
 
 --
+-- Name: activity_log activity_log_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.activity_log
+    ADD CONSTRAINT activity_log_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id) ON DELETE CASCADE;
+
+--
+-- Name: appointment_addons appointment_addons_added_by_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointment_addons
+    ADD CONSTRAINT appointment_addons_added_by_fk FOREIGN KEY (added_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: appointment_addons appointment_addons_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointment_addons
+    ADD CONSTRAINT appointment_addons_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id) ON DELETE CASCADE;
+
+--
+-- Name: appointment_addons appointment_addons_service_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointment_addons
+    ADD CONSTRAINT appointment_addons_service_id_fkey FOREIGN KEY (service_id) REFERENCES public.services(id);
+
+--
+-- Name: appointment_overrides appointment_overrides_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointment_overrides
+    ADD CONSTRAINT appointment_overrides_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id) ON DELETE CASCADE;
+
+--
+-- Name: appointment_overrides appointment_overrides_employee_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointment_overrides
+    ADD CONSTRAINT appointment_overrides_employee_id_fk FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE SET NULL;
+
+--
+-- Name: appointment_photos appointment_photos_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointment_photos
+    ADD CONSTRAINT appointment_photos_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id) ON DELETE CASCADE;
+
+--
+-- Name: appointment_photos appointment_photos_uploaded_by_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointment_photos
+    ADD CONSTRAINT appointment_photos_uploaded_by_fk FOREIGN KEY (uploaded_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: appointments appointments_assigned_employee_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointments
+    ADD CONSTRAINT appointments_assigned_employee_id_fk FOREIGN KEY (assigned_employee_id) REFERENCES public.employees(id) ON DELETE SET NULL;
+
+--
+-- Name: appointments appointments_bay_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointments
+    ADD CONSTRAINT appointments_bay_id_fkey FOREIGN KEY (bay_id) REFERENCES public.bays(id);
+
+--
+-- Name: appointments appointments_created_by_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointments
+    ADD CONSTRAINT appointments_created_by_fk FOREIGN KEY (created_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: appointments appointments_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointments
+    ADD CONSTRAINT appointments_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: appointments appointments_emergency_closure_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointments
+    ADD CONSTRAINT appointments_emergency_closure_id_fkey FOREIGN KEY (emergency_closure_id) REFERENCES public.emergency_closures(id);
+
+--
+-- Name: appointments appointments_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointments
+    ADD CONSTRAINT appointments_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: appointments appointments_planned_bay_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointments
+    ADD CONSTRAINT appointments_planned_bay_id_fkey FOREIGN KEY (planned_bay_id) REFERENCES public.bays(id);
+
+--
+-- Name: appointments appointments_service_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointments
+    ADD CONSTRAINT appointments_service_id_fkey FOREIGN KEY (service_id) REFERENCES public.services(id);
+
+--
+-- Name: appointments appointments_vehicle_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointments
+    ADD CONSTRAINT appointments_vehicle_id_fkey FOREIGN KEY (vehicle_id) REFERENCES public.vehicles(id);
+
+--
+-- Name: arrival_settings arrival_settings_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.arrival_settings
+    ADD CONSTRAINT arrival_settings_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: arrival_settings arrival_settings_updated_by_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.arrival_settings
+    ADD CONSTRAINT arrival_settings_updated_by_fk FOREIGN KEY (updated_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
 -- Name: audit_log audit_log_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.audit_log
     ADD CONSTRAINT audit_log_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id);
+
+--
+-- Name: bays bays_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.bays
+    ADD CONSTRAINT bays_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: booking_rules booking_rules_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.booking_rules
+    ADD CONSTRAINT booking_rules_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: booking_rules booking_rules_updated_by_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.booking_rules
+    ADD CONSTRAINT booking_rules_updated_by_fk FOREIGN KEY (updated_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: business_hours business_hours_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.business_hours
+    ADD CONSTRAINT business_hours_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: checklist_tasks checklist_tasks_service_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checklist_tasks
+    ADD CONSTRAINT checklist_tasks_service_id_fkey FOREIGN KEY (service_id) REFERENCES public.services(id) ON DELETE CASCADE;
+
+--
+-- Name: closures closures_created_by_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.closures
+    ADD CONSTRAINT closures_created_by_fk FOREIGN KEY (created_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: closures closures_emergency_closure_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.closures
+    ADD CONSTRAINT closures_emergency_closure_id_fkey FOREIGN KEY (emergency_closure_id) REFERENCES public.emergency_closures(id);
+
+--
+-- Name: closures closures_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.closures
+    ADD CONSTRAINT closures_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: customers customers_merged_into_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customers
+    ADD CONSTRAINT customers_merged_into_fkey FOREIGN KEY (merged_into) REFERENCES public.customers(id);
+
+--
+-- Name: emergency_closures emergency_closures_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.emergency_closures
+    ADD CONSTRAINT emergency_closures_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: emergency_closures emergency_closures_reopened_by_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.emergency_closures
+    ADD CONSTRAINT emergency_closures_reopened_by_fk FOREIGN KEY (reopened_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: emergency_closures emergency_closures_started_by_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.emergency_closures
+    ADD CONSTRAINT emergency_closures_started_by_fk FOREIGN KEY (started_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: emergency_notifications emergency_notifications_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.emergency_notifications
+    ADD CONSTRAINT emergency_notifications_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id) ON DELETE CASCADE;
+
+--
+-- Name: emergency_notifications emergency_notifications_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.emergency_notifications
+    ADD CONSTRAINT emergency_notifications_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: emergency_notifications emergency_notifications_emergency_closure_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.emergency_notifications
+    ADD CONSTRAINT emergency_notifications_emergency_closure_id_fkey FOREIGN KEY (emergency_closure_id) REFERENCES public.emergency_closures(id) ON DELETE CASCADE;
+
+--
+-- Name: emergency_notifications emergency_notifications_reschedule_link_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.emergency_notifications
+    ADD CONSTRAINT emergency_notifications_reschedule_link_id_fkey FOREIGN KEY (reschedule_link_id) REFERENCES public.reschedule_links(id);
 
 --
 -- Name: employee_locations employee_locations_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -931,11 +2074,46 @@ ALTER TABLE ONLY public.employee_schedules
     ADD CONSTRAINT employee_schedules_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE;
 
 --
+-- Name: federal_holiday_runs federal_holiday_runs_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.federal_holiday_runs
+    ADD CONSTRAINT federal_holiday_runs_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
 -- Name: invites invites_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.invites
     ADD CONSTRAINT invites_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE;
+
+--
+-- Name: job_checklist_items job_checklist_items_appointment_addon_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.job_checklist_items
+    ADD CONSTRAINT job_checklist_items_appointment_addon_id_fkey FOREIGN KEY (appointment_addon_id) REFERENCES public.appointment_addons(id) ON DELETE SET NULL;
+
+--
+-- Name: job_checklist_items job_checklist_items_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.job_checklist_items
+    ADD CONSTRAINT job_checklist_items_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id) ON DELETE CASCADE;
+
+--
+-- Name: job_checklist_items job_checklist_items_done_by_employee_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.job_checklist_items
+    ADD CONSTRAINT job_checklist_items_done_by_employee_id_fk FOREIGN KEY (done_by_employee_id) REFERENCES public.employees(id) ON DELETE SET NULL;
+
+--
+-- Name: job_checklist_items job_checklist_items_source_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.job_checklist_items
+    ADD CONSTRAINT job_checklist_items_source_task_id_fkey FOREIGN KEY (source_task_id) REFERENCES public.checklist_tasks(id) ON DELETE SET NULL;
 
 --
 -- Name: notifications notifications_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -959,6 +2137,34 @@ ALTER TABLE ONLY public.realtime_events
     ADD CONSTRAINT realtime_events_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
+-- Name: reschedule_links reschedule_links_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reschedule_links
+    ADD CONSTRAINT reschedule_links_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id) ON DELETE CASCADE;
+
+--
+-- Name: reschedule_links reschedule_links_closure_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reschedule_links
+    ADD CONSTRAINT reschedule_links_closure_id_fkey FOREIGN KEY (closure_id) REFERENCES public.closures(id);
+
+--
+-- Name: reschedule_links reschedule_links_emergency_closure_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reschedule_links
+    ADD CONSTRAINT reschedule_links_emergency_closure_id_fkey FOREIGN KEY (emergency_closure_id) REFERENCES public.emergency_closures(id);
+
+--
+-- Name: reschedule_links reschedule_links_result_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reschedule_links
+    ADD CONSTRAINT reschedule_links_result_appointment_id_fkey FOREIGN KEY (result_appointment_id) REFERENCES public.appointments(id);
+
+--
 -- Name: role_limits role_limits_role_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -978,6 +2184,13 @@ ALTER TABLE ONLY public.role_permissions
 
 ALTER TABLE ONLY public.role_permissions
     ADD CONSTRAINT role_permissions_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE;
+
+--
+-- Name: services services_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.services
+    ADD CONSTRAINT services_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 -- Name: sessions sessions_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -1013,6 +2226,55 @@ ALTER TABLE ONLY public.user_preferences
 
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE;
+
+--
+-- Name: vehicles vehicles_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vehicles
+    ADD CONSTRAINT vehicles_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: vip_clients vip_clients_added_by_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vip_clients
+    ADD CONSTRAINT vip_clients_added_by_fk FOREIGN KEY (added_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: vip_clients vip_clients_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vip_clients
+    ADD CONSTRAINT vip_clients_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: vip_clients vip_clients_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vip_clients
+    ADD CONSTRAINT vip_clients_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: vip_holds vip_holds_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vip_holds
+    ADD CONSTRAINT vip_holds_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: vip_settings vip_settings_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vip_settings
+    ADD CONSTRAINT vip_settings_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: vip_settings vip_settings_updated_by_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vip_settings
+    ADD CONSTRAINT vip_settings_updated_by_fk FOREIGN KEY (updated_by) REFERENCES public.users(id) ON DELETE SET NULL;
 
 --
 --

@@ -17,3 +17,28 @@ export async function makeLocation(
     timezone: o.timezone,
   })
 }
+
+/** Inserts a minimal employee plus login so audit-style foreign keys (created_by, started_by, ...) point at a real user. */
+export async function makeUser(
+  db: Executor,
+  newId: NewId,
+  o: Partial<{ first: string; email: string }> = {},
+): Promise<{ userId: string; employeeId: string }> {
+  seq += 1
+  const employeeId = newId()
+  const userId = newId()
+  await db
+    .insertInto('employees')
+    .values({ id: employeeId, first: o.first ?? `Tester${seq}`, status: 'active' })
+    .execute()
+  await db
+    .insertInto('users')
+    .values({
+      id: userId,
+      employee_id: employeeId,
+      email: o.email ?? `tester${seq}-${userId.slice(-6)}@example.test`,
+      password_hash: 'not-a-real-hash',
+    })
+    .execute()
+  return { userId, employeeId }
+}

@@ -12,3 +12,7 @@
 | [0008](0008-sessions-and-csrf.md) | Sessions, CSRF and login throttling |
 | [0009](0009-view-as.md) | Super Admin view-as semantics |
 | [0010](0010-money-limit-storage.md) | Money limit storage (cents, explicit unlimited) and resolution |
+| [0020](0020-domain-core-schema.md) | Domain core schema: location scoping, deferred foreign keys, bay-occupancy index |
+| [0021](0021-checklist-task-ids.md) | Checklist tasks keep stable ids; the PUT diff rules |
+| [0022](0022-closures-federal-holidays-emergency.md) | Closures, federal holidays, dayInfo and emergency closures |
+| [0023](0023-vip-and-settings-data-rules.md) | VIP, arrival and settings data rules |
