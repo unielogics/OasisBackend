@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { FixedClock } from '../../src/platform/clock.js'
-import { computeDeviceState, DEFAULT_HEALTH, DeviceHealthMonitor, freshRecord, InMemoryDeviceRepository, type HealthEvaluation } from '../../src/modules/messaging/dispatch/index.js'
+import { SimulatorProvider } from '../../src/integrations/sms/simulator.js'
+import { computeDeviceState, DEFAULT_HEALTH, DeviceHealthMonitor, freshRecord, InMemoryDeviceRepository, pollDeviceHealth, signalFromHealth, type HealthEvaluation } from '../../src/modules/messaging/dispatch/index.js'
 
 const T0 = new Date('2026-06-13T12:00:00-04:00')
 const min = (n: number): number => n * 60_000
@@ -97,5 +98,31 @@ describe('DeviceHealthMonitor', () => {
     const e = await monitor.record('d', { kind: 'ping', at: T0 })
     expect(e.record.lastSeenAt).toEqual(new Date(T0.getTime() + min(5)))
     void clock
+  })
+})
+
+describe('health polling', () => {
+  it('turns provider health into signals', () => {
+    const at = T0
+    expect(signalFromHealth({ ok: true, battery: 80, details: { reachable: true, status: 'pass', charging: true } }, at)).toEqual({ kind: 'poll_ok', at, healthStatus: 'pass', battery: 80, charging: true })
+    expect(signalFromHealth({ ok: true, details: { reachable: true, status: 'warn' } }, at)).toEqual({ kind: 'poll_ok', at, healthStatus: 'warn' })
+    expect(signalFromHealth({ ok: false, battery: 7, details: { reachable: true, status: 'fail' } }, at)).toMatchObject({ kind: 'poll_ok', healthStatus: 'fail', battery: 7 })
+    expect(signalFromHealth({ ok: false, details: { reachable: false, status: 'unreachable' } }, at)).toEqual({ kind: 'poll_failed', at })
+    expect(signalFromHealth({ ok: true }, at)).toEqual({ kind: 'poll_ok', at, healthStatus: 'pass' })
+  })
+
+  it('polls the simulated device: online, then offline after three failed polls, then back', async () => {
+    const clock = new FixedClock(T0)
+    const sim = new SimulatorProvider({ clock })
+    const monitor = new DeviceHealthMonitor(new InMemoryDeviceRepository(), clock, DEFAULT_HEALTH)
+    expect((await pollDeviceHealth(sim, monitor, 'd', clock)).state).toBe('online')
+    sim.setOutage('down')
+    for (let i = 0; i < 2; i++) expect((await pollDeviceHealth(sim, monitor, 'd', clock)).state).toBe('degraded')
+    expect((await pollDeviceHealth(sim, monitor, 'd', clock)).state).toBe('offline')
+    sim.setOutage('off')
+    expect((await pollDeviceHealth(sim, monitor, 'd', clock)).state).toBe('online')
+    sim.device.battery = 12
+    sim.device.charging = false
+    expect((await pollDeviceHealth(sim, monitor, 'd', clock)).state).toBe('degraded')
   })
 })

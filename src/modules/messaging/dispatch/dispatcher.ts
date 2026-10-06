@@ -7,7 +7,7 @@ import { expiryFor } from '../policy/body.js'
 import { canSendSms, type SmsDecision, type SmsDenyReason, type SmsPolicyContext, type SmsRecipient } from '../policy/canSend.js'
 import { classSpec, isTransactional, type SmsClass } from '../policy/classes.js'
 import { DEFAULT_QUIET_HOURS, isQuietHour, type QuietHoursConfig } from '../policy/quietHours.js'
-import { canSpend, DEFAULT_BUDGET, nextFit, snapshot, usedInWindow, type BudgetConfig, type BudgetSnapshot } from './budget.js'
+import { canSpend, DEFAULT_BUDGET, nextFit, snapshot, type BudgetConfig, type BudgetSnapshot } from './budget.js'
 import { estimateQueue, type QueueEstimate } from './eta.js'
 import { DeviceHealthMonitor, type HealthEvaluation } from './health.js'
 import { backoffMs, DEFAULT_RETRY, DEFAULT_TRANSIENT_REASONS, isTransientReason, nextRetryProviderId, type RetryConfig } from './retry.js'
@@ -100,7 +100,11 @@ export interface TickReport {
   p0FallbackCandidates: string[]
 }
 
+/** One word for the operator: what the dispatcher is doing right now. */
+export type DispatchState = 'idle' | 'sending' | 'rate_limited' | 'quiet_hours' | 'device_offline'
+
 export interface DispatcherStatus {
+  state: DispatchState
   device: DeviceState
   rateLimited: boolean
   resumesAt: Date | null
@@ -519,17 +523,17 @@ export class Dispatcher {
     const quiet = isQuietHour(now, this.cfg.quietHours)
     const head = pending.find((i) => !(quiet && !isTransactional(i.klass)))
     const blocked = head ? !canSpend(usage, now, head.segments, head.priority, this.cfg.budget) : false
+    const heldCount = quiet ? pending.filter((i) => !isTransactional(i.klass)).length : 0
+    const state: DispatchState =
+      evaluation.state === 'offline' ? 'device_offline' : pending.length === 0 ? 'idle' : blocked ? 'rate_limited' : heldCount === pending.length ? 'quiet_hours' : 'sending'
     return {
+      state,
       device: evaluation.state,
       rateLimited: blocked,
       resumesAt: head && blocked ? nextFit(usage, now, head.segments, head.priority, this.cfg.budget) : null,
       budget: snapshot(usage, now, this.cfg.budget),
       queue,
-      heldByQuietHours: quiet ? pending.filter((i) => !isTransactional(i.klass)).length : 0,
+      heldByQuietHours: heldCount,
     }
-  }
-
-  usedInWindow(usage: readonly { at: Date; segments: number }[], now: Date): number {
-    return usedInWindow(usage, now, this.cfg.budget.windowMs)
   }
 }

@@ -153,6 +153,7 @@ describe('send budget', () => {
     await enqueue(h, 'ready-31', 'ready', 'Ready', 500)
     await enqueue(h, 'rem-1', 'reminder', 'Reminder', 501)
     const status = await h.dispatcher.status()
+    expect(status.state).toBe('rate_limited')
     expect(status.rateLimited).toBe(true)
     expect(status.queue.depth).toBe(2)
     expect(status.queue.byLane).toEqual({ 0: 1, 1: 0, 2: 1, 3: 0 })
@@ -169,6 +170,22 @@ describe('send budget', () => {
     await enqueue(h, 'welcome-1', 'welcome', 'Hi', 500) // 15 minute life, next window slot in 30
     const status = await h.dispatcher.status()
     expect(status.queue.willExpire).toBe(1)
+  })
+})
+
+describe('dispatch state', () => {
+  it('says idle, sending, quiet_hours and device_offline', async () => {
+    const h = harness({ health: { failuresToOffline: 1 } })
+    expect((await h.dispatcher.status()).state).toBe('idle')
+    await enqueue(h, 'a', 'ready', 'Ready', 1)
+    expect((await h.dispatcher.status()).state).toBe('sending')
+    h.provider.setOutage('down')
+    await h.dispatcher.tick()
+    expect((await h.dispatcher.status()).state).toBe('device_offline')
+
+    const q = harness({ start: '2026-06-13T22:00:00-04:00' })
+    await q.dispatcher.enqueue({ messageId: 'r', klass: 'reminder', text: 'Reminder', recipient: recipient(1) })
+    expect((await q.dispatcher.status()).state).toBe('quiet_hours')
   })
 })
 

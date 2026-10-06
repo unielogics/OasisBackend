@@ -1,3 +1,4 @@
+import type { SmsDeviceHealth, SmsProvider } from '../../../integrations/ports/sms.js'
 import type { Clock } from '../../../platform/clock.js'
 import type { DeviceRecord, DeviceRepository, DeviceState } from './types.js'
 
@@ -143,4 +144,25 @@ export class DeviceHealthMonitor {
   async evaluate(deviceId: string): Promise<HealthEvaluation> {
     return this.settle(await this.load(deviceId), false)
   }
+}
+
+/** Turns a provider health() result into the signal the monitor takes (both adapters put `status` and `charging` in details). */
+export function signalFromHealth(health: SmsDeviceHealth, at: Date): HealthSignal {
+  const details = (health.details ?? {}) as { reachable?: boolean; status?: string; charging?: boolean }
+  const reachable = details.reachable ?? health.ok
+  if (!reachable) return { kind: 'poll_failed', at }
+  const status = details.status === 'pass' || details.status === 'warn' || details.status === 'fail' ? details.status : health.ok ? 'pass' : 'fail'
+  return {
+    kind: 'poll_ok',
+    at,
+    healthStatus: status,
+    ...(health.battery !== undefined ? { battery: health.battery } : {}),
+    ...(details.charging !== undefined ? { charging: details.charging } : {}),
+  }
+}
+
+/** One health poll: ask the device and feed the monitor. Run it every minute from the job runner. */
+export async function pollDeviceHealth(provider: SmsProvider, monitor: DeviceHealthMonitor, deviceId: string, clock: Clock): Promise<HealthEvaluation> {
+  const health = await provider.health()
+  return monitor.record(deviceId, signalFromHealth(health, clock.now()))
 }
