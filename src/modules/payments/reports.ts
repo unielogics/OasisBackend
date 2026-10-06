@@ -50,6 +50,8 @@ interface RangeRow extends InvoiceCalcRow {
   first_item: string | null
   item_count: number
   item_names: string | null
+  /** Only the list query selects it. */
+  awaiting?: 'payment' | 'refund' | null
 }
 
 async function rangeRows(db: Executor, locationId: string, from: string, to: string): Promise<RangeRow[]> {
@@ -297,6 +299,8 @@ export interface InvoiceListRow {
   status: InvoiceStatus
   statusLabel: string
   refundPending: boolean
+  /** Card money recorded by staff and not yet confirmed in Squarespace: a refund wins over a payment. */
+  awaiting: 'payment' | 'refund' | null
   adjusted: boolean
 }
 
@@ -335,7 +339,9 @@ function listSql(
       select c.*, i.id, i.invoice_no, i.biz_date, i.occurred_at, i.customer_id, i.client_name, i.vehicle_label, i.staff_label, i.tax_bp,
              (select it.name from invoice_items it where it.invoice_id = i.id order by it.position limit 1) as first_item,
              (select count(*)::int from invoice_items it where it.invoice_id = i.id) as item_count,
-             (select string_agg(it.name, '; ' order by it.position) from invoice_items it where it.invoice_id = i.id) as item_names
+             (select string_agg(it.name, '; ' order by it.position) from invoice_items it where it.invoice_id = i.id) as item_names,
+             (select case when bool_or(e.type = 'refund') then 'refund' when count(*) > 0 then 'payment' end
+                from ledger_events e where e.invoice_id = i.id and e.processor_state = 'awaiting_processor') as awaiting
       from invoices i cross join lateral invoice_calc_of(i.id) c
       where i.location_id = ${c.locationId} and i.biz_date between ${range.from}::date and ${range.to}::date
     ) t
@@ -363,6 +369,7 @@ function toListRow(r: RangeRow & { id: string }, today: string, tz: string): Inv
     status: r.status,
     statusLabel: statusLabel(r.status, refundPending),
     refundPending,
+    awaiting: r.awaiting ?? null,
     adjusted: r.adj !== 0,
   }
 }

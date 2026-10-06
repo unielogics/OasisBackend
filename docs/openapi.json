@@ -36079,6 +36079,20 @@
                           "adjusted": {
                             "type": "boolean"
                           },
+                          "awaiting": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "payment",
+                                  "refund"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "balanceCents": {
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
@@ -36178,6 +36192,7 @@
                           "status",
                           "statusLabel",
                           "refundPending",
+                          "awaiting",
                           "adjusted"
                         ],
                         "type": "object"

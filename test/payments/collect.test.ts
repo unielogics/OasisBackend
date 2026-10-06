@@ -74,6 +74,22 @@ describe('collect', () => {
     expect(b.event.byRole).toBe('Customer Support')
   })
 
+  it('the list marks an invoice with card money waiting on Squarespace, and a confirmed one drops the mark', async () => {
+    const { sofia, rafael } = p.people()
+    const inv = await makeInvoice(p.h.t.db, p.env())
+    const row = async () => {
+      const page = p.json<{ items: Array<{ id: string; awaiting: string | null }> }>(
+        await p.get(rafael, 'payments/invoices?range=30d&limit=500'),
+      )
+      return page.items.find((x) => x.id === inv.id)!
+    }
+    expect((await row()).awaiting).toBeNull()
+    const b = p.json<EventResult>(await p.send(sofia, 'POST', `invoices/${inv.id}/payments`, { method: 'card' }))
+    expect((await row()).awaiting).toBe('payment')
+    await p.send(rafael, 'POST', `ledger-events/${b.event.id}/confirm-processor`, {})
+    expect((await row()).awaiting).toBeNull()
+  })
+
   it('collecting a settled invoice is refused', async () => {
     const { rafael } = p.people()
     const inv = await makeInvoice(p.h.t.db, p.env())

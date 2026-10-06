@@ -334,6 +334,7 @@ export const ListRow = z.object({
   status: InvoiceStatus,
   statusLabel: z.string(),
   refundPending: z.boolean(),
+  awaiting: z.enum(['payment', 'refund']).nullable(),
   adjusted: z.boolean(),
 })
 export const ListResult = z.object({ items: z.array(ListRow), nextCursor: z.string().nullable() })
