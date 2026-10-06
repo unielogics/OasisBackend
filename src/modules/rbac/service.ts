@@ -35,7 +35,10 @@ const authorityOf = (roles: RoleGrant[], overrides: Record<string, Override>): A
 
 /** Authority of an employee from the database, uncached. */
 export async function loadAuthority(db: Executor, employeeId: string): Promise<Authority> {
-  const [roleIds, overrides] = await Promise.all([employeeRoleIds(db, employeeId), employeeOverrides(db, employeeId)])
+  const [roleIds, overrides] = await Promise.all([
+    employeeRoleIds(db, employeeId),
+    employeeOverrides(db, employeeId),
+  ])
   return authorityOf(await loadGrants(db, roleIds), overrides)
 }
 

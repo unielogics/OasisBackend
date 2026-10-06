@@ -105,7 +105,7 @@ export function limitsOf(m: EffectiveMap): Partial<Record<LimitKind, number | nu
   const out: Partial<Record<LimitKind, number | null>> = {}
   for (const [perm, kind] of Object.entries(LIMITED_PERMISSION)) {
     const e = m[perm]
-    if (e?.on) out[kind] = e.limit ?? DEFAULT_LIMIT_CENTS
+    if (e?.on) out[kind] = e.limit === undefined ? DEFAULT_LIMIT_CENTS : e.limit
   }
   return out
 }

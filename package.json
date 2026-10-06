@@ -22,6 +22,7 @@
     "db:schema:check": "tsx scripts/db-schema.ts --check",
     "openapi": "tsx scripts/openapi.ts",
     "seed": "tsx db/seeds/index.ts",
+    "user:create": "tsx src/modules/auth/cli.ts",
     "test": "vitest run --passWithNoTests",
     "test:unit": "vitest run test/unit test/platform.test.ts",
     "test:int": "vitest run test/integration",

@@ -1,9 +1,10 @@
 import { buildApp } from './app.js'
 import { loadEnv, type Env } from './config/env.js'
-import { createPermissiveAuthorizer, createDenyAuthorizer, type Authorizer } from './http/authorizer.js'
-import { createClock } from './platform/clock.js'
-import { createDb, type DbOptions } from './platform/db.js'
-import { createIdGenerator } from './platform/ids.js'
+import { createPermissiveAuthorizer, type Authorizer } from './http/authorizer.js'
+import { createIdentity, bootstrapAdmin, type IdentityAuthorizer } from './modules/auth/index.js'
+import { createClock, type Clock } from './platform/clock.js'
+import { createDb, type Db, type DbOptions } from './platform/db.js'
+import { createIdGenerator, type NewId } from './platform/ids.js'
 import { jobDefinitions } from './platform/job-registry.js'
 import { createJobs } from './platform/jobs.js'
 import { ensureLocation } from './platform/locations.js'
@@ -11,12 +12,18 @@ import { createLogger } from './platform/logging.js'
 import { RealtimeHub } from './platform/realtime.js'
 
 /**
- * The auth/RBAC module replaces this function with its session-backed Authorizer. Until then production fails closed
- * (every non-public route answers 401); DEV_AUTH_BYPASS gives local development a signed-in user with all permissions.
+ * Session-backed authorizer (src/modules/auth): cookie sessions, RBAC engine, CSRF. DEV_AUTH_BYPASS keeps a permissive
+ * signed-in user with every permission for local development only (refused in production by the env schema).
  */
-function makeAuthorizer(env: Env, locationId: string): Authorizer {
+function makeAuthorizer(
+  env: Env,
+  locationId: string,
+  db: Db,
+  clock: Clock,
+  newId: NewId,
+): Authorizer | IdentityAuthorizer {
   if (env.DEV_AUTH_BYPASS) return createPermissiveAuthorizer({ locationId })
-  return createDenyAuthorizer()
+  return createIdentity({ db, clock, env, newId, locationId })
 }
 
 async function main(): Promise<void> {
@@ -52,6 +59,19 @@ async function main(): Promise<void> {
   })
   await jobs.start({ workers: false })
 
+  const authorizer = makeAuthorizer(env, location.id, db, clock, newId)
+  if ('identity' in authorizer)
+    logger.warn(
+      'invite and password-reset links are not delivered by SMS or email until a NotificationPort is wired into createIdentity; a Super Admin receives them in the API response instead',
+    )
+  if ('identity' in authorizer && env.BOOTSTRAP_ADMIN_EMAIL && env.BOOTSTRAP_ADMIN_PASSWORD) {
+    const r = await bootstrapAdmin(authorizer.identity, {
+      email: env.BOOTSTRAP_ADMIN_EMAIL,
+      password: env.BOOTSTRAP_ADMIN_PASSWORD,
+    })
+    if (r.created) logger.info({ email: env.BOOTSTRAP_ADMIN_EMAIL }, 'bootstrapped the first Super Admin')
+  }
+
   const app = await buildApp({
     env,
     db,
@@ -59,7 +79,7 @@ async function main(): Promise<void> {
     newId,
     hub,
     jobs,
-    authorizer: makeAuthorizer(env, location.id),
+    authorizer,
   })
   await app.listen({ port: env.PORT, host: env.HOST })
 

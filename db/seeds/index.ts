@@ -8,6 +8,7 @@ import { createDb, transaction, type Db, type Tx } from '../../src/platform/db.j
 import { createIdGenerator, type NewId } from '../../src/platform/ids.js'
 import { ensureLocation, type Location } from '../../src/platform/locations.js'
 import { mulberry32, type Rng } from '../../src/platform/random.js'
+import { peopleProfile } from './people.js'
 
 export interface SeedContext {
   tx: Tx
@@ -39,6 +40,8 @@ export function registerSeedProfile(name: string, profile: SeedProfile): void {
   if (profiles[name]) throw new Error(`Seed profile "${name}" is already registered`)
   profiles[name] = profile
 }
+
+registerSeedProfile('people', peopleProfile)
 
 function resolveOrder(name: string, seen: string[] = []): string[] {
   const p = profiles[name]

@@ -23,7 +23,10 @@ export interface RoleRow {
 }
 
 /** Built-in roles in their fixed order, then custom roles alphabetically. */
-export function compareRoles(a: { key: string | null; name: string }, b: { key: string | null; name: string }): number {
+export function compareRoles(
+  a: { key: string | null; name: string },
+  b: { key: string | null; name: string },
+): number {
   const ia = a.key ? ROLE_PRECEDENCE.indexOf(a.key) : -1
   const ib = b.key ? ROLE_PRECEDENCE.indexOf(b.key) : -1
   if (ia !== -1 && ib !== -1) return ia - ib
@@ -40,8 +43,16 @@ export async function loadGrants(db: Executor, roleIds?: readonly string[]): Pro
   if (roles.length === 0) return []
   const ids = roles.map((r) => r.id)
   const [perms, limits] = await Promise.all([
-    db.selectFrom('role_permissions').select(['role_id', 'permission_key']).where('role_id', 'in', ids).execute(),
-    db.selectFrom('role_limits').select(['role_id', 'kind', 'unlimited', 'limit_cents']).where('role_id', 'in', ids).execute(),
+    db
+      .selectFrom('role_permissions')
+      .select(['role_id', 'permission_key'])
+      .where('role_id', 'in', ids)
+      .execute(),
+    db
+      .selectFrom('role_limits')
+      .select(['role_id', 'kind', 'unlimited', 'limit_cents'])
+      .where('role_id', 'in', ids)
+      .execute(),
   ])
   const permsBy = new Map<string, Set<string>>()
   for (const p of perms) {
@@ -68,7 +79,11 @@ export async function loadGrants(db: Executor, roleIds?: readonly string[]): Pro
 }
 
 export async function employeeRoleIds(db: Executor, employeeId: string): Promise<string[]> {
-  const rows = await db.selectFrom('employee_roles').select('role_id').where('employee_id', '=', employeeId).execute()
+  const rows = await db
+    .selectFrom('employee_roles')
+    .select('role_id')
+    .where('employee_id', '=', employeeId)
+    .execute()
   return rows.map((r) => r.role_id)
 }
 
@@ -100,7 +115,15 @@ export async function bumpRbacVersion(tx: Tx): Promise<number> {
 export async function ensurePermissionCatalog(tx: Tx): Promise<void> {
   await tx
     .insertInto('permissions')
-    .values(PERMISSIONS.map((p, i) => ({ key: p.key, module: p.module, label: p.label, has_limit: !!p.limit, sort: i + 1 })))
+    .values(
+      PERMISSIONS.map((p, i) => ({
+        key: p.key,
+        module: p.module,
+        label: p.label,
+        has_limit: !!p.limit,
+        sort: i + 1,
+      })),
+    )
     .onConflict((oc) => oc.column('key').doNothing())
     .execute()
 }
