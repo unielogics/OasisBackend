@@ -1,0 +1,38 @@
+{
+  "createdOn": "2019-11-18T21:20:05.354Z",
+  "customerEmail": "bob@example.com",
+  "discounts": [{ "amount": { "currency": "USD", "value": 49.99 }, "description": "Discount description", "name": "Sales Discount" }],
+  "id": "a7e4c6b5-d1fe-4e42-a932-f185b4b86829",
+  "modifiedOn": "2019-11-18T21:23:02.87Z",
+  "paymentGatewayError": "GATEWAY_FEE_PROCEESING_ERROR",
+  "payments": [
+    {
+      "amount": { "currency": "USD", "value": 49.99 },
+      "creditCardType": "VISA",
+      "externalCustomerId": "externalCustomerId",
+      "externalTransactionId": "ch_1FFCJCLMG4qggZ0BzchTZjwR",
+      "externalTransactionProperties": [{ "key": "key", "value": "value" }],
+      "giftCardId": "ece69479-50bc-4763-9067-4473f3abcf83",
+      "id": "ece69479-50bc-4763-9067-4473f3abcf83",
+      "netAmount": { "currency": "USD", "value": 49.99 },
+      "paidOn": "2019-09-05T23:24:09.845Z",
+      "processingFees": [],
+      "refundedAmount": { "currency": "USD", "value": 49.99 }
+    }
+  ],
+  "provider": "STRIPE",
+  "refundedAmount": { "currency": "USD", "value": 49.99 },
+  "refunds": [
+    { "amount": { "currency": "USD", "value": 49.99 }, "externalTransactionId": "re_1Flhp8J4wh083J8f7qYtzU9m", "id": "cfdb6b87-64bf-461a-b48b-eca7bd2389fc", "refundedOn": "2019-11-18T21:22:06.5Z" }
+  ],
+  "salesLineItems": [],
+  "salesOrderId": "5d71991aac180c3e7857e1df",
+  "shippingLineItems": [],
+  "total": { "currency": "USD", "value": 49.99 },
+  "totalNetPayment": { "currency": "USD", "value": 49.99 },
+  "totalNetSales": { "currency": "USD", "value": 49.99 },
+  "totalNetShipping": { "currency": "USD", "value": 49.99 },
+  "totalSales": { "currency": "USD", "value": 49.99 },
+  "totalTaxes": { "currency": "USD", "value": 49.99 },
+  "voided": true
+}

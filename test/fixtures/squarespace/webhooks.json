@@ -1,0 +1,15 @@
+{
+  "secret": "F3F9B981C78E7A6187E42853F6CE2804177E98206164779423B02DEC981ACD6B",
+  "orderCreate": {
+    "body": "{\"id\":\"5c2ba184b63ed3cb411ce2b1\",\"websiteId\":\"5f3c3d55ac435e1a051f77b3\",\"subscriptionId\":\"5f3c2155d947844beedda991\",\"topic\":\"order.create\",\"createdOn\":\"2026-10-05T10:02:00.000Z\",\"data\":{\"orderId\":\"64f0a1000000000000000009\"}}",
+    "signature": "4f3b93bb8d5ec53981ad23ee6a1550362f1c5ab1ee0d3da5da424aeb41ce80b0"
+  },
+  "orderUpdate": {
+    "body": "{\"id\":\"5c2ba184b63ed3cb411ce2b2\",\"websiteId\":\"5f3c3d55ac435e1a051f77b3\",\"subscriptionId\":\"5f3c2155d947844beedda991\",\"topic\":\"order.update\",\"createdOn\":\"2026-10-05T10:02:00.000Z\",\"data\":{\"orderId\":\"64f0a1000000000000000009\",\"update\":\"REFUNDED\"}}",
+    "signature": "caadc5e8fc906cddfa04753e57b3afd13b06294eab7d5e4ba3eaacdb1aaa80d1"
+  },
+  "extensionUninstall": {
+    "body": "{\"id\":\"5c2ba184b63ed3cb411ce2b3\",\"websiteId\":\"5f3c3d55ac435e1a051f77b3\",\"subscriptionId\":\"5f3c2155d947844beedda991\",\"topic\":\"extension.uninstall\",\"createdOn\":\"2026-10-05T10:02:00.000Z\",\"data\":{}}",
+    "signature": "cca484a7ed42803a7e444352c4582b84e926be07f33fb030a2d28e56b8cb8e29"
+  }
+}
