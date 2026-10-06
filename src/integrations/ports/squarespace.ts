@@ -43,11 +43,7 @@ export interface SqspContact {
 export interface SquarespaceSource {
   listOrders(p: { modifiedAfter: Date; modifiedBefore: Date; cursor?: string }): Promise<Page<SqspOrder>>
   getOrder(id: string): Promise<SqspOrder>
-  listTransactions(p: {
-    modifiedAfter: Date
-    modifiedBefore: Date
-    cursor?: string
-  }): Promise<Page<SqspTransaction>>
+  listTransactions(p: { modifiedAfter: Date; modifiedBefore: Date; cursor?: string }): Promise<Page<SqspTransaction>>
   listContacts(p: { cursor?: string }): Promise<Page<SqspContact>>
 }
 
