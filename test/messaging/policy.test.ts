@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { applyStopFooter, expiryFor, needsStopFooter, prepareOutboundBody, STOP_FOOTER } from '../../src/modules/messaging/policy/body.js'
 import { canSendSms, type SmsPolicyContext, type SmsRecipient } from '../../src/modules/messaging/policy/canSend.js'
-import { QUIET_HOURS_HELD_CLASSES, SMS_CLASSES, TRANSACTIONAL_CLASSES, type SmsClass } from '../../src/modules/messaging/policy/classes.js'
+import { classSpec, QUIET_HOURS_HELD_CLASSES, SMS_CLASSES, TRANSACTIONAL_CLASSES, type SmsClass } from '../../src/modules/messaging/policy/classes.js'
 import { InMemoryOptOutRepository } from '../../src/modules/messaging/policy/optouts.js'
 import { DEFAULT_QUIET_HOURS, isQuietHour, localMinuteOfDay, quietHoursEnd } from '../../src/modules/messaging/policy/quietHours.js'
 
@@ -104,10 +104,10 @@ describe('canSendSms matrix', () => {
   it('an active opt-out blocks every class including emergencies, except the keyword replies', () => {
     const optedOut = customer({ activeOptOut: true })
     for (const klass of Object.keys(SMS_CLASSES) as SmsClass[]) {
-      const spec = SMS_CLASSES[klass]
-      if ('recipient' in spec && spec.recipient === 'employee') continue
+      const spec = classSpec(klass)
+      if (spec.recipient === 'employee') continue
       const d = canSendSms(optedOut, { klass }, ctx())
-      if ('ignoresOptOut' in spec && spec.ignoresOptOut) expect(d.allowed, klass).toBe(true)
+      if (spec.ignoresOptOut) expect(d.allowed, klass).toBe(true)
       else expect(d, klass).toMatchObject({ verdict: 'deny', reason: 'opted_out' })
     }
     expect(canSendSms(optedOut, { klass: 'emergency' }, ctx())).toMatchObject({ reason: 'opted_out' })
@@ -158,7 +158,7 @@ describe('canSendSms matrix', () => {
 
   it('transactional classes bypass quiet hours: a booking confirmation at 9:30 PM goes out now', () => {
     for (const klass of TRANSACTIONAL_CLASSES) {
-      const rcpt = SMS_CLASSES[klass].recipient === 'employee' ? customer({ kind: 'employee' }) : customer()
+      const rcpt = classSpec(klass).recipient === 'employee' ? customer({ kind: 'employee' }) : customer()
       expect(canSendSms(rcpt, { klass }, ctx({ now: at930pm })).verdict, klass).toBe('allow')
     }
   })
