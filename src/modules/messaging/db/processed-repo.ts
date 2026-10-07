@@ -20,10 +20,6 @@ export class PgProcessedEvents implements ProcessedEventRepository {
 
   async forget(eventId: string): Promise<void> {
     if (this.exec.isTransaction) return
-    await this.exec
-      .deleteFrom('sms_processed_events')
-      .where('event_id', '=', eventId)
-      .execute()
-      .catch(() => undefined)
+    await this.exec.deleteFrom('sms_processed_events').where('event_id', '=', eventId).execute().catch(() => undefined)
   }
 }

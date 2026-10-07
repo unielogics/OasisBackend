@@ -45,11 +45,6 @@ export class PgCustomerDirectory implements CustomerDirectory {
       .orderBy('scheduled_start', 'desc')
       .limit(100)
       .execute()
-    return rows.map((r) => ({
-      id: r.id,
-      status: STATUS[r.status] ?? 'booked',
-      start: r.scheduled_start,
-      completedAt: r.completed_at,
-    }))
+    return rows.map((r) => ({ id: r.id, status: STATUS[r.status] ?? 'booked', start: r.scheduled_start, completedAt: r.completed_at }))
   }
 }

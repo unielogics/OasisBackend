@@ -19,17 +19,9 @@ import type { MessagingRuntime } from '../runtime.js'
 
 type Channel = 'sms' | 'email'
 
-async function logActivity(
-  tx: Tx,
-  appointmentId: string,
-  text: string,
-  channel: Channel,
-  meta: Record<string, unknown>,
-): Promise<void> {
+async function logActivity(tx: Tx, appointmentId: string, text: string, channel: Channel, meta: Record<string, unknown>): Promise<void> {
   await sql`insert into activity_log (appointment_id, text, channels, actor_type, meta)
-    values (${appointmentId}, ${text}, ${[channel, 'system']}::text[], 'system', ${JSON.stringify(meta)}::jsonb)`.execute(
-    tx,
-  )
+    values (${appointmentId}, ${text}, ${[channel, 'system']}::text[], 'system', ${JSON.stringify(meta)}::jsonb)`.execute(tx)
 }
 
 function stateOf(out: EnqueueOutcome): EmergencyNotifyResult['state'] {
@@ -45,11 +37,7 @@ export class MessagingClosureNotifier implements ClosureNotifier {
     private readonly locationId: string,
   ) {}
 
-  async notify(
-    tx: Tx,
-    notice: ClosureNotice,
-    affected: AffectedAppointment[],
-  ): Promise<{ notified: number }> {
+  async notify(tx: Tx, notice: ClosureNotice, affected: AffectedAppointment[]): Promise<{ notified: number }> {
     const { rt } = this
     const when = `on ${mediumDate(notice.date)}`
     let notified = 0
@@ -98,17 +86,11 @@ export class MessagingClosureNotifier implements ClosureNotifier {
       }
       if (!channel) continue
       notified += 1
-      await logActivity(
-        tx,
-        a.appointmentId,
-        `Closure notice queued by ${channel === 'sms' ? 'SMS' : 'email'}: ${notice.name}, ${mediumDate(notice.date)}`,
-        channel,
-        {
-          closureId: notice.closureId,
-          state: 'queued',
-          messageId,
-        },
-      )
+      await logActivity(tx, a.appointmentId, `Closure notice queued by ${channel === 'sms' ? 'SMS' : 'email'}: ${notice.name}, ${mediumDate(notice.date)}`, channel, {
+        closureId: notice.closureId,
+        state: 'queued',
+        messageId,
+      })
     }
     await audit.record(tx, {
       locationId: this.locationId,
@@ -152,11 +134,7 @@ export class MessagingEmergencyNotifier implements EmergencyNotifier {
           locationId: req.locationId,
           to: a.email,
           template: 'closure_notice',
-          vars: {
-            customerName: a.firstName,
-            closureLabel: `on ${mediumDate(a.bizDate)}`,
-            message: req.message,
-          },
+          vars: { customerName: a.firstName, closureLabel: `on ${mediumDate(a.bizDate)}`, message: req.message },
           purpose: 'emergency',
           customerId: a.customerId,
           dedupeKey: `emergency:${req.emergencyClosureId}:${a.appointmentId}:email`,
@@ -165,18 +143,12 @@ export class MessagingEmergencyNotifier implements EmergencyNotifier {
       )
       result = { state: 'queued', messageId: null }
     }
-    await logActivity(
-      tx,
-      a.appointmentId,
-      `Emergency closure message ${result.state === 'queued' ? 'queued' : 'not sent'} by ${req.channel === 'sms' ? 'SMS' : 'email'}`,
-      req.channel,
-      {
-        emergencyClosureId: req.emergencyClosureId,
-        state: result.state,
-        message: req.message,
-        rescheduleCode: req.rescheduleCode,
-      },
-    )
+    await logActivity(tx, a.appointmentId, `Emergency closure message ${result.state === 'queued' ? 'queued' : 'not sent'} by ${req.channel === 'sms' ? 'SMS' : 'email'}`, req.channel, {
+      emergencyClosureId: req.emergencyClosureId,
+      state: result.state,
+      message: req.message,
+      rescheduleCode: req.rescheduleCode,
+    })
     return result
   }
 }

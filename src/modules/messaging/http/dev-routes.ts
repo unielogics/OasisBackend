@@ -16,23 +16,14 @@ export function registerDevRoutes(app: AppInstance, rt: MessagingRuntime): void 
       schema: {
         tags: TAGS,
         summary: 'Dev only: a text arrives on the simulated device from `from`',
-        description:
-          'The simulator signs the webhook like the real app and it is handled by the same code path; the call returns after it has been applied.',
-        body: z
-          .object({
-            from: z.string().min(3).max(40),
-            body: z.string().max(1000),
-            deviceKey: z.string().optional(),
-          })
-          .strict(),
+        description: 'The simulator signs the webhook like the real app and it is handled by the same code path; the call returns after it has been applied.',
+        body: z.object({ from: z.string().min(3).max(40), body: z.string().max(1000), deviceKey: z.string().optional() }).strict(),
         response: { 200: z.object({ injected: z.literal(true), providerMessageId: z.string() }) },
       },
     },
     async (req) => {
       const devices = await rt.store.listEnabled(req.auth!.locationId)
-      const device = devices.find(
-        (d) => d.provider === 'sim' && (!req.body.deviceKey || d.device_key === req.body.deviceKey),
-      )
+      const device = devices.find((d) => d.provider === 'sim' && (!req.body.deviceKey || d.device_key === req.body.deviceKey))
       const sim = device ? rt.simulator(device) : undefined
       if (!sim) throw new AppError('NOT_FOUND', { detail: 'No enabled simulator device' })
       const providerMessageId = sim.injectInbound(req.body.from, req.body.body, { at: app.clock.now() })
@@ -51,16 +42,7 @@ export function registerDevRoutes(app: AppInstance, rt: MessagingRuntime): void 
         response: {
           200: z.object({
             items: z.array(
-              z.object({
-                id: z.string(),
-                to: z.string(),
-                template: z.string(),
-                subject: z.string().nullable(),
-                body: z.string().nullable(),
-                state: z.string(),
-                error: z.string().nullable(),
-                createdAt: z.string(),
-              }),
+              z.object({ id: z.string(), to: z.string(), template: z.string(), subject: z.string().nullable(), body: z.string().nullable(), state: z.string(), error: z.string().nullable(), createdAt: z.string() }),
             ),
           }),
         },
@@ -74,18 +56,7 @@ export function registerDevRoutes(app: AppInstance, rt: MessagingRuntime): void 
         .orderBy('created_at', 'desc')
         .limit(50)
         .execute()
-      return {
-        items: rows.map((r) => ({
-          id: r.id,
-          to: r.to_email,
-          template: r.template,
-          subject: r.subject,
-          body: r.body,
-          state: r.state,
-          error: r.error,
-          createdAt: r.created_at.toISOString(),
-        })),
-      }
+      return { items: rows.map((r) => ({ id: r.id, to: r.to_email, template: r.template, subject: r.subject, body: r.body, state: r.state, error: r.error, createdAt: r.created_at.toISOString() })) }
     },
   )
 }

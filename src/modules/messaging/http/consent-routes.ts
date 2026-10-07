@@ -27,11 +27,7 @@ const Consent = z.object({
   hasPhone: z.boolean(),
 })
 
-async function readConsent(
-  db: Executor,
-  locationId: string,
-  customerId: string,
-): Promise<z.infer<typeof Consent> | null> {
+async function readConsent(db: Executor, locationId: string, customerId: string): Promise<z.infer<typeof Consent> | null> {
   const c = await db
     .selectFrom('customers')
     .select(['id', 'phone_e164', 'sms_opted_in', 'sms_opt_in_source', 'sms_opt_in_at', 'sms_opted_out_at'])
@@ -68,7 +64,7 @@ export function registerConsentRoutes(app: AppInstance, _rt: MessagingRuntime): 
       config: { access: access.perm('cli.view') },
       schema: {
         tags: TAGS,
-        summary: "A customer's SMS consent: opt-in, opt-out and who can change it",
+        summary: 'A customer\'s SMS consent: opt-in, opt-out and who can change it',
         params: IdParams,
         response: { 200: Consent },
       },
@@ -90,12 +86,7 @@ export function registerConsentRoutes(app: AppInstance, _rt: MessagingRuntime): 
         description:
           '`optedIn: true` records staff-attested consent. `optedOut: true` records a manual opt-out (every text to the number stops, emergencies included); `optedOut: false` lifts a MANUAL opt-out only. A STOP the customer texted is refused with 422 SMS_STOP_ACTIVE: they must reply START.',
         params: IdParams,
-        body: z
-          .object({ optedIn: z.boolean().optional(), optedOut: z.boolean().optional() })
-          .strict()
-          .refine((b) => b.optedIn !== undefined || b.optedOut !== undefined, {
-            message: 'Send optedIn or optedOut',
-          }),
+        body: z.object({ optedIn: z.boolean().optional(), optedOut: z.boolean().optional() }).strict().refine((b) => b.optedIn !== undefined || b.optedOut !== undefined, { message: 'Send optedIn or optedOut' }),
         response: { 200: Consent },
       },
     },
@@ -104,21 +95,14 @@ export function registerConsentRoutes(app: AppInstance, _rt: MessagingRuntime): 
         const locationId = req.auth!.locationId
         const before = await readConsent(tx, locationId, req.params.id)
         if (!before) throw new AppError('NOT_FOUND')
-        const customer = await tx
-          .selectFrom('customers')
-          .select(['phone_e164'])
-          .where('id', '=', req.params.id)
-          .forUpdate()
-          .executeTakeFirstOrThrow()
+        const customer = await tx.selectFrom('customers').select(['phone_e164']).where('id', '=', req.params.id).forUpdate().executeTakeFirstOrThrow()
         const now = app.clock.now()
         const { optedIn, optedOut } = req.body
         const clearsOptOut = optedOut === false || optedIn === true
         const setsOptOut = optedOut === true
 
-        if (clearsOptOut && before.optedOut && !before.staffCanClearOptOut)
-          throw new AppError('SMS_STOP_ACTIVE')
-        if (setsOptOut && !customer.phone_e164)
-          throw new AppError('SMS_NO_PHONE', { params: { name: 'this customer' } })
+        if (clearsOptOut && before.optedOut && !before.staffCanClearOptOut) throw new AppError('SMS_STOP_ACTIVE')
+        if (setsOptOut && !customer.phone_e164) throw new AppError('SMS_NO_PHONE', { params: { name: 'this customer' } })
 
         if (clearsOptOut && before.optedOut) {
           if (customer.phone_e164)
@@ -129,11 +113,7 @@ export function registerConsentRoutes(app: AppInstance, _rt: MessagingRuntime): 
               .where('phone_e164', '=', customer.phone_e164)
               .where('opted_in_again_at', 'is', null)
               .execute()
-          await tx
-            .updateTable('customers')
-            .set((eb) => ({ sms_opted_out_at: null, version: eb('version', '+', 1), updated_at: now }))
-            .where('id', '=', req.params.id)
-            .execute()
+          await tx.updateTable('customers').set((eb) => ({ sms_opted_out_at: null, version: eb('version', '+', 1), updated_at: now })).where('id', '=', req.params.id).execute()
         }
         if (setsOptOut && !before.optedOut) {
           await tx
@@ -146,15 +126,9 @@ export function registerConsentRoutes(app: AppInstance, _rt: MessagingRuntime): 
               source: 'manual',
               opted_out_by: req.auth!.realUserId ?? req.auth!.userId,
             })
-            .onConflict((oc) =>
-              oc.columns(['location_id', 'phone_e164']).where('opted_in_again_at', 'is', null).doNothing(),
-            )
+            .onConflict((oc) => oc.columns(['location_id', 'phone_e164']).where('opted_in_again_at', 'is', null).doNothing())
             .execute()
-          await tx
-            .updateTable('customers')
-            .set((eb) => ({ sms_opted_out_at: now, version: eb('version', '+', 1), updated_at: now }))
-            .where('id', '=', req.params.id)
-            .execute()
+          await tx.updateTable('customers').set((eb) => ({ sms_opted_out_at: now, version: eb('version', '+', 1), updated_at: now })).where('id', '=', req.params.id).execute()
         }
         if (optedIn !== undefined)
           await tx

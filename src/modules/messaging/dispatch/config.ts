@@ -12,18 +12,12 @@ const hhmm = /^([01]?\d|2[0-3]):([0-5]\d)$/
 export function parseQuietHours(value: string | undefined, timeZone: string): QuietHoursConfig {
   const v = (value ?? '').trim().toLowerCase()
   if (v === '') return { ...DEFAULT_QUIET_HOURS, timeZone }
-  if (v === 'off' || v === 'none' || v === 'false')
-    return { ...DEFAULT_QUIET_HOURS, enabled: false, timeZone }
+  if (v === 'off' || v === 'none' || v === 'false') return { ...DEFAULT_QUIET_HOURS, enabled: false, timeZone }
   const [from, to] = v.split('-').map((s) => s.trim())
   const a = hhmm.exec(from ?? '')
   const b = hhmm.exec(to ?? '')
   if (!a || !b) throw new Error(`SMS_QUIET_HOURS must look like 21:00-08:00 or "off", got "${value}"`)
-  return {
-    enabled: true,
-    startMinute: Number(a[1]) * 60 + Number(a[2]),
-    endMinute: Number(b[1]) * 60 + Number(b[2]),
-    timeZone,
-  }
+  return { enabled: true, startMinute: Number(a[1]) * 60 + Number(a[2]), endMinute: Number(b[1]) * 60 + Number(b[2]), timeZone }
 }
 
 const schema = z.object({
@@ -48,12 +42,7 @@ export type DispatchEnvValues = z.infer<typeof schema>
 export function dispatcherConfigFromValues(
   deviceId: string,
   e: DispatchEnvValues,
-  device: {
-    minIntervalMs?: number | null
-    maxPerWindow?: number | null
-    windowMinutes?: number | null
-    simSlot?: number | null
-  } = {},
+  device: { minIntervalMs?: number | null; maxPerWindow?: number | null; windowMinutes?: number | null; simSlot?: number | null } = {},
 ): { dispatcher: DispatcherConfig; health: HealthConfig } {
   const maxPerWindow = device.maxPerWindow ?? e.SMSGATE_MAX_PER_WINDOW
   const budget: BudgetConfig = {
@@ -62,9 +51,7 @@ export function dispatcherConfigFromValues(
     reservedForP0: Math.min(e.SMSGATE_RESERVED_P0, Math.max(0, maxPerWindow - 1)),
     safetyMargin: e.SMSGATE_SAFETY_MARGIN,
   }
-  const allowlist = e.SMS_ALLOWLIST.split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
+  const allowlist = e.SMS_ALLOWLIST.split(',').map((s) => s.trim()).filter(Boolean)
   return {
     dispatcher: defaultDispatcherConfig({
       deviceId,
@@ -76,11 +63,7 @@ export function dispatcherConfigFromValues(
       environment: e.NODE_ENV,
       allowlist,
     }),
-    health: {
-      ...DEFAULT_HEALTH,
-      offlineAfterMs: e.SMSGATE_HEARTBEAT_STALE_SECONDS * 1000,
-      onlineWithinMs: e.SMSGATE_ONLINE_WITHIN_SECONDS * 1000,
-    },
+    health: { ...DEFAULT_HEALTH, offlineAfterMs: e.SMSGATE_HEARTBEAT_STALE_SECONDS * 1000, onlineWithinMs: e.SMSGATE_ONLINE_WITHIN_SECONDS * 1000 },
   }
 }
 

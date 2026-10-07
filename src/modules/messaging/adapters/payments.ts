@@ -9,11 +9,7 @@ import type { MessagingRuntime } from '../runtime.js'
 
 async function appointmentOf(tx: Tx, invoiceId: string | undefined): Promise<string | null> {
   if (!invoiceId) return null
-  const r = await tx
-    .selectFrom('invoices')
-    .select('appointment_id')
-    .where('id', '=', invoiceId)
-    .executeTakeFirst()
+  const r = await tx.selectFrom('invoices').select('appointment_id').where('id', '=', invoiceId).executeTakeFirst()
   return r?.appointment_id ?? null
 }
 
@@ -44,19 +40,7 @@ export function createDbPaymentOutbox(rt: MessagingRuntime): PaymentOutbox {
         return { messageId: null }
       }
       const loc = await rt.location(tx)
-      const q = await queueEmail(
-        tx,
-        {
-          locationId: loc.id,
-          to: m.to,
-          template: 'receipt',
-          vars,
-          purpose: 'receipt',
-          customerId: m.customerId,
-          dedupeKey: m.dedupeKey,
-        },
-        rt.deps,
-      )
+      const q = await queueEmail(tx, { locationId: loc.id, to: m.to, template: 'receipt', vars, purpose: 'receipt', customerId: m.customerId, dedupeKey: m.dedupeKey }, rt.deps)
       return { messageId: q.emailId }
     },
   }

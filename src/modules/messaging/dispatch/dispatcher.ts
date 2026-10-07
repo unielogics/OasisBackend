@@ -5,25 +5,11 @@ import { expiryFor } from '../policy/body.js'
 import type { SmsDenyReason, SmsPolicyContext, SmsRecipient } from '../policy/canSend.js'
 import { isTransactional, type SmsClass } from '../policy/classes.js'
 import { DEFAULT_QUIET_HOURS, isQuietHour, type QuietHoursConfig } from '../policy/quietHours.js'
-import {
-  canSpend,
-  DEFAULT_BUDGET,
-  nextFit,
-  snapshot,
-  type BudgetConfig,
-  type BudgetSnapshot,
-} from './budget.js'
+import { canSpend, DEFAULT_BUDGET, nextFit, snapshot, type BudgetConfig, type BudgetSnapshot } from './budget.js'
 import { estimateQueue, type QueueEstimate } from './eta.js'
 import { planEnqueue } from './enqueue.js'
 import { DeviceHealthMonitor, type HealthEvaluation } from './health.js'
-import {
-  backoffMs,
-  DEFAULT_RETRY,
-  DEFAULT_TRANSIENT_REASONS,
-  isTransientReason,
-  nextRetryProviderId,
-  type RetryConfig,
-} from './retry.js'
+import { backoffMs, DEFAULT_RETRY, DEFAULT_TRANSIENT_REASONS, isTransientReason, nextRetryProviderId, type RetryConfig } from './retry.js'
 import type { DeviceState, OutboxItem, OutboxRepository } from './types.js'
 
 // The dispatcher for ONE physical device. Pure orchestration: time comes from the injected Clock, storage from repository
@@ -54,9 +40,7 @@ export interface DispatcherConfig {
   allowlist: readonly string[]
 }
 
-export function defaultDispatcherConfig(
-  overrides: Partial<DispatcherConfig> & Pick<DispatcherConfig, 'deviceId'>,
-): DispatcherConfig {
+export function defaultDispatcherConfig(overrides: Partial<DispatcherConfig> & Pick<DispatcherConfig, 'deviceId'>): DispatcherConfig {
   return {
     budget: DEFAULT_BUDGET,
     minIntervalMs: 3000,
@@ -90,16 +74,7 @@ export interface EnqueueInput {
 }
 
 export type EnqueueResult =
-  | {
-      status: 'queued' | 'held'
-      id: string
-      segments: number
-      encoding: string
-      ttlAt: Date
-      holdUntil: Date | null
-      body: string
-      warnings: string[]
-    }
+  | { status: 'queued' | 'held'; id: string; segments: number; encoding: string; ttlAt: Date; holdUntil: Date | null; body: string; warnings: string[] }
   | { status: 'duplicate'; id: string }
   | { status: 'suppressed'; reason: SmsDenyReason }
   | { status: 'rejected'; reason: 'too_long' | 'empty'; segments?: number }
@@ -163,11 +138,7 @@ export class Dispatcher {
     const existing = await this.outbox.get(input.messageId)
     if (existing) return { status: 'duplicate', id: existing.id }
 
-    const plan = await planEnqueue(input, {
-      now,
-      cfg: this.cfg,
-      hasPriorOutbound: (phone) => this.outbox.hasPriorOutbound(phone),
-    })
+    const plan = await planEnqueue(input, { now, cfg: this.cfg, hasPriorOutbound: (phone) => this.outbox.hasPriorOutbound(phone) })
     if (plan.status !== 'ready') return plan
     const { item, holdUntil } = plan
     if (!(await this.outbox.insert(item))) return { status: 'duplicate', id: item.id }
@@ -202,10 +173,7 @@ export class Dispatcher {
       nextAttemptAt: null,
       lastError: null,
       failedAt: null,
-      providerMessageId:
-        item.acceptedAt === null
-          ? item.providerMessageId
-          : nextRetryProviderId(item.id, item.providerMessageId),
+      providerMessageId: item.acceptedAt === null ? item.providerMessageId : nextRetryProviderId(item.id, item.providerMessageId),
       ttlAt: expiryFor(item.klass, now),
     })
     return true
@@ -231,9 +199,7 @@ export class Dispatcher {
     }
 
     // A crash between claim and result leaves an item inflight. Put it back; the provider answers 409/status for its id.
-    for (const stuck of await this.outbox.listStuckInflight(
-      new Date(now.getTime() - this.cfg.inflightStaleMs),
-    )) {
+    for (const stuck of await this.outbox.listStuckInflight(new Date(now.getTime() - this.cfg.inflightStaleMs))) {
       await this.outbox.update(stuck.id, { state: 'pending', nextAttemptAt: null })
     }
 
@@ -255,9 +221,7 @@ export class Dispatcher {
     }
 
     const quiet = isQuietHour(now, this.cfg.quietHours)
-    const ready = pending.filter(
-      (i) => i.nextAttemptAt === null || i.nextAttemptAt.getTime() <= now.getTime(),
-    )
+    const ready = pending.filter((i) => i.nextAttemptAt === null || i.nextAttemptAt.getTime() <= now.getTime())
     const eligible = ready.filter((i) => {
       if (quiet && !isTransactional(i.klass)) {
         report.heldByQuietHours += 1
@@ -265,14 +229,9 @@ export class Dispatcher {
       }
       return true
     })
-    eligible.sort(
-      (a, b) =>
-        a.priority - b.priority || a.queuedAt.getTime() - b.queuedAt.getTime() || (a.id < b.id ? -1 : 1),
-    )
+    eligible.sort((a, b) => a.priority - b.priority || a.queuedAt.getTime() - b.queuedAt.getTime() || (a.id < b.id ? -1 : 1))
 
-    const usage = (await this.outbox.listUsage(new Date(now.getTime() - this.cfg.budget.windowMs))).map(
-      (u) => ({ at: u.at, segments: u.segments }),
-    )
+    const usage = (await this.outbox.listUsage(new Date(now.getTime() - this.cfg.budget.windowMs))).map((u) => ({ at: u.at, segments: u.segments }))
     let lastSendAt = usage.reduce((m, u) => Math.max(m, u.at.getTime()), Number.NEGATIVE_INFINITY)
 
     for (const item of eligible) {
@@ -332,19 +291,10 @@ export class Dispatcher {
       .map((i) => i.id)
   }
 
-  private async onAccepted(
-    item: OutboxItem,
-    providerId: string,
-    deviceState: SmsState,
-    now: Date,
-  ): Promise<void> {
+  private async onAccepted(item: OutboxItem, providerId: string, deviceState: SmsState, now: Date): Promise<void> {
     await this.outbox.recordUsage({ providerMessageId: providerId, segments: item.segments, acceptedAt: now })
     if (deviceState === 'Failed') {
-      await this.applyDeviceFailure(
-        { ...item, providerMessageId: providerId, acceptedAt: now },
-        'device reported Failed on submit',
-        now,
-      )
+      await this.applyDeviceFailure({ ...item, providerMessageId: providerId, acceptedAt: now }, 'device reported Failed on submit', now)
       return
     }
     const state = deviceState === 'Delivered' ? 'delivered' : deviceState === 'Sent' ? 'sent' : 'accepted'
@@ -360,26 +310,15 @@ export class Dispatcher {
     })
   }
 
-  private async onSendError(
-    item: OutboxItem,
-    err: unknown,
-    now: Date,
-  ): Promise<{ failed: boolean; auth: boolean; stop: boolean }> {
-    const e =
-      err instanceof SmsProviderError
-        ? err
-        : new SmsProviderError('transient', (err as Error)?.message ?? String(err))
+  private async onSendError(item: OutboxItem, err: unknown, now: Date): Promise<{ failed: boolean; auth: boolean; stop: boolean }> {
+    const e = err instanceof SmsProviderError ? err : new SmsProviderError('transient', (err as Error)?.message ?? String(err))
     if (e.kind === 'rejected') {
       await this.outbox.update(item.id, { state: 'failed', failedAt: now, lastError: e.message })
       return { failed: true, auth: false, stop: false }
     }
     if (e.kind === 'auth') {
       // Not the message's fault: put it back without burning an attempt and stop for this tick.
-      await this.outbox.update(item.id, {
-        state: 'pending',
-        nextAttemptAt: new Date(now.getTime() + 5 * 60_000),
-        lastError: e.message,
-      })
+      await this.outbox.update(item.id, { state: 'pending', nextAttemptAt: new Date(now.getTime() + 5 * 60_000), lastError: e.message })
       return { failed: false, auth: true, stop: true }
     }
     // transient or protocol: outcome unknown to us; the provider already checked the device before giving up.
@@ -401,10 +340,7 @@ export class Dispatcher {
 
   // ---- device events ---------------------------------------------------------------------------------------------
 
-  async handleEvent(
-    event: SmsEvent,
-    extras: { health?: { status: 'pass' | 'warn' | 'fail'; battery?: number; charging?: boolean } } = {},
-  ): Promise<EventResult & { health?: HealthEvaluation }> {
+  async handleEvent(event: SmsEvent, extras: { health?: { status: 'pass' | 'warn' | 'fail'; battery?: number; charging?: boolean } } = {}): Promise<EventResult & { health?: HealthEvaluation }> {
     const now = this.clock.now()
     switch (event.kind) {
       case 'ping': {
@@ -454,14 +390,12 @@ export class Dispatcher {
         return { handled: true, detail: 'updated', outboxId: item.id }
       }
       case 'failed': {
-        if (item.state === 'delivered' || item.state === 'failed')
-          return { handled: true, detail: 'ignored_stale', outboxId: item.id }
+        if (item.state === 'delivered' || item.state === 'failed') return { handled: true, detail: 'ignored_stale', outboxId: item.id }
         const requeued = await this.applyDeviceFailure(item, event.reason ?? 'unknown', now, event.at)
         return { handled: true, detail: requeued ? 'requeued' : 'updated', outboxId: item.id }
       }
       case 'cancelled': {
-        if ((RANK[item.state] ?? 0) >= RANK.sent!)
-          return { handled: true, detail: 'ignored_stale', outboxId: item.id }
+        if ((RANK[item.state] ?? 0) >= RANK.sent!) return { handled: true, detail: 'ignored_stale', outboxId: item.id }
         await this.outbox.update(item.id, { state: 'cancelled', lastError: 'cancelled on the device' })
         return { handled: true, detail: 'updated', outboxId: item.id }
       }
@@ -469,15 +403,8 @@ export class Dispatcher {
   }
 
   /** Returns true when the message was put back for one more try. */
-  private async applyDeviceFailure(
-    item: OutboxItem,
-    reason: string,
-    now: Date,
-    at: Date = now,
-  ): Promise<boolean> {
-    const canRetry =
-      isTransientReason(reason, this.cfg.transientReasons) &&
-      item.deviceFailures < this.cfg.deviceFailureMaxRetries
+  private async applyDeviceFailure(item: OutboxItem, reason: string, now: Date, at: Date = now): Promise<boolean> {
+    const canRetry = isTransientReason(reason, this.cfg.transientReasons) && item.deviceFailures < this.cfg.deviceFailureMaxRetries
     if (canRetry && item.ttlAt.getTime() > now.getTime() + this.cfg.deviceFailureRetryAfterMs) {
       await this.outbox.update(item.id, {
         state: 'pending',
@@ -522,32 +449,17 @@ export class Dispatcher {
       await this.health.record(this.cfg.deviceId, { kind: 'poll_ok', at: now })
       if (status === null) {
         if (item.reconcileResends < r.maxResends && item.ttlAt.getTime() > now.getTime()) {
-          await this.outbox.update(item.id, {
-            state: 'pending',
-            reconcileResends: item.reconcileResends + 1,
-            nextAttemptAt: null,
-            lastReconciledAt: now,
-            lastError: 'device had no record of the message',
-          })
+          await this.outbox.update(item.id, { state: 'pending', reconcileResends: item.reconcileResends + 1, nextAttemptAt: null, lastReconciledAt: now, lastError: 'device had no record of the message' })
           out.resent += 1
         } else {
-          await this.outbox.update(item.id, {
-            state: 'failed',
-            failedAt: now,
-            lastReconciledAt: now,
-            lastError: 'device lost the message',
-          })
+          await this.outbox.update(item.id, { state: 'failed', failedAt: now, lastReconciledAt: now, lastError: 'device lost the message' })
         }
         out.updated += 1
         continue
       }
       await this.outbox.update(item.id, { lastReconciledAt: now })
       if (status.state === 'Delivered' && item.state !== 'delivered') {
-        await this.outbox.update(item.id, {
-          state: 'delivered',
-          deliveredAt: now,
-          sentAt: item.sentAt ?? now,
-        })
+        await this.outbox.update(item.id, { state: 'delivered', deliveredAt: now, sentAt: item.sentAt ?? now })
         out.updated += 1
       } else if (status.state === 'Sent' && item.state === 'accepted') {
         await this.outbox.update(item.id, { state: 'sent', sentAt: now })
@@ -566,31 +478,14 @@ export class Dispatcher {
     const now = this.clock.now()
     const evaluation = await this.health.evaluate(this.cfg.deviceId)
     const pending = await this.outbox.listPending()
-    const usage = (await this.outbox.listUsage(new Date(now.getTime() - this.cfg.budget.windowMs))).map(
-      (u) => ({ at: u.at, segments: u.segments }),
-    )
-    const queue = estimateQueue(
-      pending,
-      usage,
-      now,
-      this.cfg.budget,
-      this.cfg.minIntervalMs,
-      this.cfg.quietHours,
-    )
+    const usage = (await this.outbox.listUsage(new Date(now.getTime() - this.cfg.budget.windowMs))).map((u) => ({ at: u.at, segments: u.segments }))
+    const queue = estimateQueue(pending, usage, now, this.cfg.budget, this.cfg.minIntervalMs, this.cfg.quietHours)
     const quiet = isQuietHour(now, this.cfg.quietHours)
     const head = pending.find((i) => !(quiet && !isTransactional(i.klass)))
     const blocked = head ? !canSpend(usage, now, head.segments, head.priority, this.cfg.budget) : false
     const heldCount = quiet ? pending.filter((i) => !isTransactional(i.klass)).length : 0
     const state: DispatchState =
-      evaluation.state === 'offline'
-        ? 'device_offline'
-        : pending.length === 0
-          ? 'idle'
-          : blocked
-            ? 'rate_limited'
-            : heldCount === pending.length
-              ? 'quiet_hours'
-              : 'sending'
+      evaluation.state === 'offline' ? 'device_offline' : pending.length === 0 ? 'idle' : blocked ? 'rate_limited' : heldCount === pending.length ? 'quiet_hours' : 'sending'
     return {
       state,
       device: evaluation.state,

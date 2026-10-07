@@ -35,9 +35,7 @@ export function messagingConfig(env: Env): MessagingConfig {
     tz: env.BUSINESS_TZ,
     linksEnabled: env.RESCHEDULE_LINK_ENABLED,
     ...(env.BUSINESS_PHONE ? { businessPhone: env.BUSINESS_PHONE } : {}),
-    ...(env.SMSGATE_WEBHOOK_PUBLIC_URL
-      ? { webhookPublicUrl: env.SMSGATE_WEBHOOK_PUBLIC_URL.replace(/\/+$/, '') }
-      : {}),
+    ...(env.SMSGATE_WEBHOOK_PUBLIC_URL ? { webhookPublicUrl: env.SMSGATE_WEBHOOK_PUBLIC_URL.replace(/\/+$/, '') } : {}),
     webhookToleranceSec: env.SMSGATE_WEBHOOK_TOLERANCE_SECONDS,
     tickIntervalMs: env.SMS_TICK_INTERVAL_MS,
     plan: {

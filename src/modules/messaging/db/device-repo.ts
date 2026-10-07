@@ -58,18 +58,7 @@ export class PgDeviceRepository implements DeviceRepository {
     await inTx(this.exec, async (tx) => {
       const prev = await tx
         .selectFrom('sms_devices')
-        .select([
-          'status',
-          'state_changed_at',
-          'last_seen_at',
-          'last_ping_at',
-          'last_app_started_at',
-          'last_poll_ok_at',
-          'consecutive_poll_failures',
-          'health_status',
-          'battery',
-          'charging',
-        ])
+        .select(['status', 'state_changed_at', 'last_seen_at', 'last_ping_at', 'last_app_started_at', 'last_poll_ok_at', 'consecutive_poll_failures', 'health_status', 'battery', 'charging'])
         .where('id', '=', record.id)
         .forUpdate()
         .executeTakeFirst()
@@ -102,11 +91,9 @@ export class PgDeviceRepository implements DeviceRepository {
         })
         .where('id', '=', record.id)
         .execute()
-      if (prev.status !== record.state && this.effects)
-        await this.effects(tx, { deviceId: record.id, from: prev.status, to: record.state, record })
+      if (prev.status !== record.state && this.effects) await this.effects(tx, { deviceId: record.id, from: prev.status, to: record.state, record })
     })
   }
 }
 
-const same2 = (a: Date | null, b: Date | null): boolean =>
-  a === null || b === null ? a === b : a.getTime() === b.getTime()
+const same2 = (a: Date | null, b: Date | null): boolean => (a === null || b === null ? a === b : a.getTime() === b.getTime())

@@ -69,12 +69,7 @@ export function deviceView(r: DeviceRow): DeviceView {
     lastError: r.last_error,
     webhooksUrl: r.webhooks_url,
     webhooksRegisteredAt: iso(r.webhooks_registered_at),
-    counters: {
-      sent: r.sent_count,
-      delivered: r.delivered_count,
-      failed: r.failed_count,
-      received: r.received_count,
-    },
+    counters: { sent: r.sent_count, delivered: r.delivered_count, failed: r.failed_count, received: r.received_count },
   }
 }
 
@@ -118,13 +113,7 @@ export class DeviceStore {
   }
 
   list(locationId: string): Promise<DeviceRow[]> {
-    return this.exec
-      .selectFrom('sms_devices')
-      .selectAll()
-      .where('location_id', '=', locationId)
-      .orderBy('created_at')
-      .orderBy('id')
-      .execute()
+    return this.exec.selectFrom('sms_devices').selectAll().where('location_id', '=', locationId).orderBy('created_at').orderBy('id').execute()
   }
 
   async listEnabled(locationId?: string): Promise<DeviceRow[]> {
@@ -134,33 +123,20 @@ export class DeviceStore {
   }
 
   async get(id: string): Promise<DeviceRow | null> {
-    return (
-      (await this.exec.selectFrom('sms_devices').selectAll().where('id', '=', id).executeTakeFirst()) ?? null
-    )
+    return (await this.exec.selectFrom('sms_devices').selectAll().where('id', '=', id).executeTakeFirst()) ?? null
   }
 
   async getByKey(key: string): Promise<DeviceRow | null> {
-    return (
-      (await this.exec
-        .selectFrom('sms_devices')
-        .selectAll()
-        .where('device_key', '=', key)
-        .executeTakeFirst()) ?? null
-    )
+    return (await this.exec.selectFrom('sms_devices').selectAll().where('device_key', '=', key).executeTakeFirst()) ?? null
   }
 
   secrets(r: DeviceRow): DeviceSecrets {
-    return {
-      password: r.password_enc ? this.box.decrypt(r.password_enc) : null,
-      webhookSecret: this.box.decrypt(r.webhook_secret_enc),
-    }
+    return { password: r.password_enc ? this.box.decrypt(r.password_enc) : null, webhookSecret: this.box.decrypt(r.webhook_secret_enc) }
   }
 
   async create(locationId: string, d: NewDevice): Promise<{ device: DeviceRow; webhookSecret: string }> {
     if (d.provider === 'smsgate' && (!d.baseUrl || !d.username || !d.password))
-      throw new AppError('VALIDATION_FAILED', {
-        errors: [{ path: 'baseUrl', message: 'An SMS Gate device needs its URL, username and password' }],
-      })
+      throw new AppError('VALIDATION_FAILED', { errors: [{ path: 'baseUrl', message: 'An SMS Gate device needs its URL, username and password' }] })
     const webhookSecret = d.webhookSecret ?? newWebhookSecret()
     const now = this.o.clock.now()
     const row = await this.exec
@@ -213,30 +189,16 @@ export class DeviceStore {
     if (p.maxPerWindow !== undefined) set.max_per_window = p.maxPerWindow
     if (p.windowMinutes !== undefined) set.window_minutes = p.windowMinutes
     if (p.enabled !== undefined) set.enabled = p.enabled
-    const row = await this.exec
-      .updateTable('sms_devices')
-      .set(set as never)
-      .where('id', '=', id)
-      .returningAll()
-      .executeTakeFirst()
+    const row = await this.exec.updateTable('sms_devices').set(set as never).where('id', '=', id).returningAll().executeTakeFirst()
     return row ?? null
   }
 
   async noteRemoteId(id: string, remote: string): Promise<void> {
-    await this.exec
-      .updateTable('sms_devices')
-      .set({ remote_device_id: remote })
-      .where('id', '=', id)
-      .where((eb) => eb.or([eb('remote_device_id', 'is', null), eb('remote_device_id', '!=', remote)]))
-      .execute()
+    await this.exec.updateTable('sms_devices').set({ remote_device_id: remote }).where('id', '=', id).where((eb) => eb.or([eb('remote_device_id', 'is', null), eb('remote_device_id', '!=', remote)])).execute()
   }
 
   async noteRegistered(id: string, url: string, at: Date): Promise<void> {
-    await this.exec
-      .updateTable('sms_devices')
-      .set({ webhooks_url: url, webhooks_registered_at: at, last_error: null })
-      .where('id', '=', id)
-      .execute()
+    await this.exec.updateTable('sms_devices').set({ webhooks_url: url, webhooks_registered_at: at, last_error: null }).where('id', '=', id).execute()
   }
 
   async noteError(id: string, error: string | null): Promise<void> {
@@ -244,10 +206,6 @@ export class DeviceStore {
   }
 
   async bumpReceived(id: string): Promise<void> {
-    await this.exec
-      .updateTable('sms_devices')
-      .set((eb) => ({ received_count: eb('received_count', '+', 1) }))
-      .where('id', '=', id)
-      .execute()
+    await this.exec.updateTable('sms_devices').set((eb) => ({ received_count: eb('received_count', '+', 1) })).where('id', '=', id).execute()
   }
 }

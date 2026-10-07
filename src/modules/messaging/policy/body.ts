@@ -43,12 +43,7 @@ export function prepareOutboundBody(
  * Moment after which the message is no longer worth sending. The clock starts when the message may first go out, so a
  * reminder queued at 10 PM and held to 8 AM still gets its full window.
  */
-export function expiryFor(
-  klass: SmsClass,
-  queuedAt: Date,
-  holdUntil?: Date | null,
-  ttlOverrideSec?: number,
-): Date {
+export function expiryFor(klass: SmsClass, queuedAt: Date, holdUntil?: Date | null, ttlOverrideSec?: number): Date {
   const start = holdUntil && holdUntil.getTime() > queuedAt.getTime() ? holdUntil : queuedAt
   return new Date(start.getTime() + (ttlOverrideSec ?? classSpec(klass).ttlSec) * 1000)
 }

@@ -52,11 +52,7 @@ const ThreadCustomer = z.object({
   canMessage: z.boolean(),
 })
 
-const Thread = z.object({
-  items: z.array(Message),
-  customer: ThreadCustomer.nullable(),
-  unread: z.number().int(),
-})
+const Thread = z.object({ items: z.array(Message), customer: ThreadCustomer.nullable(), unread: z.number().int() })
 
 const SendBody = z
   .object({
@@ -65,9 +61,7 @@ const SendBody = z
     vars: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
   })
   .strict()
-  .refine((b) => (b.text !== undefined) !== (b.templateKey !== undefined), {
-    message: 'Send either text or templateKey',
-  })
+  .refine((b) => (b.text !== undefined) !== (b.templateKey !== undefined), { message: 'Send either text or templateKey' })
 
 const SendResult = z.object({
   message: Message,
@@ -77,11 +71,7 @@ const SendResult = z.object({
   segments: z.number().int(),
 })
 
-async function customerFlags(
-  db: Executor,
-  locationId: string,
-  customerId: string,
-): Promise<z.infer<typeof ThreadCustomer> | null> {
+async function customerFlags(db: Executor, locationId: string, customerId: string): Promise<z.infer<typeof ThreadCustomer> | null> {
   const t = await loadCustomerTarget(db, locationId, customerId)
   if (!t) return null
   const r = t.recipient
@@ -95,12 +85,7 @@ async function customerFlags(
   }
 }
 
-async function markRead(
-  tx: Tx,
-  locationId: string,
-  where: { customerId?: string; appointmentId?: string },
-  now: Date,
-): Promise<number> {
+async function markRead(tx: Tx, locationId: string, where: { customerId?: string; appointmentId?: string }, now: Date): Promise<number> {
   let q = tx
     .updateTable('messages')
     .set({ read_at: now })
@@ -116,12 +101,7 @@ async function markRead(
         select count(*) from messages where customer_id = ${customerId} and direction = 'in' and read_at is null)
       where location_id = ${locationId} and customer_id = ${customerId}`.execute(tx)
   if (rows.length > 0)
-    await realtime.publish(tx, {
-      locationId,
-      channel: 'ops',
-      type: 'alerts.changed',
-      payload: { source: 'sms', kind: 'read' },
-    })
+    await realtime.publish(tx, { locationId, channel: 'ops', type: 'alerts.changed', payload: { source: 'sms', kind: 'read' } })
   return rows.length
 }
 
@@ -134,32 +114,18 @@ export function registerThreadRoutes(app: AppInstance, rt: MessagingRuntime): vo
         tags: TAGS,
         summary: 'The Messages tab: every text filed under this appointment, oldest first',
         description:
-          "Outbound texts the app sent for the appointment and inbound replies attributed to it (a job in progress, else the nearest upcoming booking within 72 hours, else the last completed one within 14 days). `customer.canMessage` is false when a send would be refused. No phone number is returned. `markRead=true` clears the customer's unread replies.",
+          'Outbound texts the app sent for the appointment and inbound replies attributed to it (a job in progress, else the nearest upcoming booking within 72 hours, else the last completed one within 14 days). `customer.canMessage` is false when a send would be refused. No phone number is returned. `markRead=true` clears the customer\'s unread replies.',
         params: IdParams,
-        querystring: z.object({
-          markRead: z.coerce.boolean().default(false),
-          limit: z.coerce.number().int().min(1).max(500).default(200),
-        }),
+        querystring: z.object({ markRead: z.coerce.boolean().default(false), limit: z.coerce.number().int().min(1).max(500).default(200) }),
         response: { 200: Thread },
       },
     },
     async (req) => {
       const locationId = req.auth!.locationId
-      const appt = await app.db
-        .selectFrom('appointments')
-        .select(['id', 'customer_id'])
-        .where('id', '=', req.params.id)
-        .where('location_id', '=', locationId)
-        .executeTakeFirst()
+      const appt = await app.db.selectFrom('appointments').select(['id', 'customer_id']).where('id', '=', req.params.id).where('location_id', '=', locationId).executeTakeFirst()
       if (!appt) throw new AppError('NOT_FOUND')
-      if (req.query.markRead && req.auth!.permissions.has('msg.send'))
-        await transaction(app.db, (tx) =>
-          markRead(tx, locationId, { appointmentId: appt.id }, app.clock.now()),
-        )
-      const items = await listThreadMessages(app.db, locationId, {
-        appointmentId: appt.id,
-        limit: req.query.limit,
-      })
+      if (req.query.markRead && req.auth!.permissions.has('msg.send')) await transaction(app.db, (tx) => markRead(tx, locationId, { appointmentId: appt.id }, app.clock.now()))
+      const items = await listThreadMessages(app.db, locationId, { appointmentId: appt.id, limit: req.query.limit })
       const customer = await customerFlags(app.db, locationId, appt.customer_id)
       return { items, customer, unread: items.filter((m) => !m.read).length }
     },
@@ -171,12 +137,9 @@ export function registerThreadRoutes(app: AppInstance, rt: MessagingRuntime): vo
       config: { access: access.perm('cli.view') },
       schema: {
         tags: TAGS,
-        summary: "A customer's whole thread across appointments, oldest first",
+        summary: 'A customer\'s whole thread across appointments, oldest first',
         params: IdParams,
-        querystring: z.object({
-          markRead: z.coerce.boolean().default(false),
-          limit: z.coerce.number().int().min(1).max(500).default(200),
-        }),
+        querystring: z.object({ markRead: z.coerce.boolean().default(false), limit: z.coerce.number().int().min(1).max(500).default(200) }),
         response: { 200: Thread },
       },
     },
@@ -184,14 +147,8 @@ export function registerThreadRoutes(app: AppInstance, rt: MessagingRuntime): vo
       const locationId = req.auth!.locationId
       const customer = await customerFlags(app.db, locationId, req.params.id)
       if (!customer) throw new AppError('NOT_FOUND')
-      if (req.query.markRead && req.auth!.permissions.has('msg.send'))
-        await transaction(app.db, (tx) =>
-          markRead(tx, locationId, { customerId: req.params.id }, app.clock.now()),
-        )
-      const items = await listThreadMessages(app.db, locationId, {
-        customerId: req.params.id,
-        limit: req.query.limit,
-      })
+      if (req.query.markRead && req.auth!.permissions.has('msg.send')) await transaction(app.db, (tx) => markRead(tx, locationId, { customerId: req.params.id }, app.clock.now()))
+      const items = await listThreadMessages(app.db, locationId, { customerId: req.params.id, limit: req.query.limit })
       return { items, customer, unread: items.filter((m) => !m.read).length }
     },
   )
@@ -202,15 +159,13 @@ export function registerThreadRoutes(app: AppInstance, rt: MessagingRuntime): vo
       config: { access: access.perm('msg.send') },
       schema: {
         tags: TAGS,
-        summary: "Mark the customer's unread replies as read",
+        summary: 'Mark the customer\'s unread replies as read',
         params: IdParams,
         response: { 200: z.object({ marked: z.number().int() }) },
       },
     },
     async (req) => ({
-      marked: await transaction(app.db, (tx) =>
-        markRead(tx, req.auth!.locationId, { customerId: req.params.id }, app.clock.now()),
-      ),
+      marked: await transaction(app.db, (tx) => markRead(tx, req.auth!.locationId, { customerId: req.params.id }, app.clock.now())),
     }),
   )
 
@@ -220,7 +175,7 @@ export function registerThreadRoutes(app: AppInstance, rt: MessagingRuntime): vo
       config: { access: access.perm('msg.send'), idempotency: 'required' },
       schema: {
         tags: TAGS,
-        summary: "Send a text to the appointment's customer",
+        summary: 'Send a text to the appointment\'s customer',
         description:
           'Free `text` goes out as an SMS (class staff_message) and a `templateKey` of a quick reply or an automation renders its wording; variables not supplied (`first`, `time`, `when`, `bay`) are filled from the appointment. The text passes the SMS policy: 422 SMS_OPTED_OUT after a STOP, SMS_NOT_OPTED_IN without consent, SMS_NO_PHONE without a number, SMS_TOO_LONG above the segment cap. It is queued, not sent inline; `message.status` events follow on the messages channel.',
         params: IdParams,
@@ -262,9 +217,7 @@ export function registerThreadRoutes(app: AppInstance, rt: MessagingRuntime): vo
           } else if (isTemplateKey(body.templateKey) && STAFF_SENDABLE.includes(body.templateKey)) {
             templateKey = body.templateKey
             const bayId = a.bay_id ?? a.planned_bay_id
-            const bay = bayId
-              ? await tx.selectFrom('bays').select('number').where('id', '=', bayId).executeTakeFirst()
-              : undefined
+            const bay = bayId ? await tx.selectFrom('bays').select('number').where('id', '=', bayId).executeTakeFirst() : undefined
             vars = {
               first: target.firstName,
               time: formatAppointmentTime(a.scheduled_start, now, tz),
@@ -273,9 +226,7 @@ export function registerThreadRoutes(app: AppInstance, rt: MessagingRuntime): vo
               ...body.vars,
             }
           } else {
-            throw new AppError('SMS_TEMPLATE_INVALID', {
-              params: { detail: `There is no template "${body.templateKey}" you can send` },
-            })
+            throw new AppError('SMS_TEMPLATE_INVALID', { params: { detail: `There is no template "${body.templateKey}" you can send` } })
           }
         }
 
@@ -294,18 +245,10 @@ export function registerThreadRoutes(app: AppInstance, rt: MessagingRuntime): vo
           ...(tag ? { tag } : {}),
         })
         if (!out.queued) {
-          if (out.skipped === 'template_error')
-            throw new AppError('SMS_TEMPLATE_INVALID', {
-              params: { detail: out.detail ?? 'The template needs more details' },
-            })
+          if (out.skipped === 'template_error') throw new AppError('SMS_TEMPLATE_INVALID', { params: { detail: out.detail ?? 'The template needs more details' } })
           const p = problemForSkip(out.skipped)
           throw new AppError(p.code, {
-            params: {
-              name: target.name,
-              ...p.params,
-              max: rt.config.plan.maxSegments,
-              segments: out.segments ?? '',
-            },
+            params: { name: target.name, ...p.params, max: rt.config.plan.maxSegments, segments: out.segments ?? '' },
           })
         }
         await tx
@@ -326,13 +269,7 @@ export function registerThreadRoutes(app: AppInstance, rt: MessagingRuntime): vo
         const message: MessageDto = loaded!.dto
         return {
           status: 201,
-          body: {
-            message,
-            queued: true,
-            held: out.held,
-            holdUntil: out.holdUntil ? out.holdUntil.toISOString() : null,
-            segments: out.segments,
-          },
+          body: { message, queued: true, held: out.held, holdUntil: out.holdUntil ? out.holdUntil.toISOString() : null, segments: out.segments },
           headers: { Location: `/api/v1/appointments/${a.id}/messages` },
         }
       }),

@@ -73,10 +73,7 @@ export function canSendSms(recipient: SmsRecipient, purpose: SmsPurpose, ctx: Sm
 
   if (recipient.kind === 'customer' && !spec.consentExempt) {
     if (!recipient.smsOptIn) return deny('not_opted_in')
-    if (
-      spec.category === 'marketing' &&
-      !(recipient.consentSource && MARKETING_CONSENT.has(recipient.consentSource))
-    ) {
+    if (spec.category === 'marketing' && !(recipient.consentSource && MARKETING_CONSENT.has(recipient.consentSource))) {
       return deny('consent_source_insufficient')
     }
     if (!recipient.consentSource) warnings.push('consent_source_missing')
@@ -84,13 +81,7 @@ export function canSendSms(recipient: SmsRecipient, purpose: SmsPurpose, ctx: Sm
 
   const quiet = ctx.quietHours ?? DEFAULT_QUIET_HOURS
   if (!isTransactional(purpose.klass) && isQuietHour(ctx.now, quiet)) {
-    return {
-      verdict: 'hold',
-      allowed: true,
-      reason: 'quiet_hours',
-      holdUntil: quietHoursEnd(ctx.now, quiet),
-      warnings,
-    }
+    return { verdict: 'hold', allowed: true, reason: 'quiet_hours', holdUntil: quietHoursEnd(ctx.now, quiet), warnings }
   }
   return { verdict: 'allow', allowed: true, reason: null, warnings }
 }

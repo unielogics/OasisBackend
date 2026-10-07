@@ -9,22 +9,9 @@ type ReceivedEvent = Extract<SmsEvent, { kind: 'received' }>
 
 /** What the host wires to the real system. Each method is one command from the router. */
 export interface InboundEffects {
-  sendReply(
-    to: string,
-    template: string,
-    vars: Record<string, string>,
-    ctx: { customerId: string | null; inboxId: string },
-  ): Promise<void>
+  sendReply(to: string, template: string, vars: Record<string, string>, ctx: { customerId: string | null; inboxId: string }): Promise<void>
   confirmAppointment(appointmentId: string, customerId: string): Promise<void>
-  storeMessage(msg: {
-    customerId: string
-    appointmentId: string | null
-    body: string
-    unread: boolean
-    providerMessageId: string
-    receivedAt: Date
-    deviceId: string
-  }): Promise<void>
+  storeMessage(msg: { customerId: string; appointmentId: string | null; body: string; unread: boolean; providerMessageId: string; receivedAt: Date; deviceId: string }): Promise<void>
   staffAlert(alert: Extract<InboundCommand, { type: 'staff_alert' }>): Promise<void>
 }
 
@@ -85,22 +72,13 @@ export class InboundService {
     for (const cmd of decision.commands) {
       switch (cmd.type) {
         case 'record_opt_out':
-          await this.optouts.optOut({
-            phone: cmd.phone,
-            optedOutAt: now,
-            source: 'keyword',
-            keyword: cmd.keyword,
-            inboundMessageId: row.id,
-          })
+          await this.optouts.optOut({ phone: cmd.phone, optedOutAt: now, source: 'keyword', keyword: cmd.keyword, inboundMessageId: row.id })
           break
         case 'record_opt_in':
           await this.optouts.optIn(cmd.phone, now)
           break
         case 'send_reply':
-          await this.effects.sendReply(cmd.to, cmd.template, cmd.vars, {
-            customerId: customer?.id ?? null,
-            inboxId: row.id,
-          })
+          await this.effects.sendReply(cmd.to, cmd.template, cmd.vars, { customerId: customer?.id ?? null, inboxId: row.id })
           break
         case 'confirm_appointment':
           await this.effects.confirmAppointment(cmd.appointmentId, cmd.customerId)

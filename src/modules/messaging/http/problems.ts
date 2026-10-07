@@ -71,10 +71,7 @@ export function problemForSkip(skip: SkipReason): { code: string; params: Record
     case 'synthetic_number':
       return { code: 'SMS_BLOCKED', params: { reason: 'This is a seeded demo number and is never texted' } }
     case 'not_allowlisted':
-      return {
-        code: 'SMS_BLOCKED',
-        params: { reason: 'Texting is restricted to approved numbers in this environment' },
-      }
+      return { code: 'SMS_BLOCKED', params: { reason: 'Texting is restricted to approved numbers in this environment' } }
     case 'empty':
       return { code: 'SMS_EMPTY', params: {} }
     case 'too_long':

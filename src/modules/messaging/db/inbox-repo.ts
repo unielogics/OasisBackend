@@ -54,25 +54,12 @@ export class PgInboxRepository implements InboxRepository {
     return { inserted: false, row: rowOf(existing) }
   }
 
-  async markProcessed(
-    id: string,
-    decision: InboundDecision['kind'],
-    quarantined: boolean,
-    at: Date,
-  ): Promise<void> {
-    await this.exec
-      .updateTable('sms_inbox')
-      .set({ processed_at: at, decision, quarantined })
-      .where('id', '=', id)
-      .execute()
+  async markProcessed(id: string, decision: InboundDecision['kind'], quarantined: boolean, at: Date): Promise<void> {
+    await this.exec.updateTable('sms_inbox').set({ processed_at: at, decision, quarantined }).where('id', '=', id).execute()
   }
 
   /** Links the inbox row to the customer, appointment and message the text was filed under. */
-  async attach(
-    deviceId: string,
-    providerMessageId: string,
-    link: { customerId: string | null; appointmentId: string | null; messageId: string | null },
-  ): Promise<void> {
+  async attach(deviceId: string, providerMessageId: string, link: { customerId: string | null; appointmentId: string | null; messageId: string | null }): Promise<void> {
     await this.exec
       .updateTable('sms_inbox')
       .set({ customer_id: link.customerId, appointment_id: link.appointmentId, message_id: link.messageId })

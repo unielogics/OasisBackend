@@ -45,13 +45,7 @@ export function laneLimit(priority: SmsPriority, cfg: BudgetConfig): number {
   return priority === 0 ? cap : Math.max(0, cap - cfg.reservedForP0)
 }
 
-export function canSpend(
-  usage: readonly UsagePoint[],
-  now: Date,
-  cost: number,
-  priority: SmsPriority,
-  cfg: BudgetConfig,
-): boolean {
+export function canSpend(usage: readonly UsagePoint[], now: Date, cost: number, priority: SmsPriority, cfg: BudgetConfig): boolean {
   return usedInWindow(usage, now, cfg.windowMs) + cost <= laneLimit(priority, cfg)
 }
 
@@ -59,13 +53,7 @@ export function canSpend(
  * Earliest instant at or after `from` at which `cost` segments fit for the lane, or null when they never can (the message
  * is larger than the lane limit).
  */
-export function nextFit(
-  usage: readonly UsagePoint[],
-  from: Date,
-  cost: number,
-  priority: SmsPriority,
-  cfg: BudgetConfig,
-): Date | null {
+export function nextFit(usage: readonly UsagePoint[], from: Date, cost: number, priority: SmsPriority, cfg: BudgetConfig): Date | null {
   const limit = laneLimit(priority, cfg)
   if (cost > limit) return null
   const sorted = [...usage].sort((a, b) => a.at.getTime() - b.at.getTime())

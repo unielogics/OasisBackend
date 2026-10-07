@@ -79,9 +79,7 @@ export class ProviderRegistry {
         legacyMessageField: env.SMSGATE_LEGACY_MESSAGE_FIELD,
         syncSigningKey: env.SMSGATE_SYNC_SIGNING_KEY,
         allowInsecureWebhookUrl: env.SMSGATE_ALLOW_INSECURE_WEBHOOK_URL,
-        ...((row.sim_slot_default ?? env.SMSGATE_SIM_NUMBER)
-          ? { defaultSimNumber: (row.sim_slot_default ?? env.SMSGATE_SIM_NUMBER)! }
-          : {}),
+        ...(row.sim_slot_default ?? env.SMSGATE_SIM_NUMBER ? { defaultSimNumber: (row.sim_slot_default ?? env.SMSGATE_SIM_NUMBER)! } : {}),
       }),
       { clock: this.o.clock, ...(this.o.fetch ? { fetch: this.o.fetch } : {}) },
     )

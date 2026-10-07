@@ -10,10 +10,7 @@ export type EnqueuePlan =
   | { status: 'suppressed'; reason: SmsDenyReason }
   | { status: 'rejected'; reason: 'too_long' | 'empty'; segments?: number }
 
-export type PlanConfig = Pick<
-  DispatcherConfig,
-  'maxSegments' | 'simSlot' | 'quietHours' | 'environment' | 'allowlist'
-> & {
+export type PlanConfig = Pick<DispatcherConfig, 'maxSegments' | 'simSlot' | 'quietHours' | 'environment' | 'allowlist'> & {
   /** The device the item is pinned to; null leaves it for whichever dispatcher claims it first. */
   deviceId: string | null
 }
@@ -30,12 +27,7 @@ export async function planEnqueue(
   const { now, cfg } = deps
   if (input.text.trim().length === 0) return { status: 'rejected', reason: 'empty' }
 
-  const ctx: SmsPolicyContext = {
-    now,
-    environment: cfg.environment,
-    allowlist: cfg.allowlist,
-    quietHours: cfg.quietHours,
-  }
+  const ctx: SmsPolicyContext = { now, environment: cfg.environment, allowlist: cfg.allowlist, quietHours: cfg.quietHours }
   const decision: SmsDecision = canSendSms(input.recipient, { klass: input.klass }, ctx)
   if (decision.verdict === 'deny') return { status: 'suppressed', reason: decision.reason }
   const phone = input.recipient.phone as string // canSendSms denies when there is no number
@@ -43,8 +35,7 @@ export async function planEnqueue(
   if (prepareSmsBody(input.text, undefined).body.length === 0) return { status: 'rejected', reason: 'empty' }
   const first = !(await deps.hasPriorOutbound(phone))
   const prepared = prepareOutboundBody(input.text, input.klass, { firstMessageToNumber: first })
-  if (prepared.segments > cfg.maxSegments)
-    return { status: 'rejected', reason: 'too_long', segments: prepared.segments }
+  if (prepared.segments > cfg.maxSegments) return { status: 'rejected', reason: 'too_long', segments: prepared.segments }
 
   const holdUntil = decision.verdict === 'hold' ? decision.holdUntil : null
   const item: OutboxItem = {

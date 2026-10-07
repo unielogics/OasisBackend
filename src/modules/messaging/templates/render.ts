@@ -59,11 +59,7 @@ export interface RenderedTemplate {
   text: string
 }
 
-export function renderTemplate(
-  key: string,
-  vars: TemplateVars = {},
-  opts: RenderOptions = {},
-): RenderedTemplate {
+export function renderTemplate(key: string, vars: TemplateVars = {}, opts: RenderOptions = {}): RenderedTemplate {
   if (!isTemplateKey(key)) throw new TemplateError('unknown_template', `No template "${key}"`)
   const tpl: SmsTemplate = TEMPLATES[key]
   let body = templateBody(key, opts)
@@ -83,13 +79,9 @@ export function renderTemplate(
   const used = new Set<string>()
   for (const m of body.matchAll(VAR)) if (m[1]) used.add(m[1])
   for (const name of used) if (present(vars[name]) === null && !missing.includes(name)) missing.push(name)
-  if (missing.length > 0)
-    throw new TemplateError('missing_variables', `Template "${key}" needs: ${missing.join(', ')}`, missing)
+  if (missing.length > 0) throw new TemplateError('missing_variables', `Template "${key}" needs: ${missing.join(', ')}`, missing)
 
-  const text = body
-    .replace(VAR, (_m, name: string) => present(vars[name]) ?? '')
-    .replace(/[ \t]{2,}/g, ' ')
-    .trim()
+  const text = body.replace(VAR, (_m, name: string) => present(vars[name]) ?? '').replace(/[ \t]{2,}/g, ' ').trim()
   return { key, klass: tpl.klass, text }
 }
 
@@ -104,12 +96,7 @@ export function renderSms(
   opts: RenderOptions & { firstMessageToNumber: boolean },
 ): RenderedSms {
   const rendered = renderTemplate(key, vars, opts)
-  return {
-    ...rendered,
-    prepared: prepareOutboundBody(rendered.text, rendered.klass, {
-      firstMessageToNumber: opts.firstMessageToNumber,
-    }),
-  }
+  return { ...rendered, prepared: prepareOutboundBody(rendered.text, rendered.klass, { firstMessageToNumber: opts.firstMessageToNumber }) }
 }
 
 export interface BodyProblem {
@@ -125,8 +112,7 @@ export function validateTemplateBody(key: string, body: string): BodyProblem[] {
   const tpl: SmsTemplate = TEMPLATES[key]
   const allowed = new Set<string>([...tpl.required, ...tpl.optional])
   for (const name of placeholdersOf(body)) {
-    if (!allowed.has(name))
-      problems.push({ code: 'unknown_variable', detail: `{${name}} is not available in "${key}"` })
+    if (!allowed.has(name)) problems.push({ code: 'unknown_variable', detail: `{${name}} is not available in "${key}"` })
   }
   return problems
 }

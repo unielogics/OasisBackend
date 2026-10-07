@@ -38,9 +38,7 @@ export function localMinuteOfDay(at: Date, timeZone: string): number {
 export function isQuietHour(at: Date, cfg: QuietHoursConfig): boolean {
   if (!cfg.enabled || cfg.startMinute === cfg.endMinute) return false
   const m = localMinuteOfDay(at, cfg.timeZone)
-  return cfg.startMinute < cfg.endMinute
-    ? m >= cfg.startMinute && m < cfg.endMinute
-    : m >= cfg.startMinute || m < cfg.endMinute
+  return cfg.startMinute < cfg.endMinute ? m >= cfg.startMinute && m < cfg.endMinute : m >= cfg.startMinute || m < cfg.endMinute
 }
 
 /** The first instant at or after `at` that is outside quiet hours; `at` itself when it already is. */
@@ -51,8 +49,7 @@ export function quietHoursEnd(at: Date, cfg: QuietHoursConfig): Date {
   const minuteStart = Math.floor(at.getTime() / 60_000) * 60_000
   let candidate = new Date(minuteStart + delta * 60_000)
   // Across a DST change the local clock moves by an hour; walk to the first minute that is no longer quiet.
-  for (let i = 0; i < 4 && isQuietHour(candidate, cfg); i++)
-    candidate = new Date(candidate.getTime() + 30 * 60_000)
+  for (let i = 0; i < 4 && isQuietHour(candidate, cfg); i++) candidate = new Date(candidate.getTime() + 30 * 60_000)
   for (let i = 0; i < 120; i++) {
     const earlier = new Date(candidate.getTime() - 60_000)
     if (isQuietHour(earlier, cfg)) break

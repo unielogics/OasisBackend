@@ -2,8 +2,7 @@ import type { SmsPriority } from '../../../integrations/ports/sms.js'
 import type { SmsEncoding } from '../../../integrations/sms/gsm.js'
 import type { SmsClass } from '../policy/classes.js'
 
-export type OutboxState =
-  'pending' | 'inflight' | 'accepted' | 'sent' | 'delivered' | 'failed' | 'expired' | 'cancelled'
+export type OutboxState = 'pending' | 'inflight' | 'accepted' | 'sent' | 'delivered' | 'failed' | 'expired' | 'cancelled'
 
 /** One queued text. `id` is also the SMS Gate message id of the first device attempt. */
 export interface OutboxItem {

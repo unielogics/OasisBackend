@@ -56,7 +56,14 @@ export interface MessageThreadsTable {
 export type MessageDirection = 'in' | 'out'
 export type MessageSenderKind = 'staff' | 'system' | 'customer'
 export type MessageStatus =
-  'queued' | 'sending' | 'sent' | 'delivered' | 'failed' | 'received' | 'canceled' | 'expired'
+  | 'queued'
+  | 'sending'
+  | 'sent'
+  | 'delivered'
+  | 'failed'
+  | 'received'
+  | 'canceled'
+  | 'expired'
 
 export interface MessagesTable {
   id: string
@@ -90,7 +97,14 @@ export interface MessagesTable {
 }
 
 export type OutboxStateColumn =
-  'pending' | 'inflight' | 'accepted' | 'sent' | 'delivered' | 'failed' | 'expired' | 'cancelled'
+  | 'pending'
+  | 'inflight'
+  | 'accepted'
+  | 'sent'
+  | 'delivered'
+  | 'failed'
+  | 'expired'
+  | 'cancelled'
 
 export interface SmsOutboxTable {
   id: string

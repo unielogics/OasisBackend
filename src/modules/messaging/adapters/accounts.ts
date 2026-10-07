@@ -48,21 +48,8 @@ export class MessagingAccountNotifier implements NotificationPort {
               template: msg.kind === 'invite' ? 'staff_invite' : 'password_reset',
               vars:
                 msg.kind === 'invite'
-                  ? {
-                      inviteeName: msg.firstName,
-                      inviteUrl: msg.link,
-                      expiresLabel: DateTime.fromJSDate(msg.expiresAt, { zone: rt.config.tz }).toFormat(
-                        "LLL d 'at' h:mm a",
-                      ),
-                    }
-                  : {
-                      recipientName: msg.firstName,
-                      resetUrl: msg.link,
-                      expiresMinutes: Math.max(
-                        1,
-                        Math.round((msg.expiresAt.getTime() - rt.clock.now().getTime()) / 60_000),
-                      ),
-                    },
+                  ? { inviteeName: msg.firstName, inviteUrl: msg.link, expiresLabel: DateTime.fromJSDate(msg.expiresAt, { zone: rt.config.tz }).toFormat("LLL d 'at' h:mm a") }
+                  : { recipientName: msg.firstName, resetUrl: msg.link, expiresMinutes: Math.max(1, Math.round((msg.expiresAt.getTime() - rt.clock.now().getTime()) / 60_000)) },
               purpose: msg.kind,
               employeeId: msg.employeeId,
             },

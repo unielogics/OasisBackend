@@ -703,8 +703,7 @@ export const domainSeedProfiles: Record<string, SeedProfile> = {
   domain,
   'domain-design': domainDesign,
   base: {
-    description:
-      'Reference data every environment needs: roles and employees (people) plus the domain reference data',
+    description: 'Reference data every environment needs: roles and employees (people) plus the domain reference data',
     dependsOn: ['people', 'domain'],
     run: async () => undefined,
   },

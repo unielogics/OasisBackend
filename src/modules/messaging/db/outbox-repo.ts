@@ -71,8 +71,7 @@ const COLUMN_OF: Record<keyof OutboxItem, string> = {
 
 export function rowValues(item: OutboxItem): Record<string, unknown> {
   const out: Record<string, unknown> = {}
-  for (const [k, v] of Object.entries(item) as Array<[keyof OutboxItem, unknown]>)
-    out[COLUMN_OF[k]] = v === undefined ? null : v
+  for (const [k, v] of Object.entries(item) as Array<[keyof OutboxItem, unknown]>) out[COLUMN_OF[k]] = v === undefined ? null : v
   return out
 }
 
@@ -115,15 +114,14 @@ export class PgOutboxRepository implements OutboxRepository {
   async findByProviderMessageId(providerMessageId: string): Promise<OutboxItem | null> {
     const base = this.exec.selectFrom('sms_outbox').selectAll()
     const q = this.exec.isTransaction ? base.forUpdate() : base
-    const r = await (
-      isUuid(providerMessageId)
-        ? q.where((eb) =>
-            eb.or([
-              eb('provider_message_id', '=', providerMessageId),
-              eb.and([eb('provider_message_id', 'is', null), eb('id', '=', providerMessageId)]),
-            ]),
-          )
-        : q.where('provider_message_id', '=', providerMessageId)
+    const r = await (isUuid(providerMessageId)
+      ? q.where((eb) =>
+          eb.or([
+            eb('provider_message_id', '=', providerMessageId),
+            eb.and([eb('provider_message_id', 'is', null), eb('id', '=', providerMessageId)]),
+          ]),
+        )
+      : q.where('provider_message_id', '=', providerMessageId)
     ).executeTakeFirst()
     return r ? itemOf(r) : null
   }
@@ -150,12 +148,7 @@ export class PgOutboxRepository implements OutboxRepository {
     return inTx(this.exec, async (tx) => {
       if (patch.state === 'accepted') {
         // The device can report sent or delivered before the send call returns: never move a message backwards to accepted.
-        const cur = await tx
-          .selectFrom('sms_outbox')
-          .select('state')
-          .where('id', '=', id)
-          .forUpdate()
-          .executeTakeFirst()
+        const cur = await tx.selectFrom('sms_outbox').select('state').where('id', '=', id).forUpdate().executeTakeFirst()
         if (cur && cur.state !== 'inflight' && cur.state !== 'accepted') delete set.state
       }
       const row = await tx
@@ -172,26 +165,19 @@ export class PgOutboxRepository implements OutboxRepository {
 
   async listPending(): Promise<OutboxItem[]> {
     let q = this.exec.selectFrom('sms_outbox').selectAll().where('state', '=', 'pending')
-    if (this.o.deviceId)
-      q = q.where((eb) => eb.or([eb('device_id', '=', this.o.deviceId!), eb('device_id', 'is', null)]))
+    if (this.o.deviceId) q = q.where((eb) => eb.or([eb('device_id', '=', this.o.deviceId!), eb('device_id', 'is', null)]))
     const rows = await q.orderBy('priority').orderBy('queued_at').orderBy('id').limit(PENDING_LIMIT).execute()
     return rows.map(itemOf)
   }
 
-  async listUnconfirmed(
-    acceptedBefore: Date,
-    acceptedAfter: Date,
-    reconciledBefore: Date,
-  ): Promise<OutboxItem[]> {
+  async listUnconfirmed(acceptedBefore: Date, acceptedAfter: Date, reconciledBefore: Date): Promise<OutboxItem[]> {
     let q = this.exec
       .selectFrom('sms_outbox')
       .selectAll()
       .where('state', 'in', ['accepted', 'sent'])
       .where('accepted_at', '<=', acceptedBefore)
       .where('accepted_at', '>=', acceptedAfter)
-      .where((eb) =>
-        eb.or([eb('last_reconciled_at', 'is', null), eb('last_reconciled_at', '<=', reconciledBefore)]),
-      )
+      .where((eb) => eb.or([eb('last_reconciled_at', 'is', null), eb('last_reconciled_at', '<=', reconciledBefore)]))
     if (this.o.deviceId) q = q.where('device_id', '=', this.o.deviceId)
     return (await q.orderBy('accepted_at').limit(200).execute()).map(itemOf)
   }
@@ -202,18 +188,12 @@ export class PgOutboxRepository implements OutboxRepository {
       .selectAll()
       .where('state', '=', 'inflight')
       .where((eb) => eb.or([eb('locked_at', 'is', null), eb('locked_at', '<=', lockedBefore)]))
-    if (this.o.deviceId)
-      q = q.where((eb) => eb.or([eb('device_id', '=', this.o.deviceId!), eb('device_id', 'is', null)]))
+    if (this.o.deviceId) q = q.where((eb) => eb.or([eb('device_id', '=', this.o.deviceId!), eb('device_id', 'is', null)]))
     return (await q.limit(200).execute()).map(itemOf)
   }
 
   async hasPriorOutbound(phone: string): Promise<boolean> {
-    const r = await this.exec
-      .selectFrom('sms_outbox')
-      .select('id')
-      .where('to_e164', '=', phone)
-      .limit(1)
-      .executeTakeFirst()
+    const r = await this.exec.selectFrom('sms_outbox').select('id').where('to_e164', '=', phone).limit(1).executeTakeFirst()
     return r !== undefined
   }
 
@@ -231,11 +211,7 @@ export class PgOutboxRepository implements OutboxRepository {
   }
 
   async markUsageSent(providerMessageId: string, sentAt: Date): Promise<void> {
-    await this.exec
-      .updateTable('sms_usage')
-      .set({ sent_at: sentAt })
-      .where('provider_message_id', '=', providerMessageId)
-      .execute()
+    await this.exec.updateTable('sms_usage').set({ sent_at: sentAt }).where('provider_message_id', '=', providerMessageId).execute()
   }
 
   async listUsage(since: Date): Promise<Array<{ at: Date; segments: number }>> {

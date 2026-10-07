@@ -61,10 +61,7 @@ export class WebhookService {
   /** A signed delivery from an in-process simulated device, handled exactly like an HTTP hit. */
   receiveSim(device: DeviceRow, d: SimDelivery): void {
     const p = this.receive(device.device_key, d.headers, d.body).catch((err: unknown) => {
-      this.rt.log.error(
-        { err: (err as Error).message, device: device.device_key },
-        'simulated webhook failed',
-      )
+      this.rt.log.error({ err: (err as Error).message, device: device.device_key }, 'simulated webhook failed')
     })
     this.track(p)
   }
@@ -79,22 +76,14 @@ export class WebhookService {
    * verified-but-unreadable body, 200 for everything accepted (including a repeat and an event type Oasis ignores, so the
    * device stops retrying them). The event is applied after the answer.
    */
-  async receive(
-    deviceKey: string,
-    rawHeaders: Record<string, string | string[] | undefined>,
-    raw: string,
-  ): Promise<WebhookResponse> {
+  async receive(deviceKey: string, rawHeaders: Record<string, string | string[] | undefined>, raw: string): Promise<WebhookResponse> {
     const device = await this.rt.store.getByKey(deviceKey)
     if (!device) return { status: 404, body: { ok: false, status: 'unknown_device' } }
     const headers = lower(rawHeaders)
     const secret = this.rt.store.secrets(device).webhookSecret
     let parsed: ParsedWebhook
     try {
-      parsed = verifyAndParse(headers, raw, {
-        secret,
-        toleranceSec: this.rt.config.webhookToleranceSec,
-        clock: this.rt.clock,
-      })
+      parsed = verifyAndParse(headers, raw, { secret, toleranceSec: this.rt.config.webhookToleranceSec, clock: this.rt.clock })
     } catch (err) {
       if (!(err instanceof SmsWebhookError)) throw err
       if (err.code === 'unsupported_event') return { status: 200, body: { ok: true, status: 'ignored' } }
@@ -121,12 +110,7 @@ export class WebhookService {
       .executeTakeFirst()
     if (!inserted) {
       // The device retried a delivery we already hold. If the first attempt never got applied, apply it now.
-      const prior = await this.rt.db
-        .selectFrom('webhook_log')
-        .select(['id', 'status'])
-        .where('provider', '=', 'smsgate')
-        .where('external_id', '=', parsed.envelopeId)
-        .executeTakeFirst()
+      const prior = await this.rt.db.selectFrom('webhook_log').select(['id', 'status']).where('provider', '=', 'smsgate').where('external_id', '=', parsed.envelopeId).executeTakeFirst()
       if (prior?.status === 'received') this.schedule(prior.id)
       return { status: 200, body: { ok: true, status: 'duplicate' } }
     }
@@ -138,10 +122,7 @@ export class WebhookService {
     const p = new Promise<void>((resolve) => setImmediate(resolve))
       .then(() => this.process(logId))
       .catch((err: unknown) => {
-        this.rt.log.error(
-          { err: (err as Error).message, logId },
-          'webhook processing failed; the sweep will retry',
-        )
+        this.rt.log.error({ err: (err as Error).message, logId }, 'webhook processing failed; the sweep will retry')
       })
     this.track(p)
   }
@@ -150,23 +131,12 @@ export class WebhookService {
   async process(logId: string): Promise<'processed' | 'ignored' | 'skipped'> {
     let appStartedFor: DeviceRow | null = null
     const outcome = await transaction(this.rt.db, async (tx) => {
-      const row = await tx
-        .selectFrom('webhook_log')
-        .selectAll()
-        .where('id', '=', logId)
-        .where('status', '=', 'received')
-        .forUpdate()
-        .skipLocked()
-        .executeTakeFirst()
+      const row = await tx.selectFrom('webhook_log').selectAll().where('id', '=', logId).where('status', '=', 'received').forUpdate().skipLocked().executeTakeFirst()
       if (!row || row.body === null) return 'skipped' as const
       const key = (row.headers as Record<string, string>)['x-device-key']
       const device = key ? await this.rt.store.getByKey(key) : null
       if (!device) {
-        await tx
-          .updateTable('webhook_log')
-          .set({ status: 'failed', processed_at: this.rt.clock.now(), error: 'unknown device' })
-          .where('id', '=', logId)
-          .execute()
+        await tx.updateTable('webhook_log').set({ status: 'failed', processed_at: this.rt.clock.now(), error: 'unknown device' }).where('id', '=', logId).execute()
         return 'ignored' as const
       }
       const parsed = verifyAndParse(row.headers as Record<string, string>, row.body, {
@@ -177,9 +147,7 @@ export class WebhookService {
       const event = this.withDeviceId(parsed.event, device.id)
       const result = await this.apply(tx, device, event, parsed)
       if (result.outcome === 'handled' && result.health?.appStarted) appStartedFor = device
-      const ignored =
-        result.outcome === 'duplicate' ||
-        (result.outcome === 'handled' && result.result.detail === 'ignored_unknown_message')
+      const ignored = result.outcome === 'duplicate' || (result.outcome === 'handled' && result.result.detail === 'ignored_unknown_message')
       await tx
         .updateTable('webhook_log')
         .set({ status: ignored ? 'ignored' : 'processed', processed_at: this.rt.clock.now(), error: null })
@@ -187,9 +155,7 @@ export class WebhookService {
         .execute()
       return ignored ? ('ignored' as const) : ('processed' as const)
     }).catch(async (err: unknown) => {
-      await sql`update webhook_log set error = ${(err as Error).message.slice(0, 500)} where id = ${logId}`
-        .execute(this.rt.db)
-        .catch(() => undefined)
+      await sql`update webhook_log set error = ${(err as Error).message.slice(0, 500)} where id = ${logId}`.execute(this.rt.db).catch(() => undefined)
       throw err
     })
     // The app restarted (reboot, update, crash): its webhook registrations may be gone.
@@ -201,28 +167,11 @@ export class WebhookService {
     return 'deviceId' in e ? { ...e, deviceId } : e
   }
 
-  private async apply(
-    tx: Tx,
-    device: DeviceRow,
-    event: SmsEvent,
-    parsed: ParsedWebhook,
-  ): Promise<IngestResult> {
+  private async apply(tx: Tx, device: DeviceRow, event: SmsEvent, parsed: ParsedWebhook): Promise<IngestResult> {
     const rt = this.rt
-    const cfg = rt.config.dispatch({
-      id: device.id,
-      simSlotDefault: device.sim_slot_default,
-      minIntervalMs: device.min_interval_ms,
-      maxPerWindow: device.max_per_window,
-      windowMinutes: device.window_minutes,
-    })
+    const cfg = rt.config.dispatch({ id: device.id, simSlotDefault: device.sim_slot_default, minIntervalMs: device.min_interval_ms, maxPerWindow: device.max_per_window, windowMinutes: device.window_minutes })
     const monitor = new DeviceHealthMonitor(new PgDeviceRepository(tx, rt.onTransition), rt.clock, cfg.health)
-    const dispatcher = new Dispatcher(
-      unusedProvider,
-      new PgOutboxRepository(tx, { deviceId: device.id }),
-      monitor,
-      rt.clock,
-      cfg.dispatcher,
-    )
+    const dispatcher = new Dispatcher(unusedProvider, new PgOutboxRepository(tx, { deviceId: device.id }), monitor, rt.clock, cfg.dispatcher)
     const inboxRepo = new PgInboxRepository(tx, rt.newId)
     const effects = createInboundEffects(
       tx,
@@ -237,10 +186,7 @@ export class WebhookService {
       {
         locationId: device.location_id,
         inbox: inboxRepo,
-        event: {
-          deviceId: device.id,
-          providerMessageId: event.kind === 'received' ? event.providerMessageId : '',
-        },
+        event: { deviceId: device.id, providerMessageId: event.kind === 'received' ? event.providerMessageId : '' },
       },
     )
     const inbound = new InboundService(
@@ -249,10 +195,7 @@ export class WebhookService {
       new PgCustomerDirectory(tx, device.location_id),
       effects,
       rt.clock,
-      {
-        timeZone: rt.config.tz,
-        ...(rt.config.businessPhone ? { businessPhone: rt.config.businessPhone } : {}),
-      },
+      { timeZone: rt.config.tz, ...(rt.config.businessPhone ? { businessPhone: rt.config.businessPhone } : {}) },
     )
     const ingestor = new SmsEventIngestor(new PgProcessedEvents(tx), dispatcher, rt.clock, async (e) => {
       await inbound.handleReceived(e)
