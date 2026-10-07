@@ -433,7 +433,23 @@ export const AppointmentFile = z.object({
   ),
   invoice: InvoiceSummary.nullable(),
   membership: z
-    .object({ plan: z.string(), creditsLeft: z.number().int().nullable(), creditAvailable: z.boolean() })
+    .object({
+      plan: z.string(),
+      creditsLeft: z.number().int().nullable(),
+      creditAvailable: z.boolean(),
+      planKey: z.enum(['essential', 'premium', 'executive', 'exotic']).optional(),
+      renewsAt: z.string().nullable().optional(),
+      renewLabel: z.string().nullable().optional(),
+      creditsUsed: z.number().int().optional(),
+      perks: z.array(z.string()).optional(),
+      color: z.string().optional(),
+      bgColor: z.string().optional(),
+      tint: z.string().optional(),
+      memberMonths: z.number().int().optional(),
+      retention: z
+        .object({ label: z.string(), desc: z.string(), tone: z.enum(['green', 'red']) })
+        .optional(),
+    })
     .nullable(),
   history: z.object({
     visitCount: z.number().int(),

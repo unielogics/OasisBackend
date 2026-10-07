@@ -12,6 +12,7 @@ import { peopleProfile } from './people.js'
 import { domainSeedProfiles } from './domain.js'
 import { schedulingSeedProfiles } from './scheduling.js'
 import { paymentsSeedProfiles } from './payments.js'
+import { membershipsSeedProfiles } from './memberships.js'
 
 export interface SeedContext {
   tx: Tx
@@ -48,6 +49,7 @@ registerSeedProfile('people', peopleProfile)
 for (const [name, profile] of Object.entries(domainSeedProfiles)) registerSeedProfile(name, profile)
 for (const [name, profile] of Object.entries(schedulingSeedProfiles)) registerSeedProfile(name, profile)
 for (const [name, profile] of Object.entries(paymentsSeedProfiles)) registerSeedProfile(name, profile)
+for (const [name, profile] of Object.entries(membershipsSeedProfiles)) registerSeedProfile(name, profile)
 
 function resolveOrder(name: string, seen: string[] = []): string[] {
   const p = profiles[name]

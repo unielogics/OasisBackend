@@ -1,7 +1,26 @@
 import { z } from 'zod'
+import { squarespaceEnvSchema } from '../integrations/squarespace/config.js'
 
 const provider = <T extends [string, ...string[]]>(...v: T) => z.enum(v)
 const bool = z.enum(['true', 'false', '1', '0']).transform((v) => v === 'true' || v === '1')
+
+// The Squarespace tuning variables live with the adapter (src/integrations/squarespace/config.ts); only the ones the shared
+// contract below does not already declare are picked up here, so there is one definition of each.
+const squarespaceTuning = squarespaceEnvSchema.pick({
+  SQSP_USER_AGENT: true,
+  SQSP_OVERLAP_SECONDS: true,
+  SQSP_RECONCILE_DAYS: true,
+  SQSP_REQUESTS_PER_MINUTE: true,
+  SQSP_MAX_REQUESTS_PER_RUN: true,
+  SQSP_INCLUDE_TEST_ORDERS: true,
+  SQSP_MEMBERSHIP_GRACE_DAYS: true,
+  SQSP_MATCH_CONFIDENCE_THRESHOLD: true,
+  SQSP_VARIANCE_ALERT_CENTS: true,
+  SQSP_LINK_WINDOW_DAYS: true,
+  SQSP_LINK_AMOUNT_TOLERANCE_CENTS: true,
+  SQSP_PRODUCT_MAP: true,
+  SQSP_WEBHOOK_SECRET: true,
+}).shape
 
 // Fail-fast, typed environment contract. `*_PROVIDER=sim` needs no other variable for that integration.
 export const envSchema = z
@@ -41,6 +60,9 @@ export const envSchema = z
     SQSP_API_BASE: z.string().url().default('https://api.squarespace.com'),
     SQSP_API_KEY: z.string().optional(),
     SQSP_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(30).default(120),
+    ...squarespaceTuning,
+    // Days past the grace period with no renewal before a membership is inferred canceled (lagged); 0 never infers it.
+    SQSP_LAPSE_CANCEL_DAYS: z.coerce.number().int().min(0).default(60),
 
     SMS_PROVIDER: provider('sim', 'smsgate').default('sim'),
     SMSGATE_DEVICE_URL: z.string().url().optional(),
