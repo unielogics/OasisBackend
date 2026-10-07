@@ -46,12 +46,14 @@ export interface ManualMatchResult {
 
 const keyOf = (a: Arrival): string => `sqsp:${a.orderId}:${a.kind}:${a.transactionId ?? 'order'}`
 
+/** Locks the order row: a match and an ignore of the same order (and two matches) run one after the other. */
 async function loadOrder(tx: Executor, locationId: string, orderId: string) {
   const row = await tx
     .selectFrom('sqsp_orders')
     .selectAll()
     .where('location_id', '=', locationId)
     .where('sqsp_order_id', '=', orderId)
+    .forUpdate()
     .executeTakeFirst()
   if (!row) throw new AppError('SQSP_ORDER_NOT_FOUND')
   return row
