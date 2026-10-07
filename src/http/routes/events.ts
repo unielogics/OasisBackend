@@ -24,6 +24,8 @@ import type { AppInstance } from '../types.js'
 const MAX_STREAMS_PER_USER = 8
 const MAX_REPLAY = 5000
 const MAX_BUFFERED_BYTES = 1024 * 1024
+/** How often an open stream re-validates its session and channel permissions. */
+const RECHECK_MS = 15_000
 
 function frame(f: { id?: number; event?: string; data?: unknown; comment?: string; retry?: number }): string {
   let out = ''
@@ -141,11 +143,31 @@ export function registerEventsRoute(app: AppInstance): void {
       const send = (e: RealtimeEvent): void => write(frame({ id: e.id, data: eventData(e) }))
 
       const heartbeat = setInterval(() => write(frame({ comment: 'hb' })), app.env.SSE_HEARTBEAT_MS)
+
+      // The stream was authorised once, at connect. Re-check the session and the permissions behind each channel on a timer and
+      // whenever access changes anywhere (rbac.changed), so a sign-out, deactivation, expiry or demotion ends or narrows it.
+      let rechecking = false
+      const recheck = async (): Promise<void> => {
+        if (closed || rechecking) return
+        rechecking = true
+        try {
+          const now = await app.authorizer.resolve(req, { touch: false })
+          if (closed) return
+          if (!now) return cleanup()
+          for (const c of [...channels]) if (!canSubscribe(app, now, c as RealtimeChannel)) channels.delete(c)
+        } catch (err) {
+          req.log.warn({ err: (err as Error).message }, 'event stream re-check failed; keeping the stream')
+        } finally {
+          rechecking = false
+        }
+      }
+      const recheckTimer = setInterval(() => void recheck(), Math.min(app.env.SSE_HEARTBEAT_MS, RECHECK_MS))
       const unsubscribe = hub.subscribe({
         locationId: ctx.locationId,
         userId: ctx.userId,
         channels,
         onEvent: (e) => {
+          if (e.type === 'rbac.changed') void recheck()
           if (!live) buffer.push(e)
           // the hub may dispatch an event the replay query already sent (it reads the log slightly behind the commit)
           else if (!replayed.delete(e.id)) send(e)
@@ -157,6 +179,7 @@ export function registerEventsRoute(app: AppInstance): void {
         if (closed) return
         closed = true
         clearInterval(heartbeat)
+        clearInterval(recheckTimer)
         unsubscribe()
         open.delete(res)
         const n = (perUser.get(ctx.userId) ?? 1) - 1

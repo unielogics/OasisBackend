@@ -27,10 +27,10 @@ export function createSessionAuthorizer(deps: SessionAuthorizerDeps): Authorizer
   return {
     knownPermissions: PERMISSION_KEY_SET,
 
-    async resolve(req: FastifyRequest): Promise<AuthContext | null> {
+    async resolve(req: FastifyRequest, opts?: { touch?: boolean }): Promise<AuthContext | null> {
       const token = req.cookies?.[cookieName]
       if (!token) return null
-      const rec = await deps.sessions.lookup(token)
+      const rec = await deps.sessions.lookup(token, opts)
       if (!rec) return null
 
       const real = await deps.rbac.authorityFor(rec.employee.id, rec.rbacVersion)

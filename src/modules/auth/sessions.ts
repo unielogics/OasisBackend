@@ -84,7 +84,7 @@ export class SessionService {
   }
 
   /** The live session behind a cookie token, or null when unknown, revoked, expired, or its user/employee is inactive. */
-  async lookup(token: string): Promise<SessionRecord | null> {
+  async lookup(token: string, opts: { touch?: boolean } = {}): Promise<SessionRecord | null> {
     if (!TOKEN_SHAPE.test(token)) return null
     const id = hashToken(token)
     const row = await this.db
@@ -126,7 +126,7 @@ export class SessionService {
     if (now >= row.idle_expires_at.getTime() || now >= row.absolute_expires_at.getTime()) return null
     if (row.disabled_at || row.status !== 'active') return null
 
-    if (now - row.last_seen_at.getTime() >= SESSION_TOUCH_MS) {
+    if (opts.touch !== false && now - row.last_seen_at.getTime() >= SESSION_TOUCH_MS) {
       const idle = new Date(Math.min(now + this.timings.idleMs, row.absolute_expires_at.getTime()))
       await this.db
         .updateTable('sessions')

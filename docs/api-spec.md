@@ -168,6 +168,9 @@ Resuming replays `id > Last-Event-ID` (same permission filters), then continues 
 Delivery is at least once across reconnects; clients treat events as "refetch this" hints. Clients should also refetch on
 reconnect and on tab visibility and keep a 30-60 s fallback poll. At most 8 concurrent streams per user (429 beyond);
 a consumer that falls more than 1 MiB behind is disconnected and resumes with `Last-Event-ID`.
+An open stream is re-authorised at most every 15 s (`min(SSE_HEARTBEAT_MS, 15 s)`) and at once on any `rbac.changed`: when the session is gone (sign-out,
+deactivation, password change, expiry) the stream is closed, and a channel whose permission was lost stops being delivered. A permission that is
+gained needs a new connection (the dashboard reconnects after it refetches `/me`). The re-check does not slide the session's idle expiry.
 
 Operations: the stream needs no buffering (`X-Accel-Buffering: no` is sent; nginx also needs `proxy_buffering off` and
 `proxy_read_timeout 1h` on `/api/`); Next.js rewrites are not a safe proxy for it (they gzip and time out), so
