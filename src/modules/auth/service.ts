@@ -25,6 +25,11 @@ export const RESET_TTL_MS = 60 * 60 * 1000
 export const ADMIN_RESET_TTL_MS = 24 * 60 * 60 * 1000
 /** Forgot-password requests for the same account are coalesced within this window (no SMS/email flooding). */
 export const RESET_REQUEST_COOLDOWN_MS = 60 * 1000
+/**
+ * Self-service reset requests per account per hour. The link goes out by SMS on the one shared tablet (lane 0), so an anonymous caller
+ * who knows a staff email must not be able to keep texting that person or spend the tablet's budget.
+ */
+export const RESET_REQUESTS_PER_HOUR = 3
 
 export const normalizeEmail = (email: string): string => email.trim().toLowerCase()
 
@@ -341,6 +346,14 @@ export class AuthService {
       .where('created_at', '>', new Date(now.getTime() - RESET_REQUEST_COOLDOWN_MS))
       .executeTakeFirst()
     if (recent) return
+    const lastHour = await this.d.db
+      .selectFrom('password_resets')
+      .select((eb) => eb.fn.countAll<string>().as('n'))
+      .where('user_id', '=', u.id)
+      .where('requested_by', 'is', null)
+      .where('created_at', '>', new Date(now.getTime() - 60 * 60 * 1000))
+      .executeTakeFirstOrThrow()
+    if (Number(lastHour.n) >= RESET_REQUESTS_PER_HOUR) return
     const issued = await transaction(this.d.db, async (tx) => {
       const t = await this.issueReset(tx, u.id, null, RESET_TTL_MS)
       await audit.record(tx, {

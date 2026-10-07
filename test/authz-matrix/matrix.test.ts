@@ -137,5 +137,7 @@ describe('authz matrix (generated from the route registry)', () => {
     }
     expect(covered).toBeGreaterThanOrEqual(20)
     expect(failures, failures.join('\n')).toEqual([])
-  })
+    // One login and several requests per registered route: about 26 s alone on this box, so the 30 s default is a coin flip when
+    // another process is busy. The assertion above is what matters; the budget is only headroom.
+  }, 180_000)
 })

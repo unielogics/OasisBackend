@@ -4,6 +4,8 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
 
 const PREFIX = 'v1'
+/** Node accepts a GCM tag of 4 to 16 bytes unless the length is pinned; a short tag is a guessable one. */
+const TAG_BYTES = 16
 const DEV_KEY = createHash('sha256').update('oasis-development-secrets-key').digest()
 
 export interface SecretBox {
@@ -13,7 +15,8 @@ export interface SecretBox {
 
 export function keyFromEnv(secretsKey: string | undefined, nodeEnv: string): Buffer {
   if (!secretsKey) {
-    if (nodeEnv === 'production') throw new Error('SECRETS_KEY is required in production to store device credentials')
+    if (nodeEnv === 'production')
+      throw new Error('SECRETS_KEY is required in production to store device credentials')
     return DEV_KEY
   }
   const key = Buffer.from(secretsKey, 'base64')
@@ -31,13 +34,20 @@ export function createSecretBox(secretsKey: string | undefined, nodeEnv: string)
       const iv = randomBytes(12)
       const cipher = createCipheriv('aes-256-gcm', key, iv)
       const ct = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()])
-      return [PREFIX, iv.toString('base64url'), cipher.getAuthTag().toString('base64url'), ct.toString('base64url')].join('.')
+      return [
+        PREFIX,
+        iv.toString('base64url'),
+        cipher.getAuthTag().toString('base64url'),
+        ct.toString('base64url'),
+      ].join('.')
     },
     decrypt(sealed) {
       const key = keyOf()
       const [v, iv, tag, ct] = sealed.split('.')
       if (v !== PREFIX || !iv || !tag || !ct) throw new Error('Unrecognised secret format')
-      const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64url'))
+      const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64url'), {
+        authTagLength: TAG_BYTES,
+      })
       decipher.setAuthTag(Buffer.from(tag, 'base64url'))
       return Buffer.concat([decipher.update(Buffer.from(ct, 'base64url')), decipher.final()]).toString('utf8')
     },

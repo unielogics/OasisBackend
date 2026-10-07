@@ -5,6 +5,8 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import { AppError } from '../../../platform/errors.js'
 
 const ALGO = 'aes-256-gcm'
+/** Node accepts a GCM tag of 4 to 16 bytes unless the length is pinned; a short tag is a guessable one. */
+const TAG_BYTES = 16
 
 export interface SecretBox {
   readonly keyId: string
@@ -47,7 +49,7 @@ export function createSecretBox(keys: readonly string[]): SecretBox {
       if (!id || !iv || !tag || body === undefined) throw new Error('malformed encrypted value')
       const key = byId.get(id)
       if (!key) throw new Error(`no SECRETS_KEY with id ${id} is configured`)
-      const decipher = createDecipheriv(ALGO, key, Buffer.from(iv, 'base64url'))
+      const decipher = createDecipheriv(ALGO, key, Buffer.from(iv, 'base64url'), { authTagLength: TAG_BYTES })
       decipher.setAuthTag(Buffer.from(tag, 'base64url'))
       return Buffer.concat([decipher.update(Buffer.from(body, 'base64url')), decipher.final()]).toString(
         'utf8',
