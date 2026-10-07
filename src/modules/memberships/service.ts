@@ -304,6 +304,10 @@ export async function syncMemberships(db: Db, d: MembershipSyncDeps): Promise<Me
             plan,
           )
       }
+    }).catch((e: unknown) => {
+      // another pass (sync job, contacts job, daily cycle, Sync now) created this member a moment ago: nothing left to do here
+      if ((e as { code?: string } | null)?.code !== '23505') throw e
+      report.unchanged++
     })
   }
   return report
