@@ -20,6 +20,7 @@ import type { PaymentsPorts } from './ports.js'
 import {
   calcOf,
   cardLabel,
+  cardRefundCap,
   firstPayMethod,
   getEventForUpdate,
   getInvoice,
@@ -436,8 +437,9 @@ export class PaymentsService {
       })
     }
     // The design's order: the card cap is reported before the refundable cap.
-    if (input.dest === 'card' && val > calc.toOrigMax) {
-      throw new AppError('REFUND_EXCEEDS_CARD', { params: { max: money(calc.toOrigMax) } })
+    if (input.dest === 'card') {
+      const cap = Math.min(calc.toOrigMax, await cardRefundCap(tx, inv.id))
+      if (val > cap) throw new AppError('REFUND_EXCEEDS_CARD', { params: { max: money(cap) } })
     }
     if (val > calc.refundable) throw new AppError('REFUND_EXCEEDS_REFUNDABLE')
 
@@ -523,8 +525,9 @@ export class PaymentsService {
     const calc = await calcOf(tx, inv.id)
     // Re-validate without this request's own reservation: other refunds may have been resolved since it was requested.
     const refundableWithout = Math.max(0, calc.paid - calc.refunded - (calc.pendingAmt - ev.amount_cents))
-    if (ev.dest === 'card' && ev.amount_cents > calc.toOrigMax) {
-      throw new AppError('REFUND_EXCEEDS_CARD', { params: { max: money(calc.toOrigMax) } })
+    if (ev.dest === 'card') {
+      const cap = Math.min(calc.toOrigMax, await cardRefundCap(tx, inv.id, ev.id))
+      if (ev.amount_cents > cap) throw new AppError('REFUND_EXCEEDS_CARD', { params: { max: money(cap) } })
     }
     if (ev.amount_cents > refundableWithout) throw new AppError('REFUND_EXCEEDS_REFUNDABLE')
     const now = this.d.clock.now()
@@ -642,8 +645,9 @@ export class PaymentsService {
     const settleVal = Math.min(p.diff, refundableNow)
     if (p.diff > 0 && calc.paid > 0 && settleVal > 0) {
       const dest: RefundDest = input.settle === 'card' ? 'card' : 'credit'
-      if (dest === 'card' && settleVal > calc.toOrigMax) {
-        throw new AppError('REFUND_EXCEEDS_CARD', { params: { max: money(calc.toOrigMax) } })
+      if (dest === 'card') {
+        const cap = Math.min(calc.toOrigMax, await cardRefundCap(tx, inv.id))
+        if (settleVal > cap) throw new AppError('REFUND_EXCEEDS_CARD', { params: { max: money(cap) } })
       }
       const refundLimit = c.actor.limit('refund')
       const pending = refundLimit !== null && settleVal > refundLimit
