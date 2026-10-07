@@ -746,9 +746,13 @@ export class PaymentsService {
         detail: 'Refunds were issued against this payment, so it can no longer be voided',
       })
     }
-    if (calc.paidOrig - pay.amount_cents < calc.refOrig) {
+    const cardMoney = pay.method_kind === 'card' || pay.method_kind === 'apple_pay'
+    if (
+      calc.paidOrig - pay.amount_cents < calc.refOrig ||
+      (cardMoney && (await cardRefundCap(tx, inv.id)) < pay.amount_cents)
+    ) {
       throw new AppError('VOID_NOT_ALLOWED', {
-        detail: 'Refunds were paid out against this payment, so it can no longer be voided',
+        detail: 'Refunds were issued against this payment, so it can no longer be voided',
       })
     }
     const now = this.d.clock.now()
