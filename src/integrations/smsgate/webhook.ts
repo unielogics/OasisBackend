@@ -48,9 +48,14 @@ function header(headers: Record<string, string | undefined>, name: string): stri
   return undefined
 }
 
+// Postgres text cannot hold U+0000: one such character in a sender's text would fail the event transaction on every retry
+// (and a STOP carrying one would never be recorded), so it is dropped where the payload is read.
+const noNul = (v: string): string => v.replaceAll('\u0000', '')
+
 function str(payload: Record<string, unknown>, key: string): string | undefined {
   const v = payload[key]
-  return typeof v === 'string' && v.length > 0 ? v : undefined
+  const clean = typeof v === 'string' ? noNul(v) : ''
+  return clean.length > 0 ? clean : undefined
 }
 
 function num(payload: Record<string, unknown>, key: string): number | undefined {
@@ -108,7 +113,7 @@ export function verifyAndParse(
     case 'sms:received': {
       const messageId = str(p, 'messageId')
       const sender = str(p, 'sender') ?? str(p, 'phoneNumber')
-      const message = typeof p.message === 'string' ? p.message : undefined
+      const message = typeof p.message === 'string' ? noNul(p.message) : undefined
       if (!messageId || !sender || message === undefined) throw new SmsWebhookError('bad_body', 'sms:received payload is incomplete')
       event = {
         kind: 'received',
