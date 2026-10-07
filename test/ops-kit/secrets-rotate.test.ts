@@ -51,20 +51,37 @@ async function seed(): Promise<Seeded> {
     webhookSecret: 'signing-key-abcdef',
   })
   const keyed = createKeyedBox([OLD])
-  const conn = new ConnectionStore(t.db, { locationId: location.id, clock: t.clock, newId, secrets: () => keyed })
+  const conn = new ConnectionStore(t.db, {
+    locationId: location.id,
+    clock: t.clock,
+    newId,
+    secrets: () => keyed,
+  })
   await conn.save('sqsp-api-key-live-123', { verified: true })
   await sql`insert into sqsp_webhook_subscriptions (id, location_id, sqsp_subscription_id, topic, endpoint_url, secret_enc)
-    values (${newId()}::uuid, ${location.id}::uuid, 'sub-1', 'order.create', 'https://example.test/hooks/squarespace', ${keyed.encrypt('00ff00ff')})`.execute(t.db)
+    values (${newId()}::uuid, ${location.id}::uuid, 'sub-1', 'order.create', 'https://example.test/hooks/squarespace', ${keyed.encrypt('00ff00ff')})`.execute(
+    t.db,
+  )
   return { locationId: location.id, deviceId: created.device.id, deviceKey: created.device.device_key }
 }
 
 const run = (o: { apply: boolean; oldKey?: typeof old; newKey?: typeof next }) =>
-  rotateSecrets({ url: testDatabaseUrl(), schema: t.schema, oldKey: o.oldKey ?? old, newKey: o.newKey ?? next, apply: o.apply })
+  rotateSecrets({
+    url: testDatabaseUrl(),
+    schema: t.schema,
+    oldKey: o.oldKey ?? old,
+    newKey: o.newKey ?? next,
+    apply: o.apply,
+  })
 
 const snapshot = async (): Promise<string> => {
   const parts: string[] = []
   for (const { table, column } of SECRET_COLUMNS) {
-    const r = await sql<{ v: string }>`select ${sql.id(column)} as v from ${sql.id(table)} where ${sql.id(column)} is not null order by id`.execute(t.db)
+    const r = await sql<{
+      v: string
+    }>`select ${sql.id(column)} as v from ${sql.id(table)} where ${sql.id(column)} is not null order by id`.execute(
+      t.db,
+    )
     parts.push(...r.rows.map((x) => x.v))
   }
   return parts.join('\n')
@@ -115,15 +132,31 @@ describe('rotateSecrets', () => {
     expect(r.applied).toBe(true)
     expect(r.rotated).toBe(4)
 
-    const newDevices = new DeviceStore(t.db, createMessagingBox(NEW, 'production'), { clock: t.clock, newId: createIdGenerator(t.clock) })
+    const newDevices = new DeviceStore(t.db, createMessagingBox(NEW, 'production'), {
+      clock: t.clock,
+      newId: createIdGenerator(t.clock),
+    })
     const row = (await newDevices.get(s.deviceId))!
-    expect(newDevices.secrets(row)).toEqual({ password: 'tablet-pass-123', webhookSecret: 'signing-key-abcdef' })
-    const oldDevices = new DeviceStore(t.db, createMessagingBox(OLD, 'production'), { clock: t.clock, newId: createIdGenerator(t.clock) })
+    expect(newDevices.secrets(row)).toEqual({
+      password: 'tablet-pass-123',
+      webhookSecret: 'signing-key-abcdef',
+    })
+    const oldDevices = new DeviceStore(t.db, createMessagingBox(OLD, 'production'), {
+      clock: t.clock,
+      newId: createIdGenerator(t.clock),
+    })
     expect(() => oldDevices.secrets(row)).toThrow()
 
-    const conn = new ConnectionStore(t.db, { locationId: s.locationId, clock: t.clock, newId: createIdGenerator(t.clock), secrets: () => createKeyedBox([NEW]) })
+    const conn = new ConnectionStore(t.db, {
+      locationId: s.locationId,
+      clock: t.clock,
+      newId: createIdGenerator(t.clock),
+      secrets: () => createKeyedBox([NEW]),
+    })
     expect(await conn.apiKey()).toBe('sqsp-api-key-live-123')
-    const sub = await sql<{ secret_enc: string }>`select secret_enc from sqsp_webhook_subscriptions`.execute(t.db)
+    const sub = await sql<{ secret_enc: string }>`select secret_enc from sqsp_webhook_subscriptions`.execute(
+      t.db,
+    )
     expect(createKeyedBox([NEW]).decrypt(sub.rows[0]!.secret_enc)).toBe('00ff00ff')
     expect(createKeyedBox([NEW]).keyId).toBe(sub.rows[0]!.secret_enc.split(':')[0])
   })
@@ -141,17 +174,26 @@ describe('rotateSecrets', () => {
   it('resumes a half-rotated database (some values on the new key already)', async () => {
     const s = await seed()
     const keyedNew = createKeyedBox([NEW])
-    await sql`update sqsp_connections set api_key_enc = ${keyedNew.encrypt('sqsp-api-key-live-123')}`.execute(t.db)
+    await sql`update sqsp_connections set api_key_enc = ${keyedNew.encrypt('sqsp-api-key-live-123')}`.execute(
+      t.db,
+    )
     const r = await run({ apply: true })
     expect(r.rotated).toBe(3)
     expect(r.alreadyRotated).toBe(1)
-    const conn = new ConnectionStore(t.db, { locationId: s.locationId, clock: t.clock, newId: createIdGenerator(t.clock), secrets: () => keyedNew })
+    const conn = new ConnectionStore(t.db, {
+      locationId: s.locationId,
+      clock: t.clock,
+      newId: createIdGenerator(t.clock),
+      secrets: () => keyedNew,
+    })
     expect(await conn.apiKey()).toBe('sqsp-api-key-live-123')
   })
 
   it('refuses everything and writes nothing when one value fits neither key', async () => {
     await seed()
-    await sql`update sms_devices set password_enc = ${createMessagingBox(generateKey(), 'production').encrypt('x')}`.execute(t.db)
+    await sql`update sms_devices set password_enc = ${createMessagingBox(generateKey(), 'production').encrypt('x')}`.execute(
+      t.db,
+    )
     const before = await snapshot()
     await expect(run({ apply: true })).rejects.toThrow(/cannot be decrypted with either key/)
     expect(await snapshot()).toBe(before)
@@ -168,7 +210,13 @@ describe('rotateSecrets', () => {
 
   it('refuses identical keys and a malformed key', async () => {
     await expect(run({ apply: true, newKey: old })).rejects.toThrow(/same/)
-    await expect(main(['--url', testDatabaseUrl(), '--schema', t.schema], { SECRETS_KEY: 'short', NEW_SECRETS_KEY: NEW }, () => {})).rejects.toThrow(/32 bytes/)
+    await expect(
+      main(
+        ['--url', testDatabaseUrl(), '--schema', t.schema],
+        { SECRETS_KEY: 'short', NEW_SECRETS_KEY: NEW },
+        () => {},
+      ),
+    ).rejects.toThrow(/32 bytes/)
   })
 
   it('an empty database rotates nothing and succeeds', async () => {
@@ -180,7 +228,11 @@ describe('rotateSecrets', () => {
   it('rolls back every value when a write fails midway', async () => {
     await seed()
     // A CHECK that rejects the new sealed value of the second column makes the whole transaction fail after the first update.
-    await sql.raw(`alter table sqsp_webhook_subscriptions add constraint rotate_probe check (secret_enc is null or secret_enc not like '${keyIdOf(next)}:%')`).execute(t.db)
+    await sql
+      .raw(
+        `alter table sqsp_webhook_subscriptions add constraint rotate_probe check (secret_enc is null or secret_enc not like '${keyIdOf(next)}:%')`,
+      )
+      .execute(t.db)
     const before = await snapshot()
     try {
       await expect(run({ apply: true })).rejects.toThrow()
@@ -225,19 +277,38 @@ describe('command line', () => {
     await seed()
     const keyFile = path.join(scratch, 'new.key')
     const lines: string[] = []
-    await main(['--url', testDatabaseUrl(), '--schema', t.schema, '--generate-new-key', '--new-key-out', keyFile, '--apply'], { SECRETS_KEY: OLD }, (l) => lines.push(l))
+    await main(
+      [
+        '--url',
+        testDatabaseUrl(),
+        '--schema',
+        t.schema,
+        '--generate-new-key',
+        '--new-key-out',
+        keyFile,
+        '--apply',
+      ],
+      { SECRETS_KEY: OLD },
+      (l) => lines.push(l),
+    )
     const generated = readFileSync(keyFile, 'utf8').trim()
     expect(Buffer.from(generated, 'base64')).toHaveLength(32)
     expect(statSync(keyFile).mode & 0o777).toBe(0o600)
     expect(lines.join('\n')).not.toContain(generated)
     await expect(
-      main(['--url', testDatabaseUrl(), '--schema', t.schema, '--generate-new-key', '--new-key-out', keyFile], { SECRETS_KEY: OLD }, () => {}),
+      main(
+        ['--url', testDatabaseUrl(), '--schema', t.schema, '--generate-new-key', '--new-key-out', keyFile],
+        { SECRETS_KEY: OLD },
+        () => {},
+      ),
     ).rejects.toThrow(/already exists/)
   })
 
   it('names the missing key', async () => {
     await expect(main(['--url', testDatabaseUrl()], {}, () => {})).rejects.toThrow(/old key is missing/)
-    await expect(main(['--url', testDatabaseUrl()], { SECRETS_KEY: OLD }, () => {})).rejects.toThrow(/new key is missing/)
+    await expect(main(['--url', testDatabaseUrl()], { SECRETS_KEY: OLD }, () => {})).rejects.toThrow(
+      /new key is missing/,
+    )
   })
 
   it('updateEnvFile appends the variable when the file does not have it', () => {

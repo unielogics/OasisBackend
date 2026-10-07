@@ -20,7 +20,9 @@
     "lint": "eslint .",
     "migrate": "tsx scripts/migrate.ts",
     "openapi": "tsx scripts/openapi.ts",
+    "secrets:rotate": "tsx scripts/secrets-rotate.ts",
     "seed": "tsx db/seeds/index.ts",
+    "sim:aws": "tsx scripts/verify-live/sim-aws.ts",
     "sim:smsgate": "tsx scripts/sim-smsgate.ts",
     "sim:squarespace": "tsx scripts/sim-squarespace.ts",
     "start": "node dist/server.js",
@@ -29,11 +31,16 @@
     "test:fast": "vitest run --poolOptions.forks.singleFork=false --poolOptions.forks.maxForks=2 --fileParallelism",
     "test:int": "vitest run test/integration",
     "test:ops": "vitest run test/scheduling test/golden/ops",
+    "test:ops-kit": "vitest run test/ops-kit",
     "test:payments": "vitest run test/payments",
     "test:settings": "vitest run test/settings-http",
     "test:unit": "vitest run test/unit test/platform.test.ts",
     "typecheck": "tsc --noEmit",
-    "user:create": "tsx src/modules/auth/cli.ts"
+    "user:create": "tsx src/modules/auth/cli.ts",
+    "verify:all": "tsx scripts/verify-live/all.ts",
+    "verify:aws": "tsx scripts/verify-live/aws.ts",
+    "verify:smsgate": "tsx scripts/verify-live/smsgate.ts",
+    "verify:squarespace": "tsx scripts/verify-live/squarespace.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
