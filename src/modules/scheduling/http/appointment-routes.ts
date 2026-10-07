@@ -36,6 +36,7 @@ import {
   BookingResult,
   ChecklistChange,
   CommandResult,
+  DepositChoice,
   OpsCard,
   OverrideBody,
   Status,
@@ -85,7 +86,7 @@ const BookingBody = z
   })
   .strict()
 
-const DepositPolicy = z.enum(['keep', 'refund_card', 'refund_credit'])
+const DepositPolicy = DepositChoice
 
 /** idempotentHandler answers through reply.send, which the typed route handler cannot express; the runtime schema still applies. */
 const idempotent = (h: ReturnType<typeof idempotentHandler>): never => h as never
@@ -330,7 +331,7 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
         tags: TAGS,
         summary: 'Cancel a booked or confirmed appointment',
         description:
-          'Reason required; `notify` texts the client. The invoice is canceled through the payments gateway (a deposit stays on it: canceled_kept). `deposit` records the policy; refunding is a payments command.',
+          "Reason required; `notify` texts the client, including what happens to the deposit. The money held on the invoice is settled by the cancellation policy setting (GET /settings/cancellation-policy: refunded in full when the cancel is at least `freeCancelHours` ahead, otherwise `lateRetainBp` of it is kept) and written as ledger events: a system refund, exempt from the caller's refund limit, a card refund awaits Squarespace. `deposit` (default `policy`) overrides it: `keep`, or `refund_card` / `refund_credit` as the caller's own refund (needs pay.refund; over their limit it waits for approval). The invoice is canceled (a kept deposit stays on it: canceled_kept, a fully refunded one canceled_refunded). The response carries the `settlement`. Needs an Idempotency-Key.",
         params: IdParams,
         body: z
           .object({
@@ -363,8 +364,12 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
       config: { access: access.perm('sched.cancel'), idempotency: 'required' },
       schema: {
         tags: TAGS,
-        summary: 'Mark a no-show (only after the start plus the late grace); cancels the invoice',
+        summary:
+          'Mark a no-show (only after the start plus the late grace); settles the deposit and cancels the invoice',
+        description:
+          'The money held is settled by the no-show share of the cancellation policy (kept by default) or the explicit `deposit` choice, like cancel. No text is sent to the client. Needs an Idempotency-Key.',
         params: IdParams,
+        body: z.object({ deposit: DepositChoice.optional() }).strict().optional(),
         response: { 200: CommandResult },
       },
     },
@@ -375,6 +380,7 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
           await ctxOf(app, req, ports),
           actorOf(req),
           (req.params as { id: string }).id,
+          { deposit: (req.body as { deposit?: z.infer<typeof DepositPolicy> } | undefined)?.deposit },
         )
         return { status: 200, body: r }
       }),

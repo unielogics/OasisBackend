@@ -24,6 +24,22 @@ export const settingDefs = {
   },
   'reviews.enabled': { schema: z.boolean(), default: false },
   'credit.default_expiry': { schema: z.enum(['none', '30d', '90d']), default: '90d' as const },
+  // What cancel and no-show do with the money held on the invoice (ADR 0082). Cancelling at least freeCancelHours before the
+  // start refunds it in full; later, lateRetainBp of it is kept (10000 = all, 0 = none); a no-show keeps noShowRetainBp.
+  'cancellation.policy': {
+    schema: z.object({
+      freeCancelHours: z.number().int().min(0).max(720),
+      lateRetainBp: z.number().int().min(0).max(10_000),
+      noShowRetainBp: z.number().int().min(0).max(10_000),
+      refundTo: z.enum(['original', 'credit']),
+    }),
+    default: {
+      freeCancelHours: 24,
+      lateRetainBp: 10_000,
+      noShowRetainBp: 10_000,
+      refundTo: 'original' as const,
+    },
+  },
   'sms.quiet_hours': {
     schema: z.object({ enabled: z.boolean(), start: hhmm, end: hhmm }),
     default: { enabled: false, start: '21:00', end: '08:00' },

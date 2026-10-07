@@ -25,6 +25,8 @@ import {
 import { can, firstName, loadSettingsBundle, type Actor, type SchedulingCtx } from './context.js'
 import type { InvoiceSummary, QueuedResult } from './ports.js'
 import { audit as audited } from './audit-helper.js'
+import { depositSentence } from './cancellation.js'
+import { settleClosed, settlementLog, type Settlement } from './closing.js'
 import { ensureInvoiceFor, staffLabel } from './invoicing.js'
 import { checkSlot, recordOverrides, type OverrideRequest } from './slots.js'
 import './problems.js'
@@ -122,6 +124,7 @@ async function queue(
     text?: string
     vars?: Record<string, string | number | null | undefined>
     purpose: string
+    dedupeKey?: string
   },
 ): Promise<QueuedResult> {
   return c.ports.messages.enqueue(tx, {
@@ -131,6 +134,7 @@ async function queue(
     text: m.text,
     vars: m.vars,
     purpose: m.purpose,
+    ...(m.dedupeKey ? { dedupeKey: m.dedupeKey } : {}),
   })
 }
 
@@ -513,15 +517,23 @@ export async function advanceAppointment(
 
 // cancel and no-show -------------------------------------------------------------------------------------------------
 
-export type DepositPolicy = 'keep' | 'refund_card' | 'refund_credit'
+/** What happens to the money held on the invoice: the setting's policy (default), or the staff's explicit choice. */
+export type DepositPolicy = 'policy' | 'keep' | 'refund_card' | 'refund_credit'
 
 const blankReason = (message: string): AppError =>
   new AppError('VALIDATION_FAILED', { detail: message, errors: [{ path: 'reason', message }] })
 
+/** A staff-chosen refund is the actor's own: it needs pay.refund before anything changes. */
+function requireRefundRight(actor: Actor, mode: DepositPolicy): void {
+  if ((mode === 'refund_card' || mode === 'refund_credit') && !can(actor, 'pay.refund'))
+    throw new AppError('FORBIDDEN', { meta: { required: ['pay.refund'], mode: 'all' } })
+}
+
 /**
- * Cancels a booked or confirmed job: the invoice is canceled through the gateway (a kept deposit stays on it),
- * capacity frees up, and the client is told when `notify` is set. The deposit policy is recorded; refunding a deposit
- * is a normal refund request on the payments side (the gateway contract carries no refund instruction).
+ * Cancels a booked or confirmed job. The money held on its invoice is settled by the cancellation policy (refunded in full when
+ * the cancel is early enough, otherwise the setting's share is kept) or by the staff's explicit `deposit` choice; the refund is a
+ * real ledger event (a card refund awaits Squarespace), the invoice is canceled (a kept deposit stays on it), capacity frees up
+ * and the client is told, including what happens to the deposit, when `notify` is set.
  */
 export async function cancelAppointment(
   tx: Tx,
@@ -529,26 +541,40 @@ export async function cancelAppointment(
   actor: Actor,
   id: string,
   o: { reason: string; notify?: boolean; deposit?: DepositPolicy },
-): Promise<CommandResult & { depositPolicy: DepositPolicy }> {
+): Promise<CommandResult & { depositPolicy: DepositPolicy; settlement: Settlement | null }> {
   const reason = o.reason?.trim() ?? ''
   if (reason === '') throw blankReason('Add a reason for the cancellation.')
+  const mode = o.deposit ?? 'policy'
+  requireRefundRight(actor, mode)
   const a = await lockAppointment(tx, c.locationId, id)
   if (a.status !== 'booked' && a.status !== 'confirmed') throw invalidTransition(a)
   const customer = await customerBrief(tx, a.customerId)
   const now = c.clock.now()
   await applyPatch(tx, a, { status: 'canceled', canceled_at: now, cancel_reason: reason })
+  const settlement = await settleClosed(tx, c, actor, a, { kind: 'canceled', mode })
   const invoice = await c.ports.invoices.cancelForAppointment(tx, a.id, 'canceled', actor.audit.actor ?? {})
   await logActivity(tx, c, {
     appointmentId: a.id,
     text: `Appointment canceled · ${reason}`,
     channels: ['internal'],
     actor,
-    meta: { depositPolicy: o.deposit ?? 'keep' },
+    meta: { depositPolicy: mode },
   })
+  if (settlement)
+    for (const text of settlementLog(settlement, 'canceled'))
+      await logActivity(tx, c, {
+        appointmentId: a.id,
+        text,
+        channels: ['internal'],
+        actor,
+        meta: { rule: settlement.rule },
+      })
   if (o.notify) {
+    const deposit = settlement ? depositSentence(settlement) : ''
     const sent = await queue(tx, c, a, customer, {
-      text: `Your appointment at Oasis Auto Spa ${whenLabel(a.scheduledStart, now, c.tz)} has been canceled. Reply here if you have questions.`,
+      text: `Your appointment at Oasis Auto Spa ${whenLabel(a.scheduledStart, now, c.tz)} has been canceled. ${deposit ? `${deposit} ` : ''}Reply here if you have questions.`,
       purpose: 'cancel',
+      dedupeKey: `cancel:${a.id}:v${a.version}`,
     })
     await logActivity(tx, c, {
       appointmentId: a.id,
@@ -564,18 +590,41 @@ export async function cancelAppointment(
     'cancel',
     a.id,
     { status: a.status },
-    { status: 'canceled', reason, notify: o.notify ?? false, deposit: o.deposit ?? 'keep' },
+    {
+      status: 'canceled',
+      reason,
+      notify: o.notify ?? false,
+      deposit: mode,
+      ...(settlement
+        ? {
+            heldCents: settlement.heldCents,
+            refundedCents: settlement.refundedCents,
+            retainedCents: settlement.retainedCents,
+          }
+        : {}),
+    },
   )
   const result = await finish(tx, c, a, 'canceled', {
     toast: { title: 'Appointment canceled', detail: `${customer.fullName} · ${reason}` },
     invoice,
     availabilityDates: [bizDateOf(c, a.scheduledStart)],
   })
-  return { ...result, depositPolicy: o.deposit ?? 'keep' }
+  return { ...result, depositPolicy: mode, settlement }
 }
 
-/** Only after the start plus the late grace. Cancels the invoice (reason no_show); no message is sent. */
-export async function markNoShow(tx: Tx, c: SchedulingCtx, actor: Actor, id: string): Promise<CommandResult> {
+/**
+ * Only after the start plus the late grace. The money held is settled by the no-show share of the policy (kept by default) or the
+ * staff's explicit choice, and the invoice is canceled (reason no_show). No message is sent to the client.
+ */
+export async function markNoShow(
+  tx: Tx,
+  c: SchedulingCtx,
+  actor: Actor,
+  id: string,
+  o: { deposit?: DepositPolicy } = {},
+): Promise<CommandResult & { depositPolicy: DepositPolicy; settlement: Settlement | null }> {
+  const mode = o.deposit ?? 'policy'
+  requireRefundRight(actor, mode)
   const a = await lockAppointment(tx, c.locationId, id)
   if (a.status !== 'booked' && a.status !== 'confirmed') throw invalidTransition(a)
   const { ops } = await loadSettingsBundle(tx, c.locationId)
@@ -584,14 +633,43 @@ export async function markNoShow(tx: Tx, c: SchedulingCtx, actor: Actor, id: str
     throw new AppError('TOO_EARLY_FOR_NO_SHOW', { params: { grace: ops.lateGraceMin } })
   const customer = await customerBrief(tx, a.customerId)
   await applyPatch(tx, a, { status: 'no_show', no_show_at: now })
+  const settlement = await settleClosed(tx, c, actor, a, { kind: 'no_show', mode })
   const invoice = await c.ports.invoices.cancelForAppointment(tx, a.id, 'no_show', actor.audit.actor ?? {})
   await logActivity(tx, c, { appointmentId: a.id, text: 'Marked no-show', channels: ['internal'], actor })
-  await audited(tx, c, actor, 'no_show', a.id, { status: a.status }, { status: 'no_show' })
-  return finish(tx, c, a, 'no_show', {
+  if (settlement)
+    for (const text of settlementLog(settlement, 'no_show'))
+      await logActivity(tx, c, {
+        appointmentId: a.id,
+        text,
+        channels: ['internal'],
+        actor,
+        meta: { rule: settlement.rule },
+      })
+  await audited(
+    tx,
+    c,
+    actor,
+    'no_show',
+    a.id,
+    { status: a.status },
+    {
+      status: 'no_show',
+      deposit: mode,
+      ...(settlement
+        ? {
+            heldCents: settlement.heldCents,
+            refundedCents: settlement.refundedCents,
+            retainedCents: settlement.retainedCents,
+          }
+        : {}),
+    },
+  )
+  const result = await finish(tx, c, a, 'no_show', {
     toast: { title: 'Marked no-show', detail: customer.fullName },
     invoice,
     availabilityDates: [bizDateOf(c, a.scheduledStart)],
   })
+  return { ...result, depositPolicy: mode, settlement }
 }
 
 /**
@@ -616,6 +694,7 @@ export async function reopenAppointment(
     excludeAppointmentId: a.id,
     ignorePast: o.start === undefined,
   })
+  await c.ports.deposits?.reopen(tx, { appointmentId: a.id, locationId: c.locationId })
   await applyPatch(tx, a, {
     status: 'booked',
     canceled_at: null,

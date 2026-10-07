@@ -337,7 +337,9 @@ export function registerPeopleRoutes(app: AppInstance, identityOf: IdentityProvi
             matrix: z.record(z.string(), z.record(z.string(), z.boolean())),
             limits: z
               .record(z.string(), LimitRecord)
-              .describe('roleId to money limits in CENTS (null = No limit; no stored row reads as the 2500 default)'),
+              .describe(
+                'roleId to money limits in CENTS (null = No limit; no stored row reads as the 2500 default)',
+              ),
             limitChoicesCents: z
               .array(z.number().int().nullable())
               .describe(

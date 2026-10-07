@@ -9,6 +9,8 @@ import type { StorageProvider } from '../../integrations/ports/storage.js'
 import { renderTemplate, type TemplateVars } from '../messaging/templates/render.js'
 import { QUICK_REPLIES } from '../messaging/templates/registry.js'
 import type { SmsClass } from '../messaging/policy/classes.js'
+import type { Actor } from './context.js'
+import type { SettlementKind, SettlementView } from './cancellation.js'
 import { ensureSchedulingProblems } from './problems.js'
 
 export type ActorRef = AuditActor
@@ -89,6 +91,40 @@ export interface InvoiceGateway {
  */
 export interface RevenueSource {
   revenueCents(db: Executor, locationId: string, from: Date, to: Date): Promise<number>
+}
+
+// Deposit settlement ----------------------------------------------------------------------------------------------
+
+/** How the money held on an invoice is settled when its appointment is canceled or marked no-show (ADR 0082). */
+export type SettlementMode = 'policy' | 'keep' | 'refund_card' | 'refund_credit'
+
+export interface SettleRequest {
+  appointmentId: string
+  locationId: string
+  kind: SettlementKind
+  mode: SettlementMode
+  /** mode policy: the kept share, in basis points, and where a refund goes. */
+  retainBp: number
+  refundTo: 'original' | 'credit'
+  /** The sentence that explains the decision; stored as the refund's note. */
+  rule: string
+  actor: Actor
+  /** One stable key per cancel / no-show, so the ledger events it writes are written once. */
+  idempotencyKey: string
+}
+
+/**
+ * Executes the settlement through the payments command layer, in the caller's transaction. `policy` refunds are system
+ * events (limit-exempt, no pay.refund needed); `refund_card` / `refund_credit` are the actor's own refund (their right and limit,
+ * so a large one waits for approval). `keep` writes nothing. Returns null when the appointment has no invoice.
+ */
+export interface DepositSettlement {
+  settle(tx: Tx, req: SettleRequest): Promise<SettlementView | null>
+  /**
+   * A canceled or no-show job comes back to booked: its invoice is revived (a kept deposit counts again). Refused with 409
+   * REOPEN_REFUNDED when a refund was issued, because a refund does not reopen the balance and the job would be undercharged.
+   */
+  reopen(tx: Tx, req: { appointmentId: string; locationId: string }): Promise<void>
 }
 
 export const TAX_RATE_BP = 700
@@ -419,4 +455,6 @@ export interface SchedulingPorts {
   externalAlerts: ExternalAlertSource
   revenue?: RevenueSource
   storage: StorageProvider
+  /** Without it a cancel or no-show only records the policy (the in-memory default); production wires the ledger. */
+  deposits?: DepositSettlement
 }

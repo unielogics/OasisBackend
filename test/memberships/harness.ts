@@ -38,8 +38,8 @@ export interface MemRig {
   get(s: Session, url: string): ReturnType<Harness['call']>
 }
 
-export function useMemRig(): MemRig {
-  const h = useHarness({ env: { SECRETS_KEY, SQSP_PROVIDER: 'sim', STORAGE_PROVIDER: 'fs' } })
+export function useMemRig(o: { env?: Record<string, string> } = {}): MemRig {
+  const h = useHarness({ env: { SECRETS_KEY, SQSP_PROVIDER: 'sim', STORAGE_PROVIDER: 'fs', ...o.env } })
   let superS: Session
   let limited: Session
   let noMember: Session

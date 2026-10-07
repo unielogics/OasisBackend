@@ -381,6 +381,8 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | PUT | `/api/v1/services/:id/checklist` | set.services |  |
 | PUT | `/api/v1/settings/auto-federal-holidays` | set.hours |  |
 | GET | `/api/v1/settings/bundle` | authenticated |  |
+| GET | `/api/v1/settings/cancellation-policy` | authenticated |  |
+| PUT | `/api/v1/settings/cancellation-policy` | set.hours |  |
 | GET | `/api/v1/settings/hours` | authenticated |  |
 | PUT | `/api/v1/settings/hours` | set.hours |  |
 | GET | `/api/v1/settings/rules` | authenticated |  |

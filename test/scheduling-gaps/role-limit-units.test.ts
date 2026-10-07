@@ -43,7 +43,9 @@ describe('role limit units: behaviour', () => {
 
     const overview = h.json<Json>(await h.call('GET', 'roles', { session }))
     expect(overview.limitChoicesCents).toEqual([...LIMIT_CHOICES_CENTS])
-    expect(overview.limitChoicesCents).toEqual(LIMIT_CHOICES_DOLLARS.map((d) => (d === null ? null : d * 100)))
+    expect(overview.limitChoicesCents).toEqual(
+      LIMIT_CHOICES_DOLLARS.map((d) => (d === null ? null : d * 100)),
+    )
     expect(overview.limits[role.id].refund).toBeNull() // the last accepted value was No limit
   })
 })

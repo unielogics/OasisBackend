@@ -56,6 +56,11 @@ const defs: Record<string, ProblemDef> = {
     title: 'Can’t remove add-on',
     detail: 'Refund or adjust the invoice first — removing it would leave the invoice overpaid',
   },
+  REOPEN_REFUNDED: {
+    status: 409,
+    title: 'Can’t reopen',
+    detail: 'The deposit was refunded. Book a new appointment instead',
+  },
   NOT_AN_ADDON: { status: 422, title: 'Not an add-on', detail: 'Pick an add-on from the catalog' },
 }
 
