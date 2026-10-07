@@ -39,3 +39,7 @@
 | [0071](0071-squarespace-ledger-wiring.md) | Squarespace sync over the real ledger: commands, variance, external refunds, the manual queue |
 | [0072](0072-squarespace-jobs-runtime-credentials.md) | Squarespace jobs, runtime seam, encrypted credentials, environment, webhook |
 | [0073](0073-memberships.md) | Memberships: plans, credits, inference, apply credit, the Operations port |
+| [0090](0090-job-runtime.md) | Job runtime: dead letters, run records, schedule upkeep, stately policy, DST rule |
+| [0091](0091-reminders-and-review-requests.md) | Appointment reminders (24 h, 2 h) and review requests |
+| [0092](0092-retention-and-expiry-jobs.md) | Retention, store-credit expiry, VIP hold release |
+| [0093](0093-job-operability-and-health.md) | System jobs endpoint, health probes, realtime resilience |
