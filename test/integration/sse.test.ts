@@ -1,3 +1,4 @@
+import http from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
 import { sql } from 'kysely'
 import { transaction } from '../../src/platform/db.js'
@@ -20,9 +21,7 @@ afterEach(async () => {
   ctx = undefined
 })
 
-async function start(
-  env: Record<string, string> = {},
-): Promise<{
+async function start(env: Record<string, string> = {}): Promise<{
   url: string
   app: TestApp
   pub: (e: Omit<PublishInput, 'locationId'> & { locationId?: string }) => Promise<number>
@@ -230,6 +229,43 @@ describe('GET /api/v1/events', () => {
     await sleep(300)
     const again = await connect(url)
     await again.waitFor((f) => f.event === 'ready')
+  })
+
+  it('does not count a stream whose client left before the handler ran (the count must not leak)', async () => {
+    const slow = (location: { id: string }) => {
+      const base = createPermissiveAuthorizer({ locationId: location.id })
+      return {
+        ...base,
+        async resolve(req: Parameters<typeof base.resolve>[0]) {
+          await sleep(120) // authentication takes a moment: a browser tab can close during it
+          return base.resolve(req)
+        },
+      }
+    }
+    ctx = await createTestApp({
+      testDb: t,
+      hub: { pollMs: 200 },
+      env: { SSE_HEARTBEAT_MS: '20000' },
+      authorizer: slow,
+    })
+    await ctx.app.listen({ port: 0, host: '127.0.0.1' })
+    const addr = ctx.app.server.address()
+    const url = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}/api/v1/events`
+    for (let i = 0; i < 10; i++) {
+      const r = http.get(url, {
+        headers: { accept: 'text/event-stream' },
+        agent: new http.Agent({ keepAlive: false }),
+      })
+      r.on('error', () => {})
+      await sleep(25)
+      r.destroy()
+    }
+    await sleep(600)
+    for (let i = 0; i < 8; i++) {
+      const c = await connect(url)
+      expect(c.status).toBe(200)
+      await c.waitFor((f) => f.event === 'ready')
+    }
   })
 
   it('closes open streams when the app shuts down (close() does not hang)', async () => {

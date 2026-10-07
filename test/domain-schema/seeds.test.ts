@@ -15,6 +15,7 @@ import { generateFederalHolidays } from '../../src/modules/settings/federal-holi
 import { getEmergencyState } from '../../src/modules/settings/emergency.js'
 import { getBookingRules, getHours } from '../../src/modules/settings/hours.js'
 import { listLiveClosures } from '../../src/modules/settings/closures.js'
+import { listVipClients } from '../../src/modules/settings/vip.js'
 import { dayInfo } from '../../src/modules/settings/day-info.js'
 import { listCatalog } from '../../src/modules/catalog/service.js'
 import { searchCustomers } from '../../src/modules/customers/service.js'
@@ -379,6 +380,13 @@ describe('seed data: design fixtures', () => {
     const hits = await searchCustomers(t.db, { locationId: loc.id, q: 'aisha', canContact: false })
     expect(hits).toHaveLength(1)
     expect(hits[0]).toMatchObject({ vip: true, phoneDisplay: null })
+  })
+
+  it("lists the VIP clients in the design's order (the list is ordered by when each was added)", async () => {
+    await seed('domain-design')
+    const loc = await LOC()
+    const listed = await listVipClients(t.db, loc.id)
+    expect(listed.map((v) => v.fullName)).toEqual([...DESIGN_VIP_NAMES])
   })
 })
 

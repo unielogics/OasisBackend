@@ -165,6 +165,13 @@ export function registerEventsRoute(app: AppInstance): void {
         endStream(res)
       }
       req.raw.on('close', cleanup)
+      res.on('close', cleanup)
+      // A client that left while authentication ran has already emitted its 'close': nothing would ever end this stream
+      // or give its slot back, and eight of those lock the person out of realtime until the process restarts.
+      if (res.destroyed || !res.socket || res.socket.destroyed) {
+        cleanup()
+        return reply
+      }
 
       try {
         const state = await cursorState(app.db)
