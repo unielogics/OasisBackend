@@ -87,7 +87,12 @@ export const listEvents = (db: Executor, invoiceId: string): Promise<EventRow[]>
     .orderBy('seq', 'desc')
     .execute()
 
+/** ledger_events.amount_cents is an int4: a larger amount is a validation error, not a failed insert. */
+export const MAX_EVENT_CENTS = 2_147_483_647
+
 export async function insertEvent(tx: Tx, e: NewEvent): Promise<EventRow> {
+  if (!Number.isSafeInteger(e.amount_cents) || Math.abs(e.amount_cents) > MAX_EVENT_CENTS)
+    throw new AppError('PAY_AMOUNT_INVALID', { detail: 'That amount is too large' })
   return tx.insertInto('ledger_events').values(e).returningAll().executeTakeFirstOrThrow()
 }
 
