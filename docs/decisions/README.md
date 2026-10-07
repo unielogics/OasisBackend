@@ -51,3 +51,7 @@
 | [0091](0091-reminders-and-review-requests.md) | Appointment reminders (24 h, 2 h) and review requests |
 | [0092](0092-retention-and-expiry-jobs.md) | Retention, store-credit expiry, VIP hold release |
 | [0093](0093-job-operability-and-health.md) | System jobs endpoint, health probes, realtime resilience |
+| [0100](0100-deployment-topology.md) | Deployment topology: one host, release directories, systemd, nginx, env split |
+| [0101](0101-backups-and-restore-drill.md) | Backups: snapshot-consistent dumps, retention, encrypted off-host copy, restore drill |
+| [0102](0102-live-verification-kit.md) | Live verification: one command per integration, safe by default, proven against simulators |
+| [0103](0103-secrets-rotation.md) | Secrets rotation: SECRETS_KEY re-encryption in one transaction |
