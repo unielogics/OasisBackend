@@ -102,5 +102,7 @@ create index membership_credit_events_cycle_idx on membership_credit_events (mem
 create unique index uq_credit_redeem_appointment on membership_credit_events (appointment_id)
   where kind = 'redeem' and appointment_id is not null;
 
-alter table appointments
-  add constraint appointments_membership_id_fkey foreign key (membership_id) references memberships(id) on delete set null;
+-- appointments.membership_id stays a plain uuid here: the foreign key to memberships(id) belongs to the links migration that runs
+-- after the messaging and standing-series tables exist (docs/data-model.md, test/domain-schema/migration.test.ts forbids it until then):
+--   alter table appointments add constraint appointments_membership_id_fkey
+--     foreign key (membership_id) references memberships(id) on delete set null;

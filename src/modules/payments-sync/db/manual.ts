@@ -439,6 +439,54 @@ export async function requeueManual(tx: Executor, d: { locationId: string }): Pr
   return { orders: ids.length }
 }
 
+/**
+ * The common sequence at the counter is the customer paying on the terminal (the order reaches us within minutes) and the staff
+ * member recording the card payment in Oasis a little LATER. An order the matcher could not place stays in the queue, so each
+ * cycle gives the ones that had no candidate (or only a weak one) another chance when a staff-recorded payment waiting on
+ * Squarespace, or a new payment link, appeared after the item was queued. Once per new candidate: the fresh queue row is newer
+ * than the candidate, so nothing loops.
+ */
+export async function requeueWithNewCandidates(
+  tx: Executor,
+  d: { locationId: string },
+): Promise<{ orders: number }> {
+  const r = await sql<{ sqsp_order_id: string }>`
+    select distinct q.sqsp_order_id
+    from sqsp_manual_queue q
+    join sqsp_orders o on o.location_id = q.location_id and o.sqsp_order_id = q.sqsp_order_id
+    where q.location_id = ${d.locationId} and q.state = 'open' and q.reason in ('no_candidate', 'low_confidence')
+      and o.match_state = 'manual' and o.matched_invoice_id is null
+      and (exists (select 1 from ledger_events e
+                   where e.location_id = q.location_id and e.processor_state = 'awaiting_processor' and e.created_at > q.created_at
+                     and not exists (select 1 from ledger_events v where v.voids_event_id = e.id))
+        or exists (select 1 from payment_links l
+                   where l.location_id = q.location_id and l.state = 'active' and l.created_at > q.created_at))`.execute(
+    tx,
+  )
+  const ids = r.rows.map((x) => x.sqsp_order_id)
+  if (ids.length === 0) return { orders: 0 }
+  await tx
+    .updateTable('sqsp_orders')
+    .set({ match_state: 'unmatched' })
+    .where('location_id', '=', d.locationId)
+    .where('sqsp_order_id', 'in', ids)
+    .execute()
+  await tx
+    .updateTable('sqsp_transactions')
+    .set({ state: 'new' })
+    .where('location_id', '=', d.locationId)
+    .where('state', '=', 'manual')
+    .where('sqsp_order_id', 'in', ids)
+    .execute()
+  await tx
+    .deleteFrom('sqsp_manual_queue')
+    .where('location_id', '=', d.locationId)
+    .where('state', '=', 'open')
+    .where('sqsp_order_id', 'in', ids)
+    .execute()
+  return { orders: ids.length }
+}
+
 /** Orders ignored only because no product was mapped become unmatched again when the map changes. */
 export async function reopenUnmapped(tx: Executor, d: { locationId: string }): Promise<{ orders: number }> {
   const orders = await tx
@@ -495,6 +543,18 @@ export interface OrderListItem {
     candidates: unknown
     variance: unknown
     createdAt: string
+  }[]
+  /** What was applied to the ledger for this order, with the Squarespace-versus-Oasis variance of each. */
+  matches: {
+    kind: string
+    transactionId: string | null
+    eventId: string | null
+    invoiceId: string | null
+    rule: string | null
+    confidence: number | null
+    manual: boolean
+    variance: unknown
+    at: string
   }[]
 }
 
@@ -553,6 +613,16 @@ export async function listOrders(
         .orderBy('created_at')
         .execute()
     : []
+  const matches = ids.length
+    ? await db
+        .selectFrom('sqsp_matches')
+        .selectAll()
+        .where('location_id', '=', locationId)
+        .where('sqsp_order_id', 'in', ids)
+        .orderBy('created_at')
+        .orderBy('id')
+        .execute()
+    : []
   return {
     nextCursor: page.nextCursor,
     items: page.items.map((r) => ({
@@ -594,6 +664,19 @@ export async function listOrders(
           state: t.state,
           createdOn: t.created_on.toISOString(),
           brand: t.brand,
+        })),
+      matches: matches
+        .filter((m) => m.sqsp_order_id === r.sqsp_order_id)
+        .map((m) => ({
+          kind: m.kind,
+          transactionId: m.sqsp_txn_id,
+          eventId: m.event_id,
+          invoiceId: m.invoice_id,
+          rule: m.rule,
+          confidence: m.confidence === null ? null : Number(m.confidence),
+          manual: m.manual,
+          variance: m.variance,
+          at: m.created_at.toISOString(),
         })),
       queue: queue
         .filter((m) => m.sqsp_order_id === r.sqsp_order_id)

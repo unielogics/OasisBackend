@@ -260,6 +260,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | PUT | `/api/v1/appointments/:id/checklist/items/:itemId` | jobs.checklist |  |
 | POST | `/api/v1/appointments/:id/complete` | jobs.status |  |
 | POST | `/api/v1/appointments/:id/confirm` | sched.edit | jobs.status |  |
+| POST | `/api/v1/appointments/:id/membership-perks/apply` | cli.member | required |
 | POST | `/api/v1/appointments/:id/no-show` | sched.cancel | required |
 | POST | `/api/v1/appointments/:id/notify-ready` | msg.send |  |
 | DELETE | `/api/v1/appointments/:id/photos/:photoId` | jobs.checklist |  |
@@ -293,6 +294,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/closures/preview` | set.hours |  |
 | GET | `/api/v1/customers` | cli.view |  |
 | POST | `/api/v1/customers` | sched.edit |  |
+| GET | `/api/v1/customers/:id/membership` | cli.view |  |
 | GET | `/api/v1/emergency` | authenticated |  |
 | GET | `/api/v1/emergency/:id/affected` | set.emergency |  |
 | POST | `/api/v1/emergency/close` | set.emergency | required |
@@ -309,6 +311,17 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/employees/:id/password-reset` | team.edit |  |
 | POST | `/api/v1/employees/:id/reactivate` | team.edit |  |
 | GET | `/api/v1/events` | authenticated |  |
+| POST | `/api/v1/integrations/squarespace/alerts/:id/resolve` | set.billing |  |
+| DELETE | `/api/v1/integrations/squarespace/connection` | set.billing |  |
+| PUT | `/api/v1/integrations/squarespace/connection` | set.billing |  |
+| PUT | `/api/v1/integrations/squarespace/customer-links/:sqspCustomerId` | set.billing |  |
+| GET | `/api/v1/integrations/squarespace/orders` | set.billing | pay.collect |  |
+| POST | `/api/v1/integrations/squarespace/orders/:id/ignore` | pay.collect | required |
+| POST | `/api/v1/integrations/squarespace/orders/:id/match` | pay.collect | required |
+| GET | `/api/v1/integrations/squarespace/product-map` | set.billing |  |
+| PUT | `/api/v1/integrations/squarespace/product-map` | set.billing |  |
+| GET | `/api/v1/integrations/squarespace/status` | set.billing |  |
+| POST | `/api/v1/integrations/squarespace/sync-now` | set.billing |  |
 | GET | `/api/v1/invoices/:id` | pay.reports |  |
 | POST | `/api/v1/invoices/:id/adjustments` | pay.adjust | required |
 | POST | `/api/v1/invoices/:id/credit-applications` | pay.collect | required |
@@ -325,6 +338,9 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/api/v1/me` | authenticated |  |
 | PUT | `/api/v1/me/preferences` | authenticated |  |
 | POST | `/api/v1/me/view-as` | authenticated |  |
+| GET | `/api/v1/memberships` | cli.member |  |
+| POST | `/api/v1/memberships` | cli.member |  |
+| PATCH | `/api/v1/memberships/:id` | cli.member |  |
 | GET | `/api/v1/meta/now` | public |  |
 | GET | `/api/v1/openapi.json` | public |  |
 | GET | `/api/v1/ops/alerts` | sched.view |  |
@@ -359,6 +375,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | DELETE | `/api/v1/vip/clients/:customerId` | cli.member |  |
 | POST | `/api/v1/vip/holds` | cli.member |  |
 | DELETE | `/api/v1/vip/holds/:id` | cli.member |  |
+| POST | `/hooks/squarespace` | webhook:squarespace |  |
 <!-- openapi:end -->
 
 ## 14. Identity: sign-in, sessions, RBAC, employees and roles
@@ -700,3 +717,53 @@ Canceling or a no-show cancels the invoice: `canceled` (nothing paid), `canceled
 is INV-20506), ledger events with real instants relative to the clock, store credit with allocations, and the pending refund
 INV-20579. Oracle values come from the ORIGINAL bundle (`test/golden/pay/extract-oracle.mjs`, see `test/golden/pay/README.md`);
 intentional differences are in `test/golden/pay/DEVIATIONS.md`. Tests: `test/payments/*` (`pnpm vitest run test/payments`).
+
+## 22. Squarespace sync and memberships
+
+Decisions: ADR 0070 (persistence), 0071 (ledger wiring), 0072 (jobs, credentials, environment), 0073 (memberships). Squarespace
+is read-only for payments; Oasis owns the ledger. Polling is the baseline; the webhook is an optional accelerator.
+
+### 22.1 Squarespace endpoints (`/api/v1/integrations/squarespace`)
+
+| Verb path | Permission | Notes |
+|---|---|---|
+| `GET /status` | `set.billing` | connection (never the key), per-resource sync state and lag, order and transaction counts by state, `manualQueueOpen`, `awaitingProcessor{count,cents}`, `deadLetters`, product map size, webhook state, open alerts. |
+| `POST /sync-now` | `set.billing` | `{resume?, rematch?}`. `202 {mode:"queued"}` when there is a queue (singleton), `200 {mode:"inline", result}` otherwise; `409 SQSP_NOT_CONFIGURED` without a key. `resume` clears a dead-lettered resource; `rematch` re-offers the manual queue to the matcher. |
+| `PUT /connection` | `set.billing` | `{apiKey, siteId?, verify=true}`: one read against Squarespace first (`422 SQSP_CONNECTION_FAILED`), then stored AES-256-GCM encrypted (`503` when `SECRETS_KEY` is unset). Returns the connection view; the key is never returned. `DELETE /connection` erases it and stops polling. |
+| `GET /product-map`, `PUT /product-map` | `set.billing` | rows `{productId?, sku?, name?, kind: membership\|service, plan?, planLabel?, intervalMonths?, serviceId?, active?}`; `PUT` replaces the whole map (422 with per-row errors), re-opens orders ignored only for `unmapped_sku`. `GET` adds `seen` (products on the last 90 days of orders, `mapped` or not) and the plans. |
+| `GET /orders?state=unmatched\|auto\|manual\|ignored\|membership\|all&limit&cursor` | `set.billing` or `pay.collect` | default `unmatched` = not yet matched or waiting in the manual queue. Each order carries its payments and refunds, the queue items (reason, scored suggestions), and `matches` (what was applied, confidence, variance). Contact details masked without `cli.contact`. Keyset pages (created time, id). |
+| `POST /orders/:id/match` | `pay.collect`, **Idempotency-Key** | `{eventId}` confirms a staff-recorded card payment or refund waiting on Squarespace; `{invoiceId}` records the payment as a `squarespace` pay event (`409 SQSP_MATCH_DUPLICATE` when the invoice already shows a waiting or equal card payment, unless `force`). `404 SQSP_ORDER_NOT_FOUND`, `409 SQSP_NOTHING_TO_MATCH`, `409 SQSP_ORDER_NOT_MATCHABLE`, `422 SQSP_MATCH_TARGET_REQUIRED`. |
+| `POST /orders/:id/ignore` | `pay.collect`, **Idempotency-Key** | `{reason?}`; idempotent; `409 SQSP_ORDER_ALREADY_MATCHED` once money is on an invoice. |
+| `PUT /customer-links/:sqspCustomerId` | `set.billing` | `{customerId}`; links a Squarespace customer to an Oasis customer and runs the membership pass. |
+| `POST /alerts/:id/resolve` | `set.billing` | closes a sync alert. |
+| `POST /hooks/squarespace` | signature | `Squarespace-Signature` (hex HMAC-SHA256 over the raw body, secret decoded from hex); `401` bad signature, `400` malformed, `200` stale / duplicate / ignored topic, `202` accepted. |
+
+`GET /payments/reconciliation` (Payments) now lists real `unmatchedOrders` (the manual queue) and `unmatchedTransactions`.
+
+### 22.2 Membership endpoints
+
+| Verb path | Permission | Notes |
+|---|---|---|
+| `GET /customers/:id/membership` | `cli.view` | `{membership, upgrade, history}`: plan (colours, tint, perks, percent perks as display data), status, renewal (`renewsAt`, `renewLabel`), months active, credits per rule (`left: null` = unlimited), retention, flags; for a non-member the upgrade candidacy (3 or more completed visits in 60 days); history (visits, lifetime spend, average days between visits, favourite package). |
+| `GET /memberships?status&plan&q&limit&cursor` | `cli.member` | members by customer name with a count per status. |
+| `POST /memberships` | `cli.member` | a member by hand (no subscription data): active, this cycle's credits granted. `409 MEMBERSHIP_EXISTS`. |
+| `PATCH /memberships/:id` | `cli.member` | `{status?, planKey?, planLabel?, renewsOn?, autoApply?, note?, expectedVersion?}`; holds against the inference until a newer paid order; `412` on a stale version; audited. |
+| `POST /appointments/:id/membership-perks/apply` | `cli.member`, **Idempotency-Key** | applies one credit as a system `adjust` (reason "Membership credit") equal to the package line. `404 MEMBERSHIP_NOT_FOUND`, `409 MEMBERSHIP_NOT_ACTIVE`, `MEMBERSHIP_NOT_ELIGIBLE`, `MEMBERSHIP_NO_CREDIT`, `MEMBERSHIP_CREDIT_APPLIED`, `MEMBERSHIP_NO_BALANCE`, `MEMBERSHIP_NO_INVOICE`, `MEMBERSHIP_APPOINTMENT_CLOSED`. |
+
+The Operations appointment file's `membership` (and the board's member badge) now come from the real port: `plan` is the label sold,
+`creditsLeft` (null = unlimited), `creditAvailable`, and additively `planKey`, `renewsAt`, `renewLabel`, `creditsUsed`, `perks`,
+`color`, `bgColor`, `tint`, `memberMonths`, `retention{label, desc, tone}`.
+
+### 22.3 Realtime and alerts
+
+`payments` channel: `squarespace.order_synced` `{orderId, orderNumber, matchState, invoiceId?}` whenever an order is stored or its match
+state changes; matches and confirmations also publish `invoice.updated` and `ledger.event` like a staff command. Operations alert 12
+(`awaiting_processor`: card money not confirmed after 2 hours; `unmatched_order`: orders waiting in the manual queue, managers only)
+is served by the alert source in `src/modules/payments-sync/db/queries.ts`.
+
+### 22.4 Jobs, environment, seeds, tests
+
+Jobs `sqsp.sync`, `sqsp.contacts`, `sqsp.reconcile`, `sqsp.webhook.process`, `membership.cycle` (ADR 0072). Environment: the
+`SQSP_*` variables in `src/config/env.ts` (all optional) and `SECRETS_KEY` (required to store the API key). Seed profile
+`memberships` (depends on `design`): plans, credit rules and the design's members (manual, no Squarespace ids). Run the simulator
+with `pnpm sim:squarespace`; the tests are `test/payments-sync-db/*` and `test/memberships/*`.

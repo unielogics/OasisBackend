@@ -196,6 +196,19 @@ export const OrderItem = z.object({
       brand: z.string().nullable(),
     }),
   ),
+  matches: z.array(
+    z.object({
+      kind: z.string(),
+      transactionId: z.string().nullable(),
+      eventId: z.string().nullable(),
+      invoiceId: z.string().nullable(),
+      rule: z.string().nullable(),
+      confidence: z.number().nullable(),
+      manual: z.boolean(),
+      variance: z.unknown().nullable(),
+      at: Instant,
+    }),
+  ),
   queue: z.array(
     z.object({
       id: z.string(),

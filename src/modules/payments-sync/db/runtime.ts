@@ -21,7 +21,7 @@ import { PgAlertSink, raiseAlert, resolveAlerts } from './alerts.js'
 import { ConnectionStore } from './connection.js'
 import { linkContacts, type LinkResult } from './links.js'
 import { PgLedger } from './ledger.js'
-import { requeueManual } from './manual.js'
+import { requeueManual, requeueWithNewCandidates } from './manual.js'
 import { buildProductMap } from './product-map.js'
 import {
   PgContactRepository,
@@ -193,6 +193,7 @@ export class SqspRuntime {
         await parts.engine.resume(r)
     const requeued = opts.rematch ? (await requeueManual(db, { locationId })).orders : undefined
     const cycle = await parts.engine.runCycle()
+    await requeueWithNewCandidates(db, { locationId })
     const match = await parts.runner.run()
     if (parts.productMap.size > 0) await resolveAlerts(db, alertDeps, ['product_map_empty'])
     const conn = this.d.env.SECRETS_KEY ? this.connection(locationId) : undefined
