@@ -254,6 +254,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | DELETE | `/api/v1/appointments/:id/addons/:serviceId` | sched.edit |  |
 | PUT | `/api/v1/appointments/:id/addons/:serviceId` | sched.edit |  |
 | POST | `/api/v1/appointments/:id/advance` | jobs.status | sched.edit |  |
+| POST | `/api/v1/appointments/:id/arrival-link` | sched.edit |  |
 | POST | `/api/v1/appointments/:id/arrive` | jobs.status | sched.edit |  |
 | POST | `/api/v1/appointments/:id/assign-bay` | jobs.status |  |
 | POST | `/api/v1/appointments/:id/cancel` | sched.cancel | required |
@@ -277,6 +278,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/appointments/:id/start` | jobs.status |  |
 | GET | `/api/v1/arrival-settings` | authenticated |  |
 | PUT | `/api/v1/arrival-settings` | cli.member |  |
+| POST | `/api/v1/arrivals/ping` | public |  |
 | GET | `/api/v1/auth/csrf` | authenticated |  |
 | POST | `/api/v1/auth/invite/accept` | public |  |
 | POST | `/api/v1/auth/login` | public |  |
@@ -351,6 +353,8 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/api/v1/me` | authenticated |  |
 | PUT | `/api/v1/me/preferences` | authenticated |  |
 | POST | `/api/v1/me/view-as` | authenticated |  |
+| GET | `/api/v1/membership-plans` | cli.view |  |
+| PATCH | `/api/v1/membership-plans/rules/:id` | cli.member |  |
 | GET | `/api/v1/memberships` | cli.member |  |
 | POST | `/api/v1/memberships` | cli.member |  |
 | PATCH | `/api/v1/memberships/:id` | cli.member |  |
@@ -382,11 +386,23 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | PUT | `/api/v1/services/:id/checklist` | set.services |  |
 | PUT | `/api/v1/settings/auto-federal-holidays` | set.hours |  |
 | GET | `/api/v1/settings/bundle` | authenticated |  |
+| GET | `/api/v1/settings/cancellation-policy` | authenticated |  |
+| PUT | `/api/v1/settings/cancellation-policy` | set.hours |  |
+| GET | `/api/v1/settings/features` | authenticated |  |
+| PUT | `/api/v1/settings/features` | set.billing |  |
 | GET | `/api/v1/settings/hours` | authenticated |  |
 | PUT | `/api/v1/settings/hours` | set.hours |  |
+| GET | `/api/v1/settings/location` | authenticated |  |
+| PUT | `/api/v1/settings/location` | set.hours |  |
 | GET | `/api/v1/settings/rules` | authenticated |  |
 | PUT | `/api/v1/settings/rules` | set.hours |  |
 | GET | `/api/v1/staff` | sched.view |  |
+| GET | `/api/v1/standing-series` | sched.view |  |
+| POST | `/api/v1/standing-series` | sched.edit | required |
+| GET | `/api/v1/standing-series/:id` | sched.view |  |
+| PATCH | `/api/v1/standing-series/:id` | sched.edit | required |
+| POST | `/api/v1/standing-series/:id/materialize` | sched.edit |  |
+| POST | `/api/v1/standing-series/materialize` | sched.edit |  |
 | GET | `/api/v1/vip` | authenticated |  |
 | PUT | `/api/v1/vip` | cli.member |  |
 | GET | `/api/v1/vip/clients` | cli.member |  |
@@ -396,6 +412,10 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | DELETE | `/api/v1/vip/holds/:id` | cli.member |  |
 | GET | `/dev-storage/*` | public |  |
 | POST | `/dev-storage/*` | public |  |
+| GET | `/api/v1/waitlist` | sched.view |  |
+| POST | `/api/v1/waitlist` | sched.edit |  |
+| POST | `/api/v1/waitlist/:id/accept` | sched.edit | required |
+| POST | `/api/v1/waitlist/:id/cancel` | sched.edit |  |
 | POST | `/hooks/squarespace` | webhook:squarespace |  |
 <!-- openapi:end -->
 
@@ -449,6 +469,8 @@ Requests resolve authority from `rbac_state.version` (read in the same query as 
 transaction and publishes `rbac.changed` on the `settings` realtime channel, so a change applies to signed-in people on
 their next request and clients can refetch `/me`.
 
+Role money limits: the request is dollars, everything returned is cents. `PUT /roles/:id/limits/:kind` takes the chip in dollars; `GET /roles` (`limits`, `limitChoicesCents`), `GET /me` (`permissions.*.limit`, `limits`) and the PUT response (`limitCents`) are integer cents with `null` for No limit. `test/scheduling-gaps/role-limit-units.test.ts` fails if the behaviour, the OpenAPI descriptions or this paragraph disagree.
+
 For other modules: `access.perm('x')` on the route; in a handler `req.auth` carries `permissions`, `limits` (cents; `null` =
 unlimited; compare `amount > limit`), `actorName`, `roles` (names), `viewAsRoleId` and `realUserId`. `sessionContext(req)`
 (`src/modules/auth/context.ts`) returns the richer `SessionAuthContext` (`employee`, `isSuper`, `canViewAs`, `viewAsRole`,
@@ -493,7 +515,7 @@ response carries a warning instead. Email must be unique across employees and lo
 | `POST /roles` | `team.roles` | `{name?, description?}`; default name `Shift Lead`, then `Shift Lead 2`...; copies Crew plus `sched.edit`; limits 25/25/25; 201. An explicit duplicate name is 409 `ROLE_NAME_TAKEN`. |
 | `PATCH /roles/:id` | `team.roles` | Rename/describe; the locked role answers 409 `ROLE_LOCKED`. Optional `If-Match`. |
 | `PUT /roles/:id/permissions/:key` `{granted}` | `team.roles` | Idempotent. Locked role: 409 `ROLE_LOCKED` ("Super Admin always has every permission"). Granting `set.billing` or `pay.void` needs a Super Admin. |
-| `PUT /roles/:id/limits/:kind` `{value}` | `team.roles` + Super Admin | `value` in 25, 50, 100, 250, 500, 1000 (dollars) or `null`; stored in cents. 403 `SUPER_ONLY` for anyone else, 409 `ROLE_LOCKED` for the locked role. |
+| `PUT /roles/:id/limits/:kind` `{value}` | `team.roles` + Super Admin | `value` is **dollars, not cents**: one of 25, 50, 100, 250, 500, 1000 or `null` (No limit), the design's chips; anything else is 422 `Choose 25, 50, 100, 250, 500, 1000 or No limit` (so `2500` is refused). Stored in cents; the response is `{roleId, kind, limitCents}` in **cents** (`25` becomes `2500`). 403 `SUPER_ONLY` for anyone else, 409 `ROLE_LOCKED` for the locked role. |
 | `DELETE /roles/:id` | `team.roles` | Custom roles only (409 `ROLE_NOT_REMOVABLE`). Strips the role from people, assigns Crew to anyone left with no role, drops exceptions of those people that became no-ops (an Allow a remaining role already grants, a Deny of something no remaining role grants; what they can do is unchanged), returns `{removed, affected, reassignedToCrew}`. |
 
 ### 14.7 Invariants
@@ -550,7 +572,7 @@ also publishes on `ops`). The generated table in section 13 is the endpoint list
 | `GET /emergency` | Any signed-in user: `{active, summary, counters {affected, notified, rebooked, booking}, current, strip, history, canClose, closeRoleNames, requirement, options}`. `strip` is live: `{openNow, text, todayHours, appointmentsRemaining, vehiclesOnSite, ...}` with `text` reading `"Open now · Saturday 8:00 AM – 5:00 PM · 6 appointments left today, 3 vehicles on site"`. `canClose`/`closeRoleNames` ("Management", "Super Admin") replace the static access line; `history` is null without `set.emergency`. |
 | `GET /emergency/preview` | `?reason&dur&until&through[&message&notify&link&pause]`; `reason` is the chip label or key, `dur` is `today`/`until`/`days` (`through` is accepted for `days`), `until` is `"2:00 PM"`. `{count, affected[{time, customerName, vehicle, bizDate, dateLabel, status}], onSite[], summary, untilText, renderedMessage, endsAt}`. No contact data is returned. |
 | `POST /emergency/close` | **Idempotency-Key required** (replay: same response, `Idempotent-Replayed: true`; same key, other body: 422 `IDEMPOTENCY_MISMATCH`). One transaction: 409 `EMERGENCY_ACTIVE`; 422 `EMERGENCY_NOTHING_TO_CLOSE` for "rest of today" once the shop has closed or on a day it is not open; 422 for a reopening time that is not later than now and for a last day more than 60 days out. Writes the emergency row and closure rows (replacing planned ones for later restore), flags booked and confirmed appointments in the window (multi-day: every day through the last), records the message per customer (`sms`, `email`, or `skipped_opt_out`/`no_contact`), alerts on-shift crew, schedules `emergency.auto_reopen` at the end time. 201 `{summary, notifiedCount, skipped, affected[], onSite[], closuresCreated[], emergency}`. Vehicles already on site are reported, never touched. |
-| `POST /emergency/reopen` | Soft-deletes today's and future emergency closure rows (days already over stay), restores replaced planned closures, writes history `"Reopened by {name} · {n} notified"` with real counters. 409 `EMERGENCY_NOT_ACTIVE` when nothing is active. Events on `ops`: `emergency.started`, `emergency.ended` (service) and `emergency.reopened` (command), all on one reopen. |
+| `POST /emergency/reopen` | Soft-deletes today's and future emergency closure rows (days already over stay), restores replaced planned closures, writes history `"Reopened by {name} · {n} notified"` with real counters. 409 `EMERGENCY_NOT_ACTIVE` when nothing is active. One event on `ops` per transition: `emergency.started` on close, `emergency.reopened` `{id, auto}` on reopen (person or end-time job); there is no `emergency.ended` (ADR 0080). |
 | `GET /emergency/history`, `GET /emergency/{id}/affected` | `set.emergency`; the second is the "needs rebooking" queue (booked or confirmed appointments of that emergency not yet rebooked). |
 
 Notification fan-out is behind ports (`ClosureNotifier`, `EmergencyNotifier`, `EmergencyEffects`): today they write an
@@ -912,3 +934,68 @@ Jobs `sqsp.sync`, `sqsp.contacts`, `sqsp.reconcile`, `sqsp.webhook.process`, `me
 `SQSP_*` variables in `src/config/env.ts` (all optional) and `SECRETS_KEY` (required to store the API key). Seed profile
 `memberships` (depends on `design`): plans, credit rules and the design's members (manual, no Squarespace ids). Run the simulator
 with `pnpm sim:squarespace`; the tests are `test/payments-sync-db/*` and `test/memberships/*`.
+
+## 24. Gap closers: deposit policy, arrival ping, membership credits, standing appointments and the waitlist
+
+Decisions: ADR 0080 (one emergency event per transition), 0081 (role limit units), 0082 (cancel and no-show execute the deposit policy),
+0083 (arrival ping), 0084 (memberships), 0085 (data-model document), 0086 (standing appointments and waitlist). Tests: `test/scheduling-gaps/*`,
+`test/memberships-gaps/*`, `test/standing/*`.
+
+### 24.1 Cancel and no-show settle the money held (ADR 0082)
+
+| Verb path | Permission | Notes |
+|---|---|---|
+| `GET /settings/cancellation-policy` | any signed-in user | `{policy:{freeCancelHours, lateRetainBp, noShowRetainBp, refundTo: original\|credit}, version}`. Defaults: 24, 10000, 10000, original. |
+| `PUT /settings/cancellation-policy` | `set.hours` | the same fields plus `version`; `412` when stale; `422` outside 0..720 hours or 0..10000 bp. Audited. |
+| `POST /appointments/:id/cancel` | `sched.cancel`, **Idempotency-Key** | `{reason, notify?, deposit?: policy\|keep\|refund_card\|refund_credit}` (default `policy`). Response adds `settlement {policy, heldCents, refundedCents, retainedCents, refunds[{amountCents, dest, state, awaitingProcessor}], rule}`; `depositPolicy` echoes the choice. `refund_*` needs `pay.refund` (403 `required:["pay.refund"]`) and the caller's own limit (over it the refund is `pending`). |
+| `POST /appointments/:id/no-show` | `sched.cancel`, **Idempotency-Key** | optional body `{deposit?}`; settles by `noShowRetainBp`; sends no text. |
+| `POST /appointments/:id/reopen` | `sched.cancel` | now revives the invoice; `409 REOPEN_REFUNDED` when a refund was issued ("The deposit was refunded. Book a new appointment instead"). |
+
+Policy refunds are `ledger_events` with `source = system`, reason "Cancellation policy" / "No-show policy", `actor_roles = "Cancellation policy"`,
+exempt from the actor's refund limit; a card refund is `processor_state = awaiting_processor`. The invoice ends `canceled_refunded`, `canceled_kept`
+or `canceled`. The cancellation text (with `notify`) states what happens to the deposit.
+
+### 24.2 Arrival ping (ADR 0083)
+
+| Verb path | Permission | Notes |
+|---|---|---|
+| `POST /appointments/:id/arrival-link` | `sched.edit` | `201 {token, path:"/a/<token>", url, expiresAt}`; rotates any earlier link; `409` for a finished job. Only the SHA-256 of the token is stored. |
+| `POST /arrivals/ping` | public, authenticated by the token | `{token, lat, lng, accuracyM?, etaMinutes?, declared?, pingId?}` -> `{state: outside\|inconclusive\|checked_in\|confirm_needed\|already_arrived\|disabled, distanceM, radiusM, etaMinutes, message}`. `401 ARRIVAL_LINK_INVALID`, `410 ARRIVAL_LINK_EXPIRED`, `409 ARRIVAL_NOT_CONFIGURED`, `429 ARRIVAL_PING_TOO_FAST` (Retry-After; spacing 5 s per appointment) or `RATE_LIMITED` (60/min per address). |
+| `GET /settings/location`, `PUT /settings/location` | signed-in / `set.hours` | `{lat, lng}`, the centre of the geofence. |
+| `POST /dev/appointments/:id/simulate-arrival` | `jobs.status`, only with `ALLOW_DEV_ENDPOINTS` | `{mode?: arrive\|eta, etaMinutes?}`: behaves as a ping from the door or from N minutes away. |
+
+SSE on `ops`: `arrival.eta {appointmentId, etaMinutes, distanceM, crossed}` and `arrival.checked_in {appointmentId, auto, distanceM}`; one crew bell
+notification (`kind arrival`) when the ETA first reaches the prep time and one at check-in (both only with "Alert the crew"). A browser page on another
+origin must be in `ALLOWED_ORIGINS`.
+
+### 24.3 Membership credits (ADR 0084)
+
+| Verb path | Permission | Notes |
+|---|---|---|
+| `GET /membership-plans` | `cli.view` | plans with their credit rules `{id, label, includeTags, excludeTags, perCycle, autoApply}`. |
+| `PATCH /membership-plans/rules/:id` | `cli.member` | `{autoApply}`; audited (`membership.rule.update`). |
+
+Auto-apply: a rule with `autoApply`, or a member with `autoApply` (`PATCH /memberships/:id`), redeems one credit when a covered visit is **completed** (system adjust,
+one per appointment, no payments permission needed). `GET /appointments/:id` gains `membershipUpgrade {candidate, visits60, copy} | null` (non-members only; real
+completed visits in 60 days, 3 or more = candidate). An emergency closure with "Protect member credits" marks held credits (`protect`) and a later cancel or
+no-show of such a visit restores the credit (`restore`); a reschedule keeps it. `GET /customers/:id/membership` credit rules carry `autoApply`.
+
+### 24.4 Emergency events (ADR 0080)
+
+One ops event per transition: `emergency.started` on close, `emergency.reopened {id, auto}` on reopen. `emergency.ended` no longer exists.
+
+### 24.5 Standing appointments and the waitlist (ADR 0086), behind `features.standing_waitlist` (default off)
+
+| Verb path | Permission | Notes |
+|---|---|---|
+| `GET /settings/features`, `PUT /settings/features` | signed-in / `set.billing` | `{standingWaitlist, version}`. While off everything below answers `409 FEATURE_DISABLED`. |
+| `POST /standing-series` | `sched.edit`, **Idempotency-Key** | `{customerId, vehicleId?, serviceId, cadence: weekly\|biweekly\|triweekly\|monthly, startDate, endDate?, time:"HH:MM", autoConfirm?, notes?}` -> `201 {series, materialized{booked, skipped, through}}`. VIP clients only (`422 STANDING_VIP_ONLY`), cadence must be offered (`422 STANDING_CADENCE_NOT_OFFERED`), VIP toggle on (`409 STANDING_OFF`). |
+| `GET /standing-series[?customerId&includeEnded]`, `GET /standing-series/:id` | `sched.view` | the series; the detail adds every decided date (`booked` with the appointment, or `skipped` with the reason). |
+| `PATCH /standing-series/:id` | `sched.edit`, **Idempotency-Key** | `{status?: active\|paused\|ended, endDate?, autoConfirm?, notes?, cancelUpcoming?, version?}`. Ended is final. |
+| `POST /standing-series/:id/materialize`, `POST /standing-series/materialize` | `sched.edit` | run the materializer now (the daily job does it for all). |
+| `POST /waitlist` | `sched.edit` | `{customerId, vehicleId?, serviceId, desiredDate, windowStart:"HH:MM", windowEnd:"HH:MM", notes?}` -> `201` the entry (with `isVip`). |
+| `GET /waitlist[?status&date]` | `sched.view` | entries with their `openOffer`. |
+| `POST /waitlist/:id/cancel` | `sched.edit` | withdraws the entry and its offer. |
+| `POST /waitlist/:id/accept` | `sched.edit`, **Idempotency-Key** | books the offered slot: `201 {entry, booking}`; `409 WAITLIST_NO_OFFER` or `SLOT_UNAVAILABLE`. |
+
+Jobs: `standing.materialize` (daily 04:00), `standing.autoconfirm` (hourly), `waitlist.offer_expiry` (every minute), all no-ops while the switch is off.

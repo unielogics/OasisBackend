@@ -9,6 +9,7 @@ import { settingsJobs } from '../modules/settings/jobs/index.js'
 import { maintenancePurgeJob } from './maintenance.js'
 import { alertsScanJob } from '../modules/scheduling/jobs.js'
 import { photoFinalizeJob, photoThumbnailJob } from '../modules/scheduling/photo-jobs.js'
+import { standingJobs } from '../modules/standing/jobs.js'
 
 export const jobDefinitions: readonly JobDefinition<never>[] = [
   maintenancePurgeJob,
@@ -20,4 +21,5 @@ export const jobDefinitions: readonly JobDefinition<never>[] = [
   ...messagingJobs,
   ...sqspJobs,
   membershipCycleJob,
+  ...standingJobs,
 ]

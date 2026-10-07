@@ -18,6 +18,8 @@ import { historyFor, upgradeOf, visitCounts } from '../retention.js'
 import '../problems.js'
 import { createManualMembership, currentMembership, patchMembership } from '../service.js'
 import { locationTz, viewsOf, type MembershipRow } from '../view.js'
+import { loadPlans } from '../plans.js'
+import * as audit from '../../../platform/audit.js'
 import {
   ApplyBody,
   ApplyResult,
@@ -28,6 +30,10 @@ import {
   ListResult,
   MembershipResult,
   PatchBody,
+  PlanRule,
+  PlansResult,
+  RuleParams,
+  RulePatch,
 } from './schemas.js'
 
 const TAG = 'memberships'
@@ -84,6 +90,94 @@ export function registerMembershipRoutes(app: AppInstance): void {
         upgrade: live ? null : upgradeOf(cust.full_name, counts?.visits60 ?? 0),
         history: await historyFor(app.db, c.locationId, cust.id),
       }
+    },
+  )
+
+  app.get(
+    '/membership-plans',
+    {
+      config: { access: access.perm('cli.view') },
+      schema: {
+        tags: [TAG],
+        summary: 'The membership plans with their credit rules and each rule’s auto-apply flag',
+        description:
+          'Display data (perks, discount basis points) and the rules a visit can redeem. A rule with `autoApply` redeems itself when a covered visit is completed (default off).',
+        response: { 200: PlansResult },
+      },
+    },
+    async (req) => {
+      const plans = await loadPlans(app.db, auth(req).locationId)
+      return {
+        plans: plans.map((p) => ({
+          id: p.id,
+          key: p.key,
+          name: p.name,
+          perks: p.perks,
+          addonDiscountBp: p.addonDiscountBp,
+          serviceDiscountBp: p.serviceDiscountBp,
+          rules: p.rules.map((r) => ({
+            id: r.id,
+            label: r.label,
+            includeTags: r.includeTags,
+            excludeTags: r.excludeTags,
+            perCycle: r.perCycle,
+            autoApply: r.autoApply,
+          })),
+        })),
+      }
+    },
+  )
+
+  app.patch(
+    '/membership-plans/rules/:id',
+    {
+      config: { access: access.perm('cli.member') },
+      schema: {
+        tags: [TAG],
+        summary: 'Turn a credit rule’s auto-apply on or off',
+        description:
+          'With it on, completing a visit the rule covers redeems one credit by itself (a system adjust on the invoice, one per appointment). Audited.',
+        params: RuleParams,
+        body: RulePatch,
+        response: { 200: PlanRule },
+      },
+    },
+    async (req) => {
+      const a = auth(req)
+      const body = req.body as z.infer<typeof RulePatch>
+      return app.db.transaction().execute(async (tx) => {
+        const rule = await tx
+          .selectFrom('plan_credit_rules as r')
+          .innerJoin('membership_plans as p', 'p.id', 'r.plan_id')
+          .select(['r.id', 'r.label', 'r.auto_apply', 'r.include_tags', 'r.exclude_tags', 'r.per_cycle'])
+          .where('r.id', '=', req.params.id)
+          .where('p.location_id', '=', a.locationId)
+          .forUpdate('r')
+          .executeTakeFirst()
+        if (!rule) throw new AppError('NOT_FOUND', { detail: 'That credit rule does not exist' })
+        await tx
+          .updateTable('plan_credit_rules')
+          .set({ auto_apply: body.autoApply })
+          .where('id', '=', rule.id)
+          .execute()
+        await audit.record(tx, {
+          locationId: a.locationId,
+          action: 'membership.rule.update',
+          entityType: 'plan_credit_rule',
+          entityId: rule.id,
+          before: { autoApply: rule.auto_apply },
+          after: { autoApply: body.autoApply, label: rule.label },
+          ctx: auditContextOf(req),
+        })
+        return {
+          id: rule.id,
+          label: rule.label,
+          includeTags: rule.include_tags,
+          excludeTags: rule.exclude_tags,
+          perCycle: rule.per_cycle,
+          autoApply: body.autoApply,
+        }
+      })
     },
   )
 

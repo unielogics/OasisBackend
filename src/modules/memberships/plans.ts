@@ -14,6 +14,8 @@ export interface CreditRule {
   excludeTags: string[]
   /** null = unlimited */
   perCycle: number | null
+  /** Completing a covered visit redeems this credit by itself (default off; the member's own flag also enables it). */
+  autoApply: boolean
   sort: number
 }
 
@@ -40,6 +42,7 @@ const ruleOf = (r: Selectable<PlanCreditRulesTable>): CreditRule => ({
   includeTags: r.include_tags,
   excludeTags: r.exclude_tags,
   perCycle: r.per_cycle,
+  autoApply: r.auto_apply,
   sort: r.sort,
 })
 

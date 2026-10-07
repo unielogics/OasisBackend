@@ -22,6 +22,8 @@ const PUBLIC_ROUTES = new Set([
   // the simulator object store (STORAGE_PROVIDER=fs, never production): every URL carries its own signature
   'GET /dev-storage/*',
   'POST /dev-storage/*',
+  // the customer's phone has no session; the per-appointment link token authenticates it (ADR 0083)
+  'POST /api/v1/arrivals/ping',
 ])
 
 /** 403 codes a permitted caller may still get from a business rule, keyed by "METHOD url". Empty with the generic {} body. */

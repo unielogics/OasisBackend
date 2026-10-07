@@ -9,6 +9,9 @@ import type { StorageProvider } from '../../integrations/ports/storage.js'
 import { renderTemplate, type TemplateVars } from '../messaging/templates/render.js'
 import { QUICK_REPLIES } from '../messaging/templates/registry.js'
 import type { SmsClass } from '../messaging/policy/classes.js'
+import type { Actor, SchedulingCtx } from './context.js'
+import type { SettlementKind, SettlementView } from './cancellation.js'
+import type { AppointmentRecord } from './appointments.js'
 import { ensureSchedulingProblems } from './problems.js'
 
 export type ActorRef = AuditActor
@@ -93,6 +96,45 @@ export interface InvoiceGateway {
  */
 export interface RevenueSource {
   revenueCents(db: Executor, locationId: string, from: Date, to: Date): Promise<number>
+}
+
+// Deposit settlement ----------------------------------------------------------------------------------------------
+
+/** How the money held on an invoice is settled when its appointment is canceled or marked no-show (ADR 0082). */
+export type SettlementMode = 'policy' | 'keep' | 'refund_card' | 'refund_credit'
+
+export interface SettleRequest {
+  appointmentId: string
+  locationId: string
+  kind: SettlementKind
+  mode: SettlementMode
+  /** mode policy: the kept share, in basis points, and where a refund goes. */
+  retainBp: number
+  refundTo: 'original' | 'credit'
+  /** The sentence that explains the decision; stored as the refund's note. */
+  rule: string
+  actor: Actor
+  /** One stable key per cancel / no-show, so the ledger events it writes are written once. */
+  idempotencyKey: string
+}
+
+/**
+ * Executes the settlement through the payments command layer, in the caller's transaction. `policy` refunds are system
+ * events (limit-exempt, no pay.refund needed); `refund_card` / `refund_credit` are the actor's own refund (their right and limit,
+ * so a large one waits for approval). `keep` writes nothing. Returns null when the appointment has no invoice.
+ */
+export interface DepositSettlement {
+  settle(tx: Tx, req: SettleRequest): Promise<SettlementView | null>
+  /**
+   * A canceled or no-show job comes back to booked: its invoice is revived (a kept deposit counts again). Refused with 409
+   * REOPEN_REFUNDED when a refund was issued, because a refund does not reopen the balance and the job would be undercharged.
+   */
+  reopen(tx: Tx, req: { appointmentId: string; locationId: string }): Promise<void>
+}
+
+/** The waitlist (standing module): told when a canceled job freed a slot so it can be offered. Optional; off unless the feature is on. */
+export interface WaitlistPort {
+  slotFreed(tx: Tx, c: SchedulingCtx, appointment: AppointmentRecord): Promise<void>
 }
 
 export const TAX_RATE_BP = 700
@@ -376,9 +418,44 @@ export interface MembershipRef {
   membershipId: string | null
 }
 
+/** What completing a visit did about the member's credit: nothing is thrown, a skip only says why. */
+export type AutoCreditOutcome =
+  | { applied: true; ruleLabel: string; creditsLeft: number | null; discountCents: number }
+  | { applied: false; skipped: string }
+
+/** A credit handed back because the shop's closure cost the member the visit that held it. */
+export interface ReleasedCredit {
+  ruleLabel: string
+}
+
+/** Whether a client who is not a member is worth an upgrade offer, from their real completed visits. */
+export interface UpgradeCandidacy {
+  candidate: boolean
+  /** Completed visits in the last 60 days. */
+  visits60: number
+  /** "Maria Delgado is a strong upgrade candidate — 4 visits in 60 days. Offer Essential at check-out."; null when not a candidate. */
+  copy: string | null
+}
+
 /** Implemented by the Memberships vertical. Returns an entry only for appointments whose client is an active member. */
 export interface MembershipPort {
   forAppointments(db: Executor, refs: MembershipRef[]): Promise<Map<string, MembershipInfo>>
+  /**
+   * Called when a visit is completed, in the completing transaction: redeems the member's credit when the rule (or the member)
+   * is set to apply itself. Never throws for a business reason; a failure inside it leaves the completion intact.
+   */
+  autoApplyCredit?(tx: Tx, c: SchedulingCtx, actor: Actor, appointmentId: string): Promise<AutoCreditOutcome>
+  /**
+   * Called when a job is canceled or marked no-show: gives back the credit it held if an emergency closure (with "protect
+   * credits" on) is why the visit did not happen. null when nothing was held or the closure was not the cause.
+   */
+  releaseCredit?(tx: Tx, c: SchedulingCtx, appointmentId: string): Promise<ReleasedCredit | null>
+  /** For appointments of clients without a live membership: the upgrade candidacy (appointment file, Membership tab). */
+  upgradeCandidates?(
+    db: Executor,
+    c: { locationId: string; now: Date },
+    refs: MembershipRef[],
+  ): Promise<Map<string, UpgradeCandidacy>>
 }
 
 export const noMemberships: MembershipPort = { forAppointments: async () => new Map() }
@@ -423,4 +500,7 @@ export interface SchedulingPorts {
   externalAlerts: ExternalAlertSource
   revenue?: RevenueSource
   storage: StorageProvider
+  /** Without it a cancel or no-show only records the policy (the in-memory default); production wires the ledger. */
+  deposits?: DepositSettlement
+  waitlist?: WaitlistPort
 }

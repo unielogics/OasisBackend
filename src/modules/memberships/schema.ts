@@ -33,6 +33,7 @@ export interface PlanCreditRulesTable {
   include_tags: string[]
   exclude_tags: Generated<string[]>
   per_cycle: number | null
+  auto_apply: Generated<boolean>
   sort: Generated<number>
   created_at: Generated<Date>
 }

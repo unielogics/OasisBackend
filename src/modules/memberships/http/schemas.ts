@@ -10,6 +10,7 @@ const BizDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
 export const RuleCredit = z.object({
   ruleId: z.string(),
   label: z.string(),
+  autoApply: z.boolean().describe('The rule redeems itself when a covered visit is completed'),
   unlimited: z.boolean(),
   granted: z.number().int().nullable(),
   used: z.number().int(),
@@ -138,3 +139,27 @@ export const ApplyResult = AdjustResult.extend({
   discountCents: z.number().int(),
   credits: z.object({ left: z.number().int().nullable(), used: z.number().int() }),
 })
+
+export const PlanRule = z.object({
+  id: z.string(),
+  label: z.string(),
+  includeTags: z.array(z.string()),
+  excludeTags: z.array(z.string()),
+  perCycle: z.number().int().nullable().describe('null = unlimited'),
+  autoApply: z.boolean(),
+})
+
+export const PlanView = z.object({
+  id: z.string(),
+  key: PlanKey,
+  name: z.string(),
+  perks: z.array(z.string()),
+  addonDiscountBp: z.number().int(),
+  serviceDiscountBp: z.number().int(),
+  rules: z.array(PlanRule),
+})
+
+export const PlansResult = z.object({ plans: z.array(PlanView) })
+
+export const RuleParams = z.object({ id: Uuid })
+export const RulePatch = z.object({ autoApply: z.boolean() }).strict()

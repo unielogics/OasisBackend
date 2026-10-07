@@ -14,6 +14,7 @@ import { schedulingSeedProfiles } from './scheduling.js'
 import { paymentsSeedProfiles } from './payments.js'
 import { membershipsSeedProfiles } from './memberships.js'
 import { messagingProfile } from './messaging.js'
+import { geofenceProfile } from './gaps.js'
 
 export interface SeedContext {
   tx: Tx
@@ -51,6 +52,7 @@ for (const [name, profile] of Object.entries(domainSeedProfiles)) registerSeedPr
 for (const [name, profile] of Object.entries(schedulingSeedProfiles)) registerSeedProfile(name, profile)
 for (const [name, profile] of Object.entries(paymentsSeedProfiles)) registerSeedProfile(name, profile)
 registerSeedProfile('messaging', messagingProfile)
+registerSeedProfile('geofence', geofenceProfile)
 // A seeded design database can text through the simulator device out of the box (a wrap, not a dependency, so the
 // profile order that `design` reports stays people, domain, base, domain-design, design).
 const designRun = profiles.design!.run.bind(profiles.design)

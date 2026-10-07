@@ -13,6 +13,8 @@
     "build": "tsc -p tsconfig.build.json",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm openapi --check",
     "db:schema": "tsx scripts/db-schema.ts",
+    "data-model": "tsx scripts/data-model.ts",
+    "data-model:check": "tsx scripts/data-model.ts --check",
     "db:schema:check": "tsx scripts/db-schema.ts --check",
     "dev": "tsx watch src/server.ts",
     "dev:worker": "tsx watch src/worker.ts",

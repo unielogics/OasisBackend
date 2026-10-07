@@ -301,12 +301,37 @@ export const AppointmentCore = z.object({
 
 export const Toast = z.object({ title: z.string(), detail: z.string() })
 
+export const DepositChoice = z.enum(['policy', 'keep', 'refund_card', 'refund_credit'])
+
+export const Settlement = z.object({
+  policy: DepositChoice,
+  heldCents: z
+    .number()
+    .int()
+    .describe('Money held on the invoice when it was canceled (payments less refunds), in cents'),
+  refundedCents: z
+    .number()
+    .int()
+    .describe('Refunds that are done; a refund waiting for approval is not counted'),
+  retainedCents: z.number().int().describe('The share of the held money that stays with the shop'),
+  refunds: z.array(
+    z.object({
+      amountCents: z.number().int(),
+      dest: z.enum(['card', 'cash', 'credit']),
+      state: z.enum(['done', 'pending']),
+      awaitingProcessor: z.boolean().describe('A card refund that must still be completed in Squarespace'),
+    }),
+  ),
+  rule: z.string().describe('Why: the lead time against the free-cancellation window, or the staff choice'),
+})
+
 export const CommandResult = z.object({
   appointment: AppointmentCore,
   toast: Toast,
   warnings: z.array(z.string()),
   invoice: InvoiceSummary.nullable().optional(),
-  depositPolicy: z.enum(['keep', 'refund_card', 'refund_credit']).optional(),
+  depositPolicy: DepositChoice.optional(),
+  settlement: Settlement.nullable().optional(),
 })
 
 export const BookingResult = z.object({
@@ -452,6 +477,14 @@ export const AppointmentFile = z.object({
       retention: z.object({ label: z.string(), desc: z.string(), tone: z.enum(['green', 'red']) }).optional(),
     })
     .nullable(),
+  membershipUpgrade: z
+    .object({
+      candidate: z.boolean(),
+      visits60: z.number().int().describe('Completed visits in the last 60 days (real history)'),
+      copy: z.string().nullable(),
+    })
+    .nullable()
+    .describe('For a client without a live membership: whether to offer one. null for members.'),
   history: z.object({
     visitCount: z.number().int(),
     recent: z.array(

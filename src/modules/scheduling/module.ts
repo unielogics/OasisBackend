@@ -6,8 +6,14 @@ import type { ApiModule } from '../../http/modules.js'
 import type { AppInstance } from '../../http/types.js'
 import type { StorageProvider } from '../../integrations/ports/storage.js'
 import { createStorageProvider } from '../../integrations/storage/config.js'
+import { createIdGenerator } from '../../platform/ids.js'
 import { registerAppointmentRoutes } from './http/appointment-routes.js'
+import { registerArrivalRoutes } from './http/arrival-routes.js'
 import { registerOpsRoutes } from './http/ops-routes.js'
+import { registerPolicyRoutes } from './http/policy-routes.js'
+import { createDbDepositSettlement } from './settlement.js'
+import { dbWaitlistPort } from '../standing/waitlist.js'
+import { registerStandingRoutes } from '../standing/routes.js'
 import {
   InMemoryInvoiceGateway,
   InMemoryMessageQueue,
@@ -36,12 +42,22 @@ export function resolvePorts(deps: AppDeps, given: Partial<SchedulingPorts> = {}
     externalAlerts: given.externalAlerts ?? noExternalAlerts,
     revenue: given.revenue,
     storage: given.storage ?? lazyStorage(deps),
+    // Cancel and no-show settle the money held through the payments commands. Against a database without that invoice (the
+    // in-memory gateway) the settlement finds nothing to do.
+    deposits:
+      given.deposits ??
+      createDbDepositSettlement({ clock: deps.clock, newId: deps.newId ?? createIdGenerator(deps.clock) }),
+    // a canceled job's slot is offered to the waitlist; inert unless the standing/waitlist feature setting is on
+    waitlist: given.waitlist ?? dbWaitlistPort,
   }
 }
 
 export function registerSchedulingRoutes(app: AppInstance, ports: SchedulingPorts): void {
   registerOpsRoutes(app, ports)
   registerAppointmentRoutes(app, ports)
+  registerPolicyRoutes(app)
+  registerArrivalRoutes(app, ports)
+  registerStandingRoutes(app, ports)
 }
 
 export function createSchedulingModule(given: Partial<SchedulingPorts> = {}): ApiModule {

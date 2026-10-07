@@ -4,10 +4,15 @@
 // a handful of queries, not 40.
 import { sql } from 'kysely'
 import type { Executor } from '../../platform/db.js'
-import type { MembershipInfo, MembershipPort, MembershipRef } from '../scheduling/ports.js'
+import type { MembershipInfo, MembershipPort, MembershipRef, UpgradeCandidacy } from '../scheduling/ports.js'
+import { actorFromAuth } from '../payments/actor.js'
+import { PaymentsService } from '../payments/commands.js'
+import { defaultPorts } from '../payments/ports.js'
+import { autoApplyMembershipCredit } from './apply.js'
 import { creditSummaries, eligibleRule } from './credits.js'
+import { restoreClosureCredit } from './emergency.js'
 import { loadPlans } from './plans.js'
-import { memberMonths, retentionOf, visitCounts } from './retention.js'
+import { memberMonths, retentionOf, upgradeOf, visitCounts } from './retention.js'
 import { locationTz, renewLabelOf } from './view.js'
 
 export const dbMembershipPort: MembershipPort = {
@@ -63,6 +68,48 @@ export const dbMembershipPort: MembershipPort = {
         memberMonths: memberMonths(m.started_at, now),
         retention: { label: ret.label, desc: ret.desc, tone: ret.tone },
       })
+    }
+    return out
+  },
+
+  async autoApplyCredit(tx, c, actor, appointmentId) {
+    const payments = new PaymentsService({ clock: c.clock, newId: c.newId, ports: defaultPorts() })
+    const r = await autoApplyMembershipCredit(
+      tx,
+      { locationId: c.locationId, clock: c.clock, newId: c.newId, payments },
+      { appointmentId },
+      { actor: actorFromAuth(actor.auth), audit: actor.audit, idempotencyKey: null },
+    )
+    return r
+  },
+
+  releaseCredit: (tx, c, appointmentId) =>
+    restoreClosureCredit(tx, { clock: c.clock, newId: c.newId }, appointmentId),
+
+  async upgradeCandidates(db: Executor, c, refs: MembershipRef[]): Promise<Map<string, UpgradeCandidacy>> {
+    const out = new Map<string, UpgradeCandidacy>()
+    if (refs.length === 0) return out
+    const customerIds = [...new Set(refs.map((r) => r.customerId))]
+    const live = await db
+      .selectFrom('memberships')
+      .select('customer_id')
+      .where('customer_id', 'in', customerIds)
+      .where('status', 'in', ['pending', 'active', 'past_due', 'paused'])
+      .execute()
+    const members = new Set(live.map((m) => m.customer_id))
+    const nonMembers = customerIds.filter((id) => !members.has(id))
+    if (nonMembers.length === 0) return out
+    const names = await db
+      .selectFrom('customers')
+      .select(['id', 'full_name'])
+      .where('id', 'in', nonMembers)
+      .execute()
+    const counts = await visitCounts(db, c.locationId, nonMembers, c.now)
+    for (const r of refs) {
+      const name = names.find((n) => n.id === r.customerId)
+      if (!name) continue
+      const u = upgradeOf(name.full_name, counts.get(r.customerId)?.visits60 ?? 0)
+      out.set(r.appointmentId, { candidate: u.candidate, visits60: u.visits60, copy: u.copy })
     }
     return out
   },
