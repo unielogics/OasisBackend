@@ -218,7 +218,8 @@ export class SyncEngine {
       state.inFlight = undefined
       return await this.finishOk(state, now, stats, resource)
     } catch (e) {
-      return this.finishError(state, stats, resource, e, window.cursor ? window : undefined)
+      // a 400 on the saved cursor means it expired: resuming from it would fail for ever, so the next run starts the list again
+      return this.finishError(state, stats, resource, e, window.cursor && statusOf(e) !== 400 ? window : undefined)
     }
   }
 
