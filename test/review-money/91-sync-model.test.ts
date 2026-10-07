@@ -1,6 +1,6 @@
 // Randomized interleavings of staff entries, Squarespace orders/refunds, polls, webhooks and the manual queue against a
 // ground truth: each real Squarespace payment or refund appears in the Oasis ledger at most once.
-// RV_SEEDS="1,2,3" RV_STEPS=40 npx vitest run test/review-money/91-sync-model.test.ts
+// RV_SEEDS="1,2,3" RV_STEPS=40 npx vitest run test/review-money/91-sync-model.test.ts  (RV_LEGACY=1: the code before the fixes)
 import { describe, it } from 'vitest'
 import { useRig } from '../payments-sync-db/harness.js'
 import { SyncModel } from './sync-model.js'

@@ -1,7 +1,7 @@
 // Randomized command sequences over HTTP + Postgres against an independent oracle (see model.ts). Every step is checked for
 // the right outcome (status code, amounts, pending vs done) and then for the global invariants: calc equals the oracle to the
 // cent, no over-refund, FIFO store credit, append-only ledger, approver rules, cash-basis revenue.
-// RV_SEEDS="1,2,3" RV_STEPS=60 RV_STRICT=1 npx vitest run test/review-money/90-model-based.test.ts
+// RV_SEEDS="1,2,3" RV_STEPS=60 npx vitest run test/review-money/90-model-based.test.ts
 import { describe, it } from 'vitest'
 import { usePayHarness } from './pay-harness.js'
 import { Model } from './model.js'

@@ -124,7 +124,7 @@ export class SyncModel {
   private async cycle(): Promise<void> {
     this.tick(2 * 60_000)
     // overlapping runs (webhook job + poll, two polls, a cashier tapping Collect mid-run) are what defects 5 and 13 are about:
-    // they run only in strict mode (RV_STRICT=1), which is meant to pass once those fixes are in
+    // they run unless RV_LEGACY=1, which relaxes the model for the code before the fixes
     const how = this.pick(STRICT ? (['cycle', 'cycle', 'two', 'webhook', 'collect-race'] as const) : (['cycle'] as const))
     const c = this.pick(this.custs)
     const loc = this.R.locationId

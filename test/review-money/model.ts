@@ -15,8 +15,11 @@ import { creditOracle, oracleCalc, type Alloc, type Ev, type OracleCalc } from '
 export type Who = 'rafael' | 'sofia' | 'amara' | 'daniel' | 'kevin'
 export const WHO: readonly Who[] = ['rafael', 'sofia', 'amara', 'daniel', 'kevin']
 
-/** Known, already reported defects: the random model skips the invariants they break unless RV_STRICT=1 is set. */
-export const STRICT = process.env.RV_STRICT === '1'
+/**
+ * The model asserts the corrected behaviour (the fixes on rv/money). RV_LEGACY=1 relaxes the expectations that the reported
+ * defects 1, 2, 3, 5, 7, 10 and 13 break, to run it against the code before the fixes.
+ */
+export const STRICT = process.env.RV_LEGACY !== '1'
 
 export function rng(seed: number): () => number {
   let a = seed >>> 0
@@ -205,6 +208,36 @@ export class Model {
     }
   }
 
+  /**
+   * What can still go back to the original payment methods: non-credit payments (voids out) less the card and cash refunds paid
+   * or waiting for approval; to card, further capped by the card and wallet payments less the card refunds.
+   */
+  private origCap(row: Row, dest: 'card' | 'cash', exceptEvent?: string): number {
+    let orig = 0
+    let card = 0
+    for (const e of row.evs) {
+      const isCard = e.method_kind === 'card' || e.method_kind === 'apple_pay'
+      if (e.type === 'pay') {
+        orig += e.amount_cents
+        if (isCard) card += e.amount_cents
+      } else if (e.type === 'void') {
+        orig -= e.amount_cents
+        if (isCard) card -= e.amount_cents
+      } else if (e.type === 'refund' && (e.status === 'done' || e.status === 'pending') && e.id !== exceptEvent && e.dest !== 'credit') {
+        orig -= e.amount_cents
+        if (e.dest === 'card') card -= e.amount_cents
+      }
+    }
+    return Math.max(0, dest === 'card' ? Math.min(orig, card) : orig)
+  }
+
+  /** The cap a refund to this destination must respect (none for store credit). */
+  private capOf(row: Row, oc: OracleCalc, dest: 'card' | 'cash' | 'credit', exceptEvent?: string): number {
+    if (dest === 'credit') return Number.POSITIVE_INFINITY
+    if (!STRICT) return dest === 'card' ? oc.toOrigMax : Number.POSITIVE_INFINITY
+    return this.origCap(row, dest, exceptEvent)
+  }
+
   private oc(row: Row): OracleCalc {
     return oracleCalc({ tax_bp: row.inv.tax_bp, tip_cents: row.inv.tip_cents, canceled: row.inv.canceled_at !== null }, row.prices, row.evs)
   }
@@ -386,6 +419,10 @@ export class Model {
         oc.refundable + 1,
         oc.toOrigMax,
         oc.toOrigMax + 1,
+        this.origCap(row, 'card'),
+        this.origCap(row, 'card') + 1,
+        this.origCap(row, 'cash'),
+        this.origCap(row, 'cash') + 1,
         lim ?? 100,
         (lim ?? 100) + 1,
         this.int(1, Math.max(1, oc.refundable)),
@@ -403,8 +440,8 @@ export class Model {
       return
     }
     if (val <= 0) return this.expectStatus(res, 422, 'refund of nothing')
-    const cardCapped = dest === 'card' && val > oc.toOrigMax
-    if (cardCapped || val > oc.refundable) {
+    const capped = val > this.capOf(row, oc, dest)
+    if (capped || val > oc.refundable) {
       this.expectStatus(res, 422, 'refund over a cap')
       expect((await this.load(inv.id)).evs.length).toBe(before)
       return
@@ -439,7 +476,7 @@ export class Model {
     if (lim !== null && lim < t.ev.amount_cents) return this.expectStatus(res, 403, 'approve over the approver limit')
     if (requester === who && lim !== null) return this.expectStatus(res, 403, 'self-approval')
     const withoutOwn = Math.max(0, oc.paid - oc.refunded - (oc.pendingAmt - t.ev.amount_cents))
-    if ((t.ev.dest === 'card' && t.ev.amount_cents > oc.toOrigMax) || t.ev.amount_cents > withoutOwn)
+    if (t.ev.amount_cents > this.capOf(t.row, oc, t.ev.dest!, t.ev.id) || t.ev.amount_cents > withoutOwn)
       return this.expectStatus(res, 422, 'approve that no longer fits')
     this.expectStatus(res, 200, 'approve')
     const after = await this.load(t.inv.id)
@@ -491,7 +528,7 @@ export class Model {
     const diff = oc.paid - oc.refunded - newTotal
     const settleVal = Math.min(diff, oc.refundable)
     const wantsSettlement = diff > 0 && oc.paid > 0 && settleVal > 0
-    if (wantsSettlement && settle === 'card' && settleVal > oc.toOrigMax) return this.expectStatus(res, 422, 'card settlement over the card cap')
+    if (wantsSettlement && settle === 'card' && settleVal > this.capOf(row, oc, 'card')) return this.expectStatus(res, 422, 'card settlement over the card cap')
     this.expectStatus(res, 201, 'adjust')
     const after = await this.load(inv.id)
     const aft = this.oc(after)
@@ -549,6 +586,9 @@ export class Model {
     if (already) return this.expectStatus(res, 409, 'double void')
     if (pay.method_kind !== 'cash' && pay.processor_state !== 'awaiting_processor') return this.expectStatus(res, 422, 'void of confirmed card money')
     if (oc.paid - pay.amount_cents - oc.refunded - oc.pendingAmt < 0) return this.expectStatus(res, 422, 'void of refunded money')
+    const cardMoney = pay.method_kind === 'card' || pay.method_kind === 'apple_pay'
+    if (STRICT && (this.origCap(row, 'cash') < pay.amount_cents || (cardMoney && this.origCap(row, 'card') < pay.amount_cents)))
+      return this.expectStatus(res, 422, 'void that would leave refunds above the original payments')
     this.expectStatus(res, 201, 'void')
   }
 
