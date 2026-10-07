@@ -11,6 +11,8 @@ import { ruleCovers, type CreditRule, type Plan } from './plans.js'
 export interface RuleCredit {
   ruleId: string
   label: string
+  /** The rule redeems itself when a covered visit is completed. */
+  autoApply: boolean
   unlimited: boolean
   /** null when unlimited */
   granted: number | null
@@ -66,18 +68,22 @@ export async function creditSummaries(
           ? null
           : grants.reduce((n, g) => n + (g.qty ?? 0), 0)
         : r.perCycle
-      const used =
+      // A restore gives a redeemed credit back (staff correction, or a closure canceled the visit that held it). It counts in
+      // the cycle it is written in: when the redeem belonged to an earlier cycle there is nothing to offset, and the credit
+      // comes back as a bonus. 'protect' is a marker only (ADR 0084) and never changes a count.
+      const net =
         mine.filter((e) => e.kind === 'redeem' && e.rule_id === r.id).reduce((n, e) => n + (e.qty ?? 0), 0) -
-        mine
-          .filter((e) => (e.kind === 'restore' || e.kind === 'protect') && e.rule_id === r.id)
-          .reduce((n, e) => n + (e.qty ?? 0), 0)
+        mine.filter((e) => e.kind === 'restore' && e.rule_id === r.id).reduce((n, e) => n + (e.qty ?? 0), 0)
+      const used = Math.max(0, net)
+      const bonus = Math.max(0, -net)
       return {
         ruleId: r.id,
         label: r.label,
+        autoApply: r.autoApply,
         unlimited: granted === null,
         granted,
-        used: Math.max(0, used),
-        left: granted === null ? null : Math.max(0, granted - Math.max(0, used)),
+        used,
+        left: granted === null ? null : Math.max(0, granted + bonus - used),
       }
     })
     const unlimited = rules.some((r) => r.unlimited)

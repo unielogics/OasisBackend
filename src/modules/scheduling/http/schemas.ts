@@ -474,6 +474,14 @@ export const AppointmentFile = z.object({
       retention: z.object({ label: z.string(), desc: z.string(), tone: z.enum(['green', 'red']) }).optional(),
     })
     .nullable(),
+  membershipUpgrade: z
+    .object({
+      candidate: z.boolean(),
+      visits60: z.number().int().describe('Completed visits in the last 60 days (real history)'),
+      copy: z.string().nullable(),
+    })
+    .nullable()
+    .describe('For a client without a live membership: whether to offer one. null for members.'),
   history: z.object({
     visitCount: z.number().int(),
     recent: z.array(

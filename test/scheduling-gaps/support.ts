@@ -145,3 +145,109 @@ export async function opsEvents(
   if (type) q = q.where('type', '=', type)
   return (await q.execute()) as { type: string; payload: Record<string, unknown> }[]
 }
+
+export interface CreditEventRow {
+  kind: string
+  qty: number | null
+  appointment_id: string | null
+  ledger_event_id: string | null
+  note: string | null
+  actor: string | null
+}
+
+export async function creditEvents(
+  rig: Rig,
+  membershipId: string,
+  kinds?: string[],
+): Promise<CreditEventRow[]> {
+  const rows = (
+    await sql<CreditEventRow>`
+      select kind, qty, appointment_id, ledger_event_id, note, actor
+      from membership_credit_events where membership_id = ${membershipId} order by created_at, id`.execute(
+      rig.h.t.db,
+    )
+  ).rows
+  return kinds ? rows.filter((r) => kinds.includes(r.kind)) : rows
+}
+
+export interface CreditView {
+  left: number | null
+  used: number
+  rules: { label: string; left: number | null; used: number; unlimited: boolean; autoApply?: boolean }[]
+}
+
+export async function creditsOf(rig: Rig, customerId: string): Promise<CreditView> {
+  const r = await rig.get(rig.superS(), `/customers/${customerId}/membership`)
+  return (r.json() as { membership: { credits: CreditView } }).membership.credits
+}
+
+/** advance from booked to completed as `s` (default the Super Admin), the way the dashboard's one button does. */
+export async function completeAs(rig: Rig, appointmentId: string, s = rig.superS()): Promise<void> {
+  for (const from of ['booked', 'confirmed', 'arrived', 'cleaning'] as const) {
+    const r = await rig.send(
+      s,
+      'POST',
+      `/appointments/${appointmentId}/advance`,
+      { expectedStatus: from },
+      false,
+    )
+    if (r.statusCode !== 200) throw new Error(`advance from ${from}: ${r.statusCode} ${r.body}`)
+  }
+}
+
+export async function setRuleAutoApply(
+  rig: Rig,
+  planKey: string,
+  label: string,
+  autoApply: boolean,
+): Promise<void> {
+  const plans = (await rig.get(rig.superS(), '/membership-plans')).json() as {
+    plans: { key: string; rules: { id: string; label: string }[] }[]
+  }
+  const rule = plans.plans.find((p) => p.key === planKey)!.rules.find((x) => x.label === label)!
+  const res = await rig.send(
+    rig.superS(),
+    'PATCH',
+    `/membership-plans/rules/${rule.id}`,
+    { autoApply },
+    false,
+  )
+  if (res.statusCode !== 200) throw new Error(`rule patch failed ${res.statusCode} ${res.body}`)
+}
+
+/** A completed visit `daysAgo` days before the frozen clock, written directly (the booking API refuses the past). */
+export async function completedVisit(
+  rig: Rig,
+  customerId: string,
+  daysAgo: number,
+  status = 'completed',
+): Promise<string> {
+  const db = rig.h.t.db
+  const svc = await db
+    .selectFrom('services')
+    .select(['id', 'name', 'price_cents', 'duration_min'])
+    .where('name', '=', 'Express Hand Wash')
+    .executeTakeFirstOrThrow()
+  const loc = await db.selectFrom('locations').select('id').executeTakeFirstOrThrow()
+  const at = new Date(rig.h.clock.now().getTime() - daysAgo * 86_400_000)
+  const id = rig.h.t.app.newId()
+  await db
+    .insertInto('appointments')
+    .values({
+      id,
+      location_id: loc.id,
+      customer_id: customerId,
+      vehicle_id: null,
+      service_id: svc.id,
+      package_name: svc.name,
+      price_cents: svc.price_cents,
+      duration_min: svc.duration_min,
+      status: status as never,
+      scheduled_start: at,
+      scheduled_end: new Date(at.getTime() + svc.duration_min * 60_000),
+      completed_at: status === 'completed' ? at : null,
+      pickup_state: status === 'completed' ? 'collected' : null,
+    })
+    .execute()
+  return id
+}

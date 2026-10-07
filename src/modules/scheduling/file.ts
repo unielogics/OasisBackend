@@ -26,7 +26,7 @@ import { loadSettingsBundle, type SchedulingCtx } from './context.js'
 import { liveAddons, staffLabel } from './invoicing.js'
 import { nextOf, payView, type NextStep, type PayView } from './board.js'
 import { photoSummary, type PhotoSummary } from './photos.js'
-import type { InvoiceSummary, MembershipInfo } from './ports.js'
+import type { InvoiceSummary, MembershipInfo, UpgradeCandidacy } from './ports.js'
 
 export interface ActivityEntry {
   id: number
@@ -103,6 +103,8 @@ export interface AppointmentFile {
   activity: ActivityEntry[]
   invoice: InvoiceSummary | null
   membership: MembershipInfo | null
+  /** Set only when the client has no live membership: the real visit count behind the "strong upgrade candidate" card. */
+  membershipUpgrade: UpgradeCandidacy | null
   history: {
     visitCount: number
     recent: { id: string; bizDate: string; service: string; status: string; priceCents: number }[]
@@ -180,6 +182,14 @@ export async function loadAppointmentFile(
     .where('status', '=', 'completed')
     .executeTakeFirstOrThrow()
 
+  const member = memberMap.get(a.id) ?? null
+  const upgrade = member
+    ? null
+    : ((
+        await c.ports.memberships.upgradeCandidates?.(db, { locationId: c.locationId, now }, [
+          { appointmentId: a.id, customerId: a.customerId, membershipId: a.membershipId },
+        ])
+      )?.get(a.id) ?? null)
   const invoice = invoiceMap.get(a.id) ?? null
   const unmasked = canSeeContact(auth)
   const bayOf = (bid: string | null) => {
@@ -260,7 +270,8 @@ export async function loadAppointmentFile(
       actorName: r.actor_name,
     })),
     invoice,
-    membership: memberMap.get(a.id) ?? null,
+    membership: member,
+    membershipUpgrade: upgrade,
     history: {
       visitCount: visits.n,
       recent: history.map((h) => ({

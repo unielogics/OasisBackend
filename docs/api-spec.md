@@ -253,6 +253,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | DELETE | `/api/v1/appointments/:id/addons/:serviceId` | sched.edit |  |
 | PUT | `/api/v1/appointments/:id/addons/:serviceId` | sched.edit |  |
 | POST | `/api/v1/appointments/:id/advance` | jobs.status | sched.edit |  |
+| POST | `/api/v1/appointments/:id/arrival-link` | sched.edit |  |
 | POST | `/api/v1/appointments/:id/arrive` | jobs.status | sched.edit |  |
 | POST | `/api/v1/appointments/:id/assign-bay` | jobs.status |  |
 | POST | `/api/v1/appointments/:id/cancel` | sched.cancel | required |
@@ -276,6 +277,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/appointments/:id/start` | jobs.status |  |
 | GET | `/api/v1/arrival-settings` | authenticated |  |
 | PUT | `/api/v1/arrival-settings` | cli.member |  |
+| POST | `/api/v1/arrivals/ping` | public |  |
 | GET | `/api/v1/auth/csrf` | authenticated |  |
 | POST | `/api/v1/auth/invite/accept` | public |  |
 | POST | `/api/v1/auth/login` | public |  |
@@ -350,6 +352,8 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/api/v1/me` | authenticated |  |
 | PUT | `/api/v1/me/preferences` | authenticated |  |
 | POST | `/api/v1/me/view-as` | authenticated |  |
+| GET | `/api/v1/membership-plans` | cli.view |  |
+| PATCH | `/api/v1/membership-plans/rules/:id` | cli.member |  |
 | GET | `/api/v1/memberships` | cli.member |  |
 | POST | `/api/v1/memberships` | cli.member |  |
 | PATCH | `/api/v1/memberships/:id` | cli.member |  |
@@ -385,6 +389,8 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | PUT | `/api/v1/settings/cancellation-policy` | set.hours |  |
 | GET | `/api/v1/settings/hours` | authenticated |  |
 | PUT | `/api/v1/settings/hours` | set.hours |  |
+| GET | `/api/v1/settings/location` | authenticated |  |
+| PUT | `/api/v1/settings/location` | set.hours |  |
 | GET | `/api/v1/settings/rules` | authenticated |  |
 | PUT | `/api/v1/settings/rules` | set.hours |  |
 | GET | `/api/v1/staff` | sched.view |  |

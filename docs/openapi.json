@@ -1811,6 +1811,44 @@
                         }
                       ]
                     },
+                    "membershipUpgrade": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "candidate": {
+                              "type": "boolean"
+                            },
+                            "copy": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "visits60": {
+                              "description": "Completed visits in the last 60 days (real history)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "candidate",
+                            "visits60",
+                            "copy"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "For a client without a live membership: whether to offer one. null for members."
+                    },
                     "next": {
                       "additionalProperties": false,
                       "properties": {
@@ -2658,6 +2696,7 @@
                     "activity",
                     "invoice",
                     "membership",
+                    "membershipUpgrade",
                     "history"
                   ],
                   "type": "object"
@@ -4130,6 +4169,61 @@
           "appointments"
         ],
         "x-oasis-access": "jobs.status | sched.edit"
+      }
+    },
+    "/api/v1/appointments/{id}/arrival-link": {
+      "post": {
+        "description": "Returns the token once; only its SHA-256 is stored. The link works until two hours after the booked end and dies when the job is canceled or marked no-show. `url` points at the customer app’s `/a/:token` page (PUBLIC_API_URL until that page exists); the customer page posts the token to POST /arrivals/ping.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "expiresAt": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "token": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "token",
+                    "path",
+                    "url",
+                    "expiresAt"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Issue the customer’s check-in link for an appointment (rotates any earlier one)",
+        "tags": [
+          "arrivals"
+        ],
+        "x-oasis-access": "sched.edit"
       }
     },
     "/api/v1/appointments/{id}/arrive": {
@@ -12424,6 +12518,133 @@
         "x-oasis-access": "cli.member"
       }
     },
+    "/api/v1/arrivals/ping": {
+      "post": {
+        "description": "Authenticated by the link token alone. Inside the check-in radius the job is checked in (auto check-in on) or flagged for staff to confirm (`confirm_needed`); outside it the ETA is stored and the crew is alerted once when it first reaches the prep time. Idempotent per `pingId`; a job that has arrived answers `already_arrived`. 401 ARRIVAL_LINK_INVALID, 410 ARRIVAL_LINK_EXPIRED, 409 ARRIVAL_NOT_CONFIGURED (the shop has no coordinates), 429 ARRIVAL_PING_TOO_FAST (Retry-After) or RATE_LIMITED. A browser page on another origin must be listed in ALLOWED_ORIGINS.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "accuracyM": {
+                    "description": "The fix accuracy in metres; a fix wider than the check-in radius cannot prove arrival",
+                    "maximum": 100000,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "declared": {
+                    "description": "The customer tapped \"I’m here\"",
+                    "type": "boolean"
+                  },
+                  "etaMinutes": {
+                    "description": "The phone’s own ETA; otherwise the distance at 25 km/h",
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "lat": {
+                    "maximum": 90,
+                    "minimum": -90,
+                    "type": "number"
+                  },
+                  "lng": {
+                    "maximum": 180,
+                    "minimum": -180,
+                    "type": "number"
+                  },
+                  "pingId": {
+                    "description": "Your id for this ping; a repeat returns the first answer",
+                    "maxLength": 64,
+                    "minLength": 8,
+                    "type": "string"
+                  },
+                  "token": {
+                    "description": "The check-in link token the shop issued for this appointment",
+                    "maxLength": 80,
+                    "minLength": 20,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "token",
+                  "lat",
+                  "lng"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "distanceM": {
+                      "description": "Metres from the shop",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "etaMinutes": {
+                      "anyOf": [
+                        {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "message": {
+                      "description": "Plain text for the customer’s screen",
+                      "type": "string"
+                    },
+                    "radiusM": {
+                      "description": "The check-in radius from the arrival settings",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "state": {
+                      "enum": [
+                        "outside",
+                        "inconclusive",
+                        "checked_in",
+                        "confirm_needed",
+                        "already_arrived",
+                        "disabled"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "distanceM",
+                    "radiusM",
+                    "etaMinutes",
+                    "message"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "The customer reports their position (geofence check-in and ETA)",
+        "tags": [
+          "arrivals"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
     "/api/v1/auth/csrf": {
       "get": {
         "responses": {
@@ -16441,6 +16662,10 @@
                                   "items": {
                                     "additionalProperties": false,
                                     "properties": {
+                                      "autoApply": {
+                                        "description": "The rule redeems itself when a covered visit is completed",
+                                        "type": "boolean"
+                                      },
                                       "granted": {
                                         "anyOf": [
                                           {
@@ -16483,6 +16708,7 @@
                                     "required": [
                                       "ruleId",
                                       "label",
+                                      "autoApply",
                                       "unlimited",
                                       "granted",
                                       "used",
@@ -41704,6 +41930,232 @@
         "x-oasis-access": "authenticated"
       }
     },
+    "/api/v1/membership-plans": {
+      "get": {
+        "description": "Display data (perks, discount basis points) and the rules a visit can redeem. A rule with `autoApply` redeems itself when a covered visit is completed (default off).",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "plans": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "addonDiscountBp": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "key": {
+                            "enum": [
+                              "essential",
+                              "premium",
+                              "executive",
+                              "exotic"
+                            ],
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "perks": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "rules": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "autoApply": {
+                                  "type": "boolean"
+                                },
+                                "excludeTags": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "includeTags": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "perCycle": {
+                                  "anyOf": [
+                                    {
+                                      "maximum": 9007199254740991,
+                                      "minimum": -9007199254740991,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "description": "null = unlimited"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "label",
+                                "includeTags",
+                                "excludeTags",
+                                "perCycle",
+                                "autoApply"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "serviceDiscountBp": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "key",
+                          "name",
+                          "perks",
+                          "addonDiscountBp",
+                          "serviceDiscountBp",
+                          "rules"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "plans"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "The membership plans with their credit rules and each rule’s auto-apply flag",
+        "tags": [
+          "memberships"
+        ],
+        "x-oasis-access": "cli.view"
+      }
+    },
+    "/api/v1/membership-plans/rules/{id}": {
+      "patch": {
+        "description": "With it on, completing a visit the rule covers redeems one credit by itself (a system adjust on the invoice, one per appointment). Audited.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "autoApply": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "autoApply"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "autoApply": {
+                      "type": "boolean"
+                    },
+                    "excludeTags": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "includeTags": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "perCycle": {
+                      "anyOf": [
+                        {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "null = unlimited"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label",
+                    "includeTags",
+                    "excludeTags",
+                    "perCycle",
+                    "autoApply"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Turn a credit rule’s auto-apply on or off",
+        "tags": [
+          "memberships"
+        ],
+        "x-oasis-access": "cli.member"
+      }
+    },
     "/api/v1/memberships": {
       "get": {
         "parameters": [
@@ -41859,6 +42311,10 @@
                                 "items": {
                                   "additionalProperties": false,
                                   "properties": {
+                                    "autoApply": {
+                                      "description": "The rule redeems itself when a covered visit is completed",
+                                      "type": "boolean"
+                                    },
                                     "granted": {
                                       "anyOf": [
                                         {
@@ -41901,6 +42357,7 @@
                                   "required": [
                                     "ruleId",
                                     "label",
+                                    "autoApply",
                                     "unlimited",
                                     "granted",
                                     "used",
@@ -42303,6 +42760,10 @@
                               "items": {
                                 "additionalProperties": false,
                                 "properties": {
+                                  "autoApply": {
+                                    "description": "The rule redeems itself when a covered visit is completed",
+                                    "type": "boolean"
+                                  },
                                   "granted": {
                                     "anyOf": [
                                       {
@@ -42345,6 +42806,7 @@
                                 "required": [
                                   "ruleId",
                                   "label",
+                                  "autoApply",
                                   "unlimited",
                                   "granted",
                                   "used",
@@ -42750,6 +43212,10 @@
                               "items": {
                                 "additionalProperties": false,
                                 "properties": {
+                                  "autoApply": {
+                                    "description": "The rule redeems itself when a covered visit is completed",
+                                    "type": "boolean"
+                                  },
                                   "granted": {
                                     "anyOf": [
                                       {
@@ -42792,6 +43258,7 @@
                                 "required": [
                                   "ruleId",
                                   "label",
+                                  "autoApply",
                                   "unlimited",
                                   "granted",
                                   "used",
@@ -51605,6 +52072,136 @@
         "summary": "Save the weekly hours (the dirty-tracked save of the Working hours screen)",
         "tags": [
           "settings"
+        ],
+        "x-oasis-access": "set.hours"
+      }
+    },
+    "/api/v1/settings/location": {
+      "get": {
+        "description": "null until the shop sets them; arrival pings answer 409 ARRIVAL_NOT_CONFIGURED without them.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "lat": {
+                      "anyOf": [
+                        {
+                          "maximum": 90,
+                          "minimum": -90,
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lng": {
+                      "anyOf": [
+                        {
+                          "maximum": 180,
+                          "minimum": -180,
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "lat",
+                    "lng"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "The shop’s coordinates, the centre of the check-in geofence",
+        "tags": [
+          "arrivals"
+        ],
+        "x-oasis-access": "authenticated"
+      },
+      "put": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "lat": {
+                    "maximum": 90,
+                    "minimum": -90,
+                    "type": "number"
+                  },
+                  "lng": {
+                    "maximum": 180,
+                    "minimum": -180,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "lat",
+                  "lng"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "lat": {
+                      "anyOf": [
+                        {
+                          "maximum": 90,
+                          "minimum": -90,
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lng": {
+                      "anyOf": [
+                        {
+                          "maximum": 180,
+                          "minimum": -180,
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "lat",
+                    "lng"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Set the shop’s coordinates (the centre of the check-in geofence)",
+        "tags": [
+          "arrivals"
         ],
         "x-oasis-access": "set.hours"
       }

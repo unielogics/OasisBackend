@@ -441,6 +441,15 @@ export async function completeAppointment(
     ready_notified_at: now,
   })
   await c.ports.invoices.freezeDate?.(tx, a.id, now)
+  const credit = await c.ports.memberships.autoApplyCredit?.(tx, c, actor, a.id)
+  if (credit?.applied)
+    await logActivity(tx, c, {
+      appointmentId: a.id,
+      text: `Membership credit applied automatically · ${credit.ruleLabel}`,
+      channels: ['system'],
+      actorType: 'automation',
+      meta: { discountCents: credit.discountCents },
+    })
   if (auto.length > 0)
     await logActivity(tx, c, {
       appointmentId: a.id,
@@ -523,6 +532,23 @@ export type DepositPolicy = 'policy' | 'keep' | 'refund_card' | 'refund_credit'
 const blankReason = (message: string): AppError =>
   new AppError('VALIDATION_FAILED', { detail: message, errors: [{ path: 'reason', message }] })
 
+/** An emergency closure that cost the member the visit gives the credit it held back (ADR 0084). */
+async function logReleasedCredit(
+  tx: Tx,
+  c: SchedulingCtx,
+  actor: Actor,
+  a: AppointmentRecord,
+): Promise<void> {
+  const released = await c.ports.memberships.releaseCredit?.(tx, c, a.id)
+  if (released)
+    await logActivity(tx, c, {
+      appointmentId: a.id,
+      text: `Membership credit restored · emergency closure (${released.ruleLabel})`,
+      channels: ['internal'],
+      actor,
+    })
+}
+
 /** A staff-chosen refund is the actor's own: it needs pay.refund before anything changes. */
 function requireRefundRight(actor: Actor, mode: DepositPolicy): void {
   if ((mode === 'refund_card' || mode === 'refund_credit') && !can(actor, 'pay.refund'))
@@ -560,6 +586,7 @@ export async function cancelAppointment(
     actor,
     meta: { depositPolicy: mode },
   })
+  await logReleasedCredit(tx, c, actor, a)
   if (settlement)
     for (const text of settlementLog(settlement, 'canceled'))
       await logActivity(tx, c, {
@@ -636,6 +663,7 @@ export async function markNoShow(
   const settlement = await settleClosed(tx, c, actor, a, { kind: 'no_show', mode })
   const invoice = await c.ports.invoices.cancelForAppointment(tx, a.id, 'no_show', actor.audit.actor ?? {})
   await logActivity(tx, c, { appointmentId: a.id, text: 'Marked no-show', channels: ['internal'], actor })
+  await logReleasedCredit(tx, c, actor, a)
   if (settlement)
     for (const text of settlementLog(settlement, 'no_show'))
       await logActivity(tx, c, {

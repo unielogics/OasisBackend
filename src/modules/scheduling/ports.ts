@@ -9,7 +9,7 @@ import type { StorageProvider } from '../../integrations/ports/storage.js'
 import { renderTemplate, type TemplateVars } from '../messaging/templates/render.js'
 import { QUICK_REPLIES } from '../messaging/templates/registry.js'
 import type { SmsClass } from '../messaging/policy/classes.js'
-import type { Actor } from './context.js'
+import type { Actor, SchedulingCtx } from './context.js'
 import type { SettlementKind, SettlementView } from './cancellation.js'
 import { ensureSchedulingProblems } from './problems.js'
 
@@ -408,9 +408,44 @@ export interface MembershipRef {
   membershipId: string | null
 }
 
+/** What completing a visit did about the member's credit: nothing is thrown, a skip only says why. */
+export type AutoCreditOutcome =
+  | { applied: true; ruleLabel: string; creditsLeft: number | null; discountCents: number }
+  | { applied: false; skipped: string }
+
+/** A credit handed back because the shop's closure cost the member the visit that held it. */
+export interface ReleasedCredit {
+  ruleLabel: string
+}
+
+/** Whether a client who is not a member is worth an upgrade offer, from their real completed visits. */
+export interface UpgradeCandidacy {
+  candidate: boolean
+  /** Completed visits in the last 60 days. */
+  visits60: number
+  /** "Maria Delgado is a strong upgrade candidate — 4 visits in 60 days. Offer Essential at check-out."; null when not a candidate. */
+  copy: string | null
+}
+
 /** Implemented by the Memberships vertical. Returns an entry only for appointments whose client is an active member. */
 export interface MembershipPort {
   forAppointments(db: Executor, refs: MembershipRef[]): Promise<Map<string, MembershipInfo>>
+  /**
+   * Called when a visit is completed, in the completing transaction: redeems the member's credit when the rule (or the member)
+   * is set to apply itself. Never throws for a business reason; a failure inside it leaves the completion intact.
+   */
+  autoApplyCredit?(tx: Tx, c: SchedulingCtx, actor: Actor, appointmentId: string): Promise<AutoCreditOutcome>
+  /**
+   * Called when a job is canceled or marked no-show: gives back the credit it held if an emergency closure (with "protect
+   * credits" on) is why the visit did not happen. null when nothing was held or the closure was not the cause.
+   */
+  releaseCredit?(tx: Tx, c: SchedulingCtx, appointmentId: string): Promise<ReleasedCredit | null>
+  /** For appointments of clients without a live membership: the upgrade candidacy (appointment file, Membership tab). */
+  upgradeCandidates?(
+    db: Executor,
+    c: { locationId: string; now: Date },
+    refs: MembershipRef[],
+  ): Promise<Map<string, UpgradeCandidacy>>
 }
 
 export const noMemberships: MembershipPort = { forAppointments: async () => new Map() }

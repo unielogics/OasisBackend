@@ -1,12 +1,13 @@
 // Emergency side effects that other verticals will refine later. "Alert on-shift crew" is real today: a bell
 // notification (and a targeted realtime event) for every active employee with a login whose schedule covers now.
-// "Protect member credits" stays unimplemented until Memberships exists; the port is left unset.
+// "Protect member credits" marks the credits the affected appointments hold (memberships/emergency.ts, ADR 0084).
 import '../../people/schema.js'
 import type { Clock } from '../../../platform/clock.js'
 import type { Tx } from '../../../platform/db.js'
 import type { NewId } from '../../../platform/ids.js'
 import * as realtime from '../../../platform/realtime.js'
 import { bizWeekday, minutesOfDay, toBizDate } from '../../../platform/time.js'
+import { protectMemberCredits } from '../../memberships/emergency.js'
 import type { EmergencyEffects } from '../ports.js'
 
 export interface CrewAlertOptions {
@@ -58,6 +59,9 @@ export async function onShiftUsers(
 
 export function createEmergencyEffects(o: CrewAlertOptions): EmergencyEffects {
   return {
+    async protectCredits(tx, ctx) {
+      await protectMemberCredits(tx, { clock: o.clock, newId: o.newId }, ctx)
+    },
     async alertCrew(tx, ctx) {
       const people = await onShiftUsers(tx, { locationId: ctx.locationId, now: o.clock.now(), tz: o.tz })
       for (const p of people) {
