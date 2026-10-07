@@ -594,6 +594,11 @@ update, `activity_log`, a queued message (`MessageQueue`, never sent inline), `a
 problem+json whose `title` and `detail` are the design's toast strings (curly apostrophes included). Success responses carry
 the toast for the command (`toast: {title, detail}`) and the changed appointment (`appointment`, a compact core with
 `version`, `status`, bays, `late`, `canDrag`); the dashboard refetches the board on the ops events.
+
+Pay views (`pay` on a card and in the file): `kind` is `paid`, `deposit`, `due`, `pending` or `none`. `pending` (label `Payment pending`, or
+`Payment pending · $X due` while the invoice is not fully funded) means card money staff recorded and Squarespace has not confirmed;
+`awaitingCents` says how much. It is `paid` only once confirmed (ADR 0074). The invoice summary also carries `taxBp`. Payment changes
+also publish `ops` `appointment.updated {change: "payment"}` and `kpi.dirty`.
 ## 21. Payments: invoices, ledger, store credit, reports
 
 Code: `src/modules/payments/**` (routes in `http/`), migration `20261006190000_payments.sql`, seed `db/seeds/payments.ts`

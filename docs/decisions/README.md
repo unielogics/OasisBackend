@@ -39,3 +39,4 @@
 | [0071](0071-squarespace-ledger-wiring.md) | Squarespace sync over the real ledger: commands, variance, external refunds, the manual queue |
 | [0072](0072-squarespace-jobs-runtime-credentials.md) | Squarespace jobs, runtime seam, encrypted credentials, environment, webhook |
 | [0073](0073-memberships.md) | Memberships: plans, credits, inference, apply credit, the Operations port |
+| [0074](0074-ops-live-wiring.md) | Operations on the real stack: pending card money, ops events for payments, the seeded design day's money, the simulator store |
