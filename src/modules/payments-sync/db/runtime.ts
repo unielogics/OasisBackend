@@ -105,7 +105,9 @@ export class SqspRuntime {
   /** The key to call Squarespace with: the stored connection, else SQSP_API_KEY, else the simulator's key in sim mode. */
   async resolveKey(locationId: string): Promise<string | undefined> {
     if (this.d.env.SECRETS_KEY) {
-      const stored = await this.connection(locationId).apiKey()
+      const conn = this.connection(locationId)
+      if (await conn.isDisconnected()) return undefined
+      const stored = await conn.apiKey()
       if (stored) return stored
     }
     if (this.d.env.SQSP_API_KEY) return this.d.env.SQSP_API_KEY

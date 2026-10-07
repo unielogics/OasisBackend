@@ -68,6 +68,7 @@ export function registerSqspRoutes(app: AppInstance): void {
   const runtime = () => createSqspRuntime({ db: app.db, clock: app.clock, newId: app.newId, env: app.env })
   const idem = (fn: Parameters<typeof idempotentHandler<FastifyRequest>>[0]): never =>
     idempotentHandler(fn) as never
+  const connView = (rt: ReturnType<typeof runtime>) => ({ apiKey: rt.d.env.SQSP_API_KEY, provider: rt.d.env.SQSP_PROVIDER })
   const lag = (at: Date | null | undefined, now: Date): number | null =>
     at ? Math.max(0, Math.floor((now.getTime() - at.getTime()) / 1000)) : null
 
@@ -110,14 +111,7 @@ export function registerSqspRoutes(app: AppInstance): void {
       const loc = a.locationId
       const now = app.clock.now()
       const rt = runtime()
-      const conn = rt.d.env.SECRETS_KEY
-        ? await rt.connection(loc).view(rt.d.env.SQSP_API_KEY)
-        : await new ConnectionStore(app.db, {
-            locationId: loc,
-            clock: app.clock,
-            newId: app.newId,
-            secrets: () => secretBoxFromEnv(rt.d.env),
-          }).view(rt.d.env.SQSP_API_KEY)
+      const conn = await rt.connection(loc).view(connView(rt))
       const states = await app.db.selectFrom('sqsp_sync_state').selectAll().where('location_id', '=', loc).execute()
       const resource = (r: 'orders' | 'transactions' | 'contacts' | 'reconcile') => {
         const s = states.find((x) => x.resource === r)
@@ -320,7 +314,7 @@ export function registerSqspRoutes(app: AppInstance): void {
           ctx: auditContextOf(req),
         })
       })
-      return store.view(rt.d.env.SQSP_API_KEY)
+      return store.view(connView(rt))
     },
   )
 
@@ -353,7 +347,7 @@ export function registerSqspRoutes(app: AppInstance): void {
           ctx: auditContextOf(req),
         })
       })
-      return store.view(rt.d.env.SQSP_API_KEY)
+      return store.view(connView(rt))
     },
   )
 

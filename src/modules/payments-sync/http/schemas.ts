@@ -9,7 +9,7 @@ export const LinkParams = z.object({ sqspCustomerId: z.string().min(1).max(64) }
 
 export const Connection = z.object({
   configured: z.boolean(),
-  keySource: z.enum(['database', 'environment', 'none']),
+  keySource: z.enum(['database', 'environment', 'simulator', 'none']),
   authKind: z.enum(['api_key', 'oauth']),
   status: z.enum(['connected', 'error', 'disconnected', 'unconfigured']),
   siteId: z.string().nullable(),

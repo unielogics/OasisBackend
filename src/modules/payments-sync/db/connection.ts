@@ -7,7 +7,7 @@ import type { SecretBox } from './secrets.js'
 
 export interface ConnectionView {
   configured: boolean
-  keySource: 'database' | 'environment' | 'none'
+  keySource: 'database' | 'environment' | 'simulator' | 'none'
   authKind: 'api_key' | 'oauth'
   status: 'connected' | 'error' | 'disconnected' | 'unconfigured'
   siteId: string | null
@@ -30,20 +30,39 @@ export class ConnectionStore {
       .executeTakeFirst()
   }
 
-  /** Public view: whether a key exists and where it comes from, never the key itself or any part of it. */
-  async view(envKey: string | undefined): Promise<ConnectionView> {
+  /**
+   * Public view: whether a key exists and where it comes from, never the key itself or any part of it. In sim mode with no key
+   * the simulator's own key is used, which is reported as `simulator`.
+   */
+  async view(env: { apiKey?: string; provider: 'sim' | 'live' }): Promise<ConnectionView> {
     const r = await this.row()
-    const hasDb = r?.api_key_enc != null && r.status !== 'disconnected'
+    const disconnected = r?.status === 'disconnected'
+    const hasDb = r?.api_key_enc != null && !disconnected
+    // an explicit disconnect stops polling even when SQSP_API_KEY (or the simulator) could still be used
+    const keySource = hasDb
+      ? 'database'
+      : disconnected
+        ? 'none'
+        : env.apiKey
+          ? 'environment'
+          : env.provider === 'sim'
+            ? 'simulator'
+            : 'none'
     return {
-      configured: hasDb || Boolean(envKey),
-      keySource: hasDb ? 'database' : envKey ? 'environment' : 'none',
+      configured: keySource !== 'none',
+      keySource,
       authKind: r?.auth_kind ?? 'api_key',
-      status: hasDb ? r!.status : envKey ? 'connected' : r ? r.status : 'unconfigured',
+      status: hasDb ? r!.status : keySource !== 'none' ? 'connected' : r ? r.status : 'unconfigured',
       siteId: r?.site_id ?? null,
       lastError: r?.last_error ?? null,
       lastVerifiedAt: r?.last_verified_at?.toISOString() ?? null,
       updatedAt: r?.updated_at.toISOString() ?? null,
     }
+  }
+
+  /** True after an explicit disconnect: no key is used until a new one is saved. */
+  async isDisconnected(): Promise<boolean> {
+    return (await this.row())?.status === 'disconnected'
   }
 
   /** The decrypted key of a connected database row; undefined when none (the caller falls back to SQSP_API_KEY). */
