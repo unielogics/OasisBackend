@@ -24,6 +24,7 @@ import type { EmployeesTable, EmploymentType, PayType } from './schema.js'
 import {
   assertSuperRemains,
   holdsLockedRole,
+  holdsSuperAuthority,
   lockSuperRole,
   privilegedRoleIds,
   requireSuper,
@@ -506,6 +507,8 @@ export class PeopleService {
     }
     if (target.id && target.id === actor.employee.id && next.overrides['team.roles'] === 'deny')
       throw new AppError('SELF_DENY_ROLES')
+    // Nobody below Super Admin edits their own access: a restriction someone else put on them (a Deny) would be theirs to lift.
+    if (target.id && target.id === actor.employee.id) requireSuper(actor)
   }
 
   // --- create ---------------------------------------------------------------------------------------------------
@@ -712,6 +715,12 @@ export class PeopleService {
             { path: 'body.email', message: 'An employee with a login needs an email address.' },
           ])
       }
+
+      const contactChanges =
+        (input.phone !== undefined && input.phone.trim() !== cur.phone) ||
+        (email !== undefined && email !== cur.email)
+      if (contactChanges && id !== actor.employee.id && (await holdsSuperAuthority(tx, id)))
+        requireSuper(actor)
 
       const now = this.d.clock.now()
       await tx
