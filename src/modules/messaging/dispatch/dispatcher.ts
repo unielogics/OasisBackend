@@ -243,7 +243,8 @@ export class Dispatcher {
     eligible.sort((a, b) => a.priority - b.priority || a.queuedAt.getTime() - b.queuedAt.getTime() || (a.id < b.id ? -1 : 1))
 
     const usage = (await this.outbox.listUsage(new Date(now.getTime() - this.cfg.budget.windowMs))).map((u) => ({ at: u.at, segments: u.segments }))
-    let lastSendAt = usage.reduce((m, u) => Math.max(m, u.at.getTime()), Number.NEGATIVE_INFINITY)
+    // a send time in the future (tablet clock ahead) must not stall the pacing gap until real time catches up
+    let lastSendAt = Math.min(now.getTime(), usage.reduce((m, u) => Math.max(m, u.at.getTime()), Number.NEGATIVE_INFINITY))
 
     for (const item of eligible) {
       if (report.sent.length >= this.cfg.maxPerTick) break
@@ -379,7 +380,9 @@ export class Dispatcher {
 
     switch (event.kind) {
       case 'sent': {
-        await this.outbox.markUsageSent(event.providerMessageId, event.at)
+        // The tablet reports when it sent the text, which can be later than it accepted it (its own pacing) but never earlier: a
+        // clock far behind would otherwise move the send out of the window and empty it.
+        await this.outbox.markUsageSent(event.providerMessageId, new Date(Math.max(event.at.getTime(), (item.acceptedAt ?? event.at).getTime())))
         if ((RANK[item.state] ?? 0) >= RANK.sent!) {
           // The sent event carries the true send time; a delivered event that overtook it only had a fallback.
           await this.outbox.update(item.id, { sentAt: event.at })
