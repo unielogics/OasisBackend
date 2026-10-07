@@ -21,6 +21,7 @@ import type { PaymentsPorts } from './ports.js'
 import {
   calcOf,
   cardLabel,
+  originalRefundCap,
   firstPayMethod,
   getEventForUpdate,
   getInvoice,
@@ -118,6 +119,12 @@ export interface ReceiptResult {
   sms: string
   email: string
 }
+
+/** The refund to card or cash is larger than the original (non-credit) money still there to give back. */
+const capError = (dest: 'card' | 'cash', cap: number): AppError =>
+  new AppError(dest === 'card' ? 'REFUND_EXCEEDS_CARD' : 'REFUND_EXCEEDS_ORIGINAL', {
+    params: { max: money(cap) },
+  })
 
 const forbid = (perm: string): AppError =>
   new AppError('FORBIDDEN', { meta: { required: [perm], mode: 'all' } })
@@ -438,10 +445,15 @@ export class PaymentsService {
       })
     }
     // The design's order: the card cap is reported before the refundable cap.
-    if (input.dest === 'card' && val > calc.toOrigMax) {
-      throw new AppError('REFUND_EXCEEDS_CARD', { params: { max: money(calc.toOrigMax) } })
+    if (input.dest === 'card') {
+      const cap = await originalRefundCap(tx, inv.id, 'card')
+      if (val > cap) throw capError('card', cap)
     }
     if (val > calc.refundable) throw new AppError('REFUND_EXCEEDS_REFUNDABLE')
+    if (input.dest === 'cash') {
+      const cap = await originalRefundCap(tx, inv.id, 'cash')
+      if (val > cap) throw capError('cash', cap)
+    }
 
     const limit = c.actor.limit('refund')
     const pending = limit !== null && val > limit
@@ -525,8 +537,9 @@ export class PaymentsService {
     const calc = await calcOf(tx, inv.id)
     // Re-validate without this request's own reservation: other refunds may have been resolved since it was requested.
     const refundableWithout = Math.max(0, calc.paid - calc.refunded - (calc.pendingAmt - ev.amount_cents))
-    if (ev.dest === 'card' && ev.amount_cents > calc.toOrigMax) {
-      throw new AppError('REFUND_EXCEEDS_CARD', { params: { max: money(calc.toOrigMax) } })
+    if (ev.dest !== null && ev.dest !== 'credit') {
+      const cap = await originalRefundCap(tx, inv.id, ev.dest, ev.id)
+      if (ev.amount_cents > cap) throw capError(ev.dest, cap)
     }
     if (ev.amount_cents > refundableWithout) throw new AppError('REFUND_EXCEEDS_REFUNDABLE')
     const now = this.d.clock.now()
@@ -644,8 +657,9 @@ export class PaymentsService {
     const settleVal = Math.min(p.diff, refundableNow)
     if (p.diff > 0 && calc.paid > 0 && settleVal > 0) {
       const dest: RefundDest = input.settle === 'card' ? 'card' : 'credit'
-      if (dest === 'card' && settleVal > calc.toOrigMax) {
-        throw new AppError('REFUND_EXCEEDS_CARD', { params: { max: money(calc.toOrigMax) } })
+      if (dest === 'card') {
+        const cap = await originalRefundCap(tx, inv.id, 'card')
+        if (settleVal > cap) throw capError('card', cap)
       }
       const refundLimit = c.actor.limit('refund')
       const pending = refundLimit !== null && settleVal > refundLimit
@@ -744,6 +758,15 @@ export class PaymentsService {
         detail: 'Refunds were issued against this payment, so it can no longer be voided',
       })
     }
+    const cardMoney = pay.method_kind === 'card' || pay.method_kind === 'apple_pay'
+    if (
+      (await originalRefundCap(tx, inv.id, 'cash')) < pay.amount_cents ||
+      (cardMoney && (await originalRefundCap(tx, inv.id, 'card')) < pay.amount_cents)
+    ) {
+      throw new AppError('VOID_NOT_ALLOWED', {
+        detail: 'Refunds were issued against this payment, so it can no longer be voided',
+      })
+    }
     const now = this.d.clock.now()
     const row = await insertEvent(tx, {
       ...this.base(c, inv, 'pay.void', now),
@@ -757,6 +780,10 @@ export class PaymentsService {
       reason: 'Voided',
       note: input.note ?? null,
     })
+    // a reversed payment no longer waits on Squarespace: it must leave the awaiting counters and cannot be confirmed
+    if (pay.processor_state === 'awaiting_processor') {
+      await tx.updateTable('ledger_events').set({ processor_state: 'na' }).where('id', '=', pay.id).execute()
+    }
     const invoice = await this.finish(tx, c, inv, {
       action: 'payments.void',
       before: this.snapshot(calc),

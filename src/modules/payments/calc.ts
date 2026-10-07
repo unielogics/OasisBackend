@@ -124,6 +124,8 @@ export const STATUS_LABELS: Record<InvoiceStatus, string> = {
 }
 
 export const REFUND_PENDING_LABEL = 'Refund pending'
+/** Card money staff recorded that Squarespace has not confirmed yet reads this instead of "Paid" (DV-212). */
+export const PAYMENT_PENDING_LABEL = 'Payment pending'
 
 export const statusLabel = (status: InvoiceStatus, refundPending: boolean): string =>
   refundPending ? REFUND_PENDING_LABEL : STATUS_LABELS[status]

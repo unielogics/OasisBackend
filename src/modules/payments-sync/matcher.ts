@@ -88,6 +88,8 @@ export interface LedgerEventRef {
   customer: IdentityRef
   amountCents: number
   occurredAt: Date
+  /** When a pending refund was approved: it can be paired with the feed from the request or from the approval. */
+  resolvedAt?: Date
   processorState: 'na' | 'awaiting_processor' | 'confirmed' | 'failed'
   processorRef?: string
   sqspOrderId?: string
@@ -387,7 +389,10 @@ interface Scored {
 }
 
 function scoreAwaiting(a: Arrival, e: LedgerEventRef, cfg: MatcherConfig): Scored | undefined {
-  const diff = Math.abs(a.occurredAt.getTime() - e.occurredAt.getTime())
+  const diff = Math.min(
+    Math.abs(a.occurredAt.getTime() - e.occurredAt.getTime()),
+    e.resolvedAt ? Math.abs(a.occurredAt.getTime() - e.resolvedAt.getTime()) : Number.POSITIVE_INFINITY,
+  )
   if (e.amountCents !== a.amountCents || diff > cfg.awaitingWindowMs) return undefined
   const id = identityMatch(contactOf(a), e.customer)
   const orderLink = e.sqspOrderId === a.orderId

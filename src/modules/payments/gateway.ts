@@ -203,9 +203,22 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
             ...(existing.date_frozen_at
               ? {}
               : { occurred_at: a.occurredAt, biz_date: toBizDate(a.occurredAt, tz) }),
+            // a canceled or no-show appointment that is booked again (reopen) gets its invoice back, deposit and all
+            ...(existing.canceled_at
+              ? { canceled_at: null, canceled_by: null, canceled_by_name: null, cancel_reason: null }
+              : {}),
           })
           .where('id', '=', existing.id)
           .execute()
+        if (existing.canceled_at) {
+          await audit.record(tx, {
+            locationId: a.locationId,
+            action: 'payments.invoice_reopened',
+            entityType: 'invoice',
+            entityId: existing.id,
+            after: { appointmentId: a.appointmentId },
+          })
+        }
         await touchInvoice(tx, existing.id, d.clock.now())
         return summaryOf(tx, a.appointmentId)
       }

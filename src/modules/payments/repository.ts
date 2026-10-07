@@ -87,7 +87,12 @@ export const listEvents = (db: Executor, invoiceId: string): Promise<EventRow[]>
     .orderBy('seq', 'desc')
     .execute()
 
+/** ledger_events.amount_cents is an int4: a larger amount is a validation error, not a failed insert. */
+export const MAX_EVENT_CENTS = 2_147_483_647
+
 export async function insertEvent(tx: Tx, e: NewEvent): Promise<EventRow> {
+  if (!Number.isSafeInteger(e.amount_cents) || Math.abs(e.amount_cents) > MAX_EVENT_CENTS)
+    throw new AppError('PAY_AMOUNT_INVALID', { detail: 'That amount is too large' })
   return tx.insertInto('ledger_events').values(e).returningAll().executeTakeFirstOrThrow()
 }
 
@@ -122,6 +127,34 @@ export async function getEventForUpdate(tx: Tx, locationId: string, eventId: str
     .executeTakeFirst()
   if (!row) throw new AppError('NOT_FOUND', { detail: 'That ledger entry does not exist' })
   return row
+}
+
+/**
+ * What can still go back to the original payment methods in a given destination. Store credit never comes back as money:
+ * a refund to card or cash is capped by the non-credit payments (voids taken back out) less the card and cash refunds already
+ * paid and the ones waiting for approval, which reserve that money too. A refund to card is further capped by what was paid by
+ * card or wallet. `excludeEventId` leaves one request out (its own approval).
+ */
+export async function originalRefundCap(
+  db: Executor,
+  invoiceId: string,
+  dest: 'card' | 'cash',
+  excludeEventId?: string,
+): Promise<number> {
+  const skip = excludeEventId ?? null
+  const r = await sql<{ orig: string | number; card: string | number }>`
+    select coalesce(sum(case e.type when 'pay' then e.amount_cents else -e.amount_cents end)
+                      filter (where e.type in ('pay', 'void')), 0)
+           - coalesce(sum(e.amount_cents) filter (where e.type = 'refund' and e.dest <> 'credit'
+                      and e.status in ('done', 'pending') and e.id is distinct from ${skip}::uuid), 0) as orig,
+           coalesce(sum(case e.type when 'pay' then e.amount_cents else -e.amount_cents end)
+                      filter (where e.type in ('pay', 'void') and e.method_kind in ('card', 'apple_pay')), 0)
+           - coalesce(sum(e.amount_cents) filter (where e.type = 'refund' and e.dest = 'card'
+                      and e.status in ('done', 'pending') and e.id is distinct from ${skip}::uuid), 0) as card
+    from ledger_events e where e.invoice_id = ${invoiceId}`.execute(db)
+  const orig = Number(r.rows[0]?.orig ?? 0)
+  const card = Number(r.rows[0]?.card ?? 0)
+  return Math.max(0, dest === 'card' ? Math.min(orig, card) : orig)
 }
 
 /** Item ids already claimed by a done or pending item refund of the invoice (double-refund guard). */

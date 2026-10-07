@@ -93,6 +93,22 @@ export class MatchRunner {
     const all = await this.d.transactions.listByOrder(orderId)
     const pending = all.filter((t) => t.state === 'new' || t.state === 'deferred')
 
+    if (
+      stored.matchState === 'ignored' &&
+      stored.ignoreReason === 'payment_failed' &&
+      stored.order.paymentState !== 'FAILED'
+    ) {
+      // the customer retried and the card went through: the order is a live payment again
+      await this.d.orders.setMatch(orderId, { matchState: 'unmatched' })
+      stored.matchState = 'unmatched'
+      for (const t of all) {
+        if (t.state === 'ignored' && t.ignoreReason === 'payment_failed') {
+          await this.d.transactions.setState(t.txn.id, { state: 'new' })
+          t.state = 'new'
+          pending.push(t)
+        }
+      }
+    }
     if (stored.matchState === 'ignored') {
       await this.setAll(pending, { state: 'ignored', ignoreReason: stored.ignoreReason ?? 'order_ignored' })
       return

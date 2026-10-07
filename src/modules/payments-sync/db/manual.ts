@@ -46,12 +46,14 @@ export interface ManualMatchResult {
 
 const keyOf = (a: Arrival): string => `sqsp:${a.orderId}:${a.kind}:${a.transactionId ?? 'order'}`
 
+/** Locks the order row: a match and an ignore of the same order (and two matches) run one after the other. */
 async function loadOrder(tx: Executor, locationId: string, orderId: string) {
   const row = await tx
     .selectFrom('sqsp_orders')
     .selectAll()
     .where('location_id', '=', locationId)
     .where('sqsp_order_id', '=', orderId)
+    .forUpdate()
     .executeTakeFirst()
   if (!row) throw new AppError('SQSP_ORDER_NOT_FOUND')
   return row
@@ -87,6 +89,8 @@ export async function manualMatch(
     },
   ).filter((a) => !all.some((t) => t.txn.id === a.transactionId && t.state === 'matched'))
   if (arrivals.length === 0) throw new AppError('SQSP_NOTHING_TO_MATCH')
+  // the matcher queues non-USD money for a person; a person must not book foreign cents as dollars
+  if (arrivals.some((a) => a.currency !== 'USD')) throw new AppError('SQSP_MATCH_CURRENCY')
 
   const actorCtx: CommandActor = { ...actor, manual: true }
   let invoiceId = input.invoiceId
@@ -203,6 +207,7 @@ export async function manualMatch(
           variance,
         })
     } else {
+      if (!input.force) await assertNoDuplicateRefund(tx, invoice.id, a)
       const { eventId } = await d.ops.recordExternalRefund(
         tx,
         {
@@ -325,6 +330,18 @@ async function assertNoDuplicate(
     throw new AppError('SQSP_MATCH_DUPLICATE', {
       meta: { eventIds: [...new Set([...awaiting.rows.map((r) => r.id), ...same.map((p) => p.id)])] },
     })
+}
+
+/** The refund twin of assertNoDuplicate: a staff refund of the same amount is already waiting on Squarespace or for approval. */
+async function assertNoDuplicateRefund(tx: Executor, invoiceId: string, a: Arrival): Promise<void> {
+  const same = await sql<{ id: string }>`
+    select e.id from ledger_events e
+    where e.invoice_id = ${invoiceId} and e.type = 'refund' and e.dest = 'card' and e.amount_cents = ${a.amountCents}
+      and e.processor_ref is null and (e.processor_state = 'awaiting_processor' or e.status = 'pending')`.execute(
+    tx,
+  )
+  if (same.rows.length > 0)
+    throw new AppError('SQSP_MATCH_DUPLICATE', { meta: { eventIds: same.rows.map((r) => r.id) } })
 }
 
 export async function manualIgnore(

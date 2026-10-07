@@ -9,7 +9,7 @@ import { decodeCursor, encodeCursor, type Page } from '../../platform/pagination
 import { csvLine, csvCell, CSV_BOM, type CsvKind } from '../../platform/csv.js'
 import { addDays, atLabel, clockLabel, minutesOfDay, toBizDate } from '../../platform/time.js'
 import type { PayActor } from './actor.js'
-import { statusLabel } from './calc.js'
+import { PAYMENT_PENDING_LABEL, REFUND_PENDING_LABEL, statusLabel } from './calc.js'
 import { approvalRights, type ApprovalRules } from './detail.js'
 import { invoiceLabel, pendingBannerText } from './format.js'
 import type { UnmatchedOrder, UnmatchedSource, UnmatchedTransaction } from './ports.js'
@@ -421,7 +421,17 @@ const CSV_COLUMNS: Array<{
   { header: 'Balance', kind: 'number', value: (r) => formatDecimal(r.balance) },
   { header: 'Credits issued', kind: 'number', value: (r) => formatDecimal(r.issued) },
   { header: 'Net revenue', kind: 'number', value: (r) => formatDecimal(r.net) },
-  { header: 'Status', kind: 'text', value: (r) => statusLabel(r.status, r.pending_n > 0) },
+  // the table's pill: card money waiting on Squarespace reads "Payment pending" / "Refund pending" (DV-212), not "Paid"
+  {
+    header: 'Status',
+    kind: 'text',
+    value: (r) =>
+      r.pending_n > 0 || r.awaiting === 'refund'
+        ? REFUND_PENDING_LABEL
+        : r.awaiting === 'payment'
+          ? PAYMENT_PENDING_LABEL
+          : statusLabel(r.status, false),
+  },
 ]
 
 function clock24(d: Date, tz: string): string {

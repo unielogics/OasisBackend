@@ -23,3 +23,9 @@ Status: accepted (2026-10-06)
 * **Refund by item** records the selected `invoice_items` ids on the event; an item in a done or pending item refund cannot be
   refunded again (422 `ITEM_ALREADY_REFUNDED`). The value is the selected lines plus tax at the invoice rate, as designed
   (tip and invoice-level discounts are not allocated).
+* **Refund caps (money review).** `toOrigMax` in the calc keeps the design's meaning (every non-credit payment less every non-credit
+  refund) for display, but the commands cap a refund by `originalRefundCap`: to cash, the non-credit payments less the card and
+  cash refunds done or pending; to card, additionally the card and wallet payments less the card refunds done or pending. Store
+  credit therefore never comes back as cash or card, a cash payment cannot be refunded "to card", and pending requests reserve
+  the cap so a second request that could never be approved is refused up front. A void is refused when it would push either cap
+  below zero. An approval re-validates the same caps without its own request.

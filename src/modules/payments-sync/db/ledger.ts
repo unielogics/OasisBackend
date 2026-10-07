@@ -84,6 +84,7 @@ export class SqspLedgerOps {
       type: 'pay' | 'refund'
       amount_cents: number
       occurred_at: Date
+      resolved_at: Date | null
       processor_state: LedgerEventRef['processorState']
       processor_ref: string | null
       sqsp_order_id: string | null
@@ -91,15 +92,16 @@ export class SqspLedgerOps {
       status: 'pending' | 'done' | 'denied'
       dest: string | null
     }>`
-      select e.id, e.invoice_id, e.customer_id, e.type, e.amount_cents, e.occurred_at, e.processor_state, e.processor_ref,
-             e.sqsp_order_id, e.source, e.status, e.dest
+      select e.id, e.invoice_id, e.customer_id, e.type, e.amount_cents, e.occurred_at, e.resolved_at,
+             e.processor_state, e.processor_ref, e.sqsp_order_id, e.source, e.status, e.dest
       from ledger_events e
       where e.location_id = ${loc} and e.type in ('pay', 'refund') and e.status <> 'denied'
         and not exists (select 1 from ledger_events v where v.voids_event_id = e.id)
         and (e.sqsp_order_id = ${q.orderId}
           or e.processor_ref = any(${q.transactionIds}::text[])
           or ((e.processor_state = 'awaiting_processor' or (e.type = 'refund' and e.status = 'pending' and e.dest = 'card'))
-              and e.occurred_at >= ${lo} and e.occurred_at <= ${hi}))
+              and ((e.occurred_at >= ${lo} and e.occurred_at <= ${hi})
+                or (e.resolved_at >= ${lo} and e.resolved_at <= ${hi}))))
       order by e.occurred_at, e.seq`.execute(db)
 
     const linkRows = await sql<{
@@ -140,6 +142,8 @@ export class SqspLedgerOps {
       customer: identities.get(r.customer_id) ?? { customerId: r.customer_id, emails: [], phones: [] },
       amountCents: r.amount_cents,
       occurredAt: r.occurred_at,
+      resolvedAt: r.resolved_at ?? undefined,
+      // a refund approved days after it was requested can be paired with its feed refund from either moment (resolvedAt)
       // a card refund still waiting for an Oasis approver is shown to the matcher as waiting on the processor, so a feed
       // refund for it goes to a person (refund_pending_approval) instead of being ingested as an external refund
       processorState:
@@ -437,6 +441,7 @@ export class SqspLedgerOps {
       rule: i.paymentLinkId ? 'link' : 'manual',
     })
     if (!claimed) return { eventId: await this.existingEvent(tx, i.idempotencyKey) }
+    if (!actor.manual) await this.assertDecisionStillHolds(tx, inv.id, i)
     const before = await this.invoiceSnapshot(tx, inv.id)
     const now = this.d.clock.now()
     const card = cardLabel(i.brand)
@@ -489,6 +494,29 @@ export class SqspLedgerOps {
       },
     })
     return { eventId: row.id }
+  }
+
+  /**
+   * The matcher decided on a snapshot taken before this transaction got the invoice lock. A staff member may have collected
+   * the balance or recorded the card payment since, and the webhook job and the poll can book one payment under two keys (the
+   * order-level and the transaction-level arrival). A decision the invoice no longer supports is refused; the run is retried
+   * on a fresh snapshot, where the money is recognised as already recorded or confirms the staff entry.
+   */
+  private async assertDecisionStillHolds(
+    tx: Tx,
+    invoiceId: string,
+    i: { amountCents: number; sqspOrderId: string; processorRef?: string },
+  ): Promise<void> {
+    const calc = await calcOf(tx, invoiceId)
+    const open = await sql<{ id: string }>`
+      select e.id from ledger_events e
+      where e.invoice_id = ${invoiceId} and e.type = 'pay'
+        and not exists (select 1 from ledger_events v where v.voids_event_id = e.id)
+        and (e.processor_state = 'awaiting_processor'
+          or (e.sqsp_order_id = ${i.sqspOrderId} and e.amount_cents = ${i.amountCents}
+              and (${i.processorRef ?? null}::text is null or e.processor_ref is null or e.processor_ref = ${i.processorRef ?? null})))
+      limit 1`.execute(tx)
+    if (calc.balance <= 0 || open.rows.length > 0) throw new AppError('CONCURRENT_UPDATE')
   }
 
   async confirmRefund(
