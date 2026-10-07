@@ -760,6 +760,10 @@ export class PaymentsService {
       reason: 'Voided',
       note: input.note ?? null,
     })
+    // a reversed payment no longer waits on Squarespace: it must leave the awaiting counters and cannot be confirmed
+    if (pay.processor_state === 'awaiting_processor') {
+      await tx.updateTable('ledger_events').set({ processor_state: 'na' }).where('id', '=', pay.id).execute()
+    }
     const invoice = await this.finish(tx, c, inv, {
       action: 'payments.void',
       before: this.snapshot(calc),
