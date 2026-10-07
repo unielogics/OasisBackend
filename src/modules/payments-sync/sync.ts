@@ -256,7 +256,9 @@ export class SyncEngine {
     report.windowEnd = windowEnd
     const seenOrders = new Set<string>()
     const stats = emptyStats()
-    const known = await this.knownErrorKeys(resource)
+    // An item is the same item whoever reads it: the reconcile records and clears errors under the poll's resource names, so a
+    // dead letter the poll gave up on is closed when the reconcile finally stores the item.
+    const known = { orders: await this.knownErrorKeys('orders'), transactions: await this.knownErrorKeys('transactions') }
     const save = async (patch: Partial<SyncState>): Promise<void> => {
       Object.assign(state, { phase, windowStart, watermark: windowEnd }, patch)
       await this.d.state.save(state)
@@ -277,7 +279,7 @@ export class SyncEngine {
           })
           stats.requests++
           await this.handlePage<SqspOrder>(
-            resource,
+            'orders',
             page,
             (o) => o.id,
             (o) => {
@@ -285,7 +287,7 @@ export class SyncEngine {
               return this.storeOrder(o, s)
             },
             s,
-            known,
+            known.orders,
           )
           accumulate(report.orders, s)
           next = page.nextCursor
@@ -297,12 +299,12 @@ export class SyncEngine {
           })
           stats.requests++
           await this.handlePage<SqspTransaction>(
-            resource,
+            'transactions',
             page,
             (t) => t.id,
             (t) => this.storeTransaction(t),
             s,
-            known,
+            known.transactions,
           )
           accumulate(report.transactions, s)
           next = page.nextCursor
