@@ -1,0 +1,14 @@
+# /etc/nginx/oasis/proxy.conf  -  what every proxied location sends upstream (rendered by deploy/scripts/install.sh).
+#
+# X-Forwarded-For is OVERWRITTEN with the address nginx saw, never appended to. The API runs with TRUST_PROXY=true, which makes it
+# believe the first address in that header; appending would let a client choose its own address (and dodge the login throttle).
+# The API listens on 127.0.0.1 only, so nginx is the only thing that can set the header.
+proxy_http_version 1.1;
+proxy_set_header Connection "";
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $remote_addr;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Request-Id $request_id;
+proxy_redirect off;
+# Timeouts live in the server block (60 s) so a location can raise them: nginx refuses the same directive twice in one block.

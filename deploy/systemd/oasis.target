@@ -1,0 +1,7 @@
+[Unit]
+Description=Oasis Auto Spa (API, worker, dashboard)
+Documentation=file:///opt/oasis/current/backend/docs/deployment.md
+Wants=oasis-api.service oasis-worker.service oasis-web.service
+
+[Install]
+WantedBy=multi-user.target

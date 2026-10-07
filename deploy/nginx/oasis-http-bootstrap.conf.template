@@ -1,0 +1,16 @@
+# /etc/nginx/conf.d/oasis.conf while the certificate does not exist yet (rendered by install.sh --tls certbot).
+# Serves the ACME challenge on port 80 so certbot can issue the certificate; install.sh then replaces it with the full site.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name @DOMAIN@;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type text/plain;
+    }
+
+    location / {
+        return 503 "The site is being set up.\n";
+    }
+}
