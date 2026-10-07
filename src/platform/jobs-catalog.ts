@@ -243,6 +243,35 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
       'test/memberships/seed-cycle.test.ts, test/payments-sync-db/pgboss.test.ts, test/jobs/registry.test.ts',
     status: 'existing',
   },
+  'standing.materialize': {
+    owner: 'standing',
+    purpose:
+      'Books the next four weeks of every active standing (recurring) series of a VIP client; a date that cannot be booked is recorded as skipped with its reason. Does nothing while features.standing_waitlist is off.',
+    idempotency:
+      'One standing_occurrences row per (series, date) under a unique key, and the series watermark only moves forward; a second run books nothing new.',
+    clock: 'Injected clock, business-timezone dates.',
+    tests: 'test/standing/jobs.test.ts, test/standing/standing.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'standing.autoconfirm': {
+    owner: 'standing',
+    purpose:
+      'Confirms standing appointments whose series has auto-confirm on, once they are inside the confirmation window.',
+    idempotency: 'Confirms only appointments still in booked status; a repeat finds none.',
+    clock: 'Injected clock against each appointment start.',
+    tests: 'test/standing/jobs.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'waitlist.offer_expiry': {
+    owner: 'standing',
+    purpose:
+      'Lapses waitlist offers nobody accepted in time and offers the slot to the next matching entry (VIPs first when that toggle is on).',
+    idempotency:
+      'Moves only open offers past expires_at; the next offer is unique per (entry, slot_start), so a repeat neither lapses nor offers twice.',
+    clock: 'Injected clock against expires_at.',
+    tests: 'test/standing/waitlist.test.ts, test/standing/jobs.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
 }
 
 const policyOf = (d: JobDefinition<never>): string => d.policy ?? 'standard'

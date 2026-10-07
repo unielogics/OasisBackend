@@ -8,20 +8,21 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 
 ## Migrations
 
-| Migration                                  | Adds                                                                                                                                                  |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `20261006130000_platform_core.sql`         | extensions, `app_now()`, locations, settings, idempotency keys, the realtime log, the audit log, the webhook log, notifications                       |
-| `20261006140000_people_auth.sql`           | employees, schedules, roles, the 27 permissions, money limits, per-person exceptions, users, invites, sessions, password resets, preferences        |
-| `20261006150000_domain_core.sql`           | catalog, customers, vehicles, bays, hours, booking rules, closures, emergencies, VIP and arrival configuration, appointments and their job records   |
-| `20261006160000_domain_links.sql`          | the foreign keys from the domain tables to employees and users that the domain core could not declare yet                                           |
-| `20261006180000_scheduling_ops.sql`        | the alert-set change detector of the per-minute scan and the indexes the board, calendar and availability reads use                                  |
-| `20261006190000_payments.sql`              | invoices, the append-only ledger, store-credit allocations, payment links, the gap-free invoice counter, `invoice_calc_of` and the `invoice_calc` view |
-| `20261006200000_messaging.sql`             | SMS devices, threads, messages, the outbox, inbox, opt-outs, usage log, processed webhook envelopes, the email outbox                                |
-| `20261006210000_memberships.sql`           | membership plans, credit rules, members and the credit ledger                                                                                         |
-| `20261006210100_sqsp_sync.sql`             | the Squarespace read side: connection, sync state, orders, transactions, contacts, customer links, product map, dead letters, matches, manual queue   |
-| `20261006300000_arrival_ping.sql`          | arrival pings and the expiry of the customer check-in link (ADR 0083)                                                                                 |
-| `20261006300100_membership_gaps.sql`       | `plan_credit_rules.auto_apply` (ADR 0084)                                                                                                             |
-| `20261006300200_standing_waitlist.sql`     | standing (recurring) series and their occurrences, the waitlist and its offers (ADR 0086; behind a feature setting, off by default)                  |
+| Migration                              | Adds                                                                                                                                                   |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `20261006130000_platform_core.sql`     | extensions, `app_now()`, locations, settings, idempotency keys, the realtime log, the audit log, the webhook log, notifications                        |
+| `20261006140000_people_auth.sql`       | employees, schedules, roles, the 27 permissions, money limits, per-person exceptions, users, invites, sessions, password resets, preferences           |
+| `20261006150000_domain_core.sql`       | catalog, customers, vehicles, bays, hours, booking rules, closures, emergencies, VIP and arrival configuration, appointments and their job records     |
+| `20261006160000_domain_links.sql`      | the foreign keys from the domain tables to employees and users that the domain core could not declare yet                                              |
+| `20261006180000_scheduling_ops.sql`    | the alert-set change detector of the per-minute scan and the indexes the board, calendar and availability reads use                                    |
+| `20261006190000_payments.sql`          | invoices, the append-only ledger, store-credit allocations, payment links, the gap-free invoice counter, `invoice_calc_of` and the `invoice_calc` view |
+| `20261006200000_messaging.sql`         | SMS devices, threads, messages, the outbox, inbox, opt-outs, usage log, processed webhook envelopes, the email outbox                                  |
+| `20261006210000_memberships.sql`       | membership plans, credit rules, members and the credit ledger                                                                                          |
+| `20261006210100_sqsp_sync.sql`         | the Squarespace read side: connection, sync state, orders, transactions, contacts, customer links, product map, dead letters, matches, manual queue    |
+| `20261006300000_arrival_ping.sql`      | arrival pings and the expiry of the customer check-in link (ADR 0083)                                                                                  |
+| `20261006300100_membership_gaps.sql`   | `plan_credit_rules.auto_apply` (ADR 0084)                                                                                                              |
+| `20261006300200_standing_waitlist.sql` | standing (recurring) series and their occurrences, the waitlist and its offers (ADR 0086; behind a feature setting, off by default)                    |
+| `20261006310000_jobs_runtime.sql`      | the per-job run record behind `GET /system/jobs`, and the once-only markers of the VIP-release and credit-expiry scans (ADR 0090 to 0093)              |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -32,37 +33,37 @@ module augmentation (`declare module '../../platform/schema.js'`) in each module
 
 ## Platform
 
-| Table                | Key columns and rules                                                                                                                                                                                                       |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `locations`          | `slug` (unique), `timezone` (America/New_York), `address`, `lat`/`lng` (the centre of the arrival geofence; `PUT /settings/location`). One seeded row.                                                                      |
-| `settings`           | pk `(location_id, key)`, `value jsonb`, `version`. The typed registry in `src/platform/settings.ts` is the only source of keys, validation and defaults (tax, grace minutes, approvals, reminders, quiet hours, cancellation policy). |
-| `idempotency_keys`   | pk `(key, actor)`; `request_hash`, `state in_flight\|done`, the stored response, `lock_expires_at`, `expires_at`. A replay returns the stored response; the same key with another body is 422.                              |
-| `realtime_events`    | The durable SSE log (`bigserial` id used as `Last-Event-ID`): `channel` (ops, payments, messages, settings, notifications), `type`, `payload`, `target_user_id`. An insert trigger NOTIFYs listeners on commit.              |
-| `realtime_state`     | One row: `purged_through`, the highest purged event id, so a stale `Last-Event-ID` is told to resync.                                                                                                                       |
-| `audit_log`          | Insert-only (trigger): actor, roles, `view_as_role_id`, `action`, entity, `before`/`after`, request id, idempotency key, ip. Kept forever.                                                                                  |
-| `webhook_log`        | One row per received webhook, unique `(provider, external_id)`; `signature_valid`, `status received\|processed\|ignored\|failed`.                                                                                            |
-| `notifications`      | The bell: per employee or role target, `kind` (emergency, arrival, ...), `title`, `body`, entity, `read_at`.                                                                                                                |
-| `schema_migrations`  | The migration runner's record: `name`, `checksum`, `applied_at`. An applied migration is never edited.                                                                                                                      |
+| Table               | Key columns and rules                                                                                                                                                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `locations`         | `slug` (unique), `timezone` (America/New_York), `address`, `lat`/`lng` (the centre of the arrival geofence; `PUT /settings/location`). One seeded row.                                                                                |
+| `settings`          | pk `(location_id, key)`, `value jsonb`, `version`. The typed registry in `src/platform/settings.ts` is the only source of keys, validation and defaults (tax, grace minutes, approvals, reminders, quiet hours, cancellation policy). |
+| `idempotency_keys`  | pk `(key, actor)`; `request_hash`, `state in_flight\|done`, the stored response, `lock_expires_at`, `expires_at`. A replay returns the stored response; the same key with another body is 422.                                        |
+| `realtime_events`   | The durable SSE log (`bigserial` id used as `Last-Event-ID`): `channel` (ops, payments, messages, settings, notifications), `type`, `payload`, `target_user_id`. An insert trigger NOTIFYs listeners on commit.                       |
+| `realtime_state`    | One row: `purged_through`, the highest purged event id, so a stale `Last-Event-ID` is told to resync.                                                                                                                                 |
+| `audit_log`         | Insert-only (trigger): actor, roles, `view_as_role_id`, `action`, entity, `before`/`after`, request id, idempotency key, ip. Kept forever.                                                                                            |
+| `webhook_log`       | One row per received webhook, unique `(provider, external_id)`; `signature_valid`, `status received\|processed\|ignored\|failed`.                                                                                                     |
+| `notifications`     | The bell: per employee or role target, `kind` (emergency, arrival, ...), `title`, `body`, entity, `read_at`.                                                                                                                          |
+| `schema_migrations` | The migration runner's record: `name`, `checksum`, `applied_at`. An applied migration is never edited.                                                                                                                                |
 
 ## People, auth and RBAC
 
-| Table                          | Key columns and rules                                                                                                                                                                                       |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `rbac_state`                   | One counter bumped in the same transaction as any change that can alter effective permissions; per-process caches compare it on every request.                                                              |
-| `employees`                    | `first`, `last`, `title`, `phone`/`phone_e164`, `email citext`, `status active\|invited\|inactive`, employment and pay fields, `skills`, `avatar_color`, `version`, `deactivated_at` (set iff inactive).      |
-| `employee_locations`           | pk `(employee_id, location_id)`: who works where.                                                                                                                                                           |
-| `employee_schedules`           | pk `(employee_id, weekday)`, Sunday = 0; `is_on`, `from_min`, `to_min`. Drives "on shift" (crew alerts) and the hours-conflict warnings.                                                                      |
-| `roles`                        | The five seeded roles (`key` super, mgmt, acct, support, crew) plus custom ones; `is_locked` marks the single Super Admin role.                                                                              |
-| `permissions`                  | The 27 permission keys with `module`, `label`, `sort` and `has_limit` for the three money ones (refund, adjust, credit).                                                                                                |
-| `role_permissions`             | pk `(role_id, permission_key)`.                                                                                                                                                                             |
-| `role_limits`                  | pk `(role_id, kind)`; `unlimited` or `limit_cents` (cents). **No row means the default of 2500 cents.** The API takes the chip in dollars and stores cents (ADR 0081).                                       |
-| `employee_roles`               | pk `(employee_id, role_id)`: a person's roles; permissions are the union.                                                                                                                                   |
-| `employee_permission_overrides`| pk `(employee_id, permission_key)`, `effect allow\|deny`: the per-person exceptions (deny beats allow beats role).                                                                                           |
-| `users`                        | The login of an employee (`employee_id` unique), `email citext`, scrypt `password_hash`, `failed_attempts`, `disabled_at`.                                                                                   |
-| `invites`                      | `token_hash` (unique), `channel sms\|email\|link`, `expires_at`, `accepted_at`, `revoked_at`.                                                                                                               |
-| `sessions`                     | `id` is the hex SHA-256 of the cookie token; idle and absolute expiry, `csrf_secret`, `view_as_role_id`, `revoked_at`.                                                                                       |
-| `password_resets`              | `token_hash` (unique), `expires_at`, `used_at`.                                                                                                                                                             |
-| `user_preferences`             | pk `user_id`; the theme.                                                                                                                                                                                    |
+| Table                           | Key columns and rules                                                                                                                                                                                    |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rbac_state`                    | One counter bumped in the same transaction as any change that can alter effective permissions; per-process caches compare it on every request.                                                           |
+| `employees`                     | `first`, `last`, `title`, `phone`/`phone_e164`, `email citext`, `status active\|invited\|inactive`, employment and pay fields, `skills`, `avatar_color`, `version`, `deactivated_at` (set iff inactive). |
+| `employee_locations`            | pk `(employee_id, location_id)`: who works where.                                                                                                                                                        |
+| `employee_schedules`            | pk `(employee_id, weekday)`, Sunday = 0; `is_on`, `from_min`, `to_min`. Drives "on shift" (crew alerts) and the hours-conflict warnings.                                                                 |
+| `roles`                         | The five seeded roles (`key` super, mgmt, acct, support, crew) plus custom ones; `is_locked` marks the single Super Admin role.                                                                          |
+| `permissions`                   | The 27 permission keys with `module`, `label`, `sort` and `has_limit` for the three money ones (refund, adjust, credit).                                                                                 |
+| `role_permissions`              | pk `(role_id, permission_key)`.                                                                                                                                                                          |
+| `role_limits`                   | pk `(role_id, kind)`; `unlimited` or `limit_cents` (cents). **No row means the default of 2500 cents.** The API takes the chip in dollars and stores cents (ADR 0081).                                   |
+| `employee_roles`                | pk `(employee_id, role_id)`: a person's roles; permissions are the union.                                                                                                                                |
+| `employee_permission_overrides` | pk `(employee_id, permission_key)`, `effect allow\|deny`: the per-person exceptions (deny beats allow beats role).                                                                                       |
+| `users`                         | The login of an employee (`employee_id` unique), `email citext`, scrypt `password_hash`, `failed_attempts`, `disabled_at`.                                                                               |
+| `invites`                       | `token_hash` (unique), `channel sms\|email\|link`, `expires_at`, `accepted_at`, `revoked_at`.                                                                                                            |
+| `sessions`                      | `id` is the hex SHA-256 of the cookie token; idle and absolute expiry, `csrf_secret`, `view_as_role_id`, `revoked_at`.                                                                                   |
+| `password_resets`               | `token_hash` (unique), `expires_at`, `used_at`.                                                                                                                                                          |
+| `user_preferences`              | pk `user_id`; the theme.                                                                                                                                                                                 |
 
 ## Domain core (migration `20261006150000_domain_core.sql`)
 
@@ -123,9 +124,9 @@ emergencies, VIP and arrival configuration, and appointments with their job reco
 
 ### Scheduling operations and arrival
 
-| Table             | Key columns and rules                                                                                                                                                                                                                                           |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ops_alert_state` | pk `location_id`; `alerts_hash`, `alert_keys`. The set of "Needs attention" alerts last announced over SSE, so the per-minute scan emits `alerts.changed` only when the set changes.                                                                            |
+| Table             | Key columns and rules                                                                                                                                                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ops_alert_state` | pk `location_id`; `alerts_hash`, `alert_keys`. The set of "Needs attention" alerts last announced over SSE, so the per-minute scan emits `alerts.changed` only when the set changes.                                                                                |
 | `arrival_pings`   | One accepted customer location ping per row (ADR 0083): `lat`/`lng`, `accuracy_m`, `distance_m` to the shop, `eta_min`, `declared` ("I'm here"), `outcome`, the client's `ping_key` (unique per appointment) and the `reply` that was given, replayed for a repeat. |
 
 `appointments.arrival_token_hash` (unique, SHA-256 of the customer check-in link token) and `arrival_token_expires_at` belong to the
@@ -133,80 +134,90 @@ check-in link; the plain token exists only in the response that issued it.
 
 ## Payments (migration `20261006190000_payments.sql`)
 
-| Table              | Key columns and rules                                                                                                                                                                                                                                                                                                                         |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `invoice_counters` | pk `location_id`; `next_no` (starts at 20611), incremented under a row lock in the booking transaction: gap-free.                                                                                                                                                                                                                             |
-| `invoices`         | One per appointment (`appointment_id` unique), `invoice_no` unique per location, label snapshots, `occurred_at`/`biz_date` (frozen by `date_frozen_at` at completion), `tax_bp`, `tip_cents`, `canceled_at` + `cancel_reason canceled\|no_show`, `payment_link_url`, `version`.                                                                  |
-| `invoice_items`    | Price snapshots (`package` or `addon`), `position`, `appointment_addon_id`; refund-by-item claims item ids.                                                                                                                                                                                                                                   |
-| `ledger_events`    | Append-only (trigger): `type pay\|adjust\|refund\|credit_issue\|credit_apply\|void`, `amount_cents` (adjust signed), refund `status pending\|done\|denied` and `dest card\|credit\|cash`, method fields, actor and approver fields, `source oasis\|squarespace\|system\|seed`, `processor_state na\|awaiting_processor\|confirmed\|failed`, `idempotency_key` unique. |
-| `credit_allocations` | Append-only: which store-credit lot a `credit_apply` consumed (FIFO by expiry, skipping lots already expired).                                                                                                                                                                                                                              |
-| `payment_links`    | A staff-attached Squarespace checkout or invoice URL (https): `purpose balance\|deposit`, `expected_cents`, `state`, `matched_sqsp_order_id`. No ledger event until money actually arrives.                                                                                                                                                 |
+| Table                | Key columns and rules                                                                                                                                                                                                                                                                                                                                                 |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invoice_counters`   | pk `location_id`; `next_no` (starts at 20611), incremented under a row lock in the booking transaction: gap-free.                                                                                                                                                                                                                                                     |
+| `invoices`           | One per appointment (`appointment_id` unique), `invoice_no` unique per location, label snapshots, `occurred_at`/`biz_date` (frozen by `date_frozen_at` at completion), `tax_bp`, `tip_cents`, `canceled_at` + `cancel_reason canceled\|no_show`, `payment_link_url`, `version`.                                                                                       |
+| `invoice_items`      | Price snapshots (`package` or `addon`), `position`, `appointment_addon_id`; refund-by-item claims item ids.                                                                                                                                                                                                                                                           |
+| `ledger_events`      | Append-only (trigger): `type pay\|adjust\|refund\|credit_issue\|credit_apply\|void`, `amount_cents` (adjust signed), refund `status pending\|done\|denied` and `dest card\|credit\|cash`, method fields, actor and approver fields, `source oasis\|squarespace\|system\|seed`, `processor_state na\|awaiting_processor\|confirmed\|failed`, `idempotency_key` unique. |
+| `credit_allocations` | Append-only: which store-credit lot a `credit_apply` consumed (FIFO by expiry, skipping lots already expired).                                                                                                                                                                                                                                                        |
+| `payment_links`      | A staff-attached Squarespace checkout or invoice URL (https): `purpose balance\|deposit`, `expected_cents`, `state`, `matched_sqsp_order_id`. No ledger event until money actually arrives.                                                                                                                                                                           |
 
 `invoice_calc_of(invoice)` and the `invoice_calc` view compute items, adjustments, tax (half-up), paid, refunded, balance, refundable
 and the status ladder in integer cents; `src/modules/payments/calc.ts` is the TypeScript twin.
 
 ## Messaging (migration `20261006200000_messaging.sql`)
 
-| Table                  | Key columns and rules                                                                                                                                                                                                |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sms_devices`          | The SMS Gate tablet(s): `device_key`, `provider smsgate\|sim`, encrypted `password_enc`/`webhook_secret_enc`, rate limits (`max_per_window`, `window_minutes`), health fields and `status`.                         |
-| `message_threads`      | One per customer: `last_message_at`, `last_inbound_at`, `unread_count`.                                                                                                                                              |
-| `messages`             | Every in- and outbound message: `direction`, `sender_kind`, `appointment_id`, `template_key`, `klass` (SMS class), `status`, `peer_e164`, `segments`, `encoding`, `idempotency_key` unique.                            |
-| `sms_outbox`           | The queue the dispatcher drains (`id` = `messages.id`): `priority`, `state`, `attempts`, `next_attempt_at`, `ttl_at`, `hold_until` (quiet hours), device acceptance and delivery times.                                |
-| `sms_usage`            | Segments handed to the device: the input of the sliding send window (Android's own SMS limit).                                                                                                                      |
-| `sms_processed_events` | Webhook envelope ids already applied; written in the same transaction as the event's effects.                                                                                                                        |
-| `sms_inbox`            | Every text the device received, with the router's `decision`; unknown senders stay here (`quarantined`), no customer row is created for them.                                                                       |
-| `sms_opt_outs`         | By phone number: STOP/START history; an active opt-out has `opted_in_again_at` null.                                                                                                                                 |
-| `outbox_emails`        | The email queue and the console driver's mailbox; sensitive templates lose their variables once terminal.                                                                                                           |
+| Table                  | Key columns and rules                                                                                                                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sms_devices`          | The SMS Gate tablet(s): `device_key`, `provider smsgate\|sim`, encrypted `password_enc`/`webhook_secret_enc`, rate limits (`max_per_window`, `window_minutes`), health fields and `status`. |
+| `message_threads`      | One per customer: `last_message_at`, `last_inbound_at`, `unread_count`.                                                                                                                     |
+| `messages`             | Every in- and outbound message: `direction`, `sender_kind`, `appointment_id`, `template_key`, `klass` (SMS class), `status`, `peer_e164`, `segments`, `encoding`, `idempotency_key` unique. |
+| `sms_outbox`           | The queue the dispatcher drains (`id` = `messages.id`): `priority`, `state`, `attempts`, `next_attempt_at`, `ttl_at`, `hold_until` (quiet hours), device acceptance and delivery times.     |
+| `sms_usage`            | Segments handed to the device: the input of the sliding send window (Android's own SMS limit).                                                                                              |
+| `sms_processed_events` | Webhook envelope ids already applied; written in the same transaction as the event's effects.                                                                                               |
+| `sms_inbox`            | Every text the device received, with the router's `decision`; unknown senders stay here (`quarantined`), no customer row is created for them.                                               |
+| `sms_opt_outs`         | By phone number: STOP/START history; an active opt-out has `opted_in_again_at` null.                                                                                                        |
+| `outbox_emails`        | The email queue and the console driver's mailbox; sensitive templates lose their variables once terminal.                                                                                   |
 
 ## Memberships (migration `20261006210000_memberships.sql`, ADR 0073 and 0084)
 
-| Table                       | Key columns and rules                                                                                                                                                                                                                                                         |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `membership_plans`          | Essential, Premium, Executive, Exotic per location: display colours, `perks`, discount basis points (display only), `billing_interval_months`.                                                                                                                                  |
-| `plan_credit_rules`         | A credit covers a service whose `services.tags` include any `include_tags` and none of `exclude_tags`; `per_cycle` null = unlimited; **`auto_apply`** (default false) redeems the credit when a covered visit is completed.                                                       |
-| `memberships`               | One live membership per customer (partial unique); `plan_label`, `status`, `source squarespace\|manual`, the current cycle, grace and review flags, the member's own `auto_apply`, `manual_status_at`.                                                                          |
-| `membership_credit_events`  | Append-only credit ledger: `grant` per rule per cycle, `redeem` (names the appointment, one per appointment), `restore` (gives a credit back), `protect` (a marker an emergency closure leaves; moves no count), `reserve` and `expire` (reserved kinds).                       |
+| Table                      | Key columns and rules                                                                                                                                                                                                                                     |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `membership_plans`         | Essential, Premium, Executive, Exotic per location: display colours, `perks`, discount basis points (display only), `billing_interval_months`.                                                                                                            |
+| `plan_credit_rules`        | A credit covers a service whose `services.tags` include any `include_tags` and none of `exclude_tags`; `per_cycle` null = unlimited; **`auto_apply`** (default false) redeems the credit when a covered visit is completed.                               |
+| `memberships`              | One live membership per customer (partial unique); `plan_label`, `status`, `source squarespace\|manual`, the current cycle, grace and review flags, the member's own `auto_apply`, `manual_status_at`.                                                    |
+| `membership_credit_events` | Append-only credit ledger: `grant` per rule per cycle, `redeem` (names the appointment, one per appointment), `restore` (gives a credit back), `protect` (a marker an emergency closure leaves; moves no count), `reserve` and `expire` (reserved kinds). |
 
 ## Squarespace sync (migration `20261006210100_sqsp_sync.sql`, ADR 0070 to 0072)
 
 Squarespace is read-only for payments; these tables mirror what it reports and record every decision the matcher takes.
 
-| Table                         | Key columns and rules                                                                                                                                                       |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sqsp_connections`            | Credentials encrypted with `SECRETS_KEY` (`api_key_enc`, OAuth tokens), `auth_kind`, `status`, `last_verified_at`.                                                           |
-| `sqsp_sync_state`             | pk `(location_id, resource)`: watermark, window, run and failure bookkeeping per polled resource.                                                                           |
-| `sqsp_orders`                 | Synced orders: totals in cents, `is_subscription`, `test_mode`, `line_items`, `match_state`, `matched_invoice_id`, `customer_id`.                                            |
-| `sqsp_transactions`           | The Transactions feed: `kind payment\|refund`, `amount_cents`, card `brand` (last4 only if a payload ever has it), `state`, `matched_event_id`.                                |
-| `sqsp_contacts`               | The Contacts API mirror (email, name, phone).                                                                                                                               |
-| `sqsp_customer_links`         | Squarespace customer id to an Oasis customer (unique match by email, then phone, or by hand).                                                                               |
-| `sqsp_products`               | Product or SKU to meaning: a membership tier (`plan_id`, `plan_label`, `interval_months`) or a service; the only source of "this order is a membership payment".            |
-| `sqsp_webhook_subscriptions`  | Registered order webhooks and their last delivery.                                                                                                                          |
-| `sqsp_sync_errors`            | Dead letters: an item that cannot be mapped or persisted, with attempts and `dead_lettered_at`.                                                                              |
-| `sqsp_matches`                | Every applied match decision and the idempotency record of the ledger commands the sync issues.                                                                              |
-| `sqsp_manual_queue`           | Arrivals the matcher would not decide alone (no candidate, ambiguous, below the confidence threshold, possible double count).                                                |
-| `sqsp_alerts`                 | Sync and matching alerts (variance, external refund, empty product map, dead letters, members without a customer); `dedupe_key` makes raising idempotent.                     |
+| Table                        | Key columns and rules                                                                                                                                            |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sqsp_connections`           | Credentials encrypted with `SECRETS_KEY` (`api_key_enc`, OAuth tokens), `auth_kind`, `status`, `last_verified_at`.                                               |
+| `sqsp_sync_state`            | pk `(location_id, resource)`: watermark, window, run and failure bookkeeping per polled resource.                                                                |
+| `sqsp_orders`                | Synced orders: totals in cents, `is_subscription`, `test_mode`, `line_items`, `match_state`, `matched_invoice_id`, `customer_id`.                                |
+| `sqsp_transactions`          | The Transactions feed: `kind payment\|refund`, `amount_cents`, card `brand` (last4 only if a payload ever has it), `state`, `matched_event_id`.                  |
+| `sqsp_contacts`              | The Contacts API mirror (email, name, phone).                                                                                                                    |
+| `sqsp_customer_links`        | Squarespace customer id to an Oasis customer (unique match by email, then phone, or by hand).                                                                    |
+| `sqsp_products`              | Product or SKU to meaning: a membership tier (`plan_id`, `plan_label`, `interval_months`) or a service; the only source of "this order is a membership payment". |
+| `sqsp_webhook_subscriptions` | Registered order webhooks and their last delivery.                                                                                                               |
+| `sqsp_sync_errors`           | Dead letters: an item that cannot be mapped or persisted, with attempts and `dead_lettered_at`.                                                                  |
+| `sqsp_matches`               | Every applied match decision and the idempotency record of the ledger commands the sync issues.                                                                  |
+| `sqsp_manual_queue`          | Arrivals the matcher would not decide alone (no candidate, ambiguous, below the confidence threshold, possible double count).                                    |
+| `sqsp_alerts`                | Sync and matching alerts (variance, external refund, empty product map, dead letters, members without a customer); `dedupe_key` makes raising idempotent.        |
 
 ## Standing appointments and the waitlist (migration `20261006300200_standing_waitlist.sql`, ADR 0086)
 
 Behind the setting `features.standing_waitlist` (default off) and the VIP toggles; no UI yet.
 
-| Table                  | Key columns and rules                                                                                                                                                                                              |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Table                  | Key columns and rules                                                                                                                                                                                                                                |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `standing_series`      | A VIP client's repeating slot: `cadence weekly\|biweekly\|triweekly\|monthly`, `weekday` (of `start_date`), `time_min`, `start_date`/`end_date`, `status active\|paused\|ended`, `generated_through` (the materializer's watermark), `auto_confirm`. |
-| `standing_occurrences` | One row per date the materializer decided, unique `(series_id, occurrence_date)`: `booked` with its `appointment_id`, or `skipped` with the `reason` (an error code such as `SLOT_CLOSED`).                          |
-| `waitlist_entries`     | A client waiting for a date and a start-time window (`window_start_min`..`window_end_min`) for a package; `is_vip` at joining; `status waiting\|offered\|booked\|expired\|canceled`; `appointment_id` once booked.   |
-| `waitlist_offers`      | A freed slot offered to an entry: `slot_start`/`slot_end`, `phase vip\|everyone`, `status open\|accepted\|expired\|canceled`, `expires_at`; unique `(entry_id, slot_start)`.                                      |
+| `standing_occurrences` | One row per date the materializer decided, unique `(series_id, occurrence_date)`: `booked` with its `appointment_id`, or `skipped` with the `reason` (an error code such as `SLOT_CLOSED`).                                                          |
+| `waitlist_entries`     | A client waiting for a date and a start-time window (`window_start_min`..`window_end_min`) for a package; `is_vip` at joining; `status waiting\|offered\|booked\|expired\|canceled`; `appointment_id` once booked.                                   |
+| `waitlist_offers`      | A freed slot offered to an entry: `slot_start`/`slot_end`, `phase vip\|everyone`, `status open\|accepted\|expired\|canceled`, `expires_at`; unique `(entry_id, slot_start)`.                                                                         |
+
+## Background jobs (migration `20261006310000_jobs_runtime.sql`, ADR 0090 to 0093)
+
+Written by the worker only; the request path never touches them.
+
+| Table               | Key columns and rules                                                                                                                                                                                                                                                                  |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `job_runs`          | One row per job name, updated at the start and the finish of every run: `runs`, `failures`, `consecutive_failures`, `last_outcome running\|completed\|failed`, last start/finish/success/error times, masked `last_error`, `last_duration_ms`. Feeds `GET /system/jobs` and `/readyz`. |
+| `vip_hold_releases` | Primary key `(hold_id, slot_start)`: a weekly VIP hold whose release for one concrete slot has been announced, so a rerun or a second worker announces it once; purged a week after the slot.                                                                                          |
+| `credit_expiries`   | Primary key `lot_event_id` (the store-credit lot in `ledger_events`): the unspent remainder that expired and was announced once to staff (`expired_cents`, `expires_at`). The ledger itself is untouched.                                                                              |
 
 ## Foreign keys
 
 `domain_links` added the keys from the domain tables to `employees` and `users`. Two columns stay plain `uuid` on purpose, and a
 test (`test/domain-schema/migration.test.ts`) keeps the domain tables from referencing the later verticals:
 
-| Column                               | Would reference       | Why it stays a plain uuid                                                                         |
-| ------------------------------------ | --------------------- | ------------------------------------------------------------------------------------------------- |
-| `appointments.membership_id`         | `memberships(id)`     | the domain tables must not depend on Memberships (the link is read through `MembershipPort`)       |
-| `appointments.standing_series_id`    | `standing_series(id)` | same, for the standing-appointment feature (off by default)                                         |
+| Column                               | Would reference       | Why it stays a plain uuid                                                                                        |
+| ------------------------------------ | --------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `appointments.membership_id`         | `memberships(id)`     | the domain tables must not depend on Memberships (the link is read through `MembershipPort`)                     |
+| `appointments.standing_series_id`    | `standing_series(id)` | same, for the standing-appointment feature (off by default)                                                      |
 | `emergency_notifications.message_id` | `messages(id)`        | the payments dev outbox hands out ids that are not messages (ADR 0060); `payment_links.sent_message_id` likewise |
 
 (`emergency_closures.started_by_name` and `reopened_by_name` keep the display name so history survives an employee being
