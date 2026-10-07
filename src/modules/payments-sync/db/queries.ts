@@ -114,7 +114,7 @@ export const sqspExternalAlerts: ExternalAlertSource = {
           key: 'unmatched_orders',
           kind: 'unmatched_order',
           tone: 'violet',
-          title: `${n} Squarespace order${n === 1 ? '' : 's'} need matching`,
+          title: `${n} Squarespace ${n === 1 ? 'order needs' : 'orders need'} matching`,
           desc: 'Match each to an invoice or ignore it in Payments',
           actionLabel: 'Review',
           appointmentId: null,
