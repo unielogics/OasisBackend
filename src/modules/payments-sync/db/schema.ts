@@ -1,5 +1,5 @@
 // Kysely types for the Squarespace sync tables (migration 20261006210100_sqsp_sync.sql), registered by module augmentation.
-import type { Generated } from 'kysely'
+import type { ColumnType, Generated } from 'kysely'
 import type { JsonColumn, JsonValue } from '../../../platform/schema.js'
 
 export type SqspMatchState = 'unmatched' | 'auto' | 'manual' | 'ignored' | 'membership'
@@ -62,7 +62,7 @@ export interface SqspOrdersTable {
   tax_cents: number | null
   currency: string
   test_mode: Generated<boolean>
-  line_items: JsonColumn<JsonValue[]>
+  line_items: ColumnType<JsonValue[], string | undefined, string>
   order_json: JsonColumn<Record<string, JsonValue>>
   raw: JsonColumn | null
   payload_hash: string
@@ -199,7 +199,7 @@ export interface SqspManualQueueTable {
   sqsp_order_id: string
   sqsp_txn_id: string | null
   reason: string
-  candidates: JsonColumn<JsonValue[]>
+  candidates: ColumnType<JsonValue[], string | undefined, string>
   arrival: JsonColumn<Record<string, JsonValue>>
   variance: JsonColumn | null
   state: Generated<'open' | 'resolved' | 'ignored'>

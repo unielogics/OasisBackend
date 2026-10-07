@@ -26,7 +26,7 @@ describe('secrets (AES-256-GCM with SECRETS_KEY)', () => {
     const old = createSecretBox([K1])
     const stored = old.encrypt('value')
     const [id, iv, tag, body] = stored.split(':')
-    const flipped = [id, iv, tag, Buffer.from(body!, 'base64url').map((x, i) => (i === 0 ? x ^ 1 : x)).toString('base64url')].join(':')
+    const flipped = [id, iv, tag, Buffer.from(Buffer.from(body!, 'base64url').map((x, i) => (i === 0 ? x ^ 1 : x))).toString('base64url')].join(':')
     expect(() => old.decrypt(flipped)).toThrow()
     expect(() => old.decrypt(`${id}:${iv}`)).toThrow(/malformed/)
     expect(() => createSecretBox([K2]).decrypt(stored)).toThrow(/no SECRETS_KEY with id/)

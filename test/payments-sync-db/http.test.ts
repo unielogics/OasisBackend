@@ -197,6 +197,26 @@ describe('Squarespace routes', () => {
     expect(audits).toHaveLength(1)
   })
 
+  it('sync-now queues the job when there is a queue and asks for a resume or rematch on request', async () => {
+    const calls: { name: string; data: unknown; opts: unknown }[] = []
+    const jobs = {
+      start: async () => undefined,
+      stop: async () => undefined,
+      health: async () => ({ ok: true, detail: '' }),
+      enqueue: async (name: string, data?: object, opts?: object) => {
+        calls.push({ name, data, opts })
+        return 'job-7'
+      },
+    }
+    // the harness app is the real one: give it a queue for this call
+    ;(h.t.app as unknown as { jobs: unknown }).jobs = jobs
+    const res = await send(acct, 'POST', '/integrations/squarespace/sync-now', { resume: true, rematch: true }, '')
+    ;(h.t.app as unknown as { jobs: unknown }).jobs = null
+    expect(res.statusCode, res.body).toBe(202)
+    expect(res.json()).toEqual({ mode: 'queued', queued: true, result: null })
+    expect(calls).toEqual([{ name: 'sqsp.sync', data: { resume: true, rematch: true }, opts: { singletonKey: 'sync-now:rm' } }])
+  })
+
   async function queuedOrder(over: { email?: string; amount?: number } = {}) {
     await ensurePlans(h.t.db, { locationId: h.t.location.id, clock: h.clock, newId: h.t.app.newId })
     await transaction(h.t.db, (tx) =>

@@ -9,7 +9,7 @@ import { transaction } from '../../src/platform/db.js'
 import { SquarespaceClient } from '../../src/integrations/squarespace/client.js'
 import { configureSqspRuntime, createSqspRuntime } from '../../src/modules/payments-sync/db/runtime-config.js'
 import { simFetch } from '../integrations/squarespace/helpers.js'
-import { D, SECRETS_KEY, SIM_KEY, useRig } from './harness.js'
+import { D, H, SECRETS_KEY, SIM_KEY, useRig } from './harness.js'
 
 describe('polling: watermark, overlap, chunks, failures', () => {
   const rig = useRig({ pageSize: 50 })
@@ -135,6 +135,33 @@ describe('polling: watermark, overlap, chunks, failures', () => {
     expect(state.watermark!.getTime()).toBe(r.clock.now().getTime())
     // the good order was stored all along
     expect((await r.db.selectFrom('sqsp_orders').select('id').execute()).length).toBe(1)
+  })
+
+  it('the nightly reconcile re-reads 45 days, picks up what the poll missed (a late commit), matches it, and is quiet the second time', async () => {
+    const r = rig()
+    await mapDetailSku()
+    await r.rt.syncCycle(r.locationId)
+    r.advance(2 * H)
+    // committed late with an old modification time: outside every poll window after the watermark
+    const late = r.store.createOrder({ email: 'late@example.com', name: 'Late', lineItems: [line], taxCents: 1323, createdOn: new Date(r.clock.now().getTime() - 3 * D) })
+    r.advance(120_000)
+    const poll = await r.rt.syncCycle(r.locationId)
+    expect(poll.orders?.inserted).toBe(0)
+    expect(await r.db.selectFrom('sqsp_orders').select('id').execute()).toHaveLength(0)
+    const logger = { info: () => undefined, warn: () => undefined, error: () => undefined, debug: () => undefined, child: () => logger } as never
+    const { sqspReconcileJob } = await import('../../src/modules/payments-sync/jobs/index.js')
+    await sqspReconcileJob.handler({ db: r.db, clock: r.clock, logger }, {} as never, { id: 'j' })
+    const row = await r.db.selectFrom('sqsp_orders').select(['sqsp_order_id', 'match_state']).executeTakeFirstOrThrow()
+    expect(row).toEqual({ sqsp_order_id: late.orderId, match_state: 'manual' })
+    const state = await r.db.selectFrom('sqsp_sync_state').select(['status', 'watermark']).where('resource', '=', 'reconcile').executeTakeFirstOrThrow()
+    expect(state.status).toBe('ok')
+    // the reconcile does not touch the poll watermarks
+    const orders = await r.db.selectFrom('sqsp_sync_state').select('watermark').where('resource', '=', 'orders').executeTakeFirstOrThrow()
+    expect(orders.watermark!.getTime()).toBe(r.clock.now().getTime())
+    r.advance(H)
+    const writes = await r.db.selectFrom('sqsp_orders').select('synced_at').executeTakeFirstOrThrow()
+    await sqspReconcileJob.handler({ db: r.db, clock: r.clock, logger }, {} as never, { id: 'j2' })
+    expect((await r.db.selectFrom('sqsp_orders').select('synced_at').executeTakeFirstOrThrow()).synced_at.getTime()).toBe(writes.synced_at.getTime())
   })
 
   it('a rejected key is recorded on the connection and raises sync_failing on the third run', async () => {
