@@ -7,7 +7,8 @@ export const SIM_DEVICE_KEY = 'sim-device-design'
 export const SIM_WEBHOOK_SECRET = 'sim-signing-key-design'
 
 export const messagingProfile: SeedProfile = {
-  description: 'One simulator SMS device (in-process SMS Gate stand-in); no credentials, nothing leaves the process',
+  description:
+    'One simulator SMS device (in-process SMS Gate stand-in); no credentials, nothing leaves the process',
   async run({ tx, newId, location, clock, log }: SeedContext): Promise<void> {
     // SECRETS_KEY is read here because seeds run from the CLI and from tests, outside the app's Env object.
     const box = createSecretBox(process.env.SECRETS_KEY, process.env.NODE_ENV ?? 'development')

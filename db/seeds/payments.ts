@@ -511,7 +511,10 @@ export function eventInstant(
     // An explicit date in the fixtures ("Jun 11") is a date of the design's own day (2026-06-13): keep its distance
     // from "today", so the history stays coherent whatever clock the seed runs with (credit lots expire relative to it).
     const designDay = DateTime.fromISO(DESIGN_DAY, { zone: 'utc' })
-    const d = DateTime.fromFormat(`${dayWord} ${designDay.year}`, 'LLL d yyyy', { locale: 'en-US', zone: 'utc' })
+    const d = DateTime.fromFormat(`${dayWord} ${designDay.year}`, 'LLL d yyyy', {
+      locale: 'en-US',
+      zone: 'utc',
+    })
     if (!d.isValid) throw new Error(`Bad design date "${dayWord}"`)
     day = addDays(today, Math.round(d.diff(designDay, 'days').days))
   }

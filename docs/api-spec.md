@@ -926,3 +926,68 @@ Jobs `sqsp.sync`, `sqsp.contacts`, `sqsp.reconcile`, `sqsp.webhook.process`, `me
 `SQSP_*` variables in `src/config/env.ts` (all optional) and `SECRETS_KEY` (required to store the API key). Seed profile
 `memberships` (depends on `design`): plans, credit rules and the design's members (manual, no Squarespace ids). Run the simulator
 with `pnpm sim:squarespace`; the tests are `test/payments-sync-db/*` and `test/memberships/*`.
+
+## 24. Gap closers: deposit policy, arrival ping, membership credits, standing appointments and the waitlist
+
+Decisions: ADR 0080 (one emergency event per transition), 0081 (role limit units), 0082 (cancel and no-show execute the deposit policy),
+0083 (arrival ping), 0084 (memberships), 0085 (data-model document), 0086 (standing appointments and waitlist). Tests: `test/scheduling-gaps/*`,
+`test/memberships-gaps/*`, `test/standing/*`.
+
+### 24.1 Cancel and no-show settle the money held (ADR 0082)
+
+| Verb path | Permission | Notes |
+|---|---|---|
+| `GET /settings/cancellation-policy` | any signed-in user | `{policy:{freeCancelHours, lateRetainBp, noShowRetainBp, refundTo: original\|credit}, version}`. Defaults: 24, 10000, 10000, original. |
+| `PUT /settings/cancellation-policy` | `set.hours` | the same fields plus `version`; `412` when stale; `422` outside 0..720 hours or 0..10000 bp. Audited. |
+| `POST /appointments/:id/cancel` | `sched.cancel`, **Idempotency-Key** | `{reason, notify?, deposit?: policy\|keep\|refund_card\|refund_credit}` (default `policy`). Response adds `settlement {policy, heldCents, refundedCents, retainedCents, refunds[{amountCents, dest, state, awaitingProcessor}], rule}`; `depositPolicy` echoes the choice. `refund_*` needs `pay.refund` (403 `required:["pay.refund"]`) and the caller's own limit (over it the refund is `pending`). |
+| `POST /appointments/:id/no-show` | `sched.cancel`, **Idempotency-Key** | optional body `{deposit?}`; settles by `noShowRetainBp`; sends no text. |
+| `POST /appointments/:id/reopen` | `sched.cancel` | now revives the invoice; `409 REOPEN_REFUNDED` when a refund was issued ("The deposit was refunded. Book a new appointment instead"). |
+
+Policy refunds are `ledger_events` with `source = system`, reason "Cancellation policy" / "No-show policy", `actor_roles = "Cancellation policy"`,
+exempt from the actor's refund limit; a card refund is `processor_state = awaiting_processor`. The invoice ends `canceled_refunded`, `canceled_kept`
+or `canceled`. The cancellation text (with `notify`) states what happens to the deposit.
+
+### 24.2 Arrival ping (ADR 0083)
+
+| Verb path | Permission | Notes |
+|---|---|---|
+| `POST /appointments/:id/arrival-link` | `sched.edit` | `201 {token, path:"/a/<token>", url, expiresAt}`; rotates any earlier link; `409` for a finished job. Only the SHA-256 of the token is stored. |
+| `POST /arrivals/ping` | public, authenticated by the token | `{token, lat, lng, accuracyM?, etaMinutes?, declared?, pingId?}` -> `{state: outside\|inconclusive\|checked_in\|confirm_needed\|already_arrived\|disabled, distanceM, radiusM, etaMinutes, message}`. `401 ARRIVAL_LINK_INVALID`, `410 ARRIVAL_LINK_EXPIRED`, `409 ARRIVAL_NOT_CONFIGURED`, `429 ARRIVAL_PING_TOO_FAST` (Retry-After; spacing 5 s per appointment) or `RATE_LIMITED` (60/min per address). |
+| `GET /settings/location`, `PUT /settings/location` | signed-in / `set.hours` | `{lat, lng}`, the centre of the geofence. |
+| `POST /dev/appointments/:id/simulate-arrival` | `jobs.status`, only with `ALLOW_DEV_ENDPOINTS` | `{mode?: arrive\|eta, etaMinutes?}`: behaves as a ping from the door or from N minutes away. |
+
+SSE on `ops`: `arrival.eta {appointmentId, etaMinutes, distanceM, crossed}` and `arrival.checked_in {appointmentId, auto, distanceM}`; one crew bell
+notification (`kind arrival`) when the ETA first reaches the prep time and one at check-in (both only with "Alert the crew"). A browser page on another
+origin must be in `ALLOWED_ORIGINS`.
+
+### 24.3 Membership credits (ADR 0084)
+
+| Verb path | Permission | Notes |
+|---|---|---|
+| `GET /membership-plans` | `cli.view` | plans with their credit rules `{id, label, includeTags, excludeTags, perCycle, autoApply}`. |
+| `PATCH /membership-plans/rules/:id` | `cli.member` | `{autoApply}`; audited (`membership.rule.update`). |
+
+Auto-apply: a rule with `autoApply`, or a member with `autoApply` (`PATCH /memberships/:id`), redeems one credit when a covered visit is **completed** (system adjust,
+one per appointment, no payments permission needed). `GET /appointments/:id` gains `membershipUpgrade {candidate, visits60, copy} | null` (non-members only; real
+completed visits in 60 days, 3 or more = candidate). An emergency closure with "Protect member credits" marks held credits (`protect`) and a later cancel or
+no-show of such a visit restores the credit (`restore`); a reschedule keeps it. `GET /customers/:id/membership` credit rules carry `autoApply`.
+
+### 24.4 Emergency events (ADR 0080)
+
+One ops event per transition: `emergency.started` on close, `emergency.reopened {id, auto}` on reopen. `emergency.ended` no longer exists.
+
+### 24.5 Standing appointments and the waitlist (ADR 0086), behind `features.standing_waitlist` (default off)
+
+| Verb path | Permission | Notes |
+|---|---|---|
+| `GET /settings/features`, `PUT /settings/features` | signed-in / `set.billing` | `{standingWaitlist, version}`. While off everything below answers `409 FEATURE_DISABLED`. |
+| `POST /standing-series` | `sched.edit`, **Idempotency-Key** | `{customerId, vehicleId?, serviceId, cadence: weekly\|biweekly\|triweekly\|monthly, startDate, endDate?, time:"HH:MM", autoConfirm?, notes?}` -> `201 {series, materialized{booked, skipped, through}}`. VIP clients only (`422 STANDING_VIP_ONLY`), cadence must be offered (`422 STANDING_CADENCE_NOT_OFFERED`), VIP toggle on (`409 STANDING_OFF`). |
+| `GET /standing-series[?customerId&includeEnded]`, `GET /standing-series/:id` | `sched.view` | the series; the detail adds every decided date (`booked` with the appointment, or `skipped` with the reason). |
+| `PATCH /standing-series/:id` | `sched.edit`, **Idempotency-Key** | `{status?: active\|paused\|ended, endDate?, autoConfirm?, notes?, cancelUpcoming?, version?}`. Ended is final. |
+| `POST /standing-series/:id/materialize`, `POST /standing-series/materialize` | `sched.edit` | run the materializer now (the daily job does it for all). |
+| `POST /waitlist` | `sched.edit` | `{customerId, vehicleId?, serviceId, desiredDate, windowStart:"HH:MM", windowEnd:"HH:MM", notes?}` -> `201` the entry (with `isVip`). |
+| `GET /waitlist[?status&date]` | `sched.view` | entries with their `openOffer`. |
+| `POST /waitlist/:id/cancel` | `sched.edit` | withdraws the entry and its offer. |
+| `POST /waitlist/:id/accept` | `sched.edit`, **Idempotency-Key** | books the offered slot: `201 {entry, booking}`; `409 WAITLIST_NO_OFFER` or `SLOT_UNAVAILABLE`. |
+
+Jobs: `standing.materialize` (daily 04:00), `standing.autoconfirm` (hourly), `waitlist.offer_expiry` (every minute), all no-ops while the switch is off.
