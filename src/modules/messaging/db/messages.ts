@@ -243,8 +243,20 @@ export async function syncMessageFromOutbox(
     .returning(['location_id', 'customer_id', 'appointment_id', 'thread_id', 'error'])
     .executeTakeFirstOrThrow()
 
-  if (FINAL.has(row.state) && SENSITIVE_CLASSES.has(row.klass))
+  if (FINAL.has(row.state) && SENSITIVE_CLASSES.has(row.klass)) {
+    // An invite or reset the device or carrier refused or that expired unsent reaches the employee by e-mail instead, from the live
+    // link, before the link is wiped. (A text that merely waited is handled earlier, by MessagingRuntime.emailFallback.)
+    if (row.state === 'failed' || row.state === 'expired')
+      await sql`insert into outbox_emails (id, location_id, employee_id, to_email, template, vars, purpose, dedupe_key, created_at)
+        select gen_random_uuid(), m.location_id, m.employee_id, e.email, o.klass,
+          case o.klass when 'staff_invite' then jsonb_build_object('inviteeName', e.first, 'inviteUrl', substring(o.body from 'https?://[^[:space:]]+'))
+            else jsonb_build_object('recipientName', e.first, 'resetUrl', substring(o.body from 'https?://[^[:space:]]+'), 'expiresMinutes', 30) end,
+          'sms-fallback', 'sms-fallback:' || o.id::text, app_now()
+        from sms_outbox o join messages m on m.id = o.message_id join employees e on e.id = m.employee_id
+        where o.id = ${row.id} and e.email is not null and o.fallback_emailed_at is null and o.body ~ 'https?://'
+        on conflict (dedupe_key) do nothing`.execute(tx)
     await tx.updateTable('sms_outbox').set({ body: REDACTED_BODY }).where('id', '=', row.id).execute()
+  }
 
   if (prev.status === status) return
 
