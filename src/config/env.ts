@@ -153,6 +153,12 @@ export const envSchema = z
       'must be an ISO-8601 instant',
     )
     need(e.NODE_ENV === 'production' && e.DEV_AUTH_BYPASS, 'DEV_AUTH_BYPASS', 'must not be set in production')
+    // NODE_ENV defaults to development, so a unit that forgot it must still not serve "everyone is a Super Admin" to the network.
+    need(
+      e.DEV_AUTH_BYPASS && !['127.0.0.1', '::1', 'localhost'].includes(e.HOST),
+      'DEV_AUTH_BYPASS',
+      'only with HOST set to a loopback address (127.0.0.1, ::1 or localhost)',
+    )
     need(e.NODE_ENV === 'production' && !e.SESSION_SECRET, 'SESSION_SECRET', 'required in production')
     // The session cookie, the __Host- prefix and HSTS all follow COOKIE_SECURE; production is HTTPS only.
     need(e.NODE_ENV === 'production' && !e.COOKIE_SECURE, 'COOKIE_SECURE', 'must be true in production')
