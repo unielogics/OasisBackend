@@ -90,15 +90,15 @@ export class SqspLedgerOps {
       status: 'pending' | 'done' | 'denied'
       dest: string | null
     }>`
-      select e.id, e.invoice_id, e.customer_id, e.type, e.amount_cents, e.occurred_at, e.processor_state, e.processor_ref,
-             e.sqsp_order_id, e.source, e.status, e.dest
+      select e.id, e.invoice_id, e.customer_id, e.type, e.amount_cents, coalesce(e.resolved_at, e.occurred_at) as occurred_at,
+             e.processor_state, e.processor_ref, e.sqsp_order_id, e.source, e.status, e.dest
       from ledger_events e
       where e.location_id = ${loc} and e.type in ('pay', 'refund') and e.status <> 'denied'
         and not exists (select 1 from ledger_events v where v.voids_event_id = e.id)
         and (e.sqsp_order_id = ${q.orderId}
           or e.processor_ref = any(${q.transactionIds}::text[])
           or ((e.processor_state = 'awaiting_processor' or (e.type = 'refund' and e.status = 'pending' and e.dest = 'card'))
-              and e.occurred_at >= ${lo} and e.occurred_at <= ${hi}))
+              and coalesce(e.resolved_at, e.occurred_at) >= ${lo} and coalesce(e.resolved_at, e.occurred_at) <= ${hi}))
       order by e.occurred_at, e.seq`.execute(db)
 
     const linkRows = await sql<{
@@ -139,6 +139,8 @@ export class SqspLedgerOps {
       customer: identities.get(r.customer_id) ?? { customerId: r.customer_id, emails: [], phones: [] },
       amountCents: r.amount_cents,
       occurredAt: r.occurred_at,
+      // occurredAt is when the event became actionable: a refund approved days after it was requested waits on Squarespace
+      // from the approval (resolved_at), not from the request, or its feed refund would fall outside the pairing window.
       // a card refund still waiting for an Oasis approver is shown to the matcher as waiting on the processor, so a feed
       // refund for it goes to a person (refund_pending_approval) instead of being ingested as an external refund
       processorState:
