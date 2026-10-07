@@ -28,11 +28,9 @@ export interface Schema {
   tables: Table[]
   views: string[]
   functions: { name: string; signature: string }[]
-  extensions: string[]
 }
 
 const cols = (s: string): string[] => s.split(',').map((c) => c.trim().replace(/^"|"$/g, ''))
-const strip = (s: string): string => s.replace(/^public\./, '')
 
 function parseColumn(line: string): Column | null {
   const m = /^ {4}("?[a-z_][a-z0-9_]*"?) (.+?),?$/.exec(line)
@@ -130,15 +128,10 @@ export function parseSchema(sqlText: string): Schema {
         ]
       : []
   })
-  const extensions = lines.flatMap((l) => {
-    const m = /^CREATE EXTENSION IF NOT EXISTS (\w+)/.exec(l)
-    return m ? [m[1]!] : []
-  })
   return {
     tables: [...tables.values()].sort((x, y) => x.name.localeCompare(y.name)),
     views,
     functions: functions.sort((x, y) => x.name.localeCompare(y.name)),
-    extensions,
   }
 }
 
