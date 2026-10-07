@@ -281,7 +281,11 @@ function envelope<S extends z.ZodTypeAny>(schema: S, body: unknown, what: string
 }
 
 function nextCursor(p: WirePagination | null | undefined): string | undefined {
-  return p?.hasNextPage && p.nextPageCursor ? p.nextPageCursor : undefined
+  if (!p?.hasNextPage) return undefined
+  // "more pages" without a cursor is a broken response, not the end of the list: ending here would let the sync advance its
+  // watermark past rows it never read.
+  if (!p.nextPageCursor) throw new SquarespaceMappingError('list response says hasNextPage but carries no nextPageCursor')
+  return p.nextPageCursor
 }
 
 function errorMessage(e: unknown): string {
