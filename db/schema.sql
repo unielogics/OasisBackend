@@ -1913,6 +1913,52 @@ CREATE TABLE public.sqsp_webhook_subscriptions (
 );
 
 --
+-- Name: standing_occurrences; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.standing_occurrences (
+    id uuid NOT NULL,
+    series_id uuid NOT NULL,
+    occurrence_date date NOT NULL,
+    status text NOT NULL,
+    appointment_id uuid,
+    reason text,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT standing_occurrences_check CHECK (((status = 'booked'::text) = (appointment_id IS NOT NULL))),
+    CONSTRAINT standing_occurrences_status_check CHECK ((status = ANY (ARRAY['booked'::text, 'skipped'::text])))
+);
+
+--
+-- Name: standing_series; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.standing_series (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    vehicle_id uuid,
+    service_id uuid NOT NULL,
+    cadence text NOT NULL,
+    weekday smallint NOT NULL,
+    time_min smallint NOT NULL,
+    start_date date NOT NULL,
+    end_date date,
+    status text DEFAULT 'active'::text NOT NULL,
+    generated_through date,
+    auto_confirm boolean DEFAULT true NOT NULL,
+    notes text,
+    created_by uuid,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT standing_series_cadence_check CHECK ((cadence = ANY (ARRAY['weekly'::text, 'biweekly'::text, 'triweekly'::text, 'monthly'::text]))),
+    CONSTRAINT standing_series_check CHECK (((end_date IS NULL) OR (end_date >= start_date))),
+    CONSTRAINT standing_series_status_check CHECK ((status = ANY (ARRAY['active'::text, 'paused'::text, 'ended'::text]))),
+    CONSTRAINT standing_series_time_min_check CHECK (((time_min >= 0) AND (time_min <= 1439))),
+    CONSTRAINT standing_series_weekday_check CHECK (((weekday >= 0) AND (weekday <= 6)))
+);
+
+--
 -- Name: user_preferences; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2006,6 +2052,56 @@ CREATE TABLE public.vip_settings (
     CONSTRAINT vip_settings_same_day_per_month_check CHECK (((same_day_per_month >= 0) AND (same_day_per_month <= 8))),
     CONSTRAINT vip_settings_window_std_days_check CHECK (((window_std_days >= 7) AND (window_std_days <= 60))),
     CONSTRAINT vip_settings_window_vip_days_check CHECK (((window_vip_days >= 7) AND (window_vip_days <= 90)))
+);
+
+--
+-- Name: waitlist_entries; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.waitlist_entries (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    vehicle_id uuid,
+    service_id uuid NOT NULL,
+    desired_date date NOT NULL,
+    window_start_min smallint NOT NULL,
+    window_end_min smallint NOT NULL,
+    is_vip boolean DEFAULT false NOT NULL,
+    status text DEFAULT 'waiting'::text NOT NULL,
+    appointment_id uuid,
+    notes text,
+    created_by uuid,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT waitlist_entries_check CHECK ((window_start_min < window_end_min)),
+    CONSTRAINT waitlist_entries_check1 CHECK (((status = 'booked'::text) = (appointment_id IS NOT NULL))),
+    CONSTRAINT waitlist_entries_status_check CHECK ((status = ANY (ARRAY['waiting'::text, 'offered'::text, 'booked'::text, 'expired'::text, 'canceled'::text]))),
+    CONSTRAINT waitlist_entries_window_end_min_check CHECK (((window_end_min >= 1) AND (window_end_min <= 1440))),
+    CONSTRAINT waitlist_entries_window_start_min_check CHECK (((window_start_min >= 0) AND (window_start_min <= 1439)))
+);
+
+--
+-- Name: waitlist_offers; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.waitlist_offers (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    entry_id uuid NOT NULL,
+    slot_start timestamp with time zone NOT NULL,
+    slot_end timestamp with time zone NOT NULL,
+    phase text NOT NULL,
+    status text DEFAULT 'open'::text NOT NULL,
+    offered_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    resolved_at timestamp with time zone,
+    message_id uuid,
+    CONSTRAINT waitlist_offers_check CHECK ((slot_end > slot_start)),
+    CONSTRAINT waitlist_offers_check1 CHECK (((status = 'open'::text) = (resolved_at IS NULL))),
+    CONSTRAINT waitlist_offers_phase_check CHECK ((phase = ANY (ARRAY['vip'::text, 'everyone'::text]))),
+    CONSTRAINT waitlist_offers_status_check CHECK ((status = ANY (ARRAY['open'::text, 'accepted'::text, 'expired'::text, 'canceled'::text])))
 );
 
 --
@@ -2768,6 +2864,27 @@ ALTER TABLE ONLY public.sqsp_webhook_subscriptions
     ADD CONSTRAINT sqsp_webhook_subscriptions_pkey PRIMARY KEY (id);
 
 --
+-- Name: standing_occurrences standing_occurrences_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.standing_occurrences
+    ADD CONSTRAINT standing_occurrences_pkey PRIMARY KEY (id);
+
+--
+-- Name: standing_occurrences standing_occurrences_series_id_occurrence_date_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.standing_occurrences
+    ADD CONSTRAINT standing_occurrences_series_id_occurrence_date_key UNIQUE (series_id, occurrence_date);
+
+--
+-- Name: standing_series standing_series_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.standing_series
+    ADD CONSTRAINT standing_series_pkey PRIMARY KEY (id);
+
+--
 -- Name: closures uq_closures_federal; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2836,6 +2953,27 @@ ALTER TABLE ONLY public.vip_holds
 
 ALTER TABLE ONLY public.vip_settings
     ADD CONSTRAINT vip_settings_pkey PRIMARY KEY (location_id);
+
+--
+-- Name: waitlist_entries waitlist_entries_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.waitlist_entries
+    ADD CONSTRAINT waitlist_entries_pkey PRIMARY KEY (id);
+
+--
+-- Name: waitlist_offers waitlist_offers_entry_id_slot_start_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.waitlist_offers
+    ADD CONSTRAINT waitlist_offers_entry_id_slot_start_key UNIQUE (entry_id, slot_start);
+
+--
+-- Name: waitlist_offers waitlist_offers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.waitlist_offers
+    ADD CONSTRAINT waitlist_offers_pkey PRIMARY KEY (id);
 
 --
 -- Name: webhook_log webhook_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3404,6 +3542,18 @@ CREATE INDEX sqsp_transactions_order_idx ON public.sqsp_transactions USING btree
 CREATE INDEX sqsp_transactions_state_idx ON public.sqsp_transactions USING btree (location_id, state, created_on) WHERE (state = ANY (ARRAY['new'::text, 'deferred'::text, 'manual'::text]));
 
 --
+-- Name: standing_occurrences_appointment_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX standing_occurrences_appointment_idx ON public.standing_occurrences USING btree (appointment_id) WHERE (appointment_id IS NOT NULL);
+
+--
+-- Name: standing_series_live_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX standing_series_live_idx ON public.standing_series USING btree (location_id, customer_id) WHERE (status <> 'ended'::text);
+
+--
 -- Name: uq_appointment_addons_live; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3504,6 +3654,24 @@ CREATE INDEX vehicles_plate_idx ON public.vehicles USING btree (upper(plate)) WH
 --
 
 CREATE INDEX vip_clients_customer_idx ON public.vip_clients USING btree (customer_id);
+
+--
+-- Name: waitlist_entries_match_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX waitlist_entries_match_idx ON public.waitlist_entries USING btree (location_id, desired_date) WHERE (status = ANY (ARRAY['waiting'::text, 'offered'::text]));
+
+--
+-- Name: waitlist_offers_open_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX waitlist_offers_open_idx ON public.waitlist_offers USING btree (expires_at) WHERE (status = 'open'::text);
+
+--
+-- Name: waitlist_offers_slot_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX waitlist_offers_slot_idx ON public.waitlist_offers USING btree (location_id, slot_start);
 
 --
 -- Name: webhook_log_received_idx; Type: INDEX; Schema: public; Owner: -
@@ -4593,6 +4761,55 @@ ALTER TABLE ONLY public.sqsp_webhook_subscriptions
     ADD CONSTRAINT sqsp_webhook_subscriptions_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
+-- Name: standing_occurrences standing_occurrences_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.standing_occurrences
+    ADD CONSTRAINT standing_occurrences_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id);
+
+--
+-- Name: standing_occurrences standing_occurrences_series_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.standing_occurrences
+    ADD CONSTRAINT standing_occurrences_series_id_fkey FOREIGN KEY (series_id) REFERENCES public.standing_series(id) ON DELETE CASCADE;
+
+--
+-- Name: standing_series standing_series_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.standing_series
+    ADD CONSTRAINT standing_series_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: standing_series standing_series_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.standing_series
+    ADD CONSTRAINT standing_series_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: standing_series standing_series_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.standing_series
+    ADD CONSTRAINT standing_series_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: standing_series standing_series_service_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.standing_series
+    ADD CONSTRAINT standing_series_service_id_fkey FOREIGN KEY (service_id) REFERENCES public.services(id);
+
+--
+-- Name: standing_series standing_series_vehicle_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.standing_series
+    ADD CONSTRAINT standing_series_vehicle_id_fkey FOREIGN KEY (vehicle_id) REFERENCES public.vehicles(id);
+
+--
 -- Name: user_preferences user_preferences_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4654,6 +4871,62 @@ ALTER TABLE ONLY public.vip_settings
 
 ALTER TABLE ONLY public.vip_settings
     ADD CONSTRAINT vip_settings_updated_by_fk FOREIGN KEY (updated_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: waitlist_entries waitlist_entries_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.waitlist_entries
+    ADD CONSTRAINT waitlist_entries_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id);
+
+--
+-- Name: waitlist_entries waitlist_entries_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.waitlist_entries
+    ADD CONSTRAINT waitlist_entries_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: waitlist_entries waitlist_entries_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.waitlist_entries
+    ADD CONSTRAINT waitlist_entries_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: waitlist_entries waitlist_entries_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.waitlist_entries
+    ADD CONSTRAINT waitlist_entries_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: waitlist_entries waitlist_entries_service_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.waitlist_entries
+    ADD CONSTRAINT waitlist_entries_service_id_fkey FOREIGN KEY (service_id) REFERENCES public.services(id);
+
+--
+-- Name: waitlist_entries waitlist_entries_vehicle_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.waitlist_entries
+    ADD CONSTRAINT waitlist_entries_vehicle_id_fkey FOREIGN KEY (vehicle_id) REFERENCES public.vehicles(id);
+
+--
+-- Name: waitlist_offers waitlist_offers_entry_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.waitlist_offers
+    ADD CONSTRAINT waitlist_offers_entry_id_fkey FOREIGN KEY (entry_id) REFERENCES public.waitlist_entries(id) ON DELETE CASCADE;
+
+--
+-- Name: waitlist_offers waitlist_offers_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.waitlist_offers
+    ADD CONSTRAINT waitlist_offers_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 --

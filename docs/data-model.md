@@ -21,6 +21,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261006210100_sqsp_sync.sql`             | the Squarespace read side: connection, sync state, orders, transactions, contacts, customer links, product map, dead letters, matches, manual queue   |
 | `20261006300000_arrival_ping.sql`          | arrival pings and the expiry of the customer check-in link (ADR 0083)                                                                                 |
 | `20261006300100_membership_gaps.sql`       | `plan_credit_rules.auto_apply` (ADR 0084)                                                                                                             |
+| `20261006300200_standing_waitlist.sql`     | standing (recurring) series and their occurrences, the waitlist and its offers (ADR 0086; behind a feature setting, off by default)                  |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -186,6 +187,17 @@ Squarespace is read-only for payments; these tables mirror what it reports and r
 | `sqsp_manual_queue`           | Arrivals the matcher would not decide alone (no candidate, ambiguous, below the confidence threshold, possible double count).                                                |
 | `sqsp_alerts`                 | Sync and matching alerts (variance, external refund, empty product map, dead letters, members without a customer); `dedupe_key` makes raising idempotent.                     |
 
+## Standing appointments and the waitlist (migration `20261006300200_standing_waitlist.sql`, ADR 0086)
+
+Behind the setting `features.standing_waitlist` (default off) and the VIP toggles; no UI yet.
+
+| Table                  | Key columns and rules                                                                                                                                                                                              |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `standing_series`      | A VIP client's repeating slot: `cadence weekly\|biweekly\|triweekly\|monthly`, `weekday` (of `start_date`), `time_min`, `start_date`/`end_date`, `status active\|paused\|ended`, `generated_through` (the materializer's watermark), `auto_confirm`. |
+| `standing_occurrences` | One row per date the materializer decided, unique `(series_id, occurrence_date)`: `booked` with its `appointment_id`, or `skipped` with the `reason` (an error code such as `SLOT_CLOSED`).                          |
+| `waitlist_entries`     | A client waiting for a date and a start-time window (`window_start_min`..`window_end_min`) for a package; `is_vip` at joining; `status waiting\|offered\|booked\|expired\|canceled`; `appointment_id` once booked.   |
+| `waitlist_offers`      | A freed slot offered to an entry: `slot_start`/`slot_end`, `phase vip\|everyone`, `status open\|accepted\|expired\|canceled`, `expires_at`; unique `(entry_id, slot_start)`.                                      |
+
 ## Foreign keys
 
 `domain_links` added the keys from the domain tables to `employees` and `users`. Two columns stay plain `uuid` on purpose, and a
@@ -234,7 +246,7 @@ run changes nothing and edits made after seeding survive (a retired task, a chan
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (79 tables, 1 view, 9 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (83 tables, 1 view, 9 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -1613,6 +1625,45 @@ Primary key `(id)`. Unique `(location_id, sqsp_txn_id)`. `(location_id)` referen
 
 Primary key `(id)`. Unique `(location_id, sqsp_subscription_id)`. `(location_id)` references `locations(id)` on delete cascade. 1 check constraint.
 
+#### `standing_occurrences`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `series_id` | uuid | no |  |
+| `occurrence_date` | date | no |  |
+| `status` | text | no |  |
+| `appointment_id` | uuid | yes |  |
+| `reason` | text | yes |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. Unique `(series_id, occurrence_date)`. `(appointment_id)` references `appointments(id)`. `(series_id)` references `standing_series(id)` on delete cascade. 2 check constraints. Index `standing_occurrences_appointment_idx` `(appointment_id)` where `appointment_id IS NOT NULL`.
+
+#### `standing_series`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `customer_id` | uuid | no |  |
+| `vehicle_id` | uuid | yes |  |
+| `service_id` | uuid | no |  |
+| `cadence` | text | no |  |
+| `weekday` | smallint | no |  |
+| `time_min` | smallint | no |  |
+| `start_date` | date | no |  |
+| `end_date` | date | yes |  |
+| `status` | text | no | `'active'::text` |
+| `generated_through` | date | yes |  |
+| `auto_confirm` | boolean | no | `true` |
+| `notes` | text | yes |  |
+| `created_by` | uuid | yes |  |
+| `version` | integer | no | `1` |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. `(created_by)` references `users(id)` on delete set null. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. `(service_id)` references `services(id)`. `(vehicle_id)` references `vehicles(id)`. 5 check constraints. Index `standing_series_live_idx` `(location_id, customer_id)` where `status <> 'ended'::text`.
+
 #### `user_preferences`
 
 | Column | Type | Null | Default |
@@ -1697,6 +1748,47 @@ Primary key `(id)`. Unique `(location_id, weekday, time_min)`. `(location_id)` r
 | `updated_at` | timestamp with time zone | no | `app_now()` |
 
 Primary key `(location_id)`. `(location_id)` references `locations(id)` on delete cascade. `(updated_by)` references `users(id)` on delete set null. 6 check constraints.
+
+#### `waitlist_entries`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `customer_id` | uuid | no |  |
+| `vehicle_id` | uuid | yes |  |
+| `service_id` | uuid | no |  |
+| `desired_date` | date | no |  |
+| `window_start_min` | smallint | no |  |
+| `window_end_min` | smallint | no |  |
+| `is_vip` | boolean | no | `false` |
+| `status` | text | no | `'waiting'::text` |
+| `appointment_id` | uuid | yes |  |
+| `notes` | text | yes |  |
+| `created_by` | uuid | yes |  |
+| `version` | integer | no | `1` |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. `(appointment_id)` references `appointments(id)`. `(created_by)` references `users(id)` on delete set null. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. `(service_id)` references `services(id)`. `(vehicle_id)` references `vehicles(id)`. 5 check constraints. Index `waitlist_entries_match_idx` `(location_id, desired_date)` where `status = ANY (ARRAY['waiting'::text, 'offered'::text])`.
+
+#### `waitlist_offers`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `entry_id` | uuid | no |  |
+| `slot_start` | timestamp with time zone | no |  |
+| `slot_end` | timestamp with time zone | no |  |
+| `phase` | text | no |  |
+| `status` | text | no | `'open'::text` |
+| `offered_at` | timestamp with time zone | no | `app_now()` |
+| `expires_at` | timestamp with time zone | no |  |
+| `resolved_at` | timestamp with time zone | yes |  |
+| `message_id` | uuid | yes |  |
+
+Primary key `(id)`. Unique `(entry_id, slot_start)`. `(entry_id)` references `waitlist_entries(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. 4 check constraints. Index `waitlist_offers_open_idx` `(expires_at)` where `status = 'open'::text`. Index `waitlist_offers_slot_idx` `(location_id, slot_start)`.
 
 #### `webhook_log`
 

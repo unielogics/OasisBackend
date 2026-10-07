@@ -29,7 +29,11 @@ export interface QueueEmailArgs {
 const MAX_ATTEMPTS = 5
 const backoffMs = (attempts: number): number => Math.min(30 * 60_000, 60_000 * 2 ** Math.max(0, attempts - 1))
 
-export async function queueEmail(tx: Tx, a: QueueEmailArgs, o: { newId: NewId; clock: Clock }): Promise<{ emailId: string; duplicate: boolean }> {
+export async function queueEmail(
+  tx: Tx,
+  a: QueueEmailArgs,
+  o: { newId: NewId; clock: Clock },
+): Promise<{ emailId: string; duplicate: boolean }> {
   const id = o.newId()
   const r = await tx
     .insertInto('outbox_emails')
@@ -49,7 +53,11 @@ export async function queueEmail(tx: Tx, a: QueueEmailArgs, o: { newId: NewId; c
     .returning('id')
     .executeTakeFirst()
   if (r) return { emailId: r.id, duplicate: false }
-  const prior = await tx.selectFrom('outbox_emails').select('id').where('dedupe_key', '=', a.dedupeKey ?? '').executeTakeFirstOrThrow()
+  const prior = await tx
+    .selectFrom('outbox_emails')
+    .select('id')
+    .where('dedupe_key', '=', a.dedupeKey ?? '')
+    .executeTakeFirstOrThrow()
   return { emailId: prior.id, duplicate: true }
 }
 
@@ -106,12 +114,20 @@ export class EmailSender {
   }
 
   private async sendClaimed(id: string): Promise<'sent' | 'failed' | 'retried' | 'suppressed'> {
-    const row = await this.db.selectFrom('outbox_emails').selectAll().where('id', '=', id).executeTakeFirstOrThrow()
+    const row = await this.db
+      .selectFrom('outbox_emails')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirstOrThrow()
     const now = this.clock.now()
     const scrub = SENSITIVE_EMAIL_TEMPLATES.has(row.template)
     this.captured = undefined
     try {
-      const res = await this.provider().send({ to: row.to_email, template: row.template, vars: row.vars as Record<string, string | number> })
+      const res = await this.provider().send({
+        to: row.to_email,
+        template: row.template,
+        vars: row.vars as Record<string, string | number>,
+      })
       const mail = this.captured as SentEmail | undefined
       await this.db
         .updateTable('outbox_emails')
@@ -139,7 +155,13 @@ export class EmailSender {
       if (retryable && attempts < MAX_ATTEMPTS) {
         await this.db
           .updateTable('outbox_emails')
-          .set({ state: 'pending', locked_at: null, attempts, error: message, next_attempt_at: new Date(now.getTime() + backoffMs(attempts)) })
+          .set({
+            state: 'pending',
+            locked_at: null,
+            attempts,
+            error: message,
+            next_attempt_at: new Date(now.getTime() + backoffMs(attempts)),
+          })
           .where('id', '=', id)
           .execute()
         return 'retried'
@@ -149,7 +171,13 @@ export class EmailSender {
     }
   }
 
-  private async finish(id: string, state: 'failed' | 'suppressed', attempts: number, error: string, scrub: boolean): Promise<void> {
+  private async finish(
+    id: string,
+    state: 'failed' | 'suppressed',
+    attempts: number,
+    error: string,
+    scrub: boolean,
+  ): Promise<void> {
     await this.db
       .updateTable('outbox_emails')
       .set({ state, attempts, error, locked_at: null, ...(scrub ? { vars: '{}' as never } : {}) })
@@ -157,4 +185,3 @@ export class EmailSender {
       .execute()
   }
 }
-

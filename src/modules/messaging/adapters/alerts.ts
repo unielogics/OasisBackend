@@ -11,7 +11,10 @@ const PREVIEW = 56
 const MAX_REPLY_ALERTS = 12
 
 export const messagingAlertSource: ExternalAlertSource = {
-  async list(db: Executor, ctx: { locationId: string; now: Date; manager: boolean }): Promise<ExternalAlert[]> {
+  async list(
+    db: Executor,
+    ctx: { locationId: string; now: Date; manager: boolean },
+  ): Promise<ExternalAlert[]> {
     const out: ExternalAlert[] = []
     const tz = await locationTz(db, ctx.locationId)
 

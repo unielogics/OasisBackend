@@ -18,9 +18,22 @@ export function backoffMs(attemptsSoFar: number, cfg: RetryConfig = DEFAULT_RETR
  * ("Generic failure", "Radio off", "No service", "Network error", "Timeout"), so this is a configurable pattern list.
  * Anything not matched (invalid number, null PDU, blocked) is permanent.
  */
-export const DEFAULT_TRANSIENT_REASONS: readonly RegExp[] = [/network/i, /time ?out/i, /radio/i, /no service/i, /service (is )?(not|un)available/i, /generic failure/i, /unavailable/i, /try again/i, /busy/i]
+export const DEFAULT_TRANSIENT_REASONS: readonly RegExp[] = [
+  /network/i,
+  /time ?out/i,
+  /radio/i,
+  /no service/i,
+  /service (is )?(not|un)available/i,
+  /generic failure/i,
+  /unavailable/i,
+  /try again/i,
+  /busy/i,
+]
 
-export function isTransientReason(reason: string | undefined, patterns: readonly RegExp[] = DEFAULT_TRANSIENT_REASONS): boolean {
+export function isTransientReason(
+  reason: string | undefined,
+  patterns: readonly RegExp[] = DEFAULT_TRANSIENT_REASONS,
+): boolean {
   return reason !== undefined && patterns.some((p) => p.test(reason))
 }
 

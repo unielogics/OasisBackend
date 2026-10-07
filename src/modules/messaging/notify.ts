@@ -20,8 +20,21 @@ export async function managersOf(db: Executor, locationId: string): Promise<Mana
     .where('u.disabled_at', 'is', null)
     .where((eb) =>
       eb.or([
-        eb.exists(eb.selectFrom('employee_locations as l').select('l.employee_id').whereRef('l.employee_id', '=', 'e.id').where('l.location_id', '=', locationId)),
-        eb.not(eb.exists(eb.selectFrom('employee_locations as l2').select('l2.employee_id').whereRef('l2.employee_id', '=', 'e.id'))),
+        eb.exists(
+          eb
+            .selectFrom('employee_locations as l')
+            .select('l.employee_id')
+            .whereRef('l.employee_id', '=', 'e.id')
+            .where('l.location_id', '=', locationId),
+        ),
+        eb.not(
+          eb.exists(
+            eb
+              .selectFrom('employee_locations as l2')
+              .select('l2.employee_id')
+              .whereRef('l2.employee_id', '=', 'e.id'),
+          ),
+        ),
       ]),
     )
     .orderBy('e.created_at')
@@ -29,7 +42,8 @@ export async function managersOf(db: Executor, locationId: string): Promise<Mana
   const out: Manager[] = []
   for (const p of people) {
     const a = await loadAuthority(db, p.employee_id)
-    if (a.permissions.has('sched.override') || a.permissions.has('set.billing')) out.push({ employeeId: p.employee_id, userId: p.user_id })
+    if (a.permissions.has('sched.override') || a.permissions.has('set.billing'))
+      out.push({ employeeId: p.employee_id, userId: p.user_id })
   }
   return out
 }
@@ -46,7 +60,11 @@ export interface NoticeSpec {
 }
 
 /** A notification row and a notification.new event per manager, in the caller's transaction. */
-export async function notifyManagers(tx: Tx, n: NoticeSpec, o: { newId: NewId; clock: Clock }): Promise<number> {
+export async function notifyManagers(
+  tx: Tx,
+  n: NoticeSpec,
+  o: { newId: NewId; clock: Clock },
+): Promise<number> {
   const managers = await managersOf(tx, n.locationId)
   for (const m of managers) {
     const id = o.newId()
@@ -66,14 +84,38 @@ export async function notifyManagers(tx: Tx, n: NoticeSpec, o: { newId: NewId; c
         read_at: null,
       })
       .execute()
-    await realtime.publish(tx, { locationId: n.locationId, channel: 'notifications', type: 'notification.new', payload: { id, kind: n.kind }, targetUserId: m.userId })
-    if (n.event) await realtime.publish(tx, { locationId: n.locationId, channel: 'notifications', type: n.event.type, payload: n.event.payload, targetUserId: m.userId })
+    await realtime.publish(tx, {
+      locationId: n.locationId,
+      channel: 'notifications',
+      type: 'notification.new',
+      payload: { id, kind: n.kind },
+      targetUserId: m.userId,
+    })
+    if (n.event)
+      await realtime.publish(tx, {
+        locationId: n.locationId,
+        channel: 'notifications',
+        type: n.event.type,
+        payload: n.event.payload,
+        targetUserId: m.userId,
+      })
   }
   return managers.length
 }
 
 /** SSE only, no notification row (a state change worth showing live but not worth an inbox entry). */
-export async function publishToManagers(tx: Tx, locationId: string, type: string, payload: Record<string, JsonValue>): Promise<void> {
+export async function publishToManagers(
+  tx: Tx,
+  locationId: string,
+  type: string,
+  payload: Record<string, JsonValue>,
+): Promise<void> {
   for (const m of await managersOf(tx, locationId))
-    await realtime.publish(tx, { locationId, channel: 'notifications', type, payload, targetUserId: m.userId })
+    await realtime.publish(tx, {
+      locationId,
+      channel: 'notifications',
+      type,
+      payload,
+      targetUserId: m.userId,
+    })
 }

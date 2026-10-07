@@ -34,7 +34,9 @@ export class PgOptOutRepository implements OptOutRepository {
     }
   }
 
-  async optOut(record: Omit<OptOutRecord, 'optedInAgainAt'> & { optedOutBy?: string | null }): Promise<{ created: boolean }> {
+  async optOut(
+    record: Omit<OptOutRecord, 'optedInAgainAt'> & { optedOutBy?: string | null },
+  ): Promise<{ created: boolean }> {
     return inTx(this.exec, async (tx) => {
       const r = await tx
         .insertInto('sms_opt_outs')
@@ -48,11 +50,17 @@ export class PgOptOutRepository implements OptOutRepository {
           inbound_message_id: record.inboundMessageId ?? null,
           opted_out_by: record.optedOutBy ?? null,
         })
-        .onConflict((oc) => oc.columns(['location_id', 'phone_e164']).where('opted_in_again_at', 'is', null).doNothing())
+        .onConflict((oc) =>
+          oc.columns(['location_id', 'phone_e164']).where('opted_in_again_at', 'is', null).doNothing(),
+        )
         .executeTakeFirst()
       await tx
         .updateTable('customers')
-        .set((eb) => ({ sms_opted_out_at: record.optedOutAt, version: eb('version', '+', 1), updated_at: record.optedOutAt }))
+        .set((eb) => ({
+          sms_opted_out_at: record.optedOutAt,
+          version: eb('version', '+', 1),
+          updated_at: record.optedOutAt,
+        }))
         .where('phone_e164', '=', record.phone)
         .where('merged_into', 'is', null)
         .where('deleted_at', 'is', null)

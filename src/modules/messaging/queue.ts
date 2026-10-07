@@ -10,7 +10,14 @@ import type { MessageQueue, OutboundMessage, QueuedResult } from '../scheduling/
 import type { MessagingConfig } from './config.js'
 import { loadCustomerTarget, type CustomerTarget } from './db/recipients.js'
 import { PgOutboxRepository, rowValues } from './db/outbox-repo.js'
-import { ensureThread, loadMessageDto, publishMessage, REDACTED_BODY, SENSITIVE_CLASSES, touchThread } from './db/messages.js'
+import {
+  ensureThread,
+  loadMessageDto,
+  publishMessage,
+  REDACTED_BODY,
+  SENSITIVE_CLASSES,
+  touchThread,
+} from './db/messages.js'
 import { planEnqueue } from './dispatch/enqueue.js'
 import type { SmsDenyReason, SmsRecipient } from './policy/canSend.js'
 import { isSmsClass, type SmsClass } from './policy/classes.js'
@@ -83,20 +90,41 @@ export class DbMessageQueue implements MessageQueue {
       senderKind: staffTyped ? 'staff' : 'system',
       dedupeKey: msg.dedupeKey,
     })
-    return out.queued ? { queued: true, messageId: out.messageId } : { queued: false, messageId: null, skipped: out.skipped }
+    return out.queued
+      ? { queued: true, messageId: out.messageId }
+      : { queued: false, messageId: null, skipped: out.skipped }
   }
 
   /** Customers are brand-global; the deployment's single location owns the thread. */
   private async defaultLocation(db: Executor): Promise<string | null> {
-    const r = await db.selectFrom('locations').select('id').orderBy('created_at').orderBy('id').limit(1).executeTakeFirst()
+    const r = await db
+      .selectFrom('locations')
+      .select('id')
+      .orderBy('created_at')
+      .orderBy('id')
+      .limit(1)
+      .executeTakeFirst()
     return r?.id ?? null
   }
 
   async enqueueFor(tx: Tx, a: EnqueueArgs): Promise<EnqueueOutcome> {
     const { clock, newId, config } = this.d
     if (a.dedupeKey) {
-      const prior = await tx.selectFrom('messages').select('id').where('idempotency_key', '=', a.dedupeKey).executeTakeFirst()
-      if (prior) return { queued: true, messageId: prior.id, held: false, holdUntil: null, segments: 1, body: '', duplicate: true }
+      const prior = await tx
+        .selectFrom('messages')
+        .select('id')
+        .where('idempotency_key', '=', a.dedupeKey)
+        .executeTakeFirst()
+      if (prior)
+        return {
+          queued: true,
+          messageId: prior.id,
+          held: false,
+          holdUntil: null,
+          segments: 1,
+          body: '',
+          duplicate: true,
+        }
     }
 
     let text: string
@@ -108,7 +136,11 @@ export class DbMessageQueue implements MessageQueue {
         klass = r.klass
       } catch (e) {
         if (!(e instanceof TemplateError)) throw e
-        this.d.warn?.('message template could not be rendered', { template: a.templateKey, code: e.code, details: e.details })
+        this.d.warn?.('message template could not be rendered', {
+          template: a.templateKey,
+          code: e.code,
+          details: e.details,
+        })
         return { queued: false, skipped: 'template_error', detail: e.message }
       }
     } else {
@@ -120,14 +152,28 @@ export class DbMessageQueue implements MessageQueue {
     const now = clock.now()
     const outbox = new PgOutboxRepository(tx, { deviceId: null })
     const plan = await planEnqueue(
-      { messageId: id, recipient: a.recipient, klass, text, priority: a.priority, ttlOverrideSec: a.ttlOverrideSec },
+      {
+        messageId: id,
+        recipient: a.recipient,
+        klass,
+        text,
+        priority: a.priority,
+        ttlOverrideSec: a.ttlOverrideSec,
+      },
       { now, cfg: config.plan, hasPriorOutbound: (phone) => outbox.hasPriorOutbound(phone) },
     )
     if (plan.status === 'suppressed') return { queued: false, skipped: plan.reason }
-    if (plan.status === 'rejected') return { queued: false, skipped: plan.reason, ...(plan.segments !== undefined ? { segments: plan.segments } : {}) }
+    if (plan.status === 'rejected')
+      return {
+        queued: false,
+        skipped: plan.reason,
+        ...(plan.segments !== undefined ? { segments: plan.segments } : {}),
+      }
     const { item } = plan
 
-    const threadId = a.customerId ? await ensureThread(tx, { locationId: a.locationId, customerId: a.customerId, newId }) : null
+    const threadId = a.customerId
+      ? await ensureThread(tx, { locationId: a.locationId, customerId: a.customerId, newId })
+      : null
     const inserted = await tx
       .insertInto('messages')
       .values({
@@ -156,14 +202,38 @@ export class DbMessageQueue implements MessageQueue {
       .returning('id')
       .executeTakeFirst()
     if (!inserted) {
-      const prior = await tx.selectFrom('messages').select('id').where('idempotency_key', '=', a.dedupeKey ?? '').executeTakeFirstOrThrow()
-      return { queued: true, messageId: prior.id, held: false, holdUntil: null, segments: item.segments, body: item.body, duplicate: true }
+      const prior = await tx
+        .selectFrom('messages')
+        .select('id')
+        .where('idempotency_key', '=', a.dedupeKey ?? '')
+        .executeTakeFirstOrThrow()
+      return {
+        queued: true,
+        messageId: prior.id,
+        held: false,
+        holdUntil: null,
+        segments: item.segments,
+        body: item.body,
+        duplicate: true,
+      }
     }
-    await tx.insertInto('sms_outbox').values(rowValues(item) as never).execute()
+    await tx
+      .insertInto('sms_outbox')
+      .values(rowValues(item) as never)
+      .execute()
     if (threadId) await touchThread(tx, threadId, now)
     const loaded = await loadMessageDto(tx, id)
-    if (loaded && !SENSITIVE_CLASSES.has(klass)) await publishMessage(tx, a.locationId, 'message.out', loaded.dto)
-    return { queued: true, messageId: id, held: plan.holdUntil !== null, holdUntil: plan.holdUntil, segments: item.segments, body: item.body, duplicate: false }
+    if (loaded && !SENSITIVE_CLASSES.has(klass))
+      await publishMessage(tx, a.locationId, 'message.out', loaded.dto)
+    return {
+      queued: true,
+      messageId: id,
+      held: plan.holdUntil !== null,
+      holdUntil: plan.holdUntil,
+      segments: item.segments,
+      body: item.body,
+      duplicate: false,
+    }
   }
 
   /** The customer as the policy sees them; null when the id is unknown. */
@@ -171,4 +241,3 @@ export class DbMessageQueue implements MessageQueue {
     return loadCustomerTarget(db, locationId, customerId)
   }
 }
-

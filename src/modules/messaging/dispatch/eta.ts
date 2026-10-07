@@ -23,7 +23,8 @@ export interface QueueEstimate {
   items: ItemEta[]
 }
 
-const order = (a: OutboxItem, b: OutboxItem): number => a.priority - b.priority || a.queuedAt.getTime() - b.queuedAt.getTime() || (a.id < b.id ? -1 : 1)
+const order = (a: OutboxItem, b: OutboxItem): number =>
+  a.priority - b.priority || a.queuedAt.getTime() - b.queuedAt.getTime() || (a.id < b.id ? -1 : 1)
 
 /**
  * Walks the pending queue in dispatch order against the sliding window and the pacing interval and says when each message
@@ -50,19 +51,28 @@ export function estimateQueue(
     const fit = nextFit(virtual, from, item.segments, item.priority, budget)
     let at = fit
     // The fit may land in quiet hours again for held classes; re-check once.
-    if (at && !isTransactional(item.klass) && isQuietHour(at, quiet)) at = nextFit(virtual, quietHoursEnd(at, quiet), item.segments, item.priority, budget)
+    if (at && !isTransactional(item.klass) && isQuietHour(at, quiet))
+      at = nextFit(virtual, quietHoursEnd(at, quiet), item.segments, item.priority, budget)
     if (at) {
       virtual.push({ at, segments: item.segments })
       lastAt = Math.max(lastAt, at.getTime())
     }
-    items.push({ id: item.id, priority: item.priority, at, willExpire: at !== null && at.getTime() >= item.ttlAt.getTime() })
+    items.push({
+      id: item.id,
+      priority: item.priority,
+      at,
+      willExpire: at !== null && at.getTime() >= item.ttlAt.getTime(),
+    })
   }
 
   const times = items.map((i) => i.at).filter((d): d is Date => d !== null)
   return {
     depth: sorted.length,
     byLane,
-    oldestQueuedAt: sorted.reduce<Date | null>((m, i) => (m === null || i.queuedAt < m ? i.queuedAt : m), null),
+    oldestQueuedAt: sorted.reduce<Date | null>(
+      (m, i) => (m === null || i.queuedAt < m ? i.queuedAt : m),
+      null,
+    ),
     etaFirst: times.length ? new Date(Math.min(...times.map((d) => d.getTime()))) : null,
     etaLast: times.length ? new Date(Math.max(...times.map((d) => d.getTime()))) : null,
     willExpire: items.filter((i) => i.willExpire).length,

@@ -1,4 +1,5 @@
-export type AppointmentStatus = 'booked' | 'confirmed' | 'arrived' | 'cleaning' | 'completed' | 'canceled' | 'noshow'
+export type AppointmentStatus =
+  'booked' | 'confirmed' | 'arrived' | 'cleaning' | 'completed' | 'canceled' | 'noshow'
 
 export interface AppointmentRef {
   id: string
@@ -33,7 +34,11 @@ export const DEFAULT_ATTRIBUTION: AttributionConfig = {
  * Picks the appointment an inbound message is about: a job in progress, else the nearest upcoming one within 72 h, else the
  * last completed one within 14 days. Cancelled and no-show appointments never attract replies.
  */
-export function attributeInbound(appointments: readonly AppointmentRef[], now: Date, cfg: AttributionConfig = DEFAULT_ATTRIBUTION): Attribution | null {
+export function attributeInbound(
+  appointments: readonly AppointmentRef[],
+  now: Date,
+  cfg: AttributionConfig = DEFAULT_ATTRIBUTION,
+): Attribution | null {
   const t = now.getTime()
 
   const inProgress = appointments

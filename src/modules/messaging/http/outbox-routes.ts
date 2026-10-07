@@ -86,7 +86,11 @@ export function registerOutboxRoutes(app: AppInstance, rt: MessagingRuntime): vo
         const [at, id] = decodeCursor(cursor, 2)
         q = q.where(keysetCondition(['o.queued_at', 'o.id'], [at as string, id as string], 'desc') as never)
       }
-      const rows = await q.orderBy('o.queued_at', 'desc').orderBy('o.id', 'desc').limit(limit + 1).execute()
+      const rows = await q
+        .orderBy('o.queued_at', 'desc')
+        .orderBy('o.id', 'desc')
+        .limit(limit + 1)
+        .execute()
       const contact = canSeeContact(req.auth!)
       const page = toPage(rows, limit, (r) => [r.queued_at.toISOString(), r.id])
       return {
@@ -122,7 +126,8 @@ export function registerOutboxRoutes(app: AppInstance, rt: MessagingRuntime): vo
       config: { access: access.perm('msg.send') },
       schema: {
         tags: TAGS,
-        summary: 'Send a failed or expired text again (a fresh attempt under a new device id, with a fresh TTL)',
+        summary:
+          'Send a failed or expired text again (a fresh attempt under a new device id, with a fresh TTL)',
         params: IdParams,
         response: { 200: Acted },
       },
@@ -138,12 +143,21 @@ export function registerOutboxRoutes(app: AppInstance, rt: MessagingRuntime): vo
           .forUpdate()
           .executeTakeFirst()
         if (!row) throw new AppError('NOT_FOUND')
-        if ((row.state !== 'failed' && row.state !== 'expired') || SENSITIVE_CLASSES.has(row.klass)) throw new AppError('MESSAGE_NOT_RETRYABLE')
+        if ((row.state !== 'failed' && row.state !== 'expired') || SENSITIVE_CLASSES.has(row.klass))
+          throw new AppError('MESSAGE_NOT_RETRYABLE')
         const device = (await rt.store.listEnabled(row.location_id))[0]
         if (!device) throw new AppError('SMS_NO_DEVICE')
         const { dispatcher } = rt.dispatcherFor(device, tx)
         if (!(await dispatcher.retryFailed(row.id))) throw new AppError('MESSAGE_NOT_RETRYABLE')
-        await audit.record(tx, { locationId: row.location_id, action: 'message.retry', entityType: 'message', entityId: row.id, before: { state: row.state }, after: { state: 'pending' }, ctx: auditContextOf(req) })
+        await audit.record(tx, {
+          locationId: row.location_id,
+          action: 'message.retry',
+          entityType: 'message',
+          entityId: row.id,
+          before: { state: row.state },
+          after: { state: 'pending' },
+          ctx: auditContextOf(req),
+        })
         return { id: row.id, state: 'pending' }
       }),
   )
@@ -173,7 +187,15 @@ export function registerOutboxRoutes(app: AppInstance, rt: MessagingRuntime): vo
         if (!row) throw new AppError('NOT_FOUND')
         if (row.state !== 'pending') throw new AppError('MESSAGE_NOT_CANCELABLE')
         await repo.update(row.id, { state: 'cancelled', lastError: 'cancelled by staff' })
-        await audit.record(tx, { locationId: row.location_id, action: 'message.cancel', entityType: 'message', entityId: row.id, before: { state: 'pending' }, after: { state: 'cancelled' }, ctx: auditContextOf(req) })
+        await audit.record(tx, {
+          locationId: row.location_id,
+          action: 'message.cancel',
+          entityType: 'message',
+          entityId: row.id,
+          before: { state: 'pending' },
+          after: { state: 'cancelled' },
+          ctx: auditContextOf(req),
+        })
         return { id: row.id, state: 'cancelled' }
       }),
   )
@@ -192,7 +214,8 @@ export function registerOutboxRoutes(app: AppInstance, rt: MessagingRuntime): vo
       config: { access: access.perm('msg.send') },
       schema: {
         tags: TAGS,
-        summary: 'Quarantine: texts from numbers that are not customers (no customer row is ever created for them)',
+        summary:
+          'Quarantine: texts from numbers that are not customers (no customer row is ever created for them)',
         description:
           'Carrier notices, one-time codes and strangers land here and are reviewed or ignored. A STOP, START or HELP from a stranger was still honoured by number. The sender is masked without cli.contact.',
         querystring: z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) }),
@@ -227,7 +250,12 @@ export function registerOutboxRoutes(app: AppInstance, rt: MessagingRuntime): vo
     '/messages/inbox/:id/review',
     {
       config: { access: access.perm('msg.send') },
-      schema: { tags: TAGS, summary: 'Mark a quarantined text as reviewed', params: IdParams, response: { 200: z.object({ id: z.string() }) } },
+      schema: {
+        tags: TAGS,
+        summary: 'Mark a quarantined text as reviewed',
+        params: IdParams,
+        response: { 200: z.object({ id: z.string() }) },
+      },
     },
     async (req) => {
       const r = await app.db
@@ -235,7 +263,11 @@ export function registerOutboxRoutes(app: AppInstance, rt: MessagingRuntime): vo
         .set({ reviewed_at: app.clock.now() })
         .where('id', '=', req.params.id)
         .where('quarantined', '=', true)
-        .where('device_id', 'in', app.db.selectFrom('sms_devices').select('id').where('location_id', '=', req.auth!.locationId))
+        .where(
+          'device_id',
+          'in',
+          app.db.selectFrom('sms_devices').select('id').where('location_id', '=', req.auth!.locationId),
+        )
         .returning('id')
         .executeTakeFirst()
       if (!r) throw new AppError('NOT_FOUND')

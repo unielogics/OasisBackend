@@ -15,10 +15,26 @@ export async function receiptEmailVars(db: Executor, invoiceId: string): Promise
     .where('id', '=', invoiceId)
     .executeTakeFirst()
   if (!inv) return null
-  const items = await db.selectFrom('invoice_items').select(['name', 'price_cents']).where('invoice_id', '=', invoiceId).orderBy('position').execute()
+  const items = await db
+    .selectFrom('invoice_items')
+    .select(['name', 'price_cents'])
+    .where('invoice_id', '=', invoiceId)
+    .orderBy('position')
+    .execute()
   const calc = (
-    await sql<{ adj: number; sub: number; tax: number; tip: number; total: number; paid: number; refunded: number; balance: number }>`
-      select adj, sub, tax, tip, total, paid, refunded, balance from invoice_calc_of(${invoiceId})`.execute(db)
+    await sql<{
+      adj: number
+      sub: number
+      tax: number
+      tip: number
+      total: number
+      paid: number
+      refunded: number
+      balance: number
+    }>`
+      select adj, sub, tax, tip, total, paid, refunded, balance from invoice_calc_of(${invoiceId})`.execute(
+      db,
+    )
   ).rows[0]
   if (!calc) return null
   const lines: ReceiptItem[] = items.map((i) => ({ description: i.name, cents: i.price_cents }))

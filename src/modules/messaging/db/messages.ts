@@ -129,7 +129,10 @@ const MESSAGE_COLUMNS = [
 ] as const
 
 /** One message as the thread read model and the SSE payload show it. */
-export async function loadMessageDto(db: Executor, id: string): Promise<{ dto: MessageDto; locationId: string; threadId: string | null } | null> {
+export async function loadMessageDto(
+  db: Executor,
+  id: string,
+): Promise<{ dto: MessageDto; locationId: string; threadId: string | null } | null> {
   const r = await db
     .selectFrom('messages as m')
     .leftJoin('employees as e', 'e.id', 'm.sender_employee_id')
@@ -137,7 +140,11 @@ export async function loadMessageDto(db: Executor, id: string): Promise<{ dto: M
     .where('m.id', '=', id)
     .executeTakeFirst()
   if (!r) return null
-  return { dto: toMessageDto(r, await locationTz(db, r.location_id)), locationId: r.location_id, threadId: r.thread_id }
+  return {
+    dto: toMessageDto(r, await locationTz(db, r.location_id)),
+    locationId: r.location_id,
+    threadId: r.thread_id,
+  }
 }
 
 export interface ThreadFilter {
@@ -150,7 +157,11 @@ export interface ThreadFilter {
  * Oldest first, the order a conversation is read in (the last `limit` messages when it is longer). Two texts queued in the
  * same instant read inbound first: a reply is always queued after the text it answers.
  */
-export async function listThreadMessages(db: Executor, locationId: string, f: ThreadFilter): Promise<MessageDto[]> {
+export async function listThreadMessages(
+  db: Executor,
+  locationId: string,
+  f: ThreadFilter,
+): Promise<MessageDto[]> {
   let q = db
     .selectFrom('messages as m')
     .leftJoin('employees as e', 'e.id', 'm.sender_employee_id')
@@ -159,7 +170,12 @@ export async function listThreadMessages(db: Executor, locationId: string, f: Th
     .where('m.channel', '=', 'sms')
   if (f.appointmentId) q = q.where('m.appointment_id', '=', f.appointmentId)
   if (f.customerId) q = q.where('m.customer_id', '=', f.customerId)
-  const rows = await q.orderBy('m.queued_at', 'desc').orderBy('m.direction', 'desc').orderBy('m.id', 'desc').limit(f.limit ?? 200).execute()
+  const rows = await q
+    .orderBy('m.queued_at', 'desc')
+    .orderBy('m.direction', 'desc')
+    .orderBy('m.id', 'desc')
+    .limit(f.limit ?? 200)
+    .execute()
   const tz = await locationTz(db, locationId)
   return rows.reverse().map((r) => toMessageDto(r, tz))
 }
@@ -178,7 +194,12 @@ export async function ensureThread(
   return r.id
 }
 
-export async function touchThread(tx: Tx, threadId: string, at: Date, o: { inbound?: boolean; unread?: boolean } = {}): Promise<void> {
+export async function touchThread(
+  tx: Tx,
+  threadId: string,
+  at: Date,
+  o: { inbound?: boolean; unread?: boolean } = {},
+): Promise<void> {
   await tx
     .updateTable('message_threads')
     .set((eb) => ({
@@ -201,7 +222,12 @@ export async function publishMessage(
   dto: MessageDto,
   extra: Record<string, JsonValue> = {},
 ): Promise<void> {
-  await realtime.publish(tx, { locationId, channel: 'messages', type, payload: { ...(dto as unknown as Record<string, JsonValue>), ...extra } })
+  await realtime.publish(tx, {
+    locationId,
+    channel: 'messages',
+    type,
+    payload: { ...(dto as unknown as Record<string, JsonValue>), ...extra },
+  })
 }
 
 const FINAL: ReadonlySet<OutboxState> = new Set(['delivered', 'failed', 'expired', 'cancelled'])
@@ -227,7 +253,12 @@ export async function syncMessageFromOutbox(
 ): Promise<void> {
   const status = messageStatusOf(row.state)
   const sentAt = row.sent_at ?? (row.state === 'accepted' ? row.accepted_at : null)
-  const prev = await tx.selectFrom('messages').select('status').where('id', '=', row.id).forUpdate().executeTakeFirst()
+  const prev = await tx
+    .selectFrom('messages')
+    .select('status')
+    .where('id', '=', row.id)
+    .forUpdate()
+    .executeTakeFirst()
   if (!prev) return
   const upd = await tx
     .updateTable('messages')
@@ -235,7 +266,8 @@ export async function syncMessageFromOutbox(
       status,
       provider_message_id: row.provider_message_id,
       device_id: row.device_id,
-      error: row.state === 'delivered' || row.state === 'sent' || row.state === 'accepted' ? null : row.last_error,
+      error:
+        row.state === 'delivered' || row.state === 'sent' || row.state === 'accepted' ? null : row.last_error,
       ...(sentAt ? { sent_at: sentAt } : {}),
       ...(row.delivered_at ? { delivered_at: row.delivered_at } : {}),
     })
@@ -261,9 +293,14 @@ export async function syncMessageFromOutbox(
       threadId: upd.thread_id,
     },
   })
-  if (row.device_id && (status === 'sent' || status === 'delivered' || status === 'failed' || status === 'expired')) {
+  if (
+    row.device_id &&
+    (status === 'sent' || status === 'delivered' || status === 'failed' || status === 'expired')
+  ) {
     const col = status === 'sent' ? 'sent_count' : status === 'delivered' ? 'delivered_count' : 'failed_count'
-    await sql`update sms_devices set ${sql.id(col)} = ${sql.id(col)} + 1 where id = ${row.device_id}`.execute(tx)
+    await sql`update sms_devices set ${sql.id(col)} = ${sql.id(col)} + 1 where id = ${row.device_id}`.execute(
+      tx,
+    )
   }
   if (status === 'sent' || status === 'delivered' || status === 'failed' || status === 'expired') {
     const state = status === 'sent' ? 'sent' : status === 'delivered' ? 'delivered' : 'failed'

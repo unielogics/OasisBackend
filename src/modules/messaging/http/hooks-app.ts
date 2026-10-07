@@ -14,8 +14,15 @@ export interface HooksApp {
   close(): Promise<void>
 }
 
-export async function buildHooksApp(rt: MessagingRuntime, o: { host: string; port: number; logger?: import('fastify').FastifyBaseLogger }): Promise<HooksApp> {
-  const app = Fastify({ ...(o.logger ? { loggerInstance: o.logger } : { logger: false }), bodyLimit: WEBHOOK_BODY_LIMIT, trustProxy: false })
+export async function buildHooksApp(
+  rt: MessagingRuntime,
+  o: { host: string; port: number; logger?: import('fastify').FastifyBaseLogger },
+): Promise<HooksApp> {
+  const app = Fastify({
+    ...(o.logger ? { loggerInstance: o.logger } : { logger: false }),
+    bodyLimit: WEBHOOK_BODY_LIMIT,
+    trustProxy: false,
+  })
   installRawBodyParsers(app as unknown as AppInstance)
 
   app.post<{ Params: { deviceKey: string } }>('/hooks/smsgate/:deviceKey', async (req, reply) => {
@@ -26,7 +33,9 @@ export async function buildHooksApp(rt: MessagingRuntime, o: { host: string; por
   app.setErrorHandler((err: Error & { statusCode?: number }, req, reply) => {
     req.log.error({ err: err.message }, 'hooks listener error')
     // 5xx makes the device retry the delivery, which is what we want for anything we did not persist
-    return reply.code(err.statusCode && err.statusCode >= 400 && err.statusCode < 500 ? err.statusCode : 500).send({ ok: false, status: 'error' })
+    return reply
+      .code(err.statusCode && err.statusCode >= 400 && err.statusCode < 500 ? err.statusCode : 500)
+      .send({ ok: false, status: 'error' })
   })
   await app.ready()
 
@@ -36,7 +45,9 @@ export async function buildHooksApp(rt: MessagingRuntime, o: { host: string; por
     async listen() {
       const address = await app.listen({ host: o.host, port: o.port })
       const run = (): void => {
-        void rt.webhooks.sweep().catch((err: unknown) => rt.log.error({ err: (err as Error).message }, 'webhook sweep failed'))
+        void rt.webhooks
+          .sweep()
+          .catch((err: unknown) => rt.log.error({ err: (err as Error).message }, 'webhook sweep failed'))
       }
       run()
       sweep = setInterval(run, SWEEP_EVERY_MS)

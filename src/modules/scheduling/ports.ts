@@ -11,6 +11,7 @@ import { QUICK_REPLIES } from '../messaging/templates/registry.js'
 import type { SmsClass } from '../messaging/policy/classes.js'
 import type { Actor, SchedulingCtx } from './context.js'
 import type { SettlementKind, SettlementView } from './cancellation.js'
+import type { AppointmentRecord } from './appointments.js'
 import { ensureSchedulingProblems } from './problems.js'
 
 export type ActorRef = AuditActor
@@ -125,6 +126,11 @@ export interface DepositSettlement {
    * REOPEN_REFUNDED when a refund was issued, because a refund does not reopen the balance and the job would be undercharged.
    */
   reopen(tx: Tx, req: { appointmentId: string; locationId: string }): Promise<void>
+}
+
+/** The waitlist (standing module): told when a canceled job freed a slot so it can be offered. Optional; off unless the feature is on. */
+export interface WaitlistPort {
+  slotFreed(tx: Tx, c: SchedulingCtx, appointment: AppointmentRecord): Promise<void>
 }
 
 export const TAX_RATE_BP = 700
@@ -492,4 +498,5 @@ export interface SchedulingPorts {
   storage: StorageProvider
   /** Without it a cancel or no-show only records the policy (the in-memory default); production wires the ledger. */
   deposits?: DepositSettlement
+  waitlist?: WaitlistPort
 }

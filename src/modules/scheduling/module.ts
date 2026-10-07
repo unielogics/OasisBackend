@@ -12,6 +12,8 @@ import { registerArrivalRoutes } from './http/arrival-routes.js'
 import { registerOpsRoutes } from './http/ops-routes.js'
 import { registerPolicyRoutes } from './http/policy-routes.js'
 import { createDbDepositSettlement } from './settlement.js'
+import { dbWaitlistPort } from '../standing/waitlist.js'
+import { registerStandingRoutes } from '../standing/routes.js'
 import {
   InMemoryInvoiceGateway,
   InMemoryMessageQueue,
@@ -45,6 +47,8 @@ export function resolvePorts(deps: AppDeps, given: Partial<SchedulingPorts> = {}
     deposits:
       given.deposits ??
       createDbDepositSettlement({ clock: deps.clock, newId: deps.newId ?? createIdGenerator(deps.clock) }),
+    // a canceled job's slot is offered to the waitlist; inert unless the standing/waitlist feature setting is on
+    waitlist: given.waitlist ?? dbWaitlistPort,
   }
 }
 
@@ -53,6 +57,7 @@ export function registerSchedulingRoutes(app: AppInstance, ports: SchedulingPort
   registerAppointmentRoutes(app, ports)
   registerPolicyRoutes(app)
   registerArrivalRoutes(app, ports)
+  registerStandingRoutes(app, ports)
 }
 
 export function createSchedulingModule(given: Partial<SchedulingPorts> = {}): ApiModule {

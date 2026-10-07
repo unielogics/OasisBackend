@@ -80,7 +80,10 @@ const PatchBody = z
   .strict()
 
 export function registerDeviceRoutes(app: AppInstance, rt: MessagingRuntime): void {
-  const out = (d: DeviceRow): z.infer<typeof Device> => ({ ...deviceView(d), webhookUrl: rt.webhookUrlFor(d) })
+  const out = (d: DeviceRow): z.infer<typeof Device> => ({
+    ...deviceView(d),
+    webhookUrl: rt.webhookUrlFor(d),
+  })
 
   const find = async (locationId: string, id: string): Promise<DeviceRow> => {
     const d = await rt.store.get(id)
@@ -92,7 +95,11 @@ export function registerDeviceRoutes(app: AppInstance, rt: MessagingRuntime): vo
     '/integrations/sms/devices',
     {
       config: { access: access.perm('set.billing') },
-      schema: { tags: TAGS, summary: 'The SMS devices and their health', response: { 200: z.object({ items: z.array(Device) }) } },
+      schema: {
+        tags: TAGS,
+        summary: 'The SMS devices and their health',
+        response: { 200: z.object({ items: z.array(Device) }) },
+      },
     },
     async (req) => ({ items: (await rt.store.list(req.auth!.locationId)).map(out) }),
   )
@@ -105,7 +112,7 @@ export function registerDeviceRoutes(app: AppInstance, rt: MessagingRuntime): vo
         tags: TAGS,
         summary: 'Add an SMS device',
         description:
-          'An SMS Gate device needs its tailnet URL, username and password. The webhook signing secret is generated when omitted and returned ONCE here (set the same value in the app\'s Webhooks settings); credentials are stored encrypted with SECRETS_KEY and never shown again. `provider: sim` adds an in-process simulator device.',
+          "An SMS Gate device needs its tailnet URL, username and password. The webhook signing secret is generated when omitted and returned ONCE here (set the same value in the app's Webhooks settings); credentials are stored encrypted with SECRETS_KEY and never shown again. `provider: sim` adds an in-process simulator device.",
         body: CreateBody,
         response: { 201: z.object({ device: Device, webhookSecret: z.string() }) },
       },
@@ -135,7 +142,8 @@ export function registerDeviceRoutes(app: AppInstance, rt: MessagingRuntime): vo
       schema: {
         tags: TAGS,
         summary: 'Edit a device: label, credentials, limits, enabled',
-        description: 'A password or webhook secret that is sent replaces the stored one; omitted secrets are kept.',
+        description:
+          'A password or webhook secret that is sent replaces the stored one; omitted secrets are kept.',
         params: IdParams,
         body: PatchBody,
         response: { 200: Device },
@@ -195,7 +203,13 @@ export function registerDeviceRoutes(app: AppInstance, rt: MessagingRuntime): vo
           error = (err as Error).message
         }
       }
-      return { reachable, credentials, healthStatus: details.status ?? null, battery: health.battery ?? null, error }
+      return {
+        reachable,
+        credentials,
+        healthStatus: details.status ?? null,
+        battery: health.battery ?? null,
+        error,
+      }
     },
   )
 
@@ -205,9 +219,16 @@ export function registerDeviceRoutes(app: AppInstance, rt: MessagingRuntime): vo
       config: { access: access.perm('set.billing') },
       schema: {
         tags: TAGS,
-        summary: 'Register the seven oasis-* webhooks on the device (idempotent; stale oasis-* ones are removed)',
+        summary:
+          'Register the seven oasis-* webhooks on the device (idempotent; stale oasis-* ones are removed)',
         params: IdParams,
-        response: { 200: z.object({ registered: z.boolean(), url: z.string().nullable(), error: z.string().nullable() }) },
+        response: {
+          200: z.object({
+            registered: z.boolean(),
+            url: z.string().nullable(),
+            error: z.string().nullable(),
+          }),
+        },
       },
     },
     async (req) => {
@@ -264,7 +285,11 @@ export function registerDeviceRoutes(app: AppInstance, rt: MessagingRuntime): vo
                 willExpire: z.number().int(),
               }),
             }),
-            quietHours: z.object({ enabled: z.boolean(), active: z.boolean(), endsAt: z.string().nullable() }),
+            quietHours: z.object({
+              enabled: z.boolean(),
+              active: z.boolean(),
+              endsAt: z.string().nullable(),
+            }),
             failedLast24h: z.number().int(),
           }),
         },
@@ -312,7 +337,11 @@ export function registerDeviceRoutes(app: AppInstance, rt: MessagingRuntime): vo
             willExpire: s.queue.willExpire,
           },
         },
-        quietHours: { enabled: quiet.enabled, active, endsAt: active ? quietHoursEnd(now, quiet).toISOString() : null },
+        quietHours: {
+          enabled: quiet.enabled,
+          active,
+          endsAt: active ? quietHoursEnd(now, quiet).toISOString() : null,
+        },
         failedLast24h: Number(failed.n),
       }
     },

@@ -587,6 +587,7 @@ export async function cancelAppointment(
     meta: { depositPolicy: mode },
   })
   await logReleasedCredit(tx, c, actor, a)
+  await c.ports.waitlist?.slotFreed(tx, c, a)
   if (settlement)
     for (const text of settlementLog(settlement, 'canceled'))
       await logActivity(tx, c, {

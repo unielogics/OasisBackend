@@ -15,12 +15,18 @@ const TICK_WINDOW_MS = 55_000
 
 /** One runtime per job context (db handle); env is read once from the process environment. */
 export function jobRuntime(ctx: JobContext): MessagingRuntime {
-  return runtimeFor({ db: ctx.db, clock: ctx.clock, newId: createIdGenerator(ctx.clock), env: loadEnv(), logger: ctx.logger }, ctx.db)
+  return runtimeFor(
+    { db: ctx.db, clock: ctx.clock, newId: createIdGenerator(ctx.clock), env: loadEnv(), logger: ctx.logger },
+    ctx.db,
+  )
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
-export async function runDispatchWindow(rt: MessagingRuntime, o: { windowMs?: number; intervalMs?: number } = {}): Promise<{ ticks: number; leader: boolean }> {
+export async function runDispatchWindow(
+  rt: MessagingRuntime,
+  o: { windowMs?: number; intervalMs?: number } = {},
+): Promise<{ ticks: number; leader: boolean }> {
   const windowMs = o.windowMs ?? TICK_WINDOW_MS
   const intervalMs = o.intervalMs ?? rt.config.tickIntervalMs
   const r = await rt.withLeader('sms.dispatch', async () => {
@@ -98,4 +104,10 @@ export const emailSendJob: JobDefinition = {
   },
 }
 
-export const messagingJobs: readonly JobDefinition[] = [smsDispatchJob, smsReconcileJob, smsHealthJob, smsRegisterWebhooksJob, emailSendJob]
+export const messagingJobs: readonly JobDefinition[] = [
+  smsDispatchJob,
+  smsReconcileJob,
+  smsHealthJob,
+  smsRegisterWebhooksJob,
+  emailSendJob,
+]

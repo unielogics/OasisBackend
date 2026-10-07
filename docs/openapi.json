@@ -51583,6 +51583,101 @@
         "x-oasis-access": "set.hours"
       }
     },
+    "/api/v1/settings/features": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "standingWaitlist": {
+                      "type": "boolean"
+                    },
+                    "version": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "standingWaitlist",
+                    "version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Feature switches: standing appointments and the waitlist",
+        "tags": [
+          "standing"
+        ],
+        "x-oasis-access": "authenticated"
+      },
+      "put": {
+        "description": "While off, every standing-series and waitlist endpoint answers 409 FEATURE_DISABLED, the jobs do nothing and a canceled slot is not offered. The VIP toggles in Settings must also be on for each feature.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "standingWaitlist": {
+                    "type": "boolean"
+                  },
+                  "version": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "standingWaitlist"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "standingWaitlist": {
+                      "type": "boolean"
+                    },
+                    "version": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "standingWaitlist",
+                    "version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Turn standing appointments and the waitlist on or off (default off)",
+        "tags": [
+          "standing"
+        ],
+        "x-oasis-access": "set.billing"
+      }
+    },
     "/api/v1/settings/hours": {
       "get": {
         "operationId": "getSettingsHours",
@@ -52470,6 +52565,966 @@
         "x-oasis-access": "sched.view"
       }
     },
+    "/api/v1/standing-series": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "customerId",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "includeEnded",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "autoConfirm": {
+                            "type": "boolean"
+                          },
+                          "cadence": {
+                            "enum": [
+                              "weekly",
+                              "biweekly",
+                              "triweekly",
+                              "monthly"
+                            ],
+                            "type": "string"
+                          },
+                          "customerId": {
+                            "type": "string"
+                          },
+                          "endDate": {
+                            "anyOf": [
+                              {
+                                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "generatedThrough": {
+                            "anyOf": [
+                              {
+                                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The last date the materializer looked at"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "notes": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "serviceId": {
+                            "type": "string"
+                          },
+                          "startDate": {
+                            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                            "type": "string"
+                          },
+                          "status": {
+                            "enum": [
+                              "active",
+                              "paused",
+                              "ended"
+                            ],
+                            "type": "string"
+                          },
+                          "timeMin": {
+                            "description": "Minutes from midnight, business time",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "vehicleId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "version": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "weekday": {
+                            "description": "0 = Sunday ... 6 = Saturday, the weekday of the first visit",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "customerId",
+                          "vehicleId",
+                          "serviceId",
+                          "cadence",
+                          "weekday",
+                          "timeMin",
+                          "startDate",
+                          "endDate",
+                          "status",
+                          "generatedThrough",
+                          "autoConfirm",
+                          "notes",
+                          "version"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Standing appointments (ended ones only with includeEnded)",
+        "tags": [
+          "standing"
+        ],
+        "x-oasis-access": "sched.view"
+      },
+      "post": {
+        "description": "Needs the feature on, the VIP toggle \"Standing appointments\" on, a cadence from the VIP settings and a VIP client. The first visit sets the weekday; monthly repeats on the same occurrence of that weekday (the 2nd Saturday). The next four weeks are booked immediately as ordinary appointments (source standing); dates that cannot be booked are skipped with the reason.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "autoConfirm": {
+                    "type": "boolean"
+                  },
+                  "cadence": {
+                    "enum": [
+                      "weekly",
+                      "biweekly",
+                      "triweekly",
+                      "monthly"
+                    ],
+                    "type": "string"
+                  },
+                  "customerId": {
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+                    "type": "string"
+                  },
+                  "endDate": {
+                    "anyOf": [
+                      {
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "maxLength": 500,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "serviceId": {
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+                    "type": "string"
+                  },
+                  "startDate": {
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                    "type": "string"
+                  },
+                  "time": {
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                    "type": "string"
+                  },
+                  "vehicleId": {
+                    "anyOf": [
+                      {
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "customerId",
+                  "serviceId",
+                  "cadence",
+                  "startDate",
+                  "time"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "materialized": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "booked": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "skipped": {
+                          "description": "Dates that could not be booked (closed, full, ...), recorded with the reason",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "through": {
+                          "anyOf": [
+                            {
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "booked",
+                        "skipped",
+                        "through"
+                      ],
+                      "type": "object"
+                    },
+                    "series": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "autoConfirm": {
+                          "type": "boolean"
+                        },
+                        "cadence": {
+                          "enum": [
+                            "weekly",
+                            "biweekly",
+                            "triweekly",
+                            "monthly"
+                          ],
+                          "type": "string"
+                        },
+                        "customerId": {
+                          "type": "string"
+                        },
+                        "endDate": {
+                          "anyOf": [
+                            {
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "generatedThrough": {
+                          "anyOf": [
+                            {
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The last date the materializer looked at"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "notes": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "serviceId": {
+                          "type": "string"
+                        },
+                        "startDate": {
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "active",
+                            "paused",
+                            "ended"
+                          ],
+                          "type": "string"
+                        },
+                        "timeMin": {
+                          "description": "Minutes from midnight, business time",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "vehicleId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "version": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "weekday": {
+                          "description": "0 = Sunday ... 6 = Saturday, the weekday of the first visit",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "customerId",
+                        "vehicleId",
+                        "serviceId",
+                        "cadence",
+                        "weekday",
+                        "timeMin",
+                        "startDate",
+                        "endDate",
+                        "status",
+                        "generatedThrough",
+                        "autoConfirm",
+                        "notes",
+                        "version"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "series",
+                    "materialized"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Create a standing (recurring) appointment for a VIP client",
+        "tags": [
+          "standing"
+        ],
+        "x-oasis-access": "sched.edit",
+        "x-oasis-idempotency": "required"
+      }
+    },
+    "/api/v1/standing-series/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "occurrences": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "appointmentId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "date": {
+                            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                            "type": "string"
+                          },
+                          "reason": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "status": {
+                            "enum": [
+                              "booked",
+                              "skipped"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "date",
+                          "status",
+                          "appointmentId",
+                          "reason"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "series": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "autoConfirm": {
+                          "type": "boolean"
+                        },
+                        "cadence": {
+                          "enum": [
+                            "weekly",
+                            "biweekly",
+                            "triweekly",
+                            "monthly"
+                          ],
+                          "type": "string"
+                        },
+                        "customerId": {
+                          "type": "string"
+                        },
+                        "endDate": {
+                          "anyOf": [
+                            {
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "generatedThrough": {
+                          "anyOf": [
+                            {
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The last date the materializer looked at"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "notes": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "serviceId": {
+                          "type": "string"
+                        },
+                        "startDate": {
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "active",
+                            "paused",
+                            "ended"
+                          ],
+                          "type": "string"
+                        },
+                        "timeMin": {
+                          "description": "Minutes from midnight, business time",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "vehicleId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "version": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "weekday": {
+                          "description": "0 = Sunday ... 6 = Saturday, the weekday of the first visit",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "customerId",
+                        "vehicleId",
+                        "serviceId",
+                        "cadence",
+                        "weekday",
+                        "timeMin",
+                        "startDate",
+                        "endDate",
+                        "status",
+                        "generatedThrough",
+                        "autoConfirm",
+                        "notes",
+                        "version"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "series",
+                    "occurrences"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "One standing appointment with the dates the materializer decided",
+        "tags": [
+          "standing"
+        ],
+        "x-oasis-access": "sched.view"
+      },
+      "patch": {
+        "description": "`cancelUpcoming` also cancels the booked and confirmed visits that have not happened (each as an ordinary cancel with the cancellation policy and no text). Ending is final.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "autoConfirm": {
+                    "type": "boolean"
+                  },
+                  "cancelUpcoming": {
+                    "type": "boolean"
+                  },
+                  "endDate": {
+                    "anyOf": [
+                      {
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "maxLength": 500,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "status": {
+                    "enum": [
+                      "active",
+                      "paused",
+                      "ended"
+                    ],
+                    "type": "string"
+                  },
+                  "version": {
+                    "maximum": 9007199254740991,
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "canceled": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "series": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "autoConfirm": {
+                          "type": "boolean"
+                        },
+                        "cadence": {
+                          "enum": [
+                            "weekly",
+                            "biweekly",
+                            "triweekly",
+                            "monthly"
+                          ],
+                          "type": "string"
+                        },
+                        "customerId": {
+                          "type": "string"
+                        },
+                        "endDate": {
+                          "anyOf": [
+                            {
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "generatedThrough": {
+                          "anyOf": [
+                            {
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The last date the materializer looked at"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "notes": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "serviceId": {
+                          "type": "string"
+                        },
+                        "startDate": {
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "active",
+                            "paused",
+                            "ended"
+                          ],
+                          "type": "string"
+                        },
+                        "timeMin": {
+                          "description": "Minutes from midnight, business time",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "vehicleId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "version": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "weekday": {
+                          "description": "0 = Sunday ... 6 = Saturday, the weekday of the first visit",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "customerId",
+                        "vehicleId",
+                        "serviceId",
+                        "cadence",
+                        "weekday",
+                        "timeMin",
+                        "startDate",
+                        "endDate",
+                        "status",
+                        "generatedThrough",
+                        "autoConfirm",
+                        "notes",
+                        "version"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "series",
+                    "canceled"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Pause, resume or end a standing appointment, or change its end date, auto-confirm or notes",
+        "tags": [
+          "standing"
+        ],
+        "x-oasis-access": "sched.edit",
+        "x-oasis-idempotency": "required"
+      }
+    },
+    "/api/v1/standing-series/{id}/materialize": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "booked": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "skipped": {
+                      "description": "Dates that could not be booked (closed, full, ...), recorded with the reason",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "through": {
+                      "anyOf": [
+                        {
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "booked",
+                    "skipped",
+                    "through"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Run the materializer for one series now (the daily job does this for all)",
+        "tags": [
+          "standing"
+        ],
+        "x-oasis-access": "sched.edit"
+      }
+    },
+    "/api/v1/standing-series/materialize": {
+      "post": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "booked": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "series": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "skipped": {
+                      "description": "Dates that could not be booked (closed, full, ...), recorded with the reason",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "through": {
+                      "anyOf": [
+                        {
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "booked",
+                    "skipped",
+                    "through",
+                    "series"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Run the materializer for every active series now",
+        "tags": [
+          "standing"
+        ],
+        "x-oasis-access": "sched.edit"
+      }
+    },
     "/api/v1/vip": {
       "get": {
         "operationId": "getVip",
@@ -53294,6 +54349,1063 @@
           "settings"
         ],
         "x-oasis-access": "cli.member"
+      }
+    },
+    "/api/v1/waitlist": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "waiting",
+                "offered",
+                "booked",
+                "expired",
+                "canceled"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "appointmentId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "customerId": {
+                            "type": "string"
+                          },
+                          "desiredDate": {
+                            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "isVip": {
+                            "type": "boolean"
+                          },
+                          "notes": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "openOffer": {
+                            "anyOf": [
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "expiresAt": {
+                                    "type": "string"
+                                  },
+                                  "phase": {
+                                    "enum": [
+                                      "vip",
+                                      "everyone"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "slotEnd": {
+                                    "type": "string"
+                                  },
+                                  "slotStart": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "slotStart",
+                                  "slotEnd",
+                                  "phase",
+                                  "expiresAt"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "serviceId": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "enum": [
+                              "waiting",
+                              "offered",
+                              "booked",
+                              "expired",
+                              "canceled"
+                            ],
+                            "type": "string"
+                          },
+                          "vehicleId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "version": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "windowEndMin": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "windowStartMin": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "customerId",
+                          "vehicleId",
+                          "serviceId",
+                          "desiredDate",
+                          "windowStartMin",
+                          "windowEndMin",
+                          "isVip",
+                          "status",
+                          "appointmentId",
+                          "notes",
+                          "version",
+                          "openOffer"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Waitlist entries with their open offer",
+        "tags": [
+          "standing"
+        ],
+        "x-oasis-access": "sched.view"
+      },
+      "post": {
+        "description": "A canceled job on that date whose start falls in the window (and is long enough for the package) is offered to the entry by text. VIP clients are offered first when the VIP \"Waitlist priority\" toggle is on.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "customerId": {
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+                    "type": "string"
+                  },
+                  "desiredDate": {
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                    "type": "string"
+                  },
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "maxLength": 500,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "serviceId": {
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+                    "type": "string"
+                  },
+                  "vehicleId": {
+                    "anyOf": [
+                      {
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "windowEnd": {
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$|^24:00$",
+                    "type": "string"
+                  },
+                  "windowStart": {
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "customerId",
+                  "serviceId",
+                  "desiredDate",
+                  "windowStart",
+                  "windowEnd"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "appointmentId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "customerId": {
+                      "type": "string"
+                    },
+                    "desiredDate": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "isVip": {
+                      "type": "boolean"
+                    },
+                    "notes": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "openOffer": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "expiresAt": {
+                              "type": "string"
+                            },
+                            "phase": {
+                              "enum": [
+                                "vip",
+                                "everyone"
+                              ],
+                              "type": "string"
+                            },
+                            "slotEnd": {
+                              "type": "string"
+                            },
+                            "slotStart": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "slotStart",
+                            "slotEnd",
+                            "phase",
+                            "expiresAt"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "serviceId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "waiting",
+                        "offered",
+                        "booked",
+                        "expired",
+                        "canceled"
+                      ],
+                      "type": "string"
+                    },
+                    "vehicleId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "version": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "windowEndMin": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "windowStartMin": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "customerId",
+                    "vehicleId",
+                    "serviceId",
+                    "desiredDate",
+                    "windowStartMin",
+                    "windowEndMin",
+                    "isVip",
+                    "status",
+                    "appointmentId",
+                    "notes",
+                    "version",
+                    "openOffer"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Put a client on the waitlist for a date and a time window",
+        "tags": [
+          "standing"
+        ],
+        "x-oasis-access": "sched.edit"
+      }
+    },
+    "/api/v1/waitlist/{id}/accept": {
+      "post": {
+        "description": "The first accept wins: capacity is checked again, the slot is booked as an ordinary appointment and the other offers on it are withdrawn. 409 WAITLIST_NO_OFFER when there is no open offer or it has lapsed.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "booking": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "appointment": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "assignedEmployeeId": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "bay": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "number": {
+                                      "maximum": 9007199254740991,
+                                      "minimum": -9007199254740991,
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "number"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "canDrag": {
+                              "type": "boolean"
+                            },
+                            "etaMinutes": {
+                              "anyOf": [
+                                {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "late": {
+                              "type": "boolean"
+                            },
+                            "pickupState": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "pending",
+                                    "collected"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "plannedBay": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "number": {
+                                      "maximum": 9007199254740991,
+                                      "minimum": -9007199254740991,
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "number"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "prepped": {
+                              "type": "boolean"
+                            },
+                            "scheduledEnd": {
+                              "type": "string"
+                            },
+                            "scheduledStart": {
+                              "type": "string"
+                            },
+                            "seq": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "status": {
+                              "enum": [
+                                "booked",
+                                "confirmed",
+                                "arrived",
+                                "cleaning",
+                                "completed",
+                                "canceled",
+                                "no_show"
+                              ],
+                              "type": "string"
+                            },
+                            "version": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "seq",
+                            "version",
+                            "status",
+                            "scheduledStart",
+                            "scheduledEnd",
+                            "plannedBay",
+                            "bay",
+                            "assignedEmployeeId",
+                            "etaMinutes",
+                            "prepped",
+                            "pickupState",
+                            "late",
+                            "canDrag"
+                          ],
+                          "type": "object"
+                        },
+                        "customer": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "created": {
+                              "type": "boolean"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "created"
+                          ],
+                          "type": "object"
+                        },
+                        "invoice": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "balanceCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "depositCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "invoiceId": {
+                              "type": "string"
+                            },
+                            "invoiceNo": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "items": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "kind": {
+                                    "enum": [
+                                      "package",
+                                      "addon"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "priceCents": {
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "priceCents",
+                                  "kind"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "paidCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "payMethodLabel": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "refundPending": {
+                              "type": "boolean"
+                            },
+                            "status": {
+                              "enum": [
+                                "paid",
+                                "unpaid",
+                                "partially_paid",
+                                "partially_refunded",
+                                "refunded",
+                                "canceled",
+                                "canceled_kept",
+                                "canceled_refunded"
+                              ],
+                              "type": "string"
+                            },
+                            "subtotalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "tipCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "invoiceId",
+                            "invoiceNo",
+                            "subtotalCents",
+                            "taxCents",
+                            "tipCents",
+                            "totalCents",
+                            "paidCents",
+                            "balanceCents",
+                            "depositCents",
+                            "status",
+                            "refundPending",
+                            "items",
+                            "payMethodLabel"
+                          ],
+                          "type": "object"
+                        },
+                        "messageQueued": {
+                          "type": "boolean"
+                        },
+                        "overrides": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "kind": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "reason"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "toast": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "detail": {
+                              "type": "string"
+                            },
+                            "title": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "title",
+                            "detail"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "appointment",
+                        "customer",
+                        "invoice",
+                        "overrides",
+                        "messageQueued",
+                        "toast"
+                      ],
+                      "type": "object"
+                    },
+                    "entry": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "appointmentId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "customerId": {
+                          "type": "string"
+                        },
+                        "desiredDate": {
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "isVip": {
+                          "type": "boolean"
+                        },
+                        "notes": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "openOffer": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "expiresAt": {
+                                  "type": "string"
+                                },
+                                "phase": {
+                                  "enum": [
+                                    "vip",
+                                    "everyone"
+                                  ],
+                                  "type": "string"
+                                },
+                                "slotEnd": {
+                                  "type": "string"
+                                },
+                                "slotStart": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "slotStart",
+                                "slotEnd",
+                                "phase",
+                                "expiresAt"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "serviceId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "waiting",
+                            "offered",
+                            "booked",
+                            "expired",
+                            "canceled"
+                          ],
+                          "type": "string"
+                        },
+                        "vehicleId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "version": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "windowEndMin": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "windowStartMin": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "customerId",
+                        "vehicleId",
+                        "serviceId",
+                        "desiredDate",
+                        "windowStartMin",
+                        "windowEndMin",
+                        "isVip",
+                        "status",
+                        "appointmentId",
+                        "notes",
+                        "version",
+                        "openOffer"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "entry",
+                    "booking"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Book the slot offered to an entry (the client said yes)",
+        "tags": [
+          "standing"
+        ],
+        "x-oasis-access": "sched.edit",
+        "x-oasis-idempotency": "required"
+      }
+    },
+    "/api/v1/waitlist/{id}/cancel": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "appointmentId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "customerId": {
+                      "type": "string"
+                    },
+                    "desiredDate": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "isVip": {
+                      "type": "boolean"
+                    },
+                    "notes": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "openOffer": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "expiresAt": {
+                              "type": "string"
+                            },
+                            "phase": {
+                              "enum": [
+                                "vip",
+                                "everyone"
+                              ],
+                              "type": "string"
+                            },
+                            "slotEnd": {
+                              "type": "string"
+                            },
+                            "slotStart": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "slotStart",
+                            "slotEnd",
+                            "phase",
+                            "expiresAt"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "serviceId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "waiting",
+                        "offered",
+                        "booked",
+                        "expired",
+                        "canceled"
+                      ],
+                      "type": "string"
+                    },
+                    "vehicleId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "version": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "windowEndMin": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "windowStartMin": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "customerId",
+                    "vehicleId",
+                    "serviceId",
+                    "desiredDate",
+                    "windowStartMin",
+                    "windowEndMin",
+                    "isVip",
+                    "status",
+                    "appointmentId",
+                    "notes",
+                    "version",
+                    "openOffer"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Take an entry off the waitlist (withdraws its open offer)",
+        "tags": [
+          "standing"
+        ],
+        "x-oasis-access": "sched.edit"
       }
     }
   },

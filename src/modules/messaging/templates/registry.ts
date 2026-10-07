@@ -263,13 +263,48 @@ export interface QuickReply {
 
 /** The seven quick replies from cc-domain 7.9, verbatim. */
 export const QUICK_REPLIES: readonly QuickReply[] = [
-  { key: 'qr_confirmed', label: 'Confirmed', text: 'Your appointment is confirmed. See you soon!', klass: 'quick_reply' },
-  { key: 'qr_ready_for_you', label: 'We’re ready', text: 'We’re ready for you — come on in!', klass: 'quick_reply' },
-  { key: 'qr_checked_in', label: 'Checked in', text: 'Your vehicle has been checked in.', klass: 'quick_reply' },
-  { key: 'qr_being_cleaned', label: 'Being cleaned', text: 'Your vehicle is now being cleaned.', klass: 'quick_reply' },
-  { key: 'qr_ready_pickup', label: 'Ready for pickup', text: 'Your vehicle is ready for pickup!', klass: 'quick_reply' },
-  { key: 'qr_approve_addon', label: 'Approve add-on?', text: 'We recommend an add-on — would you like to approve it?', klass: 'quick_reply' },
-  { key: 'qr_payment_link', label: 'Payment link', text: 'Here is your secure payment link.', klass: 'quick_reply' },
+  {
+    key: 'qr_confirmed',
+    label: 'Confirmed',
+    text: 'Your appointment is confirmed. See you soon!',
+    klass: 'quick_reply',
+  },
+  {
+    key: 'qr_ready_for_you',
+    label: 'We’re ready',
+    text: 'We’re ready for you — come on in!',
+    klass: 'quick_reply',
+  },
+  {
+    key: 'qr_checked_in',
+    label: 'Checked in',
+    text: 'Your vehicle has been checked in.',
+    klass: 'quick_reply',
+  },
+  {
+    key: 'qr_being_cleaned',
+    label: 'Being cleaned',
+    text: 'Your vehicle is now being cleaned.',
+    klass: 'quick_reply',
+  },
+  {
+    key: 'qr_ready_pickup',
+    label: 'Ready for pickup',
+    text: 'Your vehicle is ready for pickup!',
+    klass: 'quick_reply',
+  },
+  {
+    key: 'qr_approve_addon',
+    label: 'Approve add-on?',
+    text: 'We recommend an add-on — would you like to approve it?',
+    klass: 'quick_reply',
+  },
+  {
+    key: 'qr_payment_link',
+    label: 'Payment link',
+    text: 'Here is your secure payment link.',
+    klass: 'quick_reply',
+  },
 ]
 
 export function isTemplateKey(value: string): value is TemplateKey {
@@ -288,7 +323,11 @@ export const EMERGENCY_REASONS = {
 export type EmergencyReason = keyof typeof EMERGENCY_REASONS
 
 /** The {until} phrase for an emergency closure ("for the rest of today", "until 2:00 PM today", "through Monday, Jun 15"). */
-export function emergencyUntilText(spec: { dur: 'today' | 'until' | 'days'; until?: string; through?: string }): string {
+export function emergencyUntilText(spec: {
+  dur: 'today' | 'until' | 'days'
+  until?: string
+  through?: string
+}): string {
   if (spec.dur === 'today') return 'for the rest of today'
   if (spec.dur === 'until') return `until ${spec.until ?? ''} today`.replace('  ', ' ')
   const date = new Date(`${spec.through ?? ''}T12:00:00Z`)

@@ -17,7 +17,10 @@ export async function startInlineRunner(rt: MessagingRuntime, connection: DbOpti
   const acquire = async (): Promise<void> => {
     if (stopped || leader) return
     const client = await connectDedicated(connection)
-    const r = await client.query<{ ok: boolean }>('select pg_try_advisory_lock(hashtext($1 || current_schema())) as ok', ['sms.dispatch'])
+    const r = await client.query<{ ok: boolean }>(
+      'select pg_try_advisory_lock(hashtext($1 || current_schema())) as ok',
+      ['sms.dispatch'],
+    )
     if (!r.rows[0]?.ok) {
       await client.end().catch(() => undefined)
       return
@@ -62,7 +65,9 @@ export async function startInlineRunner(rt: MessagingRuntime, connection: DbOpti
   every(120_000, 'reconcile', () => rt.reconcileAll())
   every(3_600_000, 'register', () => rt.registerAll())
   every(30_000, 'email', () => rt.emailSender.sendDue())
-  await acquire().catch((err: unknown) => log.error({ err: (err as Error).message }, 'inline sms runner could not start'))
+  await acquire().catch((err: unknown) =>
+    log.error({ err: (err as Error).message }, 'inline sms runner could not start'),
+  )
 
   return {
     async stop() {

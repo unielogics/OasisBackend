@@ -20,7 +20,12 @@ import { createSecretBox, type SecretBox } from './crypto.js'
 import { DeviceStore, type DeviceRow } from './db/devices.js'
 import { PgDeviceRepository, type DeviceTransition } from './db/device-repo.js'
 import { PgOutboxRepository } from './db/outbox-repo.js'
-import { DeviceHealthMonitor, pollDeviceHealth, signalFromHealth, type HealthEvaluation } from './dispatch/health.js'
+import {
+  DeviceHealthMonitor,
+  pollDeviceHealth,
+  signalFromHealth,
+  type HealthEvaluation,
+} from './dispatch/health.js'
 import { Dispatcher, type TickReport } from './dispatch/dispatcher.js'
 import type { HealthConfig } from './dispatch/health.js'
 import { EmailSender, queueEmail, type EmailVars } from './email/service.js'
@@ -51,7 +56,10 @@ export interface RuntimeDeps {
   /** The scheduling ports a customer's "C" reply is confirmed through; defaults to a context that cannot touch invoices. */
   schedulingPorts?: () => SchedulingPorts
   /** Replaces SmsProvider construction (tests, spikes). */
-  providerOverride?: (row: DeviceRow, secrets: { password: string | null; webhookSecret: string }) => SmsProvider | undefined
+  providerOverride?: (
+    row: DeviceRow,
+    secrets: { password: string | null; webhookSecret: string },
+  ) => SmsProvider | undefined
   simAutoProgress?: 'instant' | 'manual'
   fetch?: (input: string, init?: RequestInit) => Promise<Response>
 }
@@ -108,26 +116,46 @@ export class MessagingRuntime {
 
   emailProvider(): EmailProvider {
     return (this.email ??=
-      this.deps.emailProvider ?? createEmailProvider(this.deps.env, { clock: this.deps.clock, onSimSend: this.emailSender.capture }))
+      this.deps.emailProvider ??
+      createEmailProvider(this.deps.env, { clock: this.deps.clock, onSimSend: this.emailSender.capture }))
   }
 
   /** The deployment's single location (the oldest row). */
   async location(db: Executor = this.db): Promise<{ id: string; tz: string }> {
-    const r = await db.selectFrom('locations').select(['id', 'timezone']).orderBy('created_at').orderBy('id').limit(1).executeTakeFirstOrThrow()
+    const r = await db
+      .selectFrom('locations')
+      .select(['id', 'timezone'])
+      .orderBy('created_at')
+      .orderBy('id')
+      .limit(1)
+      .executeTakeFirstOrThrow()
     return { id: r.id, tz: r.timezone }
   }
 
   async schedulingCtx(locationId: string): Promise<SchedulingCtx> {
     const ports = this.deps.schedulingPorts?.()
-    if (!ports) throw new Error('messaging: no scheduling ports configured; a customer reply cannot confirm an appointment')
-    return { clock: this.clock, newId: this.newId, locationId, tz: await locationTimezone(this.db, locationId), ports }
+    if (!ports)
+      throw new Error(
+        'messaging: no scheduling ports configured; a customer reply cannot confirm an appointment',
+      )
+    return {
+      clock: this.clock,
+      newId: this.newId,
+      locationId,
+      tz: await locationTimezone(this.db, locationId),
+      ports,
+    }
   }
 
   // ---- devices ---------------------------------------------------------------------------------------------------
 
   /** Pushes a device-state change to the people who can act on it. Runs inside the transaction that saved the state. */
   readonly onTransition = async (tx: Tx, t: DeviceTransition): Promise<void> => {
-    const dev = await tx.selectFrom('sms_devices').select(['location_id', 'label']).where('id', '=', t.deviceId).executeTakeFirst()
+    const dev = await tx
+      .selectFrom('sms_devices')
+      .select(['location_id', 'label'])
+      .where('id', '=', t.deviceId)
+      .executeTakeFirst()
     if (!dev) return
     const payload = { deviceId: t.deviceId, label: dev.label, from: t.from, to: t.to }
     const spec = (kind: string, title: string, body: string): NoticeSpec => ({
@@ -140,14 +168,38 @@ export class MessagingRuntime {
       event: { type: 'sms.device.health', payload },
     })
     if (t.to === 'offline')
-      await notifyManagers(tx, spec('sms.device_offline', 'SMS device offline', `${dev.label} stopped responding. Texts wait in the queue until it is back.`), this.deps)
+      await notifyManagers(
+        tx,
+        spec(
+          'sms.device_offline',
+          'SMS device offline',
+          `${dev.label} stopped responding. Texts wait in the queue until it is back.`,
+        ),
+        this.deps,
+      )
     else if (t.from === 'offline')
-      await notifyManagers(tx, spec('sms.device_recovered', 'SMS device back online', `${dev.label} is responding again. Queued texts are being sent.`), this.deps)
+      await notifyManagers(
+        tx,
+        spec(
+          'sms.device_recovered',
+          'SMS device back online',
+          `${dev.label} is responding again. Queued texts are being sent.`,
+        ),
+        this.deps,
+      )
     else if (t.from !== 'unknown') await publishToManagers(tx, dev.location_id, 'sms.device.health', payload)
-    await realtime.publish(tx, { locationId: dev.location_id, channel: 'ops', type: 'alerts.changed', payload: { source: 'sms', kind: 'device_health' } })
+    await realtime.publish(tx, {
+      locationId: dev.location_id,
+      channel: 'ops',
+      type: 'alerts.changed',
+      payload: { source: 'sms', kind: 'device_health' },
+    })
   }
 
-  dispatcherFor(device: DeviceRow, exec: Executor = this.db): { dispatcher: Dispatcher; monitor: DeviceHealthMonitor; health: HealthConfig; provider: SmsProvider } {
+  dispatcherFor(
+    device: DeviceRow,
+    exec: Executor = this.db,
+  ): { dispatcher: Dispatcher; monitor: DeviceHealthMonitor; health: HealthConfig; provider: SmsProvider } {
     const cfg = this.config.dispatch({
       id: device.id,
       simSlotDefault: device.sim_slot_default,
@@ -156,8 +208,18 @@ export class MessagingRuntime {
       windowMinutes: device.window_minutes,
     })
     const provider = this.providers.forDevice(device)
-    const monitor = new DeviceHealthMonitor(new PgDeviceRepository(exec, this.onTransition), this.clock, cfg.health)
-    const dispatcher = new Dispatcher(provider, new PgOutboxRepository(exec, { deviceId: device.id }), monitor, this.clock, cfg.dispatcher)
+    const monitor = new DeviceHealthMonitor(
+      new PgDeviceRepository(exec, this.onTransition),
+      this.clock,
+      cfg.health,
+    )
+    const dispatcher = new Dispatcher(
+      provider,
+      new PgOutboxRepository(exec, { deviceId: device.id }),
+      monitor,
+      this.clock,
+      cfg.dispatcher,
+    )
     return { dispatcher, monitor, health: cfg.health, provider }
   }
 
@@ -171,7 +233,15 @@ export class MessagingRuntime {
         const report = await dispatcher.tick()
         if (report.p0FallbackCandidates.length > 0) await this.emailFallback(report.p0FallbackCandidates)
         if (report.sent.length || report.failed.length || report.expired.length)
-          this.log.info({ device: device.device_key, sent: report.sent.length, failed: report.failed.length, expired: report.expired.length }, 'sms tick')
+          this.log.info(
+            {
+              device: device.device_key,
+              sent: report.sent.length,
+              failed: report.failed.length,
+              expired: report.expired.length,
+            },
+            'sms tick',
+          )
         out.push({ device, report })
       } catch (err) {
         this.log.error({ err: (err as Error).message, device: device.device_key }, 'sms tick failed')
@@ -180,7 +250,9 @@ export class MessagingRuntime {
     return out
   }
 
-  async reconcileAll(): Promise<Array<{ device: DeviceRow; checked: number; updated: number; resent: number; errors: number }>> {
+  async reconcileAll(): Promise<
+    Array<{ device: DeviceRow; checked: number; updated: number; resent: number; errors: number }>
+  > {
     const out = []
     for (const device of await this.store.listEnabled()) {
       try {
@@ -196,7 +268,8 @@ export class MessagingRuntime {
   /** Asks each device for its health and feeds the monitor. Returns the evaluation per device. */
   async pollHealthAll(): Promise<Array<{ device: DeviceRow; evaluation: HealthEvaluation }>> {
     const out = []
-    for (const device of await this.store.listEnabled()) out.push({ device, evaluation: await this.pollHealth(device) })
+    for (const device of await this.store.listEnabled())
+      out.push({ device, evaluation: await this.pollHealth(device) })
     return out
   }
 
@@ -208,17 +281,24 @@ export class MessagingRuntime {
       return evaluation
     } catch (err) {
       await this.store.noteError(device.id, (err as Error).message.slice(0, 300))
-      return monitor.record(device.id, signalFromHealth({ ok: false, details: { reachable: false } }, this.clock.now()))
+      return monitor.record(
+        device.id,
+        signalFromHealth({ ok: false, details: { reachable: false } }, this.clock.now()),
+      )
     }
   }
 
   /** The URL the tablet calls for this device, or null when SMSGATE_WEBHOOK_PUBLIC_URL is not set. */
   webhookUrlFor(device: DeviceRow): string | null {
     if (this.config.webhookPublicUrl) return `${this.config.webhookPublicUrl}/${device.device_key}`
-    return device.provider === 'sim' ? `http://127.0.0.1:${this.deps.env.HOOKS_PORT}/hooks/smsgate/${device.device_key}` : null
+    return device.provider === 'sim'
+      ? `http://127.0.0.1:${this.deps.env.HOOKS_PORT}/hooks/smsgate/${device.device_key}`
+      : null
   }
 
-  async registerWebhooks(device: DeviceRow): Promise<{ registered: boolean; url: string | null; error?: string }> {
+  async registerWebhooks(
+    device: DeviceRow,
+  ): Promise<{ registered: boolean; url: string | null; error?: string }> {
     const url = this.webhookUrlFor(device)
     if (!url) {
       const error = 'SMSGATE_WEBHOOK_PUBLIC_URL is not set, so the tablet has no address to send webhooks to'
@@ -239,7 +319,8 @@ export class MessagingRuntime {
 
   async registerAll(): Promise<Array<{ device: DeviceRow; registered: boolean; error?: string }>> {
     const out = []
-    for (const device of await this.store.listEnabled()) out.push({ device, ...(await this.registerWebhooks(device)) })
+    for (const device of await this.store.listEnabled())
+      out.push({ device, ...(await this.registerWebhooks(device)) })
     return out
   }
 
@@ -247,8 +328,12 @@ export class MessagingRuntime {
   async purge(): Promise<void> {
     const now = this.clock.now()
     const day = 86_400_000
-    await sql`delete from sms_usage where coalesce(sent_at, accepted_at) < ${new Date(now.getTime() - 2 * day)}`.execute(this.db)
-    await sql`delete from sms_processed_events where processed_at < ${new Date(now.getTime() - 30 * day)}`.execute(this.db)
+    await sql`delete from sms_usage where coalesce(sent_at, accepted_at) < ${new Date(now.getTime() - 2 * day)}`.execute(
+      this.db,
+    )
+    await sql`delete from sms_processed_events where processed_at < ${new Date(now.getTime() - 30 * day)}`.execute(
+      this.db,
+    )
     await sql`update sms_outbox set body = '[link sent privately]'
       where klass in ('staff_invite', 'password_reset') and state in ('sent', 'accepted')
         and coalesce(sent_at, accepted_at) < ${new Date(now.getTime() - 6 * 3600_000)}`.execute(this.db)
@@ -275,14 +360,28 @@ export class MessagingRuntime {
       const link = /https?:\/\/\S+/.exec(r.body)?.[0]
       if (!link) continue
       const vars: EmailVars =
-        r.klass === 'staff_invite' ? { inviteeName: r.first, inviteUrl: link } : { recipientName: r.first, resetUrl: link, expiresMinutes: 30 }
+        r.klass === 'staff_invite'
+          ? { inviteeName: r.first, inviteUrl: link }
+          : { recipientName: r.first, resetUrl: link, expiresMinutes: 30 }
       const queued = await this.db.transaction().execute(async (tx) => {
         const q = await queueEmail(
           tx,
-          { locationId: r.location_id, to: r.email!, template: r.klass, vars, purpose: 'sms-fallback', employeeId: r.employee_id, dedupeKey: `sms-fallback:${id}` },
+          {
+            locationId: r.location_id,
+            to: r.email!,
+            template: r.klass,
+            vars,
+            purpose: 'sms-fallback',
+            employeeId: r.employee_id,
+            dedupeKey: `sms-fallback:${id}`,
+          },
           this.deps,
         )
-        await tx.updateTable('sms_outbox').set({ fallback_emailed_at: this.clock.now() }).where('id', '=', id).execute()
+        await tx
+          .updateTable('sms_outbox')
+          .set({ fallback_emailed_at: this.clock.now() })
+          .where('id', '=', id)
+          .execute()
         return q
       })
       if (!queued.duplicate) {
@@ -297,7 +396,13 @@ export class MessagingRuntime {
 
   private connectionOptions(): DbOptions {
     const e = this.deps.env
-    return this.deps.connection ?? { url: e.DATABASE_URL, ...(e.DB_SEARCH_PATH ? { searchPath: e.DB_SEARCH_PATH } : {}), clock: this.clock }
+    return (
+      this.deps.connection ?? {
+        url: e.DATABASE_URL,
+        ...(e.DB_SEARCH_PATH ? { searchPath: e.DB_SEARCH_PATH } : {}),
+        clock: this.clock,
+      }
+    )
   }
 
   /**
@@ -307,7 +412,10 @@ export class MessagingRuntime {
   async withLeader<T>(name: string, fn: () => Promise<T>): Promise<T | null> {
     const client = await connectDedicated(this.connectionOptions())
     try {
-      const r = await client.query<{ ok: boolean }>('select pg_try_advisory_lock(hashtext($1 || current_schema())) as ok', [name])
+      const r = await client.query<{ ok: boolean }>(
+        'select pg_try_advisory_lock(hashtext($1 || current_schema())) as ok',
+        [name],
+      )
       if (!r.rows[0]?.ok) return null
       return await fn()
     } finally {

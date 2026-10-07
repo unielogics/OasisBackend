@@ -30,7 +30,9 @@ export class InMemoryInboxRepository implements InboxRepository {
   readonly rows: InboxRow[] = []
 
   async insertIfNew(msg: InboundText, receivedAt: Date): Promise<{ inserted: boolean; row: InboxRow }> {
-    const found = this.rows.find((r) => r.deviceId === msg.deviceId && r.providerMessageId === msg.providerMessageId)
+    const found = this.rows.find(
+      (r) => r.deviceId === msg.deviceId && r.providerMessageId === msg.providerMessageId,
+    )
     if (found) return { inserted: false, row: found }
     const row: InboxRow = {
       id: `inbox-${this.rows.length + 1}`,
@@ -49,7 +51,12 @@ export class InMemoryInboxRepository implements InboxRepository {
     return { inserted: true, row }
   }
 
-  async markProcessed(id: string, decision: InboundDecision['kind'], quarantined: boolean, at: Date): Promise<void> {
+  async markProcessed(
+    id: string,
+    decision: InboundDecision['kind'],
+    quarantined: boolean,
+    at: Date,
+  ): Promise<void> {
     const row = this.rows.find((r) => r.id === id)
     if (!row) return
     row.processedAt = at
@@ -61,7 +68,11 @@ export class InMemoryInboxRepository implements InboxRepository {
 export class InMemoryCustomerDirectory implements CustomerDirectory {
   readonly customers = new Map<string, { id: string; firstName?: string; appointments: AppointmentRef[] }>()
 
-  add(phone: string, customer: { id: string; firstName?: string }, appointments: AppointmentRef[] = []): void {
+  add(
+    phone: string,
+    customer: { id: string; firstName?: string },
+    appointments: AppointmentRef[] = [],
+  ): void {
     this.customers.set(phone, { ...customer, appointments })
   }
 
@@ -71,7 +82,8 @@ export class InMemoryCustomerDirectory implements CustomerDirectory {
   }
 
   async listAppointments(customerId: string): Promise<AppointmentRef[]> {
-    for (const c of this.customers.values()) if (c.id === customerId) return c.appointments.map((a) => ({ ...a }))
+    for (const c of this.customers.values())
+      if (c.id === customerId) return c.appointments.map((a) => ({ ...a }))
     return []
   }
 }

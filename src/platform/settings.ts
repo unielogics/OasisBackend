@@ -40,6 +40,9 @@ export const settingDefs = {
       refundTo: 'original' as const,
     },
   },
+  // Standing (recurring) appointments and the waitlist: schema, endpoints and jobs exist, nothing runs until this is turned on
+  // (and the matching VIP toggle in Settings is on). No UI yet (ADR 0086).
+  'features.standing_waitlist': { schema: z.boolean(), default: false },
   'sms.quiet_hours': {
     schema: z.object({ enabled: z.boolean(), start: hhmm, end: hhmm }),
     default: { enabled: false, start: '21:00', end: '08:00' },

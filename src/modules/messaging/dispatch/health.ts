@@ -31,7 +31,13 @@ export const DEFAULT_HEALTH: HealthConfig = {
 export type HealthSignal =
   | { kind: 'ping'; at: Date; healthStatus?: 'pass' | 'warn' | 'fail'; battery?: number; charging?: boolean }
   | { kind: 'app_started'; at: Date }
-  | { kind: 'poll_ok'; at: Date; healthStatus?: 'pass' | 'warn' | 'fail'; battery?: number; charging?: boolean }
+  | {
+      kind: 'poll_ok'
+      at: Date
+      healthStatus?: 'pass' | 'warn' | 'fail'
+      battery?: number
+      charging?: boolean
+    }
   | { kind: 'poll_failed'; at: Date }
 
 export interface HealthEvaluation {
@@ -61,16 +67,23 @@ export function freshRecord(id: string): DeviceRecord {
 }
 
 /** Pure: the state a record implies at `now`, with the reason. */
-export function computeDeviceState(rec: DeviceRecord, now: Date, cfg: HealthConfig): { state: DeviceState; reason: string } {
-  if (rec.consecutivePollFailures >= cfg.failuresToOffline) return { state: 'offline', reason: `${rec.consecutivePollFailures} consecutive failures` }
-  if (rec.lastSeenAt === null) return { state: rec.consecutivePollFailures > 0 ? 'degraded' : 'unknown', reason: 'no signal yet' }
+export function computeDeviceState(
+  rec: DeviceRecord,
+  now: Date,
+  cfg: HealthConfig,
+): { state: DeviceState; reason: string } {
+  if (rec.consecutivePollFailures >= cfg.failuresToOffline)
+    return { state: 'offline', reason: `${rec.consecutivePollFailures} consecutive failures` }
+  if (rec.lastSeenAt === null)
+    return { state: rec.consecutivePollFailures > 0 ? 'degraded' : 'unknown', reason: 'no signal yet' }
   const age = now.getTime() - rec.lastSeenAt.getTime()
   if (age > cfg.offlineAfterMs) return { state: 'offline', reason: `silent for ${Math.round(age / 1000)}s` }
   if (age > cfg.onlineWithinMs) return { state: 'degraded', reason: `quiet for ${Math.round(age / 1000)}s` }
   if (rec.consecutivePollFailures > 0) return { state: 'degraded', reason: 'last poll failed' }
   if (rec.healthStatus === 'fail') return { state: 'degraded', reason: 'device reports failing health' }
   if (rec.healthStatus === 'warn') return { state: 'degraded', reason: 'device reports a health warning' }
-  if (rec.battery !== null && rec.battery < cfg.lowBatteryPct && rec.charging !== true) return { state: 'degraded', reason: `battery ${rec.battery}% and not charging` }
+  if (rec.battery !== null && rec.battery < cfg.lowBatteryPct && rec.charging !== true)
+    return { state: 'degraded', reason: `battery ${rec.battery}% and not charging` }
   return { state: 'online', reason: 'recent signal' }
 }
 
@@ -158,7 +171,12 @@ export function signalFromHealth(health: SmsDeviceHealth, at: Date): HealthSigna
   if (!reachable) return { kind: 'poll_failed', at }
   const plugged = details.checks?.['battery:charging']?.observedValue
   const charging = details.charging ?? (typeof plugged === 'number' ? plugged > 0 : undefined)
-  const status = details.status === 'pass' || details.status === 'warn' || details.status === 'fail' ? details.status : health.ok ? 'pass' : 'fail'
+  const status =
+    details.status === 'pass' || details.status === 'warn' || details.status === 'fail'
+      ? details.status
+      : health.ok
+        ? 'pass'
+        : 'fail'
   return {
     kind: 'poll_ok',
     at,
@@ -169,7 +187,12 @@ export function signalFromHealth(health: SmsDeviceHealth, at: Date): HealthSigna
 }
 
 /** One health poll: ask the device and feed the monitor. Run it every minute from the job runner. */
-export async function pollDeviceHealth(provider: SmsProvider, monitor: DeviceHealthMonitor, deviceId: string, clock: Clock): Promise<HealthEvaluation> {
+export async function pollDeviceHealth(
+  provider: SmsProvider,
+  monitor: DeviceHealthMonitor,
+  deviceId: string,
+  clock: Clock,
+): Promise<HealthEvaluation> {
   const health = await provider.health()
   return monitor.record(deviceId, signalFromHealth(health, clock.now()))
 }

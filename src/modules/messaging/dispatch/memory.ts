@@ -1,4 +1,11 @@
-import type { DeviceRecord, DeviceRepository, OutboxItem, OutboxRepository, ProcessedEventRepository, UsageEntry } from './types.js'
+import type {
+  DeviceRecord,
+  DeviceRepository,
+  OutboxItem,
+  OutboxRepository,
+  ProcessedEventRepository,
+  UsageEntry,
+} from './types.js'
 
 const byLaneThenAge = (a: OutboxItem, b: OutboxItem): number =>
   a.priority - b.priority || a.queuedAt.getTime() - b.queuedAt.getTime() || (a.id < b.id ? -1 : 1)
@@ -43,10 +50,17 @@ export class InMemoryOutboxRepository implements OutboxRepository {
   }
 
   async listPending(): Promise<OutboxItem[]> {
-    return [...this.items.values()].filter((i) => i.state === 'pending').sort(byLaneThenAge).map((i) => ({ ...i }))
+    return [...this.items.values()]
+      .filter((i) => i.state === 'pending')
+      .sort(byLaneThenAge)
+      .map((i) => ({ ...i }))
   }
 
-  async listUnconfirmed(acceptedBefore: Date, acceptedAfter: Date, reconciledBefore: Date): Promise<OutboxItem[]> {
+  async listUnconfirmed(
+    acceptedBefore: Date,
+    acceptedAfter: Date,
+    reconciledBefore: Date,
+  ): Promise<OutboxItem[]> {
     return [...this.items.values()]
       .filter(
         (i) =>

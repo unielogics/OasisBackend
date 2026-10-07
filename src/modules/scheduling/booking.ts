@@ -2,6 +2,7 @@
 // invoice through the gateway, checklist snapshot, booking message. All in the caller's (idempotent) transaction.
 import type { Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
+import { isUuid } from '../../platform/ids.js'
 import { fmtT, minutesOfDay, toBizDate, wallToInstant } from '../../platform/time.js'
 import { requireService } from '../catalog/service.js'
 import '../customers/schema.js'
@@ -227,7 +228,8 @@ export async function createAppointment(
       source: input.source ?? (input.walkIn ? 'walk_in' : 'dashboard'),
       notes: clean(input.notes),
       special_instructions: clean(input.specialInstructions),
-      created_by: actor.auth.userId,
+      // a job's system actor is not a users row
+      created_by: isUuid(actor.auth.userId) ? actor.auth.userId : null,
     })
     .execute()
   for (const a of addons) {
@@ -240,7 +242,7 @@ export async function createAppointment(
         service_id: a.id,
         name: a.name,
         price_cents: a.priceCents,
-        added_by: actor.auth.userId,
+        added_by: isUuid(actor.auth.userId) ? actor.auth.userId : null,
       })
       .execute()
   }
@@ -273,13 +275,17 @@ export async function createAppointment(
       channels: ['internal'],
       actor,
     })
-  const sent = await c.ports.messages.enqueue(tx, {
-    customerId: customer.id,
-    appointmentId: id,
-    templateKey: 'booking_thanks',
-    vars: { first: customer.fullName.trim().split(/\s+/)[0] },
-    purpose: 'booking',
-  })
+  // a standing visit is booked by the materializer every few weeks; thanking the client each time would be noise
+  const sent =
+    input.source === 'standing'
+      ? { queued: false }
+      : await c.ports.messages.enqueue(tx, {
+          customerId: customer.id,
+          appointmentId: id,
+          templateKey: 'booking_thanks',
+          vars: { first: customer.fullName.trim().split(/\s+/)[0] },
+          purpose: 'booking',
+        })
   if (sent.queued)
     await logActivity(tx, c, { appointmentId: id, text: 'Booking thanks sent', channels: ['sms'], actor })
   await audit(tx, c, actor, 'create', id, null, {

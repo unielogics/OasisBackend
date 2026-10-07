@@ -13,7 +13,8 @@ export interface SecretBox {
 
 export function keyFromEnv(secretsKey: string | undefined, nodeEnv: string): Buffer {
   if (!secretsKey) {
-    if (nodeEnv === 'production') throw new Error('SECRETS_KEY is required in production to store device credentials')
+    if (nodeEnv === 'production')
+      throw new Error('SECRETS_KEY is required in production to store device credentials')
     return DEV_KEY
   }
   const key = Buffer.from(secretsKey, 'base64')
@@ -31,7 +32,12 @@ export function createSecretBox(secretsKey: string | undefined, nodeEnv: string)
       const iv = randomBytes(12)
       const cipher = createCipheriv('aes-256-gcm', key, iv)
       const ct = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()])
-      return [PREFIX, iv.toString('base64url'), cipher.getAuthTag().toString('base64url'), ct.toString('base64url')].join('.')
+      return [
+        PREFIX,
+        iv.toString('base64url'),
+        cipher.getAuthTag().toString('base64url'),
+        ct.toString('base64url'),
+      ].join('.')
     },
     decrypt(sealed) {
       const key = keyOf()

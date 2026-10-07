@@ -387,6 +387,8 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/api/v1/settings/bundle` | authenticated |  |
 | GET | `/api/v1/settings/cancellation-policy` | authenticated |  |
 | PUT | `/api/v1/settings/cancellation-policy` | set.hours |  |
+| GET | `/api/v1/settings/features` | authenticated |  |
+| PUT | `/api/v1/settings/features` | set.billing |  |
 | GET | `/api/v1/settings/hours` | authenticated |  |
 | PUT | `/api/v1/settings/hours` | set.hours |  |
 | GET | `/api/v1/settings/location` | authenticated |  |
@@ -394,6 +396,12 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/api/v1/settings/rules` | authenticated |  |
 | PUT | `/api/v1/settings/rules` | set.hours |  |
 | GET | `/api/v1/staff` | sched.view |  |
+| GET | `/api/v1/standing-series` | sched.view |  |
+| POST | `/api/v1/standing-series` | sched.edit | required |
+| GET | `/api/v1/standing-series/:id` | sched.view |  |
+| PATCH | `/api/v1/standing-series/:id` | sched.edit | required |
+| POST | `/api/v1/standing-series/:id/materialize` | sched.edit |  |
+| POST | `/api/v1/standing-series/materialize` | sched.edit |  |
 | GET | `/api/v1/vip` | authenticated |  |
 | PUT | `/api/v1/vip` | cli.member |  |
 | GET | `/api/v1/vip/clients` | cli.member |  |
@@ -401,6 +409,10 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | DELETE | `/api/v1/vip/clients/:customerId` | cli.member |  |
 | POST | `/api/v1/vip/holds` | cli.member |  |
 | DELETE | `/api/v1/vip/holds/:id` | cli.member |  |
+| GET | `/api/v1/waitlist` | sched.view |  |
+| POST | `/api/v1/waitlist` | sched.edit |  |
+| POST | `/api/v1/waitlist/:id/accept` | sched.edit | required |
+| POST | `/api/v1/waitlist/:id/cancel` | sched.edit |  |
 | POST | `/hooks/squarespace` | webhook:squarespace |  |
 <!-- openapi:end -->
 

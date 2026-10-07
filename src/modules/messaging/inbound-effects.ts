@@ -38,7 +38,13 @@ const REPLY_ACTOR_NAME = 'Customer reply'
 
 function replyActor(locationId: string): Actor {
   return {
-    auth: { userId: NIL_UUID, employeeId: null, locationId, permissions: new Set(['sched.edit', 'jobs.status']), actorName: REPLY_ACTOR_NAME },
+    auth: {
+      userId: NIL_UUID,
+      employeeId: null,
+      locationId,
+      permissions: new Set(['sched.edit', 'jobs.status']),
+      actorName: REPLY_ACTOR_NAME,
+    },
     audit: { actor: { userId: null, name: `${REPLY_ACTOR_NAME} (SMS)` } },
   }
 }
@@ -49,7 +55,8 @@ export function createInboundEffects(
   o: { locationId: string; inbox: PgInboxRepository; event: { deviceId: string; providerMessageId: string } },
 ): InboundEffects {
   // One reply per template per received text, however many code paths ask for it.
-  const replyKey = (template: string): string => `inbound-reply:${o.event.deviceId}:${o.event.providerMessageId}:${template}`
+  const replyKey = (template: string): string =>
+    `inbound-reply:${o.event.deviceId}:${o.event.providerMessageId}:${template}`
 
   return {
     async sendReply(to, template, vars, ctx) {
@@ -84,7 +91,12 @@ export function createInboundEffects(
             : e.queue.enqueue(t, m),
       }
       try {
-        await confirmAppointment(tx, { ...base, ports: { ...base.ports, messages } }, replyActor(o.locationId), appointmentId)
+        await confirmAppointment(
+          tx,
+          { ...base, ports: { ...base.ports, messages } },
+          replyActor(o.locationId),
+          appointmentId,
+        )
         await tx
           .insertInto('activity_log')
           .values({
@@ -106,7 +118,11 @@ export function createInboundEffects(
     async storeMessage(m) {
       const id = e.newId()
       const now = e.clock.now()
-      const threadId = await ensureThread(tx, { locationId: o.locationId, customerId: m.customerId, newId: e.newId })
+      const threadId = await ensureThread(tx, {
+        locationId: o.locationId,
+        customerId: m.customerId,
+        newId: e.newId,
+      })
       const target = await loadCustomerTarget(tx, o.locationId, m.customerId)
       await insertMessage(tx, {
         id,
@@ -127,7 +143,11 @@ export function createInboundEffects(
         read_at: m.unread ? null : now,
       })
       await touchThread(tx, threadId, now, { inbound: true, unread: m.unread })
-      await o.inbox.attach(m.deviceId, m.providerMessageId, { customerId: m.customerId, appointmentId: m.appointmentId, messageId: id })
+      await o.inbox.attach(m.deviceId, m.providerMessageId, {
+        customerId: m.customerId,
+        appointmentId: m.appointmentId,
+        messageId: id,
+      })
       if (m.appointmentId)
         await tx
           .insertInto('activity_log')
@@ -146,17 +166,29 @@ export function createInboundEffects(
 
     async staffAlert(a) {
       if (a.kind === 'cancel_request' || a.kind === 'unattributed_inbound') {
-        const who = await tx.selectFrom('customers').select('full_name').where('id', '=', a.customerId).executeTakeFirst()
+        const who = await tx
+          .selectFrom('customers')
+          .select('full_name')
+          .where('id', '=', a.customerId)
+          .executeTakeFirst()
         await e.notifyManagers(tx, {
           locationId: o.locationId,
           kind: a.kind === 'cancel_request' ? 'sms.cancel_request' : 'sms.unattributed_reply',
-          title: a.kind === 'cancel_request' ? `Cancel request · ${who?.full_name ?? 'customer'}` : `Reply with no appointment · ${who?.full_name ?? 'customer'}`,
+          title:
+            a.kind === 'cancel_request'
+              ? `Cancel request · ${who?.full_name ?? 'customer'}`
+              : `Reply with no appointment · ${who?.full_name ?? 'customer'}`,
           body: a.excerpt,
           entityType: a.appointmentId ? 'appointment' : 'customer',
           entityId: a.appointmentId ?? a.customerId,
         })
       }
-      await realtime.publish(tx, { locationId: o.locationId, channel: 'ops', type: 'alerts.changed', payload: { source: 'sms', kind: a.kind } })
+      await realtime.publish(tx, {
+        locationId: o.locationId,
+        channel: 'ops',
+        type: 'alerts.changed',
+        payload: { source: 'sms', kind: a.kind },
+      })
     },
   }
 }
