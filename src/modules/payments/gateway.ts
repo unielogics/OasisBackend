@@ -34,6 +34,8 @@ export interface InvoiceSummary {
   refundPending: boolean
   /** Card money staff recorded that Squarespace has not confirmed yet (it counts toward the balance at once). */
   awaitingCents: number
+  /** The rate snapshotted on the invoice, in basis points (700 = 7%). */
+  taxBp: number
   items: { name: string; priceCents: number; kind: ItemKind }[]
   payMethodLabel: string | null
 }
@@ -90,6 +92,7 @@ export async function nextInvoiceNo(tx: Tx, locationId: string): Promise<number>
 interface SummaryRow extends InvoiceCalcRow {
   appointment_id: string | null
   invoice_no: number
+  tax_bp: number
 }
 
 export async function summariesByAppointment(
@@ -99,7 +102,7 @@ export async function summariesByAppointment(
   const out = new Map<string, InvoiceSummary>()
   if (appointmentIds.length === 0) return out
   const r = await sql<SummaryRow>`
-    select c.*, i.appointment_id, i.invoice_no
+    select c.*, i.appointment_id, i.invoice_no, i.tax_bp
     from invoices i cross join lateral invoice_calc_of(i.id) c
     where i.appointment_id = any(${appointmentIds}::uuid[])`.execute(db)
   if (r.rows.length === 0) return out
@@ -144,6 +147,7 @@ export async function summariesByAppointment(
       status: calc.status,
       refundPending: calc.pendingN > 0,
       awaitingCents: Number(awaiting.rows.find((a) => a.invoice_id === row.invoice_id)?.cents ?? 0),
+      taxBp: row.tax_bp,
       items: items
         .filter((i) => i.invoice_id === row.invoice_id)
         .map((i) => ({ name: i.name, priceCents: i.price_cents, kind: i.kind })),

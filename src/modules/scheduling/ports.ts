@@ -49,6 +49,8 @@ export interface InvoiceSummary {
   refundPending: boolean
   /** Card money recorded by staff and not yet confirmed in Squarespace (counted in `paidCents`); absent = none. */
   awaitingCents?: number
+  /** The invoice's own tax rate in basis points; absent = the location default. */
+  taxBp?: number
   items: InvoiceItem[]
   payMethodLabel: string | null
 }

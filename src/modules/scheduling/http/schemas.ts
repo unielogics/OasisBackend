@@ -52,6 +52,7 @@ export const InvoiceSummary = z.object({
   ]),
   refundPending: z.boolean(),
   awaitingCents: z.number().int().optional(),
+  taxBp: z.number().int().optional(),
   items: z.array(
     z.object({ name: z.string(), priceCents: z.number().int(), kind: z.enum(['package', 'addon']) }),
   ),

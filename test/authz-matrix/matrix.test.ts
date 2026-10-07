@@ -19,6 +19,9 @@ const PUBLIC_ROUTES = new Set([
   'POST /api/v1/auth/invite/accept',
   'POST /api/v1/auth/password/forgot',
   'POST /api/v1/auth/password/reset',
+  // the simulator object store (STORAGE_PROVIDER=fs, never production): every URL carries its own signature
+  'GET /dev-storage/*',
+  'POST /dev-storage/*',
 ])
 
 /** 403 codes a permitted caller may still get from a business rule, keyed by "METHOD url". Empty with the generic {} body. */

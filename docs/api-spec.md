@@ -198,6 +198,7 @@ reloads new rows (with a 5 s safety-net poll and automatic reconnect plus catch-
 | `GET /healthz` | Liveness; no dependencies |
 | `GET /readyz` | 200 only when the database answers, every migration on disk is applied and unmodified, and the job queue is healthy; otherwise 503 with per-check detail. Point the external uptime monitor and nginx upstream check here |
 | `GET /api/v1/openapi.json` | The OpenAPI 3.1 contract |
+| `GET`, `POST /dev-storage/*` | The simulator object store behind `STORAGE_PROVIDER=fs` (not mounted in production or for S3): the presigned photo POST (`/dev-storage/upload`, CORS for `PUBLIC_DASHBOARD_URL`) and the signed thumbnail and download URLs. Public routes: every URL carries its own signature, like S3 |
 
 Logging: pino JSON, redacting `authorization`, `cookie`, `set-cookie`, passwords, tokens and secrets everywhere, masking
 phone numbers and emails at `info` and above (including inside error text), redacting sensitive query parameters in
@@ -393,6 +394,8 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | DELETE | `/api/v1/vip/clients/:customerId` | cli.member |  |
 | POST | `/api/v1/vip/holds` | cli.member |  |
 | DELETE | `/api/v1/vip/holds/:id` | cli.member |  |
+| GET | `/dev-storage/*` | public |  |
+| POST | `/dev-storage/*` | public |  |
 | POST | `/hooks/squarespace` | webhook:squarespace |  |
 <!-- openapi:end -->
 

@@ -1098,6 +1098,11 @@
                           "minimum": -9007199254740991,
                           "type": "integer"
                         },
+                        "taxBp": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
                         "taxCents": {
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
@@ -1669,6 +1674,11 @@
                               "type": "string"
                             },
                             "subtotalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxBp": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -3030,6 +3040,11 @@
                               "minimum": -9007199254740991,
                               "type": "integer"
                             },
+                            "taxBp": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "taxCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -3291,6 +3306,11 @@
                           "minimum": -9007199254740991,
                           "type": "integer"
                         },
+                        "taxBp": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
                         "taxCents": {
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
@@ -3537,6 +3557,11 @@
                           "type": "string"
                         },
                         "subtotalCents": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "taxBp": {
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
@@ -3912,6 +3937,11 @@
                               "minimum": -9007199254740991,
                               "type": "integer"
                             },
+                            "taxBp": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "taxCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -4279,6 +4309,11 @@
                               "type": "string"
                             },
                             "subtotalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxBp": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -4651,6 +4686,11 @@
                               "type": "string"
                             },
                             "subtotalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxBp": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -5034,6 +5074,11 @@
                               "type": "string"
                             },
                             "subtotalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxBp": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -5624,6 +5669,11 @@
                               "minimum": -9007199254740991,
                               "type": "integer"
                             },
+                            "taxBp": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "taxCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -5970,6 +6020,11 @@
                               "type": "string"
                             },
                             "subtotalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxBp": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -8432,6 +8487,11 @@
                               "minimum": -9007199254740991,
                               "type": "integer"
                             },
+                            "taxBp": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "taxCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -8779,6 +8839,11 @@
                               "type": "string"
                             },
                             "subtotalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxBp": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -9465,6 +9530,11 @@
                               "minimum": -9007199254740991,
                               "type": "integer"
                             },
+                            "taxBp": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "taxCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -9811,6 +9881,11 @@
                               "type": "string"
                             },
                             "subtotalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxBp": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -10192,6 +10267,11 @@
                               "type": "string"
                             },
                             "subtotalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxBp": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -10581,6 +10661,11 @@
                               "minimum": -9007199254740991,
                               "type": "integer"
                             },
+                            "taxBp": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "taxCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -10946,6 +11031,11 @@
                               "type": "string"
                             },
                             "subtotalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxBp": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
