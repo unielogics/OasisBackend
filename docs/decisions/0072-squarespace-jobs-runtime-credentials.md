@@ -52,3 +52,24 @@ subscription rows plus `SQSP_WEBHOOK_SECRET`; 401 for a bad signature (nothing l
 (older than 7 days), duplicate or ignored topics (a non-2xx would make Squarespace retry for 48 hours), 202 when accepted
 (queued, or processed inline when there is no queue). If queueing fails the notification id is given back and the answer is 503
 so Squarespace's retry is accepted. OAuth subscription management stays the interface in `integrations/squarespace/subscriptions.ts`.
+
+## First live run: what the simulator covers and what still needs a key
+
+The checklist is `docs/integrations/squarespace.md` section 7. Everything below runs in tests against the simulator and Postgres;
+the items marked LIVE need the real site and key and are not verified.
+
+| Checklist step | Status |
+|---|---|
+| 1 key, headers, 200 and shapes | LIVE (the client sends Bearer, User-Agent; verified against the documented contract only) |
+| 2 window rules (`modifiedAfter` alone, cursor with dates, inclusive bounds, direction) | LIVE (the engine does not rely on any of them: overlap, full page reads, monotonic upserts) |
+| 3 `paymentStates` surviving a cursor | LIVE (a `PARTIALLY_PAID` or `PENDING` order must stay visible on later pages) |
+| 4 transactions: brand, no last4, refunds per payment or per document, admin refunds | LIVE (the mapper reads both shapes; `externalTransactionProperties` kept in `raw`) |
+| 5 subscription products: `lineItemType`, ids, SKUs, renewals as separate orders | LIVE: fill the map with `PUT /integrations/squarespace/product-map`; until then `product_map_empty` is raised and orders are ignored |
+| 6 how staff collect (checkout link, Invoicing, POS, Scheduling) appears | LIVE: decides whether payments reach Orders or Transactions at all |
+| 7 request counter per cycle | simulator: a cycle is 2 requests when quiet (orders, transactions) |
+| 8 empty store, matcher report-only, reconcile quiet | simulator: tested (the second reconcile writes nothing); report-only mode does not exist, read the manual queue first |
+| 9 capture real payloads into `test/fixtures/squarespace/` | LIVE |
+| 10 webhooks (OAuth app, `sendTestNotification`, `REFUNDED` update) | LIVE; the verification, dedupe and replay handling are tested with signed fixtures |
+
+Also unverified until a live run: that a payment made through the staff's checkout flow carries the customer's email or phone (the
+matcher needs one of them), and that Squarespace's tax on a tax-inclusive deposit product stays within `SQSP_VARIANCE_ALERT_CENTS`.

@@ -169,11 +169,18 @@ export class PgOrderRepository implements OrderRepository {
   }
 
   async listByMatchState(state: MatchState, limit: number): Promise<StoredOrder[]> {
+    // The matcher takes the first `limit` rows every cycle. Unpaid orders (no payment yet, no transaction) stay `unmatched` until
+    // Squarespace charges them, so they go last: a pile of them must never starve the orders that can be matched now.
     const rows = await this.d.db
       .selectFrom('sqsp_orders')
       .selectAll()
       .where('location_id', '=', this.d.locationId)
       .where('match_state', '=', state)
+      .orderBy(
+        sql`(payment_state in ('NOT_CHARGED', 'PENDING') and not exists (
+          select 1 from sqsp_transactions t
+          where t.location_id = sqsp_orders.location_id and t.sqsp_order_id = sqsp_orders.sqsp_order_id))`,
+      )
       .orderBy('created_on')
       .orderBy('sqsp_order_id')
       .limit(limit)
@@ -316,11 +323,13 @@ export class PgTransactionRepository implements TransactionRepository {
 
   async listByState(states: TxnState[], limit: number): Promise<StoredTransaction[]> {
     if (states.length === 0) return []
+    // new first, deferred last: refunds waiting for an order that is not booked yet must not starve fresh transactions
     const rows = await this.d.db
       .selectFrom('sqsp_transactions')
       .selectAll()
       .where('location_id', '=', this.d.locationId)
       .where('state', 'in', states)
+      .orderBy(sql`case state when 'new' then 0 when 'deferred' then 2 else 1 end`)
       .orderBy('created_on')
       .orderBy('sqsp_txn_id')
       .limit(limit)

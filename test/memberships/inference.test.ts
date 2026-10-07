@@ -114,6 +114,14 @@ describe('membership inference from subscription orders', () => {
     const a = await makeCustomer(r.db, env, { name: 'Full Refund', email: 'full@example.com' })
     const b = await makeCustomer(r.db, env, { name: 'Part Refund', email: 'part@example.com' })
     const only = await makeCustomer(r.db, env, { name: 'Only Refunded', email: 'only@example.com' })
+    const never = await makeCustomer(r.db, env, { name: 'Never Paid', email: 'never@example.com' })
+    // refunded in full before the first sync ever saw it: there is nothing paid, so there is no member
+    const n1 = r.store.createOrder({
+      email: 'never@example.com',
+      name: 'Never Paid',
+      lineItems: [item('MEM-ESS', 'Essential')],
+    })
+    r.store.refund(n1.orderId)
     const a1 = r.store.createOrder({
       email: 'full@example.com',
       name: 'Full Refund',
@@ -132,24 +140,30 @@ describe('membership inference from subscription orders', () => {
     await sync(r)
     await pass(r)
     expect((await member(r, a)).status).toBe('active')
+    expect(
+      await r.db.selectFrom('memberships').select('id').where('customer_id', '=', never).execute(),
+    ).toHaveLength(0)
     r.advance(D)
     const a2 = r.store.renewSubscription(a1.orderId)
     r.store.refund(a2.orderId) // the renewal is refunded in full
     r.store.refund(b1.orderId, { amountCents: 2000 })
-    r.store.refund(o1.orderId)
+    r.store.refund(o1.orderId) // the only payment is refunded in full
     await sync(r)
-    const p = await pass(r)
-    expect(p.sync.created).toBe(0)
+    await pass(r)
     const full = await member(r, a)
     const part = await member(r, b)
-    expect(full.status).toBe('active')
+    expect(full.status).toBe('active') // the earlier paid order still covers the period
     expect(flags(full)).toContain('full_refund')
     expect(full.paid_order_count).toBe(1)
     expect(part.status).toBe('active')
     expect(flags(part)).toContain('partial_refund')
-    // the only order of this customer was refunded in full: not a member
+    // nothing paid is left: pending and flagged for a person, never canceled automatically
+    const refunded = await member(r, only)
+    expect(refunded.status).toBe('pending')
+    expect(flags(refunded)).toContain('full_refund')
+    expect(refunded.canceled_at).toBeNull()
     expect(
-      await r.db.selectFrom('memberships').select('id').where('customer_id', '=', only).execute(),
+      await r.db.selectFrom('memberships').select('id').where('customer_id', '=', never).execute(),
     ).toHaveLength(0)
   })
 

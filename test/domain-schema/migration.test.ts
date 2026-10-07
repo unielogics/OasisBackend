@@ -75,12 +75,17 @@ describe('domain_core migration', () => {
   })
 
   it('links to the people and auth tables (domain_links) but not to membership, messaging or standing-series tables', async () => {
-    const fks = await sql<{ ref: string }>`
-      select confrelid::regclass::text as ref from pg_constraint
+    // Only the foreign keys OF the domain tables: the verticals' own tables (membership_credit_events, messages, ...) reference
+    // their parents freely. The appointment columns that point at those verticals get their keys in a later links migration.
+    const fks = await sql<{ ref: string; src: string }>`
+      select confrelid::regclass::text as ref, conrelid::regclass::text as src from pg_constraint
       where contype = 'f' and connamespace = current_schema()::regnamespace`.execute(t.db)
-    const targets = new Set(fks.rows.map((r) => r.ref.replace(/^"?[^".]+"?\./, '').replace(/"/g, '')))
+    const bare = (name: string): string => name.replace(/^"?[^".]+"?\./, '').replace(/"/g, '')
+    const domain = fks.rows.filter((r) => DOMAIN_TABLES.includes(bare(r.src)))
+    const targets = new Set(domain.map((r) => bare(r.ref)))
     for (const linked of ['employees', 'users']) expect(targets.has(linked)).toBe(true)
-    for (const banned of ['memberships', 'messages', 'standing_series']) expect(targets.has(banned)).toBe(false)
+    for (const banned of ['memberships', 'messages', 'standing_series'])
+      expect(targets.has(banned)).toBe(false)
   })
 })
 

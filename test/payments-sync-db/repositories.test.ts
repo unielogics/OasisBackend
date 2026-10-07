@@ -144,6 +144,82 @@ describe('Postgres sync repositories', () => {
     await expect(txns.setState('nope', { state: 'ignored' })).rejects.toThrow(/not stored/)
   })
 
+  it('the matcher’s first page puts matchable orders and new transactions ahead of unpaid orders and deferred refunds', async () => {
+    const { orders, txns, now } = repos()
+    // 3 older unpaid orders (no payment yet) and 1 newer paid one: with a page of 2 the paid one must be on it
+    for (const i of [1, 2, 3])
+      await orders.upsert(
+        order({
+          id: `unpaid-${i}`,
+          paymentState: 'NOT_CHARGED',
+          createdOn: new Date(`2026-10-0${i}T10:00:00Z`),
+          modifiedOn: new Date(`2026-10-0${i}T10:00:00Z`),
+        }),
+        { now, initial },
+      )
+    await orders.upsert(
+      order({
+        id: 'paid',
+        createdOn: new Date('2026-10-05T10:00:00Z'),
+        modifiedOn: new Date('2026-10-05T10:00:00Z'),
+      }),
+      { now, initial },
+    )
+    expect((await orders.listByMatchState('unmatched', 2)).map((o) => o.order.id)).toEqual([
+      'paid',
+      'unpaid-1',
+    ])
+    // an unpaid-looking order that already has a transaction is matchable
+    await orders.upsert(
+      order({
+        id: 'part',
+        paymentState: 'PARTIALLY_PAID',
+        createdOn: new Date('2026-10-06T10:00:00Z'),
+        modifiedOn: new Date('2026-10-06T10:00:00Z'),
+      }),
+      { now, initial },
+    )
+    await orders.upsert(
+      order({
+        id: 'pending-with-txn',
+        paymentState: 'PENDING',
+        createdOn: new Date('2026-10-07T10:00:00Z'),
+        modifiedOn: new Date('2026-10-07T10:00:00Z'),
+      }),
+      { now, initial },
+    )
+    await txns.upsert(txn({ id: 't-pw', orderId: 'pending-with-txn' }), { now, initial: { state: 'new' } })
+    expect((await orders.listByMatchState('unmatched', 4)).map((o) => o.order.id)).toEqual([
+      'paid',
+      'part',
+      'pending-with-txn',
+      'unpaid-1',
+    ])
+    // deferred refunds go after new transactions, however old
+    await txns.upsert(
+      txn({
+        id: 't-old-deferred',
+        kind: 'refund',
+        createdOn: new Date('2026-09-01T10:00:00Z'),
+        documentModifiedOn: new Date('2026-09-01T10:00:00Z'),
+      }),
+      { now, initial: { state: 'deferred' } },
+    )
+    await txns.upsert(
+      txn({
+        id: 't-new',
+        createdOn: new Date('2026-10-05T10:00:00Z'),
+        documentModifiedOn: new Date('2026-10-05T10:00:00Z'),
+      }),
+      { now, initial: { state: 'new' } },
+    )
+    expect((await txns.listByState(['new', 'deferred'], 10)).map((t) => t.txn.id)).toEqual([
+      't-new',
+      't-pw',
+      't-old-deferred',
+    ])
+  })
+
   it('contacts: upsert outcomes and listing', async () => {
     const { contacts, now } = repos()
     const c: SqspContact = { id: 'c-1', email: 'maria@example.com', name: 'Maria', phone: '5557120188' }
