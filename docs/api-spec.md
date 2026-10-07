@@ -159,12 +159,17 @@ listed in `ready.denied`. Frames:
 * `event: ready` first on every connection, data `{channels, denied, cursor, heartbeatMs}`; it carries an `id` only on
   fresh connections;
 * `event: resync` when `Last-Event-ID` can no longer be replayed (events older than the 10-minute retention were purged,
-  the cursor is ahead of the log after a restore, or it is not a number): data `{reason, latestId}`, `id: latestId`.
-  The client must refetch everything; no events are replayed;
+  the cursor is ahead of the log after a restore, or it is not a number; or the replay would exceed 5,000 events,
+  reason `replay_too_large`, sent after the events already written): data `{reason, latestId}`, `id: latestId`.
+  The client must refetch everything; on `cursor_expired` no events are replayed;
 * `: hb` comment every 20 s (`SSE_HEARTBEAT_MS`) so proxies keep the stream open;
 * `retry: 3000` once at the start.
 
 Resuming replays `id > Last-Event-ID` (same permission filters), then continues live with no gaps or duplicates.
+The log is in Postgres (`realtime_events`, ids from a database sequence), so an API restart, graceful or killed, loses
+nothing: a client that reconnects with its last id gets everything committed while the API was down, in order, once
+(`test/jobs/sse-restart.test.ts` restarts a real API process with SIGTERM and SIGKILL). A gap longer than the 10-minute
+retention gets `resync`.
 Delivery is at least once across reconnects; clients treat events as "refetch this" hints. Clients should also refetch on
 reconnect and on tab visibility and keep a 30-60 s fallback poll. At most 8 concurrent streams per user (429 beyond);
 a consumer that falls more than 1 MiB behind is disconnected and resumes with `Last-Event-ID`.
@@ -195,8 +200,8 @@ reloads new rows (with a 5 s safety-net poll and automatic reconnect plus catch-
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /healthz` | Liveness; no dependencies |
-| `GET /readyz` | 200 only when the database answers, every migration on disk is applied and unmodified, and the job queue is healthy; otherwise 503 with per-check detail. Point the external uptime monitor and nginx upstream check here |
+| `GET /healthz` | Liveness: always 200 while the process answers. The body reports the database and queue state, `{status: 'ok' \| 'degraded', checks: {db, jobs}}`, where `jobs` carries `detail`, `queue {queued, scheduled, active, failed, deadLetter, oldestQueuedAgeSeconds}` and `worker {state, lastRunAt}` (`ok`, `stale` after 10 minutes without a finished job, `unknown`) |
+| `GET /readyz` | 200 only when the database answers, every migration on disk is applied and unmodified, and the job queue is reachable; otherwise 503 with per-check detail (`checks.jobs` has the same queue and worker fields as `/healthz`). A stale worker or failed jobs are reported but do not make the API unready, so a proxy health check cannot turn a late reminder into an outage. Point the external uptime monitor and nginx upstream check here |
 | `GET /api/v1/openapi.json` | The OpenAPI 3.1 contract |
 | `GET`, `POST /dev-storage/*` | The simulator object store behind `STORAGE_PROVIDER=fs` (not mounted in production or for S3): the presigned photo POST (`/dev-storage/upload`, CORS for `PUBLIC_DASHBOARD_URL`) and the signed thumbnail and download URLs. Public routes: every URL carries its own signature, like S3 |
 
@@ -228,9 +233,11 @@ only be reachable on the tailnet listener.
   `declare module '../../platform/schema.js' { interface Database { customers: CustomersTable } }`.
 * Settings registry (`src/platform/settings.ts`): typed keys, defaults and validation; versioned, audited writes.
 * Seeds: `pnpm seed -- --profile <name>` (see `db/seeds/README.md`).
-* Jobs (`src/platform/jobs.ts`, `job-registry.ts`): pg-boss schema `pgboss`; `maintenance.purge` runs every 10 minutes
-  (expired idempotency keys, realtime events older than 10 min, webhook log older than 90 days; audit is never purged).
-  `JOBS_ENABLED=false` makes the queue inert. The worker is `src/worker.ts`; the API process only produces jobs.
+* Jobs (`src/platform/jobs.ts`, `job-registry.ts`, catalogue in `docs/jobs.md`): pg-boss schema `pgboss`, a dead-letter queue
+  `<job>.dead` per job, run records in `job_runs`. `maintenance.purge` runs every 10 minutes (expired idempotency keys,
+  realtime events older than 10 min, webhook log older than 90 days) and `maintenance.retention` daily (sessions, 24-month
+  messages, bookkeeping); the audit log is never purged. `JOBS_ENABLED=false` makes the queue inert. The worker is
+  `src/worker.ts` (`startWorker`); the API process only produces jobs.
 
 ## 12. Tests
 
@@ -403,6 +410,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | PATCH | `/api/v1/standing-series/:id` | sched.edit | required |
 | POST | `/api/v1/standing-series/:id/materialize` | sched.edit |  |
 | POST | `/api/v1/standing-series/materialize` | sched.edit |  |
+| GET | `/api/v1/system/jobs` | set.billing |  |
 | GET | `/api/v1/vip` | authenticated |  |
 | PUT | `/api/v1/vip` | cli.member |  |
 | GET | `/api/v1/vip/clients` | cli.member |  |
@@ -410,12 +418,12 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | DELETE | `/api/v1/vip/clients/:customerId` | cli.member |  |
 | POST | `/api/v1/vip/holds` | cli.member |  |
 | DELETE | `/api/v1/vip/holds/:id` | cli.member |  |
-| GET | `/dev-storage/*` | public |  |
-| POST | `/dev-storage/*` | public |  |
 | GET | `/api/v1/waitlist` | sched.view |  |
 | POST | `/api/v1/waitlist` | sched.edit |  |
 | POST | `/api/v1/waitlist/:id/accept` | sched.edit | required |
 | POST | `/api/v1/waitlist/:id/cancel` | sched.edit |  |
+| GET | `/dev-storage/*` | public |  |
+| POST | `/dev-storage/*` | public |  |
 | POST | `/hooks/squarespace` | webhook:squarespace |  |
 <!-- openapi:end -->
 
@@ -999,3 +1007,39 @@ One ops event per transition: `emergency.started` on close, `emergency.reopened 
 | `POST /waitlist/:id/accept` | `sched.edit`, **Idempotency-Key** | books the offered slot: `201 {entry, booking}`; `409 WAITLIST_NO_OFFER` or `SLOT_UNAVAILABLE`. |
 
 Jobs: `standing.materialize` (daily 04:00), `standing.autoconfirm` (hourly), `waitlist.offer_expiry` (every minute), all no-ops while the switch is off.
+## 25. System: background jobs
+
+Background jobs, their schedules, retention and the daylight-saving rules are catalogued in `docs/jobs.md` (generated from
+the registry and checked by `test/jobs/registry.test.ts`). ADRs 0090 to 0093.
+
+### 25.1 `GET /api/v1/system/jobs`
+
+Permission `set.billing` (Super Admin holds every key). Read-only; one row per registered job, sorted by name; never a job
+payload.
+
+```
+{ enabled, generatedAt,
+  queue:  { queued, scheduled, active, failed, deadLetter, oldestQueuedAgeSeconds },
+  worker: { state: 'ok' | 'stale' | 'unknown', lastRunAt },
+  jobs: [{ name, cron, tz, policy, retryLimit, retryDelaySeconds, expireInSeconds, nextRunAt,
+           lastStartedAt, lastFinishedAt, lastSuccessAt, lastErrorAt, lastError, lastDurationMs,
+           lastOutcome: 'running' | 'completed' | 'failed' | null,
+           runs, failures, consecutiveFailures, queued, scheduled, active, failed, deadLetter }] }
+```
+
+`queued` is waiting and due, `scheduled` is delayed (a delayed emergency reopen, a retry backing off), `failed` counts the
+retained rows whose retries are exhausted, `deadLetter` the rows in the job's `<name>.dead` queue (kept 30 days).
+`nextRunAt` is the next cron fire in the business timezone or the earliest delayed run. `lastError` is masked (phone numbers
+and emails) and cut at 500 characters. `worker.state` is `stale` when no job finished in the last 10 minutes and `unknown`
+when none ever ran. With `JOBS_ENABLED=false` the answer is `{enabled: false, jobs: []}`.
+
+### 25.2 Notifications and events the jobs produce
+
+| Source | What |
+|---|---|
+| any job, retries exhausted | notification `job.failed` to the managers (once per failure streak) |
+| `appointments.reminders`, `appointments.review_request` | SMS through the messaging queue (templates `confirm_request`, `reminder`, `review`), activity-log line "Reminder sent" / "Review request sent" |
+| `vip.hold_release_scan` | `ops` event `availability.changed {date}` when a held slot is released |
+| `credit.expire` | notification `credit.expired` to the managers and `payments` event `credit.expired {customerId, cents}` |
+| `payments.lag-scan` | `payments` event `reconciliation.stale` while card money waits for Squarespace |
+

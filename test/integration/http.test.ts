@@ -116,11 +116,14 @@ const start = async (extra: Partial<Parameters<typeof createTestApp>[0]> = {}): 
 const origin = 'http://localhost:3000'
 
 describe('system routes', () => {
-  it('GET /healthz is public and needs no database', async () => {
+  it('GET /healthz is public, always 200, and reports the database and queue state', async () => {
     const { app } = await start()
     const res = await app.inject({ url: '/healthz', headers: { 'x-test-anonymous': '1' } })
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({ status: 'ok' })
+    expect(res.json()).toEqual({
+      status: 'ok',
+      checks: { db: { ok: true, detail: 'ok' }, jobs: { ok: true, detail: 'not configured' } },
+    })
   })
 
   it('GET /readyz reports db, migrations and jobs', async () => {

@@ -246,7 +246,7 @@ run changes nothing and edits made after seeding survive (a retired task, a chan
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (83 tables, 1 view, 9 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (86 tables, 1 view, 9 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -510,6 +510,19 @@ Primary key `(id)`. Unique `(location_id, federal_key, federal_year)`. `(created
 
 Primary key `(id)`. Unique `(apply_event_id, lot_event_id)`. `(apply_event_id)` references `ledger_events(id)`. `(customer_id)` references `customers(id)`. `(lot_event_id)` references `ledger_events(id)`. 1 check constraint. Index `credit_allocations_customer_idx` `(customer_id)`. Index `credit_allocations_lot_idx` `(lot_event_id)`. Trigger: `credit_allocations_guard`.
 
+#### `credit_expiries`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `lot_event_id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `customer_id` | uuid | no |  |
+| `expired_cents` | integer | no |  |
+| `expires_at` | timestamp with time zone | no |  |
+| `recorded_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(lot_event_id)`. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. `(lot_event_id)` references `ledger_events(id)`. 1 check constraint. Index `credit_expiries_customer_idx` `(customer_id)`.
+
 #### `customers`
 
 | Column | Type | Null | Default |
@@ -769,6 +782,27 @@ Primary key `(id)`. Unique `(appointment_id)`. Unique `(location_id, invoice_no)
 | `created_at` | timestamp with time zone | no | `app_now()` |
 
 Primary key `(id)`. `(appointment_addon_id)` references `appointment_addons(id)` on delete set null. `(appointment_id)` references `appointments(id)` on delete cascade. `(done_by_employee_id)` references `employees(id)` on delete set null. `(source_task_id)` references `checklist_tasks(id)` on delete set null. 5 check constraints. Index `job_checklist_items_appointment_idx` `(appointment_id, "position")`. Index `job_checklist_items_task_idx` `(source_task_id)` where `source_task_id IS NOT NULL`.
+
+#### `job_runs`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `name` | text | no |  |
+| `runs` | bigint | no | `0` |
+| `failures` | bigint | no | `0` |
+| `consecutive_failures` | integer | no | `0` |
+| `last_job_id` | text | yes |  |
+| `last_attempt` | integer | no | `1` |
+| `last_outcome` | text | no |  |
+| `last_started_at` | timestamp with time zone | no |  |
+| `last_finished_at` | timestamp with time zone | yes |  |
+| `last_success_at` | timestamp with time zone | yes |  |
+| `last_error_at` | timestamp with time zone | yes |  |
+| `last_error` | text | yes |  |
+| `last_duration_ms` | integer | yes |  |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(name)`. 1 check constraint.
 
 #### `ledger_events`
 
@@ -1716,6 +1750,17 @@ Primary key `(id)`. `(customer_id)` references `customers(id)`. 2 check constrai
 | `added_at` | timestamp with time zone | no | `app_now()` |
 
 Primary key `(location_id, customer_id)`. `(added_by)` references `users(id)` on delete set null. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. Index `vip_clients_customer_idx` `(customer_id)`.
+
+#### `vip_hold_releases`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `hold_id` | uuid | no |  |
+| `slot_start` | timestamp with time zone | no |  |
+| `location_id` | uuid | no |  |
+| `released_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(hold_id, slot_start)`. `(hold_id)` references `vip_holds(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. Index `vip_hold_releases_slot_idx` `(slot_start)`.
 
 #### `vip_holds`
 

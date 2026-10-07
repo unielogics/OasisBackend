@@ -567,6 +567,20 @@ CREATE TABLE public.credit_allocations (
 );
 
 --
+-- Name: credit_expiries; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.credit_expiries (
+    lot_event_id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    expired_cents integer NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    recorded_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT credit_expiries_expired_cents_check CHECK ((expired_cents > 0))
+);
+
+--
 -- Name: customers; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -899,6 +913,28 @@ CREATE TABLE public.job_checklist_items (
     CONSTRAINT job_checklist_items_position_check CHECK (("position" >= 0)),
     CONSTRAINT job_checklist_items_section_kind_check CHECK ((section_kind = ANY (ARRAY['package'::text, 'addon'::text]))),
     CONSTRAINT job_checklist_items_section_title_check CHECK ((btrim(section_title) <> ''::text))
+);
+
+--
+-- Name: job_runs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.job_runs (
+    name text NOT NULL,
+    runs bigint DEFAULT 0 NOT NULL,
+    failures bigint DEFAULT 0 NOT NULL,
+    consecutive_failures integer DEFAULT 0 NOT NULL,
+    last_job_id text,
+    last_attempt integer DEFAULT 1 NOT NULL,
+    last_outcome text NOT NULL,
+    last_started_at timestamp with time zone NOT NULL,
+    last_finished_at timestamp with time zone,
+    last_success_at timestamp with time zone,
+    last_error_at timestamp with time zone,
+    last_error text,
+    last_duration_ms integer,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT job_runs_last_outcome_check CHECK ((last_outcome = ANY (ARRAY['running'::text, 'completed'::text, 'failed'::text])))
 );
 
 --
@@ -2015,6 +2051,17 @@ CREATE TABLE public.vip_clients (
 );
 
 --
+-- Name: vip_hold_releases; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.vip_hold_releases (
+    hold_id uuid NOT NULL,
+    slot_start timestamp with time zone NOT NULL,
+    location_id uuid NOT NULL,
+    released_at timestamp with time zone DEFAULT public.app_now() NOT NULL
+);
+
+--
 -- Name: vip_holds; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2255,6 +2302,13 @@ ALTER TABLE ONLY public.credit_allocations
     ADD CONSTRAINT credit_allocations_pkey PRIMARY KEY (id);
 
 --
+-- Name: credit_expiries credit_expiries_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.credit_expiries
+    ADD CONSTRAINT credit_expiries_pkey PRIMARY KEY (lot_event_id);
+
+--
 -- Name: customers customers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2393,6 +2447,13 @@ ALTER TABLE ONLY public.invoices
 
 ALTER TABLE ONLY public.job_checklist_items
     ADD CONSTRAINT job_checklist_items_pkey PRIMARY KEY (id);
+
+--
+-- Name: job_runs job_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.job_runs
+    ADD CONSTRAINT job_runs_pkey PRIMARY KEY (name);
 
 --
 -- Name: ledger_events ledger_events_idempotency_key_key; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2934,6 +2995,13 @@ ALTER TABLE ONLY public.vip_clients
     ADD CONSTRAINT vip_clients_pkey PRIMARY KEY (location_id, customer_id);
 
 --
+-- Name: vip_hold_releases vip_hold_releases_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vip_hold_releases
+    ADD CONSTRAINT vip_hold_releases_pkey PRIMARY KEY (hold_id, slot_start);
+
+--
 -- Name: vip_holds vip_holds_location_id_weekday_time_min_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3102,6 +3170,12 @@ CREATE INDEX credit_allocations_customer_idx ON public.credit_allocations USING 
 --
 
 CREATE INDEX credit_allocations_lot_idx ON public.credit_allocations USING btree (lot_event_id);
+
+--
+-- Name: credit_expiries_customer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX credit_expiries_customer_idx ON public.credit_expiries USING btree (customer_id);
 
 --
 -- Name: customers_email_trgm; Type: INDEX; Schema: public; Owner: -
@@ -3656,6 +3730,12 @@ CREATE INDEX vehicles_plate_idx ON public.vehicles USING btree (upper(plate)) WH
 CREATE INDEX vip_clients_customer_idx ON public.vip_clients USING btree (customer_id);
 
 --
+-- Name: vip_hold_releases_slot_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX vip_hold_releases_slot_idx ON public.vip_hold_releases USING btree (slot_start);
+
+--
 -- Name: waitlist_entries_match_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3933,6 +4013,27 @@ ALTER TABLE ONLY public.credit_allocations
 
 ALTER TABLE ONLY public.credit_allocations
     ADD CONSTRAINT credit_allocations_lot_event_id_fkey FOREIGN KEY (lot_event_id) REFERENCES public.ledger_events(id);
+
+--
+-- Name: credit_expiries credit_expiries_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.credit_expiries
+    ADD CONSTRAINT credit_expiries_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: credit_expiries credit_expiries_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.credit_expiries
+    ADD CONSTRAINT credit_expiries_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: credit_expiries credit_expiries_lot_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.credit_expiries
+    ADD CONSTRAINT credit_expiries_lot_event_id_fkey FOREIGN KEY (lot_event_id) REFERENCES public.ledger_events(id);
 
 --
 -- Name: customers customers_merged_into_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -4850,6 +4951,20 @@ ALTER TABLE ONLY public.vip_clients
 
 ALTER TABLE ONLY public.vip_clients
     ADD CONSTRAINT vip_clients_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: vip_hold_releases vip_hold_releases_hold_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vip_hold_releases
+    ADD CONSTRAINT vip_hold_releases_hold_id_fkey FOREIGN KEY (hold_id) REFERENCES public.vip_holds(id) ON DELETE CASCADE;
+
+--
+-- Name: vip_hold_releases vip_hold_releases_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vip_hold_releases
+    ADD CONSTRAINT vip_hold_releases_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 -- Name: vip_holds vip_holds_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
