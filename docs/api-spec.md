@@ -260,6 +260,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | PUT | `/api/v1/appointments/:id/checklist/items/:itemId` | jobs.checklist |  |
 | POST | `/api/v1/appointments/:id/complete` | jobs.status |  |
 | POST | `/api/v1/appointments/:id/confirm` | sched.edit | jobs.status |  |
+| POST | `/api/v1/appointments/:id/membership-perks/apply` | cli.member | required |
 | GET | `/api/v1/appointments/:id/messages` | cli.view |  |
 | POST | `/api/v1/appointments/:id/messages` | msg.send | required |
 | POST | `/api/v1/appointments/:id/no-show` | sched.cancel | required |
@@ -295,6 +296,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/closures/preview` | set.hours |  |
 | GET | `/api/v1/customers` | cli.view |  |
 | POST | `/api/v1/customers` | sched.edit |  |
+| GET | `/api/v1/customers/:id/membership` | cli.view |  |
 | GET | `/api/v1/customers/:id/messages` | cli.view |  |
 | POST | `/api/v1/customers/:id/messages/read` | msg.send |  |
 | GET | `/api/v1/customers/:id/sms-consent` | cli.view |  |
@@ -321,6 +323,17 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/api/v1/integrations/sms/devices/:id/health` | set.billing |  |
 | POST | `/api/v1/integrations/sms/devices/:id/register-webhooks` | set.billing |  |
 | POST | `/api/v1/integrations/sms/devices/:id/test` | set.billing |  |
+| POST | `/api/v1/integrations/squarespace/alerts/:id/resolve` | set.billing |  |
+| DELETE | `/api/v1/integrations/squarespace/connection` | set.billing |  |
+| PUT | `/api/v1/integrations/squarespace/connection` | set.billing |  |
+| PUT | `/api/v1/integrations/squarespace/customer-links/:sqspCustomerId` | set.billing |  |
+| GET | `/api/v1/integrations/squarespace/orders` | set.billing | pay.collect |  |
+| POST | `/api/v1/integrations/squarespace/orders/:id/ignore` | pay.collect | required |
+| POST | `/api/v1/integrations/squarespace/orders/:id/match` | pay.collect | required |
+| GET | `/api/v1/integrations/squarespace/product-map` | set.billing |  |
+| PUT | `/api/v1/integrations/squarespace/product-map` | set.billing |  |
+| GET | `/api/v1/integrations/squarespace/status` | set.billing |  |
+| POST | `/api/v1/integrations/squarespace/sync-now` | set.billing |  |
 | GET | `/api/v1/invoices/:id` | pay.reports |  |
 | POST | `/api/v1/invoices/:id/adjustments` | pay.adjust | required |
 | POST | `/api/v1/invoices/:id/credit-applications` | pay.collect | required |
@@ -337,6 +350,9 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/api/v1/me` | authenticated |  |
 | PUT | `/api/v1/me/preferences` | authenticated |  |
 | POST | `/api/v1/me/view-as` | authenticated |  |
+| GET | `/api/v1/memberships` | cli.member |  |
+| POST | `/api/v1/memberships` | cli.member |  |
+| PATCH | `/api/v1/memberships/:id` | cli.member |  |
 | POST | `/api/v1/messages/:id/cancel` | msg.send |  |
 | POST | `/api/v1/messages/:id/retry` | msg.send |  |
 | GET | `/api/v1/messages/inbox` | msg.send |  |
@@ -377,6 +393,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | DELETE | `/api/v1/vip/clients/:customerId` | cli.member |  |
 | POST | `/api/v1/vip/holds` | cli.member |  |
 | DELETE | `/api/v1/vip/holds/:id` | cli.member |  |
+| POST | `/hooks/squarespace` | webhook:squarespace |  |
 <!-- openapi:end -->
 
 ## 14. Identity: sign-in, sessions, RBAC, employees and roles
@@ -725,7 +742,7 @@ Code: `src/modules/messaging/` (pure policy, dispatcher and router from the firs
 `src/integrations/{sms,smsgate}` (provider port, adapter, simulators). Tables: migration `20261006200000_messaging.sql`.
 Decisions: ADRs 0060 to 0063. Device and tablet runbook: `docs/integrations/smsgate.md`.
 
-### 22.1 How a text moves
+### 23.1 How a text moves
 
 ```
 scheduling / payments / settings / people          DbMessageQueue.enqueue(tx, ...)   (the CALLER's transaction)
@@ -741,7 +758,7 @@ A booking that rolls back takes its text with it. Nothing is sent inline. A text
 caller learns `skipped` (`opted_out`, `not_opted_in`, `no_valid_phone`, `synthetic_number`, `not_allowlisted`, `too_long`,
 `template_error`) and scheduling writes it on the activity log ("... (not sent: customer opted out of SMS)").
 
-### 22.2 Endpoints (`/api/v1`)
+### 23.2 Endpoints (`/api/v1`)
 
 | Endpoint | Permission | Notes |
 |---|---|---|
@@ -768,7 +785,7 @@ caller learns `skipped` (`opted_out`, `not_opted_in`, `no_valid_phone`, `synthet
 `status` is `queued sending sent delivered failed received canceled expired`; the outbox states `accepted` and `sent` both read as `sent`.
 The dashboard's `MessagesPort.thread` is typed as a bare array today; the live wave must read `.items`.
 
-### 22.3 Realtime
+### 23.3 Realtime
 
 Channel `messages` (needs `cli.view`), full payload (the message as above): `message.out` (queued), `message.in` (received),
 `message.status {id, status, error, customerId, appointmentId, threadId}` on every state change. Channel `notifications`
@@ -780,7 +797,7 @@ employees with a login who hold `set.billing` or `sched.override` (Super Admin, 
 Needs Attention (alerts 10 and 11 of design 4.4, `src/modules/messaging/adapters/alerts.ts`): `new_reply` (one per appointment, or
 per customer when a reply could not be attributed; a customer's CANCEL is red) and `sms_device_down` (managers only).
 
-### 22.4 Policy summary
+### 23.4 Policy summary
 
 Every text has a class (`src/modules/messaging/policy/classes.ts`): lane 0 `welcome ready addon_approval staff_invite password_reset` and the keyword replies,
 lane 1 confirmations, receipts, payment links, `staff_message`, `quick_reply`, lane 2 `confirm_request reminder review late_nudge`,
@@ -789,7 +806,7 @@ lane 3 `emergency closure_notice broadcast`. Quiet hours (`SMS_QUIET_HOURS`, def
 fan-out is lane 3, not lane 0 (review B15): the blast can use at most 24 of the 30 segments in a window, so a ready-for-pickup
 text is never starved. Outside production only `SMS_ALLOWLIST` numbers are texted; synthetic (seed) numbers never in production.
 
-### 22.5 Webhook and listeners
+### 23.5 Webhook and listeners
 
 `POST /hooks/smsgate/:deviceKey` exists **only** on the second listener (`HOOKS_HOST:HOOKS_PORT`, default 127.0.0.1:3002, started by
 `src/server.ts`; `HOOKS_PORT=0` disables it; an occupied port is logged as an error and the process keeps running). The public
@@ -800,7 +817,7 @@ The envelope is persisted in `webhook_log` (unique `(provider, external_id)` = e
 (`sms_processed_events`, outbox, message, inbound routing, device health) happens in one transaction afterwards, and a sweep every
 30 s applies envelopes that were persisted but never applied (and abandons them after 24 h).
 
-### 22.6 Jobs and dispatch modes
+### 23.6 Jobs and dispatch modes
 
 `SMS_DISPATCH_MODE` decides who drains the outbox: `jobs` (default; the pg-boss worker), `inline` (the API process runs the
 loop; single-process deployments and the live-stack harness), `off`. Jobs (all in `src/platform/job-registry.ts`): `sms.dispatch`
@@ -809,7 +826,7 @@ minutes, plus housekeeping), `sms.device.healthcheck` (every minute), `sms.webho
 `src/server.ts`; also on every `app:started`), `email.send` (every minute). A session advisory lock per database schema keeps
 the worker and the inline runner from overlapping; the atomic claim keeps two dispatchers from sending one message twice anyway.
 
-### 22.7 Environment
+### 23.7 Environment
 
 New in `src/config/env.ts` (all optional): `SMS_DISPATCH_MODE`, `SMS_TICK_INTERVAL_MS` (2000), `SMS_QUIET_HOURS`, `SMSGATE_WEBHOOK_PUBLIC_URL`,
 `SMSGATE_API_PATH`, `SMSGATE_TIMEOUT_MS`, `SMSGATE_WEBHOOK_TOLERANCE_SECONDS`, `SMSGATE_RESEND_ATTEMPTS`, `SMSGATE_SIM_NUMBER`,
@@ -821,7 +838,7 @@ device credential is stored; outside production a fixed development key is used 
 `SMSGATE_DEVICE_URL`, `SMSGATE_USERNAME`, `SMSGATE_PASSWORD`, `SMSGATE_WEBHOOK_SECRET` are not read by the runtime (add the tablet
 through `POST /integrations/sms/devices`; the `design` seed adds a simulator device, key `sim-device-design`).
 
-### 22.8 Wiring
+### 23.8 Wiring
 
 `src/composition.ts`: `messagingRuntimeFor(deps)` (one runtime per `Env` object), `configureProductionSettings({clock, newId, messaging})`
 (closure notices and the emergency fan-out queue real texts and emails), `configureProductionPayments(rt)` (receipts and payment links; until it is
@@ -831,10 +848,59 @@ routes are mounted. `src/server.ts`: `MessagingAccountNotifier` for invites and 
 exist, else email through the EmailProvider; `delivered` is true only for a real SMS Gate device or SES), the hooks listener, the inline runner.
 Receipts go out as an SMS and an itemised email (`receipt` template built from the invoice and its ledger calc).
 
-### 22.9 Tests
+### 23.9 Tests
 
 `test/messaging-db/*` (Postgres, the in-process simulator, the HTTP simulator server and the real `src/server.ts` process; run
 `pnpm vitest run test/messaging-db`), `test/messaging/*` (pure units). Still to verify on the real tablet: the 20 items in section 2 of
 `docs/integrations/smsgate.md` (route path, duplicate-id 409, `textMessage`, signature on a real delivery, HTTPS to the tailnet name,
 Android's send limit, delivery reports, `sms:delivered` per multipart part, inbound sender format, RCS, reboot behaviour, the SIM slot
 mapping). Nothing here was run against a physical device.
+## 23. Squarespace sync and memberships
+
+Decisions: ADR 0070 (persistence), 0071 (ledger wiring), 0072 (jobs, credentials, environment), 0073 (memberships). Squarespace
+is read-only for payments; Oasis owns the ledger. Polling is the baseline; the webhook is an optional accelerator.
+
+### 23.1 Squarespace endpoints (`/api/v1/integrations/squarespace`)
+
+| Verb path | Permission | Notes |
+|---|---|---|
+| `GET /status` | `set.billing` | connection (never the key), per-resource sync state and lag, order and transaction counts by state, `manualQueueOpen`, `awaitingProcessor{count,cents}`, `deadLetters`, product map size, webhook state, open alerts. |
+| `POST /sync-now` | `set.billing` | `{resume?, rematch?}`. `202 {mode:"queued"}` when there is a queue (singleton), `200 {mode:"inline", result}` otherwise; `409 SQSP_NOT_CONFIGURED` without a key. `resume` clears a dead-lettered resource; `rematch` re-offers the manual queue to the matcher. |
+| `PUT /connection` | `set.billing` | `{apiKey, siteId?, verify=true}`: one read against Squarespace first (`422 SQSP_CONNECTION_FAILED`), then stored AES-256-GCM encrypted (`503` when `SECRETS_KEY` is unset). Returns the connection view; the key is never returned. `DELETE /connection` erases it and stops polling. |
+| `GET /product-map`, `PUT /product-map` | `set.billing` | rows `{productId?, sku?, name?, kind: membership\|service, plan?, planLabel?, intervalMonths?, serviceId?, active?}`; `PUT` replaces the whole map (422 with per-row errors), re-opens orders ignored only for `unmapped_sku`. `GET` adds `seen` (products on the last 90 days of orders, `mapped` or not) and the plans. |
+| `GET /orders?state=unmatched\|auto\|manual\|ignored\|membership\|all&limit&cursor` | `set.billing` or `pay.collect` | default `unmatched` = not yet matched or waiting in the manual queue. Each order carries its payments and refunds, the queue items (reason, scored suggestions), and `matches` (what was applied, confidence, variance). Contact details masked without `cli.contact`. Keyset pages (created time, id). |
+| `POST /orders/:id/match` | `pay.collect`, **Idempotency-Key** | `{eventId}` confirms a staff-recorded card payment or refund waiting on Squarespace; `{invoiceId}` records the payment as a `squarespace` pay event (`409 SQSP_MATCH_DUPLICATE` when the invoice already shows a waiting or equal card payment, unless `force`). `404 SQSP_ORDER_NOT_FOUND`, `409 SQSP_NOTHING_TO_MATCH`, `409 SQSP_ORDER_NOT_MATCHABLE`, `422 SQSP_MATCH_TARGET_REQUIRED`. |
+| `POST /orders/:id/ignore` | `pay.collect`, **Idempotency-Key** | `{reason?}`; idempotent; `409 SQSP_ORDER_ALREADY_MATCHED` once money is on an invoice. |
+| `PUT /customer-links/:sqspCustomerId` | `set.billing` | `{customerId}`; links a Squarespace customer to an Oasis customer and runs the membership pass. |
+| `POST /alerts/:id/resolve` | `set.billing` | closes a sync alert. |
+| `POST /hooks/squarespace` | signature | `Squarespace-Signature` (hex HMAC-SHA256 over the raw body, secret decoded from hex); `401` bad signature, `400` malformed, `200` stale / duplicate / ignored topic, `202` accepted. |
+
+`GET /payments/reconciliation` (Payments) now lists real `unmatchedOrders` (the manual queue) and `unmatchedTransactions`.
+
+### 23.2 Membership endpoints
+
+| Verb path | Permission | Notes |
+|---|---|---|
+| `GET /customers/:id/membership` | `cli.view` | `{membership, upgrade, history}`: plan (colours, tint, perks, percent perks as display data), status, renewal (`renewsAt`, `renewLabel`), months active, credits per rule (`left: null` = unlimited), retention, flags; for a non-member the upgrade candidacy (3 or more completed visits in 60 days); history (visits, lifetime spend, average days between visits, favourite package). |
+| `GET /memberships?status&plan&q&limit&cursor` | `cli.member` | members by customer name with a count per status. |
+| `POST /memberships` | `cli.member` | a member by hand (no subscription data): active, this cycle's credits granted. `409 MEMBERSHIP_EXISTS`. |
+| `PATCH /memberships/:id` | `cli.member` | `{status?, planKey?, planLabel?, renewsOn?, autoApply?, note?, expectedVersion?}`; holds against the inference until a newer paid order; `412` on a stale version; audited. |
+| `POST /appointments/:id/membership-perks/apply` | `cli.member`, **Idempotency-Key** | applies one credit as a system `adjust` (reason "Membership credit") equal to the package line. `404 MEMBERSHIP_NOT_FOUND`, `409 MEMBERSHIP_NOT_ACTIVE`, `MEMBERSHIP_NOT_ELIGIBLE`, `MEMBERSHIP_NO_CREDIT`, `MEMBERSHIP_CREDIT_APPLIED`, `MEMBERSHIP_NO_BALANCE`, `MEMBERSHIP_NO_INVOICE`, `MEMBERSHIP_APPOINTMENT_CLOSED`. |
+
+The Operations appointment file's `membership` (and the board's member badge) now come from the real port: `plan` is the label sold,
+`creditsLeft` (null = unlimited), `creditAvailable`, and additively `planKey`, `renewsAt`, `renewLabel`, `creditsUsed`, `perks`,
+`color`, `bgColor`, `tint`, `memberMonths`, `retention{label, desc, tone}`.
+
+### 23.3 Realtime and alerts
+
+`payments` channel: `squarespace.order_synced` `{orderId, orderNumber, matchState, invoiceId?}` whenever an order is stored or its match
+state changes; matches and confirmations also publish `invoice.updated` and `ledger.event` like a staff command. Operations alert 12
+(`awaiting_processor`: card money not confirmed after 2 hours; `unmatched_order`: orders waiting in the manual queue, managers only)
+is served by the alert source in `src/modules/payments-sync/db/queries.ts`.
+
+### 23.4 Jobs, environment, seeds, tests
+
+Jobs `sqsp.sync`, `sqsp.contacts`, `sqsp.reconcile`, `sqsp.webhook.process`, `membership.cycle` (ADR 0072). Environment: the
+`SQSP_*` variables in `src/config/env.ts` (all optional) and `SECRETS_KEY` (required to store the API key). Seed profile
+`memberships` (depends on `design`): plans, credit rules and the design's members (manual, no Squarespace ids). Run the simulator
+with `pnpm sim:squarespace`; the tests are `test/payments-sync-db/*` and `test/memberships/*`.

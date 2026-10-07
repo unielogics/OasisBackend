@@ -980,6 +980,96 @@ CREATE TABLE public.locations (
 );
 
 --
+-- Name: membership_credit_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.membership_credit_events (
+    id uuid NOT NULL,
+    membership_id uuid NOT NULL,
+    cycle_start timestamp with time zone NOT NULL,
+    kind text NOT NULL,
+    qty smallint,
+    rule_id uuid,
+    appointment_id uuid,
+    invoice_id uuid,
+    ledger_event_id uuid,
+    note text,
+    actor text,
+    actor_user_id uuid,
+    idempotency_key text,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT membership_credit_events_check CHECK (((qty IS NOT NULL) OR (kind = 'grant'::text))),
+    CONSTRAINT membership_credit_events_kind_check CHECK ((kind = ANY (ARRAY['grant'::text, 'reserve'::text, 'redeem'::text, 'restore'::text, 'protect'::text, 'expire'::text]))),
+    CONSTRAINT membership_credit_events_qty_check CHECK (((qty IS NULL) OR (qty > 0)))
+);
+
+--
+-- Name: membership_plans; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.membership_plans (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    key text NOT NULL,
+    name text NOT NULL,
+    color text NOT NULL,
+    bg_color text NOT NULL,
+    tint text NOT NULL,
+    sort integer DEFAULT 0 NOT NULL,
+    perks text[] DEFAULT '{}'::text[] NOT NULL,
+    addon_discount_bp integer DEFAULT 0 NOT NULL,
+    service_discount_bp integer DEFAULT 0 NOT NULL,
+    billing_interval_months integer DEFAULT 1 NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT membership_plans_addon_discount_bp_check CHECK (((addon_discount_bp >= 0) AND (addon_discount_bp <= 10000))),
+    CONSTRAINT membership_plans_billing_interval_months_check CHECK (((billing_interval_months >= 1) AND (billing_interval_months <= 12))),
+    CONSTRAINT membership_plans_key_check CHECK ((key = ANY (ARRAY['essential'::text, 'premium'::text, 'executive'::text, 'exotic'::text]))),
+    CONSTRAINT membership_plans_name_check CHECK ((btrim(name) <> ''::text)),
+    CONSTRAINT membership_plans_service_discount_bp_check CHECK (((service_discount_bp >= 0) AND (service_discount_bp <= 10000)))
+);
+
+--
+-- Name: memberships; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.memberships (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    plan_id uuid NOT NULL,
+    plan_label text NOT NULL,
+    status text NOT NULL,
+    source text NOT NULL,
+    sqsp_subscription_ref text,
+    sqsp_customer_id text,
+    sqsp_product_key text,
+    started_at timestamp with time zone NOT NULL,
+    current_period_start timestamp with time zone,
+    current_period_end timestamp with time zone,
+    canceled_at timestamp with time zone,
+    cancel_reason text,
+    last_sqsp_order_id text,
+    last_paid_at timestamp with time zone,
+    paid_order_count integer DEFAULT 0 NOT NULL,
+    in_grace boolean DEFAULT false NOT NULL,
+    manual_status_at timestamp with time zone,
+    review_flags jsonb DEFAULT '[]'::jsonb NOT NULL,
+    inference_reason text,
+    auto_apply boolean DEFAULT false NOT NULL,
+    last_synced_at timestamp with time zone,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT memberships_check CHECK (((current_period_end IS NULL) OR (current_period_start IS NULL) OR (current_period_end > current_period_start))),
+    CONSTRAINT memberships_plan_label_check CHECK ((btrim(plan_label) <> ''::text)),
+    CONSTRAINT memberships_source_check CHECK ((source = ANY (ARRAY['squarespace'::text, 'manual'::text]))),
+    CONSTRAINT memberships_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text, 'past_due'::text, 'paused'::text, 'canceled'::text])))
+);
+
+--
 -- Name: message_threads; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1145,6 +1235,24 @@ CREATE TABLE public.permissions (
     label text NOT NULL,
     has_limit boolean DEFAULT false NOT NULL,
     sort smallint NOT NULL
+);
+
+--
+-- Name: plan_credit_rules; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.plan_credit_rules (
+    id uuid NOT NULL,
+    plan_id uuid NOT NULL,
+    label text NOT NULL,
+    include_tags text[] NOT NULL,
+    exclude_tags text[] DEFAULT '{}'::text[] NOT NULL,
+    per_cycle integer,
+    sort integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT plan_credit_rules_include_tags_check CHECK ((cardinality(include_tags) > 0)),
+    CONSTRAINT plan_credit_rules_label_check CHECK ((btrim(label) <> ''::text)),
+    CONSTRAINT plan_credit_rules_per_cycle_check CHECK (((per_cycle IS NULL) OR (per_cycle > 0)))
 );
 
 --
@@ -1497,6 +1605,283 @@ ALTER TABLE public.sms_usage ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     NO MINVALUE
     NO MAXVALUE
     CACHE 1
+);
+
+--
+-- Name: sqsp_alerts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sqsp_alerts (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    dedupe_key text NOT NULL,
+    code text NOT NULL,
+    sqsp_order_id text,
+    sqsp_txn_id text,
+    invoice_id uuid,
+    message text NOT NULL,
+    variance jsonb,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    resolved_at timestamp with time zone,
+    resolved_by uuid
+);
+
+--
+-- Name: sqsp_connections; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sqsp_connections (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    auth_kind text DEFAULT 'api_key'::text NOT NULL,
+    api_key_enc text,
+    site_id text,
+    client_id text,
+    client_secret_enc text,
+    access_token_enc text,
+    refresh_token_enc text,
+    token_expires_at timestamp with time zone,
+    scopes text[] DEFAULT '{}'::text[] NOT NULL,
+    status text DEFAULT 'connected'::text NOT NULL,
+    last_error text,
+    last_verified_at timestamp with time zone,
+    created_by uuid,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT sqsp_connections_auth_kind_check CHECK ((auth_kind = ANY (ARRAY['api_key'::text, 'oauth'::text]))),
+    CONSTRAINT sqsp_connections_status_check CHECK ((status = ANY (ARRAY['connected'::text, 'error'::text, 'disconnected'::text])))
+);
+
+--
+-- Name: sqsp_contacts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sqsp_contacts (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    sqsp_contact_id text NOT NULL,
+    email text,
+    name text,
+    phone text,
+    created_on timestamp with time zone,
+    payload_hash text NOT NULL,
+    synced_at timestamp with time zone NOT NULL
+);
+
+--
+-- Name: sqsp_customer_links; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sqsp_customer_links (
+    location_id uuid NOT NULL,
+    sqsp_customer_id text NOT NULL,
+    customer_id uuid NOT NULL,
+    source text NOT NULL,
+    linked_by uuid,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT sqsp_customer_links_source_check CHECK ((source = ANY (ARRAY['email'::text, 'phone'::text, 'manual'::text])))
+);
+
+--
+-- Name: sqsp_manual_queue; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sqsp_manual_queue (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    idempotency_key text NOT NULL,
+    sqsp_order_id text NOT NULL,
+    sqsp_txn_id text,
+    reason text NOT NULL,
+    candidates jsonb DEFAULT '[]'::jsonb NOT NULL,
+    arrival jsonb NOT NULL,
+    variance jsonb,
+    state text DEFAULT 'open'::text NOT NULL,
+    resolution text,
+    resolved_at timestamp with time zone,
+    resolved_by uuid,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT sqsp_manual_queue_state_check CHECK ((state = ANY (ARRAY['open'::text, 'resolved'::text, 'ignored'::text])))
+);
+
+--
+-- Name: sqsp_matches; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sqsp_matches (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    idempotency_key text NOT NULL,
+    kind text NOT NULL,
+    sqsp_order_id text,
+    sqsp_txn_id text,
+    event_id uuid,
+    invoice_id uuid,
+    rule text,
+    confidence numeric(4,3),
+    variance jsonb,
+    manual boolean DEFAULT false NOT NULL,
+    actor_user_id uuid,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT sqsp_matches_kind_check CHECK ((kind = ANY (ARRAY['confirm_awaiting'::text, 'attach_refs'::text, 'record_payment'::text, 'confirm_refund'::text, 'external_refund'::text, 'manual_ignore'::text])))
+);
+
+--
+-- Name: sqsp_orders; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sqsp_orders (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    sqsp_order_id text NOT NULL,
+    order_number text NOT NULL,
+    created_on timestamp with time zone NOT NULL,
+    modified_on timestamp with time zone NOT NULL,
+    customer_email text,
+    customer_name text,
+    customer_phone text,
+    sqsp_customer_id text,
+    channel text,
+    fulfillment_status text,
+    payment_state text,
+    is_subscription boolean DEFAULT false NOT NULL,
+    grand_total_cents integer NOT NULL,
+    refunded_total_cents integer DEFAULT 0 NOT NULL,
+    subtotal_cents integer,
+    tax_cents integer,
+    currency text NOT NULL,
+    test_mode boolean DEFAULT false NOT NULL,
+    line_items jsonb DEFAULT '[]'::jsonb NOT NULL,
+    order_json jsonb NOT NULL,
+    raw jsonb,
+    payload_hash text NOT NULL,
+    customer_id uuid,
+    matched_invoice_id uuid,
+    match_state text DEFAULT 'unmatched'::text NOT NULL,
+    ignore_reason text,
+    first_seen_at timestamp with time zone NOT NULL,
+    synced_at timestamp with time zone NOT NULL,
+    matched_at timestamp with time zone,
+    CONSTRAINT sqsp_orders_match_state_check CHECK ((match_state = ANY (ARRAY['unmatched'::text, 'auto'::text, 'manual'::text, 'ignored'::text, 'membership'::text])))
+);
+
+--
+-- Name: sqsp_products; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sqsp_products (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    sqsp_product_id text,
+    sku text,
+    name text,
+    kind text NOT NULL,
+    plan_id uuid,
+    plan_label text,
+    interval_months integer DEFAULT 1 NOT NULL,
+    service_id uuid,
+    active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT sqsp_products_check CHECK (((sqsp_product_id IS NOT NULL) OR (sku IS NOT NULL))),
+    CONSTRAINT sqsp_products_check1 CHECK (((kind <> 'membership'::text) OR (plan_id IS NOT NULL))),
+    CONSTRAINT sqsp_products_interval_months_check CHECK (((interval_months >= 1) AND (interval_months <= 12))),
+    CONSTRAINT sqsp_products_kind_check CHECK ((kind = ANY (ARRAY['membership'::text, 'service'::text])))
+);
+
+--
+-- Name: sqsp_sync_errors; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sqsp_sync_errors (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    resource text NOT NULL,
+    key text NOT NULL,
+    kind text NOT NULL,
+    message text NOT NULL,
+    raw jsonb,
+    attempts integer DEFAULT 1 NOT NULL,
+    first_at timestamp with time zone NOT NULL,
+    last_at timestamp with time zone NOT NULL,
+    dead_lettered_at timestamp with time zone,
+    resolved_at timestamp with time zone,
+    CONSTRAINT sqsp_sync_errors_kind_check CHECK ((kind = ANY (ARRAY['mapping'::text, 'persist'::text]))),
+    CONSTRAINT sqsp_sync_errors_resource_check CHECK ((resource = ANY (ARRAY['orders'::text, 'transactions'::text, 'contacts'::text, 'reconcile'::text])))
+);
+
+--
+-- Name: sqsp_sync_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sqsp_sync_state (
+    location_id uuid NOT NULL,
+    resource text NOT NULL,
+    watermark timestamp with time zone,
+    in_flight jsonb,
+    phase text,
+    window_start timestamp with time zone,
+    last_run_at timestamp with time zone,
+    last_success_at timestamp with time zone,
+    status text DEFAULT 'idle'::text NOT NULL,
+    last_error text,
+    consecutive_failures integer DEFAULT 0 NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT sqsp_sync_state_phase_check CHECK (((phase IS NULL) OR (phase = ANY (ARRAY['orders'::text, 'transactions'::text])))),
+    CONSTRAINT sqsp_sync_state_resource_check CHECK ((resource = ANY (ARRAY['orders'::text, 'transactions'::text, 'contacts'::text, 'reconcile'::text]))),
+    CONSTRAINT sqsp_sync_state_status_check CHECK ((status = ANY (ARRAY['idle'::text, 'ok'::text, 'partial'::text, 'error'::text, 'dead_letter'::text])))
+);
+
+--
+-- Name: sqsp_transactions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sqsp_transactions (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    sqsp_txn_id text NOT NULL,
+    sqsp_order_id text,
+    kind text NOT NULL,
+    created_on timestamp with time zone NOT NULL,
+    amount_cents integer NOT NULL,
+    currency text NOT NULL,
+    brand text,
+    last4 text,
+    provider text,
+    document_id text,
+    payment_id text,
+    external_transaction_id text,
+    voided boolean DEFAULT false NOT NULL,
+    document_modified_on timestamp with time zone,
+    effective_modified_on timestamp with time zone NOT NULL,
+    customer_email text,
+    txn_json jsonb NOT NULL,
+    raw jsonb,
+    payload_hash text NOT NULL,
+    state text DEFAULT 'new'::text NOT NULL,
+    ignore_reason text,
+    matched_event_id uuid,
+    first_seen_at timestamp with time zone NOT NULL,
+    synced_at timestamp with time zone NOT NULL,
+    CONSTRAINT sqsp_transactions_kind_check CHECK ((kind = ANY (ARRAY['payment'::text, 'refund'::text]))),
+    CONSTRAINT sqsp_transactions_last4_check CHECK (((last4 IS NULL) OR (last4 ~ '^[0-9]{4}$'::text))),
+    CONSTRAINT sqsp_transactions_state_check CHECK ((state = ANY (ARRAY['new'::text, 'matched'::text, 'manual'::text, 'ignored'::text, 'deferred'::text, 'membership'::text])))
+);
+
+--
+-- Name: sqsp_webhook_subscriptions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sqsp_webhook_subscriptions (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    sqsp_subscription_id text NOT NULL,
+    topic text NOT NULL,
+    endpoint_url text NOT NULL,
+    secret_enc text,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    last_delivery_at timestamp with time zone,
+    CONSTRAINT sqsp_webhook_subscriptions_endpoint_url_check CHECK ((endpoint_url ~ '^https://'::text))
 );
 
 --
@@ -1914,6 +2299,41 @@ ALTER TABLE ONLY public.locations
     ADD CONSTRAINT locations_slug_key UNIQUE (slug);
 
 --
+-- Name: membership_credit_events membership_credit_events_idempotency_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_credit_events
+    ADD CONSTRAINT membership_credit_events_idempotency_key_key UNIQUE (idempotency_key);
+
+--
+-- Name: membership_credit_events membership_credit_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_credit_events
+    ADD CONSTRAINT membership_credit_events_pkey PRIMARY KEY (id);
+
+--
+-- Name: membership_plans membership_plans_location_id_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_plans
+    ADD CONSTRAINT membership_plans_location_id_key_key UNIQUE (location_id, key);
+
+--
+-- Name: membership_plans membership_plans_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_plans
+    ADD CONSTRAINT membership_plans_pkey PRIMARY KEY (id);
+
+--
+-- Name: memberships memberships_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memberships
+    ADD CONSTRAINT memberships_pkey PRIMARY KEY (id);
+
+--
 -- Name: message_threads message_threads_location_id_customer_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2003,6 +2423,13 @@ ALTER TABLE ONLY public.permissions
 
 ALTER TABLE ONLY public.permissions
     ADD CONSTRAINT permissions_sort_key UNIQUE (sort);
+
+--
+-- Name: plan_credit_rules plan_credit_rules_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.plan_credit_rules
+    ADD CONSTRAINT plan_credit_rules_pkey PRIMARY KEY (id);
 
 --
 -- Name: rbac_state rbac_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2157,6 +2584,153 @@ ALTER TABLE ONLY public.sms_processed_events
 
 ALTER TABLE ONLY public.sms_usage
     ADD CONSTRAINT sms_usage_pkey PRIMARY KEY (id);
+
+--
+-- Name: sqsp_alerts sqsp_alerts_location_id_dedupe_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_alerts
+    ADD CONSTRAINT sqsp_alerts_location_id_dedupe_key_key UNIQUE (location_id, dedupe_key);
+
+--
+-- Name: sqsp_alerts sqsp_alerts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_alerts
+    ADD CONSTRAINT sqsp_alerts_pkey PRIMARY KEY (id);
+
+--
+-- Name: sqsp_connections sqsp_connections_location_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_connections
+    ADD CONSTRAINT sqsp_connections_location_id_key UNIQUE (location_id);
+
+--
+-- Name: sqsp_connections sqsp_connections_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_connections
+    ADD CONSTRAINT sqsp_connections_pkey PRIMARY KEY (id);
+
+--
+-- Name: sqsp_contacts sqsp_contacts_location_id_sqsp_contact_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_contacts
+    ADD CONSTRAINT sqsp_contacts_location_id_sqsp_contact_id_key UNIQUE (location_id, sqsp_contact_id);
+
+--
+-- Name: sqsp_contacts sqsp_contacts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_contacts
+    ADD CONSTRAINT sqsp_contacts_pkey PRIMARY KEY (id);
+
+--
+-- Name: sqsp_customer_links sqsp_customer_links_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_customer_links
+    ADD CONSTRAINT sqsp_customer_links_pkey PRIMARY KEY (location_id, sqsp_customer_id);
+
+--
+-- Name: sqsp_manual_queue sqsp_manual_queue_idempotency_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_manual_queue
+    ADD CONSTRAINT sqsp_manual_queue_idempotency_key_key UNIQUE (idempotency_key);
+
+--
+-- Name: sqsp_manual_queue sqsp_manual_queue_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_manual_queue
+    ADD CONSTRAINT sqsp_manual_queue_pkey PRIMARY KEY (id);
+
+--
+-- Name: sqsp_matches sqsp_matches_idempotency_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_matches
+    ADD CONSTRAINT sqsp_matches_idempotency_key_key UNIQUE (idempotency_key);
+
+--
+-- Name: sqsp_matches sqsp_matches_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_matches
+    ADD CONSTRAINT sqsp_matches_pkey PRIMARY KEY (id);
+
+--
+-- Name: sqsp_orders sqsp_orders_location_id_sqsp_order_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_orders
+    ADD CONSTRAINT sqsp_orders_location_id_sqsp_order_id_key UNIQUE (location_id, sqsp_order_id);
+
+--
+-- Name: sqsp_orders sqsp_orders_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_orders
+    ADD CONSTRAINT sqsp_orders_pkey PRIMARY KEY (id);
+
+--
+-- Name: sqsp_products sqsp_products_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_products
+    ADD CONSTRAINT sqsp_products_pkey PRIMARY KEY (id);
+
+--
+-- Name: sqsp_sync_errors sqsp_sync_errors_location_id_resource_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_sync_errors
+    ADD CONSTRAINT sqsp_sync_errors_location_id_resource_key_key UNIQUE (location_id, resource, key);
+
+--
+-- Name: sqsp_sync_errors sqsp_sync_errors_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_sync_errors
+    ADD CONSTRAINT sqsp_sync_errors_pkey PRIMARY KEY (id);
+
+--
+-- Name: sqsp_sync_state sqsp_sync_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_sync_state
+    ADD CONSTRAINT sqsp_sync_state_pkey PRIMARY KEY (location_id, resource);
+
+--
+-- Name: sqsp_transactions sqsp_transactions_location_id_sqsp_txn_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_transactions
+    ADD CONSTRAINT sqsp_transactions_location_id_sqsp_txn_id_key UNIQUE (location_id, sqsp_txn_id);
+
+--
+-- Name: sqsp_transactions sqsp_transactions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_transactions
+    ADD CONSTRAINT sqsp_transactions_pkey PRIMARY KEY (id);
+
+--
+-- Name: sqsp_webhook_subscriptions sqsp_webhook_subscriptions_location_id_sqsp_subscription_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_webhook_subscriptions
+    ADD CONSTRAINT sqsp_webhook_subscriptions_location_id_sqsp_subscription_id_key UNIQUE (location_id, sqsp_subscription_id);
+
+--
+-- Name: sqsp_webhook_subscriptions sqsp_webhook_subscriptions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_webhook_subscriptions
+    ADD CONSTRAINT sqsp_webhook_subscriptions_pkey PRIMARY KEY (id);
 
 --
 -- Name: closures uq_closures_federal; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2483,6 +3057,24 @@ CREATE INDEX ledger_events_pending_idx ON public.ledger_events USING btree (loca
 CREATE INDEX ledger_events_sqsp_order_idx ON public.ledger_events USING btree (sqsp_order_id) WHERE (sqsp_order_id IS NOT NULL);
 
 --
+-- Name: membership_credit_events_cycle_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX membership_credit_events_cycle_idx ON public.membership_credit_events USING btree (membership_id, cycle_start);
+
+--
+-- Name: memberships_plan_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX memberships_plan_idx ON public.memberships USING btree (plan_id);
+
+--
+-- Name: memberships_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX memberships_status_idx ON public.memberships USING btree (location_id, status);
+
+--
 -- Name: message_threads_unread_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2559,6 +3151,12 @@ CREATE INDEX payment_links_active_idx ON public.payment_links USING btree (locat
 --
 
 CREATE INDEX payment_links_invoice_idx ON public.payment_links USING btree (invoice_id, created_at DESC);
+
+--
+-- Name: plan_credit_rules_plan_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX plan_credit_rules_plan_idx ON public.plan_credit_rules USING btree (plan_id, sort);
 
 --
 -- Name: realtime_events_at_idx; Type: INDEX; Schema: public; Owner: -
@@ -2681,6 +3279,90 @@ CREATE INDEX sms_usage_provider_idx ON public.sms_usage USING btree (provider_me
 CREATE INDEX sms_usage_window_idx ON public.sms_usage USING btree (device_id, COALESCE(sent_at, accepted_at));
 
 --
+-- Name: sqsp_alerts_open_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sqsp_alerts_open_idx ON public.sqsp_alerts USING btree (location_id, created_at DESC) WHERE (resolved_at IS NULL);
+
+--
+-- Name: sqsp_contacts_email_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sqsp_contacts_email_idx ON public.sqsp_contacts USING btree (location_id, lower(email)) WHERE (email IS NOT NULL);
+
+--
+-- Name: sqsp_customer_links_customer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sqsp_customer_links_customer_idx ON public.sqsp_customer_links USING btree (customer_id);
+
+--
+-- Name: sqsp_manual_queue_open_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sqsp_manual_queue_open_idx ON public.sqsp_manual_queue USING btree (location_id, created_at) WHERE (state = 'open'::text);
+
+--
+-- Name: sqsp_manual_queue_order_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sqsp_manual_queue_order_idx ON public.sqsp_manual_queue USING btree (location_id, sqsp_order_id);
+
+--
+-- Name: sqsp_matches_event_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sqsp_matches_event_idx ON public.sqsp_matches USING btree (event_id) WHERE (event_id IS NOT NULL);
+
+--
+-- Name: sqsp_matches_order_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sqsp_matches_order_idx ON public.sqsp_matches USING btree (location_id, sqsp_order_id);
+
+--
+-- Name: sqsp_orders_customer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sqsp_orders_customer_idx ON public.sqsp_orders USING btree (location_id, sqsp_customer_id) WHERE (sqsp_customer_id IS NOT NULL);
+
+--
+-- Name: sqsp_orders_email_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sqsp_orders_email_idx ON public.sqsp_orders USING btree (location_id, lower(customer_email)) WHERE (customer_email IS NOT NULL);
+
+--
+-- Name: sqsp_orders_modified_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sqsp_orders_modified_idx ON public.sqsp_orders USING btree (location_id, modified_on);
+
+--
+-- Name: sqsp_orders_state_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sqsp_orders_state_idx ON public.sqsp_orders USING btree (location_id, match_state, created_on);
+
+--
+-- Name: sqsp_sync_errors_open_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sqsp_sync_errors_open_idx ON public.sqsp_sync_errors USING btree (location_id, resource) WHERE (resolved_at IS NULL);
+
+--
+-- Name: sqsp_transactions_order_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sqsp_transactions_order_idx ON public.sqsp_transactions USING btree (location_id, sqsp_order_id);
+
+--
+-- Name: sqsp_transactions_state_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sqsp_transactions_state_idx ON public.sqsp_transactions USING btree (location_id, state, created_on) WHERE (state = ANY (ARRAY['new'::text, 'deferred'::text, 'manual'::text]));
+
+--
 -- Name: uq_appointment_addons_live; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2699,6 +3381,12 @@ CREATE UNIQUE INDEX uq_bay_occupied ON public.appointments USING btree (bay_id) 
 CREATE UNIQUE INDEX uq_closures_date_live ON public.closures USING btree (location_id, date) WHERE (deleted_at IS NULL);
 
 --
+-- Name: uq_credit_redeem_appointment; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_credit_redeem_appointment ON public.membership_credit_events USING btree (appointment_id) WHERE ((kind = 'redeem'::text) AND (appointment_id IS NOT NULL));
+
+--
 -- Name: uq_customers_phone; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2711,6 +3399,12 @@ CREATE UNIQUE INDEX uq_customers_phone ON public.customers USING btree (phone_e1
 CREATE UNIQUE INDEX uq_emergency_one_active ON public.emergency_closures USING btree (location_id) WHERE active;
 
 --
+-- Name: uq_memberships_customer_live; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_memberships_customer_live ON public.memberships USING btree (customer_id) WHERE (status = ANY (ARRAY['pending'::text, 'active'::text, 'past_due'::text, 'paused'::text]));
+
+--
 -- Name: uq_services_name; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2721,6 +3415,18 @@ CREATE UNIQUE INDEX uq_services_name ON public.services USING btree (location_id
 --
 
 CREATE UNIQUE INDEX uq_sms_opt_outs_active ON public.sms_opt_outs USING btree (location_id, phone_e164) WHERE (opted_in_again_at IS NULL);
+
+--
+-- Name: uq_sqsp_products_product; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_sqsp_products_product ON public.sqsp_products USING btree (location_id, sqsp_product_id) WHERE (sqsp_product_id IS NOT NULL);
+
+--
+-- Name: uq_sqsp_products_sku; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_sqsp_products_sku ON public.sqsp_products USING btree (location_id, lower(sku)) WHERE (sku IS NOT NULL);
 
 --
 -- Name: uq_vehicles_customer_plate; Type: INDEX; Schema: public; Owner: -
@@ -3274,6 +3980,76 @@ ALTER TABLE ONLY public.ledger_events
     ADD CONSTRAINT ledger_events_voids_event_id_fkey FOREIGN KEY (voids_event_id) REFERENCES public.ledger_events(id);
 
 --
+-- Name: membership_credit_events membership_credit_events_actor_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_credit_events
+    ADD CONSTRAINT membership_credit_events_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: membership_credit_events membership_credit_events_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_credit_events
+    ADD CONSTRAINT membership_credit_events_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id);
+
+--
+-- Name: membership_credit_events membership_credit_events_invoice_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_credit_events
+    ADD CONSTRAINT membership_credit_events_invoice_id_fkey FOREIGN KEY (invoice_id) REFERENCES public.invoices(id);
+
+--
+-- Name: membership_credit_events membership_credit_events_ledger_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_credit_events
+    ADD CONSTRAINT membership_credit_events_ledger_event_id_fkey FOREIGN KEY (ledger_event_id) REFERENCES public.ledger_events(id);
+
+--
+-- Name: membership_credit_events membership_credit_events_membership_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_credit_events
+    ADD CONSTRAINT membership_credit_events_membership_id_fkey FOREIGN KEY (membership_id) REFERENCES public.memberships(id) ON DELETE CASCADE;
+
+--
+-- Name: membership_credit_events membership_credit_events_rule_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_credit_events
+    ADD CONSTRAINT membership_credit_events_rule_id_fkey FOREIGN KEY (rule_id) REFERENCES public.plan_credit_rules(id) ON DELETE SET NULL;
+
+--
+-- Name: membership_plans membership_plans_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_plans
+    ADD CONSTRAINT membership_plans_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: memberships memberships_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memberships
+    ADD CONSTRAINT memberships_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: memberships memberships_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memberships
+    ADD CONSTRAINT memberships_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: memberships memberships_plan_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memberships
+    ADD CONSTRAINT memberships_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.membership_plans(id);
+
+--
 -- Name: message_threads message_threads_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3398,6 +4174,13 @@ ALTER TABLE ONLY public.payment_links
 
 ALTER TABLE ONLY public.payment_links
     ADD CONSTRAINT payment_links_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: plan_credit_rules plan_credit_rules_plan_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.plan_credit_rules
+    ADD CONSTRAINT plan_credit_rules_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.membership_plans(id) ON DELETE CASCADE;
 
 --
 -- Name: realtime_events realtime_events_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -3559,6 +4342,188 @@ ALTER TABLE ONLY public.sms_outbox
 
 ALTER TABLE ONLY public.sms_usage
     ADD CONSTRAINT sms_usage_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.sms_devices(id) ON DELETE CASCADE;
+
+--
+-- Name: sqsp_alerts sqsp_alerts_invoice_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_alerts
+    ADD CONSTRAINT sqsp_alerts_invoice_id_fkey FOREIGN KEY (invoice_id) REFERENCES public.invoices(id);
+
+--
+-- Name: sqsp_alerts sqsp_alerts_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_alerts
+    ADD CONSTRAINT sqsp_alerts_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: sqsp_alerts sqsp_alerts_resolved_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_alerts
+    ADD CONSTRAINT sqsp_alerts_resolved_by_fkey FOREIGN KEY (resolved_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: sqsp_connections sqsp_connections_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_connections
+    ADD CONSTRAINT sqsp_connections_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: sqsp_connections sqsp_connections_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_connections
+    ADD CONSTRAINT sqsp_connections_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: sqsp_contacts sqsp_contacts_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_contacts
+    ADD CONSTRAINT sqsp_contacts_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: sqsp_customer_links sqsp_customer_links_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_customer_links
+    ADD CONSTRAINT sqsp_customer_links_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: sqsp_customer_links sqsp_customer_links_linked_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_customer_links
+    ADD CONSTRAINT sqsp_customer_links_linked_by_fkey FOREIGN KEY (linked_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: sqsp_customer_links sqsp_customer_links_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_customer_links
+    ADD CONSTRAINT sqsp_customer_links_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: sqsp_manual_queue sqsp_manual_queue_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_manual_queue
+    ADD CONSTRAINT sqsp_manual_queue_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: sqsp_manual_queue sqsp_manual_queue_resolved_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_manual_queue
+    ADD CONSTRAINT sqsp_manual_queue_resolved_by_fkey FOREIGN KEY (resolved_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: sqsp_matches sqsp_matches_actor_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_matches
+    ADD CONSTRAINT sqsp_matches_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: sqsp_matches sqsp_matches_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_matches
+    ADD CONSTRAINT sqsp_matches_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.ledger_events(id);
+
+--
+-- Name: sqsp_matches sqsp_matches_invoice_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_matches
+    ADD CONSTRAINT sqsp_matches_invoice_id_fkey FOREIGN KEY (invoice_id) REFERENCES public.invoices(id);
+
+--
+-- Name: sqsp_matches sqsp_matches_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_matches
+    ADD CONSTRAINT sqsp_matches_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: sqsp_orders sqsp_orders_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_orders
+    ADD CONSTRAINT sqsp_orders_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: sqsp_orders sqsp_orders_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_orders
+    ADD CONSTRAINT sqsp_orders_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: sqsp_orders sqsp_orders_matched_invoice_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_orders
+    ADD CONSTRAINT sqsp_orders_matched_invoice_id_fkey FOREIGN KEY (matched_invoice_id) REFERENCES public.invoices(id);
+
+--
+-- Name: sqsp_products sqsp_products_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_products
+    ADD CONSTRAINT sqsp_products_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: sqsp_products sqsp_products_plan_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_products
+    ADD CONSTRAINT sqsp_products_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.membership_plans(id);
+
+--
+-- Name: sqsp_products sqsp_products_service_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_products
+    ADD CONSTRAINT sqsp_products_service_id_fkey FOREIGN KEY (service_id) REFERENCES public.services(id);
+
+--
+-- Name: sqsp_sync_errors sqsp_sync_errors_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_sync_errors
+    ADD CONSTRAINT sqsp_sync_errors_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: sqsp_sync_state sqsp_sync_state_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_sync_state
+    ADD CONSTRAINT sqsp_sync_state_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: sqsp_transactions sqsp_transactions_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_transactions
+    ADD CONSTRAINT sqsp_transactions_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: sqsp_transactions sqsp_transactions_matched_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_transactions
+    ADD CONSTRAINT sqsp_transactions_matched_event_id_fkey FOREIGN KEY (matched_event_id) REFERENCES public.ledger_events(id);
+
+--
+-- Name: sqsp_webhook_subscriptions sqsp_webhook_subscriptions_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sqsp_webhook_subscriptions
+    ADD CONSTRAINT sqsp_webhook_subscriptions_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 -- Name: user_preferences user_preferences_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

@@ -41,6 +41,8 @@ export interface CommandContext {
   audit: AuditContext
   /** The request's Idempotency-Key header, namespaced per actor into the ledger event keys. */
   idempotencyKey: string | null
+  /** Ledger source of the events this command writes; `system` for effects Oasis applies on a person's behalf (membership credit). */
+  source?: 'oasis' | 'system'
 }
 
 export interface CommandResult {
@@ -156,7 +158,7 @@ export class PaymentsService {
       actor_roles: c.actor.rolesFor(perm) || null,
       view_as_role_id: c.actor.viewAsRoleId,
       occurred_at: now,
-      source: 'oasis',
+      source: c.source ?? 'oasis',
       idempotency_key: this.ledgerKey(c, suffix),
     }
   }

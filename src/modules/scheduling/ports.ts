@@ -352,6 +352,18 @@ export interface MembershipInfo {
   creditsLeft: number | null
   /** An unused eligible credit exists for this appointment. */
   creditAvailable: boolean
+  /** Additive display data from the Memberships vertical for the Membership tab; the in-memory port leaves them out. */
+  planKey?: 'essential' | 'premium' | 'executive' | 'exotic'
+  /** Renewal instant (ISO) and its label in the business timezone ("Jul 12, 2026"). */
+  renewsAt?: string | null
+  renewLabel?: string | null
+  creditsUsed?: number
+  perks?: string[]
+  color?: string
+  bgColor?: string
+  tint?: string
+  memberMonths?: number
+  retention?: { label: string; desc: string; tone: 'green' | 'red' }
 }
 
 export interface MembershipRef {

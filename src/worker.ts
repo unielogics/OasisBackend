@@ -1,8 +1,10 @@
 import { loadEnv } from './config/env.js'
+import { configureProductionSchedulingJobs } from './composition.js'
 import { createClock } from './platform/clock.js'
 import { createDb } from './platform/db.js'
 import { jobDefinitions } from './platform/job-registry.js'
 import { createJobs } from './platform/jobs.js'
+import { createIdGenerator } from './platform/ids.js'
 import { createLogger } from './platform/logging.js'
 
 async function main(): Promise<void> {
@@ -24,6 +26,7 @@ async function main(): Promise<void> {
     clock,
     applicationName: 'oasis-worker',
   })
+  configureProductionSchedulingJobs({ clock, newId: createIdGenerator(clock) })
   const jobs = createJobs({
     connectionString: env.DATABASE_URL,
     schema: env.PGBOSS_SCHEMA,

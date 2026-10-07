@@ -35,3 +35,7 @@
 | [0061](0061-sms-webhook-listener-and-processing.md) | The SMS Gate webhook: second listener, persist then apply, one transaction per event |
 | [0062](0062-sms-dispatch-topology-and-health.md) | Dispatch topology, leader lock and device health consequences |
 | [0063](0063-messaging-wiring-and-deviations.md) | Messaging wiring across modules, and deviations from the first spec |
+| [0070](0070-squarespace-sync-persistence.md) | Squarespace read side: persistence, idempotent upserts, dead letters, alerts |
+| [0071](0071-squarespace-ledger-wiring.md) | Squarespace sync over the real ledger: commands, variance, external refunds, the manual queue |
+| [0072](0072-squarespace-jobs-runtime-credentials.md) | Squarespace jobs, runtime seam, encrypted credentials, environment, webhook |
+| [0073](0073-memberships.md) | Memberships: plans, credits, inference, apply credit, the Operations port |

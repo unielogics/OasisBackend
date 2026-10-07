@@ -2,21 +2,27 @@
 // both call this, so the test exercises exactly what runs in production.
 import type { AppDeps } from './app.js'
 import type { StorageProvider } from './integrations/ports/storage.js'
+import { dbMembershipPort } from './modules/memberships/port.js'
 import { messagingAlertSource } from './modules/messaging/adapters/alerts.js'
 import { createDbPaymentOutbox } from './modules/messaging/adapters/payments.js'
 import { MessagingClosureNotifier, MessagingEmergencyNotifier } from './modules/messaging/adapters/settings.js'
 import { MessagingRuntime, runtimeFor, type LoggerLike } from './modules/messaging/runtime.js'
+import { combineExternalAlerts, sqspCardHints, sqspExternalAlerts, sqspUnmatched } from './modules/payments-sync/db/queries.js'
 import { createGatewayFor } from './modules/payments/module.js'
 import { createPaymentMessenger, type PaymentMessenger } from './modules/payments/messenger.js'
 import { defaultPorts as defaultPaymentsPorts, type PaymentsPorts } from './modules/payments/ports.js'
 import { ledgerRevenueSource } from './modules/payments/revenue.js'
-import { noMemberships, type SchedulingPorts } from './modules/scheduling/ports.js'
+import type { ExternalAlertSource, SchedulingPorts } from './modules/scheduling/ports.js'
 import { syncChecklistTemplate } from './modules/scheduling/checklist-sync.js'
+import { configureSchedulingJobs } from './modules/scheduling/jobs.js'
 import { ActivityClosureNotifier, ActivityEmergencyNotifier } from './modules/settings/db-adapters/index.js'
 import { configureSettings } from './modules/settings/http/runtime.js'
 import type { Clock } from './platform/clock.js'
 import { createIdGenerator, type NewId } from './platform/ids.js'
 import type { Db } from './platform/db.js'
+
+/** Needs Attention alerts 10-12: unread replies and a down SMS device (messaging), Squarespace money waiting (payments-sync). */
+export const productionExternalAlerts: ExternalAlertSource = combineExternalAlerts(messagingAlertSource, sqspExternalAlerts)
 
 type MessagingDeps = Pick<AppDeps, 'db' | 'clock' | 'env'> & { newId?: NewId }
 
@@ -35,8 +41,8 @@ export function schedulingPortsFor(deps: MessagingDeps, rt: MessagingRuntime): S
   return {
     invoices: createGatewayFor({ clock: deps.clock, newId: deps.newId ?? createIdGenerator(deps.clock) }),
     messages: rt.queue,
-    memberships: noMemberships,
-    externalAlerts: messagingAlertSource,
+    memberships: dbMembershipPort,
+    externalAlerts: productionExternalAlerts,
     revenue: ledgerRevenueSource,
     storage: unusedStorage(),
   }
@@ -109,5 +115,22 @@ export function productionPaymentsPorts(): Partial<PaymentsPorts> {
       sendPaymentLink: (tx, n) => pick().sendPaymentLink(tx, n),
       sendReceipt: (tx, n) => pick().sendReceipt(tx, n),
     },
+    // the reconciliation lists and the card hint read the Squarespace sync tables
+    unmatched: sqspUnmatched,
+    cardHints: sqspCardHints,
   }
+}
+
+/**
+ * The worker's alerts scan (appointments.late_scan) computes the same "Needs attention" set the API serves, so it gets the same
+ * real ports: the invoice gateway, ledger revenue, the memberships port (alert 9) and the Squarespace alert source (alert 12).
+ * Without this the scan would run on the in-memory defaults and announce a different alert set than the board shows.
+ */
+export function configureProductionSchedulingJobs(deps: { clock: Clock; newId: NewId }): void {
+  configureSchedulingJobs({
+    invoices: createGatewayFor(deps),
+    revenue: ledgerRevenueSource,
+    memberships: dbMembershipPort,
+    externalAlerts: productionExternalAlerts,
+  })
 }

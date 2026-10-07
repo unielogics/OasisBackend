@@ -134,7 +134,8 @@ SquarespaceClient (live) | InProcessSquarespace / HTTP sim  --implements-->  Squ
 ```
 
 Code: `src/integrations/squarespace/**` (client, mappers, webhook, oauth, simulator) and `src/modules/payments-sync/**`
-(sync, matcher, membership, runner). No database code lives in either: the integrator implements the interfaces.
+(sync, matcher, membership, runner) hold no database code; the Postgres repositories, jobs and routes live in
+`src/modules/payments-sync/{db,jobs,http}` and `src/modules/memberships` (ADRs 0070-0073).
 
 ### Client
 Typed mapping to the port types (extended additively: phone, customer id, payment state, tax and subtotal cents, provider,
