@@ -82,9 +82,12 @@ export function loggerOptions(cfg: LoggerConfig = {}): LoggerOptions {
     redact: { paths: REDACT_PATHS, censor: '[redacted]' },
     serializers: {
       // Error text (message, stack, cause chain) often embeds user input such as a phone number or email.
-      err: (e: Error) => {
-        const o = pino.stdSerializers.err(e)
-        return { ...o, message: maskText(o.message), stack: o.stack ? maskText(o.stack) : o.stack }
+      // Call sites log both `{ err }` (an Error) and `{ err: error.message }` (a string): pino hands either to this serializer.
+      err: (e: unknown) => {
+        if (typeof e === 'string') return maskText(e)
+        if (e === null || typeof e !== 'object') return e
+        const o = pino.stdSerializers.err(e as Error)
+        return { ...o, message: maskText(o.message ?? ''), stack: o.stack ? maskText(o.stack) : o.stack }
       },
       req: (r: { method?: string; url?: string; hostname?: string; host?: string; ip?: string }) => ({
         method: r.method,

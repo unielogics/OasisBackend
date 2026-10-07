@@ -94,7 +94,7 @@ describe('pg-boss jobs against the simulator', () => {
     const by = Object.fromEntries(sched.map((s) => [s.name, s]))
     expect(by['sqsp.sync']?.cron).toBe('*/2 * * * *')
     expect(by['sqsp.contacts']?.cron).toBe('17 * * * *')
-    expect(by['sqsp.reconcile']?.cron).toBe('30 2 * * *')
+    expect(by['sqsp.reconcile']?.cron).toBe('30 3 * * *')
     expect(by['membership.cycle']?.cron).toBe('0 3 * * *')
     expect(by['sqsp.webhook.process']).toBeUndefined() // queue only
     for (const n of ['sqsp.sync', 'sqsp.reconcile', 'membership.cycle'])

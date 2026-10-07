@@ -3,7 +3,7 @@
 //   sqsp.sync            every SQSP_POLL_INTERVAL_SECONDS: orders then transactions (watermark, overlap, 7-day chunks), then the
 //                        match runner, then the membership pass when orders changed
 //   sqsp.contacts        hourly: contacts (no modified filter: full read) and the customer links
-//   sqsp.reconcile       nightly 02:30: re-read the last 45 days and match whatever the poll missed
+//   sqsp.reconcile       nightly 03:30 (not 02:30: that hour is skipped on spring-forward day, ADR 0090): re-read the last 45 days and match whatever the poll missed
 //   sqsp.webhook.process queue only: fetch the order a verified notification names and match
 // A run that Squarespace rejects or that cannot persist is recorded in sqsp_sync_state (and dead-lettered after 5 consecutive
 // failures: polling stops until "Sync now" with resume), it does not throw, so pg-boss does not pile retries on top of it.
@@ -36,7 +36,7 @@ export interface SyncJobData {
 
 export const sqspSyncJob: JobDefinition<SyncJobData> = {
   name: 'sqsp.sync',
-  policy: 'singleton',
+  policy: 'stately',
   cron: pollCron(pollSeconds),
   retryLimit: 0,
   expireInSeconds: 15 * 60,
@@ -69,7 +69,7 @@ export const sqspSyncJob: JobDefinition<SyncJobData> = {
 
 export const sqspContactsJob: JobDefinition = {
   name: 'sqsp.contacts',
-  policy: 'singleton',
+  policy: 'stately',
   cron: '17 * * * *',
   retryLimit: 0,
   expireInSeconds: 15 * 60,
@@ -89,8 +89,8 @@ export const sqspContactsJob: JobDefinition = {
 
 export const sqspReconcileJob: JobDefinition = {
   name: 'sqsp.reconcile',
-  policy: 'singleton',
-  cron: '30 2 * * *',
+  policy: 'stately',
+  cron: '30 3 * * *',
   retryLimit: 1,
   expireInSeconds: 30 * 60,
   async handler(ctx) {

@@ -12,6 +12,7 @@ import { dbMembershipPort } from '../modules/memberships/port.js'
 import { squarespaceHookModule, squarespaceModule } from '../modules/payments-sync/http/module.js'
 import { createSchedulingModule } from '../modules/scheduling/module.js'
 import { settingsModule } from '../modules/settings/http/module.js'
+import { systemModule } from '../modules/system/index.js'
 import type { AppInstance } from './types.js'
 
 export type ApiModule = (app: AppInstance, deps: AppDeps) => void | Promise<void>
@@ -48,5 +49,6 @@ export const apiModules: ApiModule[] = [
   createMessagingModule((deps) => runtimeOf(deps)),
   squarespaceModule,
   membershipsModule,
+  systemModule,
 ]
 export const hookModules: ApiModule[] = [squarespaceHookModule]

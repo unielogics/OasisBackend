@@ -40,7 +40,7 @@ export async function runDispatchWindow(rt: MessagingRuntime, o: { windowMs?: nu
 export const smsDispatchJob: JobDefinition = {
   name: 'sms.dispatch',
   cron: '* * * * *',
-  policy: 'singleton',
+  policy: 'stately',
   retryLimit: 0,
   expireInSeconds: 180,
   async handler(ctx) {

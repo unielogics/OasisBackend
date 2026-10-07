@@ -343,7 +343,7 @@ describe('jobs', () => {
 
   it('the job registry carries the messaging jobs on their schedules', () => {
     const byName = Object.fromEntries(jobDefinitions.map((j) => [j.name, j]))
-    expect(byName['sms.dispatch']).toMatchObject({ cron: '* * * * *', policy: 'singleton' })
+    expect(byName['sms.dispatch']).toMatchObject({ cron: '* * * * *', policy: 'stately' })
     expect(byName['sms.reconcile']).toMatchObject({ cron: '*/2 * * * *' })
     expect(byName['sms.device.healthcheck']).toMatchObject({ cron: '* * * * *' })
     expect(byName['sms.webhooks.register']).toMatchObject({ cron: '7 * * * *' })
