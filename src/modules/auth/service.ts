@@ -355,7 +355,8 @@ export class AuthService {
       })
       return t
     })
-    await this.deliver(
+    // Not awaited: the SMS or email hop would make a known address answer slower than an unknown one. deliver() never rejects.
+    void this.deliver(
       'password_reset',
       { employeeId: u.employee_id, first: u.first, phone: u.phone_e164 ?? u.phone, email: u.email },
       issued,
