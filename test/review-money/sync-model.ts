@@ -138,10 +138,12 @@ export class SyncModel {
 
   private newOrder(c: Cust, o: { paid: boolean }): { orderId: string; paymentId?: string; amount: number } {
     const taxSq = this.chance(0.85) ? c.tax : c.tax + this.pick([-300, -2, 1, 2, 500])
+    // now and then the order carries another e-mail and phone than the customer on file (work address, spouse's phone)
+    const other = this.chance(0.15)
     const res = this.R.store.createOrder({
-      email: c.email,
+      email: other ? `other-${c.email}` : c.email,
       name: 'Cust Test',
-      phone: c.phone,
+      phone: other ? '7865550100' : c.phone,
       lineItems: [{ productId: 'p', sku: 'DET', name: 'Full Detail', unitCents: c.items }],
       taxCents: taxSq,
       pay: o.paid ? undefined : false,
@@ -180,6 +182,7 @@ export class SyncModel {
       'counter-order-first',
       'counter-order-first',
       'link-payment',
+      'late-paid-order',
       'stray',
       'refund-pair',
       'refund-pair',
@@ -225,6 +228,17 @@ export class SyncModel {
         const o = this.newOrder(c, { paid: true })
         c.realPayments.push({ orderId: o.orderId, paymentId: o.paymentId!, amount: o.amount })
         if (this.chance(0.5)) await this.staffCollect(c)
+        break
+      }
+      case 'late-paid-order': {
+        // the order exists before it is paid (unpaid, then the card goes through); the cashier may record it in between
+        if (c.realPayments.length > 0 || c.strayStaff > 0) break
+        const o = this.newOrder(c, { paid: false })
+        if (this.chance(0.6)) await this.cycle()
+        if (this.chance(0.4)) await this.staffCollect(c)
+        this.tick(this.pick([60_000, 20 * 60_000, 5 * H]))
+        const pid = this.R.store.addPayment(o.orderId, { amountCents: o.amount, paidOn: this.R.clock.now() })
+        c.realPayments.push({ orderId: o.orderId, paymentId: pid, amount: o.amount })
         break
       }
       case 'stray': {
