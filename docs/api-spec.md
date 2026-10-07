@@ -446,6 +446,8 @@ Requests resolve authority from `rbac_state.version` (read in the same query as 
 transaction and publishes `rbac.changed` on the `settings` realtime channel, so a change applies to signed-in people on
 their next request and clients can refetch `/me`.
 
+Role money limits: the request is dollars, everything returned is cents. `PUT /roles/:id/limits/:kind` takes the chip in dollars; `GET /roles` (`limits`, `limitChoicesCents`), `GET /me` (`permissions.*.limit`, `limits`) and the PUT response (`limitCents`) are integer cents with `null` for No limit. `test/scheduling-gaps/role-limit-units.test.ts` fails if the behaviour, the OpenAPI descriptions or this paragraph disagree.
+
 For other modules: `access.perm('x')` on the route; in a handler `req.auth` carries `permissions`, `limits` (cents; `null` =
 unlimited; compare `amount > limit`), `actorName`, `roles` (names), `viewAsRoleId` and `realUserId`. `sessionContext(req)`
 (`src/modules/auth/context.ts`) returns the richer `SessionAuthContext` (`employee`, `isSuper`, `canViewAs`, `viewAsRole`,
@@ -490,7 +492,7 @@ response carries a warning instead. Email must be unique across employees and lo
 | `POST /roles` | `team.roles` | `{name?, description?}`; default name `Shift Lead`, then `Shift Lead 2`...; copies Crew plus `sched.edit`; limits 25/25/25; 201. An explicit duplicate name is 409 `ROLE_NAME_TAKEN`. |
 | `PATCH /roles/:id` | `team.roles` | Rename/describe; the locked role answers 409 `ROLE_LOCKED`. Optional `If-Match`. |
 | `PUT /roles/:id/permissions/:key` `{granted}` | `team.roles` | Idempotent. Locked role: 409 `ROLE_LOCKED` ("Super Admin always has every permission"). Granting `set.billing` or `pay.void` needs a Super Admin. |
-| `PUT /roles/:id/limits/:kind` `{value}` | `team.roles` + Super Admin | `value` in 25, 50, 100, 250, 500, 1000 (dollars) or `null`; stored in cents. 403 `SUPER_ONLY` for anyone else, 409 `ROLE_LOCKED` for the locked role. |
+| `PUT /roles/:id/limits/:kind` `{value}` | `team.roles` + Super Admin | `value` is **dollars, not cents**: one of 25, 50, 100, 250, 500, 1000 or `null` (No limit), the design's chips; anything else is 422 `Choose 25, 50, 100, 250, 500, 1000 or No limit` (so `2500` is refused). Stored in cents; the response is `{roleId, kind, limitCents}` in **cents** (`25` becomes `2500`). 403 `SUPER_ONLY` for anyone else, 409 `ROLE_LOCKED` for the locked role. |
 | `DELETE /roles/:id` | `team.roles` | Custom roles only (409 `ROLE_NOT_REMOVABLE`). Strips the role from people, assigns Crew to anyone left with no role, drops exceptions of those people that became no-ops (an Allow a remaining role already grants, a Deny of something no remaining role grants; what they can do is unchanged), returns `{removed, affected, reassignedToCrew}`. |
 
 ### 14.7 Invariants

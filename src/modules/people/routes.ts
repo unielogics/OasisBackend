@@ -118,7 +118,9 @@ const RoleView = z.object({
   version: z.number().int(),
 })
 
-const LimitRecord = z.record(z.string(), z.number().int().nullable())
+const LimitRecord = z
+  .record(z.string(), z.number().int().nullable())
+  .describe('Money limits per kind (refund, adjust, credit) in CENTS; null is No limit')
 
 /** If-Match: "3", W/"3" or 3. */
 export function parseIfMatch(req: FastifyRequest): number {
@@ -333,8 +335,14 @@ export function registerPeopleRoutes(app: AppInstance, identityOf: IdentityProvi
               }),
             ),
             matrix: z.record(z.string(), z.record(z.string(), z.boolean())),
-            limits: z.record(z.string(), LimitRecord),
-            limitChoicesCents: z.array(z.number().int().nullable()),
+            limits: z
+              .record(z.string(), LimitRecord)
+              .describe('roleId to money limits in CENTS (null = No limit; no stored row reads as the 2500 default)'),
+            limitChoicesCents: z
+              .array(z.number().int().nullable())
+              .describe(
+                'The limit chips in CENTS (2500 ... 100000, then null for No limit); PUT /roles/{id}/limits/{kind} takes the same chips in DOLLARS',
+              ),
             rbacVersion: z.number().int(),
           }),
         },
@@ -433,6 +441,9 @@ export function registerPeopleRoutes(app: AppInstance, identityOf: IdentityProvi
               .refine(
                 (v) => (LIMIT_CHOICES_DOLLARS as readonly (number | null)[]).includes(v),
                 'Choose 25, 50, 100, 250, 500, 1000 or No limit',
+              )
+              .describe(
+                'DOLLARS, not cents: one of 25, 50, 100, 250, 500, 1000, or null for No limit (25 becomes 2500 cents)',
               ),
           })
           .strict(),
@@ -440,7 +451,7 @@ export function registerPeopleRoutes(app: AppInstance, identityOf: IdentityProvi
           200: z.object({
             roleId: z.string(),
             kind: z.enum(LIMIT_KINDS),
-            limitCents: z.number().int().nullable(),
+            limitCents: z.number().int().nullable().describe('The stored limit in CENTS; null is No limit'),
           }),
         },
       },

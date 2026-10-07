@@ -46462,6 +46462,7 @@
                   "additionalProperties": false,
                   "properties": {
                     "limitChoicesCents": {
+                      "description": "The limit chips in CENTS (2500 ... 100000, then null for No limit); PUT /roles/{id}/limits/{kind} takes the same chips in DOLLARS",
                       "items": {
                         "anyOf": [
                           {
@@ -46490,11 +46491,13 @@
                             }
                           ]
                         },
+                        "description": "Money limits per kind (refund, adjust, credit) in CENTS; null is No limit",
                         "propertyNames": {
                           "type": "string"
                         },
                         "type": "object"
                       },
+                      "description": "roleId to money limits in CENTS (null = No limit; no stored row reads as the 2500 default)",
                       "propertyNames": {
                         "type": "string"
                       },
@@ -46954,7 +46957,8 @@
                       {
                         "type": "null"
                       }
-                    ]
+                    ],
+                    "description": "DOLLARS, not cents: one of 25, 50, 100, 250, 500, 1000, or null for No limit (25 becomes 2500 cents)"
                   }
                 },
                 "required": [
@@ -46991,7 +46995,8 @@
                         {
                           "type": "null"
                         }
-                      ]
+                      ],
+                      "description": "The stored limit in CENTS; null is No limit"
                     },
                     "roleId": {
                       "type": "string"
