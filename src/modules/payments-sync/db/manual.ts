@@ -87,6 +87,8 @@ export async function manualMatch(
     },
   ).filter((a) => !all.some((t) => t.txn.id === a.transactionId && t.state === 'matched'))
   if (arrivals.length === 0) throw new AppError('SQSP_NOTHING_TO_MATCH')
+  // the matcher queues non-USD money for a person; a person must not book foreign cents as dollars
+  if (arrivals.some((a) => a.currency !== 'USD')) throw new AppError('SQSP_MATCH_CURRENCY')
 
   const actorCtx: CommandActor = { ...actor, manual: true }
   let invoiceId = input.invoiceId

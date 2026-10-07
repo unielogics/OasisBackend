@@ -43,6 +43,11 @@ registerProblems({
     detail:
       'This invoice already shows a payment of the same amount. Confirm that one instead, or match with force',
   },
+  SQSP_MATCH_CURRENCY: {
+    status: 422,
+    title: 'Not a US dollar order',
+    detail: 'This order was paid in another currency, so it cannot be recorded against a dollar invoice',
+  },
   SQSP_EVENT_NOT_AWAITING: {
     status: 409,
     title: 'Not waiting on Squarespace',
