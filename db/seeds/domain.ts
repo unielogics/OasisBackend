@@ -676,10 +676,15 @@ export async function seedDomainDesign(ctx: SeedContext): Promise<void> {
       .onConflict((oc) => oc.expression(sql`customer_id, upper(plate)`).doNothing())
       .execute()
   }
-  for (const name of DESIGN_VIP_NAMES) {
+  // the list is ordered by when each client was added: one second apart, in the design's order
+  for (const [i, name] of DESIGN_VIP_NAMES.entries()) {
     await tx
       .insertInto('vip_clients')
-      .values({ location_id: location.id, customer_id: customerIds.get(name)! })
+      .values({
+        location_id: location.id,
+        customer_id: customerIds.get(name)!,
+        added_at: new Date(optedInAt.getTime() - (DESIGN_VIP_NAMES.length - i) * 1000),
+      })
       .onConflict((oc) => oc.columns(['location_id', 'customer_id']).doNothing())
       .execute()
   }
