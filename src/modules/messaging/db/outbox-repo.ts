@@ -107,8 +107,13 @@ export class PgOutboxRepository implements OutboxRepository {
     return r ? itemOf(r) : null
   }
 
+  /**
+   * Inside a transaction the row is locked, so two webhook events for one message (sent and delivered arrive together) are
+   * applied one after the other, each deciding on the state the previous one committed.
+   */
   async findByProviderMessageId(providerMessageId: string): Promise<OutboxItem | null> {
-    const q = this.exec.selectFrom('sms_outbox').selectAll()
+    const base = this.exec.selectFrom('sms_outbox').selectAll()
+    const q = this.exec.isTransaction ? base.forUpdate() : base
     const r = await (isUuid(providerMessageId)
       ? q.where((eb) =>
           eb.or([
@@ -141,6 +146,11 @@ export class PgOutboxRepository implements OutboxRepository {
     }
     if (patch.state !== undefined && patch.state !== 'inflight') set.locked_at = null
     return inTx(this.exec, async (tx) => {
+      if (patch.state === 'accepted') {
+        // The device can report sent or delivered before the send call returns: never move a message backwards to accepted.
+        const cur = await tx.selectFrom('sms_outbox').select('state').where('id', '=', id).forUpdate().executeTakeFirst()
+        if (cur && cur.state !== 'inflight' && cur.state !== 'accepted') delete set.state
+      }
       const row = await tx
         .updateTable('sms_outbox')
         .set(set as never)

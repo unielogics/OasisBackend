@@ -72,6 +72,11 @@ export function useWorld(o: { start?: string; env?: Record<string, string>; auto
       if (c.phone_e164) customers.set(c.full_name, { id: c.id, phone: c.phone_e164 })
     for (const s of await t.db.selectFrom('services').select(['id', 'name', 'price_cents', 'duration_min']).where('kind', '=', 'package').execute())
       services.set(s.name, { id: s.id, price: s.price_cents, duration: s.duration_min })
+    // The people seed creates employees and roles but no logins (unless SEED_DEV_PASSWORD is set): give each one a login so
+    // "managers" (people who hold sched.override or set.billing) exist for notifications.
+    await sql`insert into users (id, employee_id, email, password_hash)
+      select gen_random_uuid(), e.id, lower(e.first) || '@example.test', 'not-a-real-hash' from employees e
+      where not exists (select 1 from users u where u.employee_id = e.id)`.execute(t.db)
     const allow = [...[...customers.values()].map((c) => c.phone), STRANGER, '+13055550198'].join(',')
     env = loadEnv({
       NODE_ENV: 'test',
@@ -175,6 +180,7 @@ export function useWorld(o: { start?: string; env?: Record<string, string>; auto
         .select(['id', 'direction', 'status', 'body', 'template_key', 'appointment_id', 'klass', 'error'])
         .where('customer_id', '=', self.customer(name).id)
         .orderBy('queued_at')
+        .orderBy('direction')
         .orderBy('id')
         .execute()
     },

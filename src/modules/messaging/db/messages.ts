@@ -146,7 +146,10 @@ export interface ThreadFilter {
   limit?: number
 }
 
-/** Oldest first, the order a conversation is read in. The last `limit` messages when the thread is longer. */
+/**
+ * Oldest first, the order a conversation is read in (the last `limit` messages when it is longer). Two texts queued in the
+ * same instant read inbound first: a reply is always queued after the text it answers.
+ */
 export async function listThreadMessages(db: Executor, locationId: string, f: ThreadFilter): Promise<MessageDto[]> {
   let q = db
     .selectFrom('messages as m')
@@ -156,7 +159,7 @@ export async function listThreadMessages(db: Executor, locationId: string, f: Th
     .where('m.channel', '=', 'sms')
   if (f.appointmentId) q = q.where('m.appointment_id', '=', f.appointmentId)
   if (f.customerId) q = q.where('m.customer_id', '=', f.customerId)
-  const rows = await q.orderBy('m.queued_at', 'desc').orderBy('m.id', 'desc').limit(f.limit ?? 200).execute()
+  const rows = await q.orderBy('m.queued_at', 'desc').orderBy('m.direction', 'desc').orderBy('m.id', 'desc').limit(f.limit ?? 200).execute()
   const tz = await locationTz(db, locationId)
   return rows.reverse().map((r) => toMessageDto(r, tz))
 }

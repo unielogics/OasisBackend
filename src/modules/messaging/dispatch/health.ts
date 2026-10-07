@@ -148,16 +148,23 @@ export class DeviceHealthMonitor {
 
 /** Turns a provider health() result into the signal the monitor takes (both adapters put `status` and `charging` in details). */
 export function signalFromHealth(health: SmsDeviceHealth, at: Date): HealthSignal {
-  const details = (health.details ?? {}) as { reachable?: boolean; status?: string; charging?: boolean }
+  const details = (health.details ?? {}) as {
+    reachable?: boolean
+    status?: string
+    charging?: boolean
+    checks?: Record<string, { observedValue?: unknown }>
+  }
   const reachable = details.reachable ?? health.ok
   if (!reachable) return { kind: 'poll_failed', at }
+  const plugged = details.checks?.['battery:charging']?.observedValue
+  const charging = details.charging ?? (typeof plugged === 'number' ? plugged > 0 : undefined)
   const status = details.status === 'pass' || details.status === 'warn' || details.status === 'fail' ? details.status : health.ok ? 'pass' : 'fail'
   return {
     kind: 'poll_ok',
     at,
     healthStatus: status,
     ...(health.battery !== undefined ? { battery: health.battery } : {}),
-    ...(details.charging !== undefined ? { charging: details.charging } : {}),
+    ...(charging !== undefined ? { charging } : {}),
   }
 }
 
