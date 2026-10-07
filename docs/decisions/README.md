@@ -39,7 +39,6 @@
 | [0071](0071-squarespace-ledger-wiring.md) | Squarespace sync over the real ledger: commands, variance, external refunds, the manual queue |
 | [0072](0072-squarespace-jobs-runtime-credentials.md) | Squarespace jobs, runtime seam, encrypted credentials, environment, webhook |
 | [0073](0073-memberships.md) | Memberships: plans, credits, inference, apply credit, the Operations port |
-| [0073](0073-memberships.md) | Memberships: plans, credits, inference and the Operations port |
 | [0080](0080-emergency-single-event-per-transition.md) | Emergency closing: one ops event per transition (started, reopened) |
 | [0081](0081-role-limit-units.md) | Role money limits: dollars in, cents out, pinned by a test |
 | [0082](0082-cancel-and-no-show-execute-the-deposit-policy.md) | Cancel and no-show execute the deposit policy through the payments commands |
