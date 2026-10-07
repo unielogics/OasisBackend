@@ -437,6 +437,7 @@ export class SqspLedgerOps {
       rule: i.paymentLinkId ? 'link' : 'manual',
     })
     if (!claimed) return { eventId: await this.existingEvent(tx, i.idempotencyKey) }
+    if (!actor.manual) await this.assertDecisionStillHolds(tx, inv.id, i)
     const before = await this.invoiceSnapshot(tx, inv.id)
     const now = this.d.clock.now()
     const card = cardLabel(i.brand)
@@ -489,6 +490,29 @@ export class SqspLedgerOps {
       },
     })
     return { eventId: row.id }
+  }
+
+  /**
+   * The matcher decided on a snapshot taken before this transaction got the invoice lock. A staff member may have collected
+   * the balance or recorded the card payment since, and the webhook job and the poll can book one payment under two keys (the
+   * order-level and the transaction-level arrival). A decision the invoice no longer supports is refused; the run is retried
+   * on a fresh snapshot, where the money is recognised as already recorded or confirms the staff entry.
+   */
+  private async assertDecisionStillHolds(
+    tx: Tx,
+    invoiceId: string,
+    i: { amountCents: number; sqspOrderId: string; processorRef?: string },
+  ): Promise<void> {
+    const calc = await calcOf(tx, invoiceId)
+    const open = await sql<{ id: string }>`
+      select e.id from ledger_events e
+      where e.invoice_id = ${invoiceId} and e.type = 'pay'
+        and not exists (select 1 from ledger_events v where v.voids_event_id = e.id)
+        and (e.processor_state = 'awaiting_processor'
+          or (e.sqsp_order_id = ${i.sqspOrderId} and e.amount_cents = ${i.amountCents}
+              and (${i.processorRef ?? null}::text is null or e.processor_ref is null or e.processor_ref = ${i.processorRef ?? null})))
+      limit 1`.execute(tx)
+    if (calc.balance <= 0 || open.rows.length > 0) throw new AppError('CONCURRENT_UPDATE')
   }
 
   async confirmRefund(
