@@ -505,6 +505,36 @@ describe('updating employees', () => {
     })
   })
 
+  it('announces every change to the team on the settings channel so open screens reload the list', async () => {
+    const sup = await asSuper(h)
+    const made = (await create(h, sup.session, valid())).json()
+    const id = made.employee.id as string
+    expect((await put(sup.session, id, { title: 'Lead' }, made.employee.version)).statusCode).toBe(200)
+    expect((await h.call('POST', `employees/${id}/deactivate`, { session: sup.session })).statusCode).toBe(
+      200,
+    )
+    expect((await h.call('POST', `employees/${id}/reactivate`, { session: sup.session })).statusCode).toBe(
+      200,
+    )
+    const events = await h.t.db
+      .selectFrom('realtime_events')
+      .select(['channel', 'type', 'payload'])
+      .where('type', '=', 'settings.changed')
+      .orderBy('id')
+      .execute()
+    const team = events.filter((e) => (e.payload as Json).section === 'employees')
+    expect(team.map((e) => (e.payload as Json).reason)).toEqual([
+      'employee.create',
+      'employee.update',
+      'employee.deactivate',
+      'employee.reactivate',
+    ])
+    for (const e of team) {
+      expect(e.channel).toBe('settings')
+      expect((e.payload as Json).employeeId).toBe(id)
+    }
+  })
+
   it('syncs the login email when an employee with a login changes it, and refuses to blank it', async () => {
     const sup = await asSuper(h)
     const user = await h.createUser({ email: 'kai@example.test', roles: ['crew'] })

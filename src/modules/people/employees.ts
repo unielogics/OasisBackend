@@ -587,6 +587,7 @@ export class PeopleService {
       await this.writeSchedule(tx, id, schedule)
       const inv = await this.d.auth.issueInvite(tx, id, actor.userId)
       const version = await bumpRbacVersion(tx)
+      await this.announce(tx, actor.locationId, id, 'employee.create')
       await audit.record(tx, {
         locationId: actor.locationId,
         action: 'employee.create',
@@ -762,6 +763,7 @@ export class PeopleService {
           payload: { reason: 'employee.access', employeeId: id, rbacVersion },
         })
       }
+      await this.announce(tx, actor.locationId, id, 'employee.update')
       await audit.record(tx, {
         locationId: actor.locationId,
         action: 'employee.update',
@@ -781,6 +783,16 @@ export class PeopleService {
       })
     })
     return { employee: await this.detail(this.d.db, actor, id), warnings }
+  }
+
+  /** Tells every open Settings screen to reload the employee list (the settings channel is readable by anyone signed in). */
+  private async announce(tx: Tx, locationId: string, employeeId: string, reason: string): Promise<void> {
+    await realtime.publish(tx, {
+      locationId,
+      channel: 'settings',
+      type: 'settings.changed',
+      payload: { section: 'employees', employeeId, reason },
+    })
   }
 
   // --- lifecycle ------------------------------------------------------------------------------------------------
@@ -819,6 +831,7 @@ export class PeopleService {
         .where('revoked_at', 'is', null)
         .execute()
       if (isSuper) await assertSuperRemains(tx)
+      await this.announce(tx, actor.locationId, id, 'employee.deactivate')
       await audit.record(tx, {
         locationId: actor.locationId,
         action: 'employee.deactivate',
@@ -853,6 +866,7 @@ export class PeopleService {
         .where('id', '=', id)
         .execute()
       if (user) await tx.updateTable('users').set({ disabled_at: null }).where('id', '=', user.id).execute()
+      await this.announce(tx, actor.locationId, id, 'employee.reactivate')
       await audit.record(tx, {
         locationId: actor.locationId,
         action: 'employee.reactivate',
