@@ -742,6 +742,11 @@ export class PaymentsService {
         detail: 'Refunds were issued against this payment, so it can no longer be voided',
       })
     }
+    if (calc.paidOrig - pay.amount_cents < calc.refOrig) {
+      throw new AppError('VOID_NOT_ALLOWED', {
+        detail: 'Refunds were paid out against this payment, so it can no longer be voided',
+      })
+    }
     const now = this.d.clock.now()
     const row = await insertEvent(tx, {
       ...this.base(c, inv, 'pay.void', now),
