@@ -156,7 +156,13 @@ export function registerAuthRoutes(app: AppInstance, identityOf: IdentityProvide
       user: z.infer<typeof SignedInResponse>['user']
     },
   ) => {
-    setSessionCookie(reply, app.env, r.session.token, r.session.expiresAt)
+    const { clock } = await identityOf()
+    setSessionCookie(
+      reply,
+      app.env,
+      r.session.token,
+      (r.session.expiresAt.getTime() - clock.now().getTime()) / 1000,
+    )
     noStore(reply)
     return { user: r.user, csrfToken: r.session.csrfToken }
   }

@@ -33,7 +33,9 @@ describe('login, cookie and session model', () => {
     expect(raw).toMatch(/HttpOnly/i)
     expect(raw).toMatch(/SameSite=Lax/i)
     expect(raw).toMatch(/Path=\//)
-    expect(raw).toMatch(/Expires=/i)
+    // relative lifetime: a frozen or offset server clock must not hand the browser a cookie that is already expired
+    expect(raw).toMatch(new RegExp(`Max-Age=${SESSION_ABSOLUTE_MS / 1000}(;|$)`, 'i'))
+    expect(raw).not.toMatch(/Expires=/i)
     expect(raw).not.toMatch(/Secure/i)
 
     const token = res.cookies[0]!.value
