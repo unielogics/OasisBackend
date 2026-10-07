@@ -1,14 +1,13 @@
 import type { Clock } from '../../../platform/clock.js'
 import type { SmsEvent, SmsPriority, SmsProvider, SmsState } from '../../../integrations/ports/sms.js'
 import { SmsProviderError } from '../../../integrations/sms/errors.js'
-import { prepareSmsBody } from '../../../integrations/sms/gsm.js'
-import { prepareOutboundBody } from '../policy/body.js'
 import { expiryFor } from '../policy/body.js'
-import { canSendSms, type SmsDecision, type SmsDenyReason, type SmsPolicyContext, type SmsRecipient } from '../policy/canSend.js'
-import { classSpec, isTransactional, type SmsClass } from '../policy/classes.js'
+import type { SmsDenyReason, SmsPolicyContext, SmsRecipient } from '../policy/canSend.js'
+import { isTransactional, type SmsClass } from '../policy/classes.js'
 import { DEFAULT_QUIET_HOURS, isQuietHour, type QuietHoursConfig } from '../policy/quietHours.js'
 import { canSpend, DEFAULT_BUDGET, nextFit, snapshot, type BudgetConfig, type BudgetSnapshot } from './budget.js'
 import { estimateQueue, type QueueEstimate } from './eta.js'
+import { planEnqueue } from './enqueue.js'
 import { DeviceHealthMonitor, type HealthEvaluation } from './health.js'
 import { backoffMs, DEFAULT_RETRY, DEFAULT_TRANSIENT_REASONS, isTransientReason, nextRetryProviderId, type RetryConfig } from './retry.js'
 import type { DeviceState, OutboxItem, OutboxRepository } from './types.js'
@@ -130,10 +129,6 @@ export class Dispatcher {
     private readonly cfg: DispatcherConfig,
   ) {}
 
-  private policyContext(now: Date): SmsPolicyContext {
-    return { now, environment: this.cfg.environment, allowlist: this.cfg.allowlist, quietHours: this.cfg.quietHours }
-  }
-
   // ---- enqueue ---------------------------------------------------------------------------------------------------
 
   async enqueue(input: EnqueueInput): Promise<EnqueueResult> {
@@ -143,54 +138,19 @@ export class Dispatcher {
     const existing = await this.outbox.get(input.messageId)
     if (existing) return { status: 'duplicate', id: existing.id }
 
-    const decision: SmsDecision = canSendSms(input.recipient, { klass: input.klass }, this.policyContext(now))
-    if (decision.verdict === 'deny') return { status: 'suppressed', reason: decision.reason }
-    const phone = input.recipient.phone as string // canSendSms denied when null
-
-    if (prepareSmsBody(input.text, undefined).body.length === 0) return { status: 'rejected', reason: 'empty' }
-    const first = !(await this.outbox.hasPriorOutbound(phone))
-    const prepared = prepareOutboundBody(input.text, input.klass, { firstMessageToNumber: first })
-    if (prepared.segments > this.cfg.maxSegments) return { status: 'rejected', reason: 'too_long', segments: prepared.segments }
-
-    const holdUntil = decision.verdict === 'hold' ? decision.holdUntil : null
-    const ttlAt = expiryFor(input.klass, now, holdUntil, input.ttlOverrideSec)
-    const item: OutboxItem = {
-      id: input.messageId,
-      messageId: input.messageId,
-      toE164: phone,
-      body: prepared.body,
-      encoding: prepared.encoding,
-      segments: prepared.segments,
-      klass: input.klass,
-      priority: input.priority ?? classSpec(input.klass).priority,
-      state: 'pending',
-      attempts: 0,
-      deviceFailures: 0,
-      reconcileResends: 0,
-      nextAttemptAt: holdUntil,
-      providerMessageId: null,
-      deviceId: this.cfg.deviceId,
-      simSlot: input.simSlot ?? this.cfg.simSlot,
-      lastError: null,
-      queuedAt: now,
-      ttlAt,
-      holdUntil,
-      acceptedAt: null,
-      sentAt: null,
-      deliveredAt: null,
-      failedAt: null,
-      lastReconciledAt: null,
-    }
+    const plan = await planEnqueue(input, { now, cfg: this.cfg, hasPriorOutbound: (phone) => this.outbox.hasPriorOutbound(phone) })
+    if (plan.status !== 'ready') return plan
+    const { item, holdUntil } = plan
     if (!(await this.outbox.insert(item))) return { status: 'duplicate', id: item.id }
     return {
       status: holdUntil ? 'held' : 'queued',
       id: item.id,
       segments: item.segments,
       encoding: item.encoding,
-      ttlAt,
+      ttlAt: item.ttlAt,
       holdUntil,
       body: item.body,
-      warnings: decision.warnings,
+      warnings: plan.warnings,
     }
   }
 

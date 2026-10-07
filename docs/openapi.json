@@ -5907,6 +5907,477 @@
         "x-oasis-access": "sched.edit | jobs.status"
       }
     },
+    "/api/v1/appointments/{id}/messages": {
+      "get": {
+        "description": "Outbound texts the app sent for the appointment and inbound replies attributed to it (a job in progress, else the nearest upcoming booking within 72 hours, else the last completed one within 14 days). `customer.canMessage` is false when a send would be refused. No phone number is returned. `markRead=true` clears the customer's unread replies.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "markRead",
+            "required": false,
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "customer": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "canMessage": {
+                              "type": "boolean"
+                            },
+                            "hasPhone": {
+                              "type": "boolean"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "optedOut": {
+                              "type": "boolean"
+                            },
+                            "smsOptedIn": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "smsOptedIn",
+                            "optedOut",
+                            "hasPhone",
+                            "canMessage"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "items": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "appointmentId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "at": {
+                            "type": "string"
+                          },
+                          "channel": {
+                            "enum": [
+                              "sms",
+                              "email",
+                              "internal"
+                            ],
+                            "type": "string"
+                          },
+                          "customerId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "direction": {
+                            "enum": [
+                              "in",
+                              "out"
+                            ],
+                            "type": "string"
+                          },
+                          "error": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "from": {
+                            "enum": [
+                              "staff",
+                              "system",
+                              "customer"
+                            ],
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "read": {
+                            "type": "boolean"
+                          },
+                          "segments": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "senderName": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "status": {
+                            "enum": [
+                              "queued",
+                              "sending",
+                              "sent",
+                              "delivered",
+                              "failed",
+                              "received",
+                              "canceled",
+                              "expired"
+                            ],
+                            "type": "string"
+                          },
+                          "templateKey": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "time": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "direction",
+                          "from",
+                          "senderName",
+                          "text",
+                          "time",
+                          "at",
+                          "channel",
+                          "status",
+                          "error",
+                          "templateKey",
+                          "appointmentId",
+                          "customerId",
+                          "segments",
+                          "read"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "unread": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "customer",
+                    "unread"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "The Messages tab: every text filed under this appointment, oldest first",
+        "tags": [
+          "messages"
+        ],
+        "x-oasis-access": "cli.view"
+      },
+      "post": {
+        "description": "Free `text` goes out as an SMS (class staff_message) and a `templateKey` of a quick reply or an automation renders its wording; variables not supplied (`first`, `time`, `when`, `bay`) are filled from the appointment. The text passes the SMS policy: 422 SMS_OPTED_OUT after a STOP, SMS_NOT_OPTED_IN without consent, SMS_NO_PHONE without a number, SMS_TOO_LONG above the segment cap. It is queued, not sent inline; `message.status` events follow on the messages channel.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "templateKey": {
+                    "maxLength": 64,
+                    "type": "string"
+                  },
+                  "text": {
+                    "maxLength": 2000,
+                    "type": "string"
+                  },
+                  "vars": {
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ]
+                    },
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "held": {
+                      "type": "boolean"
+                    },
+                    "holdUntil": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "message": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "appointmentId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "at": {
+                          "type": "string"
+                        },
+                        "channel": {
+                          "enum": [
+                            "sms",
+                            "email",
+                            "internal"
+                          ],
+                          "type": "string"
+                        },
+                        "customerId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "direction": {
+                          "enum": [
+                            "in",
+                            "out"
+                          ],
+                          "type": "string"
+                        },
+                        "error": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "from": {
+                          "enum": [
+                            "staff",
+                            "system",
+                            "customer"
+                          ],
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "read": {
+                          "type": "boolean"
+                        },
+                        "segments": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "senderName": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "enum": [
+                            "queued",
+                            "sending",
+                            "sent",
+                            "delivered",
+                            "failed",
+                            "received",
+                            "canceled",
+                            "expired"
+                          ],
+                          "type": "string"
+                        },
+                        "templateKey": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "text": {
+                          "type": "string"
+                        },
+                        "time": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "direction",
+                        "from",
+                        "senderName",
+                        "text",
+                        "time",
+                        "at",
+                        "channel",
+                        "status",
+                        "error",
+                        "templateKey",
+                        "appointmentId",
+                        "customerId",
+                        "segments",
+                        "read"
+                      ],
+                      "type": "object"
+                    },
+                    "queued": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    },
+                    "segments": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "message",
+                    "queued",
+                    "held",
+                    "holdUntil",
+                    "segments"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Send a text to the appointment's customer",
+        "tags": [
+          "messages"
+        ],
+        "x-oasis-access": "msg.send",
+        "x-oasis-idempotency": "required"
+      }
+    },
     "/api/v1/appointments/{id}/no-show": {
       "post": {
         "parameters": [
@@ -12829,6 +13300,519 @@
         "x-oasis-access": "sched.edit"
       }
     },
+    "/api/v1/customers/{id}/messages": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "markRead",
+            "required": false,
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "customer": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "canMessage": {
+                              "type": "boolean"
+                            },
+                            "hasPhone": {
+                              "type": "boolean"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "optedOut": {
+                              "type": "boolean"
+                            },
+                            "smsOptedIn": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "smsOptedIn",
+                            "optedOut",
+                            "hasPhone",
+                            "canMessage"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "items": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "appointmentId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "at": {
+                            "type": "string"
+                          },
+                          "channel": {
+                            "enum": [
+                              "sms",
+                              "email",
+                              "internal"
+                            ],
+                            "type": "string"
+                          },
+                          "customerId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "direction": {
+                            "enum": [
+                              "in",
+                              "out"
+                            ],
+                            "type": "string"
+                          },
+                          "error": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "from": {
+                            "enum": [
+                              "staff",
+                              "system",
+                              "customer"
+                            ],
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "read": {
+                            "type": "boolean"
+                          },
+                          "segments": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "senderName": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "status": {
+                            "enum": [
+                              "queued",
+                              "sending",
+                              "sent",
+                              "delivered",
+                              "failed",
+                              "received",
+                              "canceled",
+                              "expired"
+                            ],
+                            "type": "string"
+                          },
+                          "templateKey": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "time": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "direction",
+                          "from",
+                          "senderName",
+                          "text",
+                          "time",
+                          "at",
+                          "channel",
+                          "status",
+                          "error",
+                          "templateKey",
+                          "appointmentId",
+                          "customerId",
+                          "segments",
+                          "read"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "unread": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "customer",
+                    "unread"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "A customer's whole thread across appointments, oldest first",
+        "tags": [
+          "messages"
+        ],
+        "x-oasis-access": "cli.view"
+      }
+    },
+    "/api/v1/customers/{id}/messages/read": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "marked": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "marked"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Mark the customer's unread replies as read",
+        "tags": [
+          "messages"
+        ],
+        "x-oasis-access": "msg.send"
+      }
+    },
+    "/api/v1/customers/{id}/sms-consent": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "customerId": {
+                      "type": "string"
+                    },
+                    "hasPhone": {
+                      "type": "boolean"
+                    },
+                    "optedOut": {
+                      "type": "boolean"
+                    },
+                    "optedOutAt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "optInAt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "optInSource": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "optOutSource": {
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "keyword",
+                            "manual",
+                            "import"
+                          ],
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "smsOptedIn": {
+                      "type": "boolean"
+                    },
+                    "staffCanClearOptOut": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "customerId",
+                    "smsOptedIn",
+                    "optInSource",
+                    "optInAt",
+                    "optedOut",
+                    "optedOutAt",
+                    "optOutSource",
+                    "staffCanClearOptOut",
+                    "hasPhone"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "A customer's SMS consent: opt-in, opt-out and who can change it",
+        "tags": [
+          "customers"
+        ],
+        "x-oasis-access": "cli.view"
+      },
+      "put": {
+        "description": "`optedIn: true` records staff-attested consent. `optedOut: true` records a manual opt-out (every text to the number stops, emergencies included); `optedOut: false` lifts a MANUAL opt-out only. A STOP the customer texted is refused with 422 SMS_STOP_ACTIVE: they must reply START.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "optedIn": {
+                    "type": "boolean"
+                  },
+                  "optedOut": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "customerId": {
+                      "type": "string"
+                    },
+                    "hasPhone": {
+                      "type": "boolean"
+                    },
+                    "optedOut": {
+                      "type": "boolean"
+                    },
+                    "optedOutAt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "optInAt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "optInSource": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "optOutSource": {
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "keyword",
+                            "manual",
+                            "import"
+                          ],
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "smsOptedIn": {
+                      "type": "boolean"
+                    },
+                    "staffCanClearOptOut": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "customerId",
+                    "smsOptedIn",
+                    "optInSource",
+                    "optInAt",
+                    "optedOut",
+                    "optedOutAt",
+                    "optOutSource",
+                    "staffCanClearOptOut",
+                    "hasPhone"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Record consent: opt in (staff-attested), opt out, or lift a staff opt-out",
+        "tags": [
+          "customers"
+        ],
+        "x-oasis-access": "cli.edit"
+      }
+    },
     "/api/v1/emergency": {
       "get": {
         "description": "Visible to every signed-in user (the Operations banner needs it). The idle strip is computed live: open now, today's hours, appointments remaining, vehicles on site. `canClose` and `closeRoleNames` replace the design's static \"Requires Management or Super Admin\" line. `history` is only sent to holders of set.emergency.",
@@ -16868,6 +17852,1850 @@
           "realtime"
         ],
         "x-oasis-access": "authenticated"
+      }
+    },
+    "/api/v1/integrations/sms/devices": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "baseUrl": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "battery": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "charging": {
+                            "anyOf": [
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "consecutivePollFailures": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "counters": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "delivered": {
+                                "type": "number"
+                              },
+                              "failed": {
+                                "type": "number"
+                              },
+                              "received": {
+                                "type": "number"
+                              },
+                              "sent": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "sent",
+                              "delivered",
+                              "failed",
+                              "received"
+                            ],
+                            "type": "object"
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "hasPassword": {
+                            "type": "boolean"
+                          },
+                          "healthStatus": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "pass",
+                                  "warn",
+                                  "fail"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "lastAppStartedAt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "lastError": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "lastPingAt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "lastPollOkAt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "lastSeenAt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "maxPerWindow": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "minIntervalMs": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "provider": {
+                            "enum": [
+                              "sim",
+                              "smsgate"
+                            ],
+                            "type": "string"
+                          },
+                          "simSlotDefault": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "stateChangedAt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "status": {
+                            "enum": [
+                              "unknown",
+                              "online",
+                              "degraded",
+                              "offline"
+                            ],
+                            "type": "string"
+                          },
+                          "username": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "webhooksRegisteredAt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "webhooksUrl": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "webhookUrl": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "windowMinutes": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "key",
+                          "label",
+                          "provider",
+                          "baseUrl",
+                          "username",
+                          "hasPassword",
+                          "simSlotDefault",
+                          "minIntervalMs",
+                          "maxPerWindow",
+                          "windowMinutes",
+                          "enabled",
+                          "status",
+                          "stateChangedAt",
+                          "lastSeenAt",
+                          "lastPingAt",
+                          "lastAppStartedAt",
+                          "lastPollOkAt",
+                          "consecutivePollFailures",
+                          "healthStatus",
+                          "battery",
+                          "charging",
+                          "lastError",
+                          "webhooksUrl",
+                          "webhooksRegisteredAt",
+                          "counters",
+                          "webhookUrl"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "The SMS devices and their health",
+        "tags": [
+          "integrations"
+        ],
+        "x-oasis-access": "set.billing"
+      },
+      "post": {
+        "description": "An SMS Gate device needs its tailnet URL, username and password. The webhook signing secret is generated when omitted and returned ONCE here (set the same value in the app's Webhooks settings); credentials are stored encrypted with SECRETS_KEY and never shown again. `provider: sim` adds an in-process simulator device.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "baseUrl": {
+                    "format": "uri",
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "label": {
+                    "maxLength": 80,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "maxPerWindow": {
+                    "anyOf": [
+                      {
+                        "maximum": 1000,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "minIntervalMs": {
+                    "anyOf": [
+                      {
+                        "maximum": 600000,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "password": {
+                    "maxLength": 500,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "provider": {
+                    "default": "smsgate",
+                    "enum": [
+                      "sim",
+                      "smsgate"
+                    ],
+                    "type": "string"
+                  },
+                  "simSlotDefault": {
+                    "anyOf": [
+                      {
+                        "maximum": 3,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "username": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "webhookSecret": {
+                    "maxLength": 200,
+                    "minLength": 8,
+                    "type": "string"
+                  },
+                  "windowMinutes": {
+                    "anyOf": [
+                      {
+                        "maximum": 1440,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "label"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "device": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "baseUrl": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "battery": {
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "charging": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "consecutivePollFailures": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "counters": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "delivered": {
+                              "type": "number"
+                            },
+                            "failed": {
+                              "type": "number"
+                            },
+                            "received": {
+                              "type": "number"
+                            },
+                            "sent": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "sent",
+                            "delivered",
+                            "failed",
+                            "received"
+                          ],
+                          "type": "object"
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "hasPassword": {
+                          "type": "boolean"
+                        },
+                        "healthStatus": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "pass",
+                                "warn",
+                                "fail"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "key": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "lastAppStartedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastError": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastPingAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastPollOkAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastSeenAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "maxPerWindow": {
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "minIntervalMs": {
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "provider": {
+                          "enum": [
+                            "sim",
+                            "smsgate"
+                          ],
+                          "type": "string"
+                        },
+                        "simSlotDefault": {
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "stateChangedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "enum": [
+                            "unknown",
+                            "online",
+                            "degraded",
+                            "offline"
+                          ],
+                          "type": "string"
+                        },
+                        "username": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "webhooksRegisteredAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "webhooksUrl": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "webhookUrl": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "windowMinutes": {
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "key",
+                        "label",
+                        "provider",
+                        "baseUrl",
+                        "username",
+                        "hasPassword",
+                        "simSlotDefault",
+                        "minIntervalMs",
+                        "maxPerWindow",
+                        "windowMinutes",
+                        "enabled",
+                        "status",
+                        "stateChangedAt",
+                        "lastSeenAt",
+                        "lastPingAt",
+                        "lastAppStartedAt",
+                        "lastPollOkAt",
+                        "consecutivePollFailures",
+                        "healthStatus",
+                        "battery",
+                        "charging",
+                        "lastError",
+                        "webhooksUrl",
+                        "webhooksRegisteredAt",
+                        "counters",
+                        "webhookUrl"
+                      ],
+                      "type": "object"
+                    },
+                    "webhookSecret": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "device",
+                    "webhookSecret"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Add an SMS device",
+        "tags": [
+          "integrations"
+        ],
+        "x-oasis-access": "set.billing"
+      }
+    },
+    "/api/v1/integrations/sms/devices/{id}": {
+      "patch": {
+        "description": "A password or webhook secret that is sent replaces the stored one; omitted secrets are kept.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "baseUrl": {
+                    "anyOf": [
+                      {
+                        "format": "uri",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "label": {
+                    "maxLength": 80,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "maxPerWindow": {
+                    "anyOf": [
+                      {
+                        "maximum": 1000,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "minIntervalMs": {
+                    "anyOf": [
+                      {
+                        "maximum": 600000,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "password": {
+                    "anyOf": [
+                      {
+                        "maxLength": 500,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "simSlotDefault": {
+                    "anyOf": [
+                      {
+                        "maximum": 3,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "username": {
+                    "anyOf": [
+                      {
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "webhookSecret": {
+                    "maxLength": 200,
+                    "minLength": 8,
+                    "type": "string"
+                  },
+                  "windowMinutes": {
+                    "anyOf": [
+                      {
+                        "maximum": 1440,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "baseUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "battery": {
+                      "anyOf": [
+                        {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "charging": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "consecutivePollFailures": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "counters": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "delivered": {
+                          "type": "number"
+                        },
+                        "failed": {
+                          "type": "number"
+                        },
+                        "received": {
+                          "type": "number"
+                        },
+                        "sent": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "sent",
+                        "delivered",
+                        "failed",
+                        "received"
+                      ],
+                      "type": "object"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "hasPassword": {
+                      "type": "boolean"
+                    },
+                    "healthStatus": {
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "pass",
+                            "warn",
+                            "fail"
+                          ],
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "lastAppStartedAt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastError": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastPingAt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastPollOkAt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastSeenAt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "maxPerWindow": {
+                      "anyOf": [
+                        {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "minIntervalMs": {
+                      "anyOf": [
+                        {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "provider": {
+                      "enum": [
+                        "sim",
+                        "smsgate"
+                      ],
+                      "type": "string"
+                    },
+                    "simSlotDefault": {
+                      "anyOf": [
+                        {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "stateChangedAt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "status": {
+                      "enum": [
+                        "unknown",
+                        "online",
+                        "degraded",
+                        "offline"
+                      ],
+                      "type": "string"
+                    },
+                    "username": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "webhooksRegisteredAt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "webhooksUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "webhookUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "windowMinutes": {
+                      "anyOf": [
+                        {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "key",
+                    "label",
+                    "provider",
+                    "baseUrl",
+                    "username",
+                    "hasPassword",
+                    "simSlotDefault",
+                    "minIntervalMs",
+                    "maxPerWindow",
+                    "windowMinutes",
+                    "enabled",
+                    "status",
+                    "stateChangedAt",
+                    "lastSeenAt",
+                    "lastPingAt",
+                    "lastAppStartedAt",
+                    "lastPollOkAt",
+                    "consecutivePollFailures",
+                    "healthStatus",
+                    "battery",
+                    "charging",
+                    "lastError",
+                    "webhooksUrl",
+                    "webhooksRegisteredAt",
+                    "counters",
+                    "webhookUrl"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Edit a device: label, credentials, limits, enabled",
+        "tags": [
+          "integrations"
+        ],
+        "x-oasis-access": "set.billing"
+      }
+    },
+    "/api/v1/integrations/sms/devices/{id}/health": {
+      "get": {
+        "description": "`refresh=true` polls the device first. `dispatch.state` is idle, sending, rate_limited, quiet_hours or device_offline; `budget` is the sliding send window (segments used and left, lane 0 may use the reserved part).",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "device": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "baseUrl": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "battery": {
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "charging": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "consecutivePollFailures": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "counters": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "delivered": {
+                              "type": "number"
+                            },
+                            "failed": {
+                              "type": "number"
+                            },
+                            "received": {
+                              "type": "number"
+                            },
+                            "sent": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "sent",
+                            "delivered",
+                            "failed",
+                            "received"
+                          ],
+                          "type": "object"
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "hasPassword": {
+                          "type": "boolean"
+                        },
+                        "healthStatus": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "pass",
+                                "warn",
+                                "fail"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "key": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "lastAppStartedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastError": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastPingAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastPollOkAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastSeenAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "maxPerWindow": {
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "minIntervalMs": {
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "provider": {
+                          "enum": [
+                            "sim",
+                            "smsgate"
+                          ],
+                          "type": "string"
+                        },
+                        "simSlotDefault": {
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "stateChangedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "enum": [
+                            "unknown",
+                            "online",
+                            "degraded",
+                            "offline"
+                          ],
+                          "type": "string"
+                        },
+                        "username": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "webhooksRegisteredAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "webhooksUrl": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "webhookUrl": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "windowMinutes": {
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "key",
+                        "label",
+                        "provider",
+                        "baseUrl",
+                        "username",
+                        "hasPassword",
+                        "simSlotDefault",
+                        "minIntervalMs",
+                        "maxPerWindow",
+                        "windowMinutes",
+                        "enabled",
+                        "status",
+                        "stateChangedAt",
+                        "lastSeenAt",
+                        "lastPingAt",
+                        "lastAppStartedAt",
+                        "lastPollOkAt",
+                        "consecutivePollFailures",
+                        "healthStatus",
+                        "battery",
+                        "charging",
+                        "lastError",
+                        "webhooksUrl",
+                        "webhooksRegisteredAt",
+                        "counters",
+                        "webhookUrl"
+                      ],
+                      "type": "object"
+                    },
+                    "dispatch": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "budget": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "max": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "remainingOthers": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "remainingP0": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "reservedForP0": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "used": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "windowMinutes": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "used",
+                            "max",
+                            "reservedForP0",
+                            "remainingP0",
+                            "remainingOthers",
+                            "windowMinutes"
+                          ],
+                          "type": "object"
+                        },
+                        "heldByQuietHours": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "queue": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "byLane": {
+                              "additionalProperties": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "type": "object"
+                            },
+                            "depth": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "etaFirst": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "etaLast": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "oldestQueuedAt": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "willExpire": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "depth",
+                            "byLane",
+                            "oldestQueuedAt",
+                            "etaFirst",
+                            "etaLast",
+                            "willExpire"
+                          ],
+                          "type": "object"
+                        },
+                        "rateLimited": {
+                          "type": "boolean"
+                        },
+                        "resumesAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "state": {
+                          "enum": [
+                            "idle",
+                            "sending",
+                            "rate_limited",
+                            "quiet_hours",
+                            "device_offline"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "state",
+                        "rateLimited",
+                        "resumesAt",
+                        "heldByQuietHours",
+                        "budget",
+                        "queue"
+                      ],
+                      "type": "object"
+                    },
+                    "failedLast24h": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "quietHours": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "active": {
+                          "type": "boolean"
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "endsAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "active",
+                        "endsAt"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "device",
+                    "dispatch",
+                    "quietHours",
+                    "failedLast24h"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Device health and what the dispatcher is doing",
+        "tags": [
+          "integrations"
+        ],
+        "x-oasis-access": "set.billing"
+      }
+    },
+    "/api/v1/integrations/sms/devices/{id}/register-webhooks": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "registered": {
+                      "type": "boolean"
+                    },
+                    "url": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "registered",
+                    "url",
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Register the seven oasis-* webhooks on the device (idempotent; stale oasis-* ones are removed)",
+        "tags": [
+          "integrations"
+        ],
+        "x-oasis-access": "set.billing"
+      }
+    },
+    "/api/v1/integrations/sms/devices/{id}/test": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "battery": {
+                      "anyOf": [
+                        {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "credentials": {
+                      "enum": [
+                        "ok",
+                        "rejected",
+                        "unknown"
+                      ],
+                      "type": "string"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "healthStatus": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "reachable": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "reachable",
+                    "credentials",
+                    "healthStatus",
+                    "battery",
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Check the connection: health poll and a credentials probe (nothing is sent)",
+        "tags": [
+          "integrations"
+        ],
+        "x-oasis-access": "set.billing"
       }
     },
     "/api/v1/invoices/{id}": {
@@ -32874,6 +35702,537 @@
           "auth"
         ],
         "x-oasis-access": "authenticated"
+      }
+    },
+    "/api/v1/messages/{id}/cancel": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "state"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Cancel a text that has not been handed to the device yet",
+        "tags": [
+          "messages"
+        ],
+        "x-oasis-access": "msg.send"
+      }
+    },
+    "/api/v1/messages/{id}/retry": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "state"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Send a failed or expired text again (a fresh attempt under a new device id, with a fresh TTL)",
+        "tags": [
+          "messages"
+        ],
+        "x-oasis-access": "msg.send"
+      }
+    },
+    "/api/v1/messages/inbox": {
+      "get": {
+        "description": "Carrier notices, one-time codes and strangers land here and are reviewed or ignored. A STOP, START or HELP from a stranger was still honoured by number. The sender is masked without cli.contact.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "from": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "receivedAt": {
+                            "type": "string"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "from",
+                          "text",
+                          "receivedAt",
+                          "reason"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Quarantine: texts from numbers that are not customers (no customer row is ever created for them)",
+        "tags": [
+          "messages"
+        ],
+        "x-oasis-access": "msg.send"
+      }
+    },
+    "/api/v1/messages/inbox/{id}/review": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Mark a quarantined text as reviewed",
+        "tags": [
+          "messages"
+        ],
+        "x-oasis-access": "msg.send"
+      }
+    },
+    "/api/v1/messages/outbox": {
+      "get": {
+        "description": "`state` is pending, failed, expired, cancelled, delivered or all. A failed text is one the device or the network refused after the retries; an expired one outlived its class TTL (a welcome text is worth 15 minutes). The number is masked without cli.contact; staff invites and resets never show their link.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "failed",
+              "enum": [
+                "pending",
+                "failed",
+                "expired",
+                "cancelled",
+                "delivered",
+                "all"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "appointmentId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "attempts": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "canCancel": {
+                            "type": "boolean"
+                          },
+                          "canRetry": {
+                            "type": "boolean"
+                          },
+                          "customerId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "customerName": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "klass": {
+                            "type": "string"
+                          },
+                          "lane": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "lastError": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "nextAttemptAt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "queuedAt": {
+                            "type": "string"
+                          },
+                          "segments": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "state": {
+                            "enum": [
+                              "pending",
+                              "inflight",
+                              "accepted",
+                              "sent",
+                              "delivered",
+                              "failed",
+                              "expired",
+                              "cancelled"
+                            ],
+                            "type": "string"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          },
+                          "ttlAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "state",
+                          "klass",
+                          "lane",
+                          "to",
+                          "text",
+                          "segments",
+                          "attempts",
+                          "lastError",
+                          "queuedAt",
+                          "ttlAt",
+                          "nextAttemptAt",
+                          "customerId",
+                          "customerName",
+                          "appointmentId",
+                          "canRetry",
+                          "canCancel"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "nextCursor": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Texts by queue state (default failed), newest first",
+        "tags": [
+          "messages"
+        ],
+        "x-oasis-access": "msg.send"
+      }
+    },
+    "/api/v1/messages/templates": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "quickReplies": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "text"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "templates": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "body": {
+                            "type": "string"
+                          },
+                          "class": {
+                            "type": "string"
+                          },
+                          "editable": {
+                            "type": "boolean"
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "lane": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "optional": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "required": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "staffSendable": {
+                            "type": "boolean"
+                          },
+                          "transactional": {
+                            "type": "boolean"
+                          },
+                          "ttlSeconds": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "body",
+                          "class",
+                          "lane",
+                          "ttlSeconds",
+                          "transactional",
+                          "required",
+                          "optional",
+                          "editable",
+                          "staffSendable"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "quickReplies",
+                    "templates"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Quick replies and the automations (code registry; wording is SMS)",
+        "tags": [
+          "messages"
+        ],
+        "x-oasis-access": "msg.send"
       }
     },
     "/api/v1/meta/now": {

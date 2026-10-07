@@ -80,7 +80,11 @@ describe('domain_core migration', () => {
       where contype = 'f' and connamespace = current_schema()::regnamespace`.execute(t.db)
     const targets = new Set(fks.rows.map((r) => r.ref.replace(/^"?[^".]+"?\./, '').replace(/"/g, '')))
     for (const linked of ['employees', 'users']) expect(targets.has(linked)).toBe(true)
-    for (const banned of ['memberships', 'messages', 'standing_series']) expect(targets.has(banned)).toBe(false)
+    // The messaging migration (20261006200000) adds the messages tables, whose own foreign keys point at `messages`;
+    // the domain migrations themselves still never reference messaging.
+    for (const banned of ['memberships', 'standing_series']) expect(targets.has(banned)).toBe(false)
+    for (const name of ['20261006150000_domain_core.sql', '20261006160000_domain_links.sql'])
+      expect(loadMigrationFiles().find((m) => m.name === name)!.sql, name).not.toMatch(/references\s+messages\b/i)
   })
 })
 

@@ -177,6 +177,16 @@ export const TEMPLATES = {
     editable: true,
     source: 'set-domain employee invite',
   }),
+  password_reset: t({
+    key: 'password_reset',
+    label: 'Password reset',
+    klass: 'password_reset',
+    body: 'Hi {first}, here is your Oasis Auto Spa password reset link: {link} It works once and expires soon. If you did not ask for it, ignore this text.',
+    required: ['first', 'link'],
+    optional: [],
+    editable: false,
+    source: 'new: admin-triggered password reset by SMS (people module)',
+  }),
   addon_approval: t({
     key: 'addon_approval',
     label: 'Add-on approval',
