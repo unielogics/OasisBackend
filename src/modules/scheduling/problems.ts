@@ -56,6 +56,26 @@ const defs: Record<string, ProblemDef> = {
     title: 'Can’t remove add-on',
     detail: 'Refund or adjust the invoice first — removing it would leave the invoice overpaid',
   },
+  ARRIVAL_LINK_INVALID: {
+    status: 401,
+    title: 'Check-in link not valid',
+    detail: 'This check-in link is not valid. Ask the shop for a new one',
+  },
+  ARRIVAL_LINK_EXPIRED: {
+    status: 410,
+    title: 'Check-in link expired',
+    detail: 'This check-in link has expired. Ask the shop for a new one',
+  },
+  ARRIVAL_NOT_CONFIGURED: {
+    status: 409,
+    title: 'Check-in is not set up',
+    detail: 'The shop has not set its location yet, so check-in cannot be evaluated',
+  },
+  ARRIVAL_PING_TOO_FAST: {
+    status: 429,
+    title: 'Slow down',
+    detail: 'Location updates are limited to one every few seconds',
+  },
   REOPEN_REFUNDED: {
     status: 409,
     title: 'Can’t reopen',

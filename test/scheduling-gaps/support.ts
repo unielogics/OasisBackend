@@ -6,8 +6,8 @@ import { useMemRig, type MemRig } from '../memberships/harness.js'
 
 export type Rig = MemRig
 /** The membership rig with the seeded design customers' (synthetic) numbers allowlisted, so texts are really queued. */
-export const useRig = (): Rig =>
-  useMemRig({ env: { SMS_ALLOWLIST: DESIGN_CUSTOMERS.map((c) => c.phoneE164).join(',') } })
+export const useRig = (env: Record<string, string> = {}): Rig =>
+  useMemRig({ env: { SMS_ALLOWLIST: DESIGN_CUSTOMERS.map((c) => c.phoneE164).join(','), ...env } })
 
 let keyN = 0
 export const idemKey = (): string => `gap-key-${++keyN}-${'g'.repeat(10)}`

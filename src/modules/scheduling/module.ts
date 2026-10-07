@@ -8,6 +8,7 @@ import type { StorageProvider } from '../../integrations/ports/storage.js'
 import { createStorageProvider } from '../../integrations/storage/config.js'
 import { createIdGenerator } from '../../platform/ids.js'
 import { registerAppointmentRoutes } from './http/appointment-routes.js'
+import { registerArrivalRoutes } from './http/arrival-routes.js'
 import { registerOpsRoutes } from './http/ops-routes.js'
 import { registerPolicyRoutes } from './http/policy-routes.js'
 import { createDbDepositSettlement } from './settlement.js'
@@ -51,6 +52,7 @@ export function registerSchedulingRoutes(app: AppInstance, ports: SchedulingPort
   registerOpsRoutes(app, ports)
   registerAppointmentRoutes(app, ports)
   registerPolicyRoutes(app)
+  registerArrivalRoutes(app, ports)
 }
 
 export function createSchedulingModule(given: Partial<SchedulingPorts> = {}): ApiModule {
