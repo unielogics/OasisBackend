@@ -72,7 +72,10 @@ export class ConnectionStore {
     return this.d.secrets().decrypt(r.api_key_enc)
   }
 
-  async save(apiKey: string, o: { userId?: string | null; siteId?: string | null; verified: boolean }): Promise<void> {
+  async save(
+    apiKey: string,
+    o: { userId?: string | null; siteId?: string | null; verified: boolean },
+  ): Promise<void> {
     const now = this.d.clock.now()
     const enc = this.d.secrets().encrypt(apiKey)
     const v = {

@@ -66,7 +66,10 @@ export async function listProductRows(db: Executor, locationId: string): Promise
   }))
 }
 
-export function entriesOf(rows: readonly ProductRow[], planNames: ReadonlyMap<Tier, string>): ProductMapEntry[] {
+export function entriesOf(
+  rows: readonly ProductRow[],
+  planNames: ReadonlyMap<Tier, string>,
+): ProductMapEntry[] {
   return rows
     .filter((r) => r.active)
     .map((r) => ({
@@ -122,9 +125,9 @@ export async function validateProductInputs(
   const ids = new Set<string>()
   const skus = new Set<string>()
   const plans = new Set(
-    (await db.selectFrom('membership_plans').select('key').where('location_id', '=', locationId).execute()).map(
-      (p) => p.key as string,
-    ),
+    (
+      await db.selectFrom('membership_plans').select('key').where('location_id', '=', locationId).execute()
+    ).map((p) => p.key as string),
   )
   inputs.forEach((p, index) => {
     const bad = (path: string, message: string) => issues.push({ index, path, message })
@@ -156,10 +159,18 @@ export async function replaceProductRows(
   const now = d.clock.now()
   const plans = new Map(
     (
-      await tx.selectFrom('membership_plans').select(['id', 'key', 'billing_interval_months']).where('location_id', '=', d.locationId).execute()
+      await tx
+        .selectFrom('membership_plans')
+        .select(['id', 'key', 'billing_interval_months'])
+        .where('location_id', '=', d.locationId)
+        .execute()
     ).map((p) => [p.key as string, p]),
   )
-  const existing = await tx.selectFrom('sqsp_products').selectAll().where('location_id', '=', d.locationId).execute()
+  const existing = await tx
+    .selectFrom('sqsp_products')
+    .selectAll()
+    .where('location_id', '=', d.locationId)
+    .execute()
   const keep = new Set<string>()
   for (const p of inputs) {
     const hit = existing.find(

@@ -23,7 +23,18 @@ describe('POST /hooks/squarespace', () => {
     })
   }
 
-  const notification = (r: ReturnType<typeof rig>, o: { id: string; topic?: string; orderId?: string; update?: string; secret?: string; createdOn?: Date; sub?: string }) =>
+  const notification = (
+    r: ReturnType<typeof rig>,
+    o: {
+      id: string
+      topic?: string
+      orderId?: string
+      update?: string
+      secret?: string
+      createdOn?: Date
+      sub?: string
+    },
+  ) =>
     buildSignedNotification({
       secretHex: o.secret ?? SECRET,
       id: o.id,
@@ -47,9 +58,16 @@ describe('POST /hooks/squarespace', () => {
     const res = await post(app, n)
     expect(res.statusCode, res.body).toBe(202)
     expect(res.json()).toEqual({ status: 'accepted' })
-    expect((await r.db.selectFrom('sqsp_orders').select('sqsp_order_id').execute()).map((o) => o.sqsp_order_id)).toEqual([orderId])
+    expect(
+      (await r.db.selectFrom('sqsp_orders').select('sqsp_order_id').execute()).map((o) => o.sqsp_order_id),
+    ).toEqual([orderId])
     const log = await r.db.selectFrom('webhook_log').selectAll().executeTakeFirstOrThrow()
-    expect(log).toMatchObject({ provider: 'squarespace', external_id: 'n-1', status: 'processed', signature_valid: true })
+    expect(log).toMatchObject({
+      provider: 'squarespace',
+      external_id: 'n-1',
+      status: 'processed',
+      signature_valid: true,
+    })
     expect(log.body).toBe(n.rawBody)
     expect(JSON.stringify(log.headers)).not.toMatch(/signature/i)
     const dup = await post(app, n)
@@ -66,9 +84,15 @@ describe('POST /hooks/squarespace', () => {
     expect((await post(app, notification(r, { id: 'n-1', orderId }))).statusCode).toBe(202)
     r.advance(60_000)
     r.store.refund(orderId, { amountCents: 100 })
-    const upd = await post(app, notification(r, { id: 'n-2', topic: 'order.update', orderId, update: 'REFUNDED' }))
+    const upd = await post(
+      app,
+      notification(r, { id: 'n-2', topic: 'order.update', orderId, update: 'REFUNDED' }),
+    )
     expect(upd.statusCode).toBe(202)
-    const o = await r.db.selectFrom('sqsp_orders').select(['payment_state', 'refunded_total_cents']).executeTakeFirstOrThrow()
+    const o = await r.db
+      .selectFrom('sqsp_orders')
+      .select(['payment_state', 'refunded_total_cents'])
+      .executeTakeFirstOrThrow()
     expect(o).toEqual({ payment_state: 'REFUNDED', refunded_total_cents: 100 })
     expect(await r.db.selectFrom('webhook_log').select('id').execute()).toHaveLength(2)
     await app.close()
@@ -81,7 +105,12 @@ describe('POST /hooks/squarespace', () => {
     const bad = await post(app, notification(r, { id: 'n-bad', orderId, secret: SUB_SECRET }))
     expect(bad.statusCode).toBe(401)
     expect((bad.json() as { code: string }).code).toBe('WEBHOOK_SIGNATURE_INVALID')
-    const none = await app.app.inject({ method: 'POST', url: '/hooks/squarespace', headers: { 'content-type': 'application/json' }, payload: '{}' })
+    const none = await app.app.inject({
+      method: 'POST',
+      url: '/hooks/squarespace',
+      headers: { 'content-type': 'application/json' },
+      payload: '{}',
+    })
     expect(none.statusCode).toBe(401)
     expect(await r.db.selectFrom('sqsp_orders').select('id').execute()).toHaveLength(0)
     expect(await r.db.selectFrom('webhook_log').select('id').execute()).toHaveLength(0)
@@ -95,13 +124,21 @@ describe('POST /hooks/squarespace', () => {
   it('acknowledges stale and unsupported-topic notifications and rejects a malformed body', async () => {
     const r = rig()
     const app = await appWith()
-    const stale = await post(app, notification(r, { id: 'n-old', createdOn: new Date(r.clock.now().getTime() - 8 * 24 * H) }))
+    const stale = await post(
+      app,
+      notification(r, { id: 'n-old', createdOn: new Date(r.clock.now().getTime() - 8 * 24 * H) }),
+    )
     expect(stale.statusCode).toBe(200)
     expect(stale.json()).toEqual({ status: 'stale' })
     const ignored = await post(app, notification(r, { id: 'n-ext', topic: 'extension.uninstall' }))
     expect(ignored.statusCode).toBe(200)
     expect(ignored.json()).toEqual({ status: 'ignored' })
-    const bad = await app.app.inject({ method: 'POST', url: '/hooks/squarespace', headers: { 'content-type': 'application/json' }, payload: 'not json' })
+    const bad = await app.app.inject({
+      method: 'POST',
+      url: '/hooks/squarespace',
+      headers: { 'content-type': 'application/json' },
+      payload: 'not json',
+    })
     expect(bad.statusCode).toBe(400)
     await app.close()
   })
@@ -123,10 +160,16 @@ describe('POST /hooks/squarespace', () => {
     const { orderId } = r.store.createOrder({ email: 'w@example.com', name: 'W', lineItems: [line] })
     const res = await post(app, notification(r, { id: 'n-sub', orderId, secret: SUB_SECRET, sub: 'sub-9' }))
     expect(res.statusCode, res.body).toBe(202)
-    const sub = await r.db.selectFrom('sqsp_webhook_subscriptions').select('last_delivery_at').executeTakeFirstOrThrow()
+    const sub = await r.db
+      .selectFrom('sqsp_webhook_subscriptions')
+      .select('last_delivery_at')
+      .executeTakeFirstOrThrow()
     expect(sub.last_delivery_at?.toISOString()).toBe(r.clock.now().toISOString())
     // the stored secret does not verify a notification that names another subscription
-    const other = await post(app, notification(r, { id: 'n-x', orderId, secret: SUB_SECRET, sub: 'sub-other' }))
+    const other = await post(
+      app,
+      notification(r, { id: 'n-x', orderId, secret: SUB_SECRET, sub: 'sub-other' }),
+    )
     expect(other.statusCode).toBe(401)
     await app.close()
   })
@@ -154,14 +197,28 @@ describe('POST /hooks/squarespace', () => {
     fail = false
     const up = await post(app, n)
     expect(up.statusCode).toBe(202)
-    expect(enqueued).toEqual([{ name: 'sqsp.webhook.process', data: { orderId, notificationId: 'n-q', locationId: r.locationId } }])
+    expect(enqueued).toEqual([
+      { name: 'sqsp.webhook.process', data: { orderId, notificationId: 'n-q', locationId: r.locationId } },
+    ])
     // the job is what stores the order: nothing yet
     expect(await r.db.selectFrom('sqsp_orders').select('id').execute()).toHaveLength(0)
     const { sqspWebhookJob } = await import('../../src/modules/payments-sync/jobs/index.js')
-    const logger = { info: () => undefined, warn: () => undefined, error: () => undefined, debug: () => undefined, child: () => logger } as never
-    await sqspWebhookJob.handler({ db: r.db, clock: r.clock, logger }, { orderId, notificationId: 'n-q', locationId: r.locationId }, { id: 'job-1' })
+    const logger = {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+      debug: () => undefined,
+      child: () => logger,
+    } as never
+    await sqspWebhookJob.handler(
+      { db: r.db, clock: r.clock, logger },
+      { orderId, notificationId: 'n-q', locationId: r.locationId },
+      { id: 'job-1' },
+    )
     expect(await r.db.selectFrom('sqsp_orders').select('id').execute()).toHaveLength(1)
-    expect((await r.db.selectFrom('webhook_log').select('status').executeTakeFirstOrThrow()).status).toBe('processed')
+    expect((await r.db.selectFrom('webhook_log').select('status').executeTakeFirstOrThrow()).status).toBe(
+      'processed',
+    )
     await app.close()
   })
 })

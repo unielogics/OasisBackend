@@ -17,10 +17,24 @@ export interface MemRig {
   noMember: () => Session
   locationId: () => string
   customer(name: string): Promise<string>
-  member(name: string, plan: PlanKey, o?: { label?: string; renewsOn?: string }): Promise<{ id: string; customerId: string }>
-  book(customerName: string, service: string, start?: string): Promise<{ appointmentId: string; invoiceId: string }>
+  member(
+    name: string,
+    plan: PlanKey,
+    o?: { label?: string; renewsOn?: string },
+  ): Promise<{ id: string; customerId: string }>
+  book(
+    customerName: string,
+    service: string,
+    start?: string,
+  ): Promise<{ appointmentId: string; invoiceId: string }>
   complete(appointmentId: string): Promise<void>
-  send(s: Session, method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', url: string, body?: unknown, idem?: string | false): ReturnType<Harness['call']>
+  send(
+    s: Session,
+    method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+    url: string,
+    body?: unknown,
+    idem?: string | false,
+  ): ReturnType<Harness['call']>
   get(s: Session, url: string): ReturnType<Harness['call']>
 }
 
@@ -38,7 +52,8 @@ export function useMemRig(): MemRig {
     await ensurePlans(h.t.db, { locationId: locationId(), clock: h.clock, newId: h.t.app.newId })
     const amara = await h.createUser({ email: 'amara@example.test', roles: ['super'] })
     superS = await h.login(amara, addr())
-    limited = (await h.userWithPermissions(['cli.member', 'cli.view', 'sched.view'], 'limited@example.test')).session
+    limited = (await h.userWithPermissions(['cli.member', 'cli.view', 'sched.view'], 'limited@example.test'))
+      .session
     noMember = (await h.userWithPermissions(['pay.adjust', 'cli.view'], 'nomember@example.test')).session
   })
 
@@ -49,7 +64,13 @@ export function useMemRig(): MemRig {
     noMember: () => noMember,
     locationId,
     async customer(name) {
-      return (await h.t.db.selectFrom('customers').select('id').where('full_name', '=', name).executeTakeFirstOrThrow()).id
+      return (
+        await h.t.db
+          .selectFrom('customers')
+          .select('id')
+          .where('full_name', '=', name)
+          .executeTakeFirstOrThrow()
+      ).id
     },
     send: (s, method, url, body, idem) =>
       h.call(method, `/api/v1${url}`, {
@@ -78,15 +99,29 @@ export function useMemRig(): MemRig {
         .where('name', '=', service)
         .where('kind', '=', 'package')
         .executeTakeFirstOrThrow()
-      const res = await self.send(superS, 'POST', '/appointments', { customer: { id: customerId }, serviceId: svc.id, start })
+      const res = await self.send(superS, 'POST', '/appointments', {
+        customer: { id: customerId },
+        serviceId: svc.id,
+        start,
+      })
       if (res.statusCode !== 201) throw new Error(`booking failed ${res.statusCode} ${res.body}`)
       const b = res.json() as { appointment: { id: string }; invoice: { invoiceId: string } }
-      const inv = await h.t.db.selectFrom('invoices').select('id').where('appointment_id', '=', b.appointment.id).executeTakeFirstOrThrow()
+      const inv = await h.t.db
+        .selectFrom('invoices')
+        .select('id')
+        .where('appointment_id', '=', b.appointment.id)
+        .executeTakeFirstOrThrow()
       return { appointmentId: b.appointment.id, invoiceId: inv.id }
     },
     async complete(appointmentId) {
       for (const from of ['booked', 'confirmed', 'arrived', 'cleaning'] as const) {
-        const r = await self.send(superS, 'POST', `/appointments/${appointmentId}/advance`, { expectedStatus: from }, false)
+        const r = await self.send(
+          superS,
+          'POST',
+          `/appointments/${appointmentId}/advance`,
+          { expectedStatus: from },
+          false,
+        )
         if (r.statusCode !== 200) throw new Error(`advance from ${from}: ${r.statusCode} ${r.body}`)
       }
     },

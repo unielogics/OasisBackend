@@ -446,9 +446,7 @@ export const AppointmentFile = z.object({
       bgColor: z.string().optional(),
       tint: z.string().optional(),
       memberMonths: z.number().int().optional(),
-      retention: z
-        .object({ label: z.string(), desc: z.string(), tone: z.enum(['green', 'red']) })
-        .optional(),
+      retention: z.object({ label: z.string(), desc: z.string(), tone: z.enum(['green', 'red']) }).optional(),
     })
     .nullable(),
   history: z.object({

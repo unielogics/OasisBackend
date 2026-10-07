@@ -109,7 +109,7 @@ export async function viewsOf(
 
 export async function locationTz(db: Executor, locationId: string): Promise<string> {
   return (
-    (await db.selectFrom('locations').select('timezone').where('id', '=', locationId).executeTakeFirst())?.timezone ??
-    'America/New_York'
+    (await db.selectFrom('locations').select('timezone').where('id', '=', locationId).executeTakeFirst())
+      ?.timezone ?? 'America/New_York'
   )
 }

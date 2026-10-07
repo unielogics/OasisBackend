@@ -21,13 +21,18 @@ export const squarespaceHookModule: ApiModule = (app, deps) => {
     path: '/squarespace',
     handler: async (req, reply) => {
       const env = deps.env
-      const stored = await loadWebhookSecrets(deps.db, env.SECRETS_KEY ? createSecretBox([env.SECRETS_KEY]) : undefined)
+      const stored = await loadWebhookSecrets(
+        deps.db,
+        env.SECRETS_KEY ? createSecretBox([env.SECRETS_KEY]) : undefined,
+      )
       const outcome = await receiveWebhook(
         {
           clock: deps.clock,
           dedupe,
           secrets: (subscriptionId) => [
-            ...stored.filter((s) => !subscriptionId || s.subscriptionId === subscriptionId).map((s) => s.secret),
+            ...stored
+              .filter((s) => !subscriptionId || s.subscriptionId === subscriptionId)
+              .map((s) => s.secret),
             ...(env.SQSP_WEBHOOK_SECRET ? [env.SQSP_WEBHOOK_SECRET] : []),
           ],
         },
@@ -44,7 +49,9 @@ export const squarespaceHookModule: ApiModule = (app, deps) => {
           // acknowledged: a non-2xx would make Squarespace retry for 48 hours
           return reply.status(200).send({ status: outcome.status })
         case 'accepted': {
-          const sub = outcome.subscriptionId ? stored.find((s) => s.subscriptionId === outcome.subscriptionId) : undefined
+          const sub = outcome.subscriptionId
+            ? stored.find((s) => s.subscriptionId === outcome.subscriptionId)
+            : undefined
           const locationId = sub?.locationId ?? (await getDefaultLocation(deps.db))?.id
           if (!locationId) {
             await dedupe.release(outcome.notificationId)
@@ -78,10 +85,18 @@ export const squarespaceHookModule: ApiModule = (app, deps) => {
             return reply.status(202).send({ status: 'accepted' })
           }
           try {
-            const r = await createSqspRuntime({ db: deps.db, clock: deps.clock, newId, env }).ingestOrder(locationId, outcome.orderId)
+            const r = await createSqspRuntime({ db: deps.db, clock: deps.clock, newId, env }).ingestOrder(
+              locationId,
+              outcome.orderId,
+            )
             await dedupe.finish(outcome.notificationId, r ? 'processed' : 'ignored', deps.clock.now())
           } catch (e) {
-            await dedupe.finish(outcome.notificationId, 'failed', deps.clock.now(), e instanceof Error ? e.message : String(e))
+            await dedupe.finish(
+              outcome.notificationId,
+              'failed',
+              deps.clock.now(),
+              e instanceof Error ? e.message : String(e),
+            )
             await dedupe.release(outcome.notificationId)
             throw new AppError('SERVICE_UNAVAILABLE')
           }

@@ -68,7 +68,10 @@ export function registerSqspRoutes(app: AppInstance): void {
   const runtime = () => createSqspRuntime({ db: app.db, clock: app.clock, newId: app.newId, env: app.env })
   const idem = (fn: Parameters<typeof idempotentHandler<FastifyRequest>>[0]): never =>
     idempotentHandler(fn) as never
-  const connView = (rt: ReturnType<typeof runtime>) => ({ apiKey: rt.d.env.SQSP_API_KEY, provider: rt.d.env.SQSP_PROVIDER })
+  const connView = (rt: ReturnType<typeof runtime>) => ({
+    apiKey: rt.d.env.SQSP_API_KEY,
+    provider: rt.d.env.SQSP_PROVIDER,
+  })
   const lag = (at: Date | null | undefined, now: Date): number | null =>
     at ? Math.max(0, Math.floor((now.getTime() - at.getTime()) / 1000)) : null
 
@@ -112,7 +115,11 @@ export function registerSqspRoutes(app: AppInstance): void {
       const now = app.clock.now()
       const rt = runtime()
       const conn = await rt.connection(loc).view(connView(rt))
-      const states = await app.db.selectFrom('sqsp_sync_state').selectAll().where('location_id', '=', loc).execute()
+      const states = await app.db
+        .selectFrom('sqsp_sync_state')
+        .selectAll()
+        .where('location_id', '=', loc)
+        .execute()
       const resource = (r: 'orders' | 'transactions' | 'contacts' | 'reconcile') => {
         const s = states.find((x) => x.resource === r)
         return {
@@ -138,7 +145,9 @@ export function registerSqspRoutes(app: AppInstance): void {
         .groupBy('state')
         .execute()
       const queue = await sql<{ n: number }>`
-        select count(distinct sqsp_order_id)::int as n from sqsp_manual_queue where location_id = ${loc} and state = 'open'`.execute(app.db)
+        select count(distinct sqsp_order_id)::int as n from sqsp_manual_queue where location_id = ${loc} and state = 'open'`.execute(
+        app.db,
+      )
       const awaiting = await sql<{ n: number; cents: number }>`
         select count(*)::int as n, coalesce(sum(e.amount_cents), 0)::bigint as cents
         from ledger_events e
@@ -231,7 +240,9 @@ export function registerSqspRoutes(app: AppInstance): void {
         }),
       )
       if (app.jobs) {
-        const id = await app.jobs.enqueue('sqsp.sync', b, { singletonKey: `sync-now:${b.resume ? 'r' : ''}${b.rematch ? 'm' : ''}` })
+        const id = await app.jobs.enqueue('sqsp.sync', b, {
+          singletonKey: `sync-now:${b.resume ? 'r' : ''}${b.rematch ? 'm' : ''}`,
+        })
         reply.status(202)
         return { mode: 'queued' as const, queued: id !== null, result: null }
       }
@@ -338,7 +349,12 @@ export function registerSqspRoutes(app: AppInstance): void {
         secrets: () => secretBoxFromEnv(rt.d.env),
       })
       await app.db.transaction().execute(async (tx) => {
-        await new ConnectionStore(tx, { locationId: a.locationId, clock: app.clock, newId: app.newId, secrets: () => secretBoxFromEnv(rt.d.env) }).disconnect()
+        await new ConnectionStore(tx, {
+          locationId: a.locationId,
+          clock: app.clock,
+          newId: app.newId,
+          secrets: () => secretBoxFromEnv(rt.d.env),
+        }).disconnect()
         await audit.record(tx, {
           locationId: a.locationId,
           action: 'sqsp.connection_removed',
@@ -368,7 +384,12 @@ export function registerSqspRoutes(app: AppInstance): void {
     return {
       entries: await listProductRows(app.db, locationId),
       environmentEntries: envEntries,
-      seen: await seenProducts(app.db, locationId, new Date(app.clock.now().getTime() - 90 * 86_400_000), map),
+      seen: await seenProducts(
+        app.db,
+        locationId,
+        new Date(app.clock.now().getTime() - 90 * 86_400_000),
+        map,
+      ),
       plans: plans.map((p) => ({ key: p.key, name: p.name })),
       reopenedOrders: reopened,
     }
@@ -417,7 +438,8 @@ export function registerSqspRoutes(app: AppInstance): void {
         const before = await listProductRows(tx, a.locationId)
         const rows = await replaceProductRows(tx, d, b.entries)
         reopened = (await reopenUnmapped(tx, d)).orders
-        if (rows.length > 0 || runtime().d.env.SQSP_PRODUCT_MAP) await resolveAlerts(tx, d, ['product_map_empty'], { by: a.userId })
+        if (rows.length > 0 || runtime().d.env.SQSP_PRODUCT_MAP)
+          await resolveAlerts(tx, d, ['product_map_empty'], { by: a.userId })
         await audit.record(tx, {
           locationId: a.locationId,
           action: 'sqsp.product_map_saved',
@@ -428,7 +450,8 @@ export function registerSqspRoutes(app: AppInstance): void {
           ctx: auditContextOf(req),
         })
       })
-      if (reopened > 0) await app.jobs?.enqueue('sqsp.sync', {}, { singletonKey: 'after-product-map' }).catch(() => null)
+      if (reopened > 0)
+        await app.jobs?.enqueue('sqsp.sync', {}, { singletonKey: 'after-product-map' }).catch(() => null)
       return productMapResult(a.locationId, reopened)
     },
   )
@@ -514,7 +537,10 @@ export function registerSqspRoutes(app: AppInstance): void {
         body: await manualIgnore(
           tx,
           manualDeps(a.locationId),
-          { orderId: (req.params as { id: string }).id, reason: (req.body as z.infer<typeof IgnoreBody>).reason },
+          {
+            orderId: (req.params as { id: string }).id,
+            reason: (req.body as z.infer<typeof IgnoreBody>).reason,
+          },
           actorOf(req),
         ),
       }
@@ -602,4 +628,3 @@ export function registerSqspRoutes(app: AppInstance): void {
     },
   )
 }
-

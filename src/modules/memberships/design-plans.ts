@@ -91,4 +91,3 @@ export const DESIGN_PLANS: readonly DesignPlan[] = [
     rules: [{ label: 'Hand wash', includeTags: ['handwash'], perCycle: null }],
   },
 ]
-

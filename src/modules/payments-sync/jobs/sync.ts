@@ -21,6 +21,8 @@ export async function runSyncJob(
   const out = await rt.syncCycle(locationId, opts)
   if (out.status === 'not_configured') return out
   const membership =
-    out.ordersChanged || opts.rematch || opts.resume ? await runMembershipPass(db, clock, locationId, rt.d.env) : undefined
+    out.ordersChanged || opts.rematch || opts.resume
+      ? await runMembershipPass(db, clock, locationId, rt.d.env)
+      : undefined
   return { ...out, membership }
 }

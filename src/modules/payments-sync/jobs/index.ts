@@ -79,7 +79,10 @@ export const sqspContactsJob: JobDefinition = {
       const r = await rt.syncContacts(id)
       if (!r) continue
       if (r.links.linked > 0) await runMembershipPass(ctx.db, ctx.clock, id, rt.d.env)
-      ctx.logger.info({ location: id, status: r.run.status, seen: r.run.seen, ...r.links }, 'sqsp.contacts done')
+      ctx.logger.info(
+        { location: id, status: r.run.status, seen: r.run.seen, ...r.links },
+        'sqsp.contacts done',
+      )
     }
   },
 }
@@ -98,7 +101,10 @@ export const sqspReconcileJob: JobDefinition = {
       const report = await parts.engine.reconcile()
       const match = await parts.runner.run()
       if (report.missingRemoteOrderIds?.length)
-        ctx.logger.warn({ location: id, orders: report.missingRemoteOrderIds }, 'sqsp.reconcile: stored orders Squarespace no longer returns')
+        ctx.logger.warn(
+          { location: id, orders: report.missingRemoteOrderIds },
+          'sqsp.reconcile: stored orders Squarespace no longer returns',
+        )
       ctx.logger.info(
         {
           location: id,
@@ -131,14 +137,26 @@ export const sqspWebhookJob: JobDefinition<WebhookJobData> = {
     const log = new DbNotificationDedupe(ctx.db, createIdGenerator(ctx.clock))
     try {
       const r = await rt.ingestOrder(data.locationId, data.orderId)
-      await log.finish(data.notificationId, r ? 'processed' : 'ignored', ctx.clock.now(), r ? undefined : 'no Squarespace key')
-      ctx.logger.info({ orderId: data.orderId, matched: r?.match.ordersProcessed }, 'sqsp.webhook.process done')
+      await log.finish(
+        data.notificationId,
+        r ? 'processed' : 'ignored',
+        ctx.clock.now(),
+        r ? undefined : 'no Squarespace key',
+      )
+      ctx.logger.info(
+        { orderId: data.orderId, matched: r?.match.ordersProcessed },
+        'sqsp.webhook.process done',
+      )
     } catch (e) {
-      await log.finish(data.notificationId, 'failed', ctx.clock.now(), e instanceof Error ? e.message : String(e))
+      await log.finish(
+        data.notificationId,
+        'failed',
+        ctx.clock.now(),
+        e instanceof Error ? e.message : String(e),
+      )
       throw e
     }
   },
 }
 
 export const sqspJobs = [sqspSyncJob, sqspContactsJob, sqspReconcileJob, sqspWebhookJob] as const
-

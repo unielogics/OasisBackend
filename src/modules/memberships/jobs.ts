@@ -8,12 +8,23 @@ import type { Clock } from '../../platform/clock.js'
 import type { Db } from '../../platform/db.js'
 import type { SquarespaceEnv } from '../../integrations/squarespace/config.js'
 import type { Env } from '../../config/env.js'
-import { runMembershipCycle, syncMemberships, type CycleReport, type MembershipSyncReport } from './service.js'
+import {
+  runMembershipCycle,
+  syncMemberships,
+  type CycleReport,
+  type MembershipSyncReport,
+} from './service.js'
 
 /** The membership config the environment selects (grace days, lagged-cancel days, test orders). 0 lapse days never infers a cancel. */
 export function membershipConfigFromEnv(env: Env) {
-  const cfg = paymentsSyncConfigFromEnv({ ...(env as unknown as SquarespaceEnv), SQSP_PRODUCT_MAP: undefined })
-  return { ...cfg.membership, lapseCancelDays: env.SQSP_LAPSE_CANCEL_DAYS === 0 ? null : env.SQSP_LAPSE_CANCEL_DAYS }
+  const cfg = paymentsSyncConfigFromEnv({
+    ...(env as unknown as SquarespaceEnv),
+    SQSP_PRODUCT_MAP: undefined,
+  })
+  return {
+    ...cfg.membership,
+    lapseCancelDays: env.SQSP_LAPSE_CANCEL_DAYS === 0 ? null : env.SQSP_LAPSE_CANCEL_DAYS,
+  }
 }
 
 export interface MembershipPassResult {
@@ -22,7 +33,12 @@ export interface MembershipPassResult {
 }
 
 /** The daily pass for one location: roll manual cycles and grant credits, then run the subscription inference. */
-export async function runMembershipPass(db: Db, clock: Clock, locationId: string, env: Env): Promise<MembershipPassResult> {
+export async function runMembershipPass(
+  db: Db,
+  clock: Clock,
+  locationId: string,
+  env: Env,
+): Promise<MembershipPassResult> {
   const newId = createIdGenerator(clock)
   const cycle = await runMembershipCycle(db, { locationId, clock, newId })
   const productMap = await buildProductMap(db, locationId, env.SQSP_PRODUCT_MAP)

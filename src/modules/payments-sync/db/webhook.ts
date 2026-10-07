@@ -80,7 +80,11 @@ export async function loadWebhookSecrets(db: Db, box: SecretBox | undefined): Pr
   const out: StoredSecret[] = []
   for (const r of rows) {
     try {
-      out.push({ subscriptionId: r.sqsp_subscription_id, locationId: r.location_id, secret: box.decrypt(r.secret_enc!) })
+      out.push({
+        subscriptionId: r.sqsp_subscription_id,
+        locationId: r.location_id,
+        secret: box.decrypt(r.secret_enc!),
+      })
     } catch {
       // a secret encrypted with a key that is no longer configured cannot verify anything
     }

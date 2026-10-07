@@ -36,7 +36,12 @@ export interface ManualMatchInput {
 export interface ManualMatchResult {
   orderId: string
   invoiceId: string
-  applied: { kind: Arrival['kind']; transactionId: string | null; eventId: string; how: 'confirmed' | 'recorded' }[]
+  applied: {
+    kind: Arrival['kind']
+    transactionId: string | null
+    eventId: string
+    how: 'confirmed' | 'recorded'
+  }[]
 }
 
 const keyOf = (a: Arrival): string => `sqsp:${a.orderId}:${a.kind}:${a.transactionId ?? 'order'}`
@@ -74,9 +79,13 @@ export async function manualMatch(
       .execute()
   ).map(storedTransaction)
   const pending = all.filter((t) => t.state === 'new' || t.state === 'deferred' || t.state === 'manual')
-  const arrivals = arrivalsForOrder(order, pending.map((t) => t.txn), {
-    includeOrderLevel: !all.some((t) => t.txn.kind === 'payment'),
-  }).filter((a) => !all.some((t) => t.txn.id === a.transactionId && t.state === 'matched'))
+  const arrivals = arrivalsForOrder(
+    order,
+    pending.map((t) => t.txn),
+    {
+      includeOrderLevel: !all.some((t) => t.txn.kind === 'payment'),
+    },
+  ).filter((a) => !all.some((t) => t.txn.id === a.transactionId && t.state === 'matched'))
   if (arrivals.length === 0) throw new AppError('SQSP_NOTHING_TO_MATCH')
 
   const actorCtx: CommandActor = { ...actor, manual: true }
@@ -109,8 +118,15 @@ export async function manualMatch(
       transactionId: a.transactionId,
       invoiceId: invoice.id,
     }
-    if (eventRow && !claimedEvents.has(eventRow.id) && eventRow.type === (a.kind === 'payment' ? 'pay' : 'refund')) {
-      if (eventRow.processor_state !== 'awaiting_processor' && !(eventRow.type === 'refund' && eventRow.status === 'pending'))
+    if (
+      eventRow &&
+      !claimedEvents.has(eventRow.id) &&
+      eventRow.type === (a.kind === 'payment' ? 'pay' : 'refund')
+    ) {
+      if (
+        eventRow.processor_state !== 'awaiting_processor' &&
+        !(eventRow.type === 'refund' && eventRow.status === 'pending')
+      )
         throw new AppError('SQSP_EVENT_NOT_AWAITING')
       const sameAmount = arrivals.filter((x) => x.kind === a.kind && x.amountCents === eventRow!.amount_cents)
       const sameKind = arrivals.filter((x) => x.kind === a.kind)
@@ -120,19 +136,42 @@ export async function manualMatch(
       if (a.kind === 'payment') {
         await d.ops.confirmAwaiting(
           tx,
-          { idempotencyKey: key, eventId: eventRow.id, sqspOrderId: a.orderId, processorRef: a.transactionId, variance, txnId: a.transactionId },
+          {
+            idempotencyKey: key,
+            eventId: eventRow.id,
+            sqspOrderId: a.orderId,
+            processorRef: a.transactionId,
+            variance,
+            txnId: a.transactionId,
+          },
           actorCtx,
         )
       } else {
         await d.ops.confirmRefund(
           tx,
-          { idempotencyKey: key, eventId: eventRow.id, sqspOrderId: a.orderId, processorRef: a.transactionId ?? key, txnId: a.transactionId },
+          {
+            idempotencyKey: key,
+            eventId: eventRow.id,
+            sqspOrderId: a.orderId,
+            processorRef: a.transactionId ?? key,
+            txnId: a.transactionId,
+          },
           actorCtx,
         )
       }
-      applied.push({ kind: a.kind, transactionId: a.transactionId ?? null, eventId: eventRow.id, how: 'confirmed' })
+      applied.push({
+        kind: a.kind,
+        transactionId: a.transactionId ?? null,
+        eventId: eventRow.id,
+        how: 'confirmed',
+      })
       if (variance.exceedsAlert && a.kind === 'payment')
-        await raiseAlert(tx, d, { code: 'variance_exceeds_delta', ...alertBase, message: varianceMessage(a, variance.deltaCents), variance })
+        await raiseAlert(tx, d, {
+          code: 'variance_exceeds_delta',
+          ...alertBase,
+          message: varianceMessage(a, variance.deltaCents),
+          variance,
+        })
       continue
     }
     if (a.kind === 'payment') {
@@ -157,7 +196,12 @@ export async function manualMatch(
       )
       applied.push({ kind: 'payment', transactionId: a.transactionId ?? null, eventId, how: 'recorded' })
       if (variance.exceedsAlert)
-        await raiseAlert(tx, d, { code: 'variance_exceeds_delta', ...alertBase, message: varianceMessage(a, variance.deltaCents), variance })
+        await raiseAlert(tx, d, {
+          code: 'variance_exceeds_delta',
+          ...alertBase,
+          message: varianceMessage(a, variance.deltaCents),
+          variance,
+        })
     } else {
       const { eventId } = await d.ops.recordExternalRefund(
         tx,
@@ -337,10 +381,15 @@ export async function manualIgnore(
     })
     .onConflict((oc) => oc.column('idempotency_key').doNothing())
     .execute()
-  await resolveAlerts(tx, d, ['variance_exceeds_delta', 'partially_unmapped_skus', 'mixed_membership_order'], {
-    orderId: input.orderId,
-    by: actor.userId,
-  })
+  await resolveAlerts(
+    tx,
+    d,
+    ['variance_exceeds_delta', 'partially_unmapped_skus', 'mixed_membership_order'],
+    {
+      orderId: input.orderId,
+      by: actor.userId,
+    },
+  )
   await audit.record(tx, {
     locationId: d.locationId,
     action: 'sqsp.manual_ignore',
@@ -431,7 +480,14 @@ export interface OrderListItem {
   ignoreReason: string | null
   matchedInvoiceId: string | null
   lineItems: { name: string; sku: string | null; productId: string | null; qty: number; unitCents: number }[]
-  transactions: { id: string; kind: 'payment' | 'refund'; amountCents: number; state: string; createdOn: string; brand: string | null }[]
+  transactions: {
+    id: string
+    kind: 'payment' | 'refund'
+    amountCents: number
+    state: string
+    createdOn: string
+    brand: string | null
+  }[]
   queue: {
     id: string
     reason: string
@@ -467,9 +523,15 @@ export async function listOrders(
   } else if (q.state !== 'all') query = query.where('o.match_state', '=', q.state)
   if (q.cursor) {
     const [at, id] = decodeCursor(q.cursor, 2)
-    query = query.where(keysetCondition(['o.created_on', 'o.sqsp_order_id'], [at as string, id as string], 'asc'))
+    query = query.where(
+      keysetCondition(['o.created_on', 'o.sqsp_order_id'], [at as string, id as string], 'asc'),
+    )
   }
-  const rows = await query.orderBy('o.created_on').orderBy('o.sqsp_order_id').limit(q.limit + 1).execute()
+  const rows = await query
+    .orderBy('o.created_on')
+    .orderBy('o.sqsp_order_id')
+    .limit(q.limit + 1)
+    .execute()
   const page = toPage(rows, q.limit, (r) => [r.created_on.toISOString(), r.sqsp_order_id])
   const ids = page.items.map((r) => r.sqsp_order_id)
   const txns = ids.length
@@ -508,7 +570,15 @@ export async function listOrders(
       matchState: r.match_state,
       ignoreReason: r.ignore_reason,
       matchedInvoiceId: r.matched_invoice_id,
-      lineItems: (r.line_items as { name?: string; sku?: string; productId?: string; qty?: number; unitCents?: number }[]).map((li) => ({
+      lineItems: (
+        r.line_items as {
+          name?: string
+          sku?: string
+          productId?: string
+          qty?: number
+          unitCents?: number
+        }[]
+      ).map((li) => ({
         name: li.name ?? '',
         sku: li.sku ?? null,
         productId: li.productId ?? null,
@@ -538,4 +608,3 @@ export async function listOrders(
     })),
   }
 }
-

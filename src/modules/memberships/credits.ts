@@ -54,14 +54,23 @@ export async function creditSummaries(
   for (const m of members) {
     const plan = plans.find((p) => p.id === m.planId)
     const mine = events.filter(
-      (e) => e.membership_id === m.id && m.currentPeriodStart && e.cycle_start.getTime() === m.currentPeriodStart.getTime(),
+      (e) =>
+        e.membership_id === m.id &&
+        m.currentPeriodStart &&
+        e.cycle_start.getTime() === m.currentPeriodStart.getTime(),
     )
     const rules: RuleCredit[] = (plan?.rules ?? []).map((r) => {
       const grants = mine.filter((e) => e.kind === 'grant' && e.rule_id === r.id)
-      const granted = grants.length ? (grants.some((g) => g.qty === null) ? null : grants.reduce((n, g) => n + (g.qty ?? 0), 0)) : r.perCycle
+      const granted = grants.length
+        ? grants.some((g) => g.qty === null)
+          ? null
+          : grants.reduce((n, g) => n + (g.qty ?? 0), 0)
+        : r.perCycle
       const used =
         mine.filter((e) => e.kind === 'redeem' && e.rule_id === r.id).reduce((n, e) => n + (e.qty ?? 0), 0) -
-        mine.filter((e) => (e.kind === 'restore' || e.kind === 'protect') && e.rule_id === r.id).reduce((n, e) => n + (e.qty ?? 0), 0)
+        mine
+          .filter((e) => (e.kind === 'restore' || e.kind === 'protect') && e.rule_id === r.id)
+          .reduce((n, e) => n + (e.qty ?? 0), 0)
       return {
         ruleId: r.id,
         label: r.label,
@@ -75,7 +84,8 @@ export async function creditSummaries(
     out.set(m.id, {
       cycleStart: m.currentPeriodStart,
       rules,
-      creditsLeft: m.currentPeriodStart === null ? 0 : unlimited ? null : rules.reduce((n, r) => n + (r.left ?? 0), 0),
+      creditsLeft:
+        m.currentPeriodStart === null ? 0 : unlimited ? null : rules.reduce((n, r) => n + (r.left ?? 0), 0),
       creditsUsed: rules.reduce((n, r) => n + r.used, 0),
     })
   }

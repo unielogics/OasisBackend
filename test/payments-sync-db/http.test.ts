@@ -60,7 +60,13 @@ describe('Squarespace routes', () => {
   })
 
   const get = (s: Session, url: string) => h.call('GET', `/api/v1${url}`, { session: s, ip: addr() })
-  const send = (s: Session, method: 'POST' | 'PUT' | 'DELETE' | 'PATCH', url: string, body?: unknown, key?: string) =>
+  const send = (
+    s: Session,
+    method: 'POST' | 'PUT' | 'DELETE' | 'PATCH',
+    url: string,
+    body?: unknown,
+    key?: string,
+  ) =>
     h.call(method, `/api/v1${url}`, {
       session: s,
       body: body ?? {},
@@ -74,13 +80,22 @@ describe('Squarespace routes', () => {
     expect((await get(collector, '/integrations/squarespace/status')).statusCode).toBe(403)
     const empty = await get(acct, '/integrations/squarespace/status')
     expect(empty.statusCode, empty.body).toBe(200)
-    const e = empty.json() as { provider: string; sync: { orders: { status: string } }; lagSeconds: number | null; productMap: { empty: boolean } }
+    const e = empty.json() as {
+      provider: string
+      sync: { orders: { status: string } }
+      lagSeconds: number | null
+      productMap: { empty: boolean }
+    }
     expect(e.provider).toBe('sim')
     expect(e.sync.orders.status).toBe('never_run')
     expect(e.lagSeconds).toBeNull()
     expect(e.productMap.empty).toBe(true)
 
-    store.createOrder({ email: 'a@example.com', name: 'A', lineItems: [{ productId: 'p', sku: 'X', name: 'X', unitCents: 1000 }] })
+    store.createOrder({
+      email: 'a@example.com',
+      name: 'A',
+      lineItems: [{ productId: 'p', sku: 'X', name: 'X', unitCents: 1000 }],
+    })
     h.clock.advance(120_000)
     await rt().syncCycle(h.t.location.id)
     h.clock.advance(30_000)
@@ -100,10 +115,21 @@ describe('Squarespace routes', () => {
   })
 
   it('PUT connection verifies the key, stores it encrypted and never returns it anywhere', async () => {
-    const r = await send(acct, 'PUT', '/integrations/squarespace/connection', { apiKey: REAL_KEY, siteId: 'site-1' }, '')
+    const r = await send(
+      acct,
+      'PUT',
+      '/integrations/squarespace/connection',
+      { apiKey: REAL_KEY, siteId: 'site-1' },
+      '',
+    )
     expect(r.statusCode, r.body).toBe(200)
     expect(r.body).not.toContain(REAL_KEY)
-    expect(r.json()).toMatchObject({ configured: true, keySource: 'database', status: 'connected', siteId: 'site-1' })
+    expect(r.json()).toMatchObject({
+      configured: true,
+      keySource: 'database',
+      status: 'connected',
+      siteId: 'site-1',
+    })
     const row = await h.t.db.selectFrom('sqsp_connections').selectAll().executeTakeFirstOrThrow()
     expect(row.api_key_enc).toBeTruthy()
     expect(row.api_key_enc).not.toContain(REAL_KEY)
@@ -129,12 +155,24 @@ describe('Squarespace routes', () => {
   })
 
   it('PUT connection refuses a key Squarespace rejects and stores nothing', async () => {
-    const r = await send(acct, 'PUT', '/integrations/squarespace/connection', { apiKey: 'not-a-known-key-123' }, '')
+    const r = await send(
+      acct,
+      'PUT',
+      '/integrations/squarespace/connection',
+      { apiKey: 'not-a-known-key-123' },
+      '',
+    )
     expect(r.statusCode).toBe(422)
     expect((r.json() as { code: string }).code).toBe('SQSP_CONNECTION_FAILED')
     expect(r.body).not.toContain('not-a-known-key-123')
     expect(await h.t.db.selectFrom('sqsp_connections').select('id').execute()).toHaveLength(0)
-    const denied = await send(collector, 'PUT', '/integrations/squarespace/connection', { apiKey: REAL_KEY }, '')
+    const denied = await send(
+      collector,
+      'PUT',
+      '/integrations/squarespace/connection',
+      { apiKey: REAL_KEY },
+      '',
+    )
     expect(denied.statusCode).toBe(403)
   })
 
@@ -152,11 +190,25 @@ describe('Squarespace routes', () => {
   })
 
   it('product map: validates, saves, lists products seen on orders and flags the unmapped ones', async () => {
-    const bad = await send(acct, 'PUT', '/integrations/squarespace/product-map', { entries: [{ sku: 'MEM-1', kind: 'membership' }] }, '')
+    const bad = await send(
+      acct,
+      'PUT',
+      '/integrations/squarespace/product-map',
+      { entries: [{ sku: 'MEM-1', kind: 'membership' }] },
+      '',
+    )
     expect(bad.statusCode).toBe(422)
     expect(JSON.stringify(bad.json())).toMatch(/needs a plan/)
-    store.createOrder({ email: 'a@example.com', name: 'A', lineItems: [{ productId: 'p-mem', sku: 'MEM-1', name: 'Gold', unitCents: 9900 }] })
-    store.createOrder({ email: 'b@example.com', name: 'B', lineItems: [{ productId: 'p-x', sku: 'WASH-1', name: 'Wash', unitCents: 4500 }] })
+    store.createOrder({
+      email: 'a@example.com',
+      name: 'A',
+      lineItems: [{ productId: 'p-mem', sku: 'MEM-1', name: 'Gold', unitCents: 9900 }],
+    })
+    store.createOrder({
+      email: 'b@example.com',
+      name: 'B',
+      lineItems: [{ productId: 'p-x', sku: 'WASH-1', name: 'Wash', unitCents: 4500 }],
+    })
     h.clock.advance(120_000)
     await rt().syncCycle(h.t.location.id)
     const ok = await send(
@@ -191,9 +243,17 @@ describe('Squarespace routes', () => {
     const j = live.json() as { mode: string; result: { status: string } }
     expect(j.mode).toBe('inline')
     expect(j.result.status).toBe('ok')
-    const denied = await h.call('POST', '/api/v1/integrations/squarespace/sync-now', { session: collector, body: {}, ip: addr() })
+    const denied = await h.call('POST', '/api/v1/integrations/squarespace/sync-now', {
+      session: collector,
+      body: {},
+      ip: addr(),
+    })
     expect(denied.statusCode).toBe(403)
-    const audits = await h.t.db.selectFrom('audit_log').select('action').where('action', '=', 'sqsp.sync_now').execute()
+    const audits = await h.t.db
+      .selectFrom('audit_log')
+      .select('action')
+      .where('action', '=', 'sqsp.sync_now')
+      .execute()
     expect(audits).toHaveLength(1)
   })
 
@@ -210,11 +270,19 @@ describe('Squarespace routes', () => {
     }
     // the harness app is the real one: give it a queue for this call
     ;(h.t.app as unknown as { jobs: unknown }).jobs = jobs
-    const res = await send(acct, 'POST', '/integrations/squarespace/sync-now', { resume: true, rematch: true }, '')
+    const res = await send(
+      acct,
+      'POST',
+      '/integrations/squarespace/sync-now',
+      { resume: true, rematch: true },
+      '',
+    )
     ;(h.t.app as unknown as { jobs: unknown }).jobs = null
     expect(res.statusCode, res.body).toBe(202)
     expect(res.json()).toEqual({ mode: 'queued', queued: true, result: null })
-    expect(calls).toEqual([{ name: 'sqsp.sync', data: { resume: true, rematch: true }, opts: { singletonKey: 'sync-now:rm' } }])
+    expect(calls).toEqual([
+      { name: 'sqsp.sync', data: { resume: true, rematch: true }, opts: { singletonKey: 'sync-now:rm' } },
+    ])
   })
 
   async function queuedOrder(over: { email?: string; amount?: number } = {}) {
@@ -270,8 +338,13 @@ describe('Squarespace routes', () => {
     // an invoice that already shows a card payment waiting on Squarespace: confirm that one instead
     const dup = await send(collector, 'POST', url, { invoiceId: inv.id })
     expect(dup.statusCode).toBe(409)
-    expect((dup.json() as { code: string; meta: { eventIds: string[] } })).toMatchObject({ code: 'SQSP_MATCH_DUPLICATE', meta: { eventIds: [waiting] } })
-    expect(await h.t.db.selectFrom('ledger_events').select('id').where('invoice_id', '=', inv.id).execute()).toHaveLength(1)
+    expect(dup.json() as { code: string; meta: { eventIds: string[] } }).toMatchObject({
+      code: 'SQSP_MATCH_DUPLICATE',
+      meta: { eventIds: [waiting] },
+    })
+    expect(
+      await h.t.db.selectFrom('ledger_events').select('id').where('invoice_id', '=', inv.id).execute(),
+    ).toHaveLength(1)
     // confirming the waiting payment is the right way, and replaying the same request replays the response
     const key = idemKey()
     const ok = await send(collector, 'POST', url, { eventId: waiting }, key)
@@ -279,10 +352,16 @@ describe('Squarespace routes', () => {
     expect((ok.json() as { applied: { how: string }[] }).applied[0]?.how).toBe('confirmed')
     const replay = await send(collector, 'POST', url, { eventId: waiting }, key)
     expect(replay.headers['idempotent-replayed']).toBe('true')
-    const ev = await h.t.db.selectFrom('ledger_events').select(['processor_state', 'sqsp_order_id', 'processor_confirmed_by']).where('id', '=', waiting).executeTakeFirstOrThrow()
+    const ev = await h.t.db
+      .selectFrom('ledger_events')
+      .select(['processor_state', 'sqsp_order_id', 'processor_confirmed_by'])
+      .where('id', '=', waiting)
+      .executeTakeFirstOrThrow()
     expect(ev).toMatchObject({ processor_state: 'confirmed', sqsp_order_id: o.orderId })
     expect(ev.processor_confirmed_by).toMatch(/Sofia|Duarte|User/)
-    expect(await h.t.db.selectFrom('ledger_events').select('id').where('invoice_id', '=', inv.id).execute()).toHaveLength(1)
+    expect(
+      await h.t.db.selectFrom('ledger_events').select('id').where('invoice_id', '=', inv.id).execute(),
+    ).toHaveLength(1)
     // nothing is left to match
     const gone = await send(collector, 'POST', url, { invoiceId: inv.id })
     expect(gone.statusCode).toBe(409)
@@ -292,11 +371,21 @@ describe('Squarespace routes', () => {
     const o = await queuedOrder({ email: 'f@example.com' })
     const customerId = await makeCustomer(h.t.db, payEnv, { name: 'Forced', email: 'forced@example.com' })
     const inv = await makeInvoice(h.t.db, payEnv, { customerId, items: detail })
-    await addEvent(h.t.db, payEnv, inv, { type: 'pay', amountCents: 20223, method: 'Visa', methodKind: 'card' })
+    await addEvent(h.t.db, payEnv, inv, {
+      type: 'pay',
+      amountCents: 20223,
+      method: 'Visa',
+      methodKind: 'card',
+    })
     const url = `/integrations/squarespace/orders/${o.orderId}/match`
     const forced = await send(collector, 'POST', url, { invoiceId: inv.id, force: true })
     expect(forced.statusCode, forced.body).toBe(200)
-    const evs = await h.t.db.selectFrom('ledger_events').select(['source', 'amount_cents']).where('invoice_id', '=', inv.id).orderBy('seq').execute()
+    const evs = await h.t.db
+      .selectFrom('ledger_events')
+      .select(['source', 'amount_cents'])
+      .where('invoice_id', '=', inv.id)
+      .orderBy('seq')
+      .execute()
     expect(evs).toEqual([
       { source: 'oasis', amount_cents: 20223 },
       { source: 'squarespace', amount_cents: 20223 },
@@ -310,37 +399,72 @@ describe('Squarespace routes', () => {
     const r1 = await send(collector, 'POST', url, { reason: 'duplicate of a phone order' })
     expect(r1.statusCode, r1.body).toBe(200)
     expect(r1.json()).toEqual({ orderId: o.orderId, alreadyIgnored: false })
-    expect((await send(collector, 'POST', url, {})).json()).toEqual({ orderId: o.orderId, alreadyIgnored: true })
-    const row = await h.t.db.selectFrom('sqsp_orders').select(['match_state', 'ignore_reason']).executeTakeFirstOrThrow()
+    expect((await send(collector, 'POST', url, {})).json()).toEqual({
+      orderId: o.orderId,
+      alreadyIgnored: true,
+    })
+    const row = await h.t.db
+      .selectFrom('sqsp_orders')
+      .select(['match_state', 'ignore_reason'])
+      .executeTakeFirstOrThrow()
     expect(row).toEqual({ match_state: 'ignored', ignore_reason: 'manual: duplicate of a phone order' })
-    expect(await h.t.db.selectFrom('sqsp_manual_queue').select('state').executeTakeFirstOrThrow()).toEqual({ state: 'ignored' })
-    expect((await get(acct, '/integrations/squarespace/orders?state=unmatched')).json()).toMatchObject({ items: [] })
+    expect(await h.t.db.selectFrom('sqsp_manual_queue').select('state').executeTakeFirstOrThrow()).toEqual({
+      state: 'ignored',
+    })
+    expect((await get(acct, '/integrations/squarespace/orders?state=unmatched')).json()).toMatchObject({
+      items: [],
+    })
     const t = await h.t.db.selectFrom('sqsp_transactions').select('state').executeTakeFirstOrThrow()
     expect(t.state).toBe('ignored')
     // an order whose money is already recorded cannot be ignored
     const o2 = await queuedOrder({ email: 'paid@example.com' })
     const customerId = await makeCustomer(h.t.db, payEnv, { name: 'Payer', email: 'payer@example.com' })
     const inv = await makeInvoice(h.t.db, payEnv, { customerId, items: detail })
-    expect((await send(collector, 'POST', `/integrations/squarespace/orders/${o2.orderId}/match`, { invoiceId: inv.id })).statusCode).toBe(200)
+    expect(
+      (
+        await send(collector, 'POST', `/integrations/squarespace/orders/${o2.orderId}/match`, {
+          invoiceId: inv.id,
+        })
+      ).statusCode,
+    ).toBe(200)
     const refused = await send(collector, 'POST', `/integrations/squarespace/orders/${o2.orderId}/ignore`, {})
     expect(refused.statusCode).toBe(409)
     expect((refused.json() as { code: string }).code).toBe('SQSP_ORDER_ALREADY_MATCHED')
   })
 
   it('unknown orders are 404 for match and ignore', async () => {
-    expect((await send(collector, 'POST', '/integrations/squarespace/orders/nope/match', { invoiceId: '00000000-0000-7000-8000-000000000000' })).statusCode).toBe(404)
-    expect((await send(collector, 'POST', '/integrations/squarespace/orders/nope/ignore', {})).statusCode).toBe(404)
+    expect(
+      (
+        await send(collector, 'POST', '/integrations/squarespace/orders/nope/match', {
+          invoiceId: '00000000-0000-7000-8000-000000000000',
+        })
+      ).statusCode,
+    ).toBe(404)
+    expect(
+      (await send(collector, 'POST', '/integrations/squarespace/orders/nope/ignore', {})).statusCode,
+    ).toBe(404)
   })
 
   it('alerts can be resolved by set.billing', async () => {
     await queuedOrder()
-    const alert = await h.t.db.selectFrom('sqsp_alerts').select('id').where('code', '=', 'external_refund').executeTakeFirst()
+    const alert = await h.t.db
+      .selectFrom('sqsp_alerts')
+      .select('id')
+      .where('code', '=', 'external_refund')
+      .executeTakeFirst()
     expect(alert).toBeUndefined()
     const id = h.t.app.newId()
-    await h.t.db.insertInto('sqsp_alerts').values({ id, location_id: h.t.location.id, dedupe_key: 'x', code: 'external_refund', message: 'm' }).execute()
-    expect((await send(collector, 'POST', `/integrations/squarespace/alerts/${id}/resolve`, {})).statusCode).toBe(403)
+    await h.t.db
+      .insertInto('sqsp_alerts')
+      .values({ id, location_id: h.t.location.id, dedupe_key: 'x', code: 'external_refund', message: 'm' })
+      .execute()
+    expect(
+      (await send(collector, 'POST', `/integrations/squarespace/alerts/${id}/resolve`, {})).statusCode,
+    ).toBe(403)
     const r = await send(acct, 'POST', `/integrations/squarespace/alerts/${id}/resolve`, {})
     expect(r.json()).toEqual({ resolved: true })
-    expect((await send(acct, 'POST', `/integrations/squarespace/alerts/${id}/resolve`, {})).json()).toEqual({ resolved: false })
+    expect((await send(acct, 'POST', `/integrations/squarespace/alerts/${id}/resolve`, {})).json()).toEqual({
+      resolved: false,
+    })
   })
 })

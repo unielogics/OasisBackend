@@ -16,12 +16,7 @@ import * as realtime from '../../../platform/realtime.js'
 import { calcOf, cardLabel, insertEvent, lockInvoice, touchInvoice } from '../../payments/repository.js'
 import type { EventRow } from '../../payments/repository.js'
 import type { IdentityRef } from '../identity.js'
-import type {
-  LedgerCommands,
-  LedgerContextQuery,
-  LedgerReader,
-  PaymentFacts,
-} from '../ledger-ports.js'
+import type { LedgerCommands, LedgerContextQuery, LedgerReader, PaymentFacts } from '../ledger-ports.js'
 import type {
   InvoiceSummary,
   LedgerEventRef,
@@ -127,9 +122,13 @@ export class SqspLedgerOps {
               and coalesce(l.sent_at, l.created_at) >= ${new Date(Math.min(...q.around.map((t) => t.getTime())) - q.linkWindowMs)}))
       order by l.created_at, l.id`.execute(db)
 
-    const customerIds = [...new Set([...evRows.rows.map((r) => r.customer_id), ...linkRows.rows.map((r) => r.customer_id)])]
+    const customerIds = [
+      ...new Set([...evRows.rows.map((r) => r.customer_id), ...linkRows.rows.map((r) => r.customer_id)]),
+    ]
     const identities = await this.identities(db, customerIds)
-    const invoiceIds = [...new Set([...evRows.rows.map((r) => r.invoice_id), ...linkRows.rows.map((r) => r.invoice_id)])]
+    const invoiceIds = [
+      ...new Set([...evRows.rows.map((r) => r.invoice_id), ...linkRows.rows.map((r) => r.invoice_id)]),
+    ]
     const summaries = new Map<string, InvoiceSummary>()
     for (const id of invoiceIds) summaries.set(id, await this.invoiceSummary(db, id))
 
@@ -308,8 +307,21 @@ export class SqspLedgerOps {
       entityType: 'invoice',
       entityId: invoiceId,
       before: o.before,
-      after: { status: calc.status, paid: calc.paid, refunded: calc.refunded, balance: calc.balance, ...o.after },
-      ctx: o.actor.audit ?? { actor: { userId: o.actor.userId, employeeId: o.actor.employeeId, name: o.actor.name, roles: o.actor.roles } },
+      after: {
+        status: calc.status,
+        paid: calc.paid,
+        refunded: calc.refunded,
+        balance: calc.balance,
+        ...o.after,
+      },
+      ctx: o.actor.audit ?? {
+        actor: {
+          userId: o.actor.userId,
+          employeeId: o.actor.employeeId,
+          name: o.actor.name,
+          roles: o.actor.roles,
+        },
+      },
     })
     const pub = (type: string, payload: Record<string, string | number>) =>
       realtime.publish(tx, { locationId: this.d.locationId, channel: 'payments', type, payload })
@@ -403,7 +415,13 @@ export class SqspLedgerOps {
 
   async recordPayment(
     tx: Tx,
-    i: PaymentFacts & { idempotencyKey: string; invoiceId: string; paymentLinkId?: string | null; deposit: boolean; txnId?: string },
+    i: PaymentFacts & {
+      idempotencyKey: string
+      invoiceId: string
+      paymentLinkId?: string | null
+      deposit: boolean
+      txnId?: string
+    },
     actor: CommandActor = SQSP_ACTOR,
   ): Promise<{ eventId: string }> {
     const inv = await lockInvoice(tx, this.d.locationId, i.invoiceId)
@@ -503,7 +521,10 @@ export class SqspLedgerOps {
               processor_ref: ev.processor_ref ?? i.processorRef,
               sqsp_order_id: ev.sqsp_order_id ?? i.sqspOrderId,
             }
-          : { processor_ref: ev.processor_ref ?? i.processorRef, sqsp_order_id: ev.sqsp_order_id ?? i.sqspOrderId },
+          : {
+              processor_ref: ev.processor_ref ?? i.processorRef,
+              sqsp_order_id: ev.sqsp_order_id ?? i.sqspOrderId,
+            },
       )
       .where('id', '=', ev.id)
       .execute()
@@ -654,7 +675,9 @@ export class PgLedger implements LedgerReader, LedgerCommands {
     return transaction(this.db, (tx) => this.ops.confirmRefund(tx, i))
   }
 
-  recordExternalRefund(i: Parameters<LedgerCommands['recordExternalRefund']>[0]): Promise<{ eventId: string }> {
+  recordExternalRefund(
+    i: Parameters<LedgerCommands['recordExternalRefund']>[0],
+  ): Promise<{ eventId: string }> {
     return transaction(this.db, (tx) => this.ops.recordExternalRefund(tx, i))
   }
 
@@ -662,4 +685,3 @@ export class PgLedger implements LedgerReader, LedgerCommands {
     return transaction(this.db, (tx) => this.ops.enqueueManual(tx, i))
   }
 }
-

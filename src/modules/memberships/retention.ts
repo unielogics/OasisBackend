@@ -22,7 +22,13 @@ export async function visitCounts(
   if (customerIds.length === 0) return out
   const d30 = new Date(now.getTime() - 30 * DAY)
   const d60 = new Date(now.getTime() - 60 * DAY)
-  const r = await sql<{ customer_id: string; cur30: number; prev30: number; visits60: number; visit_count: number }>`
+  const r = await sql<{
+    customer_id: string
+    cur30: number
+    prev30: number
+    visits60: number
+    visit_count: number
+  }>`
     select a.customer_id,
       count(*) filter (where v.at > ${d30} and v.at <= ${now})::int as cur30,
       count(*) filter (where v.at > ${d60} and v.at <= ${d30})::int as prev30,
@@ -33,7 +39,12 @@ export async function visitCounts(
     group by a.customer_id`.execute(db)
   for (const id of customerIds) out.set(id, { cur30: 0, prev30: 0, visits60: 0, visitCount: 0 })
   for (const x of r.rows)
-    out.set(x.customer_id, { cur30: x.cur30, prev30: x.prev30, visits60: x.visits60, visitCount: x.visit_count })
+    out.set(x.customer_id, {
+      cur30: x.cur30,
+      prev30: x.prev30,
+      visits60: x.visits60,
+      visitCount: x.visit_count,
+    })
   return out
 }
 
@@ -56,7 +67,11 @@ const plural = (n: number, one: string, many: string): string => (n === 1 ? one 
  * (design strings). One deviation from the design's rule: a member who joined less than 30 days ago and has no visit yet is "New
  * member", because "Down from 0 to 0 visits" would be false.
  */
-export function retentionOf(c: Pick<VisitCounts, 'cur30' | 'prev30'>, memberSince: Date | null, now: Date): Retention {
+export function retentionOf(
+  c: Pick<VisitCounts, 'cur30' | 'prev30'>,
+  memberSince: Date | null,
+  now: Date,
+): Retention {
   const { cur30: cur, prev30: prev } = c
   if (cur >= 1 && cur >= prev)
     return {
@@ -143,7 +158,8 @@ export async function historyFor(db: Executor, locationId: string, customerId: s
 
 /** Whole months from `since` to `now`, at least 1 for a current member. */
 export function memberMonths(since: Date, now: Date): number {
-  let months = (now.getUTCFullYear() - since.getUTCFullYear()) * 12 + (now.getUTCMonth() - since.getUTCMonth())
+  let months =
+    (now.getUTCFullYear() - since.getUTCFullYear()) * 12 + (now.getUTCMonth() - since.getUTCMonth())
   if (now.getUTCDate() < since.getUTCDate()) months -= 1
   return Math.max(1, months)
 }

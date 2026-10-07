@@ -3,7 +3,12 @@
 import { sql } from 'kysely'
 import type { Executor } from '../../../platform/db.js'
 import { formatUsd } from '../../../platform/money.js'
-import type { CardHintProvider, UnmatchedOrder, UnmatchedSource, UnmatchedTransaction } from '../../payments/ports.js'
+import type {
+  CardHintProvider,
+  UnmatchedOrder,
+  UnmatchedSource,
+  UnmatchedTransaction,
+} from '../../payments/ports.js'
 import { AWAITING_ALERT_MINUTES } from '../../payments/reports.js'
 import type { ExternalAlert, ExternalAlertSource } from '../../scheduling/ports.js'
 

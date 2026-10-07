@@ -145,7 +145,10 @@ export class SqspRuntime {
     if (!apiKey) return undefined
     const { db, clock, newId, env } = this.d
     const source = this.sourceFor(locationId, apiKey)
-    const cfg = paymentsSyncConfigFromEnv({ ...(env as unknown as SquarespaceEnv), SQSP_PRODUCT_MAP: undefined })
+    const cfg = paymentsSyncConfigFromEnv({
+      ...(env as unknown as SquarespaceEnv),
+      SQSP_PRODUCT_MAP: undefined,
+    })
     const productMap = await buildProductMap(db, locationId, env.SQSP_PRODUCT_MAP)
     const now = () => clock.now()
     const repos = {
@@ -166,7 +169,17 @@ export class SqspRuntime {
       productMap,
       config: cfg.matcher,
     })
-    return { locationId, source, productMap, engine, runner, ledger, repos, matcher: cfg.matcher, sync: cfg.sync }
+    return {
+      locationId,
+      source,
+      productMap,
+      engine,
+      runner,
+      ledger,
+      repos,
+      matcher: cfg.matcher,
+      sync: cfg.sync,
+    }
   }
 
   /** Orders then transactions, then the matcher; records connection health and raises sync alerts. */
@@ -175,13 +188,17 @@ export class SqspRuntime {
     if (!parts) return { status: 'not_configured', ordersChanged: false }
     const { db, clock, newId } = this.d
     const alertDeps = { locationId, newId, clock }
-    if (opts.resume) for (const r of ['orders', 'transactions', 'contacts', 'reconcile'] as const) await parts.engine.resume(r)
+    if (opts.resume)
+      for (const r of ['orders', 'transactions', 'contacts', 'reconcile'] as const)
+        await parts.engine.resume(r)
     const requeued = opts.rematch ? (await requeueManual(db, { locationId })).orders : undefined
     const cycle = await parts.engine.runCycle()
     const match = await parts.runner.run()
     if (parts.productMap.size > 0) await resolveAlerts(db, alertDeps, ['product_map_empty'])
     const conn = this.d.env.SECRETS_KEY ? this.connection(locationId) : undefined
-    const bad = [cycle.orders, cycle.transactions].find((r) => r.status === 'error' || r.status === 'dead_letter')
+    const bad = [cycle.orders, cycle.transactions].find(
+      (r) => r.status === 'error' || r.status === 'dead_letter',
+    )
     for (const r of [cycle.orders, cycle.transactions]) {
       if (r.status === 'dead_letter')
         await raiseAlert(db, alertDeps, {

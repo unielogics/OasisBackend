@@ -36,16 +36,25 @@ describe('polling: watermark, overlap, chunks, failures', () => {
   it('the first run looks back 45 days and the next window starts 5 minutes before the watermark', async () => {
     const r = rig()
     await mapDetailSku()
-    r.store.createOrder({ email: 'a@example.com', name: 'A', lineItems: [line], createdOn: new Date(r.clock.now().getTime() - 40 * D) })
+    r.store.createOrder({
+      email: 'a@example.com',
+      name: 'A',
+      lineItems: [line],
+      createdOn: new Date(r.clock.now().getTime() - 40 * D),
+    })
     const t0 = r.clock.now()
     const first = await r.rt.syncCycle(r.locationId)
     expect(first.orders?.inserted).toBe(1)
     const w1 = orderWindows(r)
     // 45 days in 7-day chunks: 7 windows, the first starting 45 days (+ the 5 minute overlap) back
-    expect(w1.length).toBe(Math.ceil((45 * D + 5 * 60_000) / (7 * D)) )
+    expect(w1.length).toBe(Math.ceil((45 * D + 5 * 60_000) / (7 * D)))
     expect(w1[0]!.after.getTime()).toBe(t0.getTime() - 45 * D - 5 * 60_000)
     for (const w of w1) expect(w.before.getTime() - w.after.getTime()).toBeLessThanOrEqual(7 * D)
-    const state = await r.db.selectFrom('sqsp_sync_state').select(['watermark', 'status', 'last_success_at']).where('resource', '=', 'orders').executeTakeFirstOrThrow()
+    const state = await r.db
+      .selectFrom('sqsp_sync_state')
+      .select(['watermark', 'status', 'last_success_at'])
+      .where('resource', '=', 'orders')
+      .executeTakeFirstOrThrow()
     expect(state.watermark?.toISOString()).toBe(t0.toISOString())
     expect(state.status).toBe('ok')
     r.api.log.length = 0
@@ -64,13 +73,19 @@ describe('polling: watermark, overlap, chunks, failures', () => {
     await r.rt.syncCycle(r.locationId)
     r.api.log.length = 0
     r.advance(20 * D)
-    const o = r.store.createOrder({ email: 'b@example.com', name: 'B', lineItems: [line], createdOn: new Date(r.clock.now().getTime() - 10 * D) })
+    const o = r.store.createOrder({
+      email: 'b@example.com',
+      name: 'B',
+      lineItems: [line],
+      createdOn: new Date(r.clock.now().getTime() - 10 * D),
+    })
     void o
     const res = await r.rt.syncCycle(r.locationId)
     expect(res.status).toBe('ok')
     const w = orderWindows(r)
     expect(w.length).toBe(3)
-    for (let i = 1; i < w.length; i++) expect(w[i]!.after.getTime()).toBeLessThanOrEqual(w[i - 1]!.before.getTime())
+    for (let i = 1; i < w.length; i++)
+      expect(w[i]!.after.getTime()).toBeLessThanOrEqual(w[i - 1]!.before.getTime())
     expect(w[w.length - 1]!.before.getTime()).toBe(r.clock.now().getTime())
     expect(res.orders?.inserted).toBe(1)
   })
@@ -87,12 +102,19 @@ describe('polling: watermark, overlap, chunks, failures', () => {
       expect(res.status).toBe('error')
       expect(res.orders?.status).toBe(i < 5 ? 'error' : 'dead_letter')
     }
-    const st = await r.db.selectFrom('sqsp_sync_state').select(['resource', 'status', 'consecutive_failures']).where('resource', 'in', ['orders', 'transactions']).orderBy('resource').execute()
+    const st = await r.db
+      .selectFrom('sqsp_sync_state')
+      .select(['resource', 'status', 'consecutive_failures'])
+      .where('resource', 'in', ['orders', 'transactions'])
+      .orderBy('resource')
+      .execute()
     expect(st).toEqual([
       { resource: 'orders', status: 'dead_letter', consecutive_failures: 5 },
       { resource: 'transactions', status: 'dead_letter', consecutive_failures: 5 },
     ])
-    const codes = (await r.db.selectFrom('sqsp_alerts').select('code').where('resolved_at', 'is', null).execute()).map((a) => a.code)
+    const codes = (
+      await r.db.selectFrom('sqsp_alerts').select('code').where('resolved_at', 'is', null).execute()
+    ).map((a) => a.code)
     expect(codes).toContain('sync_dead_letter')
     expect(codes).toContain('sync_failing')
     // dead-lettered: the next run does not even call Squarespace
@@ -106,7 +128,9 @@ describe('polling: watermark, overlap, chunks, failures', () => {
     const resumed = await r.rt.syncCycle(r.locationId, { resume: true })
     expect(resumed.status).toBe('ok')
     expect(resumed.orders?.inserted).toBe(1)
-    const open = (await r.db.selectFrom('sqsp_alerts').select('code').where('resolved_at', 'is', null).execute()).map((a) => a.code)
+    const open = (
+      await r.db.selectFrom('sqsp_alerts').select('code').where('resolved_at', 'is', null).execute()
+    ).map((a) => a.code)
     expect(open).not.toContain('sync_dead_letter')
     expect(open).not.toContain('sync_failing')
   })
@@ -116,7 +140,12 @@ describe('polling: watermark, overlap, chunks, failures', () => {
     await mapDetailSku()
     await r.rt.syncCycle(r.locationId)
     // 30,000,000.00 dollars does not fit the integer-cents column: a persist failure that repeats
-    r.store.createOrder({ email: 'big@example.com', name: 'Big', lineItems: [{ ...line, unitCents: 3_000_000_000 }], pay: false })
+    r.store.createOrder({
+      email: 'big@example.com',
+      name: 'Big',
+      lineItems: [{ ...line, unitCents: 3_000_000_000 }],
+      pay: false,
+    })
     const good = r.store.createOrder({ email: 'ok@example.com', name: 'Ok', lineItems: [line] })
     void good
     const results = []
@@ -131,7 +160,11 @@ describe('polling: watermark, overlap, chunks, failures', () => {
     expect(errs).toHaveLength(1)
     expect(errs[0]).toMatchObject({ resource: 'orders', kind: 'persist', attempts: 5 })
     expect(errs[0]!.dead_lettered_at).not.toBeNull()
-    const state = await r.db.selectFrom('sqsp_sync_state').select(['watermark']).where('resource', '=', 'orders').executeTakeFirstOrThrow()
+    const state = await r.db
+      .selectFrom('sqsp_sync_state')
+      .select(['watermark'])
+      .where('resource', '=', 'orders')
+      .executeTakeFirstOrThrow()
     expect(state.watermark!.getTime()).toBe(r.clock.now().getTime())
     // the good order was stored all along
     expect((await r.db.selectFrom('sqsp_orders').select('id').execute()).length).toBe(1)
@@ -143,25 +176,52 @@ describe('polling: watermark, overlap, chunks, failures', () => {
     await r.rt.syncCycle(r.locationId)
     r.advance(2 * H)
     // committed late with an old modification time: outside every poll window after the watermark
-    const late = r.store.createOrder({ email: 'late@example.com', name: 'Late', lineItems: [line], taxCents: 1323, createdOn: new Date(r.clock.now().getTime() - 3 * D) })
+    const late = r.store.createOrder({
+      email: 'late@example.com',
+      name: 'Late',
+      lineItems: [line],
+      taxCents: 1323,
+      createdOn: new Date(r.clock.now().getTime() - 3 * D),
+    })
     r.advance(120_000)
     const poll = await r.rt.syncCycle(r.locationId)
     expect(poll.orders?.inserted).toBe(0)
     expect(await r.db.selectFrom('sqsp_orders').select('id').execute()).toHaveLength(0)
-    const logger = { info: () => undefined, warn: () => undefined, error: () => undefined, debug: () => undefined, child: () => logger } as never
+    const logger = {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+      debug: () => undefined,
+      child: () => logger,
+    } as never
     const { sqspReconcileJob } = await import('../../src/modules/payments-sync/jobs/index.js')
     await sqspReconcileJob.handler({ db: r.db, clock: r.clock, logger }, {} as never, { id: 'j' })
-    const row = await r.db.selectFrom('sqsp_orders').select(['sqsp_order_id', 'match_state']).executeTakeFirstOrThrow()
+    const row = await r.db
+      .selectFrom('sqsp_orders')
+      .select(['sqsp_order_id', 'match_state'])
+      .executeTakeFirstOrThrow()
     expect(row).toEqual({ sqsp_order_id: late.orderId, match_state: 'manual' })
-    const state = await r.db.selectFrom('sqsp_sync_state').select(['status', 'watermark']).where('resource', '=', 'reconcile').executeTakeFirstOrThrow()
+    const state = await r.db
+      .selectFrom('sqsp_sync_state')
+      .select(['status', 'watermark'])
+      .where('resource', '=', 'reconcile')
+      .executeTakeFirstOrThrow()
     expect(state.status).toBe('ok')
     // the reconcile does not touch the poll watermarks
-    const orders = await r.db.selectFrom('sqsp_sync_state').select('watermark').where('resource', '=', 'orders').executeTakeFirstOrThrow()
+    const orders = await r.db
+      .selectFrom('sqsp_sync_state')
+      .select('watermark')
+      .where('resource', '=', 'orders')
+      .executeTakeFirstOrThrow()
     expect(orders.watermark!.getTime()).toBe(r.clock.now().getTime())
     r.advance(H)
     const writes = await r.db.selectFrom('sqsp_orders').select('synced_at').executeTakeFirstOrThrow()
     await sqspReconcileJob.handler({ db: r.db, clock: r.clock, logger }, {} as never, { id: 'j2' })
-    expect((await r.db.selectFrom('sqsp_orders').select('synced_at').executeTakeFirstOrThrow()).synced_at.getTime()).toBe(writes.synced_at.getTime())
+    expect(
+      (
+        await r.db.selectFrom('sqsp_orders').select('synced_at').executeTakeFirstOrThrow()
+      ).synced_at.getTime(),
+    ).toBe(writes.synced_at.getTime())
   })
 
   it('a rejected key is recorded on the connection and raises sync_failing on the third run', async () => {
@@ -188,11 +248,18 @@ describe('polling: watermark, overlap, chunks, failures', () => {
       expect(res.status).toBe('error')
       expect(res.orders?.error).toMatch(/401/)
     }
-    const conn = await r.db.selectFrom('sqsp_connections').select(['status', 'last_error']).executeTakeFirstOrThrow()
+    const conn = await r.db
+      .selectFrom('sqsp_connections')
+      .select(['status', 'last_error'])
+      .executeTakeFirstOrThrow()
     expect(conn.status).toBe('error')
     expect(conn.last_error).toMatch(/401/)
     expect(conn.last_error).not.toContain('revoked-key-123')
-    const alerts = await r.db.selectFrom('sqsp_alerts').select(['code', 'message']).where('resolved_at', 'is', null).execute()
+    const alerts = await r.db
+      .selectFrom('sqsp_alerts')
+      .select(['code', 'message'])
+      .where('resolved_at', 'is', null)
+      .execute()
     expect(alerts.map((a) => a.code)).toContain('sync_failing')
     expect(JSON.stringify(alerts)).not.toContain('revoked-key-123')
   })
@@ -210,17 +277,25 @@ describe('the product map and test-mode orders', () => {
     const res = await r.rt.syncCycle(r.locationId)
     expect(res.match?.ignored).toBe(1)
     expect(res.match?.alerts).toBeGreaterThanOrEqual(1)
-    const open = await r.db.selectFrom('sqsp_alerts').select(['code', 'message']).where('resolved_at', 'is', null).execute()
+    const open = await r.db
+      .selectFrom('sqsp_alerts')
+      .select(['code', 'message'])
+      .where('resolved_at', 'is', null)
+      .execute()
     expect(open.map((a) => a.code)).toEqual(['product_map_empty'])
     expect(open[0]!.message).toMatch(/SQSP_PRODUCT_MAP/)
-    const order = await r.db.selectFrom('sqsp_orders').select(['match_state', 'ignore_reason']).executeTakeFirstOrThrow()
+    const order = await r.db
+      .selectFrom('sqsp_orders')
+      .select(['match_state', 'ignore_reason'])
+      .executeTakeFirstOrThrow()
     expect(order).toEqual({ match_state: 'ignored', ignore_reason: 'unmapped_sku' })
 
     const app = await createTestApp({
       testDb: r.t,
       modules: apiModules,
       env: { SQSP_PROVIDER: 'live', SQSP_API_KEY: SIM_KEY, SECRETS_KEY },
-      authorizer: (l) => createPermissiveAuthorizer({ locationId: l.id, userId: user.userId, employeeId: user.employeeId }),
+      authorizer: (l) =>
+        createPermissiveAuthorizer({ locationId: l.id, userId: user.userId, employeeId: user.employeeId }),
     })
     const put = await app.app.inject({
       method: 'PUT',
@@ -229,7 +304,9 @@ describe('the product map and test-mode orders', () => {
     })
     expect(put.statusCode, put.body).toBe(200)
     expect((put.json() as { reopenedOrders: number }).reopenedOrders).toBe(1)
-    expect(await r.db.selectFrom('sqsp_alerts').select('id').where('resolved_at', 'is', null).execute()).toHaveLength(0)
+    expect(
+      await r.db.selectFrom('sqsp_alerts').select('id').where('resolved_at', 'is', null).execute(),
+    ).toHaveLength(0)
     const reopened = await r.db.selectFrom('sqsp_orders').select('match_state').executeTakeFirstOrThrow()
     expect(reopened.match_state).toBe('unmatched')
     r.advance(120_000)
@@ -241,24 +318,50 @@ describe('the product map and test-mode orders', () => {
 
   it('test-mode orders are ignored unless SQSP_INCLUDE_TEST_ORDERS is set', async () => {
     const r = rig()
-    r.store.createOrder({ email: 't@example.com', name: 'T', lineItems: [line], taxCents: 1323, testMode: true })
+    r.store.createOrder({
+      email: 't@example.com',
+      name: 'T',
+      lineItems: [line],
+      taxCents: 1323,
+      testMode: true,
+    })
     r.advance(120_000)
     await r.rt.syncCycle(r.locationId)
-    const o = await r.db.selectFrom('sqsp_orders').select(['match_state', 'ignore_reason', 'test_mode']).executeTakeFirstOrThrow()
+    const o = await r.db
+      .selectFrom('sqsp_orders')
+      .select(['match_state', 'ignore_reason', 'test_mode'])
+      .executeTakeFirstOrThrow()
     expect(o).toEqual({ match_state: 'ignored', ignore_reason: 'test_mode', test_mode: true })
-    const t = await r.db.selectFrom('sqsp_transactions').select(['state', 'ignore_reason']).executeTakeFirstOrThrow()
+    const t = await r.db
+      .selectFrom('sqsp_transactions')
+      .select(['state', 'ignore_reason'])
+      .executeTakeFirstOrThrow()
     expect(t).toEqual({ state: 'ignored', ignore_reason: 'test_mode' })
   })
 })
 
 describe('test-mode orders with the flag on', () => {
-  const rig = useRig({ pageSize: 50, env: { SQSP_INCLUDE_TEST_ORDERS: 'true', SQSP_PRODUCT_MAP: JSON.stringify([{ sku: 'DET-SEDAN', kind: 'service' }]) } })
+  const rig = useRig({
+    pageSize: 50,
+    env: {
+      SQSP_INCLUDE_TEST_ORDERS: 'true',
+      SQSP_PRODUCT_MAP: JSON.stringify([{ sku: 'DET-SEDAN', kind: 'service' }]),
+    },
+  })
   it('are processed like real ones', async () => {
     const r = rig()
-    r.store.createOrder({ email: 't@example.com', name: 'T', lineItems: [{ productId: 'p', sku: 'DET-SEDAN', name: 'Full Detail', unitCents: 18900 }], taxCents: 1323, testMode: true })
+    r.store.createOrder({
+      email: 't@example.com',
+      name: 'T',
+      lineItems: [{ productId: 'p', sku: 'DET-SEDAN', name: 'Full Detail', unitCents: 18900 }],
+      taxCents: 1323,
+      testMode: true,
+    })
     r.advance(120_000)
     const res = await r.rt.syncCycle(r.locationId)
     expect(res.match?.manual).toBe(1)
-    expect((await r.db.selectFrom('sqsp_orders').select('match_state').executeTakeFirstOrThrow()).match_state).toBe('manual')
+    expect(
+      (await r.db.selectFrom('sqsp_orders').select('match_state').executeTakeFirstOrThrow()).match_state,
+    ).toBe('manual')
   })
 })

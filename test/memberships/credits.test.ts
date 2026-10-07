@@ -9,7 +9,14 @@ interface Applied {
   discountCents: number
   rule: { label: string }
   credits: { left: number | null; used: number }
-  event: { id: string; type: string; amountCents: number; reason: string | null; source: string; by: string | null }
+  event: {
+    id: string
+    type: string
+    amountCents: number
+    reason: string | null
+    source: string
+    by: string | null
+  }
   invoice: { totals: { totalCents: number; balanceCents: number } } | Record<string, unknown>
 }
 
@@ -18,17 +25,28 @@ describe('membership credits', () => {
   const apply = (appointmentId: string, idem?: string | false, s = m.superS()) =>
     m.send(s, 'POST', `/appointments/${appointmentId}/membership-perks/apply`, {}, idem)
   const calc = (invoiceId: string) =>
-    m.h.t.db.selectFrom('invoice_calc').select(['total', 'balance', 'paid', 'status', 'adj', 'tax', 'sub']).where('invoice_id', '=', invoiceId).executeTakeFirstOrThrow()
+    m.h.t.db
+      .selectFrom('invoice_calc')
+      .select(['total', 'balance', 'paid', 'status', 'adj', 'tax', 'sub'])
+      .where('invoice_id', '=', invoiceId)
+      .executeTakeFirstOrThrow()
 
   it('plans carry the design perks, colours and credit rules; a new member gets this cycle’s grants', async () => {
     const plans = await m.h.t.db.selectFrom('membership_plans').selectAll().orderBy('sort').execute()
-    expect(plans.map((p) => [p.key, p.color, p.bg_color, p.tint, p.addon_discount_bp, p.service_discount_bp])).toEqual([
+    expect(
+      plans.map((p) => [p.key, p.color, p.bg_color, p.tint, p.addon_discount_bp, p.service_discount_bp]),
+    ).toEqual([
       ['essential', '#7A8B73', '#E9EDE4', '#5E7A52', 1000, 0],
       ['premium', '#8A6D3B', '#F2E9D6', '#8A6D3B', 1500, 0],
       ['executive', '#3B5A8A', '#E0E8F4', '#3B5A8A', 2000, 0],
       ['exotic', '#7A3B8A', '#EEDFF2', '#7A3B8A', 2500, 2500],
     ])
-    expect(plans[0]?.perks).toEqual(['2 express washes / month', 'Priority booking', '10% off add-ons', 'Free vacuum anytime'])
+    expect(plans[0]?.perks).toEqual([
+      '2 express washes / month',
+      'Priority booking',
+      '10% off add-ons',
+      'Free vacuum anytime',
+    ])
     expect(plans[3]?.perks).toContain('Unlimited hand washes')
     const rules = await m.h.t.db
       .selectFrom('plan_credit_rules as r')
@@ -45,7 +63,12 @@ describe('membership credits', () => {
       ['exotic', 'handwash', null],
     ])
     const { id } = await m.member('Sofia Marchetti', 'executive')
-    const grants = await m.h.t.db.selectFrom('membership_credit_events').select(['kind', 'qty']).where('membership_id', '=', id).orderBy('created_at').execute()
+    const grants = await m.h.t.db
+      .selectFrom('membership_credit_events')
+      .select(['kind', 'qty'])
+      .where('membership_id', '=', id)
+      .orderBy('created_at')
+      .execute()
     expect(grants).toEqual([
       { kind: 'grant', qty: null },
       { kind: 'grant', qty: 2 },
@@ -62,12 +85,32 @@ describe('membership credits', () => {
     expect(body.rule.label).toBe('Express wash')
     expect(body.credits).toEqual({ left: 1, used: 1 })
     // the ledger effect: one system adjust equal to the package line, tax falls with it
-    const evs = await m.h.t.db.selectFrom('ledger_events').selectAll().where('invoice_id', '=', a.invoiceId).execute()
+    const evs = await m.h.t.db
+      .selectFrom('ledger_events')
+      .selectAll()
+      .where('invoice_id', '=', a.invoiceId)
+      .execute()
     expect(evs).toHaveLength(1)
-    expect(evs[0]).toMatchObject({ type: 'adjust', amount_cents: -4500, source: 'system', reason: 'Membership credit', note: 'Express wash · Essential', status: 'done' })
+    expect(evs[0]).toMatchObject({
+      type: 'adjust',
+      amount_cents: -4500,
+      source: 'system',
+      reason: 'Membership credit',
+      note: 'Express wash · Essential',
+      status: 'done',
+    })
     expect(await calc(a.invoiceId)).toMatchObject({ adj: -4500, sub: 0, tax: 0, total: 0, balance: 0 })
-    const redeem = await m.h.t.db.selectFrom('membership_credit_events').selectAll().where('kind', '=', 'redeem').executeTakeFirstOrThrow()
-    expect(redeem).toMatchObject({ qty: 1, appointment_id: a.appointmentId, invoice_id: a.invoiceId, ledger_event_id: evs[0]!.id })
+    const redeem = await m.h.t.db
+      .selectFrom('membership_credit_events')
+      .selectAll()
+      .where('kind', '=', 'redeem')
+      .executeTakeFirstOrThrow()
+    expect(redeem).toMatchObject({
+      qty: 1,
+      appointment_id: a.appointmentId,
+      invoice_id: a.invoiceId,
+      ledger_event_id: evs[0]!.id,
+    })
     // the same appointment again
     const again = await apply(a.appointmentId)
     expect(again.statusCode).toBe(409)
@@ -82,7 +125,9 @@ describe('membership credits', () => {
     const r3 = await apply(c.appointmentId)
     expect(r3.statusCode).toBe(409)
     expect((r3.json() as { code: string }).code).toBe('MEMBERSHIP_NO_CREDIT')
-    expect(await m.h.t.db.selectFrom('ledger_events').select('id').where('invoice_id', '=', c.invoiceId).execute()).toHaveLength(0)
+    expect(
+      await m.h.t.db.selectFrom('ledger_events').select('id').where('invoice_id', '=', c.invoiceId).execute(),
+    ).toHaveLength(0)
   })
 
   it('a replay of the same request applies once', async () => {
@@ -94,7 +139,9 @@ describe('membership credits', () => {
     expect(r1.statusCode).toBe(201)
     expect(r2.headers['idempotent-replayed']).toBe('true')
     expect(r2.body).toBe(r1.body)
-    expect(await m.h.t.db.selectFrom('ledger_events').select('id').where('invoice_id', '=', a.invoiceId).execute()).toHaveLength(1)
+    expect(
+      await m.h.t.db.selectFrom('ledger_events').select('id').where('invoice_id', '=', a.invoiceId).execute(),
+    ).toHaveLength(1)
     expect((await apply(a.appointmentId, false)).statusCode).toBe(400)
   })
 
@@ -104,20 +151,41 @@ describe('membership credits', () => {
     expect((await apply(a.appointmentId, undefined, m.noMember())).statusCode).toBe(403)
     const ok = await apply(a.appointmentId, undefined, m.limited())
     expect(ok.statusCode, ok.body).toBe(201)
-    const ev = await m.h.t.db.selectFrom('ledger_events').selectAll().where('invoice_id', '=', a.invoiceId).executeTakeFirstOrThrow()
-    expect(ev).toMatchObject({ type: 'adjust', source: 'system', amount_cents: -12900, reason: 'Membership credit' })
-    const limited = await m.h.t.db.selectFrom('users').select('id').where('email', '=', 'limited@example.test').executeTakeFirstOrThrow()
+    const ev = await m.h.t.db
+      .selectFrom('ledger_events')
+      .selectAll()
+      .where('invoice_id', '=', a.invoiceId)
+      .executeTakeFirstOrThrow()
+    expect(ev).toMatchObject({
+      type: 'adjust',
+      source: 'system',
+      amount_cents: -12900,
+      reason: 'Membership credit',
+    })
+    const limited = await m.h.t.db
+      .selectFrom('users')
+      .select('id')
+      .where('email', '=', 'limited@example.test')
+      .executeTakeFirstOrThrow()
     expect(ev.actor_user_id).toBe(limited.id)
     expect(await calc(a.invoiceId)).toMatchObject({ total: 0, balance: 0 })
     // a normal manual adjust of the same size by the same kind of limited actor is still blocked by the limit
-    const over = await m.send(m.noMember(), 'POST', `/invoices/${a.invoiceId}/adjustments`, { kind: 'discount', unit: '$', value: 12900 })
+    const over = await m.send(m.noMember(), 'POST', `/invoices/${a.invoiceId}/adjustments`, {
+      kind: 'discount',
+      unit: '$',
+      value: 12900,
+    })
     expect(over.statusCode, over.body).toBe(422)
     expect((over.json() as { code: string }).code).toBe('OVER_LIMIT')
   })
 
   it('unlimited rules never run out and show as infinity (null)', async () => {
     await m.member('Aisha Rahman', 'exotic')
-    for (const [i, start] of ['2026-06-13T13:00:00-04:00', '2026-06-13T14:00:00-04:00', '2026-06-13T15:00:00-04:00'].entries()) {
+    for (const [i, start] of [
+      '2026-06-13T13:00:00-04:00',
+      '2026-06-13T14:00:00-04:00',
+      '2026-06-13T15:00:00-04:00',
+    ].entries()) {
       const a = await m.book('Aisha Rahman', 'Express Hand Wash', start)
       const r = await apply(a.appointmentId)
       expect(r.statusCode, `${i}: ${r.body}`).toBe(201)
@@ -132,22 +200,37 @@ describe('membership credits', () => {
     expect((r0.json() as { code: string }).code).toBe('MEMBERSHIP_NOT_FOUND')
 
     const mem = await m.member('Maria Delgado', 'essential')
-    const notCovered = await m.book('Maria Delgado', 'Premium Hand Wash + Interior', '2026-06-13T12:00:00-04:00')
+    const notCovered = await m.book(
+      'Maria Delgado',
+      'Premium Hand Wash + Interior',
+      '2026-06-13T12:00:00-04:00',
+    )
     const r1 = await apply(notCovered.appointmentId)
     expect((r1.json() as { code: string }).code).toBe('MEMBERSHIP_NOT_ELIGIBLE')
 
     const paid = await m.book('Maria Delgado', 'Express Hand Wash', '2026-06-13T13:00:00-04:00')
-    expect((await m.send(m.superS(), 'POST', `/invoices/${paid.invoiceId}/payments`, { method: 'cash' })).statusCode).toBe(201)
+    expect(
+      (await m.send(m.superS(), 'POST', `/invoices/${paid.invoiceId}/payments`, { method: 'cash' }))
+        .statusCode,
+    ).toBe(201)
     const r2 = await apply(paid.appointmentId)
     expect((r2.json() as { code: string }).code).toBe('MEMBERSHIP_NO_BALANCE')
 
     const closed = await m.book('Maria Delgado', 'Express Hand Wash', '2026-06-13T14:00:00-04:00')
-    expect((await m.send(m.superS(), 'POST', `/appointments/${closed.appointmentId}/cancel`, { reason: 'Customer canceled' })).statusCode).toBeLessThan(300)
+    expect(
+      (
+        await m.send(m.superS(), 'POST', `/appointments/${closed.appointmentId}/cancel`, {
+          reason: 'Customer canceled',
+        })
+      ).statusCode,
+    ).toBeLessThan(300)
     const r3 = await apply(closed.appointmentId)
     expect((r3.json() as { code: string }).code).toBe('MEMBERSHIP_APPOINTMENT_CLOSED')
 
     const ok = await m.book('Maria Delgado', 'Express Hand Wash', '2026-06-13T15:00:00-04:00')
-    expect((await m.send(m.superS(), 'PATCH', `/memberships/${mem.id}`, { status: 'paused' })).statusCode).toBe(200)
+    expect(
+      (await m.send(m.superS(), 'PATCH', `/memberships/${mem.id}`, { status: 'paused' })).statusCode,
+    ).toBe(200)
     const r4 = await apply(ok.appointmentId)
     expect(r4.statusCode).toBe(409)
     expect((r4.json() as { code: string }).code).toBe('MEMBERSHIP_NOT_ACTIVE')
@@ -181,10 +264,20 @@ describe('membership credits', () => {
     expect(before.get(premium.appointmentId)?.creditAvailable).toBe(false)
     await apply(express.appointmentId)
     const after = await dbMembershipPort.forAppointments(m.h.t.db, refs)
-    expect(after.get(express.appointmentId)).toMatchObject({ creditsLeft: 1, creditsUsed: 1, creditAvailable: false })
+    expect(after.get(express.appointmentId)).toMatchObject({
+      creditsLeft: 1,
+      creditsUsed: 1,
+      creditAvailable: false,
+    })
     // a client who is not a member has no entry; neither does a paused member
     const tom = await m.customer('Tom Bradley')
-    expect((await dbMembershipPort.forAppointments(m.h.t.db, [{ appointmentId: express.appointmentId, customerId: tom, membershipId: null }])).size).toBe(0)
+    expect(
+      (
+        await dbMembershipPort.forAppointments(m.h.t.db, [
+          { appointmentId: express.appointmentId, customerId: tom, membershipId: null },
+        ])
+      ).size,
+    ).toBe(0)
   })
 
   it('alert 9 points at an unused credit on a completed, unpaid job, and the file carries the membership tab data', async () => {
@@ -193,11 +286,27 @@ describe('membership credits', () => {
     await m.complete(a.appointmentId)
     const alerts = await m.get(m.superS(), '/ops/alerts')
     expect(alerts.statusCode, alerts.body).toBe(200)
-    const list = (alerts.json() as { alerts: { kind: string; title: string; desc: string; action: { type: string } }[] }).alerts
+    const list = (
+      alerts.json() as { alerts: { kind: string; title: string; desc: string; action: { type: string } }[] }
+    ).alerts
     const credit = list.find((x) => x.kind === 'member_credit')
-    expect(credit).toMatchObject({ title: 'Member credit available', desc: 'Priya Nair has 1 unused Premium credit this cycle', action: { type: 'apply_credit' } })
+    expect(credit).toMatchObject({
+      title: 'Member credit available',
+      desc: 'Priya Nair has 1 unused Premium credit this cycle',
+      action: { type: 'apply_credit' },
+    })
     const file = await m.get(m.superS(), `/appointments/${a.appointmentId}`)
-    const membership = (file.json() as { membership: { plan: string; perks: string[]; renewLabel: string; retention: { label: string }; creditAvailable: boolean } }).membership
+    const membership = (
+      file.json() as {
+        membership: {
+          plan: string
+          perks: string[]
+          renewLabel: string
+          retention: { label: string }
+          creditAvailable: boolean
+        }
+      }
+    ).membership
     expect(membership).toMatchObject({ plan: 'Premium', renewLabel: 'Jul 12, 2026', creditAvailable: true })
     expect(membership.perks).toContain('Free rain repellent')
     expect(membership.retention.label).toBe('Loyal · low risk')

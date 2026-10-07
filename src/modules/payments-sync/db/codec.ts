@@ -19,7 +19,8 @@ function stable(value: unknown): string {
   })
 }
 
-export const payloadHash = (value: unknown): string => createHash('sha256').update(stable(value)).digest('hex')
+export const payloadHash = (value: unknown): string =>
+  createHash('sha256').update(stable(value)).digest('hex')
 
 /** JSON-safe copy: dates become ISO strings, undefined keys drop out. */
 export function toJson<T>(value: T): JsonValue {

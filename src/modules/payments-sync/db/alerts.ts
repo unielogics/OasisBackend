@@ -7,19 +7,25 @@ import type { NewId } from '../../../platform/ids.js'
 import { toJson } from './codec.js'
 import type { AlertSink } from '../ledger-ports.js'
 
-export type AlertInput = Parameters<AlertSink['raise']>[0] | {
+export type AlertInput =
+  | Parameters<AlertSink['raise']>[0]
+  | {
+      code: string
+      orderId?: string
+      transactionId?: string
+      invoiceId?: string
+      message: string
+      variance?: unknown
+      /** Distinguishes alerts of one code that are not tied to an order (e.g. a member without a customer). */
+      subject?: string
+    }
+
+export const alertKey = (a: {
   code: string
   orderId?: string
   transactionId?: string
-  invoiceId?: string
-  message: string
-  variance?: unknown
-  /** Distinguishes alerts of one code that are not tied to an order (e.g. a member without a customer). */
   subject?: string
-}
-
-export const alertKey = (a: { code: string; orderId?: string; transactionId?: string; subject?: string }): string =>
-  `${a.code}:${a.orderId ?? ''}:${a.transactionId ?? ''}:${a.subject ?? ''}`
+}): string => `${a.code}:${a.orderId ?? ''}:${a.transactionId ?? ''}:${a.subject ?? ''}`
 
 export async function raiseAlert(
   db: Executor,
@@ -104,6 +110,8 @@ export async function resolveAlertKeys(
   if (keys.length === 0) return 0
   const r = await sql`
     update sqsp_alerts set resolved_at = ${d.clock.now()}
-    where location_id = ${d.locationId} and resolved_at is null and dedupe_key = any(${keys as string[]}::text[])`.execute(db)
+    where location_id = ${d.locationId} and resolved_at is null and dedupe_key = any(${keys as string[]}::text[])`.execute(
+    db,
+  )
   return Number(r.numAffectedRows ?? 0)
 }

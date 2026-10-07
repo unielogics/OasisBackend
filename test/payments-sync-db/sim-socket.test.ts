@@ -25,12 +25,20 @@ describe('the runtime over a real socket to the simulator', () => {
     const api = new SquarespaceSimApi(store, r.clock, { apiKeys: [KEY] })
     server = createSimHttpServer(api)
     const base = await listen(server)
-    const env2 = testEnv({ SQSP_API_BASE: base, SQSP_USER_AGENT: 'OasisSocketTest/9', SQSP_API_KEY: 'will-be-overridden-by-the-stored-key' })
+    const env2 = testEnv({
+      SQSP_API_BASE: base,
+      SQSP_USER_AGENT: 'OasisSocketTest/9',
+      SQSP_API_KEY: 'will-be-overridden-by-the-stored-key',
+    })
     configureSqspRuntime({ env: env2, sleeper: new FakeSleeper(r.clock) })
     const rt = createSqspRuntime({ db: r.db, clock: r.clock, newId: r.newId, env: env2 })
     await rt.connection(r.locationId).save(KEY, { verified: false })
     for (let i = 0; i < 5; i++)
-      store.createOrder({ email: `c${i}@example.com`, name: `C ${i}`, lineItems: [{ productId: 'p', sku: 'X', name: 'X', unitCents: 1000 + i }] })
+      store.createOrder({
+        email: `c${i}@example.com`,
+        name: `C ${i}`,
+        lineItems: [{ productId: 'p', sku: 'X', name: 'X', unitCents: 1000 + i }],
+      })
     r.advance(60_000)
     const res = await rt.syncCycle(r.locationId)
     expect(res.status).toBe('ok')
@@ -49,9 +57,14 @@ describe('the runtime over a real socket to the simulator', () => {
     expect(bad.orders?.error).toMatch(/401/)
   })
 
-  it('sim mode points at the simulator\'s default address and key without any configuration', () => {
+  it("sim mode points at the simulator's default address and key without any configuration", () => {
     const r = rig()
-    const rt = createSqspRuntime({ db: r.db, clock: r.clock, newId: r.newId, env: testEnv({ SQSP_PROVIDER: 'sim', SQSP_API_KEY: '' } as never) })
+    const rt = createSqspRuntime({
+      db: r.db,
+      clock: r.clock,
+      newId: r.newId,
+      env: testEnv({ SQSP_PROVIDER: 'sim', SQSP_API_KEY: '' } as never),
+    })
     expect(rt.baseUrl()).toBe('http://127.0.0.1:4590')
   })
 })

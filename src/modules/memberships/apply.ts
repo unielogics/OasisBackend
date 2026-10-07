@@ -44,7 +44,8 @@ function creditActor(real: PayActor): PayActor {
     ...real,
     has: (perm) => perm === 'pay.adjust' || real.has(perm),
     limit: (kind) => (kind === 'adjust' ? null : real.limit(kind)),
-    rolesFor: (perm) => (perm === 'pay.adjust' ? real.rolesFor('cli.member') || 'Membership' : real.rolesFor(perm)),
+    rolesFor: (perm) =>
+      perm === 'pay.adjust' ? real.rolesFor('cli.member') || 'Membership' : real.rolesFor(perm),
     limitRole: (kind) => real.limitRole(kind),
   }
 }
@@ -63,7 +64,8 @@ export async function applyMembershipCredit(
     .where('a.location_id', '=', d.locationId)
     .executeTakeFirst()
   if (!appt) throw new AppError('NOT_FOUND', { detail: 'That appointment does not exist' })
-  if (appt.status === 'canceled' || appt.status === 'no_show') throw new AppError('MEMBERSHIP_APPOINTMENT_CLOSED')
+  if (appt.status === 'canceled' || appt.status === 'no_show')
+    throw new AppError('MEMBERSHIP_APPOINTMENT_CLOSED')
 
   const membership = await tx
     .selectFrom('memberships')
@@ -88,7 +90,13 @@ export async function applyMembershipCredit(
   const summary = (
     await creditSummaries(
       tx,
-      [{ id: membership.id, planId: membership.plan_id, currentPeriodStart: membership.current_period_start }],
+      [
+        {
+          id: membership.id,
+          planId: membership.plan_id,
+          currentPeriodStart: membership.current_period_start,
+        },
+      ],
       plans,
     )
   ).get(membership.id)!
@@ -144,7 +152,13 @@ export async function applyMembershipCredit(
   const after = (
     await creditSummaries(
       tx,
-      [{ id: membership.id, planId: membership.plan_id, currentPeriodStart: membership.current_period_start }],
+      [
+        {
+          id: membership.id,
+          planId: membership.plan_id,
+          currentPeriodStart: membership.current_period_start,
+        },
+      ],
       plans,
     )
   ).get(membership.id)!

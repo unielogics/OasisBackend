@@ -72,7 +72,12 @@ export async function setManualLink(
   d: { locationId: string; clock: Clock },
   o: { sqspCustomerId: string; customerId: string; userId: string | null },
 ): Promise<void> {
-  const v = { customer_id: o.customerId, source: 'manual' as const, linked_by: o.userId, created_at: d.clock.now() }
+  const v = {
+    customer_id: o.customerId,
+    source: 'manual' as const,
+    linked_by: o.userId,
+    created_at: d.clock.now(),
+  }
   await db
     .insertInto('sqsp_customer_links')
     .values({ location_id: d.locationId, sqsp_customer_id: o.sqspCustomerId, ...v })

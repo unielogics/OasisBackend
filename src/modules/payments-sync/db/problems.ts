@@ -40,7 +40,8 @@ registerProblems({
   SQSP_MATCH_DUPLICATE: {
     status: 409,
     title: 'Possible double count',
-    detail: 'This invoice already shows a payment of the same amount. Confirm that one instead, or match with force',
+    detail:
+      'This invoice already shows a payment of the same amount. Confirm that one instead, or match with force',
   },
   SQSP_EVENT_NOT_AWAITING: {
     status: 409,

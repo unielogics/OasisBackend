@@ -75,8 +75,12 @@ async function customerRefs(
   locationId: string,
   orders: readonly { customerEmail?: string; customerPhone?: string; customerId?: string }[],
 ): Promise<CustomerRef[]> {
-  const emails = [...new Set(orders.map((o) => normalizeEmail(o.customerEmail)).filter((x): x is string => !!x))]
-  const phones = [...new Set(orders.map((o) => normalizePhone(o.customerPhone)).filter((x): x is string => !!x))]
+  const emails = [
+    ...new Set(orders.map((o) => normalizeEmail(o.customerEmail)).filter((x): x is string => !!x)),
+  ]
+  const phones = [
+    ...new Set(orders.map((o) => normalizePhone(o.customerPhone)).filter((x): x is string => !!x)),
+  ]
   const sqsp = [...new Set(orders.map((o) => o.customerId).filter((x): x is string => !!x))]
   if (emails.length + phones.length + sqsp.length === 0) return []
   const rows = await sql<{ id: string; email: string | null; phone_e164: string | null }>`
@@ -86,7 +90,9 @@ async function customerRefs(
       and (c.email = any(${emails}::citext[])
         or c.phone_e164 = any(${phones}::text[])
         or c.id in (select l.customer_id from sqsp_customer_links l
-                    where l.location_id = ${locationId} and l.sqsp_customer_id = any(${sqsp}::text[])))`.execute(db)
+                    where l.location_id = ${locationId} and l.sqsp_customer_id = any(${sqsp}::text[])))`.execute(
+    db,
+  )
   if (rows.rows.length === 0) return []
   const links = await db
     .selectFrom('sqsp_customer_links')
@@ -225,12 +231,22 @@ export async function syncMemberships(db: Db, d: MembershipSyncDeps): Promise<Me
           action: 'membership.created',
           entityType: 'membership',
           entityId: id,
-          after: { customerId: action.customerId, plan: plan.key, status: inf.status, order: inf.lastOrderId },
+          after: {
+            customerId: action.customerId,
+            plan: plan.key,
+            status: inf.status,
+            order: inf.lastOrderId,
+          },
           ctx: SYSTEM_AUDIT,
         })
         report.created++
         if (inf.status === 'active' && inf.currentPeriodStart)
-          report.creditsGranted += await grantCycleCredits(tx, d, { id, currentPeriodStart: inf.currentPeriodStart }, plan)
+          report.creditsGranted += await grantCycleCredits(
+            tx,
+            d,
+            { id, currentPeriodStart: inf.currentPeriodStart },
+            plan,
+          )
       } else {
         const cur = existing!
         await tx
@@ -246,7 +262,8 @@ export async function syncMemberships(db: Db, d: MembershipSyncDeps): Promise<Me
             current_period_start: inf.currentPeriodStart ?? null,
             current_period_end: inf.currentPeriodEnd ?? null,
             canceled_at: inf.status === 'canceled' ? (cur.canceled_at ?? now) : null,
-            cancel_reason: inf.status === 'canceled' ? (cur.cancel_reason ?? 'Inferred: no renewal order') : null,
+            cancel_reason:
+              inf.status === 'canceled' ? (cur.cancel_reason ?? 'Inferred: no renewal order') : null,
             last_sqsp_order_id: inf.lastOrderId,
             last_paid_at: inf.lastPaidAt ?? null,
             paid_order_count: inf.paidOrderCount,
@@ -265,13 +282,27 @@ export async function syncMemberships(db: Db, d: MembershipSyncDeps): Promise<Me
           action: 'membership.synced',
           entityType: 'membership',
           entityId: cur.id,
-          before: { status: cur.status, plan: em?.tier, periodEnd: cur.current_period_end?.toISOString() ?? null },
-          after: { status: inf.status, plan: plan.key, periodEnd: inf.currentPeriodEnd?.toISOString() ?? null, changes: action.changes },
+          before: {
+            status: cur.status,
+            plan: em?.tier,
+            periodEnd: cur.current_period_end?.toISOString() ?? null,
+          },
+          after: {
+            status: inf.status,
+            plan: plan.key,
+            periodEnd: inf.currentPeriodEnd?.toISOString() ?? null,
+            changes: action.changes,
+          },
           ctx: SYSTEM_AUDIT,
         })
         report.updated++
         if (inf.status === 'active' && inf.currentPeriodStart)
-          report.creditsGranted += await grantCycleCredits(tx, d, { id: cur.id, currentPeriodStart: inf.currentPeriodStart }, plan)
+          report.creditsGranted += await grantCycleCredits(
+            tx,
+            d,
+            { id: cur.id, currentPeriodStart: inf.currentPeriodStart },
+            plan,
+          )
       }
     })
   }
@@ -292,7 +323,10 @@ function earliestOrder(
 }
 
 /** The member's live membership, else their most recent canceled one. */
-export async function currentMembership(db: Executor, customerId: string): Promise<MembershipRow | undefined> {
+export async function currentMembership(
+  db: Executor,
+  customerId: string,
+): Promise<MembershipRow | undefined> {
   return db
     .selectFrom('memberships')
     .selectAll()
@@ -312,7 +346,10 @@ export interface CycleReport {
  * Daily: manual memberships (no subscription data to renew them) roll their period forward by the plan's billing interval, and
  * every active membership gets its cycle credits (idempotent per membership, cycle and rule).
  */
-export async function runMembershipCycle(db: Db, d: { locationId: string; clock: Clock; newId: NewId }): Promise<CycleReport> {
+export async function runMembershipCycle(
+  db: Db,
+  d: { locationId: string; clock: Clock; newId: NewId },
+): Promise<CycleReport> {
   await ensurePlans(db, d)
   const plans = await loadPlans(db, d.locationId)
   const now = d.clock.now()
@@ -336,7 +373,12 @@ export async function runMembershipCycle(db: Db, d: { locationId: string; clock:
     }
     await db
       .updateTable('memberships')
-      .set((eb) => ({ current_period_start: start, current_period_end: end, updated_at: now, version: eb('version', '+', 1) }))
+      .set((eb) => ({
+        current_period_start: start,
+        current_period_end: end,
+        updated_at: now,
+        version: eb('version', '+', 1),
+      }))
       .where('id', '=', m.id)
       .execute()
     out.rolled++
@@ -351,7 +393,12 @@ export async function runMembershipCycle(db: Db, d: { locationId: string; clock:
   for (const m of active) {
     const plan = plans.find((p) => p.id === m.plan_id)
     if (plan && m.current_period_start)
-      out.creditsGranted += await grantCycleCredits(db, d, { id: m.id, currentPeriodStart: m.current_period_start }, plan)
+      out.creditsGranted += await grantCycleCredits(
+        db,
+        d,
+        { id: m.id, currentPeriodStart: m.current_period_start },
+        plan,
+      )
   }
   return out
 }
@@ -394,11 +441,15 @@ export async function patchMembership(
     .forUpdate()
     .executeTakeFirst()
   if (!cur) throw new AppError('MEMBERSHIP_NOT_FOUND')
-  if (p.expectedVersion !== undefined && p.expectedVersion !== cur.version) throw new AppError('VERSION_CONFLICT')
+  if (p.expectedVersion !== undefined && p.expectedVersion !== cur.version)
+    throw new AppError('VERSION_CONFLICT')
   const now = d.clock.now()
   const plans = await loadPlans(tx, d.locationId)
   const plan = p.planKey ? planByKey(plans, p.planKey) : plans.find((x) => x.id === cur.plan_id)
-  if (!plan) throw new AppError('VALIDATION_FAILED', { errors: [{ path: 'planKey', message: 'That plan is not set up' }] })
+  if (!plan)
+    throw new AppError('VALIDATION_FAILED', {
+      errors: [{ path: 'planKey', message: 'That plan is not set up' }],
+    })
   const status = p.status ?? cur.status
   let start = cur.current_period_start
   let end = cur.current_period_end
@@ -414,8 +465,7 @@ export async function patchMembership(
     current_period_start: start,
     current_period_end: end,
     canceled_at: status === 'canceled' ? (cur.canceled_at ?? now) : null,
-    cancel_reason:
-      status === 'canceled' ? (p.note?.trim() || cur.cancel_reason || 'Canceled by staff') : null,
+    cancel_reason: status === 'canceled' ? p.note?.trim() || cur.cancel_reason || 'Canceled by staff' : null,
     auto_apply: p.autoApply ?? cur.auto_apply,
     manual_status_at: now,
     in_grace: status === 'active' ? cur.in_grace : false,
@@ -470,7 +520,10 @@ export async function createManualMembership(
   await ensurePlans(tx, d)
   const plans = await loadPlans(tx, d.locationId)
   const plan = planByKey(plans, input.planKey)
-  if (!plan) throw new AppError('VALIDATION_FAILED', { errors: [{ path: 'planKey', message: 'That plan is not set up' }] })
+  if (!plan)
+    throw new AppError('VALIDATION_FAILED', {
+      errors: [{ path: 'planKey', message: 'That plan is not set up' }],
+    })
   const customer = await tx
     .selectFrom('customers')
     .select('id')

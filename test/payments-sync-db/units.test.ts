@@ -26,12 +26,21 @@ describe('secrets (AES-256-GCM with SECRETS_KEY)', () => {
     const old = createSecretBox([K1])
     const stored = old.encrypt('value')
     const [id, iv, tag, body] = stored.split(':')
-    const flipped = [id, iv, tag, Buffer.from(Buffer.from(body!, 'base64url').map((x, i) => (i === 0 ? x ^ 1 : x))).toString('base64url')].join(':')
+    const flipped = [
+      id,
+      iv,
+      tag,
+      Buffer.from(Buffer.from(body!, 'base64url').map((x, i) => (i === 0 ? x ^ 1 : x))).toString('base64url'),
+    ].join(':')
     expect(() => old.decrypt(flipped)).toThrow()
     expect(() => old.decrypt(`${id}:${iv}`)).toThrow(/malformed/)
     expect(() => createSecretBox([K2]).decrypt(stored)).toThrow(/no SECRETS_KEY with id/)
     expect(createSecretBox([K2, K1]).decrypt(stored)).toBe('value')
-    expect(createSecretBox([K2, K1]).encrypt('x').startsWith(`${keyIdOf(Buffer.from(K2, 'base64'))}:`)).toBe(true)
+    expect(
+      createSecretBox([K2, K1])
+        .encrypt('x')
+        .startsWith(`${keyIdOf(Buffer.from(K2, 'base64'))}:`),
+    ).toBe(true)
   })
 
   it('needs a 32-byte key; the environment helper answers 503 naming the variable', () => {
@@ -85,21 +94,42 @@ describe('environment', () => {
 
 describe('helpers', () => {
   it('alert keys are stable per code, order, transaction and subject', () => {
-    expect(alertKey({ code: 'external_refund', orderId: 'o', transactionId: 't' })).toBe('external_refund:o:t:')
+    expect(alertKey({ code: 'external_refund', orderId: 'o', transactionId: 't' })).toBe(
+      'external_refund:o:t:',
+    )
     expect(alertKey({ code: 'product_map_empty' })).toBe('product_map_empty:::')
-    expect(alertKey({ code: 'membership_needs_customer', subject: 'email:a@b.c' })).toBe('membership_needs_customer:::email:a@b.c')
+    expect(alertKey({ code: 'membership_needs_customer', subject: 'email:a@b.c' })).toBe(
+      'membership_needs_customer:::email:a@b.c',
+    )
   })
 
   it('payload hashes ignore key order and treat dates by instant', () => {
-    expect(payloadHash({ a: 1, b: new Date('2026-01-01T00:00:00Z') })).toBe(payloadHash({ b: new Date('2026-01-01T00:00:00.000Z'), a: 1 }))
+    expect(payloadHash({ a: 1, b: new Date('2026-01-01T00:00:00Z') })).toBe(
+      payloadHash({ b: new Date('2026-01-01T00:00:00.000Z'), a: 1 }),
+    )
     expect(payloadHash({ a: 1 })).not.toBe(payloadHash({ a: 2 }))
   })
 
   it('combined alert sources concatenate in order', async () => {
     const src = (k: string) => ({
-      list: async () => [{ key: k, kind: 'new_reply' as const, tone: 'blue' as const, title: k, desc: '', actionLabel: '', appointmentId: null, priority: 0 }],
+      list: async () => [
+        {
+          key: k,
+          kind: 'new_reply' as const,
+          tone: 'blue' as const,
+          title: k,
+          desc: '',
+          actionLabel: '',
+          appointmentId: null,
+          priority: 0,
+        },
+      ],
     })
-    const out = await combineExternalAlerts(src('a'), src('b')).list({} as never, { locationId: 'l', now: new Date(), manager: true })
+    const out = await combineExternalAlerts(src('a'), src('b')).list({} as never, {
+      locationId: 'l',
+      now: new Date(),
+      manager: true,
+    })
     expect(out.map((x) => x.key)).toEqual(['a', 'b'])
   })
 })

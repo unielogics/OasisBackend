@@ -37,7 +37,8 @@ import {
 } from './codec.js'
 import type { SqspSyncStateTable } from './schema.js'
 
-const rawColumn = (raw: unknown): string | null => (raw === undefined || raw === null ? null : JSON.stringify(raw))
+const rawColumn = (raw: unknown): string | null =>
+  raw === undefined || raw === null ? null : JSON.stringify(raw)
 
 export interface RepoDeps {
   db: Db
@@ -268,9 +269,7 @@ export class PgTransactionRepository implements TransactionRepository {
           oc
             .columns(['location_id', 'sqsp_txn_id'])
             .doUpdateSet((eb) => ({
-              ...Object.fromEntries(
-                Object.keys(updatable).map((k) => [k, eb.ref(`excluded.${k}` as never)]),
-              ),
+              ...Object.fromEntries(Object.keys(updatable).map((k) => [k, eb.ref(`excluded.${k}` as never)])),
               synced_at: ctx.now,
             }))
             .where((eb) =>
@@ -388,9 +387,7 @@ export class PgContactRepository implements ContactRepository {
     const rows = await this.d.db
       .selectFrom('sqsp_contacts as c')
       .leftJoin('sqsp_customer_links as l', (j) =>
-        j
-          .onRef('l.sqsp_customer_id', '=', 'c.sqsp_contact_id')
-          .onRef('l.location_id', '=', 'c.location_id'),
+        j.onRef('l.sqsp_customer_id', '=', 'c.sqsp_contact_id').onRef('l.location_id', '=', 'c.location_id'),
       )
       .selectAll('c')
       .select('l.customer_id as linked_customer_id')
@@ -488,7 +485,9 @@ export class PgSyncErrorRepository implements SyncErrorRepository {
     const attempts = r.rows[0]!.attempts
     if (attempts >= this.deadLetterAfter) {
       await sql`update sqsp_sync_errors set dead_lettered_at = coalesce(dead_lettered_at, ${e.at})
-        where location_id = ${this.locationId} and resource = ${e.resource} and key = ${e.key}`.execute(this.db)
+        where location_id = ${this.locationId} and resource = ${e.resource} and key = ${e.key}`.execute(
+        this.db,
+      )
     }
     return { attempts }
   }

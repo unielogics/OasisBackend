@@ -37,7 +37,11 @@ export function registerMembershipRoutes(app: AppInstance): void {
     if (!req.auth) throw new AppError('UNAUTHENTICATED')
     return req.auth
   }
-  const dctx = (req: FastifyRequest) => ({ locationId: auth(req).locationId, clock: app.clock, newId: app.newId })
+  const dctx = (req: FastifyRequest) => ({
+    locationId: auth(req).locationId,
+    clock: app.clock,
+    newId: app.newId,
+  })
   const payments = new PaymentsService({ clock: app.clock, newId: app.newId, ports: defaultPorts() })
   const idem = (fn: Parameters<typeof idempotentHandler<FastifyRequest>>[0]): never =>
     idempotentHandler(fn) as never
@@ -48,7 +52,8 @@ export function registerMembershipRoutes(app: AppInstance): void {
       config: { access: access.perm('cli.view') },
       schema: {
         tags: [TAG],
-        summary: 'A client’s membership: plan, credits, renewal, perks, retention, history and upgrade candidacy',
+        summary:
+          'A client’s membership: plan, credits, renewal, perks, retention, history and upgrade candidacy',
         description:
           'Everything the Membership and History tabs show, computed from the member row, the cycle credit events and real visit history. ' +
           'Retention compares completed visits in the last 30 days with the 30 before. A non-member with 3 or more completed visits in 60 days is an upgrade candidate. ' +
@@ -69,7 +74,8 @@ export function registerMembershipRoutes(app: AppInstance): void {
       const now = app.clock.now()
       const tz = await locationTz(app.db, c.locationId)
       const row = await currentMembership(app.db, cust.id)
-      const [view] = row && row.location_id === c.locationId ? await viewsOf(app.db, { ...c, now, tz }, [row]) : []
+      const [view] =
+        row && row.location_id === c.locationId ? await viewsOf(app.db, { ...c, now, tz }, [row]) : []
       const live = view && view.status !== 'canceled'
       const counts = (await visitCounts(app.db, c.locationId, [cust.id], now)).get(cust.id)
       return {
@@ -108,15 +114,24 @@ export function registerMembershipRoutes(app: AppInstance): void {
         const [name, id] = decodeCursor(q.cursor, 2)
         page = page.where(keysetCondition(['cu.full_name', 'm.id'], [name as string, id as string], 'asc'))
       }
-      const rows = await page.orderBy('cu.full_name').orderBy('m.id').limit(q.limit + 1).execute()
+      const rows = await page
+        .orderBy('cu.full_name')
+        .orderBy('m.id')
+        .limit(q.limit + 1)
+        .execute()
       const paged = toPage(rows, q.limit, (r) => [r.customer_name, r.id])
       const tz = await locationTz(app.db, c.locationId)
       const views = await viewsOf(app.db, { ...c, now: app.clock.now(), tz }, paged.items as MembershipRow[])
       const counts = await sql<{ status: string; n: number }>`
-        select status, count(*)::int as n from memberships where location_id = ${c.locationId} group by status`.execute(app.db)
+        select status, count(*)::int as n from memberships where location_id = ${c.locationId} group by status`.execute(
+        app.db,
+      )
       const by = (s: string) => counts.rows.find((x) => x.status === s)?.n ?? 0
       return {
-        items: views.map((v, i) => ({ ...v, customer: { id: v.customerId, name: paged.items[i]!.customer_name } })),
+        items: views.map((v, i) => ({
+          ...v,
+          customer: { id: v.customerId, name: paged.items[i]!.customer_name },
+        })),
         nextCursor: paged.nextCursor,
         counts: {
           pending: by('pending'),

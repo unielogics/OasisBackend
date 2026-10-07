@@ -65,7 +65,11 @@ describe('Postgres sync repositories', () => {
     const { orders, now } = repos()
     expect(await orders.upsert(order(), { now, initial })).toBe('inserted')
     expect(await orders.upsert(order(), { now, initial })).toBe('unchanged')
-    const newer = order({ modifiedOn: new Date('2026-10-05T13:00:00Z'), paymentState: 'REFUNDED', refundedTotalCents: 5000 })
+    const newer = order({
+      modifiedOn: new Date('2026-10-05T13:00:00Z'),
+      paymentState: 'REFUNDED',
+      refundedTotalCents: 5000,
+    })
     expect(await orders.upsert(newer, { now, initial })).toBe('updated')
     expect(await orders.upsert(order(), { now, initial })).toBe('stale')
     const stored = await orders.get('o-1')
@@ -94,15 +98,28 @@ describe('Postgres sync repositories', () => {
 
   it('orders: initial state applies on insert only; lists by state and by modified window', async () => {
     const { orders, now } = repos()
-    await orders.upsert(order({ id: 'o-a' }), { now, initial: { matchState: 'ignored', ignoreReason: 'test_mode' } })
-    await orders.upsert(order({ id: 'o-b', createdOn: new Date('2026-10-04T00:00:00Z'), modifiedOn: new Date('2026-10-04T00:00:00Z') }), {
+    await orders.upsert(order({ id: 'o-a' }), {
       now,
-      initial,
+      initial: { matchState: 'ignored', ignoreReason: 'test_mode' },
     })
+    await orders.upsert(
+      order({
+        id: 'o-b',
+        createdOn: new Date('2026-10-04T00:00:00Z'),
+        modifiedOn: new Date('2026-10-04T00:00:00Z'),
+      }),
+      {
+        now,
+        initial,
+      },
+    )
     await orders.upsert(order({ id: 'o-c' }), { now, initial })
     expect((await orders.listByMatchState('unmatched', 10)).map((o) => o.order.id)).toEqual(['o-b', 'o-c'])
     expect((await orders.listByMatchState('ignored', 10)).map((o) => o.order.id)).toEqual(['o-a'])
-    const win = await orders.listModifiedBetween(new Date('2026-10-04T12:00:00Z'), new Date('2026-10-06T00:00:00Z'))
+    const win = await orders.listModifiedBetween(
+      new Date('2026-10-04T12:00:00Z'),
+      new Date('2026-10-06T00:00:00Z'),
+    )
     expect(win.map((o) => o.order.id).sort()).toEqual(['o-a', 'o-c'])
   })
 
@@ -118,7 +135,10 @@ describe('Postgres sync repositories', () => {
     const s = await txns.get('t-1')
     expect(s?.state).toBe('matched')
     expect(s?.txn.voided).toBe(true)
-    await txns.upsert(txn({ id: 't-2', kind: 'refund', amountCents: 500, createdOn: new Date('2026-10-05T15:00:00Z') }), { now, initial: ini })
+    await txns.upsert(
+      txn({ id: 't-2', kind: 'refund', amountCents: 500, createdOn: new Date('2026-10-05T15:00:00Z') }),
+      { now, initial: ini },
+    )
     expect((await txns.listByOrder('o-1')).map((t) => t.txn.id)).toEqual(['t-1', 't-2'])
     expect((await txns.listByState(['new'], 10)).map((t) => t.txn.id)).toEqual(['t-2'])
     await expect(txns.setState('nope', { state: 'ignored' })).rejects.toThrow(/not stored/)
@@ -153,7 +173,13 @@ describe('Postgres sync repositories', () => {
     expect(s?.inFlight?.cursor).toBe('abc')
     expect(s?.inFlight?.from.getTime()).toBe(now.getTime() - D)
     expect(s?.consecutiveFailures).toBe(2)
-    await state.save({ ...s!, inFlight: undefined, status: 'ok', consecutiveFailures: 0, lastError: undefined })
+    await state.save({
+      ...s!,
+      inFlight: undefined,
+      status: 'ok',
+      consecutiveFailures: 0,
+      lastError: undefined,
+    })
     const after = await state.get('orders')
     expect(after?.inFlight).toBeUndefined()
     expect(after?.status).toBe('ok')
@@ -162,7 +188,13 @@ describe('Postgres sync repositories', () => {
   it('errors: attempts count per key, dead-letter at 5, clear resolves, a new failure starts over', async () => {
     const r = rig()
     const { errors, now } = repos()
-    const e = { resource: 'orders' as const, key: 'o-9', kind: 'persist' as const, message: 'db down', at: now }
+    const e = {
+      resource: 'orders' as const,
+      key: 'o-9',
+      kind: 'persist' as const,
+      message: 'db down',
+      at: now,
+    }
     for (let i = 1; i <= 4; i++) expect((await errors.record(e)).attempts).toBe(i)
     let dead = await r.db.selectFrom('sqsp_sync_errors').select('dead_lettered_at').executeTakeFirstOrThrow()
     expect(dead.dead_lettered_at).toBeNull()
@@ -173,7 +205,10 @@ describe('Postgres sync repositories', () => {
     await errors.clear('orders', 'o-9')
     expect(await errors.list()).toHaveLength(0)
     expect((await errors.record(e)).attempts).toBe(1)
-    const row = await r.db.selectFrom('sqsp_sync_errors').select(['dead_lettered_at', 'resolved_at']).executeTakeFirstOrThrow()
+    const row = await r.db
+      .selectFrom('sqsp_sync_errors')
+      .select(['dead_lettered_at', 'resolved_at'])
+      .executeTakeFirstOrThrow()
     expect(row.dead_lettered_at).toBeNull()
     expect(row.resolved_at).toBeNull()
     await errors.record({ ...e, key: 'o-10', kind: 'mapping', raw: { bad: true } })

@@ -149,8 +149,12 @@ export const planByKey = (plans: readonly Plan[], key: PlanKey): Plan | undefine
   plans.find((p) => p.key === key)
 
 /** A credit covers a visit of a service whose tags include any of the rule's include tags and none of its exclude tags. */
-export function ruleCovers(rule: Pick<CreditRule, 'includeTags' | 'excludeTags'>, serviceTags: readonly string[]): boolean {
+export function ruleCovers(
+  rule: Pick<CreditRule, 'includeTags' | 'excludeTags'>,
+  serviceTags: readonly string[],
+): boolean {
   return (
-    rule.includeTags.some((t) => serviceTags.includes(t)) && !rule.excludeTags.some((t) => serviceTags.includes(t))
+    rule.includeTags.some((t) => serviceTags.includes(t)) &&
+    !rule.excludeTags.some((t) => serviceTags.includes(t))
   )
 }
