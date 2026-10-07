@@ -31,7 +31,7 @@ fi
 log() { printf '%s %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 ok() { printf '%s %sok%s   %s\n' "$(date -u +%H:%M:%S)" "$C_GREEN" "$C_OFF" "$*"; }
 changed() {
-  local label=done
+  local label='done'
   [[ "$DRY_RUN" == 1 ]] && label=plan
   printf '%s %s%s%s %s\n' "$(date -u +%H:%M:%S)" "$C_GREEN" "$label" "$C_OFF" "$*"
 }

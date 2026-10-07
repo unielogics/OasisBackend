@@ -303,7 +303,7 @@ describe('nginx site', () => {
     servers().find((s) => find(s.block!, 'listen').some((l) => l.args[0] === '443'))!
   const httpsLocs = () => locationsOf({ ...https(), block: expandIncludes(https().block!, reader) })
   const text = (): string =>
-    ['conf.d/oasis.conf', 'conf.d/oasis-zones.conf', 'oasis/proxy.conf', 'oasis/security-headers.conf']
+    ['conf.d/oasis.conf', 'conf.d/00-oasis-zones.conf', 'oasis/proxy.conf', 'oasis/security-headers.conf']
       .map((f) => read(`etc/nginx/${f}`))
       .join('\n')
 
@@ -312,11 +312,18 @@ describe('nginx site', () => {
     expect(() =>
       [
         'conf.d/oasis.conf',
-        'conf.d/oasis-zones.conf',
+        'conf.d/00-oasis-zones.conf',
         'oasis/proxy.conf',
         'oasis/security-headers.conf',
       ].forEach(conf),
     ).not.toThrow()
+  })
+
+  it('writes the zones file so that nginx reads it first (oasis.conf uses the log format and zones defined there)', () => {
+    expect(readdirSync(path.join(stage.nginx, 'conf.d')).sort()).toEqual([
+      '00-oasis-zones.conf',
+      'oasis.conf',
+    ])
   })
 
   it('redirects port 80 to HTTPS except the ACME challenge, and serves TLS 1.2+ with the configured certificate', () => {
@@ -334,9 +341,9 @@ describe('nginx site', () => {
     expect(find(s, 'ssl_protocols')[0]!.args).toEqual(['TLSv1.2', 'TLSv1.3'])
     expect(find(s, 'ssl_session_tickets')[0]!.args).toEqual(['off'])
     expect(find(s, 'http2')[0]!.args).toEqual(['on'])
-    expect(find(find(conf('conf.d/oasis-zones.conf'), 'server_tokens'), 'server_tokens')[0]!.args).toEqual([
-      'off',
-    ])
+    expect(find(find(conf('conf.d/00-oasis-zones.conf'), 'server_tokens'), 'server_tokens')[0]!.args).toEqual(
+      ['off'],
+    )
   })
 
   it('routes the public URLs the way the design says (nginx location rules applied to real paths)', () => {
@@ -409,13 +416,13 @@ describe('nginx site', () => {
       expect(find(body, 'allow').map((a) => a.args[0])).toEqual(['127.0.0.1', '::1'])
       expect(find(body, 'deny')[0]!.args).toEqual(['all'])
     }
-    const zones = find(conf('conf.d/oasis-zones.conf'), 'limit_req_zone').map(
+    const zones = find(conf('conf.d/00-oasis-zones.conf'), 'limit_req_zone').map(
       (z) => /zone=(\w+):/.exec(z.args[1]!)![1],
     )
     const used = [...text().matchAll(/limit_req zone=(\w+)/g)].map((m) => m[1])
     expect(used.length).toBeGreaterThan(3)
     for (const z of used) expect(zones).toContain(z)
-    expect(find(conf('conf.d/oasis-zones.conf'), 'limit_req_status')[0]!.args).toEqual(['429'])
+    expect(find(conf('conf.d/00-oasis-zones.conf'), 'limit_req_status')[0]!.args).toEqual(['429'])
   })
 
   it('forwards the real client address by overwriting X-Forwarded-For, which is what TRUST_PROXY=true in api.env relies on', () => {
@@ -466,7 +473,7 @@ describe('nginx site', () => {
       }
     }
     check(expandIncludes(conf('conf.d/oasis.conf'), reader), 'oasis.conf')
-    check(conf('conf.d/oasis-zones.conf'), 'oasis-zones.conf')
+    check(conf('conf.d/00-oasis-zones.conf'), 'oasis-zones.conf')
   })
 
   it('sends security headers on the dashboard that match the ones the API sends', () => {
@@ -494,7 +501,7 @@ describe('nginx site', () => {
 
   it('points the upstreams at the ports the services listen on', () => {
     const ups = Object.fromEntries(
-      find(conf('conf.d/oasis-zones.conf'), 'upstream').map((u) => [
+      find(conf('conf.d/00-oasis-zones.conf'), 'upstream').map((u) => [
         u.args[0],
         find(u.block!, 'server')[0]!.args[0],
       ]),

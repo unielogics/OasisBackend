@@ -1,4 +1,5 @@
-# /etc/nginx/conf.d/oasis-zones.conf  -  http-level settings for the Oasis site (rendered by deploy/scripts/install.sh).
+# /etc/nginx/conf.d/00-oasis-zones.conf  -  http-level settings for the Oasis site (rendered by deploy/scripts/install.sh).
+# The 00- prefix makes nginx read this file before oasis.conf, which uses the log format defined here.
 
 server_tokens off;
 

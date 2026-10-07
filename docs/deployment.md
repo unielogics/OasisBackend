@@ -36,7 +36,7 @@ tablet, Squarespace and AWS work is in [live-verification.md](live-verification.
 | `/opt/oasis/current`, `/opt/oasis/previous` | symlinks to the running release and the one before it |
 | `/etc/oasis/{common,api,worker,web}.env` | environment, `0640 root:oasis`. `drill.env` (restore drill role) and `backup.env` (optional) beside them |
 | `/etc/systemd/system/oasis*.{service,timer,target}` | the units |
-| `/etc/nginx/conf.d/oasis.conf`, `oasis-zones.conf`, `/etc/nginx/oasis/{proxy,security-headers}.conf` | the site |
+| `/etc/nginx/conf.d/oasis.conf`, `00-oasis-zones.conf`, `/etc/nginx/oasis/{proxy,security-headers}.conf` | the site |
 | `/var/lib/oasis` | state: `files/` (filesystem storage), `mail/` (simulated mail), `drills/` (restore-drill results), the service user's home |
 | `/var/backups/oasis/{daily,weekly,monthly}` | database backups |
 | `/var/log/oasis/{deploy.log,deploys.list,failures.log}` | deploy history and failed timers (the services themselves log to journald) |
@@ -143,7 +143,7 @@ data and theme scripts, no `eval` or `new Function` in the bundles, fonts are se
 it is expected to work; open every screen with the console visible, and when no violation is reported run
 `install.sh ... --csp enforce` (it rewrites one file and reloads nginx).
 
-**TLS.** TLS 1.2 and 1.3, modern ECDHE ciphers, no session tickets, OCSP stapling with Let's Encrypt, HTTP/2. HSTS is sent for 180 days.
+**TLS.** TLS 1.2 and 1.3, modern ECDHE ciphers, no session tickets, HTTP/2, no OCSP stapling (Let's Encrypt stopped running OCSP responders; the template says how to turn it on for a certificate that has one). HSTS is sent for 180 days.
 
 Check a change with `nginx -t` before reloading (`install.sh` does). nginx itself could not be run while this kit was written (see
 "What was and was not verified").
@@ -188,6 +188,8 @@ restarts, health-checks again and exits 1, keeping the failed build as `<id>.fai
 * **Migrations are forward-only and a rollback does not undo them.** The old code then runs against the migrated schema, so every
   migration must stay compatible with the release before it (add columns and tables first, remove things in a later release). If a
   migration breaks that rule, roll back the code and restore the pre-deploy backup ([runbook.md](runbook.md), "Roll back").
+* The script that runs is the one in the release that is live (the first deployment uses the clone in `src/`); a release that changes
+  `deploy/` takes effect from the deploy after it, and `deploy.sh` says when the units, nginx or env templates changed so you can re-run `install.sh`.
 * One deploy at a time (a lock); it keeps the newest 4 releases plus `current` and `previous`, and at most 2 failed builds.
 * `HEALTH_CMD`, `BACKUP_CMD`, `SYSTEMCTL` and `OASIS_RUN_AS` override the commands it calls (the tests use them).
 
@@ -212,7 +214,8 @@ expiry. Keep the key file somewhere else too.
 `oasis_drill` role, which may create databases and nothing else), and verifies that the row counts equal the manifest, the migration
 count matches, and the **ledger invariants** hold (recomputed from `ledger_events`: paid and refunded of every invoice equal the sum of
 its events, balances are never negative and equal `max(0, total - paid)`, sequence numbers are unique, every event has an invoice, the
-append-only guard trigger exists). It drops the scratch copy afterwards. A failure goes to `systemctl --failed` and `failures.log`.
+append-only guard trigger exists). `ledger-check.sh` runs exactly those ledger checks, read-only, against the live database. The drill drops
+the scratch copy afterwards. A failure goes to `systemctl --failed` and `failures.log`.
 `--mode schema --schema NAME` does the same inside a scratch schema, for a host where no database can be created.
 
 ## Secrets
@@ -254,7 +257,9 @@ Verified by tests (`pnpm test:ops-kit`):
 Not verified (needs the real thing):
 * **nginx** (`nginx -t` and a real request; nginx is not installed here), certbot, and the dnf package names (`nodejs22`, `certbot`,
   `postgresql15-server`) and the `pg_hba.conf` edit that `--install-packages --install-postgres` perform;
-* **shellcheck** is not installed, so the scripts were checked with `bash -n`, structural tests and execution only;
+* **shellcheck** is not installed on the build host. It was run once from a temporary Python virtualenv (`pip install shellcheck-py`, version
+  0.11.0, nothing installed system-wide) and the scripts are clean at warning level; the test suite runs it only when `shellcheck` is
+  on the PATH or named in `SHELLCHECK`, and otherwise relies on `bash -n`, structural tests and execution;
 * `tailscale serve`: the JSON shape that `serve-check.mjs` reads follows Tailscale's `ServeConfig` type and the stand-in follows the
   same; confirm with `tailscale-serve.sh --status` on the host. Whether tailscaled and nginx can both use port 443 is untested (hence 8443);
 * the restore drill in **database mode** (the test role may not create databases here; schema mode was run);

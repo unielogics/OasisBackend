@@ -85,7 +85,6 @@ while [[ -e "$OASIS_PREFIX/releases/$ID" || -e "$OASIS_PREFIX/releases/$ID.faile
 done
 REL="$OASIS_PREFIX/releases/$ID"
 PART="$REL.partial"
-FAILED_REL=""
 log "release $ID"
 
 PART_ACTIVE=0

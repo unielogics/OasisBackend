@@ -323,14 +323,13 @@ step_systemd() {
 
 # --- 8. nginx and TLS ----------------------------------------------------------------------------------------------------------------
 render_nginx() {
-  local stapling=on csp_header="Content-Security-Policy" csp_note="Enforced."
-  [[ "$TLS" == files ]] && stapling=off
+  local csp_header="Content-Security-Policy" csp_note="Enforced."
   case "$CSP" in
     report-only) csp_header="Content-Security-Policy-Report-Only"; csp_note="Report-only until every screen has been opened with no violation in the browser console; then run install.sh --csp enforce." ;;
     off) csp_header="X-Oasis-Csp-Disabled"; csp_note="Disabled with --csp off (this header is inert)." ;;
   esac
-  local common=("DOMAIN=$DOMAIN" "API_PORT=$API_PORT" "WEB_PORT=$WEB_PORT" "NGINX_DIR=$REAL_NGINX" "TLS_CERT=$TLS_CERT" "TLS_KEY=$TLS_KEY" "SSL_STAPLING=$stapling" "CSP_HEADER=$csp_header" "CSP_NOTE=$csp_note")
-  render_template "$DEPLOY_DIR/nginx/oasis-zones.conf.template" "${common[@]}" | install_content "$NGINX_DIR/conf.d/oasis-zones.conf" 0644 root:root
+  local common=("DOMAIN=$DOMAIN" "API_PORT=$API_PORT" "WEB_PORT=$WEB_PORT" "NGINX_DIR=$REAL_NGINX" "TLS_CERT=$TLS_CERT" "TLS_KEY=$TLS_KEY" "CSP_HEADER=$csp_header" "CSP_NOTE=$csp_note")
+  render_template "$DEPLOY_DIR/nginx/oasis-zones.conf.template" "${common[@]}" | install_content "$NGINX_DIR/conf.d/00-oasis-zones.conf" 0644 root:root
   render_template "$DEPLOY_DIR/nginx/oasis-proxy.conf.template" "${common[@]}" | install_content "$NGINX_DIR/oasis/proxy.conf" 0644 root:root
   render_template "$DEPLOY_DIR/nginx/oasis-security-headers.conf.template" "${common[@]}" | install_content "$NGINX_DIR/oasis/security-headers.conf" 0644 root:root
   if [[ "$1" == bootstrap ]]; then

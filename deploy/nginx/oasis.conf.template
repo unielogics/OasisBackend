@@ -37,10 +37,8 @@ server {
     ssl_session_cache shared:oasis_ssl:10m;
     ssl_session_timeout 1d;
     ssl_session_tickets off;
-    ssl_stapling @SSL_STAPLING@;
-    ssl_stapling_verify @SSL_STAPLING@;
-    resolver 1.1.1.1 8.8.8.8 valid=300s ipv6=off;
-    resolver_timeout 5s;
+    # No OCSP stapling: Let's Encrypt stopped running OCSP responders. With a certificate that has one, add
+    # ssl_stapling on; ssl_stapling_verify on; and a resolver.
 
     access_log /var/log/nginx/oasis.access.log oasis;
     error_log /var/log/nginx/oasis.error.log warn;

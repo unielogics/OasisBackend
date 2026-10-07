@@ -9,6 +9,11 @@
 # --wait N keeps retrying for N seconds, which is what deploy.sh uses after a restart.
 set -euo pipefail
 
+# The ports come from the environment files the services use, so a changed PORT cannot make a deploy judge the wrong address.
+ETC="${OASIS_ETC:-${OASIS_ROOT_PREFIX:-}/etc/oasis}"
+read_port() { grep -E "^$1=" "$ETC/$2" 2>/dev/null | tail -n 1 | cut -d= -f2- | tr -d "'\" " || true; }
+API_PORT="${API_PORT:-$(read_port PORT api.env)}"
+WEB_PORT="${WEB_PORT:-$(read_port WEB_PORT web.env)}"
 API_URL="http://127.0.0.1:${API_PORT:-4000}"
 WEB_URL="http://127.0.0.1:${WEB_PORT:-3200}"
 PUBLIC_URL=""

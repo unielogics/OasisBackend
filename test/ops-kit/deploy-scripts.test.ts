@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http'
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -43,15 +43,17 @@ describe('shell scripts', () => {
     }
   })
 
-  const shellcheck = ['/usr/bin/shellcheck', '/usr/local/bin/shellcheck'].find((p) => existsSync(p))
+  // Runs when shellcheck is on the PATH or named in SHELLCHECK; otherwise it is skipped (not installed system-wide on the build host).
+  const shellcheck = [process.env.SHELLCHECK, '/usr/bin/shellcheck', '/usr/local/bin/shellcheck'].find(
+    (p) => !!p && existsSync(p),
+  )
   it.skipIf(!shellcheck)(
-    'pass shellcheck (skipped on this machine: shellcheck is not installed)',
+    'pass shellcheck at warning level (skipped when shellcheck is not installed)',
     async () => {
-      for (const f of allScripts()) {
-        const r = await sh(shellcheck!, ['-x', '-S', 'warning', f])
-        expect(r.out, f).toBe('')
-      }
+      const r = await sh(shellcheck!, ['-x', '-P', 'SCRIPTDIR', '-S', 'warning', ...allScripts()])
+      expect(r.out).toBe('')
     },
+    120_000,
   )
 })
 
@@ -237,6 +239,19 @@ describe('healthcheck.sh', () => {
     const r = await sh(script('healthcheck.sh'), args)
     expect(r.code, r.out).toBe(0)
     expect(r.stdout).toMatch(/^healthy:/)
+  })
+
+  it('finds the ports in the environment files, so a changed PORT cannot send a deploy to the wrong address', async () => {
+    const t = tempDir('oasis-hc-')
+    cleanups.push(t.cleanup)
+    mkdirSync(path.join(t.dir, 'etc'), { recursive: true })
+    writeFileSync(path.join(t.dir, 'etc/api.env'), '# the API port\nHOST=127.0.0.1\nPORT=4595\n')
+    writeFileSync(path.join(t.dir, 'etc/web.env'), "WEB_HOST=127.0.0.1\nWEB_PORT='4594'\n")
+    await stub({ '/healthz': [200, '{}'], '/readyz': [200, ready] }, 4595)
+    await stub({ '/login': [200, ''] }, 4594)
+    const r = await sh(script('healthcheck.sh'), [], { OASIS_ETC: path.join(t.dir, 'etc') })
+    expect(r.code, r.out).toBe(0)
+    expect(r.stdout).toContain('api http://127.0.0.1:4595, dashboard http://127.0.0.1:4594')
   })
 
   it('fails and names each problem: database down, dashboard down', async () => {

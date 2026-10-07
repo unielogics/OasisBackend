@@ -15,6 +15,7 @@ OASIS_HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 TO=""
 LIST=0
 WAIT=90
+# shellcheck disable=SC2034 # DRY_RUN is read by the sourced libraries
 while (($#)); do
   case "$1" in
     --to) TO=$2; shift 2 ;;

@@ -30,7 +30,8 @@ git).
 and change nothing. The only things that ever send or write, each behind its own flag, are: texts to the number you give with
 `--send --to` (smsgate); one email to the address you give and one tiny test file in the bucket that is deleted a second later
 (aws, `--send --to`); one signed test message to your own webhook URL (squarespace, `--post-webhook`); and temporary webhook
-registrations on the tablet that are removed again (smsgate, `--register-webhooks`). Passwords, keys and the phone number or email you
+registrations on the tablet that are removed again (smsgate, `--register-webhooks`). The SMS check talks to the tablet directly, not through Oasis's queue, so it ignores quiet hours, opt-outs and `SMS_ALLOWLIST`: give it only
+your own number. Passwords, keys and the phone number or email you
 give never appear in the output or the reports (the number shows as `+13***0100`).
 
 **What the output means.** Each line is `PASS`, `FAIL` or `SKIP`, then the item number, then what it checks and what was seen. A `FAIL` is

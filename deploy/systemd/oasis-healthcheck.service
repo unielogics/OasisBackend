@@ -8,6 +8,7 @@ User=oasis
 Group=oasis
 Environment=NODE_ENV=production
 EnvironmentFile=-/etc/oasis/web.env
+EnvironmentFile=-/etc/oasis/api.env
 ExecStart=/opt/oasis/current/backend/deploy/scripts/healthcheck.sh --quiet
 SyslogIdentifier=oasis-healthcheck
 NoNewPrivileges=yes
