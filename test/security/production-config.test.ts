@@ -30,6 +30,11 @@ describe('SEC-06 production configuration', () => {
     expect(() => loadEnv({ ...secure, ...override })).toThrow(new RegExp(name))
   })
 
+  it('refuses to boot with the dev endpoints on (they inject inbound texts as any phone number)', () => {
+    expect(() => loadEnv({ ...secure, ALLOW_DEV_ENDPOINTS: 'true' })).toThrow(/ALLOW_DEV_ENDPOINTS/)
+    expect(() => loadEnv({ DATABASE_URL: secure.DATABASE_URL, ALLOW_DEV_ENDPOINTS: 'true' })).not.toThrow()
+  })
+
   it('development keeps working without any of them', () => {
     expect(() => loadEnv({ DATABASE_URL: secure.DATABASE_URL })).not.toThrow()
   })
