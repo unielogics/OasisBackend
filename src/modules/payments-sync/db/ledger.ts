@@ -441,6 +441,21 @@ export class SqspLedgerOps {
       rule: i.paymentLinkId ? 'link' : 'manual',
     })
     if (!claimed) return { eventId: await this.existingEvent(tx, i.idempotencyKey) }
+    // An overlapping run may have recorded this very money under the other key (order level versus transaction id). The
+    // decision was made before it wrote, so look again now that the invoice is locked: same order, same amount, and no other transaction's reference.
+    const twin = await sql<{ id: string; processor_ref: string | null }>`
+      select e.id, e.processor_ref from ledger_events e
+      where e.invoice_id = ${inv.id} and e.type = 'pay' and e.sqsp_order_id = ${i.sqspOrderId} and e.amount_cents = ${i.amountCents}
+        and (${i.processorRef ?? null}::text is null or e.processor_ref is null or e.processor_ref = ${i.processorRef ?? null})
+        and not exists (select 1 from ledger_events v where v.voids_event_id = e.id)
+      order by e.seq limit 1`.execute(tx)
+    const same = twin.rows[0]
+    if (same) {
+      if (i.processorRef && !same.processor_ref)
+        await tx.updateTable('ledger_events').set({ processor_ref: i.processorRef }).where('id', '=', same.id).execute()
+      await this.setMatchEvent(tx, i.idempotencyKey, same.id, inv.id)
+      return { eventId: same.id }
+    }
     if (!actor.manual) await this.assertDecisionStillHolds(tx, inv.id, i)
     const before = await this.invoiceSnapshot(tx, inv.id)
     const now = this.d.clock.now()

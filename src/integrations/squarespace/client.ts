@@ -36,6 +36,7 @@ import {
 } from './wire.js'
 
 export const DEFAULT_BASE_URL = 'https://api.squarespace.com'
+const MAX_429_WAIT_MS = 2 * 60_000
 export const DEFAULT_USER_AGENT = 'OasisAutoSpa-Sync/1.0 (+https://oasisautospa.example)'
 
 /** Resource versions from the versioning guide (2026-10-06). Orders/Transactions are still 1.0; Contacts is v1. */
@@ -239,8 +240,11 @@ export class SquarespaceClient implements SquarespaceSource {
 
       const body = await readErrorBody(res)
       if (res.status === 429) {
+        // The documented cool down is a minute (five waits must fit the 15-minute job expiry). The wait also blocks every other caller of the shared limiter, so a longer one
+        // is an error for the run to report, not something to sleep through.
         const wait =
           parseRetryAfter(res.headers.get('retry-after'), this.opts.clock.now()) ?? this.cooldown429Ms
+        if (wait > MAX_429_WAIT_MS) throw new SquarespaceRateLimitError(body, method, path, wait)
         this.limiter.cooldown(wait)
         rateLimited++
         if (rateLimited > this.max429Retries) throw new SquarespaceRateLimitError(body, method, path, wait)
@@ -281,7 +285,11 @@ function envelope<S extends z.ZodTypeAny>(schema: S, body: unknown, what: string
 }
 
 function nextCursor(p: WirePagination | null | undefined): string | undefined {
-  return p?.hasNextPage && p.nextPageCursor ? p.nextPageCursor : undefined
+  if (!p?.hasNextPage) return undefined
+  // "more pages" without a cursor is a broken response, not the end of the list: ending here would let the sync advance its
+  // watermark past rows it never read.
+  if (!p.nextPageCursor) throw new SquarespaceMappingError('list response says hasNextPage but carries no nextPageCursor')
+  return p.nextPageCursor
 }
 
 function errorMessage(e: unknown): string {

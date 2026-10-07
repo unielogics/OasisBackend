@@ -1,6 +1,7 @@
 // The InboundEffects of the inbound router bound to one transaction: replies go through the same queue as every other
 // text, a "C" confirms through the scheduling confirm command, a received text lands in the customer's thread, and staff
 // alerts become notifications. Everything shares the transaction of the webhook event that caused it.
+import { sql } from 'kysely'
 import type { Clock } from '../../platform/clock.js'
 import type { Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
@@ -36,6 +37,12 @@ export interface ManagerNotice {
 
 const REPLY_ACTOR_NAME = 'Customer reply'
 
+// Keyword replies are the one text anybody can make the tablet send (no account, no consent needed), and lane 0 may spend the
+// whole send window. At most REPLIES_PER_NUMBER of them go to one number per REPLY_WINDOW_MS; the rest of a flood is only filed.
+const REPLY_WINDOW_MS = 30 * 60_000
+const REPLIES_PER_NUMBER = 3
+const REPLY_CLASSES = ['opt_out_confirm', 'opt_in_confirm', 'help_reply', 'confirm_ack', 'confirm_none']
+
 function replyActor(locationId: string): Actor {
   return {
     auth: { userId: NIL_UUID, employeeId: null, locationId, permissions: new Set(['sched.edit', 'jobs.status']), actorName: REPLY_ACTOR_NAME },
@@ -53,6 +60,17 @@ export function createInboundEffects(
 
   return {
     async sendReply(to, template, vars, ctx) {
+      const recent = await tx
+        .selectFrom('sms_outbox')
+        .select(sql<number>`count(*)::int`.as('n'))
+        .where('to_e164', '=', to)
+        .where('klass', 'in', REPLY_CLASSES)
+        .where('queued_at', '>', new Date(e.clock.now().getTime() - REPLY_WINDOW_MS))
+        .executeTakeFirstOrThrow()
+      if (recent.n >= REPLIES_PER_NUMBER) {
+        e.warn?.('keyword reply skipped: too many replies to this number', { template })
+        return
+      }
       const target = ctx.customerId ? await loadCustomerTarget(tx, o.locationId, ctx.customerId) : null
       const recipient = target?.recipient ?? (await strangerRecipient(tx, o.locationId, to))
       await e.queue.enqueueFor(tx, {

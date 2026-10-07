@@ -39,7 +39,7 @@ export interface MembershipSyncDeps {
   newId: NewId
   productMap: ProductMap
   config: Partial<MembershipConfig>
-  /** How far back subscription orders are read. Default 420 days (a yearly plan needs a full year of history). */
+  /** How far back subscription orders are read. Default 540 days: a yearly plan is inferred canceled 12 months + grace + lapse (432 days) after its last order. */
   lookbackDays?: number
 }
 
@@ -117,7 +117,7 @@ export async function syncMemberships(db: Db, d: MembershipSyncDeps): Promise<Me
   const report = empty()
   await ensurePlans(db, d)
   const now = d.clock.now()
-  const since = new Date(now.getTime() - (d.lookbackDays ?? 420) * DAY)
+  const since = new Date(now.getTime() - (d.lookbackDays ?? 540) * DAY)
   const rows = await db
     .selectFrom('sqsp_orders')
     .select(['order_json', 'test_mode'])
@@ -304,6 +304,10 @@ export async function syncMemberships(db: Db, d: MembershipSyncDeps): Promise<Me
             plan,
           )
       }
+    }).catch((e: unknown) => {
+      // another pass (sync job, contacts job, daily cycle, Sync now) created this member a moment ago: nothing left to do here
+      if ((e as { code?: string } | null)?.code !== '23505') throw e
+      report.unchanged++
     })
   }
   return report

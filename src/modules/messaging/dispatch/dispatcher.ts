@@ -3,7 +3,7 @@ import type { SmsEvent, SmsPriority, SmsProvider, SmsState } from '../../../inte
 import { SmsProviderError } from '../../../integrations/sms/errors.js'
 import { expiryFor } from '../policy/body.js'
 import type { SmsDenyReason, SmsPolicyContext, SmsRecipient } from '../policy/canSend.js'
-import { isTransactional, type SmsClass } from '../policy/classes.js'
+import { classSpec, isTransactional, type SmsClass } from '../policy/classes.js'
 import { DEFAULT_QUIET_HOURS, isQuietHour, type QuietHoursConfig } from '../policy/quietHours.js'
 import { canSpend, DEFAULT_BUDGET, nextFit, snapshot, type BudgetConfig, type BudgetSnapshot } from './budget.js'
 import { estimateQueue, type QueueEstimate } from './eta.js'
@@ -212,6 +212,30 @@ export class Dispatcher {
     }
     pending = pending.filter((i) => !report.expired.includes(i.id))
 
+    // The policy gate ran when the text was queued. A STOP, a staff opt-out or a consent switched off since then must still stop
+    // it, whether it waits for quiet hours, a retry, the budget or a staff "retry" of a failed text.
+    const gate = await this.outbox.suppressedAmong?.([...new Set(pending.map((i) => i.toE164))])
+    if (gate && (gate.optedOut.size > 0 || gate.notConsented.size > 0)) {
+      const reason = (i: OutboxItem): string | null => {
+        const spec = classSpec(i.klass)
+        if (gate.optedOut.has(i.toE164) && !spec.ignoresOptOut) return 'recipient opted out'
+        if (gate.notConsented.has(i.toE164) && !spec.consentExempt && spec.recipient !== 'employee') return 'recipient no longer opted in'
+        return null
+      }
+      for (const item of pending) {
+        const why = reason(item)
+        if (why) await this.outbox.update(item.id, { state: 'cancelled', lastError: why })
+      }
+      pending = pending.filter((i) => reason(i) === null)
+    }
+
+    // A number corrected while the text waited is somebody else's now.
+    const moved = await this.outbox.reassignedAmong?.(pending.map((i) => i.id))
+    if (moved && moved.size > 0) {
+      for (const item of pending) if (moved.has(item.id)) await this.outbox.update(item.id, { state: 'cancelled', lastError: 'customer no longer has this number' })
+      pending = pending.filter((i) => !moved.has(i.id))
+    }
+
     const evaluation = await this.health.evaluate(this.cfg.deviceId)
     report.device = evaluation.state
     if (evaluation.state === 'offline') {
@@ -232,7 +256,8 @@ export class Dispatcher {
     eligible.sort((a, b) => a.priority - b.priority || a.queuedAt.getTime() - b.queuedAt.getTime() || (a.id < b.id ? -1 : 1))
 
     const usage = (await this.outbox.listUsage(new Date(now.getTime() - this.cfg.budget.windowMs))).map((u) => ({ at: u.at, segments: u.segments }))
-    let lastSendAt = usage.reduce((m, u) => Math.max(m, u.at.getTime()), Number.NEGATIVE_INFINITY)
+    // a send time in the future (tablet clock ahead) must not stall the pacing gap until real time catches up
+    let lastSendAt = Math.min(now.getTime(), usage.reduce((m, u) => Math.max(m, u.at.getTime()), Number.NEGATIVE_INFINITY))
 
     for (const item of eligible) {
       if (report.sent.length >= this.cfg.maxPerTick) break
@@ -368,7 +393,9 @@ export class Dispatcher {
 
     switch (event.kind) {
       case 'sent': {
-        await this.outbox.markUsageSent(event.providerMessageId, event.at)
+        // The tablet reports when it sent the text, which can be later than it accepted it (its own pacing) but never earlier: a
+        // clock far behind would otherwise move the send out of the window and empty it.
+        await this.outbox.markUsageSent(event.providerMessageId, new Date(Math.max(event.at.getTime(), (item.acceptedAt ?? event.at).getTime())))
         if ((RANK[item.state] ?? 0) >= RANK.sent!) {
           // The sent event carries the true send time; a delivered event that overtook it only had a fallback.
           await this.outbox.update(item.id, { sentAt: event.at })
@@ -447,6 +474,11 @@ export class Dispatcher {
         break
       }
       await this.health.record(this.cfg.deviceId, { kind: 'poll_ok', at: now })
+      if (status === null && item.state === 'sent') {
+        // The tablet itself reported this text sent; its history being gone (app reinstalled) is no reason to send it again.
+        await this.outbox.update(item.id, { lastReconciledAt: now })
+        continue
+      }
       if (status === null) {
         if (item.reconcileResends < r.maxResends && item.ttlAt.getTime() > now.getTime()) {
           await this.outbox.update(item.id, { state: 'pending', reconcileResends: item.reconcileResends + 1, nextAttemptAt: null, lastReconciledAt: now, lastError: 'device had no record of the message' })

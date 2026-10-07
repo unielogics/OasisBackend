@@ -26,7 +26,8 @@ export async function buildHooksApp(rt: MessagingRuntime, o: { host: string; por
   app.setErrorHandler((err: Error & { statusCode?: number }, req, reply) => {
     req.log.error({ err: err.message }, 'hooks listener error')
     // 5xx makes the device retry the delivery, which is what we want for anything we did not persist
-    return reply.code(err.statusCode && err.statusCode >= 400 && err.statusCode < 500 ? err.statusCode : 500).send({ ok: false, status: 'error' })
+    const status = err.statusCode ?? (err as { status?: number }).status // Fastify's own errors, or an AppError from the body parser
+    return reply.code(status && status >= 400 && status < 500 ? status : 500).send({ ok: false, status: 'error' })
   })
   await app.ready()
 

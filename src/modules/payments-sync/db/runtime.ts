@@ -197,8 +197,9 @@ export class SqspRuntime {
     const match = await parts.runner.run()
     if (parts.productMap.size > 0) await resolveAlerts(db, alertDeps, ['product_map_empty'])
     const conn = this.d.env.SECRETS_KEY ? this.connection(locationId) : undefined
+    // A dead-lettered resource is skipped by every later run: that is still stopped, and its alerts must stay open until "Sync now".
     const bad = [cycle.orders, cycle.transactions].find(
-      (r) => r.status === 'error' || r.status === 'dead_letter',
+      (r) => r.status === 'error' || r.status === 'dead_letter' || r.status === 'skipped',
     )
     for (const r of [cycle.orders, cycle.transactions]) {
       if (r.status === 'dead_letter')
