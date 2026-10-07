@@ -197,6 +197,19 @@ export class PgOutboxRepository implements OutboxRepository {
     return r !== undefined
   }
 
+  async reassignedAmong(ids: readonly string[]): Promise<ReadonlySet<string>> {
+    if (ids.length === 0) return new Set()
+    const rows = await this.exec
+      .selectFrom('sms_outbox as o')
+      .innerJoin('messages as m', 'm.id', 'o.message_id')
+      .innerJoin('customers as c', 'c.id', 'm.customer_id')
+      .select('o.id')
+      .where('o.id', 'in', ids)
+      .where(sql<boolean>`c.phone_e164 is distinct from o.to_e164`)
+      .execute()
+    return new Set(rows.map((r) => r.id))
+  }
+
   async suppressedAmong(phones: readonly string[]): Promise<{ optedOut: ReadonlySet<string>; notConsented: ReadonlySet<string> }> {
     const none = { optedOut: new Set<string>(), notConsented: new Set<string>() }
     if (phones.length === 0) return none

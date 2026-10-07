@@ -229,6 +229,13 @@ export class Dispatcher {
       pending = pending.filter((i) => reason(i) === null)
     }
 
+    // A number corrected while the text waited is somebody else's now.
+    const moved = await this.outbox.reassignedAmong?.(pending.map((i) => i.id))
+    if (moved && moved.size > 0) {
+      for (const item of pending) if (moved.has(item.id)) await this.outbox.update(item.id, { state: 'cancelled', lastError: 'customer no longer has this number' })
+      pending = pending.filter((i) => !moved.has(i.id))
+    }
+
     const evaluation = await this.health.evaluate(this.cfg.deviceId)
     report.device = evaluation.state
     if (evaluation.state === 'offline') {
