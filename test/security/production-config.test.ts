@@ -35,6 +35,16 @@ describe('SEC-06 production configuration', () => {
     expect(() => loadEnv({ DATABASE_URL: secure.DATABASE_URL, ALLOW_DEV_ENDPOINTS: 'true' })).not.toThrow()
   })
 
+  it('never serves the sign-in bypass (everyone is a Super Admin) on an address other machines can reach', () => {
+    const dev = { DATABASE_URL: secure.DATABASE_URL, DEV_AUTH_BYPASS: 'true' }
+    expect(() => loadEnv({ ...dev, HOST: '0.0.0.0' })).toThrow(/DEV_AUTH_BYPASS/)
+    expect(() => loadEnv({ ...dev, HOST: '10.0.0.5' })).toThrow(/DEV_AUTH_BYPASS/)
+    expect(() => loadEnv({ ...dev, HOST: '127.0.0.1' })).not.toThrow()
+    expect(() => loadEnv({ ...dev, HOST: 'localhost' })).not.toThrow()
+    expect(() => loadEnv({ ...dev, HOST: '::1' })).not.toThrow()
+    expect(() => loadEnv({ ...dev })).not.toThrow() // HOST defaults to loopback
+  })
+
   it('development keeps working without any of them', () => {
     expect(() => loadEnv({ DATABASE_URL: secure.DATABASE_URL })).not.toThrow()
   })
