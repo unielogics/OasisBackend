@@ -274,4 +274,9 @@ export async function syncMessageFromOutbox(
       .where('state', 'in', ['queued', 'sent'])
       .execute()
   }
+  if (status === 'canceled') {
+    // a text cancelled before it left: skipped because the customer opted out, otherwise it was not delivered
+    const state = /opted out|no longer opted in/.test(row.last_error ?? '') ? 'skipped_opt_out' : 'failed'
+    await tx.updateTable('emergency_notifications').set({ state }).where('message_id', '=', row.id).where('state', 'in', ['queued', 'sent']).execute()
+  }
 }
