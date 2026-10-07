@@ -4,6 +4,36 @@ import { squarespaceEnvSchema } from '../integrations/squarespace/config.js'
 const provider = <T extends [string, ...string[]]>(...v: T) => z.enum(v)
 const bool = z.enum(['true', 'false', '1', '0']).transform((v) => v === 'true' || v === '1')
 
+const PROXY_KEYWORDS = new Set(['loopback', 'linklocal', 'uniquelocal'])
+const PROXY_ADDRESS = /^(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9a-f:]+)(?:\/\d{1,3})?$/i
+
+/**
+ * Which proxy hops may set X-Forwarded-For. Never "everyone": fastify's `true` believes the LEFT-most entry, which behind nginx's
+ * $proxy_add_x_forwarded_for is whatever the client typed. So `true` means exactly one trusted hop (the proxy in front of the app,
+ * whose appended entry is the real client); a number is a hop count; anything else is a comma-separated list of addresses, CIDR
+ * ranges or loopback/linklocal/uniquelocal.
+ */
+const trustProxy = z
+  .string()
+  .default('false')
+  .transform((raw, ctx): boolean | number | string[] => {
+    const v = raw.trim().toLowerCase()
+    if (v === 'false' || v === '0' || v === '') return false
+    if (v === 'true') return 1
+    if (/^\d{1,2}$/.test(v)) return Number(v)
+    const list = v
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean)
+    if (list.length > 0 && list.every((x) => PROXY_KEYWORDS.has(x) || PROXY_ADDRESS.test(x))) return list
+    ctx.addIssue({
+      code: 'custom',
+      message:
+        'use false, a number of proxy hops, or a comma-separated list of addresses, CIDR ranges or loopback',
+    })
+    return z.NEVER
+  })
+
 // The Squarespace tuning variables live with the adapter (src/integrations/squarespace/config.ts); only the ones the shared
 // contract below does not already declare are picked up here, so there is one definition of each.
 const squarespaceTuning = squarespaceEnvSchema.pick({
@@ -41,7 +71,7 @@ export const envSchema = z
     SESSION_COOKIE_NAME: z.string().default('oasis_sid'),
     SECRETS_KEY: z.string().optional(), // base64 32 bytes; encrypts integration credentials at rest
     COOKIE_SECURE: bool.default('false'),
-    TRUST_PROXY: bool.default('false'),
+    TRUST_PROXY: trustProxy, // false | hops | address list; see trustProxy above
     PUBLIC_API_URL: z.string().url().default('http://localhost:4000'),
     PUBLIC_DASHBOARD_URL: z.string().url().default('http://localhost:3000'),
     ALLOWED_ORIGINS: z.string().default(''), // extra comma-separated browser origins allowed on unsafe methods

@@ -44,6 +44,12 @@ export interface AppDeps {
 
 const REQUEST_ID = /^[A-Za-z0-9._-]{8,64}$/
 
+/** A hop count becomes "the first N addresses on the path (the socket peer, then X-Forwarded-For from the right) are our proxies"; fastify itself ignores a bare number. */
+const trustProxyOption = (
+  v: Env['TRUST_PROXY'],
+): boolean | string[] | ((address: string, hop: number) => boolean) =>
+  typeof v === 'number' ? (_address, hop) => hop < v : v
+
 export async function buildApp(deps: AppDeps): Promise<AppInstance> {
   const { env } = deps
   const newId = deps.newId ?? createIdGenerator(deps.clock)
@@ -57,7 +63,7 @@ export async function buildApp(deps: AppDeps): Promise<AppInstance> {
 
   const raw = Fastify({
     loggerInstance: logger,
-    trustProxy: env.TRUST_PROXY,
+    trustProxy: trustProxyOption(env.TRUST_PROXY),
     bodyLimit: 1024 * 1024,
     genReqId: (req) => {
       const incoming = req.headers['x-request-id']
