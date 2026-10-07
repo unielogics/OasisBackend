@@ -63,8 +63,11 @@ export interface OutboxRepository {
   listStuckInflight(lockedBefore: Date): Promise<OutboxItem[]>
   /** True when we have ever queued a message to the number (drives the first-message STOP footer). */
   hasPriorOutbound(phone: string): Promise<boolean>
-  /** The numbers among `phones` with an active opt-out (a STOP or a staff opt-out). Optional: the in-memory repository has no opt-out table. */
-  optedOutAmong?(phones: readonly string[]): Promise<ReadonlySet<string>>
+  /**
+   * Which of `phones` the SMS policy would now refuse: an active opt-out (a STOP, a staff opt-out, the customer's opted-out flag),
+   * or a customer whose SMS opt-in is off. Optional: the in-memory repository has neither table.
+   */
+  suppressedAmong?(phones: readonly string[]): Promise<{ optedOut: ReadonlySet<string>; notConsented: ReadonlySet<string> }>
   recordUsage(entry: UsageEntry): Promise<void>
   markUsageSent(providerMessageId: string, sentAt: Date): Promise<void>
   /** Window accounting rows with their effective time at or after `since`. */

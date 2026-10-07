@@ -197,15 +197,23 @@ export class PgOutboxRepository implements OutboxRepository {
     return r !== undefined
   }
 
-  async optedOutAmong(phones: readonly string[]): Promise<ReadonlySet<string>> {
-    if (phones.length === 0) return new Set()
-    const rows = await this.exec
-      .selectFrom('sms_opt_outs')
-      .select('phone_e164')
+  async suppressedAmong(phones: readonly string[]): Promise<{ optedOut: ReadonlySet<string>; notConsented: ReadonlySet<string> }> {
+    const none = { optedOut: new Set<string>(), notConsented: new Set<string>() }
+    if (phones.length === 0) return none
+    const outs = await this.exec.selectFrom('sms_opt_outs').select('phone_e164').where('phone_e164', 'in', phones).where('opted_in_again_at', 'is', null).execute()
+    const people = await this.exec
+      .selectFrom('customers')
+      .select(['phone_e164', 'sms_opted_in', 'sms_opted_out_at'])
       .where('phone_e164', 'in', phones)
-      .where('opted_in_again_at', 'is', null)
+      .where('merged_into', 'is', null)
+      .where('deleted_at', 'is', null)
       .execute()
-    return new Set(rows.map((r) => r.phone_e164))
+    for (const r of outs) none.optedOut.add(r.phone_e164)
+    for (const c of people) {
+      if (c.sms_opted_out_at !== null) none.optedOut.add(c.phone_e164!)
+      if (!c.sms_opted_in) none.notConsented.add(c.phone_e164!)
+    }
+    return none
   }
 
   async recordUsage(entry: UsageEntry): Promise<void> {

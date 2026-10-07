@@ -212,15 +212,21 @@ export class Dispatcher {
     }
     pending = pending.filter((i) => !report.expired.includes(i.id))
 
-    // The policy gate ran when the text was queued; a STOP (or a staff opt-out) since then must still stop it, whether it waits
-    // for quiet hours, a retry, the budget or a staff "retry" of a failed text.
-    const stopped = (await this.outbox.optedOutAmong?.([...new Set(pending.map((i) => i.toE164))])) ?? new Set<string>()
-    if (stopped.size > 0) {
-      for (const item of pending) {
-        if (!stopped.has(item.toE164) || classSpec(item.klass).ignoresOptOut) continue
-        await this.outbox.update(item.id, { state: 'cancelled', lastError: 'recipient opted out' })
+    // The policy gate ran when the text was queued. A STOP, a staff opt-out or a consent switched off since then must still stop
+    // it, whether it waits for quiet hours, a retry, the budget or a staff "retry" of a failed text.
+    const gate = await this.outbox.suppressedAmong?.([...new Set(pending.map((i) => i.toE164))])
+    if (gate && (gate.optedOut.size > 0 || gate.notConsented.size > 0)) {
+      const reason = (i: OutboxItem): string | null => {
+        const spec = classSpec(i.klass)
+        if (gate.optedOut.has(i.toE164) && !spec.ignoresOptOut) return 'recipient opted out'
+        if (gate.notConsented.has(i.toE164) && !spec.consentExempt && spec.recipient !== 'employee') return 'recipient no longer opted in'
+        return null
       }
-      pending = pending.filter((i) => !stopped.has(i.toE164) || classSpec(i.klass).ignoresOptOut)
+      for (const item of pending) {
+        const why = reason(item)
+        if (why) await this.outbox.update(item.id, { state: 'cancelled', lastError: why })
+      }
+      pending = pending.filter((i) => reason(i) === null)
     }
 
     const evaluation = await this.health.evaluate(this.cfg.deviceId)
