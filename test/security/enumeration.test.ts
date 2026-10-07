@@ -39,3 +39,33 @@ describe('SEC-07 password reset does not reveal whether an account exists', () =
     expect(h.notifier.last('password_reset')?.email).toBe(u.email)
   })
 })
+
+describe('SEC-12 an anonymous caller cannot keep texting a colleague reset links', () => {
+  const h = useHarness()
+
+  it('sends at most three self-service reset messages per account per hour', async () => {
+    const u = await h.createUser({ email: 'known@example.test', roles: ['crew'] })
+    for (let i = 0; i < 6; i++) {
+      const res = await h.t.app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/password/forgot',
+        headers: { origin: h.origin },
+        remoteAddress: `10.91.0.${i + 1}`,
+        payload: { email: u.email },
+      })
+      expect(res.statusCode).toBe(202)
+      h.clock.advance(61_000) // past the one-minute coalescing window each time
+    }
+    expect(h.notifier.sent.filter((m) => m.kind === 'password_reset')).toHaveLength(3)
+    // an hour on, the person can ask again
+    h.clock.advance(3_600_000)
+    await h.t.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/password/forgot',
+      headers: { origin: h.origin },
+      remoteAddress: '10.91.0.99',
+      payload: { email: u.email },
+    })
+    expect(h.notifier.sent.filter((m) => m.kind === 'password_reset')).toHaveLength(4)
+  })
+})
