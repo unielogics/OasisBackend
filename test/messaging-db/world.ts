@@ -107,7 +107,12 @@ export function useWorld(o: { start?: string; env?: Record<string, string>; auto
   beforeEach(async () => {
     clock.set(start)
     await sql`truncate table messages, message_threads, sms_outbox, sms_inbox, sms_usage, sms_processed_events, sms_opt_outs, outbox_emails, notifications, realtime_events, webhook_log, appointments, activity_log, audit_log restart identity cascade`.execute(t.db)
-    await sql`update customers set sms_opted_in = true, sms_opt_in_source = 'online', sms_opted_out_at = null`.execute(t.db)
+    await sql`update customers set sms_opted_in = true, sms_opt_in_source = 'online', sms_opt_in_at = null, sms_opted_out_at = null, synthetic = true`.execute(t.db)
+    const originals = [...customers.values()]
+    await sql`update customers c set phone_e164 = v.phone
+      from unnest(${originals.map((c) => c.id)}::uuid[], ${originals.map((c) => c.phone)}::text[]) as v(id, phone)
+      where c.id = v.id and c.phone_e164 is distinct from v.phone`.execute(t.db)
+    await sql`delete from sms_devices where device_key <> ${SIM_DEVICE_KEY}`.execute(t.db)
     await sql`update sms_devices set status = 'unknown', state_changed_at = null, last_seen_at = null, last_ping_at = null, last_app_started_at = null,
       last_poll_ok_at = null, consecutive_poll_failures = 0, health_status = null, battery = null, charging = null, last_error = null,
       sent_count = 0, delivered_count = 0, failed_count = 0, received_count = 0, enabled = true, remote_device_id = null`.execute(t.db)

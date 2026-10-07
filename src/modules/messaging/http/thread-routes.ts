@@ -56,7 +56,7 @@ const Thread = z.object({ items: z.array(Message), customer: ThreadCustomer.null
 
 const SendBody = z
   .object({
-    text: z.string().max(1000).optional(),
+    text: z.string().max(2000).optional(),
     templateKey: z.string().max(64).optional(),
     vars: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
   })
