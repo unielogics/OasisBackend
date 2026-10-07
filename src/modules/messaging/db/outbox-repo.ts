@@ -197,6 +197,17 @@ export class PgOutboxRepository implements OutboxRepository {
     return r !== undefined
   }
 
+  async optedOutAmong(phones: readonly string[]): Promise<ReadonlySet<string>> {
+    if (phones.length === 0) return new Set()
+    const rows = await this.exec
+      .selectFrom('sms_opt_outs')
+      .select('phone_e164')
+      .where('phone_e164', 'in', phones)
+      .where('opted_in_again_at', 'is', null)
+      .execute()
+    return new Set(rows.map((r) => r.phone_e164))
+  }
+
   async recordUsage(entry: UsageEntry): Promise<void> {
     await this.exec
       .insertInto('sms_usage')

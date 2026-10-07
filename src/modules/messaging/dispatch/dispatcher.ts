@@ -3,7 +3,7 @@ import type { SmsEvent, SmsPriority, SmsProvider, SmsState } from '../../../inte
 import { SmsProviderError } from '../../../integrations/sms/errors.js'
 import { expiryFor } from '../policy/body.js'
 import type { SmsDenyReason, SmsPolicyContext, SmsRecipient } from '../policy/canSend.js'
-import { isTransactional, type SmsClass } from '../policy/classes.js'
+import { classSpec, isTransactional, type SmsClass } from '../policy/classes.js'
 import { DEFAULT_QUIET_HOURS, isQuietHour, type QuietHoursConfig } from '../policy/quietHours.js'
 import { canSpend, DEFAULT_BUDGET, nextFit, snapshot, type BudgetConfig, type BudgetSnapshot } from './budget.js'
 import { estimateQueue, type QueueEstimate } from './eta.js'
@@ -211,6 +211,17 @@ export class Dispatcher {
       }
     }
     pending = pending.filter((i) => !report.expired.includes(i.id))
+
+    // The policy gate ran when the text was queued; a STOP (or a staff opt-out) since then must still stop it, whether it waits
+    // for quiet hours, a retry, the budget or a staff "retry" of a failed text.
+    const stopped = (await this.outbox.optedOutAmong?.([...new Set(pending.map((i) => i.toE164))])) ?? new Set<string>()
+    if (stopped.size > 0) {
+      for (const item of pending) {
+        if (!stopped.has(item.toE164) || classSpec(item.klass).ignoresOptOut) continue
+        await this.outbox.update(item.id, { state: 'cancelled', lastError: 'recipient opted out' })
+      }
+      pending = pending.filter((i) => !stopped.has(i.toE164) || classSpec(i.klass).ignoresOptOut)
+    }
 
     const evaluation = await this.health.evaluate(this.cfg.deviceId)
     report.device = evaluation.state
