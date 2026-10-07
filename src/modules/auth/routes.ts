@@ -69,6 +69,9 @@ export const MeResponse = z.object({
 
 const noStore = (reply: FastifyReply): void => void reply.header('Cache-Control', 'no-store')
 
+/** The least time POST /auth/password/forgot takes to answer, whether or not the account exists. */
+const FORGOT_MIN_MS = 150
+
 const clientMeta = (req: FastifyRequest) => ({
   ip: req.ip,
   ua: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : null,
@@ -265,9 +268,13 @@ export function registerAuthRoutes(app: AppInstance, identityOf: IdentityProvide
     },
     async (req, reply) => {
       const id = await identityOf()
+      const started = performance.now()
       await id.auth.forgotPassword({ email: req.body.email, ...clientMeta(req) }).catch((e: unknown) => {
         req.log.warn({ err: e }, 'forgot-password failed')
       })
+      // An account that exists costs a few database writes more than one that does not; answer no sooner than a fixed floor.
+      const wait = FORGOT_MIN_MS - (performance.now() - started)
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait))
       return reply.status(202).send({ accepted: true })
     },
   )

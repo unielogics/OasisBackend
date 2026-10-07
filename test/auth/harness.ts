@@ -76,7 +76,13 @@ export interface Harness {
 let counter = 0
 
 export function useHarness(
-  o: { env?: Record<string, string>; hours?: boolean; throttle?: ThrottleOptions } = {},
+  o: {
+    env?: Record<string, string>
+    hours?: boolean
+    throttle?: ThrottleOptions
+    /** Start the realtime hub so GET /api/v1/events works (the app must then be listening on a port). */
+    hub?: boolean
+  } = {},
 ): Harness {
   let testDb: TestDb
   let t: TestApp
@@ -92,6 +98,7 @@ export function useHarness(
     t = await createTestApp({
       testDb,
       env: o.env,
+      hub: o.hub ? { pollMs: 100 } : undefined,
       modules: apiModules,
       authorizer: (location) => {
         locationId = location.id

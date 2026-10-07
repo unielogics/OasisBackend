@@ -15,7 +15,7 @@ by each vertical below the generated table.
 | Time | Instants are ISO-8601 UTC. Business dates are `YYYY-MM-DD` in the location timezone (`America/New_York`); wall-clock times are minutes from midnight. Read models that show a time string also carry a ready label (`time`, `atLabel`). Helpers: `src/platform/time.ts`. Time is injected (`Clock`, SQL `app_now()`); see section 8. |
 | Ids | UUIDv7 generated in the app (`createIdGenerator(clock)`); human refs (`INV-20611`, appointment seq) are separate fields. |
 | Request id | `X-Request-Id` is accepted (8-64 chars of `A-Za-z0-9._-`) or generated, echoed on every response, present on every log line and in every error body as `requestId`. |
-| Rate limit | 300 requests/minute per user (per IP when anonymous), in memory, `RATE_LIMIT_PER_MIN`. 429 `RATE_LIMITED` with `Retry-After`. Probes and `/hooks/*` are exempt; `/events` allows 30 connects/minute. |
+| Rate limit | 300 requests/minute per user (per IP when anonymous), in memory, `RATE_LIMIT_PER_MIN`. The IP is the socket peer unless `TRUST_PROXY` names the proxies in front (`true` = one hop: nginx on the same host, whose appended `X-Forwarded-For` entry is the client; a number = hops; or an address list); entries further left are client-supplied and ignored. 429 `RATE_LIMITED` with `Retry-After`. Probes and `/hooks/*` are exempt; `/events` allows 30 connects/minute. |
 | Body limits | JSON bodies up to 1 MB (413 `PAYLOAD_TOO_LARGE`); `/hooks/*` also 1 MB. Request schemas should be `.strict()`. |
 | Security headers | Helmet with `default-src 'none'; frame-ancestors 'none'`, `nosniff`, `Cross-Origin-Resource-Policy: same-origin`, HSTS when `COOKIE_SECURE=true`. |
 
@@ -50,7 +50,7 @@ Request pipeline (`onRequest`): request id header, Origin check on unsafe method
 The auth/RBAC module implements the `Authorizer` port (`src/http/authorizer.ts`): `resolve(req)` turns the session cookie
 into an `AuthContext { userId, employeeId, locationId, permissions, limits, ... }`, `requirePerm`, optional
 `canSubscribe` (SSE channels), optional `verifyCsrf` (synchronizer token). Until it exists `src/server.ts` fails closed
-(401 everywhere non-public); `DEV_AUTH_BYPASS=true` gives local development a permissive user (refused in production).
+(401 everywhere non-public); `DEV_AUTH_BYPASS=true` gives local development a permissive user (refused in production). `NODE_ENV=production` also refuses to boot without `SESSION_SECRET`, `COOKIE_SECURE=true`, a `SECRETS_KEY` that is base64 of 32 bytes, and https `PUBLIC_DASHBOARD_URL` / `PUBLIC_API_URL`.
 For view-as sessions `permissions` are those of the viewed role and `realUserId` is the real actor; `auditContextOf(req)`
 records the real actor with `viewAsRoleId`.
 
@@ -173,6 +173,9 @@ retention gets `resync`.
 Delivery is at least once across reconnects; clients treat events as "refetch this" hints. Clients should also refetch on
 reconnect and on tab visibility and keep a 30-60 s fallback poll. At most 8 concurrent streams per user (429 beyond);
 a consumer that falls more than 1 MiB behind is disconnected and resumes with `Last-Event-ID`.
+An open stream is re-authorised at most every 15 s (`min(SSE_HEARTBEAT_MS, 15 s)`) and at once on any `rbac.changed`: when the session is gone (sign-out,
+deactivation, password change, expiry) the stream is closed, and a channel whose permission was lost stops being delivered. A permission that is
+gained applies from the next connection. The re-check does not slide the session's idle expiry.
 
 Operations: the stream needs no buffering (`X-Accel-Buffering: no` is sent; nginx also needs `proxy_buffering off` and
 `proxy_read_timeout 1h` on `/api/`); Next.js rewrites are not a safe proxy for it (they gzip and time out), so
@@ -452,7 +455,7 @@ Code: `src/modules/auth` (sessions, flows, authorizer), `src/modules/rbac` (perm
 | `POST /auth/logout` | 204; revokes the session, clears the cookie. |
 | `GET /auth/csrf` | `{csrfToken}`. |
 | `POST /auth/invite/accept` `{token, email, password}` | **Email is required** (employees may have none until now). Sets the email, creates the login, activates the employee, signs them in. 410 `INVITE_INVALID` for unknown, used, revoked or expired (7 d) tokens; 409 `EMAIL_TAKEN`. |
-| `POST /auth/password/forgot` `{email}` | Always 202 `{accepted:true}`; a known active account gets a 1-hour link through the NotificationPort (at most one per minute per account). |
+| `POST /auth/password/forgot` `{email}` | Always 202 `{accepted:true}`; a known active account gets a 1-hour link through the NotificationPort (at most one per minute and three per hour per account; further requests are answered the same and send nothing). The answer takes at least 150 ms and never waits for the SMS or email hop, so its timing does not reveal whether the address has an account. |
 | `POST /auth/password/reset` `{token, password}` | Single use; revokes every session of the account. 410 `RESET_INVALID`. |
 | `POST /auth/password/change` `{currentPassword, newPassword}` | Revokes all other sessions. 422 `CURRENT_PASSWORD_INVALID`. |
 | `GET /me` | `{user, employee, roles, displayRole, isSuperAdmin, permissions:{key:{on,limit?}}, limits:{refund?,adjust?,credit?}, rbacVersion, preferences:{theme}, viewAs:{active,canViewAs,roleId,roleName,options[]}, csrfToken, session:{expiresAt}}`. `limit`/`limits` are cents, `null` = No limit, and are present only for money permissions that are on. `roles`, `permissions` and `limits` describe the **effective** authority (the viewed role under view-as); `isSuperAdmin` is the real person. `viewAs.options` lists every role (with limits) for a Super Admin so the menu works even while viewing a role that cannot read `/roles`. |
@@ -503,7 +506,7 @@ every call from the real roles, independent of the role being viewed, so a Super
 | `GET /employees?q=&role=` | `team.view` | `q` matches first, last, full name, phone, title and role names, **not email**. `role` is a role id or built-in key. Pay type and rate are `null` without `team.edit`; phone/email are masked, and phone is not searchable, without `cli.contact` or `team.edit`. `{items}` (no paging; the list is small). |
 | `GET /employees/:id` | `team.view` | Adds `schedule[7]`, `overrides`, `effectivePermissions[27]` (`{key,module,label,on,src,ov,limit?}`), `allowedCount`; `ETag: "<version>"`. |
 | `POST /employees` | `team.edit` (+ `team.roles` for roles other than Crew or any exception) | Creates as `invited`, sends the invite. Roles default to Crew; schedule defaults to Mon-Fri 8-6 trimmed to the business hours. Body fields: `first,last,title,phone,email,roles[],employmentType,payType,rateText,skills[],schedule[{weekday,on,fromMin,toMin}],overrides{key:allow|deny},avatarColor`. Roles are ids or built-in keys. 201 `{employee, warnings[], invite:{sent,channel,expiresAt,link?}}`. |
-| `PUT /employees/:id` | `team.edit` (+ `team.roles` when roles or exceptions change) | **`If-Match: "<version>"` required** (428 `PRECONDITION_REQUIRED`, 412 `VERSION_CONFLICT` with `meta.currentVersion`). Omitted fields are unchanged. |
+| `PUT /employees/:id` | `team.edit` (+ `team.roles` when roles or exceptions change) | **`If-Match: "<version>"` required** (428 `PRECONDITION_REQUIRED`, 412 `VERSION_CONFLICT` with `meta.currentVersion`). Omitted fields are unchanged. Changing the phone or email of a Super Admin, or of anyone whose roles or exceptions grant `set.billing` or `pay.void`, needs a Super Admin (403 `SUPER_ONLY`; a person may still edit their own contact details): whoever controls those controls the invite, reset and sign-in. Changing your own roles or exceptions also needs a Super Admin, so a restriction someone else put on you stays. |
 | `POST /employees/:id/deactivate` / `reactivate` | `team.edit` | Deactivate revokes sessions and disables the login. Reactivate restores `active` for someone who ever accepted an invite, otherwise `invited`. Both idempotent. |
 | `POST /employees/:id/invite/resend` | `team.edit` | Revokes older links; 409 `INVITE_NOT_PENDING` unless the status is `invited`. |
 | `POST /employees/:id/password-reset` | `team.edit` | Sends the person a 24-hour reset link; 409 `NO_LOGIN_YET`. The response carries `link` only for a Super Admin and only when no channel delivered it: a manager must not be able to read a link that lets them become that person. |

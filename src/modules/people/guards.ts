@@ -3,6 +3,7 @@ import { sql } from 'kysely'
 import type { Executor, Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
 import { SUPER_ONLY_PERMISSIONS } from '../rbac/catalog.js'
+import { loadAuthority } from '../rbac/service.js'
 import type { SessionAuthContext } from '../auth/context.js'
 
 /** Only a Super Admin (acting as one: not while viewing as a lesser role) may do this. */
@@ -44,6 +45,17 @@ export async function holdsLockedRole(db: Executor, employeeId: string): Promise
     .where('r.is_locked', '=', true)
     .executeTakeFirst()
   return !!r
+}
+
+/**
+ * A Super Admin, or anyone whose roles or exceptions grant a Super-only permission (set.billing, pay.void). Whoever controls
+ * their phone or email controls the account (invite, reset and sign-in all run through them), so only a Super Admin may change
+ * those two fields for such a person.
+ */
+export async function holdsSuperAuthority(db: Executor, employeeId: string): Promise<boolean> {
+  if (await holdsLockedRole(db, employeeId)) return true
+  const authority = await loadAuthority(db, employeeId)
+  return [...SUPER_ONLY_PERMISSIONS].some((key) => authority.permissions.has(key))
 }
 
 /** Role ids among `roleIds` whose grants include a Super-only permission (set.billing / pay.void) or that are locked. */

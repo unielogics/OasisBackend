@@ -24,8 +24,11 @@ export interface AuthContext {
 export interface Authorizer {
   /** Permission keys that exist; when provided, routes naming an unknown key fail at boot. */
   readonly knownPermissions?: ReadonlySet<string>
-  /** Resolves the request's session (cookie) into a context, or null when unauthenticated. */
-  resolve(req: FastifyRequest): Promise<AuthContext | null>
+  /**
+   * Resolves the request's session (cookie) into a context, or null when unauthenticated. `touch: false` is a re-check
+   * that must not slide the session's idle expiry (an open event stream is not activity).
+   */
+  resolve(req: FastifyRequest, opts?: { touch?: boolean }): Promise<AuthContext | null>
   /** Throws AppError('FORBIDDEN') unless the context satisfies the permissions. */
   requirePerm(ctx: AuthContext, perms: readonly string[], mode?: 'all' | 'any'): void
   /** Per-channel SSE subscription check; defaults to the CHANNEL_PERMISSION table when absent. */

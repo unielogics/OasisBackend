@@ -11,6 +11,7 @@ import { SmsProviderError } from '../../../integrations/sms/errors.js'
 import { deviceView, type DeviceRow } from '../db/devices.js'
 import { isQuietHour, quietHoursEnd } from '../policy/quietHours.js'
 import type { MessagingRuntime } from '../runtime.js'
+import { deviceUrlProblem, originOf } from './device-url.js'
 import './problems.js'
 
 const TAGS = ['integrations']
@@ -79,8 +80,19 @@ const PatchBody = z
   })
   .strict()
 
+const fieldProblem = (path: string, message: string): AppError =>
+  new AppError('VALIDATION_FAILED', { detail: message, errors: [{ path, message }] })
+
 export function registerDeviceRoutes(app: AppInstance, rt: MessagingRuntime): void {
-  const out = (d: DeviceRow): z.infer<typeof Device> => ({ ...deviceView(d), webhookUrl: rt.webhookUrlFor(d) })
+  const checkUrl = async (baseUrl: string): Promise<void> => {
+    const problem = await deviceUrlProblem(baseUrl, app.env)
+    if (problem) throw fieldProblem('baseUrl', problem)
+  }
+
+  const out = (d: DeviceRow): z.infer<typeof Device> => ({
+    ...deviceView(d),
+    webhookUrl: rt.webhookUrlFor(d),
+  })
 
   const find = async (locationId: string, id: string): Promise<DeviceRow> => {
     const d = await rt.store.get(id)
@@ -92,7 +104,11 @@ export function registerDeviceRoutes(app: AppInstance, rt: MessagingRuntime): vo
     '/integrations/sms/devices',
     {
       config: { access: access.perm('set.billing') },
-      schema: { tags: TAGS, summary: 'The SMS devices and their health', response: { 200: z.object({ items: z.array(Device) }) } },
+      schema: {
+        tags: TAGS,
+        summary: 'The SMS devices and their health',
+        response: { 200: z.object({ items: z.array(Device) }) },
+      },
     },
     async (req) => ({ items: (await rt.store.list(req.auth!.locationId)).map(out) }),
   )
@@ -105,12 +121,13 @@ export function registerDeviceRoutes(app: AppInstance, rt: MessagingRuntime): vo
         tags: TAGS,
         summary: 'Add an SMS device',
         description:
-          'An SMS Gate device needs its tailnet URL, username and password. The webhook signing secret is generated when omitted and returned ONCE here (set the same value in the app\'s Webhooks settings); credentials are stored encrypted with SECRETS_KEY and never shown again. `provider: sim` adds an in-process simulator device.',
+          "An SMS Gate device needs its tailnet URL, username and password. The webhook signing secret is generated when omitted and returned ONCE here (set the same value in the app's Webhooks settings); credentials are stored encrypted with SECRETS_KEY and never shown again. `baseUrl` must be an http(s) address without credentials that does not point at a link-local or cloud metadata address (nor, in production, at loopback); names are resolved and checked too. `provider: sim` adds an in-process simulator device.",
         body: CreateBody,
         response: { 201: z.object({ device: Device, webhookSecret: z.string() }) },
       },
     },
     async (req, reply) => {
+      if (req.body.baseUrl) await checkUrl(req.body.baseUrl)
       const r = await transaction(app.db, async (tx) => {
         const created = await rt.store.forExecutor(tx).create(req.auth!.locationId, req.body)
         await audit.record(tx, {
@@ -135,7 +152,8 @@ export function registerDeviceRoutes(app: AppInstance, rt: MessagingRuntime): vo
       schema: {
         tags: TAGS,
         summary: 'Edit a device: label, credentials, limits, enabled',
-        description: 'A password or webhook secret that is sent replaces the stored one; omitted secrets are kept.',
+        description:
+          'A password or webhook secret that is sent replaces the stored one; omitted secrets are kept. Moving the device to another origin needs the password again (422 on `password`), so the stored one is never sent to a host chosen by whoever edits the address. The address is checked as on create.',
         params: IdParams,
         body: PatchBody,
         response: { 200: Device },
@@ -143,6 +161,17 @@ export function registerDeviceRoutes(app: AppInstance, rt: MessagingRuntime): vo
     },
     async (req) => {
       const before = await find(req.auth!.locationId, req.params.id)
+      const { baseUrl } = req.body
+      if (baseUrl) {
+        await checkUrl(baseUrl)
+        // The stored password is never shown, so it must not be sent to a new host just because someone with set.billing asked.
+        if (
+          before.password_enc !== null &&
+          req.body.password === undefined &&
+          originOf(baseUrl) !== originOf(before.base_url ?? '')
+        )
+          throw fieldProblem('password', 'Enter the device password again when you change its address.')
+      }
       const next = await rt.store.update(before.id, req.body)
       rt.providers.forget(before.id)
       await transaction(app.db, (tx) =>
@@ -195,7 +224,13 @@ export function registerDeviceRoutes(app: AppInstance, rt: MessagingRuntime): vo
           error = (err as Error).message
         }
       }
-      return { reachable, credentials, healthStatus: details.status ?? null, battery: health.battery ?? null, error }
+      return {
+        reachable,
+        credentials,
+        healthStatus: details.status ?? null,
+        battery: health.battery ?? null,
+        error,
+      }
     },
   )
 
@@ -205,9 +240,16 @@ export function registerDeviceRoutes(app: AppInstance, rt: MessagingRuntime): vo
       config: { access: access.perm('set.billing') },
       schema: {
         tags: TAGS,
-        summary: 'Register the seven oasis-* webhooks on the device (idempotent; stale oasis-* ones are removed)',
+        summary:
+          'Register the seven oasis-* webhooks on the device (idempotent; stale oasis-* ones are removed)',
         params: IdParams,
-        response: { 200: z.object({ registered: z.boolean(), url: z.string().nullable(), error: z.string().nullable() }) },
+        response: {
+          200: z.object({
+            registered: z.boolean(),
+            url: z.string().nullable(),
+            error: z.string().nullable(),
+          }),
+        },
       },
     },
     async (req) => {
@@ -264,7 +306,11 @@ export function registerDeviceRoutes(app: AppInstance, rt: MessagingRuntime): vo
                 willExpire: z.number().int(),
               }),
             }),
-            quietHours: z.object({ enabled: z.boolean(), active: z.boolean(), endsAt: z.string().nullable() }),
+            quietHours: z.object({
+              enabled: z.boolean(),
+              active: z.boolean(),
+              endsAt: z.string().nullable(),
+            }),
             failedLast24h: z.number().int(),
           }),
         },
@@ -312,7 +358,11 @@ export function registerDeviceRoutes(app: AppInstance, rt: MessagingRuntime): vo
             willExpire: s.queue.willExpire,
           },
         },
-        quietHours: { enabled: quiet.enabled, active, endsAt: active ? quietHoursEnd(now, quiet).toISOString() : null },
+        quietHours: {
+          enabled: quiet.enabled,
+          active,
+          endsAt: active ? quietHoursEnd(now, quiet).toISOString() : null,
+        },
         failedLast24h: Number(failed.n),
       }
     },

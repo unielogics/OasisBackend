@@ -22120,7 +22120,7 @@
         "x-oasis-access": "set.billing"
       },
       "post": {
-        "description": "An SMS Gate device needs its tailnet URL, username and password. The webhook signing secret is generated when omitted and returned ONCE here (set the same value in the app's Webhooks settings); credentials are stored encrypted with SECRETS_KEY and never shown again. `provider: sim` adds an in-process simulator device.",
+        "description": "An SMS Gate device needs its tailnet URL, username and password. The webhook signing secret is generated when omitted and returned ONCE here (set the same value in the app's Webhooks settings); credentials are stored encrypted with SECRETS_KEY and never shown again. `baseUrl` must be an http(s) address without credentials that does not point at a link-local or cloud metadata address (nor, in production, at loopback); names are resolved and checked too. `provider: sim` adds an in-process simulator device.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -22541,7 +22541,7 @@
     },
     "/api/v1/integrations/sms/devices/{id}": {
       "patch": {
-        "description": "A password or webhook secret that is sent replaces the stored one; omitted secrets are kept.",
+        "description": "A password or webhook secret that is sent replaces the stored one; omitted secrets are kept. Moving the device to another origin needs the password again (422 on `password`), so the stored one is never sent to a host chosen by whoever edits the address. The address is checked as on create.",
         "parameters": [
           {
             "in": "path",
