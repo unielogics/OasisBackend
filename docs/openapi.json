@@ -329,6 +329,11 @@
                           "pay": {
                             "additionalProperties": false,
                             "properties": {
+                              "awaitingCents": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
                               "balanceCents": {
                                 "maximum": 9007199254740991,
                                 "minimum": -9007199254740991,
@@ -351,6 +356,7 @@
                                   "paid",
                                   "deposit",
                                   "due",
+                                  "pending",
                                   "none"
                                 ],
                                 "type": "string"
@@ -373,6 +379,7 @@
                               "label",
                               "kind",
                               "balanceCents",
+                              "awaitingCents",
                               "invoiceNo",
                               "status"
                             ],
@@ -1003,6 +1010,11 @@
                     "invoice": {
                       "additionalProperties": false,
                       "properties": {
+                        "awaitingCents": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
                         "balanceCents": {
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
@@ -1573,6 +1585,11 @@
                         {
                           "additionalProperties": false,
                           "properties": {
+                            "awaitingCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "balanceCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -2010,6 +2027,11 @@
                         "pay": {
                           "additionalProperties": false,
                           "properties": {
+                            "awaitingCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "balanceCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -2032,6 +2054,7 @@
                                 "paid",
                                 "deposit",
                                 "due",
+                                "pending",
                                 "none"
                               ],
                               "type": "string"
@@ -2054,6 +2077,7 @@
                             "label",
                             "kind",
                             "balanceCents",
+                            "awaitingCents",
                             "invoiceNo",
                             "status"
                           ],
@@ -2918,6 +2942,11 @@
                         {
                           "additionalProperties": false,
                           "properties": {
+                            "awaitingCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "balanceCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -3174,6 +3203,11 @@
                     "invoice": {
                       "additionalProperties": false,
                       "properties": {
+                        "awaitingCents": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
                         "balanceCents": {
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
@@ -3419,6 +3453,11 @@
                     "invoice": {
                       "additionalProperties": false,
                       "properties": {
+                        "awaitingCents": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
                         "balanceCents": {
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
@@ -3785,6 +3824,11 @@
                         {
                           "additionalProperties": false,
                           "properties": {
+                            "awaitingCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "balanceCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -4151,6 +4195,11 @@
                         {
                           "additionalProperties": false,
                           "properties": {
+                            "awaitingCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "balanceCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -4518,6 +4567,11 @@
                         {
                           "additionalProperties": false,
                           "properties": {
+                            "awaitingCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "balanceCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -4896,6 +4950,11 @@
                         {
                           "additionalProperties": false,
                           "properties": {
+                            "awaitingCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "balanceCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -5477,6 +5536,11 @@
                         {
                           "additionalProperties": false,
                           "properties": {
+                            "awaitingCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "balanceCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -5822,6 +5886,11 @@
                         {
                           "additionalProperties": false,
                           "properties": {
+                            "awaitingCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "balanceCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -8275,6 +8344,11 @@
                         {
                           "additionalProperties": false,
                           "properties": {
+                            "awaitingCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "balanceCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -8621,6 +8695,11 @@
                         {
                           "additionalProperties": false,
                           "properties": {
+                            "awaitingCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "balanceCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -9298,6 +9377,11 @@
                         {
                           "additionalProperties": false,
                           "properties": {
+                            "awaitingCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "balanceCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -9643,6 +9727,11 @@
                         {
                           "additionalProperties": false,
                           "properties": {
+                            "awaitingCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "balanceCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -10019,6 +10108,11 @@
                         {
                           "additionalProperties": false,
                           "properties": {
+                            "awaitingCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "balanceCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -10399,6 +10493,11 @@
                         {
                           "additionalProperties": false,
                           "properties": {
+                            "awaitingCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "balanceCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -10763,6 +10862,11 @@
                         {
                           "additionalProperties": false,
                           "properties": {
+                            "awaitingCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
                             "balanceCents": {
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
@@ -12079,6 +12183,11 @@
                           "pay": {
                             "additionalProperties": false,
                             "properties": {
+                              "awaitingCents": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
                               "balanceCents": {
                                 "maximum": 9007199254740991,
                                 "minimum": -9007199254740991,
@@ -12101,6 +12210,7 @@
                                   "paid",
                                   "deposit",
                                   "due",
+                                  "pending",
                                   "none"
                                 ],
                                 "type": "string"
@@ -12123,6 +12233,7 @@
                               "label",
                               "kind",
                               "balanceCents",
+                              "awaitingCents",
                               "invoiceNo",
                               "status"
                             ],
@@ -12601,6 +12712,11 @@
                           "pay": {
                             "additionalProperties": false,
                             "properties": {
+                              "awaitingCents": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
                               "balanceCents": {
                                 "maximum": 9007199254740991,
                                 "minimum": -9007199254740991,
@@ -12623,6 +12739,7 @@
                                   "paid",
                                   "deposit",
                                   "due",
+                                  "pending",
                                   "none"
                                 ],
                                 "type": "string"
@@ -12645,6 +12762,7 @@
                               "label",
                               "kind",
                               "balanceCents",
+                              "awaitingCents",
                               "invoiceNo",
                               "status"
                             ],
@@ -13027,6 +13145,11 @@
                                 "pay": {
                                   "additionalProperties": false,
                                   "properties": {
+                                    "awaitingCents": {
+                                      "maximum": 9007199254740991,
+                                      "minimum": -9007199254740991,
+                                      "type": "integer"
+                                    },
                                     "balanceCents": {
                                       "maximum": 9007199254740991,
                                       "minimum": -9007199254740991,
@@ -13049,6 +13172,7 @@
                                         "paid",
                                         "deposit",
                                         "due",
+                                        "pending",
                                         "none"
                                       ],
                                       "type": "string"
@@ -13071,6 +13195,7 @@
                                     "label",
                                     "kind",
                                     "balanceCents",
+                                    "awaitingCents",
                                     "invoiceNo",
                                     "status"
                                   ],
@@ -42924,6 +43049,11 @@
                                       "pay": {
                                         "additionalProperties": false,
                                         "properties": {
+                                          "awaitingCents": {
+                                            "maximum": 9007199254740991,
+                                            "minimum": -9007199254740991,
+                                            "type": "integer"
+                                          },
                                           "balanceCents": {
                                             "maximum": 9007199254740991,
                                             "minimum": -9007199254740991,
@@ -42946,6 +43076,7 @@
                                               "paid",
                                               "deposit",
                                               "due",
+                                              "pending",
                                               "none"
                                             ],
                                             "type": "string"
@@ -42968,6 +43099,7 @@
                                           "label",
                                           "kind",
                                           "balanceCents",
+                                          "awaitingCents",
                                           "invoiceNo",
                                           "status"
                                         ],
@@ -43448,6 +43580,11 @@
                               "pay": {
                                 "additionalProperties": false,
                                 "properties": {
+                                  "awaitingCents": {
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  },
                                   "balanceCents": {
                                     "maximum": 9007199254740991,
                                     "minimum": -9007199254740991,
@@ -43470,6 +43607,7 @@
                                       "paid",
                                       "deposit",
                                       "due",
+                                      "pending",
                                       "none"
                                     ],
                                     "type": "string"
@@ -43492,6 +43630,7 @@
                                   "label",
                                   "kind",
                                   "balanceCents",
+                                  "awaitingCents",
                                   "invoiceNo",
                                   "status"
                                 ],
@@ -43980,6 +44119,11 @@
                           "pay": {
                             "additionalProperties": false,
                             "properties": {
+                              "awaitingCents": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
                               "balanceCents": {
                                 "maximum": 9007199254740991,
                                 "minimum": -9007199254740991,
@@ -44002,6 +44146,7 @@
                                   "paid",
                                   "deposit",
                                   "due",
+                                  "pending",
                                   "none"
                                 ],
                                 "type": "string"
@@ -44024,6 +44169,7 @@
                               "label",
                               "kind",
                               "balanceCents",
+                              "awaitingCents",
                               "invoiceNo",
                               "status"
                             ],
@@ -44426,6 +44572,11 @@
                                 "pay": {
                                   "additionalProperties": false,
                                   "properties": {
+                                    "awaitingCents": {
+                                      "maximum": 9007199254740991,
+                                      "minimum": -9007199254740991,
+                                      "type": "integer"
+                                    },
                                     "balanceCents": {
                                       "maximum": 9007199254740991,
                                       "minimum": -9007199254740991,
@@ -44448,6 +44599,7 @@
                                         "paid",
                                         "deposit",
                                         "due",
+                                        "pending",
                                         "none"
                                       ],
                                       "type": "string"
@@ -44470,6 +44622,7 @@
                                     "label",
                                     "kind",
                                     "balanceCents",
+                                    "awaitingCents",
                                     "invoiceNo",
                                     "status"
                                   ],
@@ -44882,6 +45035,11 @@
                                     "pay": {
                                       "additionalProperties": false,
                                       "properties": {
+                                        "awaitingCents": {
+                                          "maximum": 9007199254740991,
+                                          "minimum": -9007199254740991,
+                                          "type": "integer"
+                                        },
                                         "balanceCents": {
                                           "maximum": 9007199254740991,
                                           "minimum": -9007199254740991,
@@ -44904,6 +45062,7 @@
                                             "paid",
                                             "deposit",
                                             "due",
+                                            "pending",
                                             "none"
                                           ],
                                           "type": "string"
@@ -44926,6 +45085,7 @@
                                         "label",
                                         "kind",
                                         "balanceCents",
+                                        "awaitingCents",
                                         "invoiceNo",
                                         "status"
                                       ],

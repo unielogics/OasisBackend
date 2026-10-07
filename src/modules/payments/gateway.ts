@@ -32,6 +32,8 @@ export interface InvoiceSummary {
   depositCents: number
   status: InvoiceStatus
   refundPending: boolean
+  /** Card money staff recorded that Squarespace has not confirmed yet (it counts toward the balance at once). */
+  awaitingCents: number
   items: { name: string; priceCents: number; kind: ItemKind }[]
   payMethodLabel: string | null
 }
@@ -113,6 +115,12 @@ export async function summariesByAppointment(
            (coalesce(sum(amount_cents) filter (where type = 'pay' and deposit), 0)
             - coalesce(sum(amount_cents) filter (where type = 'void' and deposit), 0))::bigint as cents
     from ledger_events where invoice_id = any(${ids}::uuid[]) group by invoice_id`.execute(db)
+  const awaiting = await sql<{ invoice_id: string; cents: number }>`
+    select e.invoice_id, sum(e.amount_cents)::bigint as cents
+    from ledger_events e
+    where e.invoice_id = any(${ids}::uuid[]) and e.type = 'pay' and e.processor_state = 'awaiting_processor'
+      and not exists (select 1 from ledger_events v where v.voids_event_id = e.id)
+    group by e.invoice_id`.execute(db)
   const methods = await sql<{ invoice_id: string; method: string | null }>`
     select distinct on (e.invoice_id) e.invoice_id, e.method
     from ledger_events e
@@ -135,6 +143,7 @@ export async function summariesByAppointment(
       depositCents: calc.balance > 0 && calc.paid > 0 ? calc.paid : flagged,
       status: calc.status,
       refundPending: calc.pendingN > 0,
+      awaitingCents: Number(awaiting.rows.find((a) => a.invoice_id === row.invoice_id)?.cents ?? 0),
       items: items
         .filter((i) => i.invoice_id === row.invoice_id)
         .map((i) => ({ name: i.name, priceCents: i.price_cents, kind: i.kind })),

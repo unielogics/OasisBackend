@@ -10,6 +10,7 @@ import { installRequestHooks, installRouteRegistry } from './http/hooks.js'
 import { apiModules, hookModules, type ApiModule } from './http/modules.js'
 import { registerOpenApi } from './http/openapi.js'
 import { registerEventsRoute } from './http/routes/events.js'
+import { registerDevStorageRoutes, shouldMountDevStorage } from './http/routes/dev-storage.js'
 import { registerHealthRoutes } from './http/routes/health.js'
 import { registerMetaRoutes } from './http/routes/meta.js'
 import { access, type RouteRecord } from './http/access.js'
@@ -125,6 +126,8 @@ export async function buildApp(deps: AppDeps): Promise<AppInstance> {
     },
     { prefix: '/hooks' },
   )
+
+  if (shouldMountDevStorage(env)) await registerDevStorageRoutes(app)
 
   await app.ready()
   return app

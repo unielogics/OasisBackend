@@ -16,6 +16,7 @@ import { adjustPreview, itemsRefundValue, type AdjustInput, type InvoiceCalc } f
 import { creditBalance, loadCreditLots, lockCustomerCredit, recordAllocations } from './credit.js'
 import { buildDetail, type InvoiceDetail, type LedgerEventDto } from './detail.js'
 import { limitText, money } from './format.js'
+import { publishOpsForInvoice } from './ops-events.js'
 import type { PaymentsPorts } from './ports.js'
 import {
   calcOf,
@@ -218,6 +219,7 @@ export class PaymentsService {
     for (const e of o.events) await pub('ledger.event', { invoiceId: inv.id, eventId: e.id, type: e.type })
     for (const x of o.extra ?? [])
       await pub(x.type, x.eventId ? { invoiceId: inv.id, eventId: x.eventId } : { invoiceId: inv.id })
+    await publishOpsForInvoice(tx, c.locationId, inv.id)
     return this.detail(tx, c, inv.id)
   }
 

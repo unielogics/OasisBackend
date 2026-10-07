@@ -47,6 +47,8 @@ export interface InvoiceSummary {
   depositCents: number
   status: InvoiceStatus
   refundPending: boolean
+  /** Card money recorded by staff and not yet confirmed in Squarespace (counted in `paidCents`); absent = none. */
+  awaitingCents?: number
   items: InvoiceItem[]
   payMethodLabel: string | null
 }

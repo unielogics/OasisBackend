@@ -698,6 +698,11 @@ export async function seedParityOps(ctx: SeedContext): Promise<void> {
       .values(batch.slice(i, i + 200) as never)
       .execute()
   ctx.log(`parity-ops: ${made} design appointments, ${generated} procedural calendar appointments`)
+  // Invoices and members of the design day (imported late: both files import this one for the design constants).
+  const { seedParityOpsMoney } = await import('./scheduling-money.js')
+  await seedParityOpsMoney(ctx)
+  const { membershipsProfile } = await import('./memberships.js')
+  await membershipsProfile.run(ctx)
 }
 
 export const schedulingSeedProfiles: Record<string, SeedProfile> = {

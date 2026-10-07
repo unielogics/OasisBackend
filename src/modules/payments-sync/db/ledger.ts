@@ -13,6 +13,7 @@ import { transaction, type Db, type Executor, type Tx } from '../../../platform/
 import { AppError } from '../../../platform/errors.js'
 import type { NewId } from '../../../platform/ids.js'
 import * as realtime from '../../../platform/realtime.js'
+import { publishOpsForInvoice } from '../../payments/ops-events.js'
 import { calcOf, cardLabel, insertEvent, lockInvoice, touchInvoice } from '../../payments/repository.js'
 import type { EventRow } from '../../payments/repository.js'
 import type { IdentityRef } from '../identity.js'
@@ -327,6 +328,7 @@ export class SqspLedgerOps {
       realtime.publish(tx, { locationId: this.d.locationId, channel: 'payments', type, payload })
     await pub('invoice.updated', { invoiceId, version })
     for (const e of o.events) await pub('ledger.event', { invoiceId, eventId: e.id, type: e.type })
+    await publishOpsForInvoice(tx, this.d.locationId, invoiceId)
   }
 
   private invoiceSnapshot = async (tx: Tx, invoiceId: string) => {

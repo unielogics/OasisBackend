@@ -23,8 +23,9 @@ export const StaffRef = z.object({ id: z.string(), name: z.string(), initials: z
 
 export const PayView = z.object({
   label: z.string(),
-  kind: z.enum(['paid', 'deposit', 'due', 'none']),
+  kind: z.enum(['paid', 'deposit', 'due', 'pending', 'none']),
   balanceCents: z.number().int(),
+  awaitingCents: z.number().int(),
   invoiceNo: z.number().int().nullable(),
   status: z.string().nullable(),
 })
@@ -50,6 +51,7 @@ export const InvoiceSummary = z.object({
     'canceled_refunded',
   ]),
   refundPending: z.boolean(),
+  awaitingCents: z.number().int().optional(),
   items: z.array(
     z.object({ name: z.string(), priceCents: z.number().int(), kind: z.enum(['package', 'addon']) }),
   ),

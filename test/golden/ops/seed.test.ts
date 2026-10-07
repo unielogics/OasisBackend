@@ -26,6 +26,9 @@ const counts = async () =>
         'activity_log',
         'customers',
         'vehicles',
+        'invoices',
+        'ledger_events',
+        'memberships',
       ].map(
         async (table) =>
           [
@@ -129,6 +132,48 @@ describe('parity-ops', () => {
     expect(c.appointment_addons).toBe(1 + 1 + 1 + 1 + 0 + 0 + 1 + 0 + 1 + 0 + 0 + 1)
     // arrival 2 (not booked) + before 3 (cleaning, completed) + after 2 (completed) + one issue note on every 4th
     expect(c.appointment_photos).toBe(2 * 10 + 3 * 4 + 2 * 3 + 3)
+  })
+
+  it('carries the design money: one invoice per appointment, payments as the design shows, the design members', async () => {
+    const inv = await sql<{
+      name: string
+      no: number
+      tip: number
+      total: number
+      paid: number
+      balance: number
+      status: string
+      deposit: boolean | null
+    }>`
+      select c.full_name as name, i.invoice_no as no, i.tip_cents as tip, k.total, k.paid, k.balance, k.status,
+             (select bool_or(e.deposit) from ledger_events e where e.invoice_id = i.id and e.type = 'pay') as deposit
+      from invoices i
+      join customers c on c.id = i.customer_id
+      cross join lateral invoice_calc_of(i.id) k
+      where i.appointment_id is not null
+      order by i.invoice_no`.execute(t.db)
+    expect(inv.rows).toHaveLength(12)
+    expect(inv.rows.map((r) => r.no)).toEqual(Array.from({ length: 12 }, (_, i) => 20611 + i))
+    const by = Object.fromEntries(inv.rows.map((r) => [r.name, r]))
+    // a1 paid with an $8 tip, a2 paid with a $20 tip, a5 and a7 deposits, a3 and a8 unpaid (golden totals in cents)
+    expect(by['Maria Delgado']).toMatchObject({
+      tip: 800,
+      total: 9895,
+      paid: 9895,
+      balance: 0,
+      status: 'paid',
+    })
+    expect(by['David Okafor']).toMatchObject({ tip: 2000, total: 42125, balance: 0 })
+    expect(by['Priya Nair']).toMatchObject({ total: 16478, paid: 0, balance: 16478, status: 'unpaid' })
+    expect(by['Jonathan Franco']).toMatchObject({ total: 19688, balance: 0 })
+    expect(by['Sofia Marchetti']).toMatchObject({ total: 27820, paid: 5000, balance: 22820, deposit: true })
+    expect(by['Nathan Brooks']).toMatchObject({ total: 13910, balance: 0 })
+    // every payment the seed wrote is history Squarespace already settled
+    const awaiting = await sql<{ n: number }>`
+      select count(*)::int as n from ledger_events where processor_state = 'awaiting_processor'`.execute(t.db)
+    expect(awaiting.rows[0]!.n).toBe(0)
+    const members = await sql<{ n: number }>`select count(*)::int as n from memberships`.execute(t.db)
+    expect(members.rows[0]!.n).toBe(7)
   })
 
   it('is idempotent and does not depend on the injected clock', async () => {

@@ -179,18 +179,44 @@ const NEXT_STEP_OF: Partial<Record<AppointmentStatus, NextStep>> = {
 }
 
 export interface PayView {
-  /** "Paid", "Deposit · $228.00 due" or "$165.00 due". */
+  /** "Paid", "Payment pending", "Deposit · $228.00 due" or "$165.00 due". */
   label: string
-  kind: 'paid' | 'deposit' | 'due' | 'none'
+  /** `pending` = card money recorded by staff that Squarespace has not confirmed yet (DV-212): never "Paid". */
+  kind: 'paid' | 'deposit' | 'due' | 'pending' | 'none'
   balanceCents: number
+  /** Unconfirmed card money included in the funded amount. */
+  awaitingCents: number
   invoiceNo: number | null
   status: string | null
 }
 
 export function payView(inv: InvoiceSummary | null): PayView {
-  if (!inv) return { label: 'No invoice', kind: 'none', balanceCents: 0, invoiceNo: null, status: null }
-  const base = { balanceCents: inv.balanceCents, invoiceNo: inv.invoiceNo, status: inv.status }
+  if (!inv)
+    return {
+      label: 'No invoice',
+      kind: 'none',
+      balanceCents: 0,
+      awaitingCents: 0,
+      invoiceNo: null,
+      status: null,
+    }
+  const awaitingCents = inv.awaitingCents ?? 0
+  const base = {
+    balanceCents: inv.balanceCents,
+    awaitingCents,
+    invoiceNo: inv.invoiceNo,
+    status: inv.status,
+  }
   if (inv.status.startsWith('canceled')) return { ...base, label: 'Canceled', kind: 'none' }
+  // Card money staff recorded counts toward the balance at once, but the invoice reads "Paid" only when the
+  // Squarespace feed (or staff) confirmed it. A balance that is still open says so.
+  if (awaitingCents > 0)
+    return {
+      ...base,
+      label:
+        inv.balanceCents > 0 ? `Payment pending · ${formatUsdOps(inv.balanceCents)} due` : 'Payment pending',
+      kind: 'pending',
+    }
   if (inv.balanceCents <= 0 && inv.paidCents > 0) return { ...base, label: 'Paid', kind: 'paid' }
   if (inv.paidCents > 0)
     return { ...base, label: `Deposit · ${formatUsdOps(inv.balanceCents)} due`, kind: 'deposit' }
