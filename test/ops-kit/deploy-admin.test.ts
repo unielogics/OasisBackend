@@ -7,13 +7,13 @@ import { PasswordHasher } from '../../src/modules/auth/password.js'
 import { createIdGenerator } from '../../src/platform/ids.js'
 import { ensureLocation } from '../../src/platform/locations.js'
 import { resetPassword } from '../../deploy/lib/reset-password.js'
-import { useTestDb } from '../helpers/db.js'
+import { useOwnSchema } from './own-schema.js'
 import { makeUser } from '../helpers/factories.js'
 import { testDatabaseUrl } from '../helpers/env.js'
 import { REPO, parseEnvFile, script, sh, tempDir, writeExecutable } from './deploy-helpers.js'
 import { useStage } from './deploy-stage.js'
 
-const t = useTestDb()
+const t = useOwnSchema('admin')
 
 async function userWithSessions(email: string, o: { disabled?: boolean } = {}): Promise<string> {
   const newId = createIdGenerator(t.clock)

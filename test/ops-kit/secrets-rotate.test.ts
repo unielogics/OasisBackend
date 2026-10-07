@@ -20,10 +20,10 @@ import {
   rotateSecrets,
   updateEnvFile,
 } from '../../scripts/secrets-rotate.js'
-import { useTestDb } from '../helpers/db.js'
+import { useOwnSchema } from './own-schema.js'
 import { testDatabaseUrl } from '../helpers/env.js'
 
-const t = useTestDb()
+const t = useOwnSchema('rotate')
 const OLD = generateKey()
 const NEW = generateKey()
 const old = { kind: 'key', base64: OLD } as const

@@ -11,7 +11,8 @@ import { SquarespaceSimApi } from '../../src/integrations/squarespace/sim/api.js
 import { close, createSimHttpServer, listen } from '../../src/integrations/squarespace/sim/http.js'
 import { SquarespaceSimStore } from '../../src/integrations/squarespace/sim/store.js'
 import { systemClock } from '../../src/platform/clock.js'
-import { createTestDb, truncateAll, type TestDb } from '../helpers/db.js'
+import { sql } from 'kysely'
+import { createTestDb, schemaPrefix, truncateAll, type TestDb } from '../helpers/db.js'
 import { testDatabaseUrl } from '../helpers/env.js'
 import { parseEnvFile, script, sh } from './deploy-helpers.js'
 import { seedSquarespaceSim } from '../../scripts/verify-live/sim-data.js'
@@ -40,7 +41,7 @@ async function until<T>(fn: () => Promise<T | undefined | false>, ms = 40_000): 
 
 beforeAll(async () => {
   work = mkdtempSync(path.join(tmpdir(), 'oasis-live-'))
-  t = await createTestDb({ poolMax: 4 })
+  t = await createTestDb({ schema: `ops_${schemaPrefix}_live`.toLowerCase(), poolMax: 4 })
   await truncateAll(t.db)
   tablet = new SimServer({
     port: 4591,
@@ -93,6 +94,7 @@ afterAll(async () => {
   await new Promise((r) => (child ? child.once('exit', r) : r(undefined)))
   await tablet?.stop()
   if (sqsp) await close(sqsp)
+  if (t) await sql`drop schema if exists ${sql.id(t.schema)} cascade`.execute(t.db)
   await t?.close()
   if (work) rmSync(work, { recursive: true, force: true })
 })
