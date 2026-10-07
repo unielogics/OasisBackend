@@ -461,6 +461,11 @@ export class Dispatcher {
         break
       }
       await this.health.record(this.cfg.deviceId, { kind: 'poll_ok', at: now })
+      if (status === null && item.state === 'sent') {
+        // The tablet itself reported this text sent; its history being gone (app reinstalled) is no reason to send it again.
+        await this.outbox.update(item.id, { lastReconciledAt: now })
+        continue
+      }
       if (status === null) {
         if (item.reconcileResends < r.maxResends && item.ttlAt.getTime() > now.getTime()) {
           await this.outbox.update(item.id, { state: 'pending', reconcileResends: item.reconcileResends + 1, nextAttemptAt: null, lastReconciledAt: now, lastError: 'device had no record of the message' })
