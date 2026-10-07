@@ -543,7 +543,7 @@ describe('reopen, history and the needs-rebooking queue', () => {
     ).toHaveLength(0)
 
     const types = (await events(h.db, 'ops')).map((e) => e.type)
-    expect(types).toEqual(['emergency.started', 'emergency.ended', 'emergency.reopened'])
+    expect(types).toEqual(['emergency.started', 'emergency.reopened'])
     expect(await auditActions(h.db)).toContain('emergency.reopen')
 
     const history = json(await h.get('emergency/history', s))

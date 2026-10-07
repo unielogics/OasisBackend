@@ -912,7 +912,7 @@ export async function reopenShop(tx: Tx, input: ReopenInput): Promise<ReopenResu
     section: 'emergency',
     audit: input.audit,
     channel: 'ops',
-    eventType: 'emergency.ended',
+    eventType: 'emergency.reopened',
     payload: { id: em.id, auto: input.auto ?? false },
   })
   await realtime.publish(tx, {

@@ -5,7 +5,6 @@ import type { Clock } from '../../../platform/clock.js'
 import { AppError } from '../../../platform/errors.js'
 import type * as audit from '../../../platform/audit.js'
 import type { NewId } from '../../../platform/ids.js'
-import * as realtime from '../../../platform/realtime.js'
 import { minutesOfDay, toBizDate } from '../../../platform/time.js'
 import { dayInfo } from '../day-info.js'
 import {
@@ -70,7 +69,7 @@ export async function closeCommand(
   })
 }
 
-/** Reopens and announces it on the Operations channel (`emergency.reopened`) next to the service's own events. */
+/** Reopens the shop. The service publishes the single ops event (`emergency.reopened`), so every path (person, job) announces once. */
 export async function reopenCommand(
   tx: Tx,
   d: { clock: Clock; tz: string },
@@ -82,14 +81,7 @@ export async function reopenCommand(
     audit?: audit.AuditContext
   },
 ): Promise<ReopenResult> {
-  const r = await reopenShop(tx, { ...cmd, now: d.clock.now(), tz: d.tz })
-  await realtime.publish(tx, {
-    locationId: cmd.locationId,
-    channel: 'ops',
-    type: 'emergency.reopened',
-    payload: { id: r.emergency.id, auto: cmd.auto ?? false },
-  })
-  return r
+  return reopenShop(tx, { ...cmd, now: d.clock.now(), tz: d.tz })
 }
 
 /** Job path: reopens the active emergency when its end time has passed (and, when given, only that emergency). */

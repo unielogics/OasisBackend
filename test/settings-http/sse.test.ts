@@ -78,7 +78,7 @@ describe('settings and emergency events over SSE', () => {
     const opsTypes = data(withOps)
       .filter((e) => e.channel === 'ops')
       .map((e) => e.type)
-    expect(opsTypes).toEqual(['emergency.started', 'emergency.ended', 'emergency.reopened'])
+    expect(opsTypes).toEqual(['emergency.started', 'emergency.reopened'])
     expect(data(withOps).find((e) => e.type === 'emergency.started')!.payload).toMatchObject({ pause: true })
     expect(data(withoutOps).some((e) => e.channel === 'ops')).toBe(false)
     expect(

@@ -869,7 +869,7 @@ describe('reopenShop', () => {
     expect(events.map((e) => e.type)).toEqual([
       'emergency.started',
       'settings.changed',
-      'emergency.ended',
+      'emergency.reopened',
       'settings.changed',
     ])
   })

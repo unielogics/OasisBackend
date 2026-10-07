@@ -10,9 +10,8 @@ Status: accepted (2026-10-06)
   emergency id, data carries the id so a job from a rolled-back or superseded close does nothing) from inside the close
   transaction; an enqueue failure is logged and never fails the close. `emergency.sweep` (hourly and at startup) reopens any
   active emergency whose end time passed. Both go through `reopenIfDue`, which re-checks under the advisory lock.
-- **Events.** The service publishes `emergency.started` and `emergency.ended` on `ops`; the design lists `emergency.reopened`.
-  `reopenCommand` (route and jobs) publishes `emergency.reopened` as well, so a consumer of either name works. Dropping
-  `emergency.ended` means editing `src/modules/settings/emergency.ts` and its test in a later pass.
+- **Events.** Superseded by ADR 0080: one ops event per transition, `emergency.started` and `emergency.reopened`; the
+  service's extra `emergency.ended` is gone.
 - **Days already over stay closed.** Reopen soft-deletes emergency closure rows dated today or later and restores the planned
   closures they replaced; earlier days of a multi-day closure remain as the record that the shop was closed.
 - **No contact data in lists.** Preview, affected and needs-rebooking rows carry name, vehicle, time, date and status only.
