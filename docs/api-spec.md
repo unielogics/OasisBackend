@@ -824,8 +824,9 @@ through `POST /integrations/sms/devices`; the `design` seed adds a simulator dev
 ### 22.8 Wiring
 
 `src/composition.ts`: `messagingRuntimeFor(deps)` (one runtime per `Env` object), `configureProductionSettings({clock, newId, messaging})`
-(closure notices and the emergency fan-out queue real texts and emails), `paymentMessengerFor(rt)`. `src/http/modules.ts`: scheduling gets
-`messages: rt.queue` and `externalAlerts: messagingAlertSource`, payments gets the messenger over `DbPaymentOutbox`, and the messaging
+(closure notices and the emergency fan-out queue real texts and emails), `configureProductionPayments(rt)` (receipts and payment links; until it is
+called, as in the payments suite, the payments module keeps its own dev outbox; `src/server.ts` calls both). `src/http/modules.ts`: scheduling gets
+`messages: rt.queue` and `externalAlerts: messagingAlertSource`, payments takes the messenger over `DbPaymentOutbox` from `configureProductionPayments`, and the messaging
 routes are mounted. `src/server.ts`: `MessagingAccountNotifier` for invites and reset links (SMS when a usable device and number
 exist, else email through the EmailProvider; `delivered` is true only for a real SMS Gate device or SES), the hooks listener, the inline runner.
 Receipts go out as an SMS and an itemised email (`receipt` template built from the invoice and its ledger calc).

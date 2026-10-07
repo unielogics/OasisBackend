@@ -980,6 +980,64 @@ CREATE TABLE public.locations (
 );
 
 --
+-- Name: message_threads; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.message_threads (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    last_message_at timestamp with time zone,
+    last_inbound_at timestamp with time zone,
+    unread_count integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT message_threads_unread_count_check CHECK ((unread_count >= 0))
+);
+
+--
+-- Name: messages; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.messages (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    thread_id uuid,
+    customer_id uuid,
+    employee_id uuid,
+    appointment_id uuid,
+    direction text NOT NULL,
+    sender_kind text NOT NULL,
+    sender_employee_id uuid,
+    channel text DEFAULT 'sms'::text NOT NULL,
+    body text NOT NULL,
+    template_key text,
+    purpose text,
+    klass text,
+    status text NOT NULL,
+    peer_e164 text,
+    provider_message_id text,
+    device_id uuid,
+    error text,
+    segments smallint DEFAULT 1 NOT NULL,
+    encoding text,
+    idempotency_key text,
+    queued_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    sent_at timestamp with time zone,
+    delivered_at timestamp with time zone,
+    received_at timestamp with time zone,
+    read_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT messages_channel_check CHECK ((channel = ANY (ARRAY['sms'::text, 'email'::text, 'internal'::text]))),
+    CONSTRAINT messages_check CHECK (((direction = 'in'::text) = (sender_kind = 'customer'::text))),
+    CONSTRAINT messages_check1 CHECK (((direction = 'in'::text) = (status = 'received'::text))),
+    CONSTRAINT messages_direction_check CHECK ((direction = ANY (ARRAY['in'::text, 'out'::text]))),
+    CONSTRAINT messages_encoding_check CHECK (((encoding IS NULL) OR (encoding = ANY (ARRAY['GSM-7'::text, 'UCS-2'::text])))),
+    CONSTRAINT messages_segments_check CHECK ((segments >= 1)),
+    CONSTRAINT messages_sender_kind_check CHECK ((sender_kind = ANY (ARRAY['staff'::text, 'system'::text, 'customer'::text]))),
+    CONSTRAINT messages_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'sending'::text, 'sent'::text, 'delivered'::text, 'failed'::text, 'received'::text, 'canceled'::text, 'expired'::text])))
+);
+
+--
 -- Name: notifications; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1007,6 +1065,34 @@ CREATE TABLE public.ops_alert_state (
     alerts_hash text NOT NULL,
     alert_keys text[] DEFAULT '{}'::text[] NOT NULL,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL
+);
+
+--
+-- Name: outbox_emails; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.outbox_emails (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    customer_id uuid,
+    employee_id uuid,
+    to_email text NOT NULL,
+    template text NOT NULL,
+    vars jsonb DEFAULT '{}'::jsonb NOT NULL,
+    purpose text,
+    subject text,
+    body text,
+    state text DEFAULT 'pending'::text NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    next_attempt_at timestamp with time zone,
+    locked_at timestamp with time zone,
+    provider_message_id text,
+    error text,
+    dedupe_key text,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    sent_at timestamp with time zone,
+    CONSTRAINT outbox_emails_state_check CHECK ((state = ANY (ARRAY['pending'::text, 'sending'::text, 'sent'::text, 'failed'::text, 'suppressed'::text]))),
+    CONSTRAINT outbox_emails_to_email_check CHECK ((btrim(to_email) <> ''::text))
 );
 
 --
@@ -1238,6 +1324,179 @@ CREATE TABLE public.settings (
     version integer DEFAULT 1 NOT NULL,
     updated_by uuid,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL
+);
+
+--
+-- Name: sms_devices; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sms_devices (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    device_key text NOT NULL,
+    label text NOT NULL,
+    provider text DEFAULT 'smsgate'::text NOT NULL,
+    base_url text,
+    username text,
+    password_enc text,
+    webhook_secret_enc text NOT NULL,
+    remote_device_id text,
+    sim_slot_default smallint,
+    min_interval_ms integer,
+    max_per_window integer,
+    window_minutes integer,
+    enabled boolean DEFAULT true NOT NULL,
+    status text DEFAULT 'unknown'::text NOT NULL,
+    state_changed_at timestamp with time zone,
+    last_seen_at timestamp with time zone,
+    last_ping_at timestamp with time zone,
+    last_app_started_at timestamp with time zone,
+    last_poll_ok_at timestamp with time zone,
+    consecutive_poll_failures integer DEFAULT 0 NOT NULL,
+    health_status text,
+    battery smallint,
+    charging boolean,
+    last_health jsonb,
+    last_error text,
+    webhooks_url text,
+    webhooks_registered_at timestamp with time zone,
+    sent_count bigint DEFAULT 0 NOT NULL,
+    delivered_count bigint DEFAULT 0 NOT NULL,
+    failed_count bigint DEFAULT 0 NOT NULL,
+    received_count bigint DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT sms_devices_base_url_check CHECK (((base_url IS NULL) OR (base_url ~ '^https?://'::text))),
+    CONSTRAINT sms_devices_battery_check CHECK (((battery IS NULL) OR ((battery >= 0) AND (battery <= 100)))),
+    CONSTRAINT sms_devices_check CHECK (((provider = 'sim'::text) OR ((base_url IS NOT NULL) AND (username IS NOT NULL) AND (password_enc IS NOT NULL)))),
+    CONSTRAINT sms_devices_consecutive_poll_failures_check CHECK ((consecutive_poll_failures >= 0)),
+    CONSTRAINT sms_devices_device_key_check CHECK ((device_key ~ '^[A-Za-z0-9_-]{8,64}$'::text)),
+    CONSTRAINT sms_devices_health_status_check CHECK (((health_status IS NULL) OR (health_status = ANY (ARRAY['pass'::text, 'warn'::text, 'fail'::text])))),
+    CONSTRAINT sms_devices_label_check CHECK ((btrim(label) <> ''::text)),
+    CONSTRAINT sms_devices_max_per_window_check CHECK (((max_per_window IS NULL) OR (max_per_window > 0))),
+    CONSTRAINT sms_devices_min_interval_ms_check CHECK (((min_interval_ms IS NULL) OR (min_interval_ms >= 0))),
+    CONSTRAINT sms_devices_provider_check CHECK ((provider = ANY (ARRAY['sim'::text, 'smsgate'::text]))),
+    CONSTRAINT sms_devices_sim_slot_default_check CHECK (((sim_slot_default IS NULL) OR ((sim_slot_default >= 1) AND (sim_slot_default <= 3)))),
+    CONSTRAINT sms_devices_status_check CHECK ((status = ANY (ARRAY['unknown'::text, 'online'::text, 'degraded'::text, 'offline'::text]))),
+    CONSTRAINT sms_devices_window_minutes_check CHECK (((window_minutes IS NULL) OR (window_minutes > 0)))
+);
+
+--
+-- Name: sms_inbox; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sms_inbox (
+    id uuid NOT NULL,
+    device_id uuid NOT NULL,
+    provider_message_id text NOT NULL,
+    from_raw text NOT NULL,
+    from_e164 text,
+    body text NOT NULL,
+    device_received_at timestamp with time zone NOT NULL,
+    received_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    processed_at timestamp with time zone,
+    decision text,
+    quarantined boolean DEFAULT false NOT NULL,
+    customer_id uuid,
+    appointment_id uuid,
+    message_id uuid,
+    reviewed_at timestamp with time zone,
+    CONSTRAINT sms_inbox_decision_check CHECK (((decision IS NULL) OR (decision = ANY (ARRAY['opt_out'::text, 'opt_in'::text, 'help'::text, 'confirm'::text, 'confirm_nothing'::text, 'cancel_request'::text, 'message'::text, 'quarantined'::text]))))
+);
+
+--
+-- Name: sms_opt_outs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sms_opt_outs (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    phone_e164 text NOT NULL,
+    opted_out_at timestamp with time zone NOT NULL,
+    source text NOT NULL,
+    keyword text,
+    inbound_message_id uuid,
+    opted_out_by uuid,
+    opted_in_again_at timestamp with time zone,
+    CONSTRAINT sms_opt_outs_check CHECK (((opted_in_again_at IS NULL) OR (opted_in_again_at >= opted_out_at))),
+    CONSTRAINT sms_opt_outs_phone_e164_check CHECK ((phone_e164 ~ '^\+[1-9][0-9]{6,14}$'::text)),
+    CONSTRAINT sms_opt_outs_source_check CHECK ((source = ANY (ARRAY['keyword'::text, 'manual'::text, 'import'::text])))
+);
+
+--
+-- Name: sms_outbox; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sms_outbox (
+    id uuid NOT NULL,
+    message_id uuid NOT NULL,
+    to_e164 text NOT NULL,
+    body text NOT NULL,
+    encoding text NOT NULL,
+    segments smallint NOT NULL,
+    klass text NOT NULL,
+    priority smallint NOT NULL,
+    state text DEFAULT 'pending'::text NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    device_failures integer DEFAULT 0 NOT NULL,
+    reconcile_resends integer DEFAULT 0 NOT NULL,
+    next_attempt_at timestamp with time zone,
+    locked_at timestamp with time zone,
+    provider_message_id text,
+    device_id uuid,
+    sim_slot smallint,
+    last_error text,
+    queued_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    ttl_at timestamp with time zone NOT NULL,
+    hold_until timestamp with time zone,
+    accepted_at timestamp with time zone,
+    sent_at timestamp with time zone,
+    delivered_at timestamp with time zone,
+    failed_at timestamp with time zone,
+    last_reconciled_at timestamp with time zone,
+    fallback_emailed_at timestamp with time zone,
+    CONSTRAINT sms_outbox_encoding_check CHECK ((encoding = ANY (ARRAY['GSM-7'::text, 'UCS-2'::text]))),
+    CONSTRAINT sms_outbox_priority_check CHECK (((priority >= 0) AND (priority <= 3))),
+    CONSTRAINT sms_outbox_segments_check CHECK ((segments >= 1)),
+    CONSTRAINT sms_outbox_sim_slot_check CHECK (((sim_slot IS NULL) OR ((sim_slot >= 1) AND (sim_slot <= 3)))),
+    CONSTRAINT sms_outbox_state_check CHECK ((state = ANY (ARRAY['pending'::text, 'inflight'::text, 'accepted'::text, 'sent'::text, 'delivered'::text, 'failed'::text, 'expired'::text, 'cancelled'::text]))),
+    CONSTRAINT sms_outbox_to_e164_check CHECK ((to_e164 ~ '^\+[1-9][0-9]{6,14}$'::text))
+);
+
+--
+-- Name: sms_processed_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sms_processed_events (
+    event_id text NOT NULL,
+    processed_at timestamp with time zone DEFAULT public.app_now() NOT NULL
+);
+
+--
+-- Name: sms_usage; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sms_usage (
+    id bigint NOT NULL,
+    device_id uuid,
+    provider_message_id text NOT NULL,
+    segments smallint NOT NULL,
+    accepted_at timestamp with time zone NOT NULL,
+    sent_at timestamp with time zone,
+    CONSTRAINT sms_usage_segments_check CHECK ((segments >= 1))
+);
+
+--
+-- Name: sms_usage_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+ALTER TABLE public.sms_usage ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.sms_usage_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
 );
 
 --
@@ -1655,6 +1914,34 @@ ALTER TABLE ONLY public.locations
     ADD CONSTRAINT locations_slug_key UNIQUE (slug);
 
 --
+-- Name: message_threads message_threads_location_id_customer_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.message_threads
+    ADD CONSTRAINT message_threads_location_id_customer_id_key UNIQUE (location_id, customer_id);
+
+--
+-- Name: message_threads message_threads_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.message_threads
+    ADD CONSTRAINT message_threads_pkey PRIMARY KEY (id);
+
+--
+-- Name: messages messages_idempotency_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT messages_idempotency_key_key UNIQUE (idempotency_key);
+
+--
+-- Name: messages messages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT messages_pkey PRIMARY KEY (id);
+
+--
 -- Name: notifications notifications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1667,6 +1954,20 @@ ALTER TABLE ONLY public.notifications
 
 ALTER TABLE ONLY public.ops_alert_state
     ADD CONSTRAINT ops_alert_state_pkey PRIMARY KEY (location_id);
+
+--
+-- Name: outbox_emails outbox_emails_dedupe_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.outbox_emails
+    ADD CONSTRAINT outbox_emails_dedupe_key_key UNIQUE (dedupe_key);
+
+--
+-- Name: outbox_emails outbox_emails_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.outbox_emails
+    ADD CONSTRAINT outbox_emails_pkey PRIMARY KEY (id);
 
 --
 -- Name: password_resets password_resets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -1793,6 +2094,69 @@ ALTER TABLE ONLY public.sessions
 
 ALTER TABLE ONLY public.settings
     ADD CONSTRAINT settings_pkey PRIMARY KEY (location_id, key);
+
+--
+-- Name: sms_devices sms_devices_device_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_devices
+    ADD CONSTRAINT sms_devices_device_key_key UNIQUE (device_key);
+
+--
+-- Name: sms_devices sms_devices_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_devices
+    ADD CONSTRAINT sms_devices_pkey PRIMARY KEY (id);
+
+--
+-- Name: sms_inbox sms_inbox_device_id_provider_message_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_inbox
+    ADD CONSTRAINT sms_inbox_device_id_provider_message_id_key UNIQUE (device_id, provider_message_id);
+
+--
+-- Name: sms_inbox sms_inbox_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_inbox
+    ADD CONSTRAINT sms_inbox_pkey PRIMARY KEY (id);
+
+--
+-- Name: sms_opt_outs sms_opt_outs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_opt_outs
+    ADD CONSTRAINT sms_opt_outs_pkey PRIMARY KEY (id);
+
+--
+-- Name: sms_outbox sms_outbox_message_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_outbox
+    ADD CONSTRAINT sms_outbox_message_id_key UNIQUE (message_id);
+
+--
+-- Name: sms_outbox sms_outbox_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_outbox
+    ADD CONSTRAINT sms_outbox_pkey PRIMARY KEY (id);
+
+--
+-- Name: sms_processed_events sms_processed_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_processed_events
+    ADD CONSTRAINT sms_processed_events_pkey PRIMARY KEY (event_id);
+
+--
+-- Name: sms_usage sms_usage_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_usage
+    ADD CONSTRAINT sms_usage_pkey PRIMARY KEY (id);
 
 --
 -- Name: closures uq_closures_federal; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2119,6 +2483,48 @@ CREATE INDEX ledger_events_pending_idx ON public.ledger_events USING btree (loca
 CREATE INDEX ledger_events_sqsp_order_idx ON public.ledger_events USING btree (sqsp_order_id) WHERE (sqsp_order_id IS NOT NULL);
 
 --
+-- Name: message_threads_unread_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX message_threads_unread_idx ON public.message_threads USING btree (location_id, last_inbound_at DESC) WHERE (unread_count > 0);
+
+--
+-- Name: messages_appointment_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX messages_appointment_idx ON public.messages USING btree (appointment_id, queued_at, id) WHERE (appointment_id IS NOT NULL);
+
+--
+-- Name: messages_customer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX messages_customer_idx ON public.messages USING btree (customer_id, queued_at DESC) WHERE (customer_id IS NOT NULL);
+
+--
+-- Name: messages_in_flight_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX messages_in_flight_idx ON public.messages USING btree (status) WHERE (status = ANY (ARRAY['queued'::text, 'sending'::text]));
+
+--
+-- Name: messages_provider_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX messages_provider_idx ON public.messages USING btree (provider_message_id) WHERE (provider_message_id IS NOT NULL);
+
+--
+-- Name: messages_thread_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX messages_thread_idx ON public.messages USING btree (thread_id, queued_at, id) WHERE (thread_id IS NOT NULL);
+
+--
+-- Name: messages_unread_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX messages_unread_idx ON public.messages USING btree (customer_id) WHERE ((direction = 'in'::text) AND (read_at IS NULL));
+
+--
 -- Name: notifications_location_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2129,6 +2535,12 @@ CREATE INDEX notifications_location_idx ON public.notifications USING btree (loc
 --
 
 CREATE INDEX notifications_unread_idx ON public.notifications USING btree (employee_id) WHERE (read_at IS NULL);
+
+--
+-- Name: outbox_emails_drain_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX outbox_emails_drain_idx ON public.outbox_emails USING btree (state, next_attempt_at) WHERE (state = ANY (ARRAY['pending'::text, 'sending'::text]));
 
 --
 -- Name: password_resets_user_idx; Type: INDEX; Schema: public; Owner: -
@@ -2209,6 +2621,66 @@ CREATE INDEX sessions_absolute_idx ON public.sessions USING btree (absolute_expi
 CREATE INDEX sessions_user_idx ON public.sessions USING btree (user_id) WHERE (revoked_at IS NULL);
 
 --
+-- Name: sms_devices_location_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sms_devices_location_idx ON public.sms_devices USING btree (location_id, enabled, created_at);
+
+--
+-- Name: sms_inbox_from_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sms_inbox_from_idx ON public.sms_inbox USING btree (from_e164) WHERE (from_e164 IS NOT NULL);
+
+--
+-- Name: sms_inbox_quarantine_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sms_inbox_quarantine_idx ON public.sms_inbox USING btree (received_at DESC) WHERE (quarantined AND (reviewed_at IS NULL));
+
+--
+-- Name: sms_opt_outs_phone_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sms_opt_outs_phone_idx ON public.sms_opt_outs USING btree (phone_e164, opted_out_at DESC);
+
+--
+-- Name: sms_outbox_drain_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sms_outbox_drain_idx ON public.sms_outbox USING btree (state, priority, next_attempt_at);
+
+--
+-- Name: sms_outbox_provider_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sms_outbox_provider_idx ON public.sms_outbox USING btree (provider_message_id) WHERE (provider_message_id IS NOT NULL);
+
+--
+-- Name: sms_outbox_to_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sms_outbox_to_idx ON public.sms_outbox USING btree (to_e164);
+
+--
+-- Name: sms_outbox_unconfirmed_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sms_outbox_unconfirmed_idx ON public.sms_outbox USING btree (accepted_at) WHERE (state = ANY (ARRAY['accepted'::text, 'sent'::text]));
+
+--
+-- Name: sms_usage_provider_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sms_usage_provider_idx ON public.sms_usage USING btree (provider_message_id);
+
+--
+-- Name: sms_usage_window_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sms_usage_window_idx ON public.sms_usage USING btree (device_id, COALESCE(sent_at, accepted_at));
+
+--
 -- Name: uq_appointment_addons_live; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2243,6 +2715,12 @@ CREATE UNIQUE INDEX uq_emergency_one_active ON public.emergency_closures USING b
 --
 
 CREATE UNIQUE INDEX uq_services_name ON public.services USING btree (location_id, kind, lower(name));
+
+--
+-- Name: uq_sms_opt_outs_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_sms_opt_outs_active ON public.sms_opt_outs USING btree (location_id, phone_e164) WHERE (opted_in_again_at IS NULL);
 
 --
 -- Name: uq_vehicles_customer_plate; Type: INDEX; Schema: public; Owner: -
@@ -2796,6 +3274,69 @@ ALTER TABLE ONLY public.ledger_events
     ADD CONSTRAINT ledger_events_voids_event_id_fkey FOREIGN KEY (voids_event_id) REFERENCES public.ledger_events(id);
 
 --
+-- Name: message_threads message_threads_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.message_threads
+    ADD CONSTRAINT message_threads_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: message_threads message_threads_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.message_threads
+    ADD CONSTRAINT message_threads_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: messages messages_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT messages_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id) ON DELETE SET NULL;
+
+--
+-- Name: messages messages_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT messages_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: messages messages_device_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT messages_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.sms_devices(id) ON DELETE SET NULL;
+
+--
+-- Name: messages messages_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT messages_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE SET NULL;
+
+--
+-- Name: messages messages_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT messages_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: messages messages_sender_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT messages_sender_employee_id_fkey FOREIGN KEY (sender_employee_id) REFERENCES public.employees(id) ON DELETE SET NULL;
+
+--
+-- Name: messages messages_thread_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT messages_thread_id_fkey FOREIGN KEY (thread_id) REFERENCES public.message_threads(id) ON DELETE CASCADE;
+
+--
 -- Name: notifications notifications_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2808,6 +3349,27 @@ ALTER TABLE ONLY public.notifications
 
 ALTER TABLE ONLY public.ops_alert_state
     ADD CONSTRAINT ops_alert_state_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: outbox_emails outbox_emails_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.outbox_emails
+    ADD CONSTRAINT outbox_emails_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: outbox_emails outbox_emails_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.outbox_emails
+    ADD CONSTRAINT outbox_emails_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE SET NULL;
+
+--
+-- Name: outbox_emails outbox_emails_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.outbox_emails
+    ADD CONSTRAINT outbox_emails_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 -- Name: password_resets password_resets_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -2920,6 +3482,83 @@ ALTER TABLE ONLY public.sessions
 
 ALTER TABLE ONLY public.settings
     ADD CONSTRAINT settings_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: sms_devices sms_devices_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_devices
+    ADD CONSTRAINT sms_devices_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: sms_inbox sms_inbox_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_inbox
+    ADD CONSTRAINT sms_inbox_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id) ON DELETE SET NULL;
+
+--
+-- Name: sms_inbox sms_inbox_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_inbox
+    ADD CONSTRAINT sms_inbox_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: sms_inbox sms_inbox_device_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_inbox
+    ADD CONSTRAINT sms_inbox_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.sms_devices(id) ON DELETE CASCADE;
+
+--
+-- Name: sms_inbox sms_inbox_message_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_inbox
+    ADD CONSTRAINT sms_inbox_message_id_fkey FOREIGN KEY (message_id) REFERENCES public.messages(id) ON DELETE SET NULL;
+
+--
+-- Name: sms_opt_outs sms_opt_outs_inbound_message_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_opt_outs
+    ADD CONSTRAINT sms_opt_outs_inbound_message_id_fkey FOREIGN KEY (inbound_message_id) REFERENCES public.sms_inbox(id) ON DELETE SET NULL;
+
+--
+-- Name: sms_opt_outs sms_opt_outs_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_opt_outs
+    ADD CONSTRAINT sms_opt_outs_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: sms_opt_outs sms_opt_outs_opted_out_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_opt_outs
+    ADD CONSTRAINT sms_opt_outs_opted_out_by_fkey FOREIGN KEY (opted_out_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: sms_outbox sms_outbox_device_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_outbox
+    ADD CONSTRAINT sms_outbox_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.sms_devices(id) ON DELETE SET NULL;
+
+--
+-- Name: sms_outbox sms_outbox_message_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_outbox
+    ADD CONSTRAINT sms_outbox_message_id_fkey FOREIGN KEY (message_id) REFERENCES public.messages(id) ON DELETE CASCADE;
+
+--
+-- Name: sms_usage sms_usage_device_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_usage
+    ADD CONSTRAINT sms_usage_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.sms_devices(id) ON DELETE CASCADE;
 
 --
 -- Name: user_preferences user_preferences_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

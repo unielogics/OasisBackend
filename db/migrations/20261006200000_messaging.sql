@@ -226,10 +226,5 @@ create table outbox_emails (
 );
 create index outbox_emails_drain_idx on outbox_emails (state, next_attempt_at) where state in ('pending', 'sending');
 
--- The foreign keys earlier migrations had to leave open until the messages table existed.
-alter table emergency_notifications add constraint emergency_notifications_message_id_fk
-  foreign key (message_id) references messages(id) on delete set null not valid;
-alter table emergency_notifications validate constraint emergency_notifications_message_id_fk;
-alter table payment_links add constraint payment_links_sent_message_id_fk
-  foreign key (sent_message_id) references messages(id) on delete set null not valid;
-alter table payment_links validate constraint payment_links_sent_message_id_fk;
+-- emergency_notifications.message_id and payment_links.sent_message_id stay plain uuid columns holding messages.id, as the
+-- earlier migrations left them: the payments module's dev outbox hands out random uuids that are not messages (ADR 0060).

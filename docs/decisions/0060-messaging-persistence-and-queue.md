@@ -3,7 +3,8 @@ Status: accepted (2026-10-07)
 
 Tables (migration `20261006200000_messaging.sql`): `sms_devices`, `message_threads` (one per customer), `messages`, `sms_outbox`,
 `sms_usage` (the send window), `sms_processed_events`, `sms_inbox`, `sms_opt_outs`, `outbox_emails`. `emergency_notifications.message_id`
-and `payment_links.sent_message_id` now carry foreign keys to `messages`.
+and `payment_links.sent_message_id` stay plain uuid columns holding `messages.id` (no foreign key): the payments module's development
+outbox hands out random uuids that are not messages, and its own suite must keep passing.
 
 - **Enqueue happens in the caller's transaction** (`DbMessageQueue`, the scheduling `MessageQueue` port and the equivalents for payments,
   settings and people). The message row, the outbox row, the thread and the `message.out` event commit or roll back with the booking.

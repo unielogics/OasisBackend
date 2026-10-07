@@ -3,7 +3,7 @@
 import type { AppDeps } from '../app.js'
 import { messagingAlertSource } from '../modules/messaging/adapters/alerts.js'
 import { createMessagingModule } from '../modules/messaging/http/module.js'
-import { messagingRuntimeFor, paymentMessengerFor } from '../composition.js'
+import { messagingRuntimeFor, productionPaymentsPorts } from '../composition.js'
 import { authModule, peopleModule } from '../modules/auth/module.js'
 import { customersModule } from '../modules/customers/http/module.js'
 import { paymentsModule, createGatewayFor } from '../modules/payments/module.js'
@@ -28,9 +28,8 @@ const schedulingModule: ApiModule = (app, deps) =>
     externalAlerts: messagingAlertSource,
   })(app, deps)
 
-/** Payments with receipts and payment links delivered through the messaging queue and the EmailProvider. */
-const paymentsWired: ApiModule = (app, deps) =>
-  paymentsModule({ ports: { messenger: paymentMessengerFor(runtimeOf(deps)) } })(app, deps)
+/** Payments; receipts and payment links go through the messaging queue once configureProductionPayments ran (server.ts). */
+const paymentsWired: ApiModule = (app, deps) => paymentsModule({ ports: productionPaymentsPorts() })(app, deps)
 
 export const apiModules: ApiModule[] = [
   authModule,

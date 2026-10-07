@@ -7,7 +7,8 @@ import { createDbPaymentOutbox } from './modules/messaging/adapters/payments.js'
 import { MessagingClosureNotifier, MessagingEmergencyNotifier } from './modules/messaging/adapters/settings.js'
 import { MessagingRuntime, runtimeFor, type LoggerLike } from './modules/messaging/runtime.js'
 import { createGatewayFor } from './modules/payments/module.js'
-import { createPaymentMessenger } from './modules/payments/messenger.js'
+import { createPaymentMessenger, type PaymentMessenger } from './modules/payments/messenger.js'
+import { defaultPorts as defaultPaymentsPorts, type PaymentsPorts } from './modules/payments/ports.js'
 import { ledgerRevenueSource } from './modules/payments/revenue.js'
 import { noMemberships, type SchedulingPorts } from './modules/scheduling/ports.js'
 import { syncChecklistTemplate } from './modules/scheduling/checklist-sync.js'
@@ -87,4 +88,26 @@ export function configureProductionSettings(deps: ProductionSettingsDeps): void 
 /** The payment messenger over the messaging queue: receipts and payment links really go out. */
 export function paymentMessengerFor(rt: MessagingRuntime): ReturnType<typeof createPaymentMessenger> {
   return createPaymentMessenger(createDbPaymentOutbox(rt))
+}
+
+let paymentsRuntime: MessagingRuntime | undefined
+
+/**
+ * Boot-time wiring of Payments (src/server.ts), the same pattern as configureProductionSettings: until it is called the
+ * payments module keeps its own default outbox, which is what its own test suite asserts against.
+ */
+export function configureProductionPayments(rt: MessagingRuntime): void {
+  paymentsRuntime = rt
+}
+
+/** Payments ports for the module list. The messenger resolves at call time, so wiring may happen after the routes are registered. */
+export function productionPaymentsPorts(): Partial<PaymentsPorts> {
+  const fallback = defaultPaymentsPorts().messenger
+  const pick = (): PaymentMessenger => (paymentsRuntime ? paymentMessengerFor(paymentsRuntime) : fallback)
+  return {
+    messenger: {
+      sendPaymentLink: (tx, n) => pick().sendPaymentLink(tx, n),
+      sendReceipt: (tx, n) => pick().sendReceipt(tx, n),
+    },
+  }
 }

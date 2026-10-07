@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { LightMyRequestResponse } from 'fastify'
 import { sql } from 'kysely'
 import { SIM_DEVICE_KEY } from '../../db/seeds/messaging.js'
-import { configureProductionSettings, messagingRuntimeFor } from '../../src/composition.js'
+import { configureProductionPayments, configureProductionSettings, messagingRuntimeFor } from '../../src/composition.js'
 import { createPermissiveAuthorizer } from '../../src/http/authorizer.js'
 import { apiModules } from '../../src/http/modules.js'
 import { EmailError } from '../../src/integrations/email/errors.js'
@@ -34,6 +34,7 @@ beforeAll(async () => {
   })
   rt = messagingRuntimeFor({ db: w.t.db, clock: w.clock, env: app.env })
   configureProductionSettings({ clock: w.clock, newId: w.newId, messaging: rt })
+  configureProductionPayments(rt)
 })
 afterAll(async () => {
   await rt?.idle()
