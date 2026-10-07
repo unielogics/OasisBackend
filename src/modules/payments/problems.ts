@@ -23,6 +23,11 @@ registerProblems({
     title: 'Refund to card not possible',
     detail: 'Only {max} was paid by card — refund the rest to store credit.',
   },
+  REFUND_EXCEEDS_ORIGINAL: {
+    status: 422,
+    title: 'Refund to cash not possible',
+    detail: 'Only {max} was paid by card or cash — refund the rest to store credit.',
+  },
   REFUND_EXCEEDS_REFUNDABLE: {
     status: 422,
     title: 'Refund too large',

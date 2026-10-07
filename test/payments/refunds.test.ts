@@ -390,15 +390,16 @@ describe('approve and deny', () => {
       }),
     )
     expect(req.event.status).toBe('pending')
-    expect(
-      (
-        await p.send(rafael, 'POST', `invoices/${inv.id}/refunds`, {
-          mode: 'custom',
-          amountCents: 5000,
-          dest: 'cash',
-        })
-      ).statusCode,
-    ).toBe(201)
+    // 50.00 of the card money goes back through Squarespace directly while the request waits (an external refund is never
+    // reserved, so only the approval can catch it; a cash refund in Oasis would now be refused up front)
+    await addEvent(p.h.t.db, env, inv, {
+      type: 'refund',
+      amountCents: 5000,
+      dest: 'card',
+      method: 'Visa ••5521',
+      methodKind: 'card',
+      processorState: 'confirmed',
+    })
     const res = await p.send(rafael, 'POST', `invoices/${inv.id}/refunds/${req.event.id}/approve`)
     expect(res.statusCode).toBe(422)
     expect(res.json()).toMatchObject({

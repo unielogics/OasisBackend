@@ -130,18 +130,31 @@ export async function getEventForUpdate(tx: Tx, locationId: string, eventId: str
 }
 
 /**
- * What can still go back to a card: card and wallet payments (voids taken back out) less the card refunds already paid and the
- * ones waiting for approval, which reserve the card money too. `excludeEventId` leaves one request out (its own approval).
- * toOrigMax counts every non-credit payment, cash included, so a refund to card is capped by the smaller of the two.
+ * What can still go back to the original payment methods in a given destination. Store credit never comes back as money:
+ * a refund to card or cash is capped by the non-credit payments (voids taken back out) less the card and cash refunds already
+ * paid and the ones waiting for approval, which reserve that money too. A refund to card is further capped by what was paid by
+ * card or wallet. `excludeEventId` leaves one request out (its own approval).
  */
-export async function cardRefundCap(db: Executor, invoiceId: string, excludeEventId?: string): Promise<number> {
-  const r = await sql<{ cents: string | number }>`
+export async function originalRefundCap(
+  db: Executor,
+  invoiceId: string,
+  dest: 'card' | 'cash',
+  excludeEventId?: string,
+): Promise<number> {
+  const skip = excludeEventId ?? null
+  const r = await sql<{ orig: string | number; card: string | number }>`
     select coalesce(sum(case e.type when 'pay' then e.amount_cents else -e.amount_cents end)
-             filter (where e.type in ('pay', 'void') and e.method_kind in ('card', 'apple_pay')), 0)
-         - coalesce(sum(e.amount_cents) filter (where e.type = 'refund' and e.dest = 'card' and e.status in ('done', 'pending')
-             and e.id is distinct from ${excludeEventId ?? null}::uuid), 0) as cents
+                      filter (where e.type in ('pay', 'void')), 0)
+           - coalesce(sum(e.amount_cents) filter (where e.type = 'refund' and e.dest <> 'credit'
+                      and e.status in ('done', 'pending') and e.id is distinct from ${skip}::uuid), 0) as orig,
+           coalesce(sum(case e.type when 'pay' then e.amount_cents else -e.amount_cents end)
+                      filter (where e.type in ('pay', 'void') and e.method_kind in ('card', 'apple_pay')), 0)
+           - coalesce(sum(e.amount_cents) filter (where e.type = 'refund' and e.dest = 'card'
+                      and e.status in ('done', 'pending') and e.id is distinct from ${skip}::uuid), 0) as card
     from ledger_events e where e.invoice_id = ${invoiceId}`.execute(db)
-  return Math.max(0, Number(r.rows[0]?.cents ?? 0))
+  const orig = Number(r.rows[0]?.orig ?? 0)
+  const card = Number(r.rows[0]?.card ?? 0)
+  return Math.max(0, dest === 'card' ? Math.min(orig, card) : orig)
 }
 
 /** Item ids already claimed by a done or pending item refund of the invoice (double-refund guard). */
