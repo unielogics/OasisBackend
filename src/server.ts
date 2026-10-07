@@ -2,9 +2,13 @@ import { buildApp } from './app.js'
 import { loadEnv, type Env } from './config/env.js'
 import { createPermissiveAuthorizer, type Authorizer } from './http/authorizer.js'
 import { createIdentity, bootstrapAdmin, type IdentityAuthorizer } from './modules/auth/index.js'
-import { AuditAccountNotifier, DbBusinessHours } from './modules/settings/db-adapters/index.js'
+import type { NotificationPort } from './modules/auth/notifications.js'
+import { MessagingAccountNotifier } from './modules/messaging/adapters/accounts.js'
+import { buildHooksApp, type HooksApp } from './modules/messaging/http/hooks-app.js'
+import { startInlineRunner, type InlineRunner } from './modules/messaging/jobs/runner.js'
+import { DbBusinessHours } from './modules/settings/db-adapters/index.js'
 import { enqueueStartupJobs } from './modules/settings/jobs/index.js'
-import { configureProductionSettings } from './composition.js'
+import { configureProductionSettings, messagingRuntimeFor } from './composition.js'
 import { createClock, type Clock } from './platform/clock.js'
 import { createDb, type Db, type DbOptions } from './platform/db.js'
 import { createIdGenerator, type NewId } from './platform/ids.js'
@@ -24,6 +28,7 @@ function makeAuthorizer(
   db: Db,
   clock: Clock,
   newId: NewId,
+  notifier: NotificationPort,
 ): Authorizer | IdentityAuthorizer {
   if (env.DEV_AUTH_BYPASS) return createPermissiveAuthorizer({ locationId })
   return createIdentity({
@@ -33,7 +38,7 @@ function makeAuthorizer(
     newId,
     locationId,
     businessHours: new DbBusinessHours(db),
-    notifier: new AuditAccountNotifier(db, locationId),
+    notifier,
   })
 }
 
@@ -72,12 +77,13 @@ async function main(): Promise<void> {
   await enqueueStartupJobs(jobs, (err, job) =>
     logger.warn({ err: err.message, job }, 'startup job not enqueued'),
   )
-  configureProductionSettings({ clock, newId })
+  const messaging = messagingRuntimeFor({ db, clock, env, newId }, { logger })
+  configureProductionSettings({ clock, newId, messaging })
 
-  const authorizer = makeAuthorizer(env, location.id, db, clock, newId)
-  if ('identity' in authorizer)
+  const authorizer = makeAuthorizer(env, location.id, db, clock, newId, new MessagingAccountNotifier(messaging))
+  if (env.SMS_PROVIDER === 'sim' || env.EMAIL_PROVIDER === 'sim')
     logger.warn(
-      'invite and password-reset links are not delivered by SMS or email until a NotificationPort is wired into createIdentity; a Super Admin receives them in the API response instead',
+      'SMS_PROVIDER or EMAIL_PROVIDER is sim: invite and reset links are not really delivered, so a Super Admin receives them in the API response',
     )
   if ('identity' in authorizer && env.BOOTSTRAP_ADMIN_EMAIL && env.BOOTSTRAP_ADMIN_PASSWORD) {
     const r = await bootstrapAdmin(authorizer.identity, {
@@ -98,11 +104,33 @@ async function main(): Promise<void> {
   })
   await app.listen({ port: env.PORT, host: env.HOST })
 
+  // The SMS Gate webhook is served only here, on the tailnet-facing listener; the public listener answers 404 for it.
+  let hooks: HooksApp | undefined
+  if (env.HOOKS_PORT > 0) {
+    const candidate = await buildHooksApp(messaging, { host: env.HOOKS_HOST, port: env.HOOKS_PORT, logger: logger.child({ listener: 'hooks' }) })
+    try {
+      logger.info({ address: await candidate.listen() }, 'hooks listener started')
+      hooks = candidate
+    } catch (err) {
+      // Another instance already owns the port (two stacks on one host): sending still works, inbound texts do not.
+      if ((err as { code?: string }).code !== 'EADDRINUSE') throw err
+      await candidate.close()
+      logger.error({ port: env.HOOKS_PORT }, 'hooks listener port is in use: SMS webhooks (inbound texts, delivery receipts) are NOT being received by this instance; set HOOKS_PORT')
+    }
+  }
+  let runner: InlineRunner | undefined
+  if (env.SMS_DISPATCH_MODE === 'inline')
+    runner = await startInlineRunner(messaging, { url: env.DATABASE_URL, searchPath: env.DB_SEARCH_PATH, clock })
+  else if (env.SMS_DISPATCH_MODE === 'jobs')
+    await jobs.enqueue('sms.webhooks.register', {}, { singletonKey: 'boot' }).catch((err: Error) => logger.warn({ err: err.message }, 'webhook registration not enqueued'))
+
   let stopping = false
   const shutdown = async (signal: string): Promise<void> => {
     if (stopping) return
     stopping = true
     app.log.info({ signal }, 'shutting down')
+    await runner?.stop()
+    await hooks?.close()
     await hub.close()
     await app.close()
     await jobs.stop()

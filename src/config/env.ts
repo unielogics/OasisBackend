@@ -50,10 +50,36 @@ export const envSchema = z
     SMSGATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(30), // per SMSGATE_WINDOW_MINUTES
     SMSGATE_WINDOW_MINUTES: z.coerce.number().int().positive().default(30),
     SMS_ALLOWLIST: z.string().default(''), // comma-separated E.164; empty = unrestricted in production only
+    // Messaging runtime (src/modules/messaging). All optional; docs/integrations/smsgate.md section 4 lists the defaults.
+    SMS_DISPATCH_MODE: provider('jobs', 'inline', 'off').default('jobs'), // who drains sms_outbox: pg-boss worker, this API process, nobody
+    SMS_TICK_INTERVAL_MS: z.coerce.number().int().min(250).default(2000),
+    SMS_QUIET_HOURS: z.string().optional(), // "21:00-08:00" (default) or "off"; holds non-transactional classes only
+    SMSGATE_WEBHOOK_PUBLIC_URL: z.string().url().optional(), // https://<host>.<tailnet>.ts.net/hooks/smsgate (the tablet appends /<deviceKey>)
+    SMSGATE_API_PATH: z.string().default('/messages'),
+    SMSGATE_TIMEOUT_MS: z.coerce.number().int().min(500).default(10_000),
+    SMSGATE_WEBHOOK_TOLERANCE_SECONDS: z.coerce.number().int().min(30).default(86_400),
+    SMSGATE_RESEND_ATTEMPTS: z.coerce.number().int().min(0).max(3).default(1),
+    SMSGATE_SIM_NUMBER: z.coerce.number().int().min(1).max(3).optional(),
+    SMSGATE_LEGACY_MESSAGE_FIELD: bool.default('false'),
+    SMSGATE_SYNC_SIGNING_KEY: bool.default('false'),
+    SMSGATE_ALLOW_INSECURE_WEBHOOK_URL: bool.default('false'),
+    SMSGATE_RESERVED_P0: z.coerce.number().int().min(0).default(6),
+    SMSGATE_SAFETY_MARGIN: z.coerce.number().int().min(0).default(0),
+    SMSGATE_MIN_INTERVAL_MS: z.coerce.number().int().min(0).default(3000),
+    SMSGATE_MAX_SEGMENTS: z.coerce.number().int().min(1).default(8),
+    SMSGATE_HEARTBEAT_STALE_SECONDS: z.coerce.number().int().min(60).default(600),
+    SMSGATE_ONLINE_WITHIN_SECONDS: z.coerce.number().int().min(30).default(180),
+    BUSINESS_PHONE: z.string().optional(), // shown in the HELP reply
+    HOOKS_HOST: z.string().default('127.0.0.1'), // the tailnet-facing hooks listener (src/server.ts)
+    HOOKS_PORT: z.coerce.number().int().min(0).default(3002), // 0 disables the second listener
 
     EMAIL_PROVIDER: provider('sim', 'ses').default('sim'),
     AWS_REGION: z.string().default('us-east-1'),
     SES_FROM_ADDRESS: z.string().email().optional(),
+    SES_FROM_NAME: z.string().default('Oasis Auto Spa'),
+    SES_REPLY_TO: z.string().email().optional(),
+    SES_CONFIGURATION_SET: z.string().optional(),
+    EMAIL_CONSOLE_DIR: z.string().default('./.data/mail'), // where the sim driver writes .eml files
 
     STORAGE_PROVIDER: provider('fs', 's3').default('fs'),
     STORAGE_FS_ROOT: z.string().default('./.data/files'),

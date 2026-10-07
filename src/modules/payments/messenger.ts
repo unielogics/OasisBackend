@@ -11,6 +11,8 @@ export type DeliveryState = 'queued' | 'skipped_opt_out' | 'no_contact'
 
 export interface QueuedSms {
   customerId: string
+  /** The invoice the message is about, so the thread can file it under the appointment. */
+  invoiceId?: string
   toE164: string
   body: string
   klass: 'receipt' | 'payment_link'
@@ -19,6 +21,8 @@ export interface QueuedSms {
 
 export interface QueuedEmail {
   customerId: string
+  /** The invoice the receipt is for; the email layer builds the itemised receipt from it. */
+  invoiceId?: string
   to: string
   subject: string
   text: string
@@ -108,6 +112,7 @@ export function createPaymentMessenger(outbox: PaymentOutbox): PaymentMessenger 
       if (c.smsOptedOut || !c.smsOptedIn) return { state: 'skipped_opt_out', messageId: null }
       const r = await outbox.queueSms(tx, {
         customerId: n.customerId,
+        invoiceId: n.invoiceId,
         toE164: c.phone,
         body: `Here is your secure payment link: ${n.url}`,
         klass: 'payment_link',
@@ -123,6 +128,7 @@ export function createPaymentMessenger(outbox: PaymentOutbox): PaymentMessenger 
         else {
           await outbox.queueSms(tx, {
             customerId: n.customerId,
+            invoiceId: n.invoiceId,
             toE164: c.phone,
             body: receiptSmsBody(n),
             klass: 'receipt',
@@ -135,6 +141,7 @@ export function createPaymentMessenger(outbox: PaymentOutbox): PaymentMessenger 
       if (c.email) {
         await outbox.queueEmail(tx, {
           customerId: n.customerId,
+          invoiceId: n.invoiceId,
           to: c.email,
           subject: `Your Oasis Auto Spa receipt ${invoiceLabel(n.invoiceNo)}`,
           text: [

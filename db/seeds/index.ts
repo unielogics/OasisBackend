@@ -12,6 +12,7 @@ import { peopleProfile } from './people.js'
 import { domainSeedProfiles } from './domain.js'
 import { schedulingSeedProfiles } from './scheduling.js'
 import { paymentsSeedProfiles } from './payments.js'
+import { messagingProfile } from './messaging.js'
 
 export interface SeedContext {
   tx: Tx
@@ -48,6 +49,14 @@ registerSeedProfile('people', peopleProfile)
 for (const [name, profile] of Object.entries(domainSeedProfiles)) registerSeedProfile(name, profile)
 for (const [name, profile] of Object.entries(schedulingSeedProfiles)) registerSeedProfile(name, profile)
 for (const [name, profile] of Object.entries(paymentsSeedProfiles)) registerSeedProfile(name, profile)
+registerSeedProfile('messaging', messagingProfile)
+// A seeded design database can text through the simulator device out of the box (a wrap, not a dependency, so the
+// profile order that `design` reports stays people, domain, base, domain-design, design).
+const designRun = profiles.design!.run.bind(profiles.design)
+profiles.design!.run = async (ctx) => {
+  await designRun(ctx)
+  await messagingProfile.run(ctx)
+}
 
 function resolveOrder(name: string, seen: string[] = []): string[] {
   const p = profiles[name]

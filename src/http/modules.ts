@@ -1,6 +1,9 @@
 // Registry of API modules. A vertical adds one import and one entry here; its routes are mounted under /api/v1 and
 // every route must declare config.access (see ./access.ts). Webhook modules are mounted under /hooks.
 import type { AppDeps } from '../app.js'
+import { messagingAlertSource } from '../modules/messaging/adapters/alerts.js'
+import { createMessagingModule } from '../modules/messaging/http/module.js'
+import { messagingRuntimeFor, paymentMessengerFor } from '../composition.js'
 import { authModule, peopleModule } from '../modules/auth/module.js'
 import { customersModule } from '../modules/customers/http/module.js'
 import { paymentsModule, createGatewayFor } from '../modules/payments/module.js'
@@ -11,9 +14,23 @@ import type { AppInstance } from './types.js'
 
 export type ApiModule = (app: AppInstance, deps: AppDeps) => void | Promise<void>
 
-/** Scheduling composed with the real invoice gateway (payments) and cash-basis revenue from the ledger. */
+const runtimeOf = (deps: AppDeps): ReturnType<typeof messagingRuntimeFor> => messagingRuntimeFor(deps)
+
+/**
+ * Scheduling composed with the real invoice gateway (payments), cash-basis revenue from the ledger, the messaging
+ * outbox (every notification is queued as an SMS) and the messaging alerts (new reply, device down).
+ */
 const schedulingModule: ApiModule = (app, deps) =>
-  createSchedulingModule({ invoices: createGatewayFor(deps), revenue: ledgerRevenueSource })(app, deps)
+  createSchedulingModule({
+    invoices: createGatewayFor(deps),
+    revenue: ledgerRevenueSource,
+    messages: runtimeOf(deps).queue,
+    externalAlerts: messagingAlertSource,
+  })(app, deps)
+
+/** Payments with receipts and payment links delivered through the messaging queue and the EmailProvider. */
+const paymentsWired: ApiModule = (app, deps) =>
+  paymentsModule({ ports: { messenger: paymentMessengerFor(runtimeOf(deps)) } })(app, deps)
 
 export const apiModules: ApiModule[] = [
   authModule,
@@ -21,6 +38,7 @@ export const apiModules: ApiModule[] = [
   settingsModule,
   customersModule,
   schedulingModule,
-  paymentsModule(),
+  paymentsWired,
+  createMessagingModule((deps) => runtimeOf(deps)),
 ]
 export const hookModules: ApiModule[] = []

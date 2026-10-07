@@ -295,6 +295,8 @@ export interface OutboundMessage {
   vars?: TemplateVars
   /** Why the message exists, for the activity log and the outbox ("confirm", "arrive", ...). */
   purpose: string
+  /** A second enqueue with the same key returns the first message instead of queuing another. */
+  dedupeKey?: string
 }
 
 export interface QueuedResult {

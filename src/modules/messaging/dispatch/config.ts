@@ -36,15 +36,19 @@ const schema = z.object({
   SMSGATE_SIM_NUMBER: z.coerce.number().int().min(1).max(3).optional(),
 })
 
-export function dispatcherConfigFromEnv(
+export type DispatchEnvValues = z.infer<typeof schema>
+
+/** Settings of the dispatcher and the health monitor from already parsed values (the app's Env has the same fields). */
+export function dispatcherConfigFromValues(
   deviceId: string,
-  source: Record<string, string | undefined> = process.env,
+  e: DispatchEnvValues,
+  device: { minIntervalMs?: number | null; maxPerWindow?: number | null; windowMinutes?: number | null; simSlot?: number | null } = {},
 ): { dispatcher: DispatcherConfig; health: HealthConfig } {
-  const e = schema.parse(source)
+  const maxPerWindow = device.maxPerWindow ?? e.SMSGATE_MAX_PER_WINDOW
   const budget: BudgetConfig = {
-    maxPerWindow: e.SMSGATE_MAX_PER_WINDOW,
-    windowMs: e.SMSGATE_WINDOW_MINUTES * 60_000,
-    reservedForP0: Math.min(e.SMSGATE_RESERVED_P0, Math.max(0, e.SMSGATE_MAX_PER_WINDOW - 1)),
+    maxPerWindow,
+    windowMs: (device.windowMinutes ?? e.SMSGATE_WINDOW_MINUTES) * 60_000,
+    reservedForP0: Math.min(e.SMSGATE_RESERVED_P0, Math.max(0, maxPerWindow - 1)),
     safetyMargin: e.SMSGATE_SAFETY_MARGIN,
   }
   const allowlist = e.SMS_ALLOWLIST.split(',').map((s) => s.trim()).filter(Boolean)
@@ -52,13 +56,20 @@ export function dispatcherConfigFromEnv(
     dispatcher: defaultDispatcherConfig({
       deviceId,
       budget,
-      minIntervalMs: e.SMSGATE_MIN_INTERVAL_MS,
+      minIntervalMs: device.minIntervalMs ?? e.SMSGATE_MIN_INTERVAL_MS,
       maxSegments: e.SMSGATE_MAX_SEGMENTS,
-      simSlot: e.SMSGATE_SIM_NUMBER,
+      simSlot: device.simSlot ?? e.SMSGATE_SIM_NUMBER,
       quietHours: parseQuietHours(e.SMS_QUIET_HOURS, e.BUSINESS_TZ),
       environment: e.NODE_ENV,
       allowlist,
     }),
     health: { ...DEFAULT_HEALTH, offlineAfterMs: e.SMSGATE_HEARTBEAT_STALE_SECONDS * 1000, onlineWithinMs: e.SMSGATE_ONLINE_WITHIN_SECONDS * 1000 },
   }
+}
+
+export function dispatcherConfigFromEnv(
+  deviceId: string,
+  source: Record<string, string | undefined> = process.env,
+): { dispatcher: DispatcherConfig; health: HealthConfig } {
+  return dispatcherConfigFromValues(deviceId, schema.parse(source))
 }
