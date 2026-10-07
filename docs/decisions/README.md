@@ -31,3 +31,7 @@
 | [0053](0053-payments-card-money-under-squarespace.md) | Payments: card money awaiting Squarespace, brand-only labels, payment links |
 | [0054](0054-payments-invoice-lifecycle.md) | Payments: invoice at booking, gap-free numbering, biz_date freeze, canceled statuses |
 | [0055](0055-payments-reports-and-csv.md) | Payments: ranges, KPIs, chart, by-method, list, banner and CSV rules |
+| [0060](0060-messaging-persistence-and-queue.md) | Messaging persistence: one outbox, caller-transaction enqueue, atomic claim |
+| [0061](0061-sms-webhook-listener-and-processing.md) | The SMS Gate webhook: second listener, persist then apply, one transaction per event |
+| [0062](0062-sms-dispatch-topology-and-health.md) | Dispatch topology, leader lock and device health consequences |
+| [0063](0063-messaging-wiring-and-deviations.md) | Messaging wiring across modules, and deviations from the first spec |

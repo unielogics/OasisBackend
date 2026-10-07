@@ -8,10 +8,11 @@ import { Dispatcher } from '../../src/modules/messaging/dispatch/dispatcher.js'
 import { DeviceHealthMonitor } from '../../src/modules/messaging/dispatch/health.js'
 import { PgDeviceRepository } from '../../src/modules/messaging/db/device-repo.js'
 import { PgOutboxRepository } from '../../src/modules/messaging/db/outbox-repo.js'
+import { jobDefinitions } from '../../src/platform/job-registry.js'
+import { runDispatchWindow } from '../../src/modules/messaging/jobs/index.js'
 import { useWorld } from './world.js'
 
 const w = useWorld()
-const maria = (): string => w.customer('Maria Delgado').id
 let k = 0
 
 type Tpl = { templateKey: string; vars?: Record<string, string | number> }
@@ -319,5 +320,33 @@ describe('two dispatchers', () => {
     expect(inside).toEqual([false])
     expect(await w.rt.withLeader('test.lock', async () => 'again')).toBe('again')
     await sql`select 1`.execute(w.t.db)
+  })
+})
+
+describe('jobs', () => {
+  it('the sms.dispatch window ticks repeatedly under the leader lock and drains what is queued meanwhile', async () => {
+    await online()
+    const first = await queue({ templateKey: 'booking_thanks', vars: { first: 'Maria' } })
+    const window = runDispatchWindow(w.rt, { windowMs: 1200, intervalMs: 100 })
+    await new Promise((r) => setTimeout(r, 300))
+    const second = await queue({ templateKey: 'booking_thanks', vars: { first: 'David' } }, 'David Okafor')
+    const r = await window
+    expect(r.leader).toBe(true)
+    expect(r.ticks).toBeGreaterThanOrEqual(3)
+    expect(new Set((await w.t.db.selectFrom('sms_outbox').select(['id', 'state']).execute()).filter((o) => o.state === 'accepted').map((o) => o.id))).toEqual(new Set([first.messageId, second.messageId]))
+  })
+
+  it('a second runner does nothing while the first holds the lock', async () => {
+    const outer = await w.rt.withLeader('sms.dispatch', async () => runDispatchWindow(w.rt, { windowMs: 200, intervalMs: 50 }))
+    expect(outer).toEqual({ ticks: 0, leader: false })
+  })
+
+  it('the job registry carries the messaging jobs on their schedules', () => {
+    const byName = Object.fromEntries(jobDefinitions.map((j) => [j.name, j]))
+    expect(byName['sms.dispatch']).toMatchObject({ cron: '* * * * *', policy: 'singleton' })
+    expect(byName['sms.reconcile']).toMatchObject({ cron: '*/2 * * * *' })
+    expect(byName['sms.device.healthcheck']).toMatchObject({ cron: '* * * * *' })
+    expect(byName['sms.webhooks.register']).toMatchObject({ cron: '7 * * * *' })
+    expect(byName['email.send']).toMatchObject({ cron: '* * * * *' })
   })
 })

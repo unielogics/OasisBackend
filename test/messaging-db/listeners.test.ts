@@ -2,7 +2,7 @@
 // answers 404, and a full loop runs over real HTTP in both directions (SmsGateProvider -> SimServer -> signed webhooks).
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { apiModules } from '../../src/http/modules.js'
-import { SIM_DEVICE_KEY, SIM_WEBHOOK_SECRET } from '../../db/seeds/messaging.js'
+import { SIM_DEVICE_KEY } from '../../db/seeds/messaging.js'
 import { messagingRuntimeFor } from '../../src/composition.js'
 import { SimServer } from '../../src/integrations/smsgate/sim-server.js'
 import { buildHooksApp, type HooksApp } from '../../src/modules/messaging/http/hooks-app.js'

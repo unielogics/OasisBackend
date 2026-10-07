@@ -17,7 +17,7 @@ export async function startInlineRunner(rt: MessagingRuntime, connection: DbOpti
   const acquire = async (): Promise<void> => {
     if (stopped || leader) return
     const client = await connectDedicated(connection)
-    const r = await client.query<{ ok: boolean }>('select pg_try_advisory_lock(hashtext($1 || current_schema())) as ok', ['sms.inline'])
+    const r = await client.query<{ ok: boolean }>('select pg_try_advisory_lock(hashtext($1 || current_schema())) as ok', ['sms.dispatch'])
     if (!r.rows[0]?.ok) {
       await client.end().catch(() => undefined)
       return

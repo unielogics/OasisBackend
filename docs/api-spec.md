@@ -260,6 +260,8 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | PUT | `/api/v1/appointments/:id/checklist/items/:itemId` | jobs.checklist |  |
 | POST | `/api/v1/appointments/:id/complete` | jobs.status |  |
 | POST | `/api/v1/appointments/:id/confirm` | sched.edit | jobs.status |  |
+| GET | `/api/v1/appointments/:id/messages` | cli.view |  |
+| POST | `/api/v1/appointments/:id/messages` | msg.send | required |
 | POST | `/api/v1/appointments/:id/no-show` | sched.cancel | required |
 | POST | `/api/v1/appointments/:id/notify-ready` | msg.send |  |
 | DELETE | `/api/v1/appointments/:id/photos/:photoId` | jobs.checklist |  |
@@ -293,6 +295,10 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/closures/preview` | set.hours |  |
 | GET | `/api/v1/customers` | cli.view |  |
 | POST | `/api/v1/customers` | sched.edit |  |
+| GET | `/api/v1/customers/:id/messages` | cli.view |  |
+| POST | `/api/v1/customers/:id/messages/read` | msg.send |  |
+| GET | `/api/v1/customers/:id/sms-consent` | cli.view |  |
+| PUT | `/api/v1/customers/:id/sms-consent` | cli.edit |  |
 | GET | `/api/v1/emergency` | authenticated |  |
 | GET | `/api/v1/emergency/:id/affected` | set.emergency |  |
 | POST | `/api/v1/emergency/close` | set.emergency | required |
@@ -309,6 +315,12 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/employees/:id/password-reset` | team.edit |  |
 | POST | `/api/v1/employees/:id/reactivate` | team.edit |  |
 | GET | `/api/v1/events` | authenticated |  |
+| GET | `/api/v1/integrations/sms/devices` | set.billing |  |
+| POST | `/api/v1/integrations/sms/devices` | set.billing |  |
+| PATCH | `/api/v1/integrations/sms/devices/:id` | set.billing |  |
+| GET | `/api/v1/integrations/sms/devices/:id/health` | set.billing |  |
+| POST | `/api/v1/integrations/sms/devices/:id/register-webhooks` | set.billing |  |
+| POST | `/api/v1/integrations/sms/devices/:id/test` | set.billing |  |
 | GET | `/api/v1/invoices/:id` | pay.reports |  |
 | POST | `/api/v1/invoices/:id/adjustments` | pay.adjust | required |
 | POST | `/api/v1/invoices/:id/credit-applications` | pay.collect | required |
@@ -325,6 +337,12 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/api/v1/me` | authenticated |  |
 | PUT | `/api/v1/me/preferences` | authenticated |  |
 | POST | `/api/v1/me/view-as` | authenticated |  |
+| POST | `/api/v1/messages/:id/cancel` | msg.send |  |
+| POST | `/api/v1/messages/:id/retry` | msg.send |  |
+| GET | `/api/v1/messages/inbox` | msg.send |  |
+| POST | `/api/v1/messages/inbox/:id/review` | msg.send |  |
+| GET | `/api/v1/messages/outbox` | msg.send |  |
+| GET | `/api/v1/messages/templates` | msg.send |  |
 | GET | `/api/v1/meta/now` | public |  |
 | GET | `/api/v1/openapi.json` | public |  |
 | GET | `/api/v1/ops/alerts` | sched.view |  |
@@ -700,3 +718,122 @@ Canceling or a no-show cancels the invoice: `canceled` (nothing paid), `canceled
 is INV-20506), ledger events with real instants relative to the clock, store credit with allocations, and the pending refund
 INV-20579. Oracle values come from the ORIGINAL bundle (`test/golden/pay/extract-oracle.mjs`, see `test/golden/pay/README.md`);
 intentional differences are in `test/golden/pay/DEVIATIONS.md`. Tests: `test/payments/*` (`pnpm vitest run test/payments`).
+
+## 22. Messaging: SMS over the SMS Gate tablet
+
+Code: `src/modules/messaging/` (pure policy, dispatcher and router from the first wave, plus `db/`, `http/`, `jobs/`, `adapters/`),
+`src/integrations/{sms,smsgate}` (provider port, adapter, simulators). Tables: migration `20261006200000_messaging.sql`.
+Decisions: ADRs 0060 to 0063. Device and tablet runbook: `docs/integrations/smsgate.md`.
+
+### 22.1 How a text moves
+
+```
+scheduling / payments / settings / people          DbMessageQueue.enqueue(tx, ...)   (the CALLER's transaction)
+        render template -> canSendSms (opt-in, STOP, synthetic, SMS_ALLOWLIST, quiet hours) -> GSM-7 + segments + STOP footer
+        -> messages row (queued) + sms_outbox row + thread + SSE message.out
+dispatcher (job sms.dispatch or inline loop)       claim (FOR UPDATE SKIP LOCKED) -> SmsProvider.send(our message id)
+        -> outbox accepted -> message sent                 sliding window 30 segments / 30 min, lane 0 may use the reserved 6
+device webhooks (hooks listener only)              sms:sent / delivered / failed / cancelled / received / system:ping / app:started
+        -> webhook_log (persist) -> 2xx -> one transaction: outbox + message state, inbound router, device health
+```
+
+A booking that rolls back takes its text with it. Nothing is sent inline. A text the policy refuses is **not** persisted: the
+caller learns `skipped` (`opted_out`, `not_opted_in`, `no_valid_phone`, `synthetic_number`, `not_allowlisted`, `too_long`,
+`template_error`) and scheduling writes it on the activity log ("... (not sent: customer opted out of SMS)").
+
+### 22.2 Endpoints (`/api/v1`)
+
+| Endpoint | Permission | Notes |
+|---|---|---|
+| `GET /appointments/:id/messages` | `cli.view` | The Messages tab. `{items: Message[], customer: {id, name, smsOptedIn, optedOut, hasPhone, canMessage}, unread}`, oldest first. Outbound texts of the appointment and inbound replies attributed to it. No phone number in the payload. `?markRead=true` clears unread (needs `msg.send` to take effect); `?limit` (default 200). |
+| `GET /customers/:id/messages` | `cli.view` | The customer-level thread across appointments (B31). Same shape. |
+| `POST /appointments/:id/messages` | `msg.send`, **Idempotency-Key required** | Body `{text}` (free text, class `staff_message`) or `{templateKey, vars?}` (a quick reply key `qr_*` or an automation: `booking_thanks confirm_request confirmed reminder welcome in_progress ready reschedule review late_nudge payment_link addon_approval`; `first`, `time`, `when`, `bay` are filled from the appointment). 201 `{message, queued: true, held, holdUntil, segments}`. Sending also marks the customer's replies read and writes the activity line "Staff message sent". 422 `SMS_OPTED_OUT`, `SMS_NOT_OPTED_IN`, `SMS_NO_PHONE`, `SMS_BLOCKED` (synthetic number or off the allow-list), `SMS_TOO_LONG` (over `SMSGATE_MAX_SEGMENTS`), `SMS_EMPTY`, `SMS_TEMPLATE_INVALID`. |
+| `POST /customers/:id/messages/read` | `msg.send` | Marks the customer's unread replies read. `{marked}`. |
+| `GET /messages/templates` | `msg.send` | `{quickReplies[], templates[]}` with class, lane, TTL, quiet-hours behaviour, variables, `staffSendable`. The code registry is the source; there is no per-shop template editing yet (ADR 0063). |
+| `GET /messages/outbox?state=failed` | `msg.send` | `state` is `pending failed expired cancelled delivered all`; keyset paging (`limit`, `cursor`). Number masked without `cli.contact`; invite and reset links are never shown. |
+| `POST /messages/:id/retry` | `msg.send` | A failed or expired text goes back to pending under a new device id with a fresh TTL (409 `MESSAGE_NOT_RETRYABLE`; never for invites and resets). Audited. |
+| `POST /messages/:id/cancel` | `msg.send` | Only while pending (409 `MESSAGE_NOT_CANCELABLE`). Audited. |
+| `GET /messages/inbox` | `msg.send` | The quarantine: texts from numbers that are not customers (strangers, carrier notices, short codes). `POST /messages/inbox/:id/review` marks one reviewed. |
+| `GET /customers/:id/sms-consent` | `cli.view` | `{smsOptedIn, optInSource, optedOut, optOutSource keyword/manual, staffCanClearOptOut, hasPhone, ...}` |
+| `PUT /customers/:id/sms-consent` | `cli.edit` | `{optedIn?, optedOut?}`. `optedIn: true` records staff-attested consent; `optedOut: true` records a manual opt-out; `optedOut: false` lifts a MANUAL opt-out only. A STOP the customer texted is refused with 422 `SMS_STOP_ACTIVE`: they reply START. Audited. |
+| `GET /integrations/sms/devices` | `set.billing` | Devices with health, counters and the webhook URL to configure. Never a secret. |
+| `POST /integrations/sms/devices` | `set.billing` | `{label, provider: smsgate|sim, baseUrl, username, password, webhookSecret?, limits...}`. 201 `{device, webhookSecret}`: the signing secret (generated when omitted) is returned ONCE; credentials are stored AES-256-GCM encrypted with `SECRETS_KEY`. |
+| `PATCH /integrations/sms/devices/:id` | `set.billing` | Label, credentials (a sent secret replaces the stored one), `enabled`, `simSlotDefault`, `minIntervalMs`, `maxPerWindow`, `windowMinutes`. |
+| `POST /integrations/sms/devices/:id/test` | `set.billing` | Health poll plus a credentials probe; nothing is sent. `{reachable, credentials: ok/rejected/unknown, healthStatus, battery, error}`. |
+| `POST /integrations/sms/devices/:id/register-webhooks` | `set.billing` | Registers the seven `oasis-*` webhooks (idempotent; stale `oasis-*` ones removed). Needs `SMSGATE_WEBHOOK_PUBLIC_URL` (HTTPS) except for loopback and simulators. |
+| `GET /integrations/sms/devices/:id/health?refresh=` | `set.billing` | Device state plus the dispatcher: `state` (idle, sending, rate_limited, quiet_hours, device_offline), the sliding-window budget, queue depth by lane with ETAs, quiet hours, failures in 24 h. |
+| `POST /dev/sms/inbound`, `GET /dev/mail` | `set.billing`, only with `ALLOW_DEV_ENDPOINTS=true` | Inject a text into the simulated device (handled by the same code path; returns once applied); read the console mailbox. |
+
+`Message` = `{id, direction in|out, from staff|system|customer, senderName, text, time "10:36 AM", at, channel, status, error, templateKey, appointmentId, customerId, segments, read}`.
+`status` is `queued sending sent delivered failed received canceled expired`; the outbox states `accepted` and `sent` both read as `sent`.
+The dashboard's `MessagesPort.thread` is typed as a bare array today; the live wave must read `.items`.
+
+### 22.3 Realtime
+
+Channel `messages` (needs `cli.view`), full payload (the message as above): `message.out` (queued), `message.in` (received),
+`message.status {id, status, error, customerId, appointmentId, threadId}` on every state change. Channel `notifications`
+(targeted at each manager's user): `notification.new {id, kind}` for `sms.device_offline`, `sms.device_recovered`,
+`sms.cancel_request`, `sms.unattributed_reply`, and `sms.device.health {deviceId, label, from, to}` on every device state change.
+Channel `ops`: `alerts.changed {source: 'sms'}` when a reply arrives or is read, a device changes state. Managers are active
+employees with a login who hold `set.billing` or `sched.override` (Super Admin, Management, Accounting, plus any per-person Allow).
+
+Needs Attention (alerts 10 and 11 of design 4.4, `src/modules/messaging/adapters/alerts.ts`): `new_reply` (one per appointment, or
+per customer when a reply could not be attributed; a customer's CANCEL is red) and `sms_device_down` (managers only).
+
+### 22.4 Policy summary
+
+Every text has a class (`src/modules/messaging/policy/classes.ts`): lane 0 `welcome ready addon_approval staff_invite password_reset` and the keyword replies,
+lane 1 confirmations, receipts, payment links, `staff_message`, `quick_reply`, lane 2 `confirm_request reminder review late_nudge`,
+lane 3 `emergency closure_notice broadcast`. Quiet hours (`SMS_QUIET_HOURS`, default 21:00-08:00 in `BUSINESS_TZ`) hold only
+`confirm_request reminder review late_nudge closure_notice broadcast`; the TTL clock starts when the hold ends. The emergency
+fan-out is lane 3, not lane 0 (review B15): the blast can use at most 24 of the 30 segments in a window, so a ready-for-pickup
+text is never starved. Outside production only `SMS_ALLOWLIST` numbers are texted; synthetic (seed) numbers never in production.
+
+### 22.5 Webhook and listeners
+
+`POST /hooks/smsgate/:deviceKey` exists **only** on the second listener (`HOOKS_HOST:HOOKS_PORT`, default 127.0.0.1:3002, started by
+`src/server.ts`; `HOOKS_PORT=0` disables it; an occupied port is logged as an error and the process keeps running). The public
+listener has no such route and answers 404. Verification is HMAC-SHA256 over the raw body plus `X-Timestamp` with the device's own
+secret (24 h tolerance, `SMSGATE_WEBHOOK_TOLERANCE_SECONDS`): 401 for a missing header, bad or stale signature, 400 for a signed body
+that is not an envelope, 404 for an unknown device key, 200 for everything accepted (a repeat, an event type Oasis ignores).
+The envelope is persisted in `webhook_log` (unique `(provider, external_id)` = envelope id) before the answer; applying it
+(`sms_processed_events`, outbox, message, inbound routing, device health) happens in one transaction afterwards, and a sweep every
+30 s applies envelopes that were persisted but never applied (and abandons them after 24 h).
+
+### 22.6 Jobs and dispatch modes
+
+`SMS_DISPATCH_MODE` decides who drains the outbox: `jobs` (default; the pg-boss worker), `inline` (the API process runs the
+loop; single-process deployments and the live-stack harness), `off`. Jobs (all in `src/platform/job-registry.ts`): `sms.dispatch`
+(every minute, a ~55 s window ticking every `SMS_TICK_INTERVAL_MS`, under the leader advisory lock), `sms.reconcile` (every 2
+minutes, plus housekeeping), `sms.device.healthcheck` (every minute), `sms.webhooks.register` (hourly, and once at boot from
+`src/server.ts`; also on every `app:started`), `email.send` (every minute). A session advisory lock per database schema keeps
+the worker and the inline runner from overlapping; the atomic claim keeps two dispatchers from sending one message twice anyway.
+
+### 22.7 Environment
+
+New in `src/config/env.ts` (all optional): `SMS_DISPATCH_MODE`, `SMS_TICK_INTERVAL_MS` (2000), `SMS_QUIET_HOURS`, `SMSGATE_WEBHOOK_PUBLIC_URL`,
+`SMSGATE_API_PATH`, `SMSGATE_TIMEOUT_MS`, `SMSGATE_WEBHOOK_TOLERANCE_SECONDS`, `SMSGATE_RESEND_ATTEMPTS`, `SMSGATE_SIM_NUMBER`,
+`SMSGATE_LEGACY_MESSAGE_FIELD`, `SMSGATE_SYNC_SIGNING_KEY`, `SMSGATE_ALLOW_INSECURE_WEBHOOK_URL`, `SMSGATE_RESERVED_P0`,
+`SMSGATE_SAFETY_MARGIN`, `SMSGATE_MIN_INTERVAL_MS`, `SMSGATE_MAX_SEGMENTS`, `SMSGATE_HEARTBEAT_STALE_SECONDS`,
+`SMSGATE_ONLINE_WITHIN_SECONDS`, `BUSINESS_PHONE` (HELP reply), `HOOKS_HOST`, `HOOKS_PORT`, `SES_FROM_NAME`, `SES_REPLY_TO`,
+`SES_CONFIGURATION_SET`, `EMAIL_CONSOLE_DIR`. `SECRETS_KEY` (base64, 32 bytes) is now used: required in production as soon as a
+device credential is stored; outside production a fixed development key is used when it is unset. Devices live in `sms_devices`;
+`SMSGATE_DEVICE_URL`, `SMSGATE_USERNAME`, `SMSGATE_PASSWORD`, `SMSGATE_WEBHOOK_SECRET` are not read by the runtime (add the tablet
+through `POST /integrations/sms/devices`; the `design` seed adds a simulator device, key `sim-device-design`).
+
+### 22.8 Wiring
+
+`src/composition.ts`: `messagingRuntimeFor(deps)` (one runtime per `Env` object), `configureProductionSettings({clock, newId, messaging})`
+(closure notices and the emergency fan-out queue real texts and emails), `paymentMessengerFor(rt)`. `src/http/modules.ts`: scheduling gets
+`messages: rt.queue` and `externalAlerts: messagingAlertSource`, payments gets the messenger over `DbPaymentOutbox`, and the messaging
+routes are mounted. `src/server.ts`: `MessagingAccountNotifier` for invites and reset links (SMS when a usable device and number
+exist, else email through the EmailProvider; `delivered` is true only for a real SMS Gate device or SES), the hooks listener, the inline runner.
+Receipts go out as an SMS and an itemised email (`receipt` template built from the invoice and its ledger calc).
+
+### 22.9 Tests
+
+`test/messaging-db/*` (Postgres, the in-process simulator, the HTTP simulator server and the real `src/server.ts` process; run
+`pnpm vitest run test/messaging-db`), `test/messaging/*` (pure units). Still to verify on the real tablet: the 20 items in section 2 of
+`docs/integrations/smsgate.md` (route path, duplicate-id 409, `textMessage`, signature on a real delivery, HTTPS to the tailnet name,
+Android's send limit, delivery reports, `sms:delivered` per multipart part, inbound sender format, RCS, reboot behaviour, the SIM slot
+mapping). Nothing here was run against a physical device.
