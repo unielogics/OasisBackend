@@ -29,6 +29,7 @@ const counts = async () =>
         'invoices',
         'ledger_events',
         'memberships',
+        'messages',
       ].map(
         async (table) =>
           [
@@ -174,6 +175,36 @@ describe('parity-ops', () => {
     expect(awaiting.rows[0]!.n).toBe(0)
     const members = await sql<{ n: number }>`select count(*)::int as n from memberships`.execute(t.db)
     expect(members.rows[0]!.n).toBe(7)
+  })
+
+  it("carries the design's conversations: a delivered text for each automatic SMS line of the activity log", async () => {
+    const lines = await sql<{ n: number }>`
+      select count(*)::int as n from activity_log
+      where text in ('Booking created', 'Confirmation + reminder sent', 'In-progress message sent', 'Ready-for-pickup sent')
+        and appointment_id in (select id from appointments where scheduled_start between '2026-06-13' and '2026-06-15')`.execute(
+      t.db,
+    )
+    const msgs = await sql<{
+      n: number
+    }>`select count(*)::int as n from messages where appointment_id is not null`.execute(t.db)
+    expect(msgs.rows[0]!.n).toBe(lines.rows[0]!.n)
+    const priya = await sql<{ body: string; sender_kind: string; status: string; template_key: string }>`
+      select m.body, m.sender_kind, m.status, m.template_key from messages m
+      join customers c on c.id = m.customer_id where c.full_name = 'Priya Nair' order by m.queued_at, m.id`.execute(
+      t.db,
+    )
+    expect(priya.rows.map((r) => [r.template_key, r.sender_kind, r.status])).toEqual([
+      ['booking_thanks', 'system', 'delivered'],
+      ['confirm_request', 'system', 'delivered'],
+      ['in_progress', 'system', 'delivered'],
+      ['ready', 'system', 'delivered'],
+    ])
+    expect(priya.rows[0]!.body).toBe('Hi Priya, thanks for booking with Oasis Auto Spa.')
+    expect(priya.rows[1]!.body).toBe(
+      'Your appointment at Oasis Auto Spa is confirmed for 9:45 AM. Reply C to confirm.',
+    )
+    const outbox = await sql<{ n: number }>`select count(*)::int as n from sms_outbox`.execute(t.db)
+    expect(outbox.rows[0]!.n).toBe(0) // history, nothing waits to be sent
   })
 
   it('is idempotent and does not depend on the injected clock', async () => {
