@@ -1,0 +1,63 @@
+[Unit]
+Description=Oasis Auto Spa API (Fastify)
+Documentation=file:///opt/oasis/current/backend/docs/deployment.md
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+PartOf=oasis.target
+StartLimitIntervalSec=300
+StartLimitBurst=8
+
+[Service]
+Type=simple
+User=oasis
+Group=oasis
+WorkingDirectory=/opt/oasis/current/backend
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/oasis/common.env
+EnvironmentFile=/etc/oasis/api.env
+ExecStart=/usr/bin/node dist/server.js
+Restart=always
+RestartSec=3
+TimeoutStartSec=60
+# The API closes its listeners, drains the event streams and the job queue on SIGTERM; give it time.
+TimeoutStopSec=30
+KillSignal=SIGTERM
+SyslogIdentifier=oasis-api
+
+# Resources
+LimitNOFILE=65536
+MemoryMax=1500M
+TasksMax=512
+
+# Hardening. Node needs writable+executable memory for its JIT, so MemoryDenyWriteExecute is deliberately not set.
+# If a future Node release is killed with SIGSYS, loosen SystemCallFilter first (journalctl -u oasis-api).
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+StateDirectory=oasis
+StateDirectoryMode=0750
+ReadWritePaths=/var/lib/oasis
+
+[Install]
+WantedBy=multi-user.target

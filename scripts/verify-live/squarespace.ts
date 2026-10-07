@@ -27,6 +27,7 @@ import {
   normalizeTier,
   type ProductMapEntry,
 } from '../../src/modules/payments-sync/product-map.js'
+import { ProductMapBody } from '../../src/modules/payments-sync/http/schemas.js'
 import { systemClock } from '../../src/platform/clock.js'
 import {
   MissingConfig,
@@ -202,6 +203,23 @@ export function discoverProducts(orders: SqspOrder[]): ProductFinding[] {
 
 const intervalFor = (days: number | undefined): number =>
   days === undefined ? 1 : days <= 45 ? 1 : days <= 100 ? 3 : days <= 200 ? 6 : 12
+
+/** The rows PUT /api/v1/integrations/squarespace/product-map takes (the primary way to hold the map), from the SQSP_PRODUCT_MAP-style entries. */
+export function toApiEntries(entries: ProductMapEntry[]): Array<Record<string, unknown>> {
+  return entries.map((e) => ({
+    ...(e.productId ? { productId: e.productId } : {}),
+    ...(e.sku ? { sku: e.sku } : {}),
+    ...(e.label ? { name: e.label.slice(0, 200) } : {}),
+    kind: e.kind,
+    ...(e.kind === 'membership'
+      ? {
+          plan: e.tier,
+          planLabel: (e.tierLabel ?? e.label ?? e.tier ?? '').slice(0, 40),
+          intervalMonths: e.intervalMonths ?? 1,
+        }
+      : {}),
+  }))
+}
 
 export function proposeProductMap(findings: ProductFinding[]): {
   entries: ProductMapEntry[]
@@ -634,15 +652,19 @@ async function runInner(ctx: RunContext): Promise<RunResult> {
             (f) =>
               `${f.name} | id ${f.productId ?? '-'} | sku ${f.sku ?? '-'} | type ${f.lineItemType ?? '-'} | ${(f.unitCents / 100).toFixed(2)} | ${f.orders} order(s), ${f.customers} customer(s), ${f.repeatCustomers} repeat | median gap ${f.medianDaysBetween ?? '-'} d | tier ${f.tier ?? '-'}`,
           )
-        const proposal = JSON.stringify(entries, null, 2)
-        mkdirSync(ctx.outDir, { recursive: true })
+        const api = ProductMapBody.parse({ entries: toApiEntries(entries) })
+        const proposal = JSON.stringify(api, null, 2)
+        const envForm = JSON.stringify(entries)
         const proposalFile = path.join(
           ctx.outDir,
           `${isoDate(r.startedAt)}-squarespace-product-map.proposed.json`,
         )
-        if (!args.flag('no-report')) writeFileSync(proposalFile, `${proposal}\n`, { mode: 0o600 })
+        if (!args.flag('no-report')) {
+          mkdirSync(ctx.outDir, { recursive: true })
+          writeFileSync(proposalFile, `${proposal}\n`, { mode: 0o600 })
+        }
         r.note(
-          `product map PROPOSAL (not written anywhere${args.flag('no-report') ? '' : `; saved to ${proposalFile}`}). Review it, then PUT /api/v1/integrations/squarespace/product-map or set SQSP_PRODUCT_MAP:\n${proposal}`,
+          `product map PROPOSAL (not written anywhere${args.flag('no-report') ? '' : `; saved to ${proposalFile}`}). Review it, then: deploy/scripts/oasis-admin.sh sqsp-product-map --file <that file>. The same map as an environment value would be SQSP_PRODUCT_MAP='${envForm}'. The body:\n${proposal}`,
         )
         for (const n of notes) r.note(n)
         if (memberships.length > 0)

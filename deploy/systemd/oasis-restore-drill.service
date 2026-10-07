@@ -1,0 +1,36 @@
+[Unit]
+Description=Oasis Auto Spa restore drill (restore the newest backup into a scratch database and check it)
+Documentation=file:///opt/oasis/current/backend/docs/runbook.md
+After=network-online.target postgresql.service
+Wants=postgresql.service
+OnFailure=oasis-notify-failure@%n.service
+
+[Service]
+Type=oneshot
+User=oasis
+Group=oasis
+WorkingDirectory=/opt/oasis/current/backend
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/oasis/common.env
+EnvironmentFile=-/etc/oasis/backup.env
+# RESTORE_ADMIN_URL (a role that may create databases) lives in /etc/oasis/drill.env, mode 0640 root:oasis.
+EnvironmentFile=-/etc/oasis/drill.env
+ExecStart=/opt/oasis/current/backend/deploy/scripts/restore-drill.sh --latest
+SyslogIdentifier=oasis-restore-drill
+Nice=15
+IOSchedulingClass=idle
+TimeoutStartSec=3h
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+UMask=0077
+ReadWritePaths=/var/backups/oasis /var/log/oasis /var/lib/oasis

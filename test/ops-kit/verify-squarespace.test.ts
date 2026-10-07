@@ -8,7 +8,8 @@ import { SquarespaceSimApi } from '../../src/integrations/squarespace/sim/api.js
 import { close, createSimHttpServer, listen } from '../../src/integrations/squarespace/sim/http.js'
 import { SquarespaceSimStore } from '../../src/integrations/squarespace/sim/store.js'
 import { receiveWebhook, InMemoryNotificationDedupe } from '../../src/integrations/squarespace/webhook.js'
-import { ProductMap, type ProductMapEntry } from '../../src/modules/payments-sync/product-map.js'
+import { ProductMapBody } from '../../src/modules/payments-sync/http/schemas.js'
+import { ProductMap } from '../../src/modules/payments-sync/product-map.js'
 import { systemClock } from '../../src/platform/clock.js'
 import {
   main,
@@ -62,14 +63,24 @@ describe('verify:squarespace against the simulator on port 4590', () => {
       r.outDir,
       `${new Date().toISOString().slice(0, 10)}-squarespace-product-map.proposed.json`,
     )
-    const entries = JSON.parse(readFileSync(file, 'utf8')) as ProductMapEntry[]
-    expect(() => new ProductMap(entries)).not.toThrow()
-    const byProduct = Object.fromEntries(entries.map((e) => [e.sku, e]))
-    expect(byProduct['MEM-PREMIUM']).toMatchObject({ kind: 'membership', tier: 'premium' })
-    expect(byProduct['MEM-EXECUTIVE']).toMatchObject({ kind: 'membership', tier: 'executive' })
+    const body = JSON.parse(readFileSync(file, 'utf8')) as { entries: Array<Record<string, unknown>> }
+    // exactly what PUT /api/v1/integrations/squarespace/product-map accepts
+    expect(ProductMapBody.safeParse(body).success).toBe(true)
+    const byProduct = Object.fromEntries(body.entries.map((e) => [e.sku, e]))
+    expect(byProduct['MEM-PREMIUM']).toMatchObject({
+      kind: 'membership',
+      plan: 'premium',
+      planLabel: 'Premium Care Membership',
+      intervalMonths: 1,
+    })
+    expect(byProduct['MEM-EXECUTIVE']).toMatchObject({ kind: 'membership', plan: 'executive' })
     // a service that merely has a tier word in its name is not turned into a membership
     expect(byProduct['WASH-EXEC']).toMatchObject({ kind: 'service' })
+    expect(byProduct['WASH-EXEC']).not.toHaveProperty('plan')
     expect(byProduct['TSHIRT-M']).toMatchObject({ kind: 'service' })
+    // the environment-variable form of the same map is accepted by the app's parser too
+    const envForm = /SQSP_PRODUCT_MAP='(\[.*\])'/.exec(proposal)![1]!
+    expect(() => ProductMap.fromJson(envForm)).not.toThrow()
     expect(r.markdown('squarespace')).toContain('| SQ-05 |')
   })
 

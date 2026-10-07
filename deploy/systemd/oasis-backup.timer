@@ -1,0 +1,12 @@
+[Unit]
+Description=Nightly Oasis Auto Spa database backup
+
+[Timer]
+# 03:15 shop time; the shop is closed and the SMS dispatcher is idle.
+OnCalendar=*-*-* 03:15:00 America/New_York
+RandomizedDelaySec=10min
+Persistent=true
+Unit=oasis-backup.service
+
+[Install]
+WantedBy=timers.target

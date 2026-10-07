@@ -1,0 +1,11 @@
+[Unit]
+Description=Monthly Oasis Auto Spa restore drill
+
+[Timer]
+OnCalendar=*-*-02 04:30:00 America/New_York
+RandomizedDelaySec=30min
+Persistent=true
+Unit=oasis-restore-drill.service
+
+[Install]
+WantedBy=timers.target

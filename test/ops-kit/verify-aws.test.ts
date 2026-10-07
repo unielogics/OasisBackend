@@ -1,4 +1,5 @@
 import { readdirSync } from 'node:fs'
+import { envSchema } from '../../src/config/env.js'
 import { afterEach, describe, expect, it } from 'vitest'
 import { AwsSim, type AwsSimOptions } from '../../scripts/verify-live/sim-aws.js'
 import { main, AWS_ITEMS } from '../../scripts/verify-live/aws.js'
@@ -36,9 +37,7 @@ async function live(
       AWS_SECRET_ACCESS_KEY: 'super-secret-key-value',
       AWS_ENDPOINT_URL: sim.url,
       AWS_REGION: 'us-east-1',
-      S3_FORCE_PATH_STYLE: 'true',
       S3_BUCKET: 'oasis-live',
-      S3_KEY_PREFIX: 'prod/',
       SES_FROM_ADDRESS: 'no-reply@oasis.example',
       SES_CONFIGURATION_SET: 'oasis-sim',
       PUBLIC_DASHBOARD_URL: 'https://dashboard.oasis.example',
@@ -143,12 +142,12 @@ describe('verify:aws against an account (live mode over the simulator)', () => {
     const g1 = r.json('aws').items.find((i) => i.id === 'AWS-G1')!
     expect(g1.detail).toBe('2 missing: ses:SendEmail, s3:DeleteObject')
     expect(r.out).toMatch(
-      /fix: Add to the app role's policy: ses:SendEmail on .*; s3:DeleteObject on arn:aws:s3:::oasis-live\/prod\/verify\/\*/,
+      /fix: Add to the app role's policy: ses:SendEmail on .*; s3:DeleteObject on arn:aws:s3:::oasis-live\/verify\/\*/,
     )
     expect(sim.sentEmails).toHaveLength(0)
     // the failed delete leaves the test object, and the script says so instead of pretending to have cleaned up
     expect(sim.objects.size).toBe(1)
-    expect(r.json('aws').notes.join('\n')).toMatch(/COULD NOT delete the test object prod\/verify\//)
+    expect(r.json('aws').notes.join('\n')).toMatch(/COULD NOT delete the test object verify\//)
   })
 
   it('missing s3:ListBucket is found by the 403-instead-of-404 rule', async () => {
@@ -205,6 +204,26 @@ describe('verify:aws against an account (live mode over the simulator)', () => {
       /ses:GetAccount, s3:GetBucketCORS, s3:GetBucketPolicy|s3:GetBucketCORS/,
     )
     expect(r.code).toBe(0)
+  })
+
+  it('a prefix or encryption setting that src/config/env.ts does not declare is reported as ignored by the app, and the round trip uses what the app will use', async () => {
+    const { env, sim } = await live()
+    const declared = Object.keys(
+      (envSchema as unknown as { _def: { schema: { shape: Record<string, unknown> } } })._def.schema.shape,
+    )
+    const r = await run(['--send', '--to', 'tester@example.com'], { ...env, S3_KEY_PREFIX: 'prod/' })
+    const s5 = r.json('aws').items.find((i) => i.id === 'AWS-S5')!
+    if (declared.includes('S3_KEY_PREFIX')) {
+      expect(s5.status).toBe('PASS')
+    } else {
+      expect(s5.status).toBe('FAIL')
+      expect(s5.detail).toMatch(
+        /S3_KEY_PREFIX is set but src\/config\/env.ts does not declare it, so the app ignores it/,
+      )
+      // the app would write at the bucket root, so that is where the check wrote (and cleaned up) too
+      expect(sim.requests.some((q) => q.includes('/oasis-live/prod/verify'))).toBe(false)
+    }
+    expect(sim.objects.size).toBe(0)
   })
 
   it('a bucket in another region or a wrong name is a FAIL with the create command', async () => {

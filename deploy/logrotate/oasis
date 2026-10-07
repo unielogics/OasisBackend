@@ -1,0 +1,25 @@
+# /etc/logrotate.d/oasis  -  installed by deploy/scripts/install.sh. The services log to journald (journalctl -u oasis-api); these are the files.
+
+/var/log/nginx/oasis.access.log /var/log/nginx/oasis.error.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    sharedscripts
+    create 0640 nginx adm
+    postrotate
+        [ -s /run/nginx.pid ] && kill -USR1 "$(cat /run/nginx.pid)" || true
+    endscript
+}
+
+/var/log/oasis/*.log {
+    weekly
+    rotate 12
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}

@@ -23,6 +23,7 @@ import {
   HeadBucketCommand,
   S3Client,
 } from '@aws-sdk/client-s3'
+import { envSchema } from '../../src/config/env.js'
 import { SesProvider } from '../../src/integrations/email/ses-provider.js'
 import { S3Storage } from '../../src/integrations/storage/s3-provider.js'
 import { normalizePrefix } from '../../src/integrations/storage/keys.js'
@@ -270,7 +271,7 @@ async function runInner(ctx: RunContext): Promise<RunResult> {
   const sesClient = new SESv2Client(common)
   const s3Client = new S3Client({
     ...common,
-    ...(sim || env.S3_FORCE_PATH_STYLE === 'true' ? { forcePathStyle: true } : {}),
+    ...(sim || endpoint || env.S3_FORCE_PATH_STYLE === 'true' ? { forcePathStyle: true } : {}),
     ...(env.S3_ENDPOINT && !sim ? { endpoint: env.S3_ENDPOINT } : {}),
   })
 
@@ -496,7 +497,14 @@ async function runInner(ctx: RunContext): Promise<RunResult> {
   // ---- S3 -----------------------------------------------------------------------------------------------------------------
   async function s3Checks(): Promise<void> {
     const Bucket = bucket!
-    const prefix = normalizePrefix(env.S3_KEY_PREFIX ?? '')
+    // What the running app sees is the environment after loadEnv(): variables src/config/env.ts does not declare are dropped, so
+    // the round trip below uses only the settings the app will really have.
+    const declared = new Set(
+      Object.keys(
+        (envSchema as unknown as { _def: { schema: { shape: Record<string, unknown> } } })._def.schema.shape,
+      ),
+    )
+    const prefix = declared.has('S3_KEY_PREFIX') || sim ? normalizePrefix(env.S3_KEY_PREFIX ?? '') : ''
     const readDenied = (id: string, action: string): void => {
       diag.add(action)
       r.skip(id, `this identity may not call ${action} on ${Bucket}; the app does not need it`)
@@ -605,8 +613,9 @@ async function runInner(ctx: RunContext): Promise<RunResult> {
     if (!send) {
       r.skip('AWS-S3', 'writes and deletes one tiny object under verify/: pass --send --to <email>')
     } else {
-      const sse =
-        env.S3_SSE === 'AES256'
+      const sse = !(declared.has('S3_SSE') || sim)
+        ? undefined
+        : env.S3_SSE === 'AES256'
           ? ({ mode: 'AES256' } as const)
           : env.S3_SSE === 'aws:kms'
             ? ({ mode: 'aws:kms', ...(env.S3_KMS_KEY_ID ? { kmsKeyId: env.S3_KMS_KEY_ID } : {}) } as const)
@@ -750,8 +759,14 @@ async function runInner(ctx: RunContext): Promise<RunResult> {
     const problems: string[] = []
     if (!sim && env.STORAGE_PROVIDER && env.STORAGE_PROVIDER !== 's3')
       problems.push(`STORAGE_PROVIDER is ${env.STORAGE_PROVIDER}, not s3`)
+    const ignored = ['S3_KEY_PREFIX', 'S3_SSE', 'S3_KMS_KEY_ID', 'S3_ENDPOINT', 'S3_FORCE_PATH_STYLE'].filter(
+      (k) => !!env[k] && !declared.has(k) && !sim,
+    )
+    if (ignored.length)
+      problems.push(
+        `${ignored.join(', ')} ${ignored.length > 1 ? 'are' : 'is'} set but src/config/env.ts does not declare ${ignored.length > 1 ? 'them' : 'it'}, so the app ignores ${ignored.length > 1 ? 'them' : 'it'} (no prefix, no encryption header); this check used the value, the app will not`,
+      )
     if (env.S3_BUCKET && env.S3_BUCKET !== Bucket) problems.push('S3_BUCKET differs')
-    if (!prefix && !sim) problems.push('S3_KEY_PREFIX is empty (the policy in the docs is scoped to prod/*)')
     let encNote = 'default encryption unreadable'
     if (enc instanceof Error) {
       if (isDenied(enc)) diag.add('s3:GetEncryptionConfiguration')
@@ -766,7 +781,7 @@ async function runInner(ctx: RunContext): Promise<RunResult> {
       r.fail(
         'AWS-S5',
         `${problems.join('; ')}; ${encNote}`,
-        'Set STORAGE_PROVIDER=s3, S3_BUCKET, AWS_REGION and S3_KEY_PREFIX=prod/ in /etc/oasis/common.env (docs/integrations/s3.md step 5).',
+        'Set STORAGE_PROVIDER=s3, S3_BUCKET and AWS_REGION in /etc/oasis/common.env (docs/integrations/s3.md step 5); prefix and encryption settings only count once src/config/env.ts declares them.',
       )
     else r.pass('AWS-S5', `region ${region}, prefix "${prefix || '(none)'}", ${encNote}`)
   }

@@ -1,0 +1,29 @@
+# /etc/nginx/conf.d/oasis-zones.conf  -  http-level settings for the Oasis site (rendered by deploy/scripts/install.sh).
+
+server_tokens off;
+
+# Rate-limit zones, per client address. The app has its own limits (300 requests a minute per user, sign-in throttling);
+# these are the coarse outer ring that stops a flood before it reaches Node.
+#   login   sign-in, password reset and invite endpoints. 30 a minute allows a whole shop signing in behind one address.
+#   api     everything else under /api
+#   hooks   the public webhook endpoints
+limit_req_zone $binary_remote_addr zone=oasis_login:10m rate=30r/m;
+limit_req_zone $binary_remote_addr zone=oasis_api:10m rate=30r/s;
+limit_req_zone $binary_remote_addr zone=oasis_hooks:10m rate=20r/s;
+limit_conn_zone $binary_remote_addr zone=oasis_conn:10m;
+limit_req_status 429;
+limit_conn_status 429;
+
+# Access log with the request id nginx hands to the API (X-Request-Id), so a line here matches the API's log line.
+log_format oasis '$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent '
+                 '"$http_referer" "$http_user_agent" rt=$request_time urt=$upstream_response_time rid=$request_id';
+
+upstream oasis_api {
+    server 127.0.0.1:@API_PORT@;
+    keepalive 16;
+}
+
+upstream oasis_web {
+    server 127.0.0.1:@WEB_PORT@;
+    keepalive 16;
+}

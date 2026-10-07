@@ -1,0 +1,10 @@
+[Unit]
+Description=Oasis Auto Spa health check every five minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+Unit=oasis-healthcheck.service
+
+[Install]
+WantedBy=timers.target

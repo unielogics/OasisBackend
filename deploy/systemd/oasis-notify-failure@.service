@@ -1,0 +1,12 @@
+[Unit]
+Description=Record that %i failed
+# A hook for OnFailure=. The failure is already in the journal and in "systemctl --failed"; this unit also writes a line to the
+# file the runbook tells you to check, and runs /etc/oasis/notify-failure.sh when you create one (mail, SMS, a webhook ...).
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo "$(date -u +%%FT%%TZ) %i failed" >> /var/log/oasis/failures.log; [ -x /etc/oasis/notify-failure.sh ] && /etc/oasis/notify-failure.sh "%i" || true'
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/var/log/oasis

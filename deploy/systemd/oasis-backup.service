@@ -1,0 +1,34 @@
+[Unit]
+Description=Oasis Auto Spa nightly database backup (pg_dump, custom format)
+Documentation=file:///opt/oasis/current/backend/docs/runbook.md
+After=network-online.target postgresql.service
+Wants=postgresql.service
+OnFailure=oasis-notify-failure@%n.service
+
+[Service]
+Type=oneshot
+User=oasis
+Group=oasis
+WorkingDirectory=/opt/oasis/current/backend
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/oasis/common.env
+EnvironmentFile=-/etc/oasis/backup.env
+ExecStart=/opt/oasis/current/backend/deploy/scripts/backup.sh --label nightly
+SyslogIdentifier=oasis-backup
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=2h
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+UMask=0077
+ReadWritePaths=/var/backups/oasis /var/log/oasis

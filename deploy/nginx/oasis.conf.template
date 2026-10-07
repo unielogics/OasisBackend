@@ -1,0 +1,151 @@
+# /etc/nginx/conf.d/oasis.conf  -  the public site (rendered by deploy/scripts/install.sh; edit the template, not this file).
+#
+#   /                     the dashboard (Next.js, 127.0.0.1:@WEB_PORT@)
+#   /api/                 the API (Fastify, 127.0.0.1:@API_PORT@), same origin as the dashboard so there is no CORS
+#   /api/v1/events        the Server-Sent Events stream: no buffering, one-hour reads
+#   /hooks/squarespace    Squarespace webhook (signed, public), 1 MB body limit, POST only
+#   /hooks/ses            Amazon SNS feedback (signed, public)
+#   /hooks/*              everything else, including /hooks/smsgate, answers 404 here. The SMS Gate webhook is served only on
+#                         the tailnet (tailscale-serve.sh -> the API's second listener).
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name @DOMAIN@;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type text/plain;
+    }
+
+    location / {
+        return 301 https://@DOMAIN@$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name @DOMAIN@;
+
+    ssl_certificate @TLS_CERT@;
+    ssl_certificate_key @TLS_KEY@;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:oasis_ssl:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+    ssl_stapling @SSL_STAPLING@;
+    ssl_stapling_verify @SSL_STAPLING@;
+    resolver 1.1.1.1 8.8.8.8 valid=300s ipv6=off;
+    resolver_timeout 5s;
+
+    access_log /var/log/nginx/oasis.access.log oasis;
+    error_log /var/log/nginx/oasis.error.log warn;
+
+    # The API's own body limit is 1 MB (photos go straight to S3 with a presigned POST); nginx stops anything larger earlier.
+    client_max_body_size 2m;
+    client_body_timeout 30s;
+    client_header_timeout 15s;
+    keepalive_timeout 65s;
+    limit_conn oasis_conn 200;
+    proxy_connect_timeout 5s;
+    proxy_send_timeout 60s;
+    proxy_read_timeout 60s;
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml image/svg+xml;
+    gzip_min_length 1024;
+
+    # --- probes ---
+    # Liveness is public (an uptime monitor can use it). Readiness reports database and migration detail: this host only.
+    location = /healthz {
+        include @NGINX_DIR@/oasis/proxy.conf;
+        access_log off;
+        proxy_pass http://oasis_api;
+    }
+
+    location = /readyz {
+        allow 127.0.0.1;
+        allow ::1;
+        deny all;
+        include @NGINX_DIR@/oasis/proxy.conf;
+        access_log off;
+        proxy_pass http://oasis_api;
+    }
+
+    # --- webhooks ---
+    location = /hooks/squarespace {
+        limit_except POST {
+            deny all;
+        }
+        limit_req zone=oasis_hooks burst=40 nodelay;
+        client_max_body_size 1m;
+        include @NGINX_DIR@/oasis/proxy.conf;
+        proxy_pass http://oasis_api;
+    }
+
+    location = /hooks/ses {
+        limit_except POST {
+            deny all;
+        }
+        limit_req zone=oasis_hooks burst=40 nodelay;
+        client_max_body_size 1m;
+        include @NGINX_DIR@/oasis/proxy.conf;
+        proxy_pass http://oasis_api;
+    }
+
+    # Everything else under /hooks, notably /hooks/smsgate, is not public.
+    location ^~ /hooks/ {
+        default_type application/json;
+        return 404 '{"ok":false,"status":"not_found"}';
+    }
+
+    # The filesystem-storage simulator is for development only. Production stores photos in S3.
+    location ^~ /dev-storage/ {
+        default_type application/json;
+        return 404 '{"ok":false,"status":"not_found"}';
+    }
+
+    # --- API ---
+    # The OpenAPI document describes every route; it is not for the public.
+    location = /api/v1/openapi.json {
+        allow 127.0.0.1;
+        allow ::1;
+        deny all;
+        include @NGINX_DIR@/oasis/proxy.conf;
+        proxy_pass http://oasis_api;
+    }
+
+    # Server-Sent Events: nothing may buffer or compress the stream, and the connection lives for hours.
+    location = /api/v1/events {
+        include @NGINX_DIR@/oasis/proxy.conf;
+        proxy_buffering off;
+        proxy_cache off;
+        gzip off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_pass http://oasis_api;
+    }
+
+    # Sign-in, password reset and invitation endpoints get the tighter zone.
+    location ~ ^/api/v1/auth/(login|password/forgot|password/reset|invite/accept)$ {
+        limit_req zone=oasis_login burst=10 nodelay;
+        include @NGINX_DIR@/oasis/proxy.conf;
+        proxy_pass http://oasis_api;
+    }
+
+    location /api/ {
+        limit_req zone=oasis_api burst=60 nodelay;
+        include @NGINX_DIR@/oasis/proxy.conf;
+        proxy_pass http://oasis_api;
+    }
+
+    # --- dashboard ---
+    location / {
+        include @NGINX_DIR@/oasis/security-headers.conf;
+        include @NGINX_DIR@/oasis/proxy.conf;
+        proxy_pass http://oasis_web;
+    }
+}
