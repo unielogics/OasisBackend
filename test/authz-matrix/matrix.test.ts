@@ -19,6 +19,8 @@ const PUBLIC_ROUTES = new Set([
   'POST /api/v1/auth/invite/accept',
   'POST /api/v1/auth/password/forgot',
   'POST /api/v1/auth/password/reset',
+  // the customer's phone has no session; the per-appointment link token authenticates it (ADR 0083)
+  'POST /api/v1/arrivals/ping',
 ])
 
 /** 403 codes a permitted caller may still get from a business rule, keyed by "METHOD url". Empty with the generic {} body. */
