@@ -32,7 +32,7 @@
     "start": "node dist/server.js",
     "start:worker": "node dist/worker.js",
     "test": "vitest run --passWithNoTests",
-    "test:fast": "vitest run --poolOptions.forks.singleFork=false --poolOptions.forks.maxForks=2 --fileParallelism",
+    "test:fast": "vitest run --poolOptions.forks.singleFork=false --poolOptions.forks.maxForks=2 --fileParallelism --exclude 'test/ops-kit/**' && vitest run test/ops-kit",
     "test:int": "vitest run test/integration",
     "test:ops": "vitest run test/scheduling test/golden/ops",
     "test:ops-kit": "vitest run test/ops-kit",

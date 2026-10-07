@@ -90,7 +90,7 @@ describe('environment templates', () => {
     const env = loadEnv({ ...merged, NODE_ENV: 'production' })
     expect(env.NODE_ENV).toBe('production')
     expect(env.HOST).toBe('127.0.0.1')
-    expect(env.TRUST_PROXY).toBe(true)
+    expect(env.TRUST_PROXY).toBe(1) // true parses to one trusted hop: nginx in front
     expect(env.COOKIE_SECURE).toBe(true)
     expect(env.HOOKS_HOST).toBe('127.0.0.1')
     expect(env.HOOKS_PORT).toBe(3002)

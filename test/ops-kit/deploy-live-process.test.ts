@@ -3,7 +3,7 @@
 // The SMS Gate tablet and Squarespace are the simulators.
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { networkInterfaces, tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { SimServer } from '../../src/integrations/smsgate/sim-server.js'
@@ -39,11 +39,20 @@ async function until<T>(fn: () => Promise<T | undefined | false>, ms = 40_000): 
   }
 }
 
+// A production server refuses a tablet on loopback (device-url.ts), so the simulated tablet listens on this host's
+// private address, as a real tablet would on its own address.
+const TABLET_HOST =
+  Object.values(networkInterfaces())
+    .flat()
+    .find((a) => a && a.family === 'IPv4' && !a.internal)?.address ?? null
+const TABLET_URL = `http://${TABLET_HOST}:4591`
+
 beforeAll(async () => {
   work = mkdtempSync(path.join(tmpdir(), 'oasis-live-'))
   t = await createTestDb({ schema: `ops_${schemaPrefix}_live`.toLowerCase(), poolMax: 4 })
   await truncateAll(t.db)
   tablet = new SimServer({
+    host: TABLET_HOST ?? '127.0.0.1',
     port: 4591,
     username: 'tablet',
     password: 'tablet-pass',
@@ -181,66 +190,70 @@ describe('oasis-admin.sh', () => {
     expect((await admin('frobnicate')).stderr).toMatch(/unknown command/)
   }, 60_000)
 
-  it('registers a tablet, shows its secret once, tests it, registers the seven webhooks and reads its health', async () => {
-    const add = await admin(
-      'sms-add-device',
-      '--label',
-      'Front desk tablet',
-      '--device-url',
-      'http://127.0.0.1:4591',
-      '--username',
-      'tablet',
-      '--password-env',
-      'TABLET_PW',
-      '--webhook-secret-env',
-      'SQSP_KEY',
-    )
-    expect(add.code, add.out).toBe(0)
-    const created = json(add)
-    expect(created.device.label).toBe('Front desk tablet')
-    expect(created.webhookSecret).toBe('sqsp-live-key-123')
-    expect(add.stderr).toMatch(/shown only now/)
-    expect(JSON.stringify(created)).not.toContain('tablet-pass') // the password is stored encrypted and never returned
-    const id = created.device.id as string
+  it.skipIf(!TABLET_HOST)(
+    'registers a tablet, shows its secret once, tests it, registers the seven webhooks and reads its health',
+    async () => {
+      const add = await admin(
+        'sms-add-device',
+        '--label',
+        'Front desk tablet',
+        '--device-url',
+        TABLET_URL,
+        '--username',
+        'tablet',
+        '--password-env',
+        'TABLET_PW',
+        '--webhook-secret-env',
+        'SQSP_KEY',
+      )
+      expect(add.code, add.out).toBe(0)
+      const created = json(add)
+      expect(created.device.label).toBe('Front desk tablet')
+      expect(created.webhookSecret).toBe('sqsp-live-key-123')
+      expect(add.stderr).toMatch(/shown only now/)
+      expect(JSON.stringify(created)).not.toContain('tablet-pass') // the password is stored encrypted and never returned
+      const id = created.device.id as string
 
-    const list = json(await admin('sms-devices'))
-    expect(list.items?.[0]?.id ?? list.devices?.[0]?.id ?? list[0]?.id).toBe(id)
+      const list = json(await admin('sms-devices'))
+      expect(list.items?.[0]?.id ?? list.devices?.[0]?.id ?? list[0]?.id).toBe(id)
 
-    const test = json(await admin('sms-test', id))
-    expect(test).toMatchObject({ reachable: true, credentials: 'ok' })
-    const wrong = await admin(
-      'sms-update-device',
-      id,
-      '--device-url',
-      'http://127.0.0.1:4591',
-      '--username',
-      'tablet',
-      '--password-env',
-      'SQSP_KEY',
-    )
-    expect(wrong.code, wrong.out).toBe(0)
-    expect(json(await admin('sms-test', id)).credentials).toBe('rejected')
-    await admin('sms-update-device', id, '--password-env', 'TABLET_PW')
+      const test = json(await admin('sms-test', id))
+      expect(test).toMatchObject({ reachable: true, credentials: 'ok' })
+      const wrong = await admin(
+        'sms-update-device',
+        id,
+        '--device-url',
+        TABLET_URL,
+        '--username',
+        'tablet',
+        '--password-env',
+        'SQSP_KEY',
+      )
+      expect(wrong.code, wrong.out).toBe(0)
+      expect(json(await admin('sms-test', id)).credentials).toBe('rejected')
+      await admin('sms-update-device', id, '--password-env', 'TABLET_PW')
 
-    const reg = await admin('sms-register-webhooks', id)
-    expect(reg.code, reg.out).toBe(0)
-    const onDevice = (await (await fetch('http://127.0.0.1:4591/__sim/state')).json()) as {
-      webhooks: Array<{ id: string; url: string }>
-    }
-    expect(onDevice.webhooks.map((w) => w.id).sort()).toEqual([
-      'oasis-app-started',
-      'oasis-sms-cancelled',
-      'oasis-sms-delivered',
-      'oasis-sms-failed',
-      'oasis-sms-received',
-      'oasis-sms-sent',
-      'oasis-system-ping',
-    ])
-    expect(onDevice.webhooks[0]!.url).toMatch(/^http:\/\/127\.0\.0\.1:4593\/hooks\/smsgate\//)
+      const reg = await admin('sms-register-webhooks', id)
+      expect(reg.code, reg.out).toBe(0)
+      const onDevice = (await (await fetch(`${TABLET_URL}/__sim/state`)).json()) as {
+        webhooks: Array<{ id: string; url: string }>
+      }
+      expect(onDevice.webhooks.map((w) => w.id).sort()).toEqual([
+        'oasis-app-started',
+        'oasis-sms-cancelled',
+        'oasis-sms-delivered',
+        'oasis-sms-failed',
+        'oasis-sms-received',
+        'oasis-sms-sent',
+        'oasis-system-ping',
+      ])
+      expect(onDevice.webhooks[0]!.url).toMatch(/^http:\/\/127\.0\.0\.1:4593\/hooks\/smsgate\//)
 
-    const health = await admin('sms-health', id)
-    expect(health.code, health.out).toBe(0)
-  }, 90_000)
+      const health = await admin('sms-health', id)
+      expect(health.code, health.out).toBe(0)
+    },
+    90_000,
+  )
 
   it('connects Squarespace (verified first), loads the proposed product map from a file, and runs a sync', async () => {
     const status0 = json(await admin('sqsp-status'))
