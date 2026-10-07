@@ -14,14 +14,6 @@ const north = (meters: number): { lat: number; lng: number } => ({
 })
 const START = '2026-06-13T11:00:00-04:00'
 
-interface PingReply {
-  state: string
-  distanceM: number
-  radiusM: number
-  etaMinutes: number | null
-  message: string
-}
-
 async function setup(
   m: Rig,
   o: { coords?: boolean } = {},
