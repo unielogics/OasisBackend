@@ -57,6 +57,7 @@ interface Row {
     tip_cents: number
     canceled_at: Date | null
     appointment_id: string | null
+    occurred_at: Date
   }
   prices: number[]
   itemIds: string[]
@@ -1061,6 +1062,10 @@ export class Model {
         counts: { invoices: number; refunded: number; adjusted: number; openBalances: number }
       }
       byMethod: Record<string, number>
+      chart: {
+        granularity: 'hour' | 'day'
+        buckets: Array<{ key: string | number; netCents: number; lossCents: number }>
+      }
     }
     const rows: Array<{ inv: InvRef; row: Row; oc: OracleCalc; bizDate: string }> = []
     for (const inv of this.invs) {
@@ -1158,6 +1163,25 @@ export class Model {
         else if (e.type === 'credit_apply') want.storeCredit = want.storeCredit! + e.amount_cents
       }
     }
+    // chart: each invoice lands in the bucket of its service day (or hour), with its own rounded net and its losses
+    const hourOf = (d: Date): number => DateTime.fromJSDate(d, { zone: 'America/New_York' }).hour
+    let seenNet = 0
+    let seenLoss = 0
+    for (const b of sum.chart.buckets) {
+      const inB = rows.filter((r) =>
+        sum.chart.granularity === 'hour' ? hourOf(r.row.inv.occurred_at) === b.key : r.bizDate === b.key,
+      )
+      const net = inB.reduce((a, r) => a + r.oc.net, 0)
+      const loss = inB.reduce((a, r) => a + r.oc.refunded + Math.max(0, -r.oc.adj), 0)
+      if (b.netCents !== net || b.lossCents !== loss)
+        this.fail(
+          `chart bucket ${String(b.key)}: api net=${b.netCents} loss=${b.lossCents}, oracle net=${net} loss=${loss}`,
+        )
+      seenNet += net
+      seenLoss += loss
+    }
+    if (seenNet !== tot((r) => r.oc.net) || seenLoss !== tot((r) => r.oc.refunded + Math.max(0, -r.oc.adj)))
+      this.fail('some invoice is in no chart bucket')
     for (const kk of Object.keys(want))
       if ((sum.byMethod[kk] ?? 0) !== want[kk]) this.fail(`byMethod.${kk} ${sum.byMethod[kk]} vs ${want[kk]}`)
   }
