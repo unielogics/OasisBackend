@@ -157,6 +157,11 @@ export const envSchema = z
     // The session cookie, the __Host- prefix and HSTS all follow COOKIE_SECURE; production is HTTPS only.
     need(e.NODE_ENV === 'production' && !e.COOKIE_SECURE, 'COOKIE_SECURE', 'must be true in production')
     need(
+      e.NODE_ENV === 'production' && e.ALLOW_DEV_ENDPOINTS,
+      'ALLOW_DEV_ENDPOINTS',
+      'must not be set in production',
+    )
+    need(
       e.NODE_ENV === 'production' && !validSecretsKey(e.SECRETS_KEY),
       'SECRETS_KEY',
       'required in production: base64 of 32 random bytes (it seals device and API credentials)',
