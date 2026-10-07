@@ -23,7 +23,7 @@ and the foreign key `appointments.membership_id -> memberships`). Code in `src/m
   permission and limit are lifted for this command only but who stays the recorded actor. Tax falls with it because adjustments
   are pre-tax. One credit per appointment, enforced by a partial unique index as well.
 * **Inference pass** (`syncMemberships`, after a sync that changed orders and in the daily job): the pure inference over membership
-  orders of the last 420 days; people are linked by Squarespace customer id, then email, then phone (`sqsp_customer_links`; ambiguity
+  orders of the last 540 days (a yearly plan is inferred canceled 432 days after its last order); people are linked by Squarespace customer id, then email, then phone (`sqsp_customer_links`; ambiguity
   links nobody); status is active until the paid period ends plus `SQSP_MEMBERSHIP_GRACE_DAYS` (7), then past_due, then, lagged and
   flagged `lagged_cancellation`, canceled after `SQSP_LAPSE_CANCEL_DAYS` (60) more days; a full refund flags review and never
   cancels; a payment after a cancellation reactivates the same row. Someone who matches no customer raises
