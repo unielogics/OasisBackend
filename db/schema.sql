@@ -342,6 +342,7 @@ CREATE TABLE public.appointments (
     created_by uuid,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    arrival_token_expires_at timestamp with time zone,
     CONSTRAINT appointments_check CHECK ((scheduled_end > scheduled_start)),
     CONSTRAINT appointments_check1 CHECK (((status <> 'cleaning'::text) OR (bay_id IS NOT NULL))),
     CONSTRAINT appointments_duration_min_check CHECK ((duration_min > 0)),
@@ -364,6 +365,32 @@ ALTER TABLE public.appointments ALTER COLUMN seq ADD GENERATED ALWAYS AS IDENTIT
     NO MINVALUE
     NO MAXVALUE
     CACHE 1
+);
+
+--
+-- Name: arrival_pings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.arrival_pings (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    appointment_id uuid NOT NULL,
+    at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    lat numeric(9,6) NOT NULL,
+    lng numeric(9,6) NOT NULL,
+    accuracy_m integer,
+    distance_m integer NOT NULL,
+    eta_min integer,
+    declared boolean DEFAULT false NOT NULL,
+    outcome text NOT NULL,
+    ping_key text,
+    reply jsonb NOT NULL,
+    CONSTRAINT arrival_pings_accuracy_m_check CHECK (((accuracy_m IS NULL) OR (accuracy_m >= 0))),
+    CONSTRAINT arrival_pings_distance_m_check CHECK ((distance_m >= 0)),
+    CONSTRAINT arrival_pings_eta_min_check CHECK (((eta_min IS NULL) OR (eta_min >= 0))),
+    CONSTRAINT arrival_pings_lat_check CHECK (((lat >= ('-90'::integer)::numeric) AND (lat <= (90)::numeric))),
+    CONSTRAINT arrival_pings_lng_check CHECK (((lng >= ('-180'::integer)::numeric) AND (lng <= (180)::numeric))),
+    CONSTRAINT arrival_pings_outcome_check CHECK ((outcome = ANY (ARRAY['outside'::text, 'inconclusive'::text, 'checked_in'::text, 'confirm_needed'::text, 'already_arrived'::text])))
 );
 
 --
@@ -1250,6 +1277,7 @@ CREATE TABLE public.plan_credit_rules (
     per_cycle integer,
     sort integer DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    auto_apply boolean DEFAULT false NOT NULL,
     CONSTRAINT plan_credit_rules_include_tags_check CHECK ((cardinality(include_tags) > 0)),
     CONSTRAINT plan_credit_rules_label_check CHECK ((btrim(label) <> ''::text)),
     CONSTRAINT plan_credit_rules_per_cycle_check CHECK (((per_cycle IS NULL) OR (per_cycle > 0)))
@@ -2052,6 +2080,13 @@ ALTER TABLE ONLY public.appointments
 
 ALTER TABLE ONLY public.appointments
     ADD CONSTRAINT appointments_seq_key UNIQUE (seq);
+
+--
+-- Name: arrival_pings arrival_pings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.arrival_pings
+    ADD CONSTRAINT arrival_pings_pkey PRIMARY KEY (id);
 
 --
 -- Name: arrival_settings arrival_settings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2883,6 +2918,12 @@ CREATE INDEX appointments_location_status_start_idx ON public.appointments USING
 CREATE INDEX appointments_planned_bay_idx ON public.appointments USING btree (planned_bay_id, scheduled_start) WHERE (planned_bay_id IS NOT NULL);
 
 --
+-- Name: arrival_pings_appointment_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX arrival_pings_appointment_idx ON public.arrival_pings USING btree (appointment_id, at DESC);
+
+--
 -- Name: audit_log_actor_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3369,6 +3410,18 @@ CREATE INDEX sqsp_transactions_state_idx ON public.sqsp_transactions USING btree
 CREATE UNIQUE INDEX uq_appointment_addons_live ON public.appointment_addons USING btree (appointment_id, service_id) WHERE (removed_at IS NULL);
 
 --
+-- Name: uq_appointments_arrival_token; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_appointments_arrival_token ON public.appointments USING btree (arrival_token_hash) WHERE (arrival_token_hash IS NOT NULL);
+
+--
+-- Name: uq_arrival_ping_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_arrival_ping_key ON public.arrival_pings USING btree (appointment_id, ping_key) WHERE (ping_key IS NOT NULL);
+
+--
 -- Name: uq_bay_occupied; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3600,6 +3653,20 @@ ALTER TABLE ONLY public.appointments
 
 ALTER TABLE ONLY public.appointments
     ADD CONSTRAINT appointments_vehicle_id_fkey FOREIGN KEY (vehicle_id) REFERENCES public.vehicles(id);
+
+--
+-- Name: arrival_pings arrival_pings_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.arrival_pings
+    ADD CONSTRAINT arrival_pings_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id) ON DELETE CASCADE;
+
+--
+-- Name: arrival_pings arrival_pings_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.arrival_pings
+    ADD CONSTRAINT arrival_pings_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 -- Name: arrival_settings arrival_settings_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
