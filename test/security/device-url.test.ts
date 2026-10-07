@@ -146,6 +146,8 @@ describe('SEC-04 SMS device URL: production refuses loopback', () => {
       SESSION_SECRET: 'p'.repeat(40),
       COOKIE_SECURE: 'true',
       SECRETS_KEY: Buffer.alloc(32, 7).toString('base64'),
+      PUBLIC_DASHBOARD_URL: 'https://app.oasis.test',
+      PUBLIC_API_URL: 'https://app.oasis.test',
     },
   })
 

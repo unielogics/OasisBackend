@@ -52,6 +52,8 @@ const squarespaceTuning = squarespaceEnvSchema.pick({
   SQSP_WEBHOOK_SECRET: true,
 }).shape
 
+const validSecretsKey = (v: string | undefined): boolean => !!v && Buffer.from(v, 'base64').length === 32
+
 // Fail-fast, typed environment contract. `*_PROVIDER=sim` needs no other variable for that integration.
 export const envSchema = z
   .object({
@@ -152,6 +154,19 @@ export const envSchema = z
     )
     need(e.NODE_ENV === 'production' && e.DEV_AUTH_BYPASS, 'DEV_AUTH_BYPASS', 'must not be set in production')
     need(e.NODE_ENV === 'production' && !e.SESSION_SECRET, 'SESSION_SECRET', 'required in production')
+    // The session cookie, the __Host- prefix and HSTS all follow COOKIE_SECURE; production is HTTPS only.
+    need(e.NODE_ENV === 'production' && !e.COOKIE_SECURE, 'COOKIE_SECURE', 'must be true in production')
+    need(
+      e.NODE_ENV === 'production' && !validSecretsKey(e.SECRETS_KEY),
+      'SECRETS_KEY',
+      'required in production: base64 of 32 random bytes (it seals device and API credentials)',
+    )
+    for (const name of ['PUBLIC_DASHBOARD_URL', 'PUBLIC_API_URL'] as const)
+      need(
+        e.NODE_ENV === 'production' && !e[name].startsWith('https://'),
+        name,
+        'must be an https:// URL in production (it is the origin the browser may call from and the host of the links we text)',
+      )
     need(e.SQSP_PROVIDER === 'live' && !e.SQSP_API_KEY, 'SQSP_API_KEY', 'required when SQSP_PROVIDER=live')
     need(e.SMS_PROVIDER === 'smsgate' && !e.SMSGATE_DEVICE_URL, 'SMSGATE_DEVICE_URL', 'required for smsgate')
     need(e.SMS_PROVIDER === 'smsgate' && !e.SMSGATE_USERNAME, 'SMSGATE_USERNAME', 'required for smsgate')

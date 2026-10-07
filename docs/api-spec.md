@@ -50,7 +50,7 @@ Request pipeline (`onRequest`): request id header, Origin check on unsafe method
 The auth/RBAC module implements the `Authorizer` port (`src/http/authorizer.ts`): `resolve(req)` turns the session cookie
 into an `AuthContext { userId, employeeId, locationId, permissions, limits, ... }`, `requirePerm`, optional
 `canSubscribe` (SSE channels), optional `verifyCsrf` (synchronizer token). Until it exists `src/server.ts` fails closed
-(401 everywhere non-public); `DEV_AUTH_BYPASS=true` gives local development a permissive user (refused in production).
+(401 everywhere non-public); `DEV_AUTH_BYPASS=true` gives local development a permissive user (refused in production). `NODE_ENV=production` also refuses to boot without `SESSION_SECRET`, `COOKIE_SECURE=true`, a `SECRETS_KEY` that is base64 of 32 bytes, and https `PUBLIC_DASHBOARD_URL` / `PUBLIC_API_URL`.
 For view-as sessions `permissions` are those of the viewed role and `realUserId` is the real actor; `auditContextOf(req)`
 records the real actor with `viewAsRoleId`.
 

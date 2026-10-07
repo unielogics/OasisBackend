@@ -141,6 +141,7 @@ describe('production cookie', () => {
       NODE_ENV: 'production',
       COOKIE_SECURE: 'true',
       SESSION_SECRET: 'x'.repeat(40),
+      SECRETS_KEY: Buffer.alloc(32, 5).toString('base64'),
       PUBLIC_DASHBOARD_URL: 'https://app.oasis.test',
       PUBLIC_API_URL: 'https://app.oasis.test',
     },
