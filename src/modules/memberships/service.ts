@@ -162,7 +162,17 @@ export async function syncMemberships(db: Db, d: MembershipSyncDeps): Promise<Me
       report.held++
       continue
     }
-    const action = reconcileMembership(em, inf)
+    let action = reconcileMembership(em, inf)
+    // the pure rule compares status, tier, period and last order; grace and review flags are kept current as well
+    if (
+      action.action === 'none' &&
+      action.reason === 'unchanged' &&
+      existing &&
+      (existing.in_grace !== inf.inGrace ||
+        JSON.stringify(existing.review_flags) !== JSON.stringify(inf.flags) ||
+        existing.inference_reason !== inf.reason)
+    )
+      action = { action: 'update', membershipId: existing.id, inference: inf, changes: ['grace or flags'] }
     if (action.action === 'needs_customer') {
       report.needsCustomer++
       await raiseAlert(db, d, {
