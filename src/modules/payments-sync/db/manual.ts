@@ -335,7 +335,9 @@ async function assertNoDuplicateRefund(tx: Executor, invoiceId: string, a: Arriv
   const same = await sql<{ id: string }>`
     select e.id from ledger_events e
     where e.invoice_id = ${invoiceId} and e.type = 'refund' and e.dest = 'card' and e.amount_cents = ${a.amountCents}
-      and e.processor_ref is null and (e.processor_state = 'awaiting_processor' or e.status = 'pending')`.execute(tx)
+      and e.processor_ref is null and (e.processor_state = 'awaiting_processor' or e.status = 'pending')`.execute(
+    tx,
+  )
   if (same.rows.length > 0)
     throw new AppError('SQSP_MATCH_DUPLICATE', { meta: { eventIds: same.rows.map((r) => r.id) } })
 }

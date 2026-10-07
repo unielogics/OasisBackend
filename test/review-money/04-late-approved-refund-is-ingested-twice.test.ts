@@ -30,7 +30,10 @@ describe('a refund approved late is still the same refund when Squarespace shows
       email: 'liam@example.com',
       phone: '+13055550142',
     })
-    const inv = await makeInvoice(r.db, env, { customerId, items: [{ name: 'Full Detail', priceCents: 18900 }] })
+    const inv = await makeInvoice(r.db, env, {
+      customerId,
+      items: [{ name: 'Full Detail', priceCents: 18900 }],
+    })
 
     // the original card payment, confirmed from Squarespace
     const order = r.store.createOrder({
@@ -72,7 +75,12 @@ describe('a refund approved late is still the same refund when Squarespace shows
     // approved on Friday (72 h later), refunded in Squarespace right after
     r.advance(72 * H)
     await transaction(r.db, (tx) =>
-      service.approveRefund(tx, ctxFor(r.locationId, stubActor(rafael, { refund: 100000 })), inv.id, requested.event.id),
+      service.approveRefund(
+        tx,
+        ctxFor(r.locationId, stubActor(rafael, { refund: 100000 })),
+        inv.id,
+        requested.event.id,
+      ),
     )
     r.advance(10 * 60_000)
     r.store.refund(order.orderId, { amountCents: 6000, refundedOn: r.clock.now() })
@@ -87,6 +95,8 @@ describe('a refund approved late is still the same refund when Squarespace shows
       .where('invoice_id', '=', inv.id)
       .where('type', '=', 'refund')
       .execute()
-    expect(refunds).toEqual([{ id: requested.event.id, amount_cents: 6000, source: 'oasis', processor_state: 'confirmed' }])
+    expect(refunds).toEqual([
+      { id: requested.event.id, amount_cents: 6000, source: 'oasis', processor_state: 'confirmed' },
+    ])
   })
 })

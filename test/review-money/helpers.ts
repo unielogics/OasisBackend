@@ -15,11 +15,22 @@ export async function makeUser(db: Executor, newId: NewId, first: string): Promi
   const userId = newId()
   await db
     .insertInto('employees')
-    .values({ id: employeeId, first, last: 'Review', email: `${first.toLowerCase()}.${employeeId}@example.test`, status: 'active' })
+    .values({
+      id: employeeId,
+      first,
+      last: 'Review',
+      email: `${first.toLowerCase()}.${employeeId}@example.test`,
+      status: 'active',
+    })
     .execute()
   await db
     .insertInto('users')
-    .values({ id: userId, employee_id: employeeId, email: `${first.toLowerCase()}.${userId}@example.test`, password_hash: 'x' })
+    .values({
+      id: userId,
+      employee_id: employeeId,
+      email: `${first.toLowerCase()}.${userId}@example.test`,
+      password_hash: 'x',
+    })
     .execute()
   return { userId, employeeId, name: `${first} R.` }
 }
@@ -43,5 +54,10 @@ export function stubActor(u: StubUser, limits: Partial<Limits> = {}): PayActor {
 
 let keyN = 0
 export function ctxFor(locationId: string, actor: PayActor, key?: string): CommandContext {
-  return { locationId, actor, audit: {}, idempotencyKey: key ?? `rv-${++keyN}-${Math.random().toString(36).slice(2, 8)}` }
+  return {
+    locationId,
+    actor,
+    audit: {},
+    idempotencyKey: key ?? `rv-${++keyN}-${Math.random().toString(36).slice(2, 8)}`,
+  }
 }

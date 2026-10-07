@@ -27,17 +27,27 @@ describe('pending card refunds respect the card cap together', () => {
       methodKind: 'store_credit',
     })
     // Sofia's limit is $50.00: both requests wait for approval
-    const first = await p.send(sofia, 'POST', `invoices/${inv.id}/refunds`, { mode: 'custom', amountCents: 10000, dest: 'card' })
+    const first = await p.send(sofia, 'POST', `invoices/${inv.id}/refunds`, {
+      mode: 'custom',
+      amountCents: 10000,
+      dest: 'card',
+    })
     expect(first.statusCode).toBe(201)
     expect(first.json()).toMatchObject({ event: { status: 'pending' } })
 
     // only 20.00 of the card money is left unreserved
-    const second = await p.send(sofia, 'POST', `invoices/${inv.id}/refunds`, { mode: 'custom', amountCents: 5976, dest: 'card' })
+    const second = await p.send(sofia, 'POST', `invoices/${inv.id}/refunds`, {
+      mode: 'custom',
+      amountCents: 5976,
+      dest: 'card',
+    })
     expect(second.statusCode, 'a request that cannot be approved must not be accepted').toBe(422)
     expect(second.json()).toMatchObject({ code: 'REFUND_EXCEEDS_CARD' })
 
     // and the approver is not left with a request that can only be denied
-    const queue = (await p.get(rafael, 'payments/approvals')).json() as { items: { eventId: string; amountCents: number }[] }
+    const queue = (await p.get(rafael, 'payments/approvals')).json() as {
+      items: { eventId: string; amountCents: number }[]
+    }
     for (const item of queue.items) {
       const res = await p.send(rafael, 'POST', `invoices/${inv.id}/refunds/${item.eventId}/approve`, {})
       expect(res.statusCode, `approving ${item.amountCents}`).toBe(200)

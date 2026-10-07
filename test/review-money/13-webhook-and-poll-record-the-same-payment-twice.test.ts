@@ -23,10 +23,19 @@ describe('webhook and poll for the same order', () => {
     const env = await setupEnv({ db: r.db, clock: r.clock })
     await ensurePlans(r.db, { locationId: r.locationId, clock: r.clock, newId: r.newId })
     await transaction(r.db, (tx) =>
-      replaceProductRows(tx, { locationId: r.locationId, clock: r.clock, newId: r.newId }, [{ sku: 'DET-SEDAN', kind: 'service' }]),
+      replaceProductRows(tx, { locationId: r.locationId, clock: r.clock, newId: r.newId }, [
+        { sku: 'DET-SEDAN', kind: 'service' },
+      ]),
     )
-    const customerId = await makeCustomer(r.db, env, { name: 'Liam Chen', email: 'liam@example.com', phone: '+13055550142' })
-    const inv = await makeInvoice(r.db, env, { customerId, items: [{ name: 'Full Detail', priceCents: 18900 }] })
+    const customerId = await makeCustomer(r.db, env, {
+      name: 'Liam Chen',
+      email: 'liam@example.com',
+      phone: '+13055550142',
+    })
+    const inv = await makeInvoice(r.db, env, {
+      customerId,
+      items: [{ name: 'Full Detail', priceCents: 18900 }],
+    })
     const service = new PaymentsService({ clock: r.clock, newId: r.newId, ports: defaultPorts() })
     const rafael = await makeUser(r.db, r.newId, 'Rafael')
     await transaction(r.db, (tx) =>
@@ -88,7 +97,10 @@ describe('webhook and poll for the same order', () => {
       .where('invoice_id', '=', inv.id)
       .where('type', '=', 'pay')
       .execute()
-    expect(pays.reduce((a, e) => a + e.amount_cents, 0), JSON.stringify(pays)).toBe(20223)
+    expect(
+      pays.reduce((a, e) => a + e.amount_cents, 0),
+      JSON.stringify(pays),
+    ).toBe(20223)
     expect(pays).toHaveLength(1)
   })
 })

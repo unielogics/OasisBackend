@@ -16,7 +16,9 @@ interface PayResult {
 async function voidedCardPayment() {
   const { rafael } = p.people()
   const inv = await makeInvoice(p.h.t.db, p.env())
-  const card = p.json<PayResult>(await p.send(rafael, 'POST', `invoices/${inv.id}/payments`, { method: 'card' }))
+  const card = p.json<PayResult>(
+    await p.send(rafael, 'POST', `invoices/${inv.id}/payments`, { method: 'card' }),
+  )
   expect(card.event.processorState).toBe('awaiting_processor')
   const voided = await p.send(rafael, 'POST', `invoices/${inv.id}/void`, { eventId: card.event.id })
   expect(voided.statusCode).toBe(201)

@@ -25,7 +25,13 @@ interface Cust {
   tax: number
   realPayments: Array<{ orderId: string; paymentId: string; amount: number }>
   strayStaff: number
-  refundPairs: Array<{ staffEventId: string | null; sqspRefundId: string | null; orderId: string; amount: number; approvedAt: number | null }>
+  refundPairs: Array<{
+    staffEventId: string | null
+    sqspRefundId: string | null
+    orderId: string
+    amount: number
+    approvedAt: number | null
+  }>
 }
 
 export class SyncModel {
@@ -69,7 +75,9 @@ export class SyncModel {
     this.env = await setupEnv({ db: r.db, clock: r.clock })
     await ensurePlans(r.db, { locationId: r.locationId, clock: r.clock, newId: r.newId })
     await transaction(r.db, (tx) =>
-      replaceProductRows(tx, { locationId: r.locationId, clock: r.clock, newId: r.newId }, [{ sku: 'DET', kind: 'service' }]),
+      replaceProductRows(tx, { locationId: r.locationId, clock: r.clock, newId: r.newId }, [
+        { sku: 'DET', kind: 'service' },
+      ]),
     )
     this.service = new PaymentsService({ clock: r.clock, newId: r.newId, ports: defaultPorts() })
     this.sofia = { u: await makeUser(r.db, r.newId, 'Sofia'), limit: 5000 }
@@ -77,11 +85,29 @@ export class SyncModel {
     for (let i = 0; i < 4; i++) {
       const email = `cust${i}@example.com`
       const phone = `30555501${String(40 + i).padStart(2, '0')}`
-      const customerId = await makeCustomer(r.db, this.env, { name: `Cust ${i} Test`, email, phone: `+1${phone}` })
+      const customerId = await makeCustomer(r.db, this.env, {
+        name: `Cust ${i} Test`,
+        email,
+        phone: `+1${phone}`,
+      })
       const items = this.int(80, 400) * 100 + this.pick([0, 0, 50, 99])
-      const inv = await makeInvoice(r.db, this.env, { customerId, items: [{ name: 'Full Detail', priceCents: items }] })
+      const inv = await makeInvoice(r.db, this.env, {
+        customerId,
+        items: [{ name: 'Full Detail', priceCents: items }],
+      })
       const tax = Number((2n * BigInt(items) * 700n + 10_000n) / 20_000n)
-      this.custs.push({ customerId, email, phone, inv, total: items + tax, items, tax, realPayments: [], strayStaff: 0, refundPairs: [] })
+      this.custs.push({
+        customerId,
+        email,
+        phone,
+        inv,
+        total: items + tax,
+        items,
+        tax,
+        realPayments: [],
+        strayStaff: 0,
+        refundPairs: [],
+      })
     }
   }
 
@@ -99,7 +125,9 @@ export class SyncModel {
   private async staffCollect(c: Cust): Promise<string | null> {
     try {
       const out = await transaction(this.R.db, (tx) =>
-        this.service.collect(tx, ctxFor(this.R.locationId, this.actor('rafael')), c.inv.id, { method: 'card' }),
+        this.service.collect(tx, ctxFor(this.R.locationId, this.actor('rafael')), c.inv.id, {
+          method: 'card',
+        }),
       )
       return 'event' in out ? out.event.id : null
     } catch (e) {
@@ -125,14 +153,19 @@ export class SyncModel {
     this.tick(2 * 60_000)
     // overlapping runs (webhook job + poll, two polls, a cashier tapping Collect mid-run) are what defects 5 and 13 are about:
     // they run unless RV_LEGACY=1, which relaxes the model for the code before the fixes
-    const how = this.pick(STRICT ? (['cycle', 'cycle', 'two', 'webhook', 'collect-race'] as const) : (['cycle'] as const))
+    const how = this.pick(
+      STRICT ? (['cycle', 'cycle', 'two', 'webhook', 'collect-race'] as const) : (['cycle'] as const),
+    )
     const c = this.pick(this.custs)
     const loc = this.R.locationId
     if (how === 'cycle') await this.R.rt.syncCycle(loc)
     else if (how === 'two') await Promise.all([this.R.rt.syncCycle(loc), this.R.rt.syncCycle(loc)])
     else if (how === 'webhook') {
       const o = c.realPayments[0]
-      await Promise.all([this.R.rt.syncCycle(loc), o ? this.R.rt.ingestOrder(loc, o.orderId) : Promise.resolve(undefined)])
+      await Promise.all([
+        this.R.rt.syncCycle(loc),
+        o ? this.R.rt.ingestOrder(loc, o.orderId) : Promise.resolve(undefined),
+      ])
     } else if (c.realPayments.length === 0 && c.strayStaff === 0) {
       // the cashier taps Collect while the poll is running; with no real payment behind it, it is a stray record
       const [, ev] = await Promise.all([this.R.rt.syncCycle(loc), this.staffCollect(c)])
@@ -207,11 +240,22 @@ export class SyncModel {
           .where('invoice_id', '=', c.inv.id)
           .where('type', '=', 'pay')
           .where('processor_state', '=', 'awaiting_processor')
-          .where((eb) => eb.not(eb.exists(eb.selectFrom('ledger_events as v').select('v.id').whereRef('v.voids_event_id', '=', 'ledger_events.id'))))
+          .where((eb) =>
+            eb.not(
+              eb.exists(
+                eb
+                  .selectFrom('ledger_events as v')
+                  .select('v.id')
+                  .whereRef('v.voids_event_id', '=', 'ledger_events.id'),
+              ),
+            ),
+          )
           .executeTakeFirst()
         if (!e) break
         const voided = await transaction(this.R.db, (tx) =>
-          this.service.voidPayment(tx, ctxFor(this.R.locationId, this.actor('rafael')), c.inv.id, { eventId: e.id }),
+          this.service.voidPayment(tx, ctxFor(this.R.locationId, this.actor('rafael')), c.inv.id, {
+            eventId: e.id,
+          }),
         ).then(
           () => true,
           () => false,
@@ -232,7 +276,11 @@ export class SyncModel {
         let staffEventId: string | null = null
         try {
           const res = await transaction(this.R.db, (tx) =>
-            this.service.refund(tx, ctxFor(this.R.locationId, this.actor(who)), c.inv.id, { mode: 'custom', amountCents: amount, dest: 'card' }),
+            this.service.refund(tx, ctxFor(this.R.locationId, this.actor(who)), c.inv.id, {
+              mode: 'custom',
+              amountCents: amount,
+              dest: 'card',
+            }),
           )
           staffEventId = res.event.id
           this.log(`staff refund ${amount} by ${who} -> ${res.event.status}`)
@@ -240,7 +288,13 @@ export class SyncModel {
           this.log(`staff refund ${amount} refused ${(e as { code?: string }).code}`)
           break
         }
-        const pair: Cust['refundPairs'][number] = { staffEventId, sqspRefundId: null, orderId: pay.orderId, amount, approvedAt: null }
+        const pair: Cust['refundPairs'][number] = {
+          staffEventId,
+          sqspRefundId: null,
+          orderId: pay.orderId,
+          amount,
+          approvedAt: null,
+        }
         c.refundPairs.push(pair)
         await this.finishRefund(c, pair)
         break
@@ -261,10 +315,17 @@ export class SyncModel {
 
   /** Approve a pending staff refund after a random delay and perform the refund in Squarespace at a random moment. */
   private async finishRefund(c: Cust, pair: Cust['refundPairs'][number]): Promise<void> {
-    const ev = await this.R.db.selectFrom('ledger_events').select('status').where('id', '=', pair.staffEventId!).executeTakeFirstOrThrow()
+    const ev = await this.R.db
+      .selectFrom('ledger_events')
+      .select('status')
+      .where('id', '=', pair.staffEventId!)
+      .executeTakeFirstOrThrow()
     const sqspFirst = this.chance(0.2)
     const doSqsp = () => {
-      pair.sqspRefundId = this.R.store.refund(pair.orderId, { amountCents: pair.amount, refundedOn: this.R.clock.now() })
+      pair.sqspRefundId = this.R.store.refund(pair.orderId, {
+        amountCents: pair.amount,
+        refundedOn: this.R.clock.now(),
+      })
       this.log(`squarespace refund ${pair.amount}`)
     }
     if (sqspFirst) doSqsp()
@@ -274,7 +335,12 @@ export class SyncModel {
       this.tick(wait)
       this.log(`approval after ${wait / H} h`)
       await transaction(this.R.db, (tx) =>
-        this.service.approveRefund(tx, ctxFor(this.R.locationId, this.actor('rafael')), c.inv.id, pair.staffEventId!),
+        this.service.approveRefund(
+          tx,
+          ctxFor(this.R.locationId, this.actor('rafael')),
+          c.inv.id,
+          pair.staffEventId!,
+        ),
       )
       pair.approvedAt = this.R.clock.now().getTime()
       this.log('approved')
@@ -292,8 +358,18 @@ export class SyncModel {
     const item = page.items.find((o) => o.queue.length > 0)
     if (!item) return
     const c = this.custs.find((x) => x.realPayments.some((p) => p.orderId === item.sqspOrderId))
-    const deps = { locationId: this.R.locationId, clock: this.R.clock, newId: this.R.newId, ops: new SqspLedgerOps({ locationId: this.R.locationId, clock: this.R.clock, newId: this.R.newId }), varianceAlertCents: 100 }
-    const actor = { userId: this.rafael.u.userId, employeeId: this.rafael.u.employeeId, name: this.rafael.u.name }
+    const deps = {
+      locationId: this.R.locationId,
+      clock: this.R.clock,
+      newId: this.R.newId,
+      ops: new SqspLedgerOps({ locationId: this.R.locationId, clock: this.R.clock, newId: this.R.newId }),
+      varianceAlertCents: 100,
+    }
+    const actor = {
+      userId: this.rafael.u.userId,
+      employeeId: this.rafael.u.employeeId,
+      name: this.rafael.u.name,
+    }
     try {
       if (!c || this.chance(0.2)) {
         await transaction(this.R.db, (tx) => manualIgnore(tx, deps, { orderId: item.sqspOrderId }, actor))
@@ -311,7 +387,14 @@ export class SyncModel {
         if (hasRefund && !STRICT) return
         const byEvent = waiting && this.chance(0.5)
         await transaction(this.R.db, (tx) =>
-          manualMatch(tx, deps, byEvent ? { orderId: item.sqspOrderId, eventId: waiting!.id } : { orderId: item.sqspOrderId, invoiceId: c.inv.id }, actor),
+          manualMatch(
+            tx,
+            deps,
+            byEvent
+              ? { orderId: item.sqspOrderId, eventId: waiting!.id }
+              : { orderId: item.sqspOrderId, invoiceId: c.inv.id },
+            actor,
+          ),
         )
         this.log(`manual match ${item.sqspOrderId.slice(-6)}`)
       }
@@ -347,33 +430,55 @@ export class SyncModel {
           occurred_at: Date
         }>`select id, type, amount_cents, status, source, method_kind, processor_state, processor_ref, sqsp_order_id, dest, occurred_at
            from ledger_events e where invoice_id = ${c.inv.id}
-             and not exists (select 1 from ledger_events v where v.voids_event_id = e.id) order by seq`.execute(db)
+             and not exists (select 1 from ledger_events v where v.voids_event_id = e.id) order by seq`.execute(
+          db,
+        )
       ).rows
-      const cardPays = evs.filter((e) => e.type === 'pay' && (e.method_kind === 'card' || e.method_kind === 'apple_pay'))
+      const cardPays = evs.filter(
+        (e) => e.type === 'pay' && (e.method_kind === 'card' || e.method_kind === 'apple_pay'),
+      )
       const realTotal = c.realPayments.reduce((a, p) => a + p.amount, 0)
       const paid = cardPays.reduce((a, e) => a + e.amount_cents, 0)
       if (cardPays.length > c.realPayments.length + c.strayStaff)
-        this.fail(`cust ${i}: ${cardPays.length} card payments in the ledger for ${c.realPayments.length} real payment(s) and ${c.strayStaff} stray staff record(s)\n${JSON.stringify(cardPays)}`)
+        this.fail(
+          `cust ${i}: ${cardPays.length} card payments in the ledger for ${c.realPayments.length} real payment(s) and ${c.strayStaff} stray staff record(s)\n${JSON.stringify(cardPays)}`,
+        )
       void paid
       void realTotal
       // every real refund is on the ledger at most once, counting the staff record of it and the sync's copy together
       for (const p of c.refundPairs) {
         if (!p.sqspRefundId) continue
         const copies = evs.filter(
-          (e) => e.type === 'refund' && e.status !== 'denied' && (e.id === p.staffEventId || e.processor_ref === p.sqspRefundId),
+          (e) =>
+            e.type === 'refund' &&
+            e.status !== 'denied' &&
+            (e.id === p.staffEventId || e.processor_ref === p.sqspRefundId),
         )
         if (copies.length > 1) {
-          const matches = await sql`select kind, rule, sqsp_txn_id, event_id, manual, created_at from sqsp_matches where sqsp_order_id = ${p.orderId} order by created_at, id`.execute(db)
-          const queue = await sql`select reason, state, sqsp_txn_id, created_at from sqsp_manual_queue where sqsp_order_id = ${p.orderId} order by created_at`.execute(db)
+          const matches =
+            await sql`select kind, rule, sqsp_txn_id, event_id, manual, created_at from sqsp_matches where sqsp_order_id = ${p.orderId} order by created_at, id`.execute(
+              db,
+            )
+          const queue =
+            await sql`select reason, state, sqsp_txn_id, created_at from sqsp_manual_queue where sqsp_order_id = ${p.orderId} order by created_at`.execute(
+              db,
+            )
           const allRefunds = evs.filter((e) => e.type === 'refund')
-          this.log(`DEBUG matches=${JSON.stringify(matches.rows)} queue=${JSON.stringify(queue.rows)} refunds=${JSON.stringify(allRefunds)}`)
+          this.log(
+            `DEBUG matches=${JSON.stringify(matches.rows)} queue=${JSON.stringify(queue.rows)} refunds=${JSON.stringify(allRefunds)}`,
+          )
         }
         if (copies.length > 1)
-          this.fail(`cust ${i}: the ${p.amount} refund (staff event ${p.staffEventId?.slice(-6)}, squarespace refund ${p.sqspRefundId.slice(-6)}) is on the ledger ${copies.length} times\n${JSON.stringify(copies)}`)
+          this.fail(
+            `cust ${i}: the ${p.amount} refund (staff event ${p.staffEventId?.slice(-6)}, squarespace refund ${p.sqspRefundId.slice(-6)}) is on the ledger ${copies.length} times\n${JSON.stringify(copies)}`,
+          )
       }
-      const refunded = evs.filter((e) => e.type === 'refund' && e.status === 'done').reduce((a, e) => a + e.amount_cents, 0)
+      const refunded = evs
+        .filter((e) => e.type === 'refund' && e.status === 'done')
+        .reduce((a, e) => a + e.amount_cents, 0)
       const intended = c.refundPairs.reduce((a, p) => a + p.amount, 0)
-      if (refunded > intended) this.fail(`cust ${i}: refunded ${refunded} on the ledger but only ${intended} intended/real`)
+      if (refunded > intended)
+        this.fail(`cust ${i}: refunded ${refunded} on the ledger but only ${intended} intended/real`)
     }
   }
 

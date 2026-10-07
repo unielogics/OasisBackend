@@ -121,7 +121,9 @@ export interface ReceiptResult {
 
 /** The refund to card or cash is larger than the original (non-credit) money still there to give back. */
 const capError = (dest: 'card' | 'cash', cap: number): AppError =>
-  new AppError(dest === 'card' ? 'REFUND_EXCEEDS_CARD' : 'REFUND_EXCEEDS_ORIGINAL', { params: { max: money(cap) } })
+  new AppError(dest === 'card' ? 'REFUND_EXCEEDS_CARD' : 'REFUND_EXCEEDS_ORIGINAL', {
+    params: { max: money(cap) },
+  })
 
 const forbid = (perm: string): AppError =>
   new AppError('FORBIDDEN', { meta: { required: [perm], mode: 'all' } })

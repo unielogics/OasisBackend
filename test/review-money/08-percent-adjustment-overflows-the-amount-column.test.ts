@@ -10,7 +10,9 @@ const p = usePayHarness()
 describe('adjustments cannot overflow the integer amount column', () => {
   it('a huge percent surcharge is a 4xx validation error, never a 500', async () => {
     const { amara } = p.people()
-    const inv = await makeInvoice(p.h.t.db, p.env(), { items: [{ name: 'Executive Detail', priceCents: 30000 }] })
+    const inv = await makeInvoice(p.h.t.db, p.env(), {
+      items: [{ name: 'Executive Detail', priceCents: 30000 }],
+    })
     const res = await p.send(amara, 'POST', `invoices/${inv.id}/adjustments`, {
       kind: 'surcharge',
       unit: '%',
@@ -18,7 +20,11 @@ describe('adjustments cannot overflow the integer amount column', () => {
     })
     expect(res.statusCode, res.body.slice(0, 200)).toBeLessThan(500)
     expect(res.statusCode).toBeGreaterThanOrEqual(400)
-    const rows = await p.h.t.db.selectFrom('ledger_events').select('id').where('invoice_id', '=', inv.id).execute()
+    const rows = await p.h.t.db
+      .selectFrom('ledger_events')
+      .select('id')
+      .where('invoice_id', '=', inv.id)
+      .execute()
     expect(rows).toHaveLength(0)
   })
 })

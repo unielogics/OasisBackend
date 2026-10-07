@@ -26,7 +26,10 @@ describe('an order whose first payment attempt failed and whose retry succeeded'
       email: 'liam@example.com',
       phone: '+13055550142',
     })
-    const inv = await makeInvoice(r.db, env, { customerId, items: [{ name: 'Full Detail', priceCents: 18900 }] })
+    const inv = await makeInvoice(r.db, env, {
+      customerId,
+      items: [{ name: 'Full Detail', priceCents: 18900 }],
+    })
     const order = r.store.createOrder({
       email: 'liam@example.com',
       name: 'Liam Chen',
@@ -38,7 +41,10 @@ describe('an order whose first payment attempt failed and whose retry succeeded'
     r.store.setState(order.orderId, { paymentState: 'FAILED' })
     r.advance(120_000)
     await r.rt.syncCycle(r.locationId)
-    const first = await r.db.selectFrom('sqsp_orders').select(['match_state', 'ignore_reason']).executeTakeFirstOrThrow()
+    const first = await r.db
+      .selectFrom('sqsp_orders')
+      .select(['match_state', 'ignore_reason'])
+      .executeTakeFirstOrThrow()
     expect(first).toEqual({ match_state: 'ignored', ignore_reason: 'payment_failed' })
 
     // the customer retries and the card goes through
@@ -48,10 +54,22 @@ describe('an order whose first payment attempt failed and whose retry succeeded'
       r.advance(120_000)
       await r.rt.syncCycle(r.locationId)
     }
-    const order2 = await r.db.selectFrom('sqsp_orders').select(['match_state', 'payment_state']).executeTakeFirstOrThrow()
+    const order2 = await r.db
+      .selectFrom('sqsp_orders')
+      .select(['match_state', 'payment_state'])
+      .executeTakeFirstOrThrow()
     expect(order2.payment_state).toBe('PAID')
-    const pays = await r.db.selectFrom('ledger_events').select('id').where('invoice_id', '=', inv.id).where('type', '=', 'pay').execute()
-    const queued = await r.db.selectFrom('sqsp_manual_queue').select('id').where('state', '=', 'open').execute()
+    const pays = await r.db
+      .selectFrom('ledger_events')
+      .select('id')
+      .where('invoice_id', '=', inv.id)
+      .where('type', '=', 'pay')
+      .execute()
+    const queued = await r.db
+      .selectFrom('sqsp_manual_queue')
+      .select('id')
+      .where('state', '=', 'open')
+      .execute()
     expect(order2.match_state, 'a paid order must not stay ignored').not.toBe('ignored')
     expect(pays.length + queued.length, 'the money is on the ledger or in the queue').toBeGreaterThan(0)
   })

@@ -19,10 +19,19 @@ describe('manual match of a non-USD order', () => {
     const env = await setupEnv({ db: r.db, clock: r.clock })
     await ensurePlans(r.db, { locationId: r.locationId, clock: r.clock, newId: r.newId })
     await transaction(r.db, (tx) =>
-      replaceProductRows(tx, { locationId: r.locationId, clock: r.clock, newId: r.newId }, [{ sku: 'DET-SEDAN', kind: 'service' }]),
+      replaceProductRows(tx, { locationId: r.locationId, clock: r.clock, newId: r.newId }, [
+        { sku: 'DET-SEDAN', kind: 'service' },
+      ]),
     )
-    const customerId = await makeCustomer(r.db, env, { name: 'Liam Chen', email: 'liam@example.com', phone: '+13055550142' })
-    const inv = await makeInvoice(r.db, env, { customerId, items: [{ name: 'Full Detail', priceCents: 18900 }] })
+    const customerId = await makeCustomer(r.db, env, {
+      name: 'Liam Chen',
+      email: 'liam@example.com',
+      phone: '+13055550142',
+    })
+    const inv = await makeInvoice(r.db, env, {
+      customerId,
+      items: [{ name: 'Full Detail', priceCents: 18900 }],
+    })
     const order = r.store.createOrder({
       email: 'liam@example.com',
       name: 'Liam Chen',
@@ -32,7 +41,11 @@ describe('manual match of a non-USD order', () => {
     })
     r.advance(120_000)
     await r.rt.syncCycle(r.locationId)
-    const q = await r.db.selectFrom('sqsp_manual_queue').select('reason').where('state', '=', 'open').execute()
+    const q = await r.db
+      .selectFrom('sqsp_manual_queue')
+      .select('reason')
+      .where('state', '=', 'open')
+      .execute()
     expect(q).toEqual([{ reason: 'currency_mismatch' }])
 
     const rafael = await makeUser(r.db, r.newId, 'Rafael')
@@ -44,12 +57,22 @@ describe('manual match of a non-USD order', () => {
       varianceAlertCents: 100,
     }
     const attempt = await transaction(r.db, (tx) =>
-      manualMatch(tx, deps, { orderId: order.orderId, invoiceId: inv.id }, { userId: rafael.userId, employeeId: rafael.employeeId, name: rafael.name }),
+      manualMatch(
+        tx,
+        deps,
+        { orderId: order.orderId, invoiceId: inv.id },
+        { userId: rafael.userId, employeeId: rafael.employeeId, name: rafael.name },
+      ),
     ).then(
       () => 'matched',
       (e: { code?: string }) => e.code ?? 'error',
     )
-    const pays = await r.db.selectFrom('ledger_events').select('amount_cents').where('invoice_id', '=', inv.id).where('type', '=', 'pay').execute()
+    const pays = await r.db
+      .selectFrom('ledger_events')
+      .select('amount_cents')
+      .where('invoice_id', '=', inv.id)
+      .where('type', '=', 'pay')
+      .execute()
     expect(pays, `manual match answered ${attempt}`).toHaveLength(0)
   })
 })

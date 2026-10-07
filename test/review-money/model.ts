@@ -152,13 +152,22 @@ export class Model {
         priceCents: this.int(1, 600) * this.pick([1, 7, 25, 100]),
         kind: i === 0 ? ('package' as const) : ('addon' as const),
       }))
-      const inv = await makeInvoice(this.db, env, { customerId, items, taxBp, tipCents: this.chance(0.3) ? this.int(0, 3000) : 0 })
+      const inv = await makeInvoice(this.db, env, {
+        customerId,
+        items,
+        taxBp,
+        tipCents: this.chance(0.3) ? this.int(0, 3000) : 0,
+      })
       const appointmentId = await makeAppointment(this.db, f, {
         customerId,
         serviceId,
         start: new Date('2026-06-13T10:30:00-04:00'),
       })
-      await this.db.updateTable('invoices').set({ appointment_id: appointmentId }).where('id', '=', inv.id).execute()
+      await this.db
+        .updateTable('invoices')
+        .set({ appointment_id: appointmentId })
+        .where('id', '=', inv.id)
+        .execute()
       this.invs.push({ id: inv.id, customerId, appointmentId, taxBp })
     }
     for (const w of WHO) {
@@ -166,7 +175,8 @@ export class Model {
       expect(d.statusCode).toBe(200)
       const me = d.json() as { permissions: Record<string, { on: boolean; limit?: number | null }> }
       const on = (k: string): boolean => me.permissions[k]?.on === true
-      const lim = (k: string): number | null => (on(k) ? (me.permissions[k]!.limit === undefined ? 2500 : me.permissions[k]!.limit!) : 0)
+      const lim = (k: string): number | null =>
+        on(k) ? (me.permissions[k]!.limit === undefined ? 2500 : me.permissions[k]!.limit!) : 0
       this.callers.set(w, {
         canCollect: on('pay.collect'),
         canRefund: on('pay.refund'),
@@ -196,9 +206,20 @@ export class Model {
   // --- reading state -----------------------------------------------------------------------------------------------
 
   private async load(invId: string): Promise<Row> {
-    const inv = await this.db.selectFrom('invoices').selectAll().where('id', '=', invId).executeTakeFirstOrThrow()
-    const items = await this.db.selectFrom('invoice_items').selectAll().where('invoice_id', '=', invId).orderBy('position').execute()
-    const evs = (await sql<Ev>`select * from ledger_events where invoice_id = ${invId} order by seq`.execute(this.db)).rows
+    const inv = await this.db
+      .selectFrom('invoices')
+      .selectAll()
+      .where('id', '=', invId)
+      .executeTakeFirstOrThrow()
+    const items = await this.db
+      .selectFrom('invoice_items')
+      .selectAll()
+      .where('invoice_id', '=', invId)
+      .orderBy('position')
+      .execute()
+    const evs = (
+      await sql<Ev>`select * from ledger_events where invoice_id = ${invId} order by seq`.execute(this.db)
+    ).rows
     return {
       inv,
       prices: items.map((i) => i.price_cents),
@@ -223,7 +244,12 @@ export class Model {
       } else if (e.type === 'void') {
         orig -= e.amount_cents
         if (isCard) card -= e.amount_cents
-      } else if (e.type === 'refund' && (e.status === 'done' || e.status === 'pending') && e.id !== exceptEvent && e.dest !== 'credit') {
+      } else if (
+        e.type === 'refund' &&
+        (e.status === 'done' || e.status === 'pending') &&
+        e.id !== exceptEvent &&
+        e.dest !== 'credit'
+      ) {
         orig -= e.amount_cents
         if (e.dest === 'card') card -= e.amount_cents
       }
@@ -239,15 +265,27 @@ export class Model {
   }
 
   private oc(row: Row): OracleCalc {
-    return oracleCalc({ tax_bp: row.inv.tax_bp, tip_cents: row.inv.tip_cents, canceled: row.inv.canceled_at !== null }, row.prices, row.evs)
+    return oracleCalc(
+      { tax_bp: row.inv.tax_bp, tip_cents: row.inv.tip_cents, canceled: row.inv.canceled_at !== null },
+      row.prices,
+      row.evs,
+    )
   }
 
   private async customerEvents(customerId: string): Promise<{ evs: Ev[]; allocs: Alloc[] }> {
-    const evs = (await sql<Ev>`select * from ledger_events where customer_id = ${customerId} order by seq`.execute(this.db)).rows.map((e) => ({
+    const evs = (
+      await sql<Ev>`select * from ledger_events where customer_id = ${customerId} order by seq`.execute(
+        this.db,
+      )
+    ).rows.map((e) => ({
       ...e,
       seq: Number(e.seq),
     }))
-    const allocs = (await sql<Alloc>`select apply_event_id, lot_event_id, cents from credit_allocations where customer_id = ${customerId}`.execute(this.db)).rows
+    const allocs = (
+      await sql<Alloc>`select apply_event_id, lot_event_id, cents from credit_allocations where customer_id = ${customerId}`.execute(
+        this.db,
+      )
+    ).rows
     return { evs, allocs }
   }
 
@@ -342,9 +380,14 @@ export class Model {
     return this.pick(this.invs)
   }
 
-  private expectStatus(res: { statusCode: number; body: string }, want: number | number[], what: string): void {
+  private expectStatus(
+    res: { statusCode: number; body: string },
+    want: number | number[],
+    what: string,
+  ): void {
     const ok = Array.isArray(want) ? want.includes(res.statusCode) : res.statusCode === want
-    if (!ok) this.fail(`${what}: expected ${JSON.stringify(want)}, got ${res.statusCode} ${res.body.slice(0, 300)}`)
+    if (!ok)
+      this.fail(`${what}: expected ${JSON.stringify(want)}, got ${res.statusCode} ${res.body.slice(0, 300)}`)
   }
 
   private async collect(): Promise<void> {
@@ -377,7 +420,9 @@ export class Model {
     const oc = this.oc(row)
     const bal = await this.creditBalance(inv.customerId)
     const res = await this.p.send(this.people[who], 'POST', `invoices/${inv.id}/credit-applications`, {})
-    this.log(`credit-apply ${who} inv=${inv.id.slice(-6)} balance=${oc.balance} credit=${bal} -> ${res.statusCode}`)
+    this.log(
+      `credit-apply ${who} inv=${inv.id.slice(-6)} balance=${oc.balance} credit=${bal} -> ${res.statusCode}`,
+    )
     if (!this.can(who, 'canCollect')) return this.expectStatus(res, 403, 'credit-apply without pay.collect')
     const use = Math.min(bal, oc.balance)
     if (use <= 0) return this.expectStatus(res, 422, 'credit-apply with nothing to apply')
@@ -387,7 +432,9 @@ export class Model {
   }
 
   private claimedItems(row: Row): Set<string> {
-    return new Set(row.evs.filter((e) => e.type === 'refund' && e.status !== 'denied').flatMap((e) => e.item_ids))
+    return new Set(
+      row.evs.filter((e) => e.type === 'refund' && e.status !== 'denied').flatMap((e) => e.item_ids),
+    )
   }
 
   private async refund(): Promise<void> {
@@ -432,7 +479,9 @@ export class Model {
       body = { mode, dest, amountCents: val }
     }
     const res = await this.p.send(this.people[who], 'POST', `invoices/${inv.id}/refunds`, body)
-    this.log(`refund ${who} ${mode} ${dest} val=${val} refundable=${oc.refundable} toOrig=${oc.toOrigMax} limit=${lim} -> ${res.statusCode}`)
+    this.log(
+      `refund ${who} ${mode} ${dest} val=${val} refundable=${oc.refundable} toOrig=${oc.toOrigMax} limit=${lim} -> ${res.statusCode}`,
+    )
     if (!this.can(who, 'canRefund')) return this.expectStatus(res, 403, 'refund without pay.refund')
     const before = row.evs.length
     if (mode === 'items' && itemsClaimed) {
@@ -458,7 +507,8 @@ export class Model {
     const cands: Array<{ inv: InvRef; ev: Ev; row: Row }> = []
     for (const inv of this.invs) {
       const row = await this.load(inv.id)
-      for (const ev of row.evs) if (ev.type === 'refund' && ev.status === 'pending') cands.push({ inv, ev, row })
+      for (const ev of row.evs)
+        if (ev.type === 'refund' && ev.status === 'pending') cands.push({ inv, ev, row })
     }
     return cands.length ? this.pick(cands) : null
   }
@@ -470,10 +520,18 @@ export class Model {
     const oc = this.oc(t.row)
     const lim = this.limit(who, 'refund')
     const requester = t.ev.actor_user_id ? this.userOf.get(t.ev.actor_user_id) : undefined
-    const res = await this.p.send(this.people[who], 'POST', `invoices/${t.inv.id}/refunds/${t.ev.id}/approve`, {})
-    this.log(`approve ${who} (limit ${lim}) amount=${t.ev.amount_cents} requester=${requester} -> ${res.statusCode} ${res.statusCode >= 400 ? (res.json() as { code?: string }).code : ''}`)
+    const res = await this.p.send(
+      this.people[who],
+      'POST',
+      `invoices/${t.inv.id}/refunds/${t.ev.id}/approve`,
+      {},
+    )
+    this.log(
+      `approve ${who} (limit ${lim}) amount=${t.ev.amount_cents} requester=${requester} -> ${res.statusCode} ${res.statusCode >= 400 ? (res.json() as { code?: string }).code : ''}`,
+    )
     if (!this.can(who, 'canRefund')) return this.expectStatus(res, 403, 'approve without pay.refund')
-    if (lim !== null && lim < t.ev.amount_cents) return this.expectStatus(res, 403, 'approve over the approver limit')
+    if (lim !== null && lim < t.ev.amount_cents)
+      return this.expectStatus(res, 403, 'approve over the approver limit')
     if (requester === who && lim !== null) return this.expectStatus(res, 403, 'self-approval')
     const withoutOwn = Math.max(0, oc.paid - oc.refunded - (oc.pendingAmt - t.ev.amount_cents))
     if (t.ev.amount_cents > this.capOf(t.row, oc, t.ev.dest!, t.ev.id) || t.ev.amount_cents > withoutOwn)
@@ -490,7 +548,12 @@ export class Model {
     const t = await this.pendingRefund()
     if (!t) return
     const who = this.pickWho()
-    const res = await this.p.send(this.people[who], 'POST', `invoices/${t.inv.id}/refunds/${t.ev.id}/deny`, {})
+    const res = await this.p.send(
+      this.people[who],
+      'POST',
+      `invoices/${t.inv.id}/refunds/${t.ev.id}/deny`,
+      {},
+    )
     this.log(`deny ${who} amount=${t.ev.amount_cents} -> ${res.statusCode}`)
     if (!this.can(who, 'canRefund')) return this.expectStatus(res, 403, 'deny without pay.refund')
     this.expectStatus(res, 200, 'deny')
@@ -511,7 +574,9 @@ export class Model {
     if (settle) body.settle = settle
     const res = await this.p.send(this.people[who], 'POST', `invoices/${inv.id}/adjustments`, body)
     const code = res.statusCode >= 400 ? (res.json() as { code?: string }).code : ''
-    this.log(`adjust ${who} ${kind} ${value}${unit} settle=${settle} items=${oc.items} adj=${oc.adj} paid=${oc.paid} -> ${res.statusCode} ${code}`)
+    this.log(
+      `adjust ${who} ${kind} ${value}${unit} settle=${settle} items=${oc.items} adj=${oc.adj} paid=${oc.paid} -> ${res.statusCode} ${code}`,
+    )
     if (!this.can(who, 'canAdjust')) return this.expectStatus(res, 403, 'adjust without pay.adjust')
     if (row.inv.canceled_at) return this.expectStatus(res, 409, 'adjust on a canceled invoice')
     const pre = unit === '%' ? Number((2n * BigInt(oc.items) * BigInt(value) + 10_000n) / 20_000n) : value
@@ -528,13 +593,16 @@ export class Model {
     const diff = oc.paid - oc.refunded - newTotal
     const settleVal = Math.min(diff, oc.refundable)
     const wantsSettlement = diff > 0 && oc.paid > 0 && settleVal > 0
-    if (wantsSettlement && settle === 'card' && settleVal > this.capOf(row, oc, 'card')) return this.expectStatus(res, 422, 'card settlement over the card cap')
+    if (wantsSettlement && settle === 'card' && settleVal > this.capOf(row, oc, 'card'))
+      return this.expectStatus(res, 422, 'card settlement over the card cap')
     this.expectStatus(res, 201, 'adjust')
     const after = await this.load(inv.id)
     const aft = this.oc(after)
     expect(aft.total, 'total after adjust (oracle on the new ledger)').toBe(newTotal)
     const maxBefore = row.evs.reduce((m, e) => Math.max(m, Number(e.seq)), 0)
-    const settlement = after.evs.find((e) => e.parent_event_id !== null && e.type === 'refund' && Number(e.seq) > maxBefore)
+    const settlement = after.evs.find(
+      (e) => e.parent_event_id !== null && e.type === 'refund' && Number(e.seq) > maxBefore,
+    )
     if (wantsSettlement) {
       expect(settlement, 'settlement refund').toBeDefined()
       if (settlement!.amount_cents !== settleVal)
@@ -553,7 +621,10 @@ export class Model {
     const amount = this.int(1, 30_000)
     const expiry = this.pick(['none', 'd30', 'd90'] as const)
     const before = this.clock.now()
-    const res = await this.p.send(this.people[who], 'POST', `invoices/${inv.id}/credits`, { amountCents: amount, expiry })
+    const res = await this.p.send(this.people[who], 'POST', `invoices/${inv.id}/credits`, {
+      amountCents: amount,
+      expiry,
+    })
     this.log(`issue-credit ${who} ${amount} ${expiry} -> ${res.statusCode}`)
     if (!this.can(who, 'canCredit')) return this.expectStatus(res, 403, 'credit without pay.credit')
     const lim = this.limit(who, 'credit')
@@ -565,7 +636,11 @@ export class Model {
     const days = expiry === 'd30' ? 30 : expiry === 'd90' ? 90 : 0
     if (days === 0) expect(ev.expires_at).toBeNull()
     else {
-      const want = DateTime.fromJSDate(before, { zone: 'America/New_York' }).startOf('day').plus({ days: days + 1 }).startOf('day').toJSDate()
+      const want = DateTime.fromJSDate(before, { zone: 'America/New_York' })
+        .startOf('day')
+        .plus({ days: days + 1 })
+        .startOf('day')
+        .toJSDate()
       expect(ev.expires_at?.toISOString()).toBe(want.toISOString())
     }
   }
@@ -581,13 +656,21 @@ export class Model {
     const already = row.evs.some((e) => e.voids_event_id === pay.id)
     const res = await this.p.send(this.people[who], 'POST', `invoices/${inv.id}/void`, { eventId: pay.id })
     const code = res.statusCode >= 400 ? (res.json() as { code?: string }).code : ''
-    this.log(`void ${who} pay=${pay.method_kind}/${pay.processor_state}/${pay.amount_cents} already=${already} -> ${res.statusCode} ${code}`)
+    this.log(
+      `void ${who} pay=${pay.method_kind}/${pay.processor_state}/${pay.amount_cents} already=${already} -> ${res.statusCode} ${code}`,
+    )
     if (!this.can(who, 'canVoid')) return this.expectStatus(res, 403, 'void without pay.void')
     if (already) return this.expectStatus(res, 409, 'double void')
-    if (pay.method_kind !== 'cash' && pay.processor_state !== 'awaiting_processor') return this.expectStatus(res, 422, 'void of confirmed card money')
-    if (oc.paid - pay.amount_cents - oc.refunded - oc.pendingAmt < 0) return this.expectStatus(res, 422, 'void of refunded money')
+    if (pay.method_kind !== 'cash' && pay.processor_state !== 'awaiting_processor')
+      return this.expectStatus(res, 422, 'void of confirmed card money')
+    if (oc.paid - pay.amount_cents - oc.refunded - oc.pendingAmt < 0)
+      return this.expectStatus(res, 422, 'void of refunded money')
     const cardMoney = pay.method_kind === 'card' || pay.method_kind === 'apple_pay'
-    if (STRICT && (this.origCap(row, 'cash') < pay.amount_cents || (cardMoney && this.origCap(row, 'card') < pay.amount_cents)))
+    if (
+      STRICT &&
+      (this.origCap(row, 'cash') < pay.amount_cents ||
+        (cardMoney && this.origCap(row, 'card') < pay.amount_cents))
+    )
       return this.expectStatus(res, 422, 'void that would leave refunds above the original payments')
     this.expectStatus(res, 201, 'void')
   }
@@ -604,7 +687,8 @@ export class Model {
     const perm = ev.type === 'refund' ? 'canRefund' : 'canCollect'
     if (!this.can(who, perm)) return this.expectStatus(res, 403, 'confirm without permission')
     const voided = row.evs.some((e) => e.voids_event_id === ev.id)
-    if (ev.processor_state !== 'awaiting_processor' || (voided && STRICT)) return this.expectStatus(res, 409, 'confirm of an event not awaiting')
+    if (ev.processor_state !== 'awaiting_processor' || (voided && STRICT))
+      return this.expectStatus(res, 409, 'confirm of an event not awaiting')
     this.expectStatus(res, 200, 'confirm')
   }
 
@@ -624,12 +708,23 @@ export class Model {
     const inv = this.anInvoice()
     const row = await this.load(inv.id)
     if (row.inv.canceled_at) return
-    const cur = await this.db.selectFrom('invoice_items').selectAll().where('invoice_id', '=', inv.id).orderBy('position').execute()
+    const cur = await this.db
+      .selectFrom('invoice_items')
+      .selectAll()
+      .where('invoice_id', '=', inv.id)
+      .orderBy('position')
+      .execute()
     let next = cur.map((i) => ({ name: i.name, priceCents: i.price_cents, kind: i.kind }))
     const op = this.pick(['add', 'remove', 'reprice'] as const)
-    if (op === 'add') next = [...next, { name: `Addon ${this.int(1, 99)}`, priceCents: this.int(100, 9000), kind: 'addon' as const }]
-    else if (op === 'remove' && next.length > 1) next = next.filter((_, i) => i !== this.int(1, next.length - 1))
-    else if (op === 'reprice') next = next.map((n, i) => (i === next.length - 1 ? { ...n, priceCents: this.int(100, 9000) } : n))
+    if (op === 'add')
+      next = [
+        ...next,
+        { name: `Addon ${this.int(1, 99)}`, priceCents: this.int(100, 9000), kind: 'addon' as const },
+      ]
+    else if (op === 'remove' && next.length > 1)
+      next = next.filter((_, i) => i !== this.int(1, next.length - 1))
+    else if (op === 'reprice')
+      next = next.map((n, i) => (i === next.length - 1 ? { ...n, priceCents: this.int(100, 9000) } : n))
     const oc = this.oc(row)
     // expected: a removal that leaves the invoice overpaid is refused (409); everything else goes through
     const removed = cur.length > next.length || op === 'reprice'
@@ -638,15 +733,20 @@ export class Model {
       next.map((n) => n.priceCents),
       row.evs,
     )
-    const changed = JSON.stringify(cur.map((i) => [i.kind, i.name, i.price_cents])) !== JSON.stringify(next.map((n) => [n.kind, n.name, n.priceCents]))
+    const changed =
+      JSON.stringify(cur.map((i) => [i.kind, i.name, i.price_cents])) !==
+      JSON.stringify(next.map((n) => [n.kind, n.name, n.priceCents]))
     let outcome = 'ok'
     try {
       await transaction(this.db, (tx) => this.gw.syncItems(tx, inv.appointmentId, next))
     } catch (e) {
       outcome = (e as { code?: string }).code ?? String(e)
     }
-    this.log(`items ${op} -> ${outcome} (items ${oc.items} -> ${would.items}, overpaid would be ${would.overpaid})`)
-    if (changed && removed && would.overpaid > 0) expect(outcome, 'item removal that overpays').toBe('ADDON_REMOVE_OVERPAID')
+    this.log(
+      `items ${op} -> ${outcome} (items ${oc.items} -> ${would.items}, overpaid would be ${would.overpaid})`,
+    )
+    if (changed && removed && would.overpaid > 0)
+      expect(outcome, 'item removal that overpays').toBe('ADDON_REMOVE_OVERPAID')
     else expect(outcome, 'item sync').toBe('ok')
   }
 
@@ -656,34 +756,59 @@ export class Model {
     this.log(`clock +${ms / 3_600_000}h -> ${this.clock.now().toISOString()}`)
     // the sessions idle out after 12 h
     const n = this.p.people()
-    for (const w of WHO) n[w].session = await this.p.h.login(n[w].user, `10.88.${this.int(1, 200)}.${this.int(1, 250)}`)
+    for (const w of WHO)
+      n[w].session = await this.p.h.login(n[w].user, `10.88.${this.int(1, 200)}.${this.int(1, 250)}`)
   }
 
   private async cancel(): Promise<void> {
     const inv = this.anInvoice()
     await transaction(this.db, (tx) =>
-      this.gw.cancelForAppointment(tx, inv.appointmentId, this.pick(['canceled', 'no_show'] as const), { userId: null, name: 'Model', roles: null }),
+      this.gw.cancelForAppointment(tx, inv.appointmentId, this.pick(['canceled', 'no_show'] as const), {
+        userId: null,
+        name: 'Model',
+        roles: null,
+      }),
     )
     this.log(`cancel inv=${inv.id.slice(-6)}`)
   }
 
   private async race(): Promise<void> {
-    const kind = this.pick(['two-refunds', 'approve-deny', 'two-approvals', 'confirm-void', 'two-credit-apply', 'refund-adjust', 'collect-collect'])
+    const kind = this.pick([
+      'two-refunds',
+      'approve-deny',
+      'two-approvals',
+      'confirm-void',
+      'two-credit-apply',
+      'refund-adjust',
+      'collect-collect',
+    ])
     const inv = this.anInvoice()
     const row = await this.load(inv.id)
     const oc = this.oc(row)
     const before = row.evs.length
-    const send = (who: Who, method: 'POST' | 'PUT', url: string, body: unknown, key?: string) => this.p.send(this.people[who], method, url, body, key)
+    const send = (who: Who, method: 'POST' | 'PUT', url: string, body: unknown, key?: string) =>
+      this.p.send(this.people[who], method, url, body, key)
     let results: Array<{ statusCode: number }> = []
     switch (kind) {
       case 'two-refunds': {
         const amt = Math.max(1, Math.floor(oc.refundable * 0.6))
         results = await Promise.all([
-          send('amara', 'POST', `invoices/${inv.id}/refunds`, { mode: 'custom', amountCents: amt, dest: 'credit' }),
-          send('rafael', 'POST', `invoices/${inv.id}/refunds`, { mode: 'custom', amountCents: amt, dest: 'credit' }),
+          send('amara', 'POST', `invoices/${inv.id}/refunds`, {
+            mode: 'custom',
+            amountCents: amt,
+            dest: 'credit',
+          }),
+          send('rafael', 'POST', `invoices/${inv.id}/refunds`, {
+            mode: 'custom',
+            amountCents: amt,
+            dest: 'credit',
+          }),
         ])
         if (oc.refundable > 0 && amt * 2 > oc.refundable && amt <= oc.refundable)
-          expect(results.filter((r) => r.statusCode === 201).length, 'two refunds of 60% each cannot both succeed').toBe(1)
+          expect(
+            results.filter((r) => r.statusCode === 201).length,
+            'two refunds of 60% each cannot both succeed',
+          ).toBe(1)
         break
       }
       case 'approve-deny': {
@@ -693,7 +818,10 @@ export class Model {
           send('amara', 'POST', `invoices/${t.inv.id}/refunds/${t.ev.id}/approve`, {}),
           send('rafael', 'POST', `invoices/${t.inv.id}/refunds/${t.ev.id}/deny`, {}),
         ])
-        expect(results.filter((r) => r.statusCode === 200).length, 'approve and deny of one request cannot both win').toBeLessThanOrEqual(1)
+        expect(
+          results.filter((r) => r.statusCode === 200).length,
+          'approve and deny of one request cannot both win',
+        ).toBeLessThanOrEqual(1)
         break
       }
       case 'two-approvals': {
@@ -703,7 +831,10 @@ export class Model {
           send('amara', 'POST', `invoices/${t.inv.id}/refunds/${t.ev.id}/approve`, {}),
           send('amara', 'POST', `invoices/${t.inv.id}/refunds/${t.ev.id}/approve`, {}),
         ])
-        expect(results.filter((r) => r.statusCode === 200).length, 'one request approved twice').toBeLessThanOrEqual(1)
+        expect(
+          results.filter((r) => r.statusCode === 200).length,
+          'one request approved twice',
+        ).toBeLessThanOrEqual(1)
         break
       }
       case 'confirm-void': {
@@ -713,7 +844,8 @@ export class Model {
           send('rafael', 'POST', `ledger-events/${pay.id}/confirm-processor`, {}),
           send('amara', 'POST', `invoices/${inv.id}/void`, { eventId: pay.id }),
         ])
-        if (STRICT) expect(results.filter((r) => r.statusCode < 300).length, 'confirm and void of one payment').toBe(1)
+        if (STRICT)
+          expect(results.filter((r) => r.statusCode < 300).length, 'confirm and void of one payment').toBe(1)
         break
       }
       case 'two-credit-apply': {
@@ -729,8 +861,17 @@ export class Model {
       case 'refund-adjust': {
         const amt = Math.max(1, oc.refundable)
         results = await Promise.all([
-          send('amara', 'POST', `invoices/${inv.id}/refunds`, { mode: 'custom', amountCents: amt, dest: 'credit' }),
-          send('amara', 'POST', `invoices/${inv.id}/adjustments`, { kind: 'discount', unit: '%', value: 1000, settle: 'credit' }),
+          send('amara', 'POST', `invoices/${inv.id}/refunds`, {
+            mode: 'custom',
+            amountCents: amt,
+            dest: 'credit',
+          }),
+          send('amara', 'POST', `invoices/${inv.id}/adjustments`, {
+            kind: 'discount',
+            unit: '%',
+            value: 1000,
+            settle: 'credit',
+          }),
         ])
         break
       }
@@ -739,7 +880,10 @@ export class Model {
           send('rafael', 'POST', `invoices/${inv.id}/payments`, { method: 'card' }),
           send('amara', 'POST', `invoices/${inv.id}/payments`, { method: 'cash' }),
         ])
-        expect(results.filter((r) => r.statusCode === 201).length, 'the balance cannot be collected twice').toBeLessThanOrEqual(1)
+        expect(
+          results.filter((r) => r.statusCode === 201).length,
+          'the balance cannot be collected twice',
+        ).toBeLessThanOrEqual(1)
         break
       }
     }
@@ -754,9 +898,27 @@ export class Model {
     if (oc.balance <= 0) return
     const key = freshKey()
     const who = this.pick(['rafael', 'amara', 'daniel'] as const)
-    const a = await this.p.send(this.people[who], 'POST', `invoices/${inv.id}/payments`, { method: 'cash' }, key)
-    const b = await this.p.send(this.people[who], 'POST', `invoices/${inv.id}/payments`, { method: 'cash' }, key)
-    const c = await this.p.send(this.people[who], 'POST', `invoices/${inv.id}/payments`, { method: 'card' }, key)
+    const a = await this.p.send(
+      this.people[who],
+      'POST',
+      `invoices/${inv.id}/payments`,
+      { method: 'cash' },
+      key,
+    )
+    const b = await this.p.send(
+      this.people[who],
+      'POST',
+      `invoices/${inv.id}/payments`,
+      { method: 'cash' },
+      key,
+    )
+    const c = await this.p.send(
+      this.people[who],
+      'POST',
+      `invoices/${inv.id}/payments`,
+      { method: 'card' },
+      key,
+    )
     this.log(`replay ${who} -> ${a.statusCode},${b.statusCode},${c.statusCode}`)
     this.expectStatus(a, 201, 'first send of a key')
     expect(b.statusCode).toBe(201)
@@ -770,11 +932,19 @@ export class Model {
   // --- invariants --------------------------------------------------------------------------------------------------
 
   private async snapshotLedger(): Promise<void> {
-    const rows = (await sql<Record<string, unknown>>`select * from ledger_events order by seq`.execute(this.db)).rows
+    const rows = (
+      await sql<Record<string, unknown>>`select * from ledger_events order by seq`.execute(this.db)
+    ).rows
     for (const r of rows) {
       const key = String(r.id)
       const frozen = JSON.stringify(
-        IMMUTABLE_COLS.map((c) => (r[c] instanceof Date ? (r[c] as Date).toISOString() : typeof r[c] === 'bigint' ? String(r[c]) : r[c])),
+        IMMUTABLE_COLS.map((c) =>
+          r[c] instanceof Date
+            ? (r[c] as Date).toISOString()
+            : typeof r[c] === 'bigint'
+              ? String(r[c])
+              : r[c],
+        ),
       )
       const prev = this.snapshot.get(key)
       if (prev !== undefined && prev !== frozen) this.fail(`ledger row ${key} changed an immutable column`)
@@ -783,7 +953,8 @@ export class Model {
       const ps = String(r.processor_state)
       const st = String(r.status)
       if (seen) {
-        if (seen.processor === 'confirmed' && ps !== 'confirmed') this.fail(`event ${key} left the confirmed state (${ps})`)
+        if (seen.processor === 'confirmed' && ps !== 'confirmed')
+          this.fail(`event ${key} left the confirmed state (${ps})`)
         if (seen.processor !== 'awaiting_processor' && ps === 'awaiting_processor' && seen.processor !== 'na')
           this.fail(`event ${key} went back to awaiting_processor from ${seen.processor}`)
         if (seen.status === 'done' && st !== 'done') this.fail(`event ${key} left status done (${st})`)
@@ -791,7 +962,8 @@ export class Model {
       }
       this.statusSeen.set(key, { processor: ps, status: st })
     }
-    for (const key of this.snapshot.keys()) if (!rows.some((r) => String(r.id) === key)) this.fail(`ledger row ${key} disappeared`)
+    for (const key of this.snapshot.keys())
+      if (!rows.some((r) => String(r.id) === key)) this.fail(`ledger row ${key} disappeared`)
   }
 
   async checkInvariants(): Promise<void> {
@@ -802,19 +974,34 @@ export class Model {
       const oc = this.oc(row)
       const res = await this.p.get(this.people.amara, `invoices/${inv.id}`)
       this.expectStatus(res, 200, 'invoice detail')
-      const d = res.json() as { calc: Record<string, number | string>; clientCredit: { balanceCents: number } }
+      const d = res.json() as {
+        calc: Record<string, number | string>
+        clientCredit: { balanceCents: number }
+      }
       for (const k of Object.keys(oc) as Array<keyof OracleCalc>) {
-        if (d.calc[k] !== oc[k]) this.fail(`calc.${k}: api=${String(d.calc[k])} oracle=${String(oc[k])} (inv ${inv.id.slice(-6)})`)
+        if (d.calc[k] !== oc[k])
+          this.fail(`calc.${k}: api=${String(d.calc[k])} oracle=${String(oc[k])} (inv ${inv.id.slice(-6)})`)
       }
       // balance, refunds and the caps
       if (oc.balance < 0) this.fail('negative balance')
-      if (oc.refunded + oc.pendingAmt > oc.paid) this.fail(`refunds ${oc.refunded}+${oc.pendingAmt} exceed what was paid ${oc.paid}`)
+      if (oc.refunded + oc.pendingAmt > oc.paid)
+        this.fail(`refunds ${oc.refunded}+${oc.pendingAmt} exceed what was paid ${oc.paid}`)
       if (oc.paid < 0) this.fail(`negative paid ${oc.paid}`)
       if (STRICT) {
-        if (oc.refOrig > oc.paidOrig) this.fail(`refunds to the original payments ${oc.refOrig} exceed ${oc.paidOrig}`)
-        const cardPaid = row.evs.filter((e) => (e.type === 'pay' || e.type === 'void') && (e.method_kind === 'card' || e.method_kind === 'apple_pay')).reduce((a, e) => a + (e.type === 'pay' ? e.amount_cents : -e.amount_cents), 0)
-        const cardRefunded = row.evs.filter((e) => e.type === 'refund' && e.status === 'done' && e.dest === 'card').reduce((a, e) => a + e.amount_cents, 0)
-        if (cardRefunded > cardPaid) this.fail(`card refunds ${cardRefunded} exceed card payments ${cardPaid}`)
+        if (oc.refOrig > oc.paidOrig)
+          this.fail(`refunds to the original payments ${oc.refOrig} exceed ${oc.paidOrig}`)
+        const cardPaid = row.evs
+          .filter(
+            (e) =>
+              (e.type === 'pay' || e.type === 'void') &&
+              (e.method_kind === 'card' || e.method_kind === 'apple_pay'),
+          )
+          .reduce((a, e) => a + (e.type === 'pay' ? e.amount_cents : -e.amount_cents), 0)
+        const cardRefunded = row.evs
+          .filter((e) => e.type === 'refund' && e.status === 'done' && e.dest === 'card')
+          .reduce((a, e) => a + e.amount_cents, 0)
+        if (cardRefunded > cardPaid)
+          this.fail(`card refunds ${cardRefunded} exceed card payments ${cardPaid}`)
       }
       // the approvals rules on every resolved refund
       for (const e of row.evs) {
@@ -825,15 +1012,21 @@ export class Model {
           const requester = e.actor_user_id ? this.userOf.get(e.actor_user_id) : undefined
           if (!approver) this.fail('approver unknown')
           const lim = this.limit(approver!, 'refund')
-          if (lim !== null && lim < e.amount_cents) this.fail(`refund of ${e.amount_cents} approved by ${approver} whose limit is ${lim}`)
+          if (lim !== null && lim < e.amount_cents)
+            this.fail(`refund of ${e.amount_cents} approved by ${approver} whose limit is ${lim}`)
           if (requester === approver && lim !== null) this.fail('self-approval slipped through')
         }
-        if (e.status === 'denied' && e.processor_state !== 'na') this.fail('a denied refund waits on the processor')
+        if (e.status === 'denied' && e.processor_state !== 'na')
+          this.fail('a denied refund waits on the processor')
       }
       // the awaiting counters never include reversed money (known defect 1)
       if (STRICT) {
         for (const e of row.evs) {
-          if (e.type === 'pay' && e.processor_state === 'awaiting_processor' && row.evs.some((v) => v.voids_event_id === e.id))
+          if (
+            e.type === 'pay' &&
+            e.processor_state === 'awaiting_processor' &&
+            row.evs.some((v) => v.voids_event_id === e.id)
+          )
             this.fail(`voided payment ${e.id} still awaits the processor`)
         }
       }
@@ -841,7 +1034,8 @@ export class Model {
       const { evs, allocs } = await this.customerEvents(inv.customerId)
       const rep = creditOracle(evs, allocs, now)
       if (rep.problems.length) this.fail(`store credit: ${rep.problems.join('; ')}`)
-      if (d.clientCredit.balanceCents !== rep.balance) this.fail(`client credit balance api=${d.clientCredit.balanceCents} oracle=${rep.balance}`)
+      if (d.clientCredit.balanceCents !== rep.balance)
+        this.fail(`client credit balance api=${d.clientCredit.balanceCents} oracle=${rep.balance}`)
       const outside = allocs.filter((a) => a.cents <= 0)
       if (outside.length) this.fail('non-positive allocation')
       const spent = evs.filter((e) => e.type === 'credit_apply').reduce((a, e) => a + e.amount_cents, 0)
@@ -857,57 +1051,106 @@ export class Model {
     const rangeKey = this.pick(['7d', '30d', 'mtd', 'today'] as const)
     const sum = (await this.p.get(this.people.amara, `payments/summary?range=${rangeKey}`)).json() as {
       range: { from: string; to: string }
-      kpis: { grossSales: number; netRevenue: number; refunds: number; adjustments: number; creditsIssued: number; outstanding: number; counts: { invoices: number; refunded: number; adjusted: number; openBalances: number } }
+      kpis: {
+        grossSales: number
+        netRevenue: number
+        refunds: number
+        adjustments: number
+        creditsIssued: number
+        outstanding: number
+        counts: { invoices: number; refunded: number; adjusted: number; openBalances: number }
+      }
       byMethod: Record<string, number>
     }
     const rows: Array<{ inv: InvRef; row: Row; oc: OracleCalc; bizDate: string }> = []
     for (const inv of this.invs) {
       const row = await this.load(inv.id)
-      const b = await this.db.selectFrom('invoices').select(sql<string>`biz_date::text`.as('d')).where('id', '=', inv.id).executeTakeFirstOrThrow()
-      if (b.d >= sum.range.from && b.d <= sum.range.to) rows.push({ inv, row, oc: this.oc(row), bizDate: b.d })
+      const b = await this.db
+        .selectFrom('invoices')
+        .select(sql<string>`biz_date::text`.as('d'))
+        .where('id', '=', inv.id)
+        .executeTakeFirstOrThrow()
+      if (b.d >= sum.range.from && b.d <= sum.range.to)
+        rows.push({ inv, row, oc: this.oc(row), bizDate: b.d })
     }
     const tot = (f: (r: { oc: OracleCalc }) => number): number => rows.reduce((a, r) => a + f(r), 0)
     const k = sum.kpis
     const mism: string[] = []
-    if (k.grossSales !== tot((r) => r.oc.items)) mism.push(`grossSales ${k.grossSales} vs ${tot((r) => r.oc.items)}`)
-    if (k.adjustments !== tot((r) => r.oc.adj)) mism.push(`adjustments ${k.adjustments} vs ${tot((r) => r.oc.adj)}`)
-    if (k.refunds !== tot((r) => r.oc.refunded)) mism.push(`refunds ${k.refunds} vs ${tot((r) => r.oc.refunded)}`)
-    if (k.outstanding !== tot((r) => r.oc.balance)) mism.push(`outstanding ${k.outstanding} vs ${tot((r) => r.oc.balance)}`)
-    if (k.creditsIssued !== tot((r) => r.oc.issued)) mism.push(`creditsIssued ${k.creditsIssued} vs ${tot((r) => r.oc.issued)}`)
+    if (k.grossSales !== tot((r) => r.oc.items))
+      mism.push(`grossSales ${k.grossSales} vs ${tot((r) => r.oc.items)}`)
+    if (k.adjustments !== tot((r) => r.oc.adj))
+      mism.push(`adjustments ${k.adjustments} vs ${tot((r) => r.oc.adj)}`)
+    if (k.refunds !== tot((r) => r.oc.refunded))
+      mism.push(`refunds ${k.refunds} vs ${tot((r) => r.oc.refunded)}`)
+    if (k.outstanding !== tot((r) => r.oc.balance))
+      mism.push(`outstanding ${k.outstanding} vs ${tot((r) => r.oc.balance)}`)
+    if (k.creditsIssued !== tot((r) => r.oc.issued))
+      mism.push(`creditsIssued ${k.creditsIssued} vs ${tot((r) => r.oc.issued)}`)
     if (k.counts.invoices !== rows.length) mism.push(`invoice count ${k.counts.invoices} vs ${rows.length}`)
     if (k.counts.openBalances !== rows.filter((r) => r.oc.balance > 0).length) mism.push('openBalances')
     // net: refunds lose their tax part once per tax rate, half-up on the aggregate
     const byRate = new Map<number, bigint>()
-    for (const r of rows) byRate.set(r.row.inv.tax_bp, (byRate.get(r.row.inv.tax_bp) ?? 0n) + BigInt(r.oc.refunded))
+    for (const r of rows)
+      byRate.set(r.row.inv.tax_bp, (byRate.get(r.row.inv.tax_bp) ?? 0n) + BigInt(r.oc.refunded))
     let refundNet = 0n
-    for (const [bp, amt] of byRate) refundNet += (2n * amt * 10_000n + BigInt(10_000 + bp)) / (2n * BigInt(10_000 + bp))
+    for (const [bp, amt] of byRate)
+      refundNet += (2n * amt * 10_000n + BigInt(10_000 + bp)) / (2n * BigInt(10_000 + bp))
     const wantNet = Number(BigInt(tot((r) => r.oc.items + r.oc.adj)) - refundNet)
     if (k.netRevenue !== wantNet) mism.push(`netRevenue ${k.netRevenue} vs ${wantNet}`)
     if (mism.length) this.fail(`summary ${rangeKey}: ${mism.join('; ')}`)
 
     // table vs CSV
-    const list = (await this.p.get(this.people.amara, `payments/invoices?range=${rangeKey}&limit=500`)).json() as {
-      items: Array<{ id: string; label: string; totalCents: number; paidCents: number; balanceCents: number; statusLabel: string; bizDate: string }>
+    const list = (
+      await this.p.get(this.people.amara, `payments/invoices?range=${rangeKey}&limit=500`)
+    ).json() as {
+      items: Array<{
+        id: string
+        label: string
+        totalCents: number
+        paidCents: number
+        balanceCents: number
+        statusLabel: string
+        bizDate: string
+      }>
     }
-    if (list.items.length !== rows.length) this.fail(`table has ${list.items.length} rows, oracle ${rows.length}`)
+    if (list.items.length !== rows.length)
+      this.fail(`table has ${list.items.length} rows, oracle ${rows.length}`)
     const csvRes = await this.p.get(this.people.amara, `payments/export.csv?range=${rangeKey}`)
-    const lines = csvRes.body.replace(/^\uFEFF/, '').split('\r\n').filter(Boolean)
+    const lines = csvRes.body
+      .replace(/^\uFEFF/, '')
+      .split('\r\n')
+      .filter(Boolean)
     const header = lines[0]!.split(',')
     const col = (n: string): number => header.indexOf(n)
-    if (lines.length - 1 !== list.items.length) this.fail(`csv has ${lines.length - 1} rows, table ${list.items.length}`)
+    if (lines.length - 1 !== list.items.length)
+      this.fail(`csv has ${lines.length - 1} rows, table ${list.items.length}`)
     const cents = (txt: string): number => Math.round(Number(txt) * 100)
     for (const [i, item] of list.items.entries()) {
       const cells = lines[i + 1]!.split(',')
       const o = rows.find((r) => r.inv.id === item.id)!.oc
-      if (cells[col('Invoice')] !== item.label) this.fail(`csv row ${i} is ${cells[col('Invoice')]}, table ${item.label}`)
-      if (cents(cells[col('Total')]!) !== item.totalCents || item.totalCents !== o.total) this.fail(`csv/table/oracle total differ for ${item.label}`)
-      if (cents(cells[col('Paid')]!) !== item.paidCents || item.paidCents !== o.paid) this.fail(`csv/table/oracle paid differ for ${item.label}`)
-      if (cents(cells[col('Balance')]!) !== item.balanceCents || item.balanceCents !== o.balance) this.fail(`csv/table/oracle balance differ for ${item.label}`)
-      if (cents(cells[col('Net revenue')]!) !== o.net) this.fail(`csv net differs from oracle for ${item.label}: ${cells[col('Net revenue')]} vs ${o.net}`)
+      if (cells[col('Invoice')] !== item.label)
+        this.fail(`csv row ${i} is ${cells[col('Invoice')]}, table ${item.label}`)
+      if (cents(cells[col('Total')]!) !== item.totalCents || item.totalCents !== o.total)
+        this.fail(`csv/table/oracle total differ for ${item.label}`)
+      if (cents(cells[col('Paid')]!) !== item.paidCents || item.paidCents !== o.paid)
+        this.fail(`csv/table/oracle paid differ for ${item.label}`)
+      if (cents(cells[col('Balance')]!) !== item.balanceCents || item.balanceCents !== o.balance)
+        this.fail(`csv/table/oracle balance differ for ${item.label}`)
+      if (cents(cells[col('Net revenue')]!) !== o.net)
+        this.fail(`csv net differs from oracle for ${item.label}: ${cells[col('Net revenue')]} vs ${o.net}`)
     }
     // collected by method: pays by tender (voids back out) plus store credit applied, for invoices of the range
     const want: Record<string, number> = { card: 0, applePay: 0, cash: 0, storeCredit: 0, other: 0 }
-    const key = (m: string | null): string => (m === 'card' ? 'card' : m === 'apple_pay' ? 'applePay' : m === 'cash' ? 'cash' : m === 'store_credit' ? 'storeCredit' : 'other')
+    const key = (m: string | null): string =>
+      m === 'card'
+        ? 'card'
+        : m === 'apple_pay'
+          ? 'applePay'
+          : m === 'cash'
+            ? 'cash'
+            : m === 'store_credit'
+              ? 'storeCredit'
+              : 'other'
     for (const r of rows) {
       for (const e of r.row.evs) {
         if (e.type === 'pay') want[key(e.method_kind)] = want[key(e.method_kind)]! + e.amount_cents
@@ -915,13 +1158,16 @@ export class Model {
         else if (e.type === 'credit_apply') want.storeCredit = want.storeCredit! + e.amount_cents
       }
     }
-    for (const kk of Object.keys(want)) if ((sum.byMethod[kk] ?? 0) !== want[kk]) this.fail(`byMethod.${kk} ${sum.byMethod[kk]} vs ${want[kk]}`)
+    for (const kk of Object.keys(want))
+      if ((sum.byMethod[kk] ?? 0) !== want[kk]) this.fail(`byMethod.${kk} ${sum.byMethod[kk]} vs ${want[kk]}`)
   }
 
   private async checkRevenue(): Promise<void> {
     const loc = this.p.env().locationId
     const now = this.clock.now()
-    const all = (await sql<Ev>`select * from ledger_events where location_id = ${loc} order by seq`.execute(this.db)).rows
+    const all = (
+      await sql<Ev>`select * from ledger_events where location_id = ${loc} order by seq`.execute(this.db)
+    ).rows
     const windows: Array<[Date, Date]> = [
       [new Date(now.getTime() - 86_400_000), new Date(now.getTime() + 1)],
       [new Date(now.getTime() - 10 * 86_400_000), new Date(now.getTime() - 3_600_000)],
@@ -932,14 +1178,16 @@ export class Model {
       for (const e of all) {
         const a = BigInt(e.amount_cents)
         const at = e.occurred_at.getTime()
-        if ((e.type === 'pay' || e.type === 'void') && at >= from.getTime() && at < to.getTime()) cents += e.type === 'pay' ? a : -a
+        if ((e.type === 'pay' || e.type === 'void') && at >= from.getTime() && at < to.getTime())
+          cents += e.type === 'pay' ? a : -a
         if (e.type === 'refund' && e.status === 'done' && e.dest !== 'credit') {
           const t = (e.resolved_at ?? e.occurred_at).getTime()
           if (t >= from.getTime() && t < to.getTime()) cents -= a
         }
       }
       const got = await ledgerRevenueSource.revenueCents(this.db, loc, from, to)
-      if (got !== Number(cents)) this.fail(`revenue [${from.toISOString()}, ${to.toISOString()}) api=${got} oracle=${Number(cents)}`)
+      if (got !== Number(cents))
+        this.fail(`revenue [${from.toISOString()}, ${to.toISOString()}) api=${got} oracle=${Number(cents)}`)
     }
   }
 }

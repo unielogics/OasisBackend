@@ -17,8 +17,17 @@ describe('reopen revives the invoice', () => {
     const f = await setupLocation(t)
     const gw = createInvoiceGateway({ clock: t.clock, newId: createIdGenerator(t.clock) })
     const customerId = await makeCustomer(t.db, f, { name: 'Priya Nair' })
-    const serviceId = await makeService(t.db, f, { kind: 'package', name: 'Express Hand Wash', priceCents: 4500, durationMin: 45 })
-    const appointmentId = await makeAppointment(t.db, f, { customerId, serviceId, start: edt('2026-06-13', '10:30') })
+    const serviceId = await makeService(t.db, f, {
+      kind: 'package',
+      name: 'Express Hand Wash',
+      priceCents: 4500,
+      durationMin: 45,
+    })
+    const appointmentId = await makeAppointment(t.db, f, {
+      customerId,
+      serviceId,
+      start: edt('2026-06-13', '10:30'),
+    })
     const input: EnsureInvoiceInput = {
       appointmentId,
       locationId: f.locationId,
@@ -32,13 +41,20 @@ describe('reopen revives the invoice', () => {
       addons: [],
     }
     const first = await transaction(t.db, (tx) => gw.ensureForAppointment(tx, input))
-    await addEvent(t.db, { location: f.location, locationId: f.locationId, newId: f.newId }, { id: first.invoiceId, customerId }, {
-      type: 'pay',
-      amountCents: 1000,
-      method: 'Cash',
-      methodKind: 'cash',
-    })
-    const canceled = await transaction(t.db, (tx) => gw.cancelForAppointment(tx, appointmentId, 'canceled', { userId: null, name: 'Sofia D.' }))
+    await addEvent(
+      t.db,
+      { location: f.location, locationId: f.locationId, newId: f.newId },
+      { id: first.invoiceId, customerId },
+      {
+        type: 'pay',
+        amountCents: 1000,
+        method: 'Cash',
+        methodKind: 'cash',
+      },
+    )
+    const canceled = await transaction(t.db, (tx) =>
+      gw.cancelForAppointment(tx, appointmentId, 'canceled', { userId: null, name: 'Sofia D.' }),
+    )
     expect(canceled?.status).toBe('canceled_kept')
 
     // lifecycle.reopenAppointment: the appointment is booked again and the invoice is ensured again

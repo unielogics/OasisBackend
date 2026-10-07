@@ -23,11 +23,20 @@ describe('manual matching of a refund', () => {
     const env = await setupEnv({ db: r.db, clock: r.clock })
     await ensurePlans(r.db, { locationId: r.locationId, clock: r.clock, newId: r.newId })
     await transaction(r.db, (tx) =>
-      replaceProductRows(tx, { locationId: r.locationId, clock: r.clock, newId: r.newId }, [{ sku: 'DET-SEDAN', kind: 'service' }]),
+      replaceProductRows(tx, { locationId: r.locationId, clock: r.clock, newId: r.newId }, [
+        { sku: 'DET-SEDAN', kind: 'service' },
+      ]),
     )
     // the customer's contact on file differs from the one on the Squarespace order (work email, other phone)
-    const customerId = await makeCustomer(r.db, env, { name: 'Liam Chen', email: 'liam@example.com', phone: '+13055550142' })
-    const inv = await makeInvoice(r.db, env, { customerId, items: [{ name: 'Full Detail', priceCents: 18900 }] })
+    const customerId = await makeCustomer(r.db, env, {
+      name: 'Liam Chen',
+      email: 'liam@example.com',
+      phone: '+13055550142',
+    })
+    const inv = await makeInvoice(r.db, env, {
+      customerId,
+      items: [{ name: 'Full Detail', priceCents: 18900 }],
+    })
     const order = r.store.createOrder({
       email: 'liam.work@acme.example',
       name: 'Liam Chen',
@@ -35,7 +44,14 @@ describe('manual matching of a refund', () => {
       lineItems: [{ productId: 'p', sku: 'DET-SEDAN', name: 'Full Detail', unitCents: 18900 }],
       taxCents: 1323,
     })
-    await addEvent(r.db, env, inv, { type: 'pay', amountCents: 20223, method: 'Visa', methodKind: 'card', processorState: 'confirmed', at: r.clock.now() })
+    await addEvent(r.db, env, inv, {
+      type: 'pay',
+      amountCents: 20223,
+      method: 'Visa',
+      methodKind: 'card',
+      processorState: 'confirmed',
+      at: r.clock.now(),
+    })
     await r.db
       .updateTable('ledger_events')
       .set({ sqsp_order_id: order.orderId, processor_ref: order.paymentId ?? null })
@@ -58,7 +74,11 @@ describe('manual matching of a refund', () => {
     r.store.refund(order.orderId, { amountCents: 6000, refundedOn: r.clock.now() })
     r.advance(120_000)
     await r.rt.syncCycle(r.locationId)
-    const queued = await r.db.selectFrom('sqsp_manual_queue').select(['reason', 'state']).where('state', '=', 'open').execute()
+    const queued = await r.db
+      .selectFrom('sqsp_manual_queue')
+      .select(['reason', 'state'])
+      .where('state', '=', 'open')
+      .execute()
     expect(queued.length, 'the unpairable refund waits in the queue').toBe(1)
 
     // staff pick "match to invoice" for it
@@ -70,12 +90,22 @@ describe('manual matching of a refund', () => {
       varianceAlertCents: 100,
     }
     const attempt = await transaction(r.db, (tx) =>
-      manualMatch(tx, deps, { orderId: order.orderId, invoiceId: inv.id }, { userId: rafael.userId, employeeId: rafael.employeeId, name: rafael.name }),
+      manualMatch(
+        tx,
+        deps,
+        { orderId: order.orderId, invoiceId: inv.id },
+        { userId: rafael.userId, employeeId: rafael.employeeId, name: rafael.name },
+      ),
     ).then(
       () => 'matched',
       (e: { code?: string }) => e.code ?? 'error',
     )
-    const refunds = await r.db.selectFrom('ledger_events').select(['id', 'amount_cents', 'source']).where('invoice_id', '=', inv.id).where('type', '=', 'refund').execute()
+    const refunds = await r.db
+      .selectFrom('ledger_events')
+      .select(['id', 'amount_cents', 'source'])
+      .where('invoice_id', '=', inv.id)
+      .where('type', '=', 'refund')
+      .execute()
     expect(refunds, `manual match answered ${attempt}`).toHaveLength(1)
   })
 })

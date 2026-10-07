@@ -151,9 +151,12 @@ export interface CreditReport {
  */
 export function creditOracle(events: readonly Ev[], allocs: readonly Alloc[], now: Date): CreditReport {
   const problems: string[] = []
-  const lots = events.filter((e) => e.type === 'credit_issue' || (e.type === 'refund' && e.dest === 'credit' && e.status === 'done'))
+  const lots = events.filter(
+    (e) => e.type === 'credit_issue' || (e.type === 'refund' && e.dest === 'credit' && e.status === 'done'),
+  )
   const eff = (e: Ev): number => (e.resolved_at ?? e.occurred_at).getTime()
-  const exp = (e: Ev): number => (e.type === 'credit_issue' && e.expires_at ? e.expires_at.getTime() : Number.POSITIVE_INFINITY)
+  const exp = (e: Ev): number =>
+    e.type === 'credit_issue' && e.expires_at ? e.expires_at.getTime() : Number.POSITIVE_INFINITY
   const remaining = new Map<string, number>(lots.map((l) => [l.id, l.amount_cents]))
   const applies = events.filter((e) => e.type === 'credit_apply').sort((a, b) => seqOf(a) - seqOf(b))
   for (const a of applies) {
@@ -172,10 +175,13 @@ export function creditOracle(events: readonly Ev[], allocs: readonly Alloc[], no
     }
     if (left > 0) problems.push(`apply ${a.id} of ${a.amount_cents} exceeds the usable credit by ${left}`)
     const actual = new Map<string, number>()
-    for (const al of allocs.filter((x) => x.apply_event_id === a.id)) actual.set(al.lot_event_id, (actual.get(al.lot_event_id) ?? 0) + al.cents)
+    for (const al of allocs.filter((x) => x.apply_event_id === a.id))
+      actual.set(al.lot_event_id, (actual.get(al.lot_event_id) ?? 0) + al.cents)
     const key = (m: Map<string, number>): string => JSON.stringify([...m.entries()].sort())
     if (key(expected) !== key(actual))
-      problems.push(`apply ${a.id}: stored allocation ${key(actual)} differs from the FIFO replay ${key(expected)}`)
+      problems.push(
+        `apply ${a.id}: stored allocation ${key(actual)} differs from the FIFO replay ${key(expected)}`,
+      )
     for (const [lot, c] of expected) remaining.set(lot, (remaining.get(lot) ?? 0) - c)
   }
   // the spendable balance is read from what is actually stored, so a replay mismatch cannot hide a wrong balance

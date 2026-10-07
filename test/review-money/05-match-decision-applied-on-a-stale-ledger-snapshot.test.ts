@@ -31,7 +31,10 @@ describe('the sync does not double count money the cashier recorded while it was
       email: 'liam@example.com',
       phone: '+13055550142',
     })
-    const inv = await makeInvoice(r.db, env, { customerId, items: [{ name: 'Full Detail', priceCents: 18900 }] })
+    const inv = await makeInvoice(r.db, env, {
+      customerId,
+      items: [{ name: 'Full Detail', priceCents: 18900 }],
+    })
     const service = new PaymentsService({ clock: r.clock, newId: r.newId, ports: defaultPorts() })
     const rafael = await makeUser(r.db, r.newId, 'Rafael')
     const actor = stubActor(rafael, { refund: null, adjust: null, credit: null })
@@ -65,7 +68,9 @@ describe('the sync does not double count money the cashier recorded while it was
         const ctx = await parts.ledger.loadContext(q)
         if (!raced) {
           raced = true
-          await transaction(r.db, (tx) => service.collect(tx, ctxFor(r.locationId, actor), inv.id, { method: 'card' }))
+          await transaction(r.db, (tx) =>
+            service.collect(tx, ctxFor(r.locationId, actor), inv.id, { method: 'card' }),
+          )
         }
         return ctx
       },

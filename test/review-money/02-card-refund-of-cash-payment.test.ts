@@ -11,7 +11,9 @@ const p = usePayHarness()
 describe('a refund to card is capped by what was paid by card', () => {
   it('refuses a card refund on an invoice paid only in cash', async () => {
     const { rafael } = p.people()
-    const inv = await makeInvoice(p.h.t.db, p.env(), { items: [{ name: 'Express Hand Wash', priceCents: 10000 }] })
+    const inv = await makeInvoice(p.h.t.db, p.env(), {
+      items: [{ name: 'Express Hand Wash', priceCents: 10000 }],
+    })
     const cash = await p.send(rafael, 'POST', `invoices/${inv.id}/payments`, { method: 'cash' })
     expect(cash.statusCode).toBe(201)
 
@@ -26,7 +28,9 @@ describe('a refund to card is capped by what was paid by card', () => {
 
   it('caps a card refund of a mixed cash + card invoice at the card part', async () => {
     const { rafael } = p.people()
-    const inv = await makeInvoice(p.h.t.db, p.env(), { items: [{ name: 'Express Hand Wash', priceCents: 10000 }] })
+    const inv = await makeInvoice(p.h.t.db, p.env(), {
+      items: [{ name: 'Express Hand Wash', priceCents: 10000 }],
+    })
     await addEvent(p.h.t.db, p.env(), inv, {
       type: 'pay',
       amountCents: 7000,
