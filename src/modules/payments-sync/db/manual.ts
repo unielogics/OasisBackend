@@ -203,6 +203,7 @@ export async function manualMatch(
           variance,
         })
     } else {
+      if (!input.force) await assertNoDuplicateRefund(tx, invoice.id, a)
       const { eventId } = await d.ops.recordExternalRefund(
         tx,
         {
@@ -325,6 +326,16 @@ async function assertNoDuplicate(
     throw new AppError('SQSP_MATCH_DUPLICATE', {
       meta: { eventIds: [...new Set([...awaiting.rows.map((r) => r.id), ...same.map((p) => p.id)])] },
     })
+}
+
+/** The refund twin of assertNoDuplicate: a staff refund of the same amount is already waiting on Squarespace or for approval. */
+async function assertNoDuplicateRefund(tx: Executor, invoiceId: string, a: Arrival): Promise<void> {
+  const same = await sql<{ id: string }>`
+    select e.id from ledger_events e
+    where e.invoice_id = ${invoiceId} and e.type = 'refund' and e.dest = 'card' and e.amount_cents = ${a.amountCents}
+      and e.processor_ref is null and (e.processor_state = 'awaiting_processor' or e.status = 'pending')`.execute(tx)
+  if (same.rows.length > 0)
+    throw new AppError('SQSP_MATCH_DUPLICATE', { meta: { eventIds: same.rows.map((r) => r.id) } })
 }
 
 export async function manualIgnore(
