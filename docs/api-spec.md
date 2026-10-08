@@ -832,13 +832,15 @@ The dashboard's `MessagesPort.thread` is typed as a bare array today; the live w
 
 Channel `messages` (needs `cli.view`), full payload (the message as above): `message.out` (queued), `message.in` (received),
 `message.status {id, status, error, customerId, appointmentId, threadId}` on every state change. Channel `notifications`
-(targeted at each manager's user): `notification.new {id, kind}` for `sms.device_offline`, `sms.device_recovered`,
-`sms.cancel_request`, `sms.unattributed_reply`, and `sms.device.health {deviceId, label, from, to}` on every device state change.
+(targeted at each manager's user): `notification.new {id, kind}` for `sms.device_offline`, `sms.device_recovered` (each at
+most once per device per 30 minutes, ADR 0122), `sms.app_restarted`, `sms.no_device`, `sms.cancel_request`,
+`sms.unattributed_reply`, and `sms.device.health {deviceId, label, from, to}` on every device state change.
 Channel `ops`: `alerts.changed {source: 'sms'}` when a reply arrives or is read, a device changes state. Managers are active
 employees with a login who hold `set.billing` or `sched.override` (Super Admin, Management, Accounting, plus any per-person Allow).
 
 Needs Attention (alerts 10 and 11 of design 4.4, `src/modules/messaging/adapters/alerts.ts`): `new_reply` (one per appointment, or
-per customer when a reply could not be attributed; a customer's CANCEL is red) and `sms_device_down` (managers only).
+per customer when a reply could not be attributed; a customer's CANCEL is red) and `sms_device_down` (managers only: a device
+offline, or key `sms_no_device` "No SMS device" while texts are queued and no device is enabled).
 
 ### 23.4 Policy summary
 
@@ -848,6 +850,11 @@ lane 3 `emergency closure_notice broadcast`. Quiet hours (`SMS_QUIET_HOURS`, def
 `confirm_request reminder review late_nudge closure_notice broadcast`; the TTL clock starts when the hold ends. The emergency
 fan-out is lane 3, not lane 0 (review B15): the blast can use at most 24 of the 30 segments in a window, so a ready-for-pickup
 text is never starved. Outside production only `SMS_ALLOWLIST` numbers are texted; synthetic (seed) numbers never in production.
+
+Inbound keywords (`src/modules/messaging/inbound/keywords.ts`; the whole message, any case, edge punctuation ignored): opt-out
+STOP, STOPALL / STOP ALL, UNSUBSCRIBE, END, QUIT, REVOKE, OPTOUT / OPT OUT (two-word forms also with a hyphen, underscore or dot);
+opt-in START, UNSTOP, YES when opted out; HELP; confirm C, CONFIRM, YES with a booking waiting. CANCEL is a cancel request to
+staff, not an opt-out, and Spanish words are not keywords: both are open decisions for the owner (ADR 0124).
 
 ### 23.5 Webhook and listeners
 
@@ -1047,4 +1054,6 @@ when none ever ran. With `JOBS_ENABLED=false` the answer is `{enabled: false, jo
 | `vip.hold_release_scan` | `ops` event `availability.changed {date}` when a held slot is released |
 | `credit.expire` | notification `credit.expired` to the managers and `payments` event `credit.expired {customerId, cents}` |
 | `payments.lag-scan` | `payments` event `reconciliation.stale` while card money waits for Squarespace |
+| `ledger.integrity_check` | a `ledger_integrity_runs` row per business date; notification `ledger.integrity_failed` to the managers when it finds a new set of problems (ADR 0123) |
+| `sms.device.healthcheck`, `sms.dispatch` | notifications `sms.device_offline` / `sms.device_recovered` debounced per 30-minute flap window with the end state announced when it closes, `sms.no_device` once per episode (ADR 0122) |
 
