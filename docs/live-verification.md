@@ -200,8 +200,8 @@ Everything is a read. `--days N` is how far back to look (30 by default; widen i
 ```
 
 `s3:ListBucket` matters: without it a photo that does not exist reads as "forbidden" instead of "not found" and uploads cannot be
-confirmed. Scope this to the whole bucket for now, not a prefix: the application does not yet read `S3_KEY_PREFIX`
-([deployment.md](deployment.md), "Known gaps"). Drop the configuration-set line if you do not use one.
+confirmed. The application reads `S3_KEY_PREFIX`, so the object statements may be scoped to that prefix; `pnpm aws:provision`
+writes exactly this policy for the `oasis-app` user ([aws-setup.md](aws-setup.md)). Drop the configuration-set line if you do not use one.
 
 The check can only report on settings it may read. To see every item, run it once with a person's login that can read the settings, or add
 this read-only policy to a temporary user (it grants nothing the app uses):
