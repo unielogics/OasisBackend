@@ -5,11 +5,37 @@ import {
   migrationStatusFromDb,
   type MigrationFile,
 } from '../../platform/migrate.js'
+import type { FastifyRequest } from 'fastify'
 import type { JobsHealth } from '../../platform/jobs.js'
 import { access } from '../access.js'
 import type { AppInstance } from '../types.js'
 
 type Check = { ok: boolean; detail: string } & Partial<Pick<JobsHealth, 'queue' | 'worker'>>
+
+const isLoopbackAddress = (a: string | undefined): boolean => {
+  if (!a) return false
+  let v = a.trim().replace(/^"|"$/g, '')
+  const bracketed = /^\[([^\]]+)\](?::\d+)?$/.exec(v)
+  if (bracketed) v = bracketed[1]!
+  else v = v.replace(/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/, '$1')
+  return v === '::1' || /^(::ffff:)?127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/i.test(v)
+}
+
+/** Addresses a proxy reports for the request (X-Forwarded-For, X-Real-IP, Forwarded: for=...). */
+function forwardedAddresses(req: FastifyRequest): string[] {
+  const one = (h: string | string[] | undefined): string => (Array.isArray(h) ? h.join(',') : (h ?? ''))
+  const out = [...one(req.headers['x-forwarded-for']).split(','), one(req.headers['x-real-ip'])]
+  for (const m of one(req.headers.forwarded).matchAll(/for=("[^"]*"|[^;,\s]+)/gi)) out.push(m[1]!)
+  return out.map((s) => s.trim()).filter(Boolean)
+}
+
+/**
+ * The probes answer their details (database error text, migration names, queue state) only to the server itself: the socket peer
+ * is a loopback address and no proxy says the request came from anywhere else. Everyone else gets `{status}` and the status code.
+ */
+export function isLoopbackCaller(req: FastifyRequest): boolean {
+  return isLoopbackAddress(req.socket.remoteAddress) && forwardedAddresses(req).every(isLoopbackAddress)
+}
 
 export function registerHealthRoutes(app: AppInstance): void {
   let files: MigrationFile[] | null = null
@@ -30,14 +56,15 @@ export function registerHealthRoutes(app: AppInstance): void {
   app.get(
     '/healthz',
     { config: { access: access.public('Liveness probe'), rateLimit: false }, schema: { hide: true } },
-    async () => {
+    async (req) => {
       const db = await checkDb()
       const jobs: Check = !db.ok
         ? { ok: false, detail: 'skipped: database unavailable' }
         : app.jobs
           ? await app.jobs.health().catch((e: Error) => ({ ok: false, detail: e.message }))
           : { ok: true, detail: 'not configured' }
-      return { status: db.ok && jobs.ok ? 'ok' : 'degraded', checks: { db, jobs } }
+      const status = db.ok && jobs.ok ? 'ok' : 'degraded'
+      return isLoopbackCaller(req) ? { status, checks: { db, jobs } } : { status }
     },
   )
 
@@ -47,7 +74,7 @@ export function registerHealthRoutes(app: AppInstance): void {
       config: { access: access.public('Readiness probe for the proxy and uptime monitor'), rateLimit: false },
       schema: { hide: true },
     },
-    async (_req, reply) => {
+    async (req, reply) => {
       const db = await checkDb()
 
       let migrations: Check = { ok: false, detail: 'unknown' }
@@ -65,9 +92,10 @@ export function registerHealthRoutes(app: AppInstance): void {
       }
       const jobs: Check = app.jobs ? await app.jobs.health() : { ok: true, detail: 'not configured' }
       const ok = db.ok && migrations.ok && jobs.ok
+      const status = ok ? 'ready' : 'degraded'
       return reply
         .status(ok ? 200 : 503)
-        .send({ status: ok ? 'ready' : 'degraded', checks: { db, migrations, jobs } })
+        .send(isLoopbackCaller(req) ? { status, checks: { db, migrations, jobs } } : { status })
     },
   )
 }
