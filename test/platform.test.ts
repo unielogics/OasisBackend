@@ -41,8 +41,8 @@ describe('env contract', () => {
     })
     expect(e.SMSGATE_MAX_PER_WINDOW).toBe(30)
   })
-  it('requires smsgate credentials when SMS_PROVIDER=smsgate', () => {
-    expect(() => loadEnv({ ...base, SMS_PROVIDER: 'smsgate' })).toThrow(/SMSGATE_DEVICE_URL/)
+  it('needs no device settings in the environment when SMS_PROVIDER=smsgate (the tablets live in sms_devices)', () => {
+    expect(loadEnv({ ...base, SMS_PROVIDER: 'smsgate' }).SMS_PROVIDER).toBe('smsgate')
   })
   it('refuses a frozen clock and missing secret in production', () => {
     expect(() => loadEnv({ ...base, NODE_ENV: 'production', CLOCK_FREEZE_AT: PARITY_NOW })).toThrow(
