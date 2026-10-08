@@ -15,7 +15,7 @@ by each vertical below the generated table.
 | Time | Instants are ISO-8601 UTC. Business dates are `YYYY-MM-DD` in the location timezone (`America/New_York`); wall-clock times are minutes from midnight. Read models that show a time string also carry a ready label (`time`, `atLabel`). Helpers: `src/platform/time.ts`. Time is injected (`Clock`, SQL `app_now()`); see section 8. |
 | Ids | UUIDv7 generated in the app (`createIdGenerator(clock)`); human refs (`INV-20611`, appointment seq) are separate fields. |
 | Request id | `X-Request-Id` is accepted (8-64 chars of `A-Za-z0-9._-`) or generated, echoed on every response, present on every log line and in every error body as `requestId`. |
-| Rate limit | 300 requests/minute per user (per IP when anonymous), in memory, `RATE_LIMIT_PER_MIN`. The IP is the socket peer unless `TRUST_PROXY` names the proxies in front (`true` = one hop: nginx on the same host, whose appended `X-Forwarded-For` entry is the client; a number = hops; or an address list); entries further left are client-supplied and ignored. 429 `RATE_LIMITED` with `Retry-After`. Probes and `/hooks/*` are exempt; `/events` allows 30 connects/minute. |
+| Rate limit | 300 requests/minute per user (per IP when anonymous), in memory, `RATE_LIMIT_PER_MIN`, charged before the 401/403 decision so rejected floods are throttled too; ahead of the session lookup each address is also capped at 4 x `RATE_LIMIT_PER_MIN` (SEC-14, ADR 0120). Routes with their own limit (sign-in, password reset, `/events`, the arrival ping) keep only that limit. The IP is the socket peer unless `TRUST_PROXY` names the proxies in front (`true` = one hop: nginx on the same host, whose appended `X-Forwarded-For` entry is the client; a number = hops; or an address list); entries further left are client-supplied and ignored. 429 `RATE_LIMITED` with `Retry-After`. Probes and `/hooks/*` are exempt; `/events` allows 30 connects/minute. |
 | Body limits | JSON bodies up to 1 MB (413 `PAYLOAD_TOO_LARGE`); `/hooks/*` also 1 MB. Request schemas should be `.strict()`. |
 | Security headers | Helmet with `default-src 'none'; frame-ancestors 'none'`, `nosniff`, `Cross-Origin-Resource-Policy: same-origin`, HSTS when `COOKIE_SECURE=true`. |
 
@@ -204,13 +204,15 @@ reloads new rows (with a 5 s safety-net poll and automatic reconnect plus catch-
 | Endpoint | Purpose |
 |---|---|
 | `GET /healthz` | Liveness: always 200 while the process answers. The body reports the database and queue state, `{status: 'ok' \| 'degraded', checks: {db, jobs}}`, where `jobs` carries `detail`, `queue {queued, scheduled, active, failed, deadLetter, oldestQueuedAgeSeconds}` and `worker {state, lastRunAt}` (`ok`, `stale` after 10 minutes without a finished job, `unknown`) |
-| `GET /readyz` | 200 only when the database answers, every migration on disk is applied and unmodified, and the job queue is reachable; otherwise 503 with per-check detail (`checks.jobs` has the same queue and worker fields as `/healthz`). A stale worker or failed jobs are reported but do not make the API unready, so a proxy health check cannot turn a late reminder into an outage. Point the external uptime monitor and nginx upstream check here |
+| `GET /readyz` | 200 only when the database answers, every migration on disk is applied and unmodified, and the job queue is reachable; otherwise 503 with per-check detail (`checks.jobs` has the same queue and worker fields as `/healthz`). A stale worker or failed jobs are reported but do not make the API unready, so a proxy health check cannot turn a late reminder into an outage. Point the external uptime monitor and nginx upstream check here. Both probes answer the `checks` detail only to the server itself (loopback socket peer and no proxy header naming another address); anyone else gets `{status}` with the same status code (ADR 0120) |
 | `GET /api/v1/openapi.json` | The OpenAPI 3.1 contract |
 | `GET`, `POST /dev-storage/*` | The simulator object store behind `STORAGE_PROVIDER=fs` (not mounted in production or for S3): the presigned photo POST (`/dev-storage/upload`, CORS for `PUBLIC_DASHBOARD_URL`) and the signed thumbnail and download URLs. Public routes: every URL carries its own signature, like S3 |
 
 Logging: pino JSON, redacting `authorization`, `cookie`, `set-cookie`, passwords, tokens and secrets everywhere, masking
 phone numbers and emails at `info` and above (including inside error text), redacting sensitive query parameters in
-logged URLs, truncating strings above 8 KiB.
+logged URLs (credentials and search terms: `token`, `code`, `q`, `search`, `phone`, `email`, `name`, `plate` and the like) and link tokens
+in their paths (`/a/<token>`, invite and reset pages, any 32+ character opaque segment), truncating strings above 8 KiB. The request
+and reply reach their serializers (method, redacted URL, host, address; status code), never the raw objects (ADR 0120).
 
 ## 10. Webhooks (`/hooks/*`)
 
