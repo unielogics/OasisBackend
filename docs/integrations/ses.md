@@ -16,21 +16,30 @@ Receipt line items travel in one variable; build it with `encodeReceiptItems([{ 
 
 ## Environment variables
 
-Existing contract (`src/config/env.ts`): `EMAIL_PROVIDER`, `AWS_REGION`, `SES_FROM_ADDRESS` (required for `ses`).
-
-New, exported as `emailEnvShape` for the integrator to spread into `envSchema` (not edited here):
+All declared in `src/config/env.ts` (the email shape lives in `src/integrations/email/env.ts` and is spread into `envSchema`):
 
 | Variable | Default | Meaning |
 |---|---|---|
+| `EMAIL_PROVIDER` | `sim` | `ses` sends through Amazon SES. |
+| `AWS_REGION` | `us-east-1` | Region of SES (and S3, SNS). |
+| `SES_FROM_ADDRESS` | unset | Sender on a verified identity. Required for `ses`. |
 | `SES_FROM_NAME` | `Oasis Auto Spa` | Display name in `From`. |
 | `SES_REPLY_TO` | unset | Default `Reply-To`; a request's `replyTo` wins. |
-| `SES_CONFIGURATION_SET` | unset | Configuration set attached to every send (needed for event publishing). |
-| `SES_SNS_TOPIC_ARNS` | empty | Comma-separated SNS topic ARNs `/hooks/ses` accepts (`sesTopicArns(env)` parses it). Must be non-empty in production. |
+| `SES_CONFIGURATION_SET` | unset | Configuration set attached to every send (publishes the feedback events). `pnpm aws:provision` creates `oasis-mail`. |
+| `SES_SNS_TOPIC_ARNS` | empty | Comma-separated SNS topic ARNs `/hooks/ses` accepts. **Empty refuses every notification.** |
+| `SES_ENDPOINT` | unset | SESv2 endpoint override for the AWS simulator (`scripts/verify-live/sim-aws.ts`) only. |
 | `EMAIL_CONSOLE_DIR` | `./.data/mail` | Where the sim driver writes `.eml` files. |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | unset | The `oasis-app` key (read by the AWS SDK; declared so the pair is validated and `GET /system/integrations` can name the source). |
+| `AWS_EC2_METADATA_DISABLED` | `false` | `true` keeps the SDK away from instance metadata; set it whenever keys are used. |
+
+`GET /api/v1/system/integrations` (`set.billing`) reports for `email`: provider, whether it is configured, exactly which of these are
+missing, the last send, the last error (masked), the last feedback received and the number of suppressed addresses.
 
 ## One-time AWS setup
 
-Everything below is per region; use the region in `AWS_REGION`.
+**Use `pnpm aws:provision` ([../aws-setup.md](../aws-setup.md))**: it creates the identity, the configuration set `oasis-mail`, the
+topic `oasis-ses-events` with its policy and the HTTPS subscription, and the `oasis-app` user and policy, plan first and idempotently.
+The manual steps below explain what it does (the names in them are examples). Everything is per region; use `AWS_REGION`.
 
 1. **Verify the sending domain with Easy DKIM** (preferred over a single address; it also speeds up production access).
    - Console: SES, Configuration, Identities, Create identity, Domain, leave Easy DKIM with RSA_2048_BIT.
@@ -44,11 +53,11 @@ Everything below is per region; use the region in `AWS_REGION`.
    Test without risk using `success@simulator.amazonses.com`, `bounce@simulator.amazonses.com` and `complaint@simulator.amazonses.com`; these work in the sandbox and do not count toward bounce rates.
 3. **Configuration set and feedback topic.**
    ```
-   aws sesv2 create-configuration-set --configuration-set-name oasis-prod
-   aws sns create-topic --name oasis-ses-feedback          # Standard topic; SES does not support FIFO
+   aws sesv2 create-configuration-set --configuration-set-name oasis-mail
+   aws sns create-topic --name oasis-ses-events          # Standard topic; SES does not support FIFO
    aws sesv2 create-configuration-set-event-destination \
-     --configuration-set-name oasis-prod --event-destination-name sns-feedback \
-     --event-destination '{"Enabled":true,"MatchingEventTypes":["BOUNCE","COMPLAINT","DELIVERY"],"SnsDestination":{"TopicArn":"arn:aws:sns:<region>:<acct>:oasis-ses-feedback"}}'
+     --configuration-set-name oasis-mail --event-destination-name oasis-sns-events \
+     --event-destination '{"Enabled":true,"MatchingEventTypes":["BOUNCE","COMPLAINT","DELIVERY","REJECT"],"SnsDestination":{"TopicArn":"arn:aws:sns:<region>:<acct>:oasis-ses-events"}}'
    ```
    Topic access policy so SES may publish (replace the placeholders):
    ```json
@@ -59,15 +68,15 @@ Everything below is per region; use the region in `AWS_REGION`.
        "Effect": "Allow",
        "Principal": { "Service": "ses.amazonaws.com" },
        "Action": "sns:Publish",
-       "Resource": "arn:aws:sns:<region>:<acct>:oasis-ses-feedback",
+       "Resource": "arn:aws:sns:<region>:<acct>:oasis-ses-events",
        "Condition": { "StringEquals": {
          "AWS:SourceAccount": "<acct>",
-         "AWS:SourceArn": "arn:aws:ses:<region>:<acct>:configuration-set/oasis-prod"
+         "AWS:SourceArn": "arn:aws:ses:<region>:<acct>:configuration-set/oasis-mail"
        } }
      }]
    }
    ```
-   Set `SES_CONFIGURATION_SET=oasis-prod` and `SES_SNS_TOPIC_ARNS=arn:aws:sns:<region>:<acct>:oasis-ses-feedback`.
+   Set `SES_CONFIGURATION_SET=oasis-mail` and `SES_SNS_TOPIC_ARNS=arn:aws:sns:<region>:<acct>:oasis-ses-events`.
    The parser accepts both payload shapes: configuration-set events (`eventType`) and identity feedback notifications (`notificationType`).
 4. **Subscribe the app to the topic. Pick one.**
    - **HTTPS (default, needs a public endpoint).** `aws sns subscribe --topic-arn <arn> --protocol https --notification-endpoint https://<public-api-domain>/hooks/ses`. The app answers the `SubscriptionConfirmation` itself (signature verified, SubscribeURL host checked, then fetched). This route must be reachable by AWS, so it lives on the public API domain, not on the tailnet (the SMS Gate webhooks are the tailnet-only ones).
@@ -83,7 +92,7 @@ Everything below is per region; use the region in `AWS_REGION`.
          "Action": "ses:SendEmail",
          "Resource": [
            "arn:aws:ses:<region>:<acct>:identity/oasisautospa.example",
-           "arn:aws:ses:<region>:<acct>:configuration-set/oasis-prod"
+           "arn:aws:ses:<region>:<acct>:configuration-set/oasis-mail"
          ],
          "Condition": { "StringEquals": { "ses:FromAddress": "no-reply@oasisautospa.example" } }
        },
@@ -91,28 +100,35 @@ Everything below is per region; use the region in `AWS_REGION`.
          "Sid": "ReadFeedbackQueue",
          "Effect": "Allow",
          "Action": ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"],
-         "Resource": "arn:aws:sqs:<region>:<acct>:oasis-ses-feedback"
+         "Resource": "arn:aws:sqs:<region>:<acct>:oasis-ses-events"
        }
      ]
    }
    ```
    Drop the second statement for the HTTPS path. While in the sandbox the identity ARN list must also cover the verified recipient identities if you restrict `Resource` that tightly (or use `*` for the sandbox period). The SDK needs no other SES permission.
 
-## Mounting the webhook
+## The webhook (mounted)
 
-```ts
-const verifier = new SnsVerifier({ clock, allowedTopicArns: sesTopicArns(env), maxAgeSec: 3600 })
-const handle = createSesWebhookHandler({
-  verifier,
-  onDecisions: async (decisions) => { /* persist, see below */ },
-})
-// SNS posts JSON with content-type text/plain; Fastify's built-in text/plain parser already yields the raw string.
-app.post('/hooks/ses', async (req, rep) => { const r = await handle(req.body as string); rep.code(r.status).send(r.body) })
-```
+`POST /hooks/ses` is the hook module `src/modules/messaging/email/hook.ts` (registered in `src/http/modules.ts`, ADR 0110). It takes the
+raw body (SNS posts JSON as `text/plain`), at most 1 MB, and needs no session, CSRF token or Idempotency-Key.
 
-Status codes: 200 handled or ignored, 400 malformed, 403 signature/topic/certificate-URL rejected, 503 or 502 or 500 for transient trouble so SNS retries (certificate unreachable, confirmation GET failed, persistence failed). The route is public and must skip session auth and CSRF.
+| Situation | Answer |
+|---|---|
+| `SES_SNS_TOPIC_ARNS` empty | 403, nothing parsed |
+| not JSON, or not an SNS envelope | 400 |
+| topic not on the list, certificate URL not `https://sns.<region>.amazonaws.com/...pem`, bad signature, certificate not RSA or outside its validity, message older than 3,900 s | 403, nothing recorded |
+| certificate download failed | 503 (SNS retries) |
+| `SubscriptionConfirmation` for an allowed topic whose `SubscribeURL` is an SNS `ConfirmSubscription` URL for that topic | the URL is fetched, 200 (502 when the GET fails) |
+| a `Notification` whose `MessageId` was handled before | 200 `duplicate`, nothing changes |
+| a bounce, complaint or delivery | recorded in one transaction, 200 `recorded N`; 500 when recording fails (the claim is released so the retry is processed) |
+| any other SES event (Reject, Send, Open, ...) or a non-SES message | 200, ignored |
 
-Verification follows the AWS SNS documentation: certificate URL must be `https://sns.<region>.amazonaws.com(.cn)/....pem` (no credentials, no custom port); the string to sign is the byte-sorted `Name\nValue\n` list (`Message, MessageId, Subject (only if present), Timestamp, TopicArn, Type`; confirmations use `Message, MessageId, SubscribeURL, Timestamp, Token, TopicArn, Type`); SignatureVersion 1 is RSA-SHA1 and 2 is RSA-SHA256; the signing certificate must be RSA and within its validity window per the injected `Clock`; the topic must be on the allow-list. The certificate is fetched through an injectable `fetchCertificate` (default: `fetch` with 5 s timeout, no redirects, 64 KB cap) and cached per URL. The signature is the authentication; TLS to `sns.*.amazonaws.com` provides the transport trust for the certificate download.
+What is recorded: hard bounces and complaints upsert `email_suppressions` (address, reason, bounce type and subtype, first and last seen,
+count, source message ids) and set `customers.email_bounced_at`; the `outbox_emails` row gets `feedback` and `feedback_detail` (or
+`delivered_at`); a bounced receipt leaves a line in its job's activity log; a newly suppressed address notifies the managers. The
+messaging runtime checks the list before every send: a receipt to a suppressed address ends `suppressed` with the reason in `error`, and
+an invitation or password reset notifies every Super Admin. `GET /api/v1/system/email-suppressions` lists the list and
+`DELETE /api/v1/system/email-suppressions/:address` lifts one entry (audited).
 
 ## Bounce, complaint and delivery decisions (pure)
 
@@ -126,7 +142,7 @@ Verification follows the AWS SNS documentation: certificate URL must be `https:/
 | Delivery | `delivered` | Mark `outbox_emails` delivered by `messageId` (= `ses_message_id`). |
 | Anything else (Send, Open, Click, DeliveryDelay, Reject, ...) | none | Ignored. |
 
-Each decision carries `address` (lowercased), `messageId`, `feedbackId`, the SES timestamp, bounce type/subtype and diagnostic. Wire the suppression list into sending with `createEmailProvider(env, { isSuppressed })`; a suppressed recipient raises `EmailError('SUPPRESSED')` before SES is called. SES also keeps its own account-level suppression list; ours is additional and also drives the choice to fall back to SMS.
+Each decision carries `address` (lowercased), `messageId`, `feedbackId`, the SES timestamp, bounce type/subtype and diagnostic. The messaging runtime wraps its provider with the suppression check (`withSuppression`); a suppressed recipient raises `EmailError('SUPPRESSED')` with the reason before SES is called. SES also keeps its own account-level suppression list; ours is additional and also drives the choice to fall back to SMS.
 
 ## Errors
 
@@ -136,4 +152,6 @@ Each decision carries `address` (lowercased), `messageId`, `feedbackId`, the SES
 
 Verified (docs read while building this): SNS signature string-to-sign and cert URL rules; SES notification and event JSON shape (`notificationType` vs `eventType`, bounce types and subtypes, complaint feedback types); sandbox limits (200 per 24 h, 1 per second, verified recipients only) and the production-access request; Easy DKIM 2048-bit default; `ses:SendEmail` plus identity and configuration-set resources; SNS topic policy for SES.
 
-Not verified against a live account (no credentials): the exact `AccessDenied` behaviour when only the identity ARN is listed and a configuration set is used (the policy above lists both); SES custom MAIL FROM record values (use the ones the console shows); real SNS delivery to `/hooks/ses` (covered here by locally signed fixtures). A gated live smoke test (one email to the verified inbox, one `bounce@simulator.amazonses.com` round trip) belongs to milestone M6.
+Verified locally: `/hooks/ses` on the real app and Postgres with notifications signed by a certificate from a test CA (test/aws/ses-feedback.test.ts), and the whole path (invite, reset, receipt through SES, bounce, suppressed next receipt) through the spawned `src/server.ts` and `src/worker.ts` against the AWS simulator (test/aws/sim-e2e.test.ts).
+
+Not verified against a live account (no credentials): the exact `AccessDenied` behaviour when only the identity ARN is listed and a configuration set is used (the policy lists both); whether `ses:FromAddress` matches a From header with a display name (pnpm verify:aws --send exercises exactly that format); SES custom MAIL FROM record values; real SNS delivery to `/hooks/ses`. docs/aws-setup.md step 9 is the live check (one email, one `bounce@simulator.amazonses.com` round trip).
