@@ -205,6 +205,12 @@ export const InvoiceDetail = z.object({
     }),
   ),
   calc: Calc,
+  // the caps the refund command applies, per destination, after done and pending refunds (detail.ts RefundCapsDto)
+  refundCaps: z.object({
+    cardCents: z.number().int(),
+    otherCents: z.number().int(),
+    totalCents: z.number().int(),
+  }),
   clientCredit: ClientCredit,
   ledger: z.array(LedgerEvent),
   caller: z

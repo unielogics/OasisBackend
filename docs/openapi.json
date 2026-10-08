@@ -8016,6 +8016,32 @@
                             }
                           ]
                         },
+                        "refundCaps": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "cardCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "otherCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "cardCents",
+                            "otherCents",
+                            "totalCents"
+                          ],
+                          "type": "object"
+                        },
                         "refundPending": {
                           "type": "boolean"
                         },
@@ -8085,6 +8111,7 @@
                         "items",
                         "adjustments",
                         "calc",
+                        "refundCaps",
                         "clientCredit",
                         "ledger",
                         "caller"
@@ -26915,6 +26942,32 @@
                         }
                       ]
                     },
+                    "refundCaps": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "cardCents": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "otherCents": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "totalCents": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "cardCents",
+                        "otherCents",
+                        "totalCents"
+                      ],
+                      "type": "object"
+                    },
                     "refundPending": {
                       "type": "boolean"
                     },
@@ -26984,6 +27037,7 @@
                     "items",
                     "adjustments",
                     "calc",
+                    "refundCaps",
                     "clientCredit",
                     "ledger",
                     "caller"
@@ -28183,6 +28237,32 @@
                             }
                           ]
                         },
+                        "refundCaps": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "cardCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "otherCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "cardCents",
+                            "otherCents",
+                            "totalCents"
+                          ],
+                          "type": "object"
+                        },
                         "refundPending": {
                           "type": "boolean"
                         },
@@ -28252,6 +28332,7 @@
                         "items",
                         "adjustments",
                         "calc",
+                        "refundCaps",
                         "clientCredit",
                         "ledger",
                         "caller"
@@ -29760,6 +29841,32 @@
                             }
                           ]
                         },
+                        "refundCaps": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "cardCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "otherCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "cardCents",
+                            "otherCents",
+                            "totalCents"
+                          ],
+                          "type": "object"
+                        },
                         "refundPending": {
                           "type": "boolean"
                         },
@@ -29829,6 +29936,7 @@
                         "items",
                         "adjustments",
                         "calc",
+                        "refundCaps",
                         "clientCredit",
                         "ledger",
                         "caller"
@@ -31025,6 +31133,32 @@
                             }
                           ]
                         },
+                        "refundCaps": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "cardCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "otherCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "cardCents",
+                            "otherCents",
+                            "totalCents"
+                          ],
+                          "type": "object"
+                        },
                         "refundPending": {
                           "type": "boolean"
                         },
@@ -31094,6 +31228,7 @@
                         "items",
                         "adjustments",
                         "calc",
+                        "refundCaps",
                         "clientCredit",
                         "ledger",
                         "caller"
@@ -31932,6 +32067,32 @@
                             }
                           ]
                         },
+                        "refundCaps": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "cardCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "otherCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "cardCents",
+                            "otherCents",
+                            "totalCents"
+                          ],
+                          "type": "object"
+                        },
                         "refundPending": {
                           "type": "boolean"
                         },
@@ -32001,6 +32162,7 @@
                         "items",
                         "adjustments",
                         "calc",
+                        "refundCaps",
                         "clientCredit",
                         "ledger",
                         "caller"
@@ -33211,6 +33373,32 @@
                             }
                           ]
                         },
+                        "refundCaps": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "cardCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "otherCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "cardCents",
+                            "otherCents",
+                            "totalCents"
+                          ],
+                          "type": "object"
+                        },
                         "refundPending": {
                           "type": "boolean"
                         },
@@ -33280,6 +33468,7 @@
                         "items",
                         "adjustments",
                         "calc",
+                        "refundCaps",
                         "clientCredit",
                         "ledger",
                         "caller"
@@ -34132,6 +34321,32 @@
                             }
                           ]
                         },
+                        "refundCaps": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "cardCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "otherCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "cardCents",
+                            "otherCents",
+                            "totalCents"
+                          ],
+                          "type": "object"
+                        },
                         "refundPending": {
                           "type": "boolean"
                         },
@@ -34201,6 +34416,7 @@
                         "items",
                         "adjustments",
                         "calc",
+                        "refundCaps",
                         "clientCredit",
                         "ledger",
                         "caller"
@@ -35415,6 +35631,32 @@
                             }
                           ]
                         },
+                        "refundCaps": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "cardCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "otherCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "cardCents",
+                            "otherCents",
+                            "totalCents"
+                          ],
+                          "type": "object"
+                        },
                         "refundPending": {
                           "type": "boolean"
                         },
@@ -35484,6 +35726,7 @@
                         "items",
                         "adjustments",
                         "calc",
+                        "refundCaps",
                         "clientCredit",
                         "ledger",
                         "caller"
@@ -36653,6 +36896,32 @@
                             }
                           ]
                         },
+                        "refundCaps": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "cardCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "otherCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "cardCents",
+                            "otherCents",
+                            "totalCents"
+                          ],
+                          "type": "object"
+                        },
                         "refundPending": {
                           "type": "boolean"
                         },
@@ -36722,6 +36991,7 @@
                         "items",
                         "adjustments",
                         "calc",
+                        "refundCaps",
                         "clientCredit",
                         "ledger",
                         "caller"
@@ -37902,6 +38172,32 @@
                             }
                           ]
                         },
+                        "refundCaps": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "cardCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "otherCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "cardCents",
+                            "otherCents",
+                            "totalCents"
+                          ],
+                          "type": "object"
+                        },
                         "refundPending": {
                           "type": "boolean"
                         },
@@ -37971,6 +38267,7 @@
                         "items",
                         "adjustments",
                         "calc",
+                        "refundCaps",
                         "clientCredit",
                         "ledger",
                         "caller"
@@ -38796,6 +39093,32 @@
                             }
                           ]
                         },
+                        "refundCaps": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "cardCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "otherCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "cardCents",
+                            "otherCents",
+                            "totalCents"
+                          ],
+                          "type": "object"
+                        },
                         "refundPending": {
                           "type": "boolean"
                         },
@@ -38865,6 +39188,7 @@
                         "items",
                         "adjustments",
                         "calc",
+                        "refundCaps",
                         "clientCredit",
                         "ledger",
                         "caller"
@@ -40042,6 +40366,32 @@
                             }
                           ]
                         },
+                        "refundCaps": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "cardCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "otherCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "cardCents",
+                            "otherCents",
+                            "totalCents"
+                          ],
+                          "type": "object"
+                        },
                         "refundPending": {
                           "type": "boolean"
                         },
@@ -40111,6 +40461,7 @@
                         "items",
                         "adjustments",
                         "calc",
+                        "refundCaps",
                         "clientCredit",
                         "ledger",
                         "caller"
@@ -41295,6 +41646,32 @@
                             }
                           ]
                         },
+                        "refundCaps": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "cardCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "otherCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "cardCents",
+                            "otherCents",
+                            "totalCents"
+                          ],
+                          "type": "object"
+                        },
                         "refundPending": {
                           "type": "boolean"
                         },
@@ -41364,6 +41741,7 @@
                         "items",
                         "adjustments",
                         "calc",
+                        "refundCaps",
                         "clientCredit",
                         "ledger",
                         "caller"

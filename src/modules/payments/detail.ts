@@ -11,6 +11,7 @@ import {
   getInvoice,
   listEvents,
   listItems,
+  originalRefundCap,
   type EventRow,
   type InvoiceRow,
   type ItemRow,
@@ -95,6 +96,18 @@ export interface CallerDto {
   creditLimitCents: number | null
 }
 
+/**
+ * The refund caps the refund command applies, after every done and pending refund (a pending request reserves its money):
+ * `cardCents` caps a refund to card (the card money not given back), `otherCents` a refund to cash (the money paid by
+ * anything but store credit), `totalCents` every refund (calc.refundable). The command checks, in this order: card
+ * `cardCents` then `totalCents`; cash `totalCents` then `otherCents`; store credit `totalCents`.
+ */
+export interface RefundCapsDto {
+  cardCents: number
+  otherCents: number
+  totalCents: number
+}
+
 export interface InvoiceDetail {
   id: string
   invoiceNo: number
@@ -122,6 +135,7 @@ export interface InvoiceDetail {
   items: InvoiceItemDto[]
   adjustments: AdjustmentLineDto[]
   calc: InvoiceCalc
+  refundCaps: RefundCapsDto
   clientCredit: ClientCreditSummary
   ledger: LedgerEventDto[]
   caller: CallerDto | null
@@ -227,11 +241,13 @@ export async function invoiceDetail(
 }
 
 export async function buildDetail(db: Executor, c: DetailContext, inv: InvoiceRow): Promise<InvoiceDetail> {
-  const [items, events, calc, credit] = await Promise.all([
+  const [items, events, calc, credit, cardCap, otherCap] = await Promise.all([
     listItems(db, inv.id),
     listEvents(db, inv.id),
     calcOf(db, inv.id),
     clientCreditSummary(db, inv.customer_id, c.now),
+    originalRefundCap(db, inv.id, 'card'),
+    originalRefundCap(db, inv.id, 'cash'),
   ])
   const voidedIds = new Set(
     events.filter((e) => e.type === 'void' && e.voids_event_id).map((e) => e.voids_event_id!),
@@ -285,6 +301,7 @@ export async function buildDetail(db: Executor, c: DetailContext, inv: InvoiceRo
         amountCents: e.amount_cents,
       })),
     calc,
+    refundCaps: { cardCents: cardCap, otherCents: otherCap, totalCents: calc.refundable },
     clientCredit: credit,
     ledger: dto,
     caller: callerDto(c.actor),
