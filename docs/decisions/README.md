@@ -55,3 +55,8 @@
 | [0101](0101-backups-and-restore-drill.md) | Backups: snapshot-consistent dumps, retention, encrypted off-host copy, restore drill |
 | [0102](0102-live-verification-kit.md) | Live verification: one command per integration, safe by default, proven against simulators |
 | [0103](0103-secrets-rotation.md) | Secrets rotation: SECRETS_KEY re-encryption in one transaction |
+| [0120](0120-security-leftovers.md) | Security leftovers: masked phone match, rate limits before authentication, audited invoice creation, probe detail, log redaction |
+| [0121](0121-demo-seed-profile.md) | The demo seed: the design's day on today's date, as it stands when the seed runs |
+| [0122](0122-sms-channel-notices.md) | SMS channel notices: flap debounce, app restarted without a reboot, texts queued with no device |
+| [0123](0123-ledger-integrity-check.md) | Nightly ledger integrity check |
+| [0124](0124-opt-out-keywords-and-revocation.md) | Opt-out keywords, and the owner's decisions on CANCEL and Spanish replies |

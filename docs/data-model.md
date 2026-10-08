@@ -23,6 +23,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261006300100_membership_gaps.sql`   | `plan_credit_rules.auto_apply` (ADR 0084)                                                                                                              |
 | `20261006300200_standing_waitlist.sql` | standing (recurring) series and their occurrences, the waitlist and its offers (ADR 0086; behind a feature setting, off by default)                    |
 | `20261006310000_jobs_runtime.sql`      | the per-job run record behind `GET /system/jobs`, and the once-only markers of the VIP-release and credit-expiry scans (ADR 0090 to 0093)              |
+| `20261006410000_notices_and_ledger_integrity.sql` | the debounce record of manager notices that can repeat (SMS device flapping, app restarts, no device) and the nightly ledger integrity results (ADR 0122, 0123) |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -209,6 +210,15 @@ Written by the worker only; the request path never touches them.
 | `vip_hold_releases` | Primary key `(hold_id, slot_start)`: a weekly VIP hold whose release for one concrete slot has been announced, so a rerun or a second worker announces it once; purged a week after the slot.                                                                                          |
 | `credit_expiries`   | Primary key `lot_event_id` (the store-credit lot in `ledger_events`): the unspent remainder that expired and was announced once to staff (`expired_cents`, `expires_at`). The ledger itself is untouched.                                                                              |
 
+## Notices and ledger checks (migration `20261006410000_notices_and_ledger_integrity.sql`, ADR 0122 and 0123)
+
+Written by the messaging runtime and the worker; neither holds business data.
+
+| Table                   | Key columns and rules |
+| ----------------------- | --------------------- |
+| `notice_debounce`       | Primary key `(location_id, key)`: the last time a repeatable manager notice was sent (`last_sent_at`), what it announced (`state`) and how many repeats were held back since (`suppressed`). Keys `sms.device:<id>:offline` / `:online` / `:state`, `sms.app_restarted:<id>`, `sms.no_device`. |
+| `ledger_integrity_runs` | One row per `(location_id, check_date)`: the night's `ledger.integrity_check` result (`ok`, `invoices_checked`, `findings` jsonb of `{code, detail, invoiceNo?}`, `job_id`). A re-run with the same result leaves the row alone. |
+
 ## Foreign keys
 
 `domain_links` added the keys from the domain tables to `employees` and `users`. Two columns stay plain `uuid` on purpose, and a
@@ -254,10 +264,30 @@ run changes nothing and edits made after seeding survive (a retired task, a chan
 - VIP clients: Jonathan Franco, Liam Chen, Aisha Rahman, Elena Volkov (resolved to customers by exact name).
 - No appointments, invoices, memberships or messages: the verticals that own them seed those.
 
+`demo` (`db/seeds/demo.ts`, depends on `design`, `memberships` and `geofence`; `pnpm seed -- --profile design,demo`): the
+Operations design day re-anchored on **today** in the business time zone with the real clock, for a live link. Details in
+`db/seeds/README.md`.
+
+- `appointments`: a1-a11 at their design times today and a12 tomorrow, in the state their day (`DEMO_PLAN`) has reached at
+  the seed's clock (10:36 AM gives the design board exactly; one car per bay at any moment); the Payments history's jobs of the
+  last 29 days (completed, one canceled); the design's procedural days 30-60 back (completed) and from tomorrow to 60 ahead
+  (booked or confirmed), closed days skipped. `appointment_addons`, `job_checklist_items` (ticks only for work done),
+  `appointment_photos` (rows without objects), `activity_log` and delivered `messages` follow the same timeline.
+- `invoices`: exactly one per appointment. INV-20601..20608 on the eight jobs the Payments design names, the history's own
+  numbers (20506-20610 without today's eight), the past procedural days from 20505 downward, everything else from
+  `invoice_counters` (today's other four first, then the future days in date order). No number is used twice.
+- `ledger_events` (`source='seed'`): yesterday's deposits and Nathan's prepayment, today's prepayments at the Payments design's
+  times, counter payments when a car is finished, David's loyalty adjustment, the history's events (pending refund INV-20579,
+  canceled INV-20571, store credit with `credit_allocations`), the past procedural payments. Exactly one card payment is
+  `processor_state='awaiting_processor'`: the day's latest counter card payment, or yesterday's last card payment before
+  the first one of the day.
+- Customers: the twenty design pool names (`+1 305/786 555 0114-0133`) and the history's extra people (`+1 954 555 01xx`), all
+  `synthetic`.
+
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (86 tables, 1 view, 9 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (88 tables, 1 view, 9 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -870,6 +900,23 @@ Primary key `(name)`. 1 check constraint.
 
 Primary key `(id)`. Unique `(idempotency_key)`. Unique `(seq)`. `(actor_employee_id)` references `employees(id)` on delete set null. `(actor_user_id)` references `users(id)` on delete set null. `(approved_by_employee_id)` references `employees(id)` on delete set null. `(approved_by_user_id)` references `users(id)` on delete set null. `(customer_id)` references `customers(id)`. `(denied_by_employee_id)` references `employees(id)` on delete set null. `(denied_by_user_id)` references `users(id)` on delete set null. `(invoice_id)` references `invoices(id)`. `(location_id)` references `locations(id)` on delete cascade. `(parent_event_id)` references `ledger_events(id)`. `(voids_event_id)` references `ledger_events(id)`. 19 check constraints. Index `ledger_events_awaiting_idx` `(location_id, occurred_at)` where `processor_state = 'awaiting_processor'::text`. Index `ledger_events_customer_idx` `(customer_id, type, occurred_at)`. Index `ledger_events_invoice_idx` `(invoice_id, occurred_at DESC, seq DESC)`. Index `ledger_events_pending_idx` `(location_id, occurred_at)` where `status = 'pending'::text`. Index `ledger_events_sqsp_order_idx` `(sqsp_order_id)` where `sqsp_order_id IS NOT NULL`. Trigger: `ledger_events_guard`.
 
+#### `ledger_integrity_runs`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `check_date` | date | no |  |
+| `started_at` | timestamp with time zone | no |  |
+| `finished_at` | timestamp with time zone | no |  |
+| `ok` | boolean | no |  |
+| `invoices_checked` | integer | no |  |
+| `findings` | jsonb | no | `'[]'::jsonb` |
+| `job_id` | text | yes |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. Unique `(location_id, check_date)`. `(location_id)` references `locations(id)` on delete cascade. 1 check constraint.
+
 #### `locations`
 
 | Column | Type | Null | Default |
@@ -1011,6 +1058,19 @@ Primary key `(id)`. Unique `(location_id, customer_id)`. `(customer_id)` referen
 | `created_at` | timestamp with time zone | no | `app_now()` |
 
 Primary key `(id)`. Unique `(idempotency_key)`. `(appointment_id)` references `appointments(id)` on delete set null. `(customer_id)` references `customers(id)`. `(device_id)` references `sms_devices(id)` on delete set null. `(employee_id)` references `employees(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. `(sender_employee_id)` references `employees(id)` on delete set null. `(thread_id)` references `message_threads(id)` on delete cascade. 8 check constraints. Index `messages_appointment_idx` `(appointment_id, queued_at, id)` where `appointment_id IS NOT NULL`. Index `messages_customer_idx` `(customer_id, queued_at DESC)` where `customer_id IS NOT NULL`. Index `messages_in_flight_idx` `(status)` where `status = ANY (ARRAY['queued'::text, 'sending'::text])`. Index `messages_provider_idx` `(provider_message_id)` where `provider_message_id IS NOT NULL`. Index `messages_thread_idx` `(thread_id, queued_at, id)` where `thread_id IS NOT NULL`. Index `messages_unread_idx` `(customer_id)` where `(direction = 'in'::text) AND (read_at IS NULL)`.
+
+#### `notice_debounce`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `location_id` | uuid | no |  |
+| `key` | text | no |  |
+| `state` | text | yes |  |
+| `last_sent_at` | timestamp with time zone | yes |  |
+| `suppressed` | integer | no | `0` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(location_id, key)`. `(location_id)` references `locations(id)` on delete cascade. 1 check constraint.
 
 #### `notifications`
 

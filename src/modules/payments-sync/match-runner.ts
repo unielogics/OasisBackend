@@ -131,6 +131,15 @@ export class MatchRunner {
         await this.d.orders.setMatch(orderId, { matchState: 'ignored', ignoreReason: plan.reason })
         await this.setAll(pending, { state: 'ignored', ignoreReason: plan.reason })
         report.ignored++
+        // every product unmapped: say so once for this order (with nothing mapped at all, product_map_empty already did)
+        if (plan.reason === 'unmapped_sku' && this.d.productMap.size > 0) {
+          const skus = stored.order.lineItems.map((li) => li.sku || li.name || li.productId || '?')
+          await this.alert(report, {
+            code: 'order_ignored_unmapped',
+            orderId,
+            message: `Squarespace order ${stored.order.orderNumber || orderId} was ignored: none of its products (${skus.join(', ')}) is mapped to a service or a membership.`,
+          })
+        }
         return
       case 'membership':
         await this.d.orders.setMatch(orderId, { matchState: 'membership' })

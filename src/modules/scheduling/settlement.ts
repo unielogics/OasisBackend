@@ -11,6 +11,7 @@ import { actorFromAuth, type PayActor } from '../payments/actor.js'
 import { PaymentsService, type CommandContext } from '../payments/commands.js'
 import { defaultPorts } from '../payments/ports.js'
 import * as audit from '../../platform/audit.js'
+import type { AuditContext } from '../../platform/audit.js'
 import { AppError } from '../../platform/errors.js'
 import * as realtime from '../../platform/realtime.js'
 import { calcOf, lockInvoice, touchInvoice } from '../payments/repository.js'
@@ -114,7 +115,7 @@ export function createDbDepositSettlement(d: { clock: Clock; newId: NewId }): De
         refunds,
       }
     },
-    async reopen(tx: Tx, req: { appointmentId: string; locationId: string }): Promise<void> {
+    async reopen(tx: Tx, req: { appointmentId: string; locationId: string; audit?: AuditContext }): Promise<void> {
       const inv = await tx
         .selectFrom('invoices')
         .select(['id', 'canceled_at', 'version'])
@@ -144,6 +145,7 @@ export function createDbDepositSettlement(d: { clock: Clock; newId: NewId }): De
         entityType: 'invoice',
         entityId: inv.id,
         after: { appointmentId: req.appointmentId },
+        ctx: req.audit,
       })
       await realtime.publish(tx, {
         locationId: req.locationId,

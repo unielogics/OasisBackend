@@ -18,6 +18,12 @@ import {
 import { alertsScanJob } from '../../src/modules/scheduling/jobs.js'
 import { photoFinalizeJob, photoThumbnailJob } from '../../src/modules/scheduling/photo-jobs.js'
 import { paymentsLagScanJob } from '../../src/modules/payments/jobs.js'
+import { ledgerIntegrityJob } from '../../src/modules/payments/jobs-integrity.js'
+import {
+  standingAutoconfirmJob,
+  standingMaterializeJob,
+  waitlistOfferExpiryJob,
+} from '../../src/modules/standing/jobs.js'
 import {
   emergencyAutoReopenJob,
   emergencySweepJob,
@@ -58,7 +64,15 @@ afterAll(() => {
 })
 afterEach(async () => {
   await sql`delete from settings where key = 'federal_holidays.auto'`.execute(w.t.db)
+  await setStanding(false)
+  await sql`delete from standing_series`.execute(w.t.db)
 })
+
+/** The standing-appointment and waitlist feature (off by default); its jobs do nothing while it is off. */
+async function setStanding(on: boolean): Promise<void> {
+  await sql`update settings set value = ${JSON.stringify(on)}::jsonb
+    where location_id = ${w.locationId} and key = 'features.standing_waitlist'`.execute(w.t.db)
+}
 
 const D = 24 * 3600_000
 const db = () => w.t.db
@@ -245,6 +259,29 @@ const scenarios: Scenario[] = [
     changes: false,
   },
   {
+    job: 'ledger.integrity_check',
+    defs: [ledgerIntegrityJob],
+    async arrange() {
+      // store credit applied with no FIFO allocation behind it: a problem the check must record and announce
+      const inv = await makeInvoice(db(), env(), { customerId: w.customer('Maria Delgado').id })
+      await addEvent(db(), env(), inv, {
+        type: 'credit_apply',
+        amountCents: 700,
+        method: 'Store credit',
+        methodKind: 'store_credit',
+      })
+    },
+    observe: async () => ({
+      runs: (
+        await db()
+          .selectFrom('ledger_integrity_runs')
+          .select(['check_date', 'ok', 'invoices_checked', 'findings'])
+          .execute()
+      ).map((r) => ({ ...r })),
+      notices: await count('notifications', sql`kind = 'ledger.integrity_failed'`),
+    }),
+  },
+  {
     job: 'sms.device.healthcheck',
     defs: [smsHealthJob],
     arrange: async () => undefined,
@@ -273,6 +310,83 @@ const scenarios: Scenario[] = [
     arrange: async () => undefined,
     observe: async () => db().selectFrom('sms_outbox').select(['state', 'reconcile_resends']).execute(),
     changes: false,
+  },
+  {
+    job: 'standing.materialize',
+    defs: [standingMaterializeJob],
+    async arrange() {
+      await setStanding(true)
+      await insertSeries({ startDate: '2026-06-20', timeMin: 540 })
+    },
+    observe: observeStanding,
+  },
+  {
+    job: 'standing.autoconfirm',
+    defs: [standingAutoconfirmJob],
+    async arrange() {
+      await setStanding(true)
+      const series = await insertSeries({ startDate: '2026-06-13', timeMin: 600 })
+      // tomorrow's occurrence, booked: inside the 48-hour auto-confirm window
+      const appt = await w.appointment({
+        customer: 'Liam Chen',
+        at: '2026-06-13T10:00:00-04:00',
+        status: 'booked',
+      })
+      await db()
+        .updateTable('appointments')
+        .set({ standing_series_id: series })
+        .where('id', '=', appt)
+        .execute()
+    },
+    observe: async () => ({
+      standing: await observeStanding(),
+      texts: await count('messages', sql`direction = 'out'`),
+    }),
+  },
+  {
+    job: 'waitlist.offer_expiry',
+    defs: [waitlistOfferExpiryJob],
+    async arrange() {
+      await setStanding(true)
+      const entry = w.newId()
+      await db()
+        .insertInto('waitlist_entries')
+        .values({
+          id: entry,
+          location_id: w.locationId,
+          customer_id: w.customer('Liam Chen').id,
+          service_id: (
+            await db()
+              .selectFrom('services')
+              .select('id')
+              .where('name', '=', 'Express Hand Wash')
+              .executeTakeFirstOrThrow()
+          ).id,
+          desired_date: '2026-06-13',
+          window_start_min: 540,
+          window_end_min: 720,
+          status: 'offered',
+        } as never)
+        .execute()
+      await db()
+        .insertInto('waitlist_offers')
+        .values({
+          id: w.newId(),
+          location_id: w.locationId,
+          entry_id: entry,
+          slot_start: new Date('2026-06-13T10:00:00-04:00'),
+          slot_end: new Date('2026-06-13T10:35:00-04:00'),
+          phase: 'everyone',
+          expires_at: new Date(w.clock.now().getTime() - 5 * 60_000),
+        } as never)
+        .execute()
+    },
+    observe: async () => ({
+      offers: (
+        await db().selectFrom('waitlist_offers').select(['status', 'phase']).orderBy('slot_start').execute()
+      ).map((r) => ({ ...r })),
+      entries: (await db().selectFrom('waitlist_entries').select('status').execute()).map((r) => r.status),
+    }),
   },
   {
     job: 'email.send',
@@ -318,6 +432,43 @@ async function arrangeEmergency(): Promise<void> {
     } as never)
     .execute()
 }
+async function insertSeries(o: { startDate: string; timeMin: number }): Promise<string> {
+  const id = w.newId()
+  await db()
+    .insertInto('standing_series')
+    .values({
+      id,
+      location_id: w.locationId,
+      customer_id: w.customer('Liam Chen').id,
+      service_id: (
+        await db()
+          .selectFrom('services')
+          .select('id')
+          .where('name', '=', 'Express Hand Wash')
+          .executeTakeFirstOrThrow()
+      ).id,
+      cadence: 'weekly',
+      weekday: 6,
+      time_min: o.timeMin,
+      start_date: o.startDate,
+    } as never)
+    .execute()
+  return id
+}
+
+async function observeStanding(): Promise<unknown> {
+  return {
+    appointments: (
+      await sql<{ start: Date; status: string }>`
+      select scheduled_start as start, status from appointments where standing_series_id is not null
+      order by scheduled_start`.execute(db())
+    ).rows.map((r) => `${r.start.toISOString()} ${r.status}`),
+    through: (await db().selectFrom('standing_series').select('generated_through').execute()).map(
+      (r) => r.generated_through,
+    ),
+  }
+}
+
 /** Jobs whose own suite runs them twice through the real worker; the suite file must mention the job. */
 const dedicated: Record<string, string> = {
   'maintenance.retention': 'test/jobs/scans.test.ts',
@@ -334,25 +485,9 @@ const dedicated: Record<string, string> = {
   'membership.cycle': 'test/jobs/matrix-sqsp.test.ts',
 }
 
-/**
- * Registered jobs whose handlers are tested in their own suite but whose run through the real worker is still owed. Listed
- * here (and as a todo below) instead of under `dedicated`, which only names suites that use the real worker.
- */
-const owedWorkerProof: Record<string, string> = {
-  'standing.materialize': 'test/standing/jobs.test.ts',
-  'standing.autoconfirm': 'test/standing/jobs.test.ts',
-  'waitlist.offer_expiry': 'test/standing/jobs.test.ts',
-}
-
 describe('every registered job runs twice through the real worker', () => {
-  it.todo(`owed: ${Object.keys(owedWorkerProof).join(', ')} twice through the real worker`)
-
   it('has a scenario or a dedicated suite for every job in the registry, and none for a job that does not exist', () => {
-    const covered = [
-      ...scenarios.map((s) => s.job),
-      ...Object.keys(dedicated),
-      ...Object.keys(owedWorkerProof),
-    ]
+    const covered = [...scenarios.map((s) => s.job), ...Object.keys(dedicated)]
     expect(new Set(covered).size).toBe(covered.length)
     expect([...covered].sort()).toEqual(jobDefinitions.map((j) => j.name).sort())
     for (const [job, file] of Object.entries(dedicated)) {

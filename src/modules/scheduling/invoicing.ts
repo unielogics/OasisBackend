@@ -3,7 +3,7 @@ import type { Executor, Tx } from '../../platform/db.js'
 import { displayName } from '../auth/context.js'
 import '../people/schema.js'
 import { customerBrief, vehicleBrief, vehicleLabel, type AppointmentRecord } from './appointments.js'
-import type { SchedulingCtx } from './context.js'
+import type { Actor, SchedulingCtx } from './context.js'
 import type { InvoiceItem, InvoiceSummary } from './ports.js'
 
 /** "Marco R." for an employee, "Unassigned" for none. */
@@ -41,11 +41,12 @@ export async function invoiceItemsOf(db: Executor, a: AppointmentRecord): Promis
   ]
 }
 
-/** Creates the appointment's invoice (or refreshes its date and revives it after a reopen). */
+/** Creates the appointment's invoice (or refreshes its date and revives it after a reopen), audited as `actor`'s request. */
 export async function ensureInvoiceFor(
   tx: Tx,
   c: SchedulingCtx,
   a: AppointmentRecord,
+  actor?: Actor,
 ): Promise<InvoiceSummary> {
   const [customer, vehicle, staff, addons] = await Promise.all([
     customerBrief(tx, a.customerId),
@@ -64,6 +65,7 @@ export async function ensureInvoiceFor(
     packageName: a.packageName,
     packagePriceCents: a.priceCents,
     addons: addons.map((x) => ({ name: x.name, priceCents: x.priceCents })),
+    ...(actor ? { audit: actor.audit } : {}),
   })
 }
 

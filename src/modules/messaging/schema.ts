@@ -204,8 +204,19 @@ export interface OutboxEmailsTable {
   sent_at: Date | null
 }
 
+/** Debounce record of manager notices that can repeat (migration 20261006410000, ADR 0122). */
+export interface NoticeDebounceTable {
+  location_id: string
+  key: string
+  state: string | null
+  last_sent_at: Date | null
+  suppressed: Generated<number>
+  updated_at: Generated<Date>
+}
+
 declare module '../../platform/schema.js' {
   interface Database {
+    notice_debounce: NoticeDebounceTable
     sms_devices: SmsDevicesTable
     message_threads: MessageThreadsTable
     messages: MessagesTable

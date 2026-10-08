@@ -154,6 +154,16 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
     tests: 'test/jobs/scans.test.ts, test/jobs/registry.test.ts',
     status: 'built',
   },
+  'ledger.integrity_check': {
+    owner: 'payments',
+    purpose:
+      'Nightly proof that every invoice_calc_of row equals calcInvoice over the raw lines and ledger events, that the append-only triggers on ledger_events and credit_allocations exist and are enabled, and that FIFO allocations sum to their credit_apply and never overdraw a lot. Records the result; a problem notifies the managers.',
+    idempotency:
+      'One ledger_integrity_runs row per location and business date; a re-run with the same result changes nothing and a known problem is not announced twice. The ledger is only read.',
+    clock: 'Injected clock for the run time and the business date.',
+    tests: 'test/payments/ledger-integrity.test.ts, test/jobs/matrix.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
   'sms.dispatch': {
     owner: 'messaging',
     purpose:
@@ -250,7 +260,7 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
     idempotency:
       'One standing_occurrences row per (series, date) under a unique key, and the series watermark only moves forward; a second run books nothing new.',
     clock: 'Injected clock, business-timezone dates.',
-    tests: 'test/standing/jobs.test.ts, test/standing/standing.test.ts, test/jobs/registry.test.ts',
+    tests: 'test/standing/jobs.test.ts, test/standing/standing.test.ts, test/jobs/registry.test.ts, test/jobs/matrix.test.ts',
     status: 'built',
   },
   'standing.autoconfirm': {
@@ -259,7 +269,7 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
       'Confirms standing appointments whose series has auto-confirm on, once they are inside the confirmation window.',
     idempotency: 'Confirms only appointments still in booked status; a repeat finds none.',
     clock: 'Injected clock against each appointment start.',
-    tests: 'test/standing/jobs.test.ts, test/jobs/registry.test.ts',
+    tests: 'test/standing/jobs.test.ts, test/jobs/registry.test.ts, test/jobs/matrix.test.ts',
     status: 'built',
   },
   'waitlist.offer_expiry': {
@@ -269,7 +279,7 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
     idempotency:
       'Moves only open offers past expires_at; the next offer is unique per (entry, slot_start), so a repeat neither lapses nor offers twice.',
     clock: 'Injected clock against expires_at.',
-    tests: 'test/standing/waitlist.test.ts, test/standing/jobs.test.ts, test/jobs/registry.test.ts',
+    tests: 'test/standing/waitlist.test.ts, test/standing/jobs.test.ts, test/jobs/registry.test.ts, test/jobs/matrix.test.ts',
     status: 'built',
   },
 }

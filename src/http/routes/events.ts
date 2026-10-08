@@ -133,6 +133,9 @@ export function registerEventsRoute(app: AppInstance): void {
       let closed = false
       const buffer: RealtimeEvent[] = []
       const replayed = new Set<number>()
+      // events at or below this id are never sent live: they predate a fresh stream or were replayed to a resumed one (the hub can
+      // dispatch them late, after the stream went live)
+      let floor = Number.MAX_SAFE_INTEGER
       const channels = new Set<string>(allowed)
 
       const write = (chunk: string): void => {
@@ -170,7 +173,7 @@ export function registerEventsRoute(app: AppInstance): void {
           if (e.type === 'rbac.changed') void recheck()
           if (!live) buffer.push(e)
           // the hub may dispatch an event the replay query already sent (it reads the log slightly behind the commit)
-          else if (!replayed.delete(e.id)) send(e)
+          else if (!replayed.delete(e.id) && e.id > floor) send(e)
         },
         onClose: () => cleanup(),
       })
@@ -204,7 +207,7 @@ export function registerEventsRoute(app: AppInstance): void {
           cursor: state.latestId,
           heartbeatMs: app.env.SSE_HEARTBEAT_MS,
         }
-        let floor = state.latestId // events at or below this id are not sent from the live buffer
+        floor = state.latestId
 
         if (!resuming) {
           write(frame({ event: 'ready', id: state.latestId, data: readyBody }))

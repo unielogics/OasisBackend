@@ -20,6 +20,7 @@ import { Dispatcher } from './dispatch/dispatcher.js'
 import { SmsEventIngestor, type IngestResult } from './dispatch/ingest.js'
 import { createInboundEffects } from './inbound-effects.js'
 import { InboundService } from './inbound/service.js'
+import { noteAppStarted } from './device-notices.js'
 import { notifyManagers } from './notify.js'
 import type { MessagingRuntime } from './runtime.js'
 import './schema.js'
@@ -146,7 +147,11 @@ export class WebhookService {
       })
       const event = this.withDeviceId(parsed.event, device.id)
       const result = await this.apply(tx, device, event, parsed)
-      if (result.outcome === 'handled' && result.health?.appStarted) appStartedFor = device
+      if (result.outcome === 'handled' && result.health?.appStarted) {
+        appStartedFor = device
+        // `device` was read before this event touched it: a restart moments after the last signal was not a reboot
+        await noteAppStarted(tx, this.rt.deps, device, event.kind === 'app_started' ? event.at : this.rt.clock.now())
+      }
       const ignored = result.outcome === 'duplicate' || (result.outcome === 'handled' && result.result.detail === 'ignored_unknown_message')
       await tx
         .updateTable('webhook_log')

@@ -4,6 +4,7 @@ import { assertValidKey } from '../platform/idempotency.js'
 import type { Env } from '../config/env.js'
 import type { RouteRecord, RouteAccess } from './access.js'
 import { isIdempotentHandler } from './idempotent.js'
+import type { RateLimits } from './rate-limit.js'
 import type { AppInstance } from './types.js'
 
 const UNSAFE = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
@@ -83,7 +84,8 @@ export function installRouteRegistry(app: AppInstance, records: RouteRecord[]): 
   })
 }
 
-export function installRequestHooks(app: AppInstance): void {
+/** `limits` charges the global per-caller budget before the 401/403 decision (SEC-14; src/http/rate-limit.ts). */
+export function installRequestHooks(app: AppInstance, limits?: RateLimits): void {
   const origins = allowedOrigins(app.env)
   app.decorateRequest('auth', null)
 
@@ -94,12 +96,17 @@ export function installRequestHooks(app: AppInstance): void {
     if (req.url.startsWith('/api/')) reply.header('X-API-Version', '1')
     if (access.kind === 'webhook') return
 
-    if (UNSAFE.has(req.method)) assertOriginAllowed(req, origins)
-    if (access.kind === 'public') return
+    if (access.kind === 'public') {
+      await limits?.charge(req, reply)
+      if (UNSAFE.has(req.method)) assertOriginAllowed(req, origins)
+      return
+    }
 
     const ctx = await app.authorizer.resolve(req)
+    if (ctx) req.auth = ctx
+    await limits?.charge(req, reply)
+    if (UNSAFE.has(req.method)) assertOriginAllowed(req, origins)
     if (!ctx) throw new AppError('UNAUTHENTICATED')
-    req.auth = ctx
     if (access.kind === 'permission') app.authorizer.requirePerm(ctx, access.perms, access.mode)
     if (UNSAFE.has(req.method)) await app.authorizer.verifyCsrf?.(req, ctx)
   })

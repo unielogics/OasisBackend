@@ -16526,7 +16526,7 @@
         "x-oasis-access": "cli.view"
       },
       "post": {
-        "description": "The phone is normalised to E.164 and is the identity: an existing live customer is returned with `created: false` and only missing details are filled. Contact fields come back null without cli.contact.",
+        "description": "The phone is normalised to E.164 and is the identity: an existing live customer is returned with `created: false` and only missing details are filled. Contact fields come back null without cli.contact. Without cli.contact a number that belongs to an existing customer answers a masked match (`masked: true`: initials only, no id, contact or vehicles) and the record is left untouched, so the box cannot be used to find out who owns a number; find the customer by name instead.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -16653,128 +16653,248 @@
                       "type": "boolean"
                     },
                     "customer": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "email": {
-                          "anyOf": [
-                            {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "email": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "fullName": {
                               "type": "string"
                             },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "fullName": {
-                          "type": "string"
-                        },
-                        "id": {
-                          "type": "string"
-                        },
-                        "needsDetails": {
-                          "type": "boolean"
-                        },
-                        "phone": {
-                          "anyOf": [
-                            {
+                            "id": {
                               "type": "string"
                             },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "vehicles": {
-                          "items": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "color": {
-                                "anyOf": [
-                                  {
-                                    "type": "string"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "id": {
-                                "type": "string"
-                              },
-                              "make": {
-                                "anyOf": [
-                                  {
-                                    "type": "string"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "model": {
-                                "anyOf": [
-                                  {
-                                    "type": "string"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "plate": {
-                                "anyOf": [
-                                  {
-                                    "type": "string"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "year": {
-                                "anyOf": [
-                                  {
-                                    "maximum": 9007199254740991,
-                                    "minimum": -9007199254740991,
-                                    "type": "integer"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              }
+                            "needsDetails": {
+                              "type": "boolean"
                             },
-                            "required": [
-                              "id",
-                              "year",
-                              "make",
-                              "model",
-                              "color",
-                              "plate"
-                            ],
-                            "type": "object"
+                            "phone": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "vehicles": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "color": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "make": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "model": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "plate": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "year": {
+                                    "anyOf": [
+                                      {
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "year",
+                                  "make",
+                                  "model",
+                                  "color",
+                                  "plate"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "vip": {
+                              "type": "boolean"
+                            }
                           },
-                          "type": "array"
+                          "required": [
+                            "id",
+                            "fullName",
+                            "phone",
+                            "email",
+                            "vip",
+                            "needsDetails",
+                            "vehicles"
+                          ],
+                          "type": "object"
                         },
-                        "vip": {
-                          "type": "boolean"
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "email": {
+                              "type": "null"
+                            },
+                            "fullName": {
+                              "type": "string"
+                            },
+                            "id": {
+                              "type": "null"
+                            },
+                            "needsDetails": {
+                              "enum": [
+                                false
+                              ],
+                              "type": "boolean"
+                            },
+                            "phone": {
+                              "type": "null"
+                            },
+                            "vehicles": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "color": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "make": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "model": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "plate": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "year": {
+                                    "anyOf": [
+                                      {
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "year",
+                                  "make",
+                                  "model",
+                                  "color",
+                                  "plate"
+                                ],
+                                "type": "object"
+                              },
+                              "maxItems": 0,
+                              "type": "array"
+                            },
+                            "vip": {
+                              "enum": [
+                                false
+                              ],
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "fullName",
+                            "phone",
+                            "email",
+                            "vip",
+                            "needsDetails",
+                            "vehicles"
+                          ],
+                          "type": "object"
                         }
-                      },
-                      "required": [
-                        "id",
-                        "fullName",
-                        "phone",
-                        "email",
-                        "vip",
-                        "needsDetails",
-                        "vehicles"
-                      ],
-                      "type": "object"
+                      ]
+                    },
+                    "masked": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "customer",
-                    "created"
+                    "created",
+                    "masked"
                   ],
                   "type": "object"
                 }

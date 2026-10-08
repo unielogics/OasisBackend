@@ -723,7 +723,7 @@ export async function reopenAppointment(
     excludeAppointmentId: a.id,
     ignorePast: o.start === undefined,
   })
-  await c.ports.deposits?.reopen(tx, { appointmentId: a.id, locationId: c.locationId })
+  await c.ports.deposits?.reopen(tx, { appointmentId: a.id, locationId: c.locationId, audit: actor.audit })
   await applyPatch(tx, a, {
     status: 'booked',
     canceled_at: null,
@@ -734,7 +734,7 @@ export async function reopenAppointment(
   })
   await recordOverrides(tx, c, actor, a.id, decision)
   const fresh = await reload(tx, c, a.id)
-  const invoice = await ensureInvoiceFor(tx, c, fresh)
+  const invoice = await ensureInvoiceFor(tx, c, fresh, actor)
   await logActivity(tx, c, {
     appointmentId: a.id,
     text: 'Appointment reopened',
@@ -794,7 +794,7 @@ export async function rescheduleAppointment(
   })
   await recordOverrides(tx, c, actor, a.id, decision)
   const fresh = await reload(tx, c, a.id)
-  const invoice = await ensureInvoiceFor(tx, c, fresh)
+  const invoice = await ensureInvoiceFor(tx, c, fresh, actor)
   const label = whenLabel(o.start, c.clock.now(), c.tz)
   const sent = await queue(tx, c, a, customer, {
     templateKey: 'reschedule',

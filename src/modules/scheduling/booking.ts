@@ -261,7 +261,7 @@ export async function createAppointment(
   await recordOverrides(tx, c, actor, id, decision)
 
   const appt: AppointmentRecord = await requireAppointment(tx, c.locationId, id)
-  const invoice = await ensureInvoiceFor(tx, c, appt)
+  const invoice = await ensureInvoiceFor(tx, c, appt, actor)
   await logActivity(tx, c, {
     appointmentId: id,
     text: input.walkIn ? 'Walk-in booked' : 'Booking created',
