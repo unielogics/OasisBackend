@@ -1,7 +1,7 @@
 // Review finding 19: docs/integrations/ses.md (and review B34) make SNS bounce and complaint feedback part of the email
 // design: POST /hooks/ses decides suppressions and customers.email_bounced_at, and the suppression list is wired into the
-// provider with createEmailProvider(env, { isSuppressed }). Neither is wired in the app: the route does not exist and the
-// messaging runtime builds its provider without isSuppressed, so a hard-bounced or complaining address is mailed again.
+// provider. Fixed by ADR 0110 (src/modules/messaging/email/hook.ts and feedback.ts); test/aws/ses-feedback.test.ts covers the
+// signature, topic, replay and persistence rules.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { hookModules } from '../../src/http/modules.js'
 import { createTestApp, type TestApp } from '../helpers/app.js'
@@ -19,9 +19,7 @@ describe('SES feedback', () => {
     await t?.close()
   })
 
-  // Open finding, pinned as an expected failure so the suite stays green; mounting /hooks/ses makes this fail, and then it
-  // must become a plain it() again.
-  it.fails('has a public POST /hooks/ses route', async () => {
+  it('has a public POST /hooks/ses route', async () => {
     const res = await app.app.inject({
       method: 'POST',
       url: '/hooks/ses',

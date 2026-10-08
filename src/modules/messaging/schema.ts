@@ -202,6 +202,30 @@ export interface OutboxEmailsTable {
   dedupe_key: string | null
   created_at: Generated<Date>
   sent_at: Date | null
+  // SES feedback (migration 20261006400000_email_feedback.sql)
+  appointment_id: Generated<string | null>
+  error_at: Generated<Date | null>
+  delivered_at: Generated<Date | null>
+  feedback: Generated<'soft_bounce' | 'hard_bounce' | 'complaint' | null>
+  feedback_at: Generated<Date | null>
+  feedback_detail: Generated<string | null>
+}
+
+export interface EmailSuppressionsTable {
+  address: string
+  reason: 'bounce' | 'complaint'
+  bounce_type: string | null
+  bounce_subtype: string | null
+  complaint_feedback_type: string | null
+  diagnostic: string | null
+  first_seen_at: Date
+  last_seen_at: Date
+  count: Generated<number>
+  source_message_ids: Generated<string[]>
+  cleared_at: Date | null
+  cleared_by: string | null
+  created_at: Generated<Date>
+  updated_at: Generated<Date>
 }
 
 declare module '../../platform/schema.js' {
@@ -215,5 +239,6 @@ declare module '../../platform/schema.js' {
     sms_inbox: SmsInboxTable
     sms_opt_outs: SmsOptOutsTable
     outbox_emails: OutboxEmailsTable
+    email_suppressions: EmailSuppressionsTable
   }
 }

@@ -413,6 +413,9 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | PATCH | `/api/v1/standing-series/:id` | sched.edit | required |
 | POST | `/api/v1/standing-series/:id/materialize` | sched.edit |  |
 | POST | `/api/v1/standing-series/materialize` | sched.edit |  |
+| GET | `/api/v1/system/email-suppressions` | set.billing |  |
+| DELETE | `/api/v1/system/email-suppressions/:address` | set.billing + cli.contact |  |
+| GET | `/api/v1/system/integrations` | set.billing |  |
 | GET | `/api/v1/system/jobs` | set.billing |  |
 | GET | `/api/v1/vip` | authenticated |  |
 | PUT | `/api/v1/vip` | cli.member |  |
@@ -427,6 +430,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/waitlist/:id/cancel` | sched.edit |  |
 | GET | `/dev-storage/*` | public |  |
 | POST | `/dev-storage/*` | public |  |
+| POST | `/hooks/ses` | webhook:ses |  |
 | POST | `/hooks/squarespace` | webhook:squarespace |  |
 <!-- openapi:end -->
 

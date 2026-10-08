@@ -40,7 +40,20 @@ export function createDbPaymentOutbox(rt: MessagingRuntime): PaymentOutbox {
         return { messageId: null }
       }
       const loc = await rt.location(tx)
-      const q = await queueEmail(tx, { locationId: loc.id, to: m.to, template: 'receipt', vars, purpose: 'receipt', customerId: m.customerId, dedupeKey: m.dedupeKey }, rt.deps)
+      const q = await queueEmail(
+        tx,
+        {
+          locationId: loc.id,
+          to: m.to,
+          template: 'receipt',
+          vars,
+          purpose: 'receipt',
+          customerId: m.customerId,
+          appointmentId: await appointmentOf(tx, m.invoiceId),
+          dedupeKey: m.dedupeKey,
+        },
+        rt.deps,
+      )
       return { messageId: q.emailId }
     },
   }

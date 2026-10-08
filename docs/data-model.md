@@ -257,7 +257,7 @@ run changes nothing and edits made after seeding survive (a retired task, a chan
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (86 tables, 1 view, 9 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (87 tables, 1 view, 9 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -559,6 +559,27 @@ Primary key `(lot_event_id)`. `(customer_id)` references `customers(id)`. `(loca
 | `updated_at` | timestamp with time zone | no | `app_now()` |
 
 Primary key `(id)`. `(merged_into)` references `customers(id)`. 7 check constraints. Index `customers_email_trgm` `(((email)::text) public.gin_trgm_ops)`. Index `customers_full_name_trgm` `(full_name public.gin_trgm_ops)`. Index `customers_merged_into_idx` `(merged_into)` where `merged_into IS NOT NULL`. Index `customers_phone_trgm` `(phone_e164 public.gin_trgm_ops)`. Unique index `uq_customers_phone` `(phone_e164)` where `(phone_e164 IS NOT NULL) AND (merged_into IS NULL) AND (deleted_at IS NULL)`.
+
+#### `email_suppressions`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `address` | text | no |  |
+| `reason` | text | no |  |
+| `bounce_type` | text | yes |  |
+| `bounce_subtype` | text | yes |  |
+| `complaint_feedback_type` | text | yes |  |
+| `diagnostic` | text | yes |  |
+| `first_seen_at` | timestamp with time zone | no |  |
+| `last_seen_at` | timestamp with time zone | no |  |
+| `count` | integer | no | `1` |
+| `source_message_ids` | text[] | no | `'{}'::text[]` |
+| `cleared_at` | timestamp with time zone | yes |  |
+| `cleared_by` | uuid | yes |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(address)`. `(cleared_by)` references `users(id)` on delete set null. 3 check constraints. Index `email_suppressions_active_idx` `(last_seen_at DESC)` where `cleared_at IS NULL`.
 
 #### `emergency_closures`
 
@@ -1064,8 +1085,14 @@ Primary key `(location_id)`. `(location_id)` references `locations(id)` on delet
 | `dedupe_key` | text | yes |  |
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `sent_at` | timestamp with time zone | yes |  |
+| `appointment_id` | uuid | yes |  |
+| `error_at` | timestamp with time zone | yes |  |
+| `delivered_at` | timestamp with time zone | yes |  |
+| `feedback` | text | yes |  |
+| `feedback_at` | timestamp with time zone | yes |  |
+| `feedback_detail` | text | yes |  |
 
-Primary key `(id)`. Unique `(dedupe_key)`. `(customer_id)` references `customers(id)`. `(employee_id)` references `employees(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. 2 check constraints. Index `outbox_emails_drain_idx` `(state, next_attempt_at)` where `state = ANY (ARRAY['pending'::text, 'sending'::text])`.
+Primary key `(id)`. Unique `(dedupe_key)`. `(appointment_id)` references `appointments(id)` on delete set null. `(customer_id)` references `customers(id)`. `(employee_id)` references `employees(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. 3 check constraints. Index `outbox_emails_drain_idx` `(state, next_attempt_at)` where `state = ANY (ARRAY['pending'::text, 'sending'::text])`. Index `outbox_emails_provider_message_idx` `(provider_message_id)` where `provider_message_id IS NOT NULL`.
 
 #### `password_resets`
 
