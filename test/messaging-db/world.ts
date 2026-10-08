@@ -105,6 +105,8 @@ export function useWorld(o: { start?: string; env?: Record<string, string>; auto
   }
 
   beforeEach(async () => {
+    // the previous test's runtime may still be dispatching or applying events: truncating under it deadlocks
+    await rt?.idle()
     clock.set(start)
     await sql`truncate table messages, message_threads, sms_outbox, sms_inbox, sms_usage, sms_processed_events, sms_opt_outs, outbox_emails, notifications, notice_debounce, realtime_events, webhook_log, appointments, activity_log, audit_log restart identity cascade`.execute(t.db)
     await sql`update customers set sms_opted_in = true, sms_opt_in_source = 'online', sms_opt_in_at = null, sms_opted_out_at = null, synthetic = true`.execute(t.db)
