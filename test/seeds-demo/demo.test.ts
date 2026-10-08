@@ -11,6 +11,7 @@ import { productionExternalAlerts } from '../../src/composition.js'
 import { dbMembershipPort } from '../../src/modules/memberships/port.js'
 import { createGatewayFor } from '../../src/modules/payments/module.js'
 import { ledgerRevenueSource } from '../../src/modules/payments/revenue.js'
+import { checkLedgerIntegrity } from '../../src/modules/payments/jobs-integrity.js'
 import { invoiceList } from '../../src/modules/payments/reports.js'
 import type { SchedulingCtx } from '../../src/modules/scheduling/context.js'
 import { InMemoryMessageQueue } from '../../src/modules/scheduling/ports.js'
@@ -131,6 +132,9 @@ async function assertCoherent(db: Db, now: Date): Promise<void> {
   expect(awaiting).toHaveLength(1)
   expect(awaiting[0]).toMatchObject({ method_kind: 'card', last4: null })
   // the invoice money adds up: never paid beyond the total
+  // the nightly ledger check finds nothing to report on the demo data
+  const location = await db.selectFrom('locations').select('id').executeTakeFirstOrThrow()
+  expect((await checkLedgerIntegrity(db, location.id)).findings).toEqual([])
   const overpaid = await n(
     db,
     sql<{
