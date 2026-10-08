@@ -1,5 +1,6 @@
 // Needs Attention alerts 10 and 11 (design 4.4): an unread inbound text (also one that could not be tied to an appointment,
-// and a customer's CANCEL) and an SMS device that is offline. Computed on read, like the other alerts.
+// and a customer's CANCEL) and an SMS device that is offline, or texts queued with no device enabled at all. Computed on read,
+// like the other alerts.
 import type { Executor } from '../../../platform/db.js'
 import { fmtT, minutesOfDay } from '../../../platform/time.js'
 import type { ExternalAlert, ExternalAlertSource } from '../../scheduling/ports.js'
@@ -54,6 +55,34 @@ export const messagingAlertSource: ExternalAlertSource = {
         .where('status', '=', 'offline')
         .orderBy('created_at')
         .execute()
+      // texts waiting with nobody to send them: no device is enabled at all (ADR 0122)
+      const enabled = await db
+        .selectFrom('sms_devices')
+        .select('id')
+        .where('location_id', '=', ctx.locationId)
+        .where('enabled', '=', true)
+        .executeTakeFirst()
+      if (!enabled) {
+        const waiting = await db
+          .selectFrom('sms_outbox as o')
+          .innerJoin('messages as m', 'm.id', 'o.message_id')
+          .select((eb) => eb.fn.countAll<number>().as('n'))
+          .where('m.location_id', '=', ctx.locationId)
+          .where('o.state', '=', 'pending')
+          .executeTakeFirstOrThrow()
+        const n = Number(waiting.n)
+        if (n > 0)
+          out.push({
+            key: 'sms_no_device',
+            kind: 'sms_device_down',
+            tone: 'red',
+            title: 'No SMS device',
+            desc: `${n} text${n === 1 ? ' is' : 's are'} queued · no SMS device is enabled`,
+            actionLabel: 'Open health',
+            appointmentId: null,
+            priority: 1,
+          })
+      }
       for (const d of down) {
         const since = d.last_seen_at ?? d.state_changed_at
         out.push({

@@ -7,7 +7,6 @@ import type { Env } from '../../config/env.js'
 import type { Clock } from '../../platform/clock.js'
 import { connectDedicated, type Db, type DbOptions, type Executor, type Tx } from '../../platform/db.js'
 import type { NewId } from '../../platform/ids.js'
-import * as realtime from '../../platform/realtime.js'
 import { createEmailProvider } from '../../integrations/email/config.js'
 import type { EmailProvider } from '../../integrations/ports/email.js'
 import type { SmsProvider } from '../../integrations/ports/sms.js'
@@ -24,7 +23,7 @@ import { DeviceHealthMonitor, pollDeviceHealth, signalFromHealth, type HealthEva
 import { Dispatcher, type TickReport } from './dispatch/dispatcher.js'
 import type { HealthConfig } from './dispatch/health.js'
 import { EmailSender, queueEmail, type EmailVars } from './email/service.js'
-import { notifyManagers, publishToManagers, type NoticeSpec } from './notify.js'
+import { catchUpDeviceNotices, checkNoDevice, onDeviceTransition } from './device-notices.js'
 import { ProviderRegistry } from './providers.js'
 import { DbMessageQueue } from './queue.js'
 import { WebhookService } from './webhook.js'
@@ -125,27 +124,11 @@ export class MessagingRuntime {
 
   // ---- devices ---------------------------------------------------------------------------------------------------
 
-  /** Pushes a device-state change to the people who can act on it. Runs inside the transaction that saved the state. */
-  readonly onTransition = async (tx: Tx, t: DeviceTransition): Promise<void> => {
-    const dev = await tx.selectFrom('sms_devices').select(['location_id', 'label']).where('id', '=', t.deviceId).executeTakeFirst()
-    if (!dev) return
-    const payload = { deviceId: t.deviceId, label: dev.label, from: t.from, to: t.to }
-    const spec = (kind: string, title: string, body: string): NoticeSpec => ({
-      locationId: dev.location_id,
-      kind,
-      title,
-      body,
-      entityType: 'sms_device',
-      entityId: t.deviceId,
-      event: { type: 'sms.device.health', payload },
-    })
-    if (t.to === 'offline')
-      await notifyManagers(tx, spec('sms.device_offline', 'SMS device offline', `${dev.label} stopped responding. Texts wait in the queue until it is back.`), this.deps)
-    else if (t.from === 'offline')
-      await notifyManagers(tx, spec('sms.device_recovered', 'SMS device back online', `${dev.label} is responding again. Queued texts are being sent.`), this.deps)
-    else if (t.from !== 'unknown') await publishToManagers(tx, dev.location_id, 'sms.device.health', payload)
-    await realtime.publish(tx, { locationId: dev.location_id, channel: 'ops', type: 'alerts.changed', payload: { source: 'sms', kind: 'device_health' } })
-  }
+  /**
+   * Pushes a device-state change to the people who can act on it (offline and back-online notices debounced per flap window,
+   * ADR 0122). Runs inside the transaction that saved the state.
+   */
+  readonly onTransition = (tx: Tx, t: DeviceTransition): Promise<void> => onDeviceTransition(tx, this.deps, t)
 
   dispatcherFor(device: DeviceRow, exec: Executor = this.db): { dispatcher: Dispatcher; monitor: DeviceHealthMonitor; health: HealthConfig; provider: SmsProvider } {
     const cfg = this.config.dispatch({
@@ -165,7 +148,9 @@ export class MessagingRuntime {
 
   async tickAll(): Promise<DeviceTick[]> {
     const out: DeviceTick[] = []
-    for (const device of await this.store.listEnabled()) {
+    const devices = await this.store.listEnabled()
+    if (devices.length === 0) await this.noticeNoDevice()
+    for (const device of devices) {
       try {
         const { dispatcher } = this.dispatcherFor(device)
         const report = await dispatcher.tick()
@@ -196,8 +181,23 @@ export class MessagingRuntime {
   /** Asks each device for its health and feeds the monitor. Returns the evaluation per device. */
   async pollHealthAll(): Promise<Array<{ device: DeviceRow; evaluation: HealthEvaluation }>> {
     const out = []
-    for (const device of await this.store.listEnabled()) out.push({ device, evaluation: await this.pollHealth(device) })
+    const devices = await this.store.listEnabled()
+    for (const device of devices) out.push({ device, evaluation: await this.pollHealth(device) })
+    // a state change held back inside a flap window is announced once the window allows (ADR 0122)
+    for (const device of devices) await this.db.transaction().execute((tx) => catchUpDeviceNotices(tx, this.deps, device))
+    await this.noticeNoDevice()
     return out
+  }
+
+  /** Texts waiting and no enabled SMS device: managers are told once per episode (ADR 0122). */
+  async noticeNoDevice(): Promise<boolean> {
+    try {
+      const { id } = await this.location()
+      return await this.db.transaction().execute((tx) => checkNoDevice(tx, this.deps, id))
+    } catch (err) {
+      this.log.error({ err: (err as Error).message }, 'sms no-device check failed')
+      return false
+    }
   }
 
   async pollHealth(device: DeviceRow): Promise<HealthEvaluation> {
