@@ -17,7 +17,11 @@ afterEach(async () => {
   ctx = undefined
 })
 
-async function start(): Promise<{ url: string; app: TestApp; pub: (e: Omit<PublishInput, 'locationId'>) => Promise<number> }> {
+async function start(): Promise<{
+  url: string
+  app: TestApp
+  pub: (e: Omit<PublishInput, 'locationId'>) => Promise<number>
+}> {
   ctx = await createTestApp({ testDb: t, hub: { pollMs: 200 }, env: { SSE_HEARTBEAT_MS: '20000' } })
   await ctx.app.listen({ port: 0, host: '127.0.0.1' })
   const addr = ctx.app.server.address()
