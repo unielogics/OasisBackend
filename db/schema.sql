@@ -1025,6 +1025,24 @@ ALTER TABLE public.ledger_events ALTER COLUMN seq ADD GENERATED ALWAYS AS IDENTI
 );
 
 --
+-- Name: ledger_integrity_runs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ledger_integrity_runs (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    check_date date NOT NULL,
+    started_at timestamp with time zone NOT NULL,
+    finished_at timestamp with time zone NOT NULL,
+    ok boolean NOT NULL,
+    invoices_checked integer NOT NULL,
+    findings jsonb DEFAULT '[]'::jsonb NOT NULL,
+    job_id text,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT ledger_integrity_runs_invoices_checked_check CHECK ((invoices_checked >= 0))
+);
+
+--
 -- Name: locations; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1188,6 +1206,20 @@ CREATE TABLE public.messages (
     CONSTRAINT messages_segments_check CHECK ((segments >= 1)),
     CONSTRAINT messages_sender_kind_check CHECK ((sender_kind = ANY (ARRAY['staff'::text, 'system'::text, 'customer'::text]))),
     CONSTRAINT messages_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'sending'::text, 'sent'::text, 'delivered'::text, 'failed'::text, 'received'::text, 'canceled'::text, 'expired'::text])))
+);
+
+--
+-- Name: notice_debounce; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notice_debounce (
+    location_id uuid NOT NULL,
+    key text NOT NULL,
+    state text,
+    last_sent_at timestamp with time zone,
+    suppressed integer DEFAULT 0 NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT notice_debounce_suppressed_check CHECK ((suppressed >= 0))
 );
 
 --
@@ -2477,6 +2509,20 @@ ALTER TABLE ONLY public.ledger_events
     ADD CONSTRAINT ledger_events_seq_key UNIQUE (seq);
 
 --
+-- Name: ledger_integrity_runs ledger_integrity_runs_location_id_check_date_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_integrity_runs
+    ADD CONSTRAINT ledger_integrity_runs_location_id_check_date_key UNIQUE (location_id, check_date);
+
+--
+-- Name: ledger_integrity_runs ledger_integrity_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_integrity_runs
+    ADD CONSTRAINT ledger_integrity_runs_pkey PRIMARY KEY (id);
+
+--
 -- Name: locations locations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2552,6 +2598,13 @@ ALTER TABLE ONLY public.messages
 
 ALTER TABLE ONLY public.messages
     ADD CONSTRAINT messages_pkey PRIMARY KEY (id);
+
+--
+-- Name: notice_debounce notice_debounce_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notice_debounce
+    ADD CONSTRAINT notice_debounce_pkey PRIMARY KEY (location_id, key);
 
 --
 -- Name: notifications notifications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -4316,6 +4369,13 @@ ALTER TABLE ONLY public.ledger_events
     ADD CONSTRAINT ledger_events_voids_event_id_fkey FOREIGN KEY (voids_event_id) REFERENCES public.ledger_events(id);
 
 --
+-- Name: ledger_integrity_runs ledger_integrity_runs_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ledger_integrity_runs
+    ADD CONSTRAINT ledger_integrity_runs_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
 -- Name: membership_credit_events membership_credit_events_actor_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4447,6 +4507,13 @@ ALTER TABLE ONLY public.messages
 
 ALTER TABLE ONLY public.messages
     ADD CONSTRAINT messages_thread_id_fkey FOREIGN KEY (thread_id) REFERENCES public.message_threads(id) ON DELETE CASCADE;
+
+--
+-- Name: notice_debounce notice_debounce_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notice_debounce
+    ADD CONSTRAINT notice_debounce_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 -- Name: notifications notifications_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

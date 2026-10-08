@@ -163,8 +163,23 @@ export interface InvoiceCalcRow {
   status: InvoiceStatus
 }
 
+/** One nightly ledger integrity check per location (migration 20261006410000, ADR 0123). */
+export interface LedgerIntegrityRunsTable {
+  id: string
+  location_id: string
+  check_date: string
+  started_at: Date
+  finished_at: Date
+  ok: boolean
+  invoices_checked: number
+  findings: unknown
+  job_id: string | null
+  created_at: Generated<Date>
+}
+
 declare module '../../platform/schema.js' {
   interface Database {
+    ledger_integrity_runs: LedgerIntegrityRunsTable
     invoice_counters: InvoiceCountersTable
     invoices: InvoicesTable
     invoice_items: InvoiceItemsTable
