@@ -254,6 +254,26 @@ run changes nothing and edits made after seeding survive (a retired task, a chan
 - VIP clients: Jonathan Franco, Liam Chen, Aisha Rahman, Elena Volkov (resolved to customers by exact name).
 - No appointments, invoices, memberships or messages: the verticals that own them seed those.
 
+`demo` (`db/seeds/demo.ts`, depends on `design`, `memberships` and `geofence`; `pnpm seed -- --profile design,demo`): the
+Operations design day re-anchored on **today** in the business time zone with the real clock, for a live link. Details in
+`db/seeds/README.md`.
+
+- `appointments`: a1-a11 at their design times today and a12 tomorrow, in the state their day (`DEMO_PLAN`) has reached at
+  the seed's clock (10:36 AM gives the design board exactly; one car per bay at any moment); the Payments history's jobs of the
+  last 29 days (completed, one canceled); the design's procedural days 30-60 back (completed) and from tomorrow to 60 ahead
+  (booked or confirmed), closed days skipped. `appointment_addons`, `job_checklist_items` (ticks only for work done),
+  `appointment_photos` (rows without objects), `activity_log` and delivered `messages` follow the same timeline.
+- `invoices`: exactly one per appointment. INV-20601..20608 on the eight jobs the Payments design names, the history's own
+  numbers (20506-20610 without today's eight), the past procedural days from 20505 downward, everything else from
+  `invoice_counters` (today's other four first, then the future days in date order). No number is used twice.
+- `ledger_events` (`source='seed'`): yesterday's deposits and Nathan's prepayment, today's prepayments at the Payments design's
+  times, counter payments when a car is finished, David's loyalty adjustment, the history's events (pending refund INV-20579,
+  canceled INV-20571, store credit with `credit_allocations`), the past procedural payments. Exactly one card payment is
+  `processor_state='awaiting_processor'`: the day's latest counter card payment, or yesterday's last card payment before
+  the first one of the day.
+- Customers: the twenty design pool names (`+1 305/786 555 0114-0133`) and the history's extra people (`+1 954 555 01xx`), all
+  `synthetic`.
+
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
