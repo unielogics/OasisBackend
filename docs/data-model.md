@@ -23,6 +23,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261006300100_membership_gaps.sql`   | `plan_credit_rules.auto_apply` (ADR 0084)                                                                                                              |
 | `20261006300200_standing_waitlist.sql` | standing (recurring) series and their occurrences, the waitlist and its offers (ADR 0086; behind a feature setting, off by default)                    |
 | `20261006310000_jobs_runtime.sql`      | the per-job run record behind `GET /system/jobs`, and the once-only markers of the VIP-release and credit-expiry scans (ADR 0090 to 0093)              |
+| `20261006400000_email_feedback.sql`    | the SES suppression list, and SES feedback, error time and the job of a receipt on the email outbox (ADR 0110)                                         |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -208,6 +209,17 @@ Written by the worker only; the request path never touches them.
 | `job_runs`          | One row per job name, updated at the start and the finish of every run: `runs`, `failures`, `consecutive_failures`, `last_outcome running\|completed\|failed`, last start/finish/success/error times, masked `last_error`, `last_duration_ms`. Feeds `GET /system/jobs` and `/readyz`. |
 | `vip_hold_releases` | Primary key `(hold_id, slot_start)`: a weekly VIP hold whose release for one concrete slot has been announced, so a rerun or a second worker announces it once; purged a week after the slot.                                                                                          |
 | `credit_expiries`   | Primary key `lot_event_id` (the store-credit lot in `ledger_events`): the unspent remainder that expired and was announced once to staff (`expired_cents`, `expires_at`). The ledger itself is untouched.                                                                              |
+
+## Email feedback (migration `20261006400000_email_feedback.sql`, ADR 0110)
+
+Written by `POST /hooks/ses` (SNS-signed SES events); read before every send.
+
+| Table                | Key columns and rules                                                                                                                                                                                                                                                         |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `email_suppressions` | Primary key `address` (lowercased, trimmed); account-wide, no `location_id`. `reason bounce\|complaint` (a complaint outranks a bounce), bounce type/subtype, complaint feedback type, diagnostic, `first_seen_at`, `last_seen_at`, `count` of distinct SES messages, the last 20 `source_message_ids`; `cleared_at`/`cleared_by` when a person lifted it. |
+
+The same migration adds to `outbox_emails`: `appointment_id` (a receipt's job, for the activity line), `error_at`, `delivered_at`,
+`feedback soft_bounce|hard_bounce|complaint`, `feedback_at`, `feedback_detail`, and an index on `provider_message_id`.
 
 ## Foreign keys
 
