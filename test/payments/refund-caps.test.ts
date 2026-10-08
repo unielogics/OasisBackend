@@ -141,10 +141,11 @@ async function capsOf(who: Person, id: string): Promise<Caps> {
 }
 
 describe('GET /invoices/:id refundCaps', () => {
+  // one test per case (the harness signs five people in before each test); each destination gets its own invoice
   for (const c of CASES) {
-    for (const dest of ['card', 'cash', 'credit'] as const) {
-      it(`${c.name}: the caps predict every answer of a refund to ${dest}`, async () => {
-        const { rafael } = p.people()
+    it(`${c.name}: the caps predict every answer of a refund to card, cash and store credit`, async () => {
+      const { rafael } = p.people()
+      for (const dest of ['card', 'cash', 'credit'] as const) {
         const inv = await c.build()
         const caps = await capsOf(rafael, inv.id)
         expect(caps).toEqual(c.caps)
@@ -181,7 +182,7 @@ describe('GET /invoices/:id refundCaps', () => {
         } else {
           expect(Math.min(dest === 'card' ? caps.cardCents : caps.otherCents, caps.totalCents)).toBe(0)
         }
-      })
-    }
+      }
+    })
   }
 })
