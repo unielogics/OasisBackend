@@ -1,6 +1,7 @@
 // Registry of API modules. A vertical adds one import and one entry here; its routes are mounted under /api/v1 and
 // every route must declare config.access (see ./access.ts). Webhook modules are mounted under /hooks.
 import type { AppDeps } from '../app.js'
+import { sesHookModule } from '../modules/messaging/email/hook.js'
 import { createMessagingModule } from '../modules/messaging/http/module.js'
 import { messagingRuntimeFor, productionExternalAlerts, productionPaymentsPorts } from '../composition.js'
 import { authModule, peopleModule } from '../modules/auth/module.js'
@@ -51,4 +52,4 @@ export const apiModules: ApiModule[] = [
   membershipsModule,
   systemModule,
 ]
-export const hookModules: ApiModule[] = [squarespaceHookModule]
+export const hookModules: ApiModule[] = [squarespaceHookModule, sesHookModule]

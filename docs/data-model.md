@@ -23,6 +23,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261006300100_membership_gaps.sql`   | `plan_credit_rules.auto_apply` (ADR 0084)                                                                                                              |
 | `20261006300200_standing_waitlist.sql` | standing (recurring) series and their occurrences, the waitlist and its offers (ADR 0086; behind a feature setting, off by default)                    |
 | `20261006310000_jobs_runtime.sql`      | the per-job run record behind `GET /system/jobs`, and the once-only markers of the VIP-release and credit-expiry scans (ADR 0090 to 0093)              |
+| `20261006400000_email_feedback.sql`    | the SES suppression list, and SES feedback, error time and the job of a receipt on the email outbox (ADR 0110)                                         |
 | `20261006410000_notices_and_ledger_integrity.sql` | the debounce record of manager notices that can repeat (SMS device flapping, app restarts, no device) and the nightly ledger integrity results (ADR 0122, 0123) |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
@@ -219,6 +220,17 @@ Written by the messaging runtime and the worker; neither holds business data.
 | `notice_debounce`       | Primary key `(location_id, key)`: the last time a repeatable manager notice was sent (`last_sent_at`), what it announced (`state`) and how many repeats were held back since (`suppressed`). Keys `sms.device:<id>:offline` / `:online` / `:state`, `sms.app_restarted:<id>`, `sms.no_device`. |
 | `ledger_integrity_runs` | One row per `(location_id, check_date)`: the night's `ledger.integrity_check` result (`ok`, `invoices_checked`, `findings` jsonb of `{code, detail, invoiceNo?}`, `job_id`). A re-run with the same result leaves the row alone. |
 
+## Email feedback (migration `20261006400000_email_feedback.sql`, ADR 0110)
+
+Written by `POST /hooks/ses` (SNS-signed SES events); read before every send.
+
+| Table                | Key columns and rules                                                                                                                                                                                                                                                         |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `email_suppressions` | Primary key `address` (lowercased, trimmed); account-wide, no `location_id`. `reason bounce\|complaint` (a complaint outranks a bounce), bounce type/subtype, complaint feedback type, diagnostic, `first_seen_at`, `last_seen_at`, `count` of distinct SES messages, the last 20 `source_message_ids`; `cleared_at`/`cleared_by` when a person lifted it. |
+
+The same migration adds to `outbox_emails`: `appointment_id` (a receipt's job, for the activity line), `error_at`, `delivered_at`,
+`feedback soft_bounce|hard_bounce|complaint`, `feedback_at`, `feedback_detail`, and an index on `provider_message_id`.
+
 ## Foreign keys
 
 `domain_links` added the keys from the domain tables to `employees` and `users`. Two columns stay plain `uuid` on purpose, and a
@@ -287,7 +299,7 @@ Operations design day re-anchored on **today** in the business time zone with th
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (88 tables, 1 view, 9 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (89 tables, 1 view, 9 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -589,6 +601,27 @@ Primary key `(lot_event_id)`. `(customer_id)` references `customers(id)`. `(loca
 | `updated_at` | timestamp with time zone | no | `app_now()` |
 
 Primary key `(id)`. `(merged_into)` references `customers(id)`. 7 check constraints. Index `customers_email_trgm` `(((email)::text) public.gin_trgm_ops)`. Index `customers_full_name_trgm` `(full_name public.gin_trgm_ops)`. Index `customers_merged_into_idx` `(merged_into)` where `merged_into IS NOT NULL`. Index `customers_phone_trgm` `(phone_e164 public.gin_trgm_ops)`. Unique index `uq_customers_phone` `(phone_e164)` where `(phone_e164 IS NOT NULL) AND (merged_into IS NULL) AND (deleted_at IS NULL)`.
+
+#### `email_suppressions`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `address` | text | no |  |
+| `reason` | text | no |  |
+| `bounce_type` | text | yes |  |
+| `bounce_subtype` | text | yes |  |
+| `complaint_feedback_type` | text | yes |  |
+| `diagnostic` | text | yes |  |
+| `first_seen_at` | timestamp with time zone | no |  |
+| `last_seen_at` | timestamp with time zone | no |  |
+| `count` | integer | no | `1` |
+| `source_message_ids` | text[] | no | `'{}'::text[]` |
+| `cleared_at` | timestamp with time zone | yes |  |
+| `cleared_by` | uuid | yes |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(address)`. `(cleared_by)` references `users(id)` on delete set null. 3 check constraints. Index `email_suppressions_active_idx` `(last_seen_at DESC)` where `cleared_at IS NULL`.
 
 #### `emergency_closures`
 
@@ -1124,8 +1157,14 @@ Primary key `(location_id)`. `(location_id)` references `locations(id)` on delet
 | `dedupe_key` | text | yes |  |
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `sent_at` | timestamp with time zone | yes |  |
+| `appointment_id` | uuid | yes |  |
+| `error_at` | timestamp with time zone | yes |  |
+| `delivered_at` | timestamp with time zone | yes |  |
+| `feedback` | text | yes |  |
+| `feedback_at` | timestamp with time zone | yes |  |
+| `feedback_detail` | text | yes |  |
 
-Primary key `(id)`. Unique `(dedupe_key)`. `(customer_id)` references `customers(id)`. `(employee_id)` references `employees(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. 2 check constraints. Index `outbox_emails_drain_idx` `(state, next_attempt_at)` where `state = ANY (ARRAY['pending'::text, 'sending'::text])`.
+Primary key `(id)`. Unique `(dedupe_key)`. `(appointment_id)` references `appointments(id)` on delete set null. `(customer_id)` references `customers(id)`. `(employee_id)` references `employees(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. 3 check constraints. Index `outbox_emails_drain_idx` `(state, next_attempt_at)` where `state = ANY (ARRAY['pending'::text, 'sending'::text])`. Index `outbox_emails_provider_message_idx` `(provider_message_id)` where `provider_message_id IS NOT NULL`.
 
 #### `password_resets`
 

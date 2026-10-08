@@ -197,7 +197,8 @@ describe('webhook handler', () => {
 
   it('confirms a subscription after verifying its signature', async () => {
     const { handler, confirmed } = collect()
-    const url = 'https://sns.us-east-1.amazonaws.com/?Action=ConfirmSubscription&TopicArn=x&Token=abc'
+    // a real SubscribeURL names the topic; the handler only follows one for the topic the signed envelope names
+    const url = `https://sns.us-east-1.amazonaws.com/?Action=ConfirmSubscription&TopicArn=${encodeURIComponent(TOPIC)}&Token=abc`
     const r = await handler(
       body(
         signedEnvelope(cert, {
@@ -246,7 +247,7 @@ describe('webhook handler', () => {
     })
     const e = signedEnvelope(cert, {
       Type: 'SubscriptionConfirmation',
-      SubscribeURL: 'https://sns.us-east-1.amazonaws.com/?x=1',
+      SubscribeURL: `https://sns.us-east-1.amazonaws.com/?Action=ConfirmSubscription&TopicArn=${encodeURIComponent(TOPIC)}&Token=t`,
       Token: 't',
     })
     expect((await h(body(e))).status).toBe(502)

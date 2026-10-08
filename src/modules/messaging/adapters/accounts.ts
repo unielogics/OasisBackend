@@ -4,6 +4,7 @@
 import { DateTime } from 'luxon'
 import type { AccountMessage, DeliveryResult, NotificationPort } from '../../auth/notifications.js'
 import { hasActiveOptOut } from '../db/recipients.js'
+import { noticeSuppressedAccountLink } from '../email/feedback.js'
 import { queueEmail } from '../email/service.js'
 import type { MessagingRuntime } from '../runtime.js'
 
@@ -57,6 +58,12 @@ export class MessagingAccountNotifier implements NotificationPort {
           ),
         )
         const sent = await rt.emailSender.sendNow(queued.emailId)
+        if (sent === 'suppressed')
+          await noticeSuppressedAccountLink(
+            rt.db,
+            { locationId: loc.id, employeeId: msg.employeeId, firstName: msg.firstName, kind: msg.kind, address: msg.email },
+            rt.deps,
+          )
         return { delivered: sent === 'sent' && rt.deps.env.EMAIL_PROVIDER === 'ses', channel: 'email' }
       }
     } catch (err) {

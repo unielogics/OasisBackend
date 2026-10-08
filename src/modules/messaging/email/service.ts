@@ -22,6 +22,8 @@ export interface QueueEmailArgs {
   purpose: string
   customerId?: string | null
   employeeId?: string | null
+  /** The job the email is about (a receipt): a bounce is written to that job's activity log. */
+  appointmentId?: string | null
   /** A second queue call with the same key does nothing and returns duplicate. */
   dedupeKey?: string
 }
@@ -38,6 +40,7 @@ export async function queueEmail(tx: Tx, a: QueueEmailArgs, o: { newId: NewId; c
       location_id: a.locationId,
       customer_id: a.customerId ?? null,
       employee_id: a.employeeId ?? null,
+      ...(a.appointmentId ? { appointment_id: a.appointmentId } : {}),
       to_email: a.to,
       template: a.template,
       vars: JSON.stringify(a.vars) as never,
@@ -139,7 +142,7 @@ export class EmailSender {
       if (retryable && attempts < MAX_ATTEMPTS) {
         await this.db
           .updateTable('outbox_emails')
-          .set({ state: 'pending', locked_at: null, attempts, error: message, next_attempt_at: new Date(now.getTime() + backoffMs(attempts)) })
+          .set({ state: 'pending', locked_at: null, attempts, error: message, error_at: now, next_attempt_at: new Date(now.getTime() + backoffMs(attempts)) })
           .where('id', '=', id)
           .execute()
         return 'retried'
@@ -152,7 +155,7 @@ export class EmailSender {
   private async finish(id: string, state: 'failed' | 'suppressed', attempts: number, error: string, scrub: boolean): Promise<void> {
     await this.db
       .updateTable('outbox_emails')
-      .set({ state, attempts, error, locked_at: null, ...(scrub ? { vars: '{}' as never } : {}) })
+      .set({ state, attempts, error, error_at: this.clock.now(), locked_at: null, ...(scrub ? { vars: '{}' as never } : {}) })
       .where('id', '=', id)
       .execute()
   }

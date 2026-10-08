@@ -9,6 +9,7 @@
   },
   "type": "module",
   "scripts": {
+    "aws:provision": "tsx scripts/aws/provision.ts",
     "bootstrap:verify": "bash scripts/bootstrap/verify.sh",
     "build": "tsc -p tsconfig.build.json",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm openapi --check",
@@ -74,6 +75,9 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@aws-sdk/client-iam": "3.1146.0",
+    "@aws-sdk/client-sns": "3.1146.0",
+    "@aws-sdk/client-sts": "3.1146.0",
     "@eslint/js": "^9.39.5",
     "@seriousme/openapi-schema-validator": "^2.11.0",
     "@types/luxon": "^3.7.6",

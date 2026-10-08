@@ -1,5 +1,7 @@
 import { z } from 'zod'
+import { emailEnvShape } from '../integrations/email/env.js'
 import { squarespaceEnvSchema } from '../integrations/squarespace/config.js'
+import { storageEnvShape } from '../integrations/storage/env.js'
 
 const provider = <T extends [string, ...string[]]>(...v: T) => z.enum(v)
 const bool = z.enum(['true', 'false', '1', '0']).transform((v) => v === 'true' || v === '1')
@@ -127,17 +129,27 @@ export const envSchema = z
     HOOKS_HOST: z.string().default('127.0.0.1'), // the tailnet-facing hooks listener (src/server.ts)
     HOOKS_PORT: z.coerce.number().int().min(0).default(3002), // 0 disables the second listener
 
-    EMAIL_PROVIDER: provider('sim', 'ses').default('sim'),
+    // Payment links may only point at these hosts (comma separated, exact or subdomain); default squarespace.com.
+    PAYMENT_LINK_HOSTS: z.string().optional(),
+
+    // AWS credentials are read by the AWS SDK itself (default chain: these variables, then AWS_PROFILE). They are declared so
+    // that a typo is caught here and GET /system/integrations can say which source is configured; nothing returns them.
     AWS_REGION: z.string().default('us-east-1'),
+    AWS_ACCESS_KEY_ID: z.string().min(16).optional(),
+    AWS_SECRET_ACCESS_KEY: z.string().min(16).optional(),
+    AWS_SESSION_TOKEN: z.string().optional(),
+    AWS_PROFILE: z.string().optional(),
+    // true: the SDK never asks the EC2 instance metadata service for credentials (set it whenever keys or a profile are used).
+    AWS_EC2_METADATA_DISABLED: bool.default('false'),
+
+    EMAIL_PROVIDER: provider('sim', 'ses').default('sim'),
     SES_FROM_ADDRESS: z.string().email().optional(),
-    SES_FROM_NAME: z.string().default('Oasis Auto Spa'),
-    SES_REPLY_TO: z.string().email().optional(),
-    SES_CONFIGURATION_SET: z.string().optional(),
-    EMAIL_CONSOLE_DIR: z.string().default('./.data/mail'), // where the sim driver writes .eml files
+    ...emailEnvShape, // SES_FROM_NAME, SES_REPLY_TO, SES_CONFIGURATION_SET, SES_SNS_TOPIC_ARNS, SES_ENDPOINT, EMAIL_CONSOLE_DIR
 
     STORAGE_PROVIDER: provider('fs', 's3').default('fs'),
     STORAGE_FS_ROOT: z.string().default('./.data/files'),
     S3_BUCKET: z.string().optional(),
+    ...storageEnvShape, // S3_KEY_PREFIX, S3_SSE, S3_KMS_KEY_ID, S3_ENDPOINT, S3_FORCE_PATH_STYLE, STORAGE_SIGNING_SECRET
   })
   .superRefine((e, ctx) => {
     const need = (cond: boolean, path: string, msg: string) =>
@@ -178,21 +190,24 @@ export const envSchema = z
         name,
         'must be an https:// URL in production (it is the origin the browser may call from and the host of the links we text)',
       )
-    need(e.SQSP_PROVIDER === 'live' && !e.SQSP_API_KEY, 'SQSP_API_KEY', 'required when SQSP_PROVIDER=live')
-    need(e.SMS_PROVIDER === 'smsgate' && !e.SMSGATE_DEVICE_URL, 'SMSGATE_DEVICE_URL', 'required for smsgate')
-    need(e.SMS_PROVIDER === 'smsgate' && !e.SMSGATE_USERNAME, 'SMSGATE_USERNAME', 'required for smsgate')
-    need(e.SMS_PROVIDER === 'smsgate' && !e.SMSGATE_PASSWORD, 'SMSGATE_PASSWORD', 'required for smsgate')
-    need(
-      e.SMS_PROVIDER === 'smsgate' && !e.SMSGATE_WEBHOOK_SECRET,
-      'SMSGATE_WEBHOOK_SECRET',
-      'required for smsgate',
-    )
+    // SQSP_PROVIDER=live reads the key stored with PUT /integrations/squarespace/connection (or SQSP_API_KEY), and
+    // SMS_PROVIDER=smsgate reads the tablets from sms_devices: neither needs anything else in the environment.
     need(
       e.EMAIL_PROVIDER === 'ses' && !e.SES_FROM_ADDRESS,
       'SES_FROM_ADDRESS',
       'required when EMAIL_PROVIDER=ses',
     )
     need(e.STORAGE_PROVIDER === 's3' && !e.S3_BUCKET, 'S3_BUCKET', 'required when STORAGE_PROVIDER=s3')
+    need(
+      !!e.S3_KMS_KEY_ID && e.S3_SSE !== 'aws:kms',
+      'S3_KMS_KEY_ID',
+      'only used with S3_SSE=aws:kms; set both or neither',
+    )
+    need(
+      !!e.AWS_ACCESS_KEY_ID !== !!e.AWS_SECRET_ACCESS_KEY,
+      e.AWS_ACCESS_KEY_ID ? 'AWS_SECRET_ACCESS_KEY' : 'AWS_ACCESS_KEY_ID',
+      'AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY go together',
+    )
   })
 
 export type Env = z.infer<typeof envSchema>

@@ -50,10 +50,12 @@ Do these in order; each step ends with something you can check.
    ([deployment.md](deployment.md), "The tailnet side"). Then `sudo $D/tailscale-serve.sh` and put the URL it prints into `common.env`
    as `SMSGATE_WEBHOOK_PUBLIC_URL`.
 8. **Settings in the dashboard:** working hours, closures, employees and roles, packages (Settings screens).
-9. **Integrations**, each with its own check: the tablet (section 6), Squarespace (section 7), AWS SES and S3
-   ([live-verification.md](live-verification.md), "AWS"). They are off (`sim`) until you switch them: in `common.env` set
+9. **Integrations**, each with its own check: the tablet (section 6), Squarespace (section 7), AWS SES and S3 (create everything with
+   `pnpm aws:provision` and the temporary setup user, exactly as in [aws-setup.md](aws-setup.md), then
+   [live-verification.md](live-verification.md), "AWS"). They are off (`sim`) until you switch them: in `common.env` set
    `SMS_PROVIDER=smsgate`, `SQSP_PROVIDER=live`, `EMAIL_PROVIDER=ses`, `STORAGE_PROVIDER=s3` one at a time, `sudo systemctl restart
-   oasis-api oasis-worker` after each.
+   oasis-api oasis-worker` after each. `GET /api/v1/system/integrations` (Super Admin) then says per integration whether it is
+   configured, which settings are still missing, and the last success and last error.
 10. **Backups:** `sudo -u oasis $D/backup.sh --label manual`, then the restore drill (section 4). Check `systemctl list-timers 'oasis*'` shows
     the nightly backup, the monthly drill and the health check. Set `BACKUP_S3_URI` and an encryption key for the off-host copy.
 11. **Acceptance run:** `sudo $D/verify.sh all --send --sms-to +1... --email-to you@... --instance-profile` with the tablet in your hand.
@@ -195,13 +197,14 @@ sudo $D/tailscale-serve.sh                              # once per host; prints 
 $D/oasis-admin.sh ... sms-register-webhooks <device id> # seven oasis-* webhooks on the tablet
 sudo $D/verify.sh smsgate --send --to +1YOURNUMBER --watch --replies   # one text out, receipts, then reply C, STOP, START, HELP
 ```
-`SMS_PROVIDER=smsgate` plus `SMSGATE_DEVICE_URL`, `SMSGATE_USERNAME`, `SMSGATE_PASSWORD` and `SMSGATE_WEBHOOK_SECRET` (the same values)
-in `common.env`, then restart the API and the worker. Until you do that the dashboard sends nothing real.
+Set `SMS_PROVIDER=smsgate` in `common.env` and restart the API and the worker. Nothing else goes in the environment: the tablet's URL,
+password and signing key live (encrypted) in its device record, which is what the application reads. The `SMSGATE_DEVICE_URL`,
+`_USERNAME`, `_PASSWORD` and `_WEBHOOK_SECRET` lines in `common.env` are only for `verify.sh smsgate` and may stay commented out.
 
 **Replace a tablet** (broken, or a new SIM):
 1. Prepare the new tablet as above and add it as a second device. Run `sms-test` and `sudo $D/verify.sh smsgate --send ...` against it.
-2. Disable the old one: `oasis-admin.sh ... sms-update-device <old id> --disable`. Update the four `SMSGATE_*` values in `common.env` to the
-   new device and restart the API and worker.
+2. Disable the old one: `oasis-admin.sh ... sms-update-device <old id> --disable`. If you keep the `SMSGATE_*` lines for
+   `verify.sh smsgate`, point them at the new device.
 3. If the phone **number** changed, customers who reply to the old number reach nobody: tell them (the welcome text carries the new
    number), and keep the old SIM somewhere you can read it for a few weeks. Opt-outs (STOP) are kept per customer in the database, not per tablet.
 4. Texts still queued are sent by whichever enabled device takes them; disable the old device first if you do not want that.
@@ -226,9 +229,9 @@ them in Oasis, and Oasis confirms them when the money shows up there.
    their renewal period, services) in `<date>-squarespace-product-map.proposed.json` beside it. Nothing is written to Oasis.
 3. **Review the proposal.** A product becomes a membership only if its name or SKU says which tier it is (Essential, Premium, Executive,
    Exotic) and customers re-buy it, or it is called a membership/subscription. Fix names and tiers by hand in the file.
-4. **Put the key in the environment** (`SQSP_PROVIDER=live` and `SQSP_API_KEY=...` in `common.env`; the application currently requires the key
-   there, see deployment.md "Known gaps") and restart the API and worker. Optionally also store it encrypted:
-   `SQSP_KEY=<key> $D/oasis-admin.sh ... sqsp-connect --key-env SQSP_KEY` (it verifies the key against Squarespace first).
+4. **Store the key and switch:** `SQSP_KEY=<key> $D/oasis-admin.sh ... sqsp-connect --key-env SQSP_KEY` (it verifies the key against
+   Squarespace first and stores it encrypted with `SECRETS_KEY`), then `SQSP_PROVIDER=live` in `common.env` and restart the API and worker.
+   `SQSP_API_KEY` in `common.env` is optional (a fallback; the stored key wins when both exist).
 5. **Load the map:** `$D/oasis-admin.sh ... sqsp-product-map --file <the proposal>`, then `... sqsp-sync-now`. Orders that were ignored only
    because no product was mapped become unmatched again and are matched.
 6. **Watch it settle:** `... sqsp-status` (lag, orders waiting, dead letters) and the Payments screen's reconciliation list. Orders the
@@ -248,11 +251,11 @@ them in Oasis, and Oasis confirms them when the money shows up there.
 | `SECRETS_KEY` (encrypts stored tablet and Squarespace credentials) | `common.env` | `sudo $D/secrets-rotate.sh --generate` (dry run), then `sudo $D/secrets-rotate.sh --new-key-file /etc/oasis/secrets-key.new --apply`. Store the new key in the password manager, delete the `common.env.bak-*` copies | API and worker stop for under a minute |
 | `SESSION_SECRET` | `common.env` | change the value, `systemctl restart oasis-api oasis-worker` | everyone is signed out |
 | Database password | role `oasis`, `DATABASE_URL` | `sudo -u postgres psql -c "alter role oasis password 'NEW'"`, put the new password in `DATABASE_URL`, restart all three, update `drill.env` if you rotate `oasis_drill` | a short outage |
-| Tablet password | SMS Gate app, device record | change it in the app, then `oasis-admin.sh ... sms-update-device <id> --password-env VAR`, update `SMSGATE_PASSWORD` in `common.env` | none |
-| Tablet webhook signing key | SMS Gate app, device record | `sms-update-device <id> --webhook-secret-env VAR`, set the same key in the app, `sms-register-webhooks <id>`, update `SMSGATE_WEBHOOK_SECRET` | texts from customers pause until both sides match |
-| Squarespace API key | Squarespace, `common.env`, optionally the database | create a new key, `sqsp-connect --key-env VAR`, update `SQSP_API_KEY`, restart, then revoke the old key in Squarespace | none |
+| Tablet password | SMS Gate app, device record | change it in the app, then `oasis-admin.sh ... sms-update-device <id> --password-env VAR` (and `SMSGATE_PASSWORD` in `common.env` if you keep it for `verify.sh smsgate`) | none |
+| Tablet webhook signing key | SMS Gate app, device record | `sms-update-device <id> --webhook-secret-env VAR`, set the same key in the app, `sms-register-webhooks <id>` (and `SMSGATE_WEBHOOK_SECRET` if kept for `verify.sh smsgate`) | texts from customers pause until both sides match |
+| Squarespace API key | the database (encrypted), optionally `common.env` | create a new key, `sqsp-connect --key-env VAR` (and `SQSP_API_KEY` if you keep the fallback), restart, then revoke the old key in Squarespace | none |
 | Squarespace webhook secret | Squarespace subscription, `SQSP_WEBHOOK_SECRET` | rotate in Squarespace (it returns the new hex once), update the variable, restart the API | none |
-| AWS | EC2 instance role (no keys on disk) | nothing to rotate; if you use an IAM user instead, make a new key, update `AWS_*`, restart, delete the old key | none |
+| AWS (`oasis-app` access key) | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` in `common.env` | with a temporary setup user: `pnpm aws:provision ... --new-access-key --out <new file> --apply` (the old key keeps working), paste the two new lines into `common.env`, restart API and worker, check `GET /api/v1/system/integrations`, then the owner deactivates and deletes the old key in the IAM console ([aws-setup.md](aws-setup.md), "Later") | none |
 | Backup encryption key | `BACKUP_ENCRYPTION_KEY_FILE` | `node deploy/lib/backup-crypt.mjs keygen NEWFILE`, point `backup.env` at it. **Keep the old key** to read older backups | none |
 | Deploy keys | GitHub, `/var/lib/oasis/.ssh` | `install.sh --gen-deploy-keys` after removing the old key files, add the new public keys, delete the old ones on GitHub | none |
 

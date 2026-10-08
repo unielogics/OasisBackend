@@ -83,9 +83,12 @@ rejects `BOOTSTRAP_ADMIN_EMAIL=` and similar, which is why optional settings are
 Production switches that matter: `NODE_ENV=production`, `TRUST_PROXY=true` and `COOKIE_SECURE=true` (api.env), `HOST=127.0.0.1`,
 `SMS_DISPATCH_MODE=jobs` (the worker sends texts), and none of `DEV_AUTH_BYPASS`, `CLOCK_FREEZE_AT`, `ALLOW_DEV_ENDPOINTS`.
 
-Two quirks of the current environment schema that the templates work around (see "Known gaps"): `SQSP_PROVIDER=live` insists on an
-`SQSP_API_KEY` in the environment, and `SMS_PROVIDER=smsgate` insists on `SMSGATE_DEVICE_URL`, `_USERNAME`, `_PASSWORD` and
-`_WEBHOOK_SECRET` in the environment, although the running app reads the tablet from the database.
+AWS: `pnpm aws:provision` ([aws-setup.md](aws-setup.md)) creates the buckets, the SES identity, configuration set and feedback topic, and
+the `oasis-app` user; it prints the exact lines for `common.env` (`AWS_REGION`, `SES_FROM_ADDRESS`, `SES_CONFIGURATION_SET`,
+`SES_SNS_TOPIC_ARNS`, `S3_BUCKET`, `S3_KEY_PREFIX`, `BACKUP_S3_URI`) and writes the app's `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`
+to a 0600 file. Keep `AWS_EC2_METADATA_DISABLED=true` (the template's value) so the SDK never falls back to instance metadata.
+`SQSP_PROVIDER=live` needs no `SQSP_API_KEY` when the key is stored with `sqsp-connect`, and `SMS_PROVIDER=smsgate` needs no `SMSGATE_*`
+device values (the app reads the tablets from the database).
 
 ### First Super Admin
 
@@ -270,14 +273,8 @@ Not verified (needs the real thing):
 
 Found while building the kit; none is changed here because the files belong to other work.
 
-1. `S3_KEY_PREFIX`, `S3_SSE`, `S3_KMS_KEY_ID`, `S3_ENDPOINT`, `S3_FORCE_PATH_STYLE`, `STORAGE_SIGNING_SECRET` and `SES_SNS_TOPIC_ARNS` are
-   documented in `docs/integrations/{s3,ses}.md` as variables for the integrator to add to the environment schema, but
-   `src/config/env.ts` does not declare them, and zod drops undeclared keys, so the app ignores them. Until they are declared the
-   app writes photos at the bucket root with no encryption header: give its IAM role the whole bucket, not a `prod/*` prefix.
-   `pnpm verify:aws` reports this (item AWS-S5).
-2. `SQSP_PROVIDER=live` requires `SQSP_API_KEY` in the environment, so a key stored encrypted in the database (the route that exists for
-   it) cannot be the only copy. Put the key in `common.env` too (the stored key wins when both exist).
-3. `SMS_PROVIDER=smsgate` requires the four `SMSGATE_*` device values in the environment although the running app reads the tablet from
-   `sms_devices`. Keep them equal to the device's (and note `secrets-rotate` does not touch these plaintext copies).
-4. No `/hooks/ses` route is mounted yet; nginx already forwards that path for when it is.
+1. (Closed, ADR 0112.) The storage and SES variables are declared in `src/config/env.ts`; the IAM policy is scoped to the `prod/` prefix.
+2. (Closed, ADR 0112.) `SQSP_PROVIDER=live` works with only the stored, encrypted key.
+3. (Closed, ADR 0112.) `SMS_PROVIDER=smsgate` needs no device values in the environment.
+4. (Closed, ADR 0110.) `/hooks/ses` is mounted: SNS-signed bounce and complaint feedback feeds the suppression list.
 5. The SMS devices and the Squarespace connection have no dashboard screen; `deploy/scripts/oasis-admin.sh` drives the API for them.

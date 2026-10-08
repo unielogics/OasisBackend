@@ -1,0 +1,441 @@
+// pnpm aws:provision: plan first, apply only with --apply, idempotent on re-run, never deletes, the key only in --out (0600), and
+// every call it makes allowed by the temporary setup policy documented in docs/aws-setup.md. The AWS account is an in-memory fake
+// behind the real SDK client classes (aws-sdk-client-mock).
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { main } from '../../scripts/aws/provision.js'
+import {
+  backupsLifecycle,
+  names,
+  photosCors,
+  photosLifecycle,
+  runtimePolicy,
+  tlsOnlyBucketPolicy,
+  topicPolicy,
+  TOPIC_DELIVERY_POLICY,
+  type ProvisionSpec,
+} from '../../scripts/aws/lib/documents.js'
+import { allowedBy, iamCallsOf, type PolicyStatement } from '../../scripts/aws/lib/iam.js'
+import { ACCOUNT, FakeAws } from './helpers/fake-aws.js'
+
+const PHOTOS = `oasis-photos-${ACCOUNT}`
+const BACKUPS = `oasis-backups-${ACCOUNT}`
+const TOPIC = `arn:aws:sns:us-east-1:${ACCOUNT}:oasis-ses-events`
+const POLICY_ARN = `arn:aws:iam::${ACCOUNT}:policy/oasis-app-runtime`
+const HOOKS = 'https://oasis.example.com/hooks/ses'
+
+let fake: FakeAws
+let dir: string
+const allSent: Array<{ command: string; input: Record<string, unknown> }> = []
+
+beforeEach(() => {
+  fake = new FakeAws()
+  dir = mkdtempSync(path.join(tmpdir(), 'oasis-provision-'))
+})
+afterEach(() => {
+  allSent.push(...fake.sent)
+  fake.restore()
+  rmSync(dir, { recursive: true, force: true })
+})
+
+const base = ['--profile', 'oasis-setup', '--sender', 'oasisautospa.com', '--dashboard-origin', 'https://oasis.example.com', '--hooks-url', HOOKS]
+
+async function run(args: string[], env: Record<string, string | undefined> = {}) {
+  const lines: string[] = []
+  const factory = fake.install()
+  let built = 0
+  const code = await main(args, {
+    env,
+    log: (l) => lines.push(l),
+    clients: (cfg) => {
+      built += 1
+      return factory(cfg)
+    },
+  })
+  fake.restore()
+  return { code, out: lines.join('\n'), built }
+}
+
+const spec = (over: Partial<ProvisionSpec> = {}): ProvisionSpec => ({
+  region: 'us-east-1',
+  account: ACCOUNT,
+  prefix: 'oasis',
+  sender: { kind: 'domain', identity: 'oasisautospa.com', domain: 'oasisautospa.com' },
+  dashboardOrigins: ['https://oasis.example.com'],
+  hooksUrl: HOOKS,
+  keyPrefix: 'prod/',
+  photoRetentionDays: 760,
+  backupRetentionDays: 400,
+  sandboxRecipients: [],
+  ...over,
+})
+
+describe('refusals', () => {
+  it('refuses to run without --profile or explicit key variables, before any AWS client exists', async () => {
+    const r = await run(['--sender', 'oasisautospa.com', '--dashboard-origin', 'https://oasis.example.com'])
+    expect(r.code).toBe(2)
+    expect(r.out).toMatch(/refusing to run without credentials chosen on purpose: pass --profile <name>/)
+    expect(r.built).toBe(0)
+    expect(fake.sent).toEqual([])
+  })
+
+  it('accepts the pnpm "--" separator', async () => {
+    const r = await run(['--', ...base])
+    expect(r.code, r.out).toBe(0)
+  })
+
+  it('refuses an ambiguous identity (profile and key variables together)', async () => {
+    const r = await run(base, { AWS_ACCESS_KEY_ID: 'AKIAENVKEY', AWS_SECRET_ACCESS_KEY: 'secret' })
+    expect(r.code).toBe(2)
+    expect(r.built).toBe(0)
+  })
+
+  it('accepts explicit key variables instead of a profile, and always disables the instance metadata service', async () => {
+    delete process.env.AWS_EC2_METADATA_DISABLED
+    const r = await run(base.slice(2), { AWS_ACCESS_KEY_ID: 'AKIAENVKEY', AWS_SECRET_ACCESS_KEY: 'secret' })
+    expect(r.code).toBe(0)
+    expect(process.env.AWS_EC2_METADATA_DISABLED).toBe('true')
+  })
+
+  it.each([
+    [['--sender', 'not a sender'], /--sender/],
+    [['--dashboard-origin', 'http://oasis.example.com'], /https only/],
+    [['--hooks-url', 'https://oasis.example.com/hooks/smsgate'], /--hooks-url/],
+    [['--key-prefix', 'prod'], /--key-prefix/],
+    [['--request-ses-production'], /--website-url and --use-case/],
+    [['--sandbox-recipient', 'example.com'], /must be an address/],
+  ])('rejects bad input %j', async (extra, msg) => {
+    const r = await run([...base, ...extra])
+    expect(r.code).toBe(2)
+    expect(r.out).toMatch(msg)
+    expect(fake.mutations()).toEqual([])
+  })
+
+  it('stops when a bucket name is taken by another account', async () => {
+    fake.foreignBuckets.add(PHOTOS)
+    const r = await run([...base, '--apply', '--out', path.join(dir, 'k')])
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/exists but this identity may not use it/)
+    expect(fake.mutations()).toEqual([])
+  })
+})
+
+describe('plan, apply, re-run', () => {
+  it('on an empty account the plan lists every resource, prints every document, and changes nothing', async () => {
+    const r = await run(base)
+    expect(r.code).toBe(0)
+    expect(fake.mutations()).toEqual([])
+    for (const line of [
+      `identity: arn:aws:iam::${ACCOUNT}:user/oasis-setup-temp (account ${ACCOUNT})`,
+      `  + S3 photos bucket ${PHOTOS}: create in us-east-1 with Object Ownership BucketOwnerEnforced (ACLs disabled)`,
+      `  + S3 photos bucket ${PHOTOS}: CORS: POST, GET and HEAD from https://oasis.example.com: set the document below`,
+      `  + S3 backups bucket ${BACKUPS}: versioning enabled: set the document below`,
+      '  + SES sending identity oasisautospa.com: create the domain identity with Easy DKIM (RSA 2048); the three CNAME records are printed after apply',
+      `  + SNS topic oasis-ses-events: create (Standard; SES does not publish to FIFO) with the access policy and the HTTPS delivery policy below; ARN ${TOPIC}`,
+      '  + SES configuration set oasis-mail: event destination oasis-sns-events: BOUNCE, COMPLAINT, DELIVERY, REJECT to oasis-ses-events',
+      `  + SNS subscription oasis-ses-events -> ${HOOKS}: subscribe the HTTPS endpoint (the app confirms it itself)`,
+      '  + IAM user oasis-app: create (no console password, tagged app=oasis)',
+      '  + IAM policy oasis-app-runtime: create the managed policy (least privilege, below)',
+      '  + IAM user oasis-app: create one access key: pass --out <file> (written with mode 0600, never printed)',
+      'note: SES: the account is in the SANDBOX (only verified recipients, 200 per day)',
+      'Nothing was changed. Run again with --apply to make these changes.',
+      `  SES_SNS_TOPIC_ARNS=${TOPIC}`,
+      `  S3_BUCKET=${PHOTOS}`,
+      '  S3_KEY_PREFIX=prod/',
+      `  BACKUP_S3_URI=s3://${BACKUPS}/db/`,
+    ])
+      expect(r.out.split('\n')).toContain(line)
+    expect(r.out).toContain(JSON.stringify(runtimePolicy(spec()), null, 2))
+    expect(r.out).toContain(JSON.stringify(tlsOnlyBucketPolicy(PHOTOS), null, 2))
+  })
+
+  it('--apply without --out stops before changing anything when a key is to be created', async () => {
+    const r = await run([...base, '--apply'])
+    expect(r.code).toBe(2)
+    expect(r.out).toMatch(/pass --out <file>/)
+    expect(fake.mutations()).toEqual([])
+  })
+
+  it('applies, writes the key only to --out (0600), prints the DKIM records, and a re-run finds nothing to do', async () => {
+    const out = path.join(dir, 'oasis-app.key')
+    const first = await run([...base, '--out', out, '--apply'])
+    expect(first.code, first.out).toBe(0)
+
+    const b = fake.buckets.get(PHOTOS)!
+    expect(b.pab).toEqual({ BlockPublicAcls: true, IgnorePublicAcls: true, BlockPublicPolicy: true, RestrictPublicBuckets: true })
+    expect(b.ownership).toEqual({ Rules: [{ ObjectOwnership: 'BucketOwnerEnforced' }] })
+    expect(b.cors).toEqual(photosCors(['https://oasis.example.com']).CORSRules)
+    expect(b.life).toEqual(photosLifecycle(spec()).Rules)
+    expect(JSON.parse(b.policy!)).toEqual(tlsOnlyBucketPolicy(PHOTOS))
+    expect(fake.buckets.get(BACKUPS)).toMatchObject({ versioning: 'Enabled', life: backupsLifecycle(spec()).Rules })
+    expect(JSON.parse(fake.topics.get(TOPIC)!.attrs.Policy!)).toEqual(topicPolicy(spec()))
+    expect(JSON.parse(fake.topics.get(TOPIC)!.attrs.DeliveryPolicy!)).toEqual(TOPIC_DELIVERY_POLICY)
+    expect(fake.topics.get(TOPIC)!.subs).toEqual([{ Protocol: 'https', Endpoint: HOOKS, SubscriptionArn: 'PendingConfirmation' }])
+    expect(fake.configSets.get('oasis-mail')!.get('oasis-sns-events')).toEqual({
+      Enabled: true,
+      MatchingEventTypes: ['BOUNCE', 'COMPLAINT', 'DELIVERY', 'REJECT'],
+      SnsDestination: { TopicArn: TOPIC },
+    })
+    expect(fake.users.get('oasis-app')!.attached).toEqual(new Set([POLICY_ARN]))
+    expect(JSON.parse(decodeURIComponent(fake.policies.get(POLICY_ARN)![0]!.Document))).toEqual(runtimePolicy(spec()))
+
+    const key = readFileSync(out, 'utf8')
+    expect(statSync(out).mode & 0o777).toBe(0o600)
+    const [id, secret] = fake.secrets.slice(-1).concat(fake.secrets.slice(-2, -1))
+    expect(key).toContain(`AWS_ACCESS_KEY_ID=${id}\n`)
+    expect(key).toContain(`AWS_SECRET_ACCESS_KEY=${secret}\n`)
+    expect(first.out).not.toContain(secret!)
+    expect(first.out).not.toContain(id!)
+    expect(first.out).toContain(`access key ${id!.slice(0, 4)}...${id!.slice(-4)} written to ${out} (mode 0600)`)
+    for (const t of ['tok1abc', 'tok2def', 'tok3ghi'])
+      expect(first.out).toContain(`CNAME  ${t}._domainkey.oasisautospa.com  ->  ${t}.dkim.amazonses.com`)
+
+    // the confirmation reached the app; the re-run is all "="
+    fake.topics.get(TOPIC)!.subs[0]!.SubscriptionArn = `${TOPIC}:sub-1`
+    const before = fake.sent.length
+    const again = await run(base)
+    expect(again.code).toBe(0)
+    expect(fake.sent.slice(before).filter((s) => /^(Create|Put|Set|Subscribe|Attach|Update|Delete)/.test(s.command))).toEqual([])
+    expect(again.out).toContain('Nothing to change.')
+    expect(again.out).not.toMatch(/^ {2}[+~!] /m)
+    expect(again.out).toContain(`  = IAM user oasis-app: has ${id!.slice(0, 4)}...${id!.slice(-4)} (Active); pass --new-access-key to rotate`)
+    // DKIM records are printed again while the domain is not verified
+    expect(again.out).toContain('CNAME  tok1abc._domainkey.oasisautospa.com  ->  tok1abc.dkim.amazonses.com')
+
+    // and applying again changes nothing, even with --out given
+    const third = await run([...base, '--out', path.join(dir, 'unused.key'), '--apply'])
+    expect(third.out).toContain('applied 0 change(s)')
+    expect(existsSync(path.join(dir, 'unused.key'))).toBe(false)
+  })
+
+  it('never overwrites an existing --out file', async () => {
+    const out = path.join(dir, 'exists.key')
+    writeFileSync(out, 'keep me')
+    const r = await run([...base, '--out', out, '--apply'])
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/already exists/)
+    expect(readFileSync(out, 'utf8')).toBe('keep me')
+    expect(fake.mutations()).toEqual([])
+  })
+})
+
+describe('drift and things it does not own', () => {
+  async function provisioned(): Promise<void> {
+    const r = await run([...base, '--out', path.join(dir, 'k1'), '--apply'])
+    expect(r.code, r.out).toBe(0)
+    fake.topics.get(TOPIC)!.subs[0]!.SubscriptionArn = `${TOPIC}:sub-1`
+    fake.sent.length = 0
+  }
+
+  it('repairs a changed CORS rule and keeps a lifecycle rule and a policy statement someone else added', async () => {
+    await provisioned()
+    const b = fake.buckets.get(PHOTOS)!
+    b.cors = [{ ID: 'dashboard-uploads', AllowedOrigins: ['https://old.example.com'], AllowedMethods: ['POST'], AllowedHeaders: ['*'] }]
+    b.life = [...(b.life ?? []), { ID: 'someone-elses-rule', Status: 'Enabled', Filter: { Prefix: 'tmp/' }, Expiration: { Days: 3 } }]
+    const pol = JSON.parse(b.policy!) as { Statement: object[] }
+    pol.Statement.push({ Sid: 'AuditorRead', Effect: 'Allow', Principal: { AWS: `arn:aws:iam::${ACCOUNT}:root` }, Action: 's3:GetObject', Resource: `arn:aws:s3:::${PHOTOS}/*` })
+    b.policy = JSON.stringify(pol)
+
+    const plan = await run(base)
+    expect(plan.out).toContain(`  ~ S3 photos bucket ${PHOTOS}: CORS: POST, GET and HEAD from https://oasis.example.com: replace with the document below`)
+    expect(plan.out).toContain(`  = S3 photos bucket ${PHOTOS}: lifecycle: photos under "prod/" expire after 760 days, unfinished uploads after 1 day: as wanted`)
+    expect(plan.out).toContain(`  = S3 photos bucket ${PHOTOS}: bucket policy: deny any request without TLS: as wanted`)
+
+    const r = await run([...base, '--apply', '--dashboard-origin', 'https://staging.oasis.example.com'])
+    expect(r.code).toBe(0)
+    expect(fake.mutations().map((m) => m.command)).toEqual(['PutBucketCorsCommand'])
+    expect(b.cors).toEqual(photosCors(['https://oasis.example.com', 'https://staging.oasis.example.com']).CORSRules)
+    expect((b.life as Array<{ ID: string }>).map((x) => x.ID)).toContain('someone-elses-rule')
+    expect((JSON.parse(b.policy!) as { Statement: Array<{ Sid: string }> }).Statement.map((s) => s.Sid)).toEqual(['DenyInsecureTransport', 'AuditorRead'])
+  })
+
+  it('adds a policy version when the runtime policy changes, removing the oldest non-default one at the IAM limit of five', async () => {
+    await provisioned()
+    const versions = fake.policies.get(POLICY_ARN)!
+    for (let i = 2; i <= 5; i++) versions.push({ VersionId: `v${i}`, Document: versions[0]!.Document, IsDefaultVersion: false, CreateDate: new Date(i * 1000) })
+    const r = await run([...base, '--sandbox-recipient', 'tester@example.com', '--apply'])
+    expect(r.code, r.out).toBe(0)
+    expect(r.out).toContain('  ~ IAM policy oasis-app-runtime: add a new default version with the document below')
+    expect(r.out).toContain('removed the oldest non-default version v2 of oasis-app-runtime (IAM keeps at most five)')
+    expect(fake.mutations().map((m) => m.command)).toEqual(['CreateEmailIdentityCommand', 'DeletePolicyVersionCommand', 'CreatePolicyVersionCommand'])
+    const def = versions.find((v) => v.IsDefaultVersion)!
+    expect(JSON.parse(decodeURIComponent(def.Document))).toEqual(runtimePolicy(spec({ sandboxRecipients: ['tester@example.com'] })))
+    expect(r.out).toContain('SES emailed a verification link to t***@example.com')
+  })
+
+  it('re-sends a pending subscription confirmation, and skips the subscription without --hooks-url', async () => {
+    await provisioned()
+    fake.topics.get(TOPIC)!.subs[0]!.SubscriptionArn = 'PendingConfirmation'
+    const r = await run([...base, '--apply'])
+    expect(r.out).toContain(`  ! SNS subscription oasis-ses-events -> ${HOOKS}: pending confirmation: subscribe again so SNS resends the confirmation (set SES_SNS_TOPIC_ARNS and restart the API first)`)
+    expect(fake.mutations().map((m) => m.command)).toEqual(['SubscribeCommand'])
+    const without = await run(base.slice(0, -2))
+    expect(without.out).toContain('  - SNS subscription oasis-ses-events -> (no --hooks-url): pass --hooks-url https://<public host>/hooks/ses to subscribe the app')
+  })
+
+  it('creates a second key only with --new-access-key, and never a third', async () => {
+    await provisioned()
+    const r = await run([...base, '--new-access-key', '--out', path.join(dir, 'k2'), '--apply'])
+    expect(r.code).toBe(0)
+    expect(fake.users.get('oasis-app')!.keys).toHaveLength(2)
+    expect(r.out).toMatch(/the existing AKIA\.\.\.\d{4} \(Active\) stays until you deactivate it/)
+    const third = await run([...base, '--new-access-key', '--out', path.join(dir, 'k3'), '--apply'])
+    expect(third.code).toBe(1)
+    expect(third.out).toMatch(/already has two access keys/)
+  })
+
+  it('submits the SES production request only when asked, once', async () => {
+    await provisioned()
+    expect(fake.mutations()).toEqual([])
+    const flags = ['--request-ses-production', '--website-url', 'https://oasis.example.com', '--use-case', 'Transactional receipts and staff invitations only.', '--contact-email', 'owner@oasisautospa.com']
+    const plan = await run([...base, ...flags])
+    expect(plan.out).toContain('  ! SES production access: submit the production-access request (TRANSACTIONAL, https://oasis.example.com/)')
+    expect(fake.mutations()).toEqual([])
+    const r = await run([...base, ...flags, '--apply'])
+    expect(r.code).toBe(0)
+    expect(fake.mutations()).toEqual([
+      {
+        service: 'ses',
+        command: 'PutAccountDetailsCommand',
+        input: {
+          ProductionAccessEnabled: true,
+          MailType: 'TRANSACTIONAL',
+          WebsiteURL: 'https://oasis.example.com/',
+          UseCaseDescription: 'Transactional receipts and staff invitations only.',
+          ContactLanguage: 'EN',
+          AdditionalContactEmailAddresses: ['owner@oasisautospa.com'],
+        },
+      },
+    ])
+    const again = await run([...base, ...flags, '--apply'])
+    expect(again.out).toContain('  = SES production access: a request is already pending review')
+  })
+})
+
+describe('documents (exact)', () => {
+  it('the runtime policy: least privilege for a domain sender and for an address sender', () => {
+    expect(runtimePolicy(spec())).toEqual({
+      Version: '2012-10-17',
+      Statement: [
+        { Sid: 'PhotoObjects', Effect: 'Allow', Action: ['s3:PutObject', 's3:GetObject', 's3:DeleteObject'], Resource: `arn:aws:s3:::${PHOTOS}/prod/*` },
+        { Sid: 'PhotoHeadMissingKey', Effect: 'Allow', Action: 's3:ListBucket', Resource: `arn:aws:s3:::${PHOTOS}` },
+        { Sid: 'BackupObjects', Effect: 'Allow', Action: ['s3:PutObject', 's3:GetObject'], Resource: `arn:aws:s3:::${BACKUPS}/*` },
+        { Sid: 'BackupList', Effect: 'Allow', Action: 's3:ListBucket', Resource: `arn:aws:s3:::${BACKUPS}` },
+        {
+          Sid: 'SendEmail',
+          Effect: 'Allow',
+          Action: ['ses:SendEmail', 'ses:SendRawEmail'],
+          Resource: [`arn:aws:ses:us-east-1:${ACCOUNT}:identity/oasisautospa.com`, `arn:aws:ses:us-east-1:${ACCOUNT}:configuration-set/oasis-mail`],
+          Condition: { StringLike: { 'ses:FromAddress': '*@oasisautospa.com' } },
+        },
+      ],
+    })
+    const addr = runtimePolicy(spec({ sender: { kind: 'address', identity: 'no-reply@oasisautospa.com', domain: 'oasisautospa.com' }, keyPrefix: '' })) as {
+      Statement: Array<{ Sid: string; Resource: unknown; Condition?: unknown }>
+    }
+    expect(addr.Statement[0]!.Resource).toBe(`arn:aws:s3:::${PHOTOS}/*`)
+    expect(addr.Statement[4]).toMatchObject({
+      Resource: [`arn:aws:ses:us-east-1:${ACCOUNT}:identity/no-reply@oasisautospa.com`, `arn:aws:ses:us-east-1:${ACCOUNT}:configuration-set/oasis-mail`],
+      Condition: { StringEquals: { 'ses:FromAddress': 'no-reply@oasisautospa.com' } },
+    })
+  })
+
+  it('the bucket, CORS, lifecycle and topic documents', () => {
+    expect(tlsOnlyBucketPolicy(PHOTOS)).toEqual({
+      Version: '2012-10-17',
+      Statement: [
+        {
+          Sid: 'DenyInsecureTransport',
+          Effect: 'Deny',
+          Principal: '*',
+          Action: 's3:*',
+          Resource: [`arn:aws:s3:::${PHOTOS}`, `arn:aws:s3:::${PHOTOS}/*`],
+          Condition: { Bool: { 'aws:SecureTransport': 'false' } },
+        },
+      ],
+    })
+    expect(photosCors(['https://oasis.example.com'])).toEqual({
+      CORSRules: [
+        { ID: 'dashboard-uploads', AllowedOrigins: ['https://oasis.example.com'], AllowedMethods: ['POST', 'GET', 'HEAD'], AllowedHeaders: ['*'], ExposeHeaders: ['ETag'], MaxAgeSeconds: 3000 },
+      ],
+    })
+    expect(photosLifecycle(spec())).toEqual({
+      Rules: [
+        { ID: 'expire-photos', Status: 'Enabled', Filter: { Prefix: 'prod/' }, Expiration: { Days: 760 } },
+        { ID: 'abort-incomplete-uploads', Status: 'Enabled', Filter: { Prefix: '' }, AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 } },
+      ],
+    })
+    expect(backupsLifecycle(spec())).toEqual({
+      Rules: [
+        { ID: 'expire-backups', Status: 'Enabled', Filter: { Prefix: '' }, Expiration: { Days: 400 }, NoncurrentVersionExpiration: { NoncurrentDays: 30 } },
+        { ID: 'abort-incomplete-uploads', Status: 'Enabled', Filter: { Prefix: '' }, AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 } },
+      ],
+    })
+    expect(topicPolicy(spec())).toEqual({
+      Version: '2012-10-17',
+      Id: 'oasis-ses-events-policy',
+      Statement: [
+        {
+          Sid: 'AccountOwner',
+          Effect: 'Allow',
+          Principal: { AWS: '*' },
+          Action: ['SNS:GetTopicAttributes', 'SNS:SetTopicAttributes', 'SNS:AddPermission', 'SNS:RemovePermission', 'SNS:DeleteTopic', 'SNS:Subscribe', 'SNS:ListSubscriptionsByTopic', 'SNS:Publish'],
+          Resource: TOPIC,
+          Condition: { StringEquals: { 'AWS:SourceOwner': ACCOUNT } },
+        },
+        {
+          Sid: 'SesPublishesFeedback',
+          Effect: 'Allow',
+          Principal: { Service: 'ses.amazonaws.com' },
+          Action: 'SNS:Publish',
+          Resource: TOPIC,
+          Condition: { StringEquals: { 'AWS:SourceAccount': ACCOUNT, 'AWS:SourceArn': `arn:aws:ses:us-east-1:${ACCOUNT}:configuration-set/oasis-mail` } },
+        },
+      ],
+    })
+    expect(names({ prefix: 'oasis', account: ACCOUNT, region: 'us-east-1' })).toMatchObject({ user: 'oasis-app', policy: 'oasis-app-runtime', topic: 'oasis-ses-events' })
+  })
+})
+
+describe('the temporary setup policy (docs/aws-setup.md)', () => {
+  const doc = readFileSync('docs/aws-setup.md', 'utf8')
+  const block = /<!-- setup-policy:start -->\s*```json\n([\s\S]*?)```\s*<!-- setup-policy:end -->/.exec(doc)
+  const statements = (JSON.parse(block![1]!) as { Statement: PolicyStatement[] }).Statement
+  const NOW = new Date('2026-10-08T12:00:00Z')
+
+  it('is the policy the owner was given: every statement expires, and app names are oasis-app / oasis-app-*', () => {
+    expect(statements.map((s) => s.Sid)).toEqual(['WhoAmI', 'Email', 'Buckets', 'ListBuckets', 'EmailEvents', 'AppUser', 'AppPolicy', 'AttachAppPolicy', 'Firewall', 'Dns'])
+    for (const s of statements) expect(s.Condition?.DateLessThan?.['aws:CurrentTime'], s.Sid).toBeDefined()
+    expect(statements.find((s) => s.Sid === 'AppUser')!.Resource).toBe('arn:aws:iam::*:user/oasis-app')
+  })
+
+  it('allows every call the script made in these tests (describe and change calls alike), and the evaluator is not permissive', () => {
+    const ctx = { region: 'us-east-1', account: ACCOUNT }
+    const seen = new Set<string>()
+    const denied: string[] = []
+    for (const s of allSent) {
+      seen.add(s.command)
+      for (const call of iamCallsOf(s.command, s.input, ctx))
+        if (!allowedBy(statements, call, NOW)) denied.push(`${s.command}: ${call.action} on ${call.resource}`)
+    }
+    expect(denied).toEqual([])
+    // the suites above exercised every kind of call the script can make
+    for (const c of [
+      'GetCallerIdentityCommand', 'HeadBucketCommand', 'CreateBucketCommand', 'PutPublicAccessBlockCommand', 'PutBucketEncryptionCommand', 'PutBucketCorsCommand',
+      'PutBucketLifecycleConfigurationCommand', 'PutBucketPolicyCommand', 'PutBucketVersioningCommand', 'GetBucketOwnershipControlsCommand',
+      'CreateEmailIdentityCommand', 'GetEmailIdentityCommand', 'CreateConfigurationSetCommand', 'CreateConfigurationSetEventDestinationCommand',
+      'CreateTopicCommand', 'GetTopicAttributesCommand', 'ListSubscriptionsByTopicCommand', 'SubscribeCommand', 'CreateUserCommand', 'CreatePolicyCommand',
+      'AttachUserPolicyCommand', 'CreateAccessKeyCommand', 'ListAccessKeysCommand', 'GetPolicyVersionCommand', 'ListPolicyVersionsCommand',
+      'DeletePolicyVersionCommand', 'CreatePolicyVersionCommand', 'GetAccountCommand', 'PutAccountDetailsCommand',
+    ])
+      expect(seen.has(c), c).toBe(true)
+    // negative controls: what the policy must refuse
+    expect(allowedBy(statements, { action: 's3:CreateBucket', resource: 'arn:aws:s3:::other-bucket' }, NOW)).toBe(false)
+    expect(allowedBy(statements, { action: 'iam:CreateUser', resource: `arn:aws:iam::${ACCOUNT}:user/admin` }, NOW)).toBe(false)
+    expect(allowedBy(statements, { action: 'iam:AttachUserPolicy', resource: `arn:aws:iam::${ACCOUNT}:user/oasis-app`, context: { 'iam:PolicyARN': 'arn:aws:iam::aws:policy/AdministratorAccess' } }, NOW)).toBe(false)
+    expect(allowedBy(statements, { action: 'iam:CreatePolicy', resource: `arn:aws:iam::${ACCOUNT}:policy/oasis-app-runtime` }, new Date('2027-01-01T00:00:00Z'))).toBe(false)
+    expect(allowedBy(statements, { action: 'iam:TagPolicy', resource: `arn:aws:iam::${ACCOUNT}:policy/oasis-app-runtime` }, NOW)).toBe(false)
+  })
+})

@@ -55,6 +55,9 @@
 | [0101](0101-backups-and-restore-drill.md) | Backups: snapshot-consistent dumps, retention, encrypted off-host copy, restore drill |
 | [0102](0102-live-verification-kit.md) | Live verification: one command per integration, safe by default, proven against simulators |
 | [0103](0103-secrets-rotation.md) | Secrets rotation: SECRETS_KEY re-encryption in one transaction |
+| [0110](0110-ses-feedback-and-suppression.md) | SES feedback: /hooks/ses and the suppression list |
+| [0111](0111-aws-provisioning.md) | AWS provisioning: one reviewed, idempotent command |
+| [0112](0112-integration-configuration-and-status.md) | Integration configuration is declared, switchable by configuration only, and visible |
 | [0120](0120-security-leftovers.md) | Security leftovers: masked phone match, rate limits before authentication, audited invoice creation, probe detail, log redaction |
 | [0121](0121-demo-seed-profile.md) | The demo seed: the design's day on today's date, as it stands when the seed runs |
 | [0122](0122-sms-channel-notices.md) | SMS channel notices: flap debounce, app restarted without a reboot, texts queued with no device |

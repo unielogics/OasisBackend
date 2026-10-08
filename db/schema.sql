@@ -614,6 +614,30 @@ CREATE TABLE public.customers (
 );
 
 --
+-- Name: email_suppressions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.email_suppressions (
+    address text NOT NULL,
+    reason text NOT NULL,
+    bounce_type text,
+    bounce_subtype text,
+    complaint_feedback_type text,
+    diagnostic text,
+    first_seen_at timestamp with time zone NOT NULL,
+    last_seen_at timestamp with time zone NOT NULL,
+    count integer DEFAULT 1 NOT NULL,
+    source_message_ids text[] DEFAULT '{}'::text[] NOT NULL,
+    cleared_at timestamp with time zone,
+    cleared_by uuid,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT email_suppressions_address_check CHECK (((address <> ''::text) AND (address = lower(btrim(address))))),
+    CONSTRAINT email_suppressions_count_check CHECK ((count >= 1)),
+    CONSTRAINT email_suppressions_reason_check CHECK ((reason = ANY (ARRAY['bounce'::text, 'complaint'::text])))
+);
+
+--
 -- Name: emergency_closures; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1276,6 +1300,13 @@ CREATE TABLE public.outbox_emails (
     dedupe_key text,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     sent_at timestamp with time zone,
+    appointment_id uuid,
+    error_at timestamp with time zone,
+    delivered_at timestamp with time zone,
+    feedback text,
+    feedback_at timestamp with time zone,
+    feedback_detail text,
+    CONSTRAINT outbox_emails_feedback_check CHECK (((feedback IS NULL) OR (feedback = ANY (ARRAY['soft_bounce'::text, 'hard_bounce'::text, 'complaint'::text])))),
     CONSTRAINT outbox_emails_state_check CHECK ((state = ANY (ARRAY['pending'::text, 'sending'::text, 'sent'::text, 'failed'::text, 'suppressed'::text]))),
     CONSTRAINT outbox_emails_to_email_check CHECK ((btrim(to_email) <> ''::text))
 );
@@ -2348,6 +2379,13 @@ ALTER TABLE ONLY public.customers
     ADD CONSTRAINT customers_pkey PRIMARY KEY (id);
 
 --
+-- Name: email_suppressions email_suppressions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_suppressions
+    ADD CONSTRAINT email_suppressions_pkey PRIMARY KEY (address);
+
+--
 -- Name: emergency_closures emergency_closures_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3255,6 +3293,12 @@ CREATE INDEX customers_merged_into_idx ON public.customers USING btree (merged_i
 CREATE INDEX customers_phone_trgm ON public.customers USING gin (phone_e164 public.gin_trgm_ops);
 
 --
+-- Name: email_suppressions_active_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX email_suppressions_active_idx ON public.email_suppressions USING btree (last_seen_at DESC) WHERE (cleared_at IS NULL);
+
+--
 -- Name: emergency_closures_history_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3439,6 +3483,12 @@ CREATE INDEX notifications_unread_idx ON public.notifications USING btree (emplo
 --
 
 CREATE INDEX outbox_emails_drain_idx ON public.outbox_emails USING btree (state, next_attempt_at) WHERE (state = ANY (ARRAY['pending'::text, 'sending'::text]));
+
+--
+-- Name: outbox_emails_provider_message_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX outbox_emails_provider_message_idx ON public.outbox_emails USING btree (provider_message_id) WHERE (provider_message_id IS NOT NULL);
 
 --
 -- Name: password_resets_user_idx; Type: INDEX; Schema: public; Owner: -
@@ -4096,6 +4146,13 @@ ALTER TABLE ONLY public.customers
     ADD CONSTRAINT customers_merged_into_fkey FOREIGN KEY (merged_into) REFERENCES public.customers(id);
 
 --
+-- Name: email_suppressions email_suppressions_cleared_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.email_suppressions
+    ADD CONSTRAINT email_suppressions_cleared_by_fkey FOREIGN KEY (cleared_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
 -- Name: emergency_closures emergency_closures_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4528,6 +4585,13 @@ ALTER TABLE ONLY public.notifications
 
 ALTER TABLE ONLY public.ops_alert_state
     ADD CONSTRAINT ops_alert_state_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: outbox_emails outbox_emails_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.outbox_emails
+    ADD CONSTRAINT outbox_emails_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id) ON DELETE SET NULL;
 
 --
 -- Name: outbox_emails outbox_emails_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

@@ -9,6 +9,7 @@ import { connectDedicated, type Db, type DbOptions, type Executor, type Tx } fro
 import type { NewId } from '../../platform/ids.js'
 import { createEmailProvider } from '../../integrations/email/config.js'
 import type { EmailProvider } from '../../integrations/ports/email.js'
+import { withSuppression } from '../../integrations/email/suppression.js'
 import type { SmsProvider } from '../../integrations/ports/sms.js'
 import { SimulatorProvider } from '../../integrations/sms/simulator.js'
 import type { SchedulingCtx } from '../scheduling/context.js'
@@ -22,6 +23,7 @@ import { PgOutboxRepository } from './db/outbox-repo.js'
 import { DeviceHealthMonitor, pollDeviceHealth, signalFromHealth, type HealthEvaluation } from './dispatch/health.js'
 import { Dispatcher, type TickReport } from './dispatch/dispatcher.js'
 import type { HealthConfig } from './dispatch/health.js'
+import { dbSuppressionCheck, noticeSuppressedAccountLink } from './email/feedback.js'
 import { EmailSender, queueEmail, type EmailVars } from './email/service.js'
 import { catchUpDeviceNotices, checkNoDevice, onDeviceTransition } from './device-notices.js'
 import { ProviderRegistry } from './providers.js'
@@ -105,9 +107,12 @@ export class MessagingRuntime {
     return this.deps.newId
   }
 
+  /** The EmailProvider of this process; an address on the suppression list (SES bounces, complaints) is never mailed. */
   emailProvider(): EmailProvider {
-    return (this.email ??=
-      this.deps.emailProvider ?? createEmailProvider(this.deps.env, { clock: this.deps.clock, onSimSend: this.emailSender.capture }))
+    return (this.email ??= withSuppression(
+      this.deps.emailProvider ?? createEmailProvider(this.deps.env, { clock: this.deps.clock, onSimSend: this.emailSender.capture }),
+      dbSuppressionCheck(this.deps.db),
+    ))
   }
 
   /** The deployment's single location (the oldest row). */
@@ -286,7 +291,13 @@ export class MessagingRuntime {
         return q
       })
       if (!queued.duplicate) {
-        await this.emailSender.sendNow(queued.emailId)
+        const sent = await this.emailSender.sendNow(queued.emailId)
+        if (sent === 'suppressed')
+          await noticeSuppressedAccountLink(
+            this.db,
+            { locationId: r.location_id, employeeId: r.employee_id!, firstName: r.first, kind: r.klass === 'staff_invite' ? 'invite' : 'password_reset', address: r.email },
+            this.deps,
+          )
         n += 1
       }
     }

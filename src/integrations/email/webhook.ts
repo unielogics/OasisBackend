@@ -19,7 +19,23 @@ export interface SesWebhookOptions {
   onDecisions: (decisions: FeedbackDecision[]) => Promise<void> | void
   /** Fetches SubscribeURL to confirm a subscription. */
   confirm?: UrlFetcher
+  /**
+   * Replay protection by SNS MessageId, claimed after the signature is verified. `claim` returns false for a message already
+   * handled (answered 200, nothing recorded twice); `release` undoes a claim when recording failed, so the SNS retry is processed.
+   */
+  dedupe?: {
+    claim(messageId: string): Promise<boolean>
+    release(messageId: string): Promise<void>
+    finish?(messageId: string, status: 'processed' | 'ignored', detail?: string): Promise<void>
+  }
   log?: (event: string, detail: Record<string, unknown>) => void
+}
+
+/** SubscribeURL must be an SNS ConfirmSubscription call for the very topic the signed envelope names. */
+export function isConfirmUrlFor(raw: string | undefined, topicArn: string): boolean {
+  if (!raw || !isSnsUrl(raw)) return false
+  const u = new URL(raw)
+  return u.searchParams.get('Action') === 'ConfirmSubscription' && u.searchParams.get('TopicArn') === topicArn
 }
 
 const reply = (status: number, msg: string): WebhookResult => ({
@@ -52,17 +68,22 @@ export function createSesWebhookHandler(
     }
 
     if (env.Type === 'SubscriptionConfirmation') {
-      if (!env.SubscribeURL || !isSnsUrl(env.SubscribeURL))
-        return reply(400, 'SubscribeURL is not an SNS URL')
+      const subscribeUrl = env.SubscribeURL
+      if (!subscribeUrl || !isConfirmUrlFor(subscribeUrl, env.TopicArn))
+        return reply(400, 'SubscribeURL is not an SNS confirmation URL for this topic')
       let res
       try {
-        res = await confirm(env.SubscribeURL)
+        res = await confirm(subscribeUrl)
       } catch {
         return reply(502, 'could not confirm subscription, retry')
       }
       if (!res.ok) return reply(502, 'could not confirm subscription, retry')
       log('ses.webhook.subscription_confirmed', { topicArn: env.TopicArn })
       return reply(200, 'subscription confirmed')
+    }
+    if (env.Type === 'Notification' && opts.dedupe && !(await opts.dedupe.claim(env.MessageId))) {
+      log('ses.webhook.duplicate', { messageId: env.MessageId })
+      return reply(200, 'duplicate')
     }
     if (env.Type === 'UnsubscribeConfirmation') {
       log('ses.webhook.unsubscribed', { topicArn: env.TopicArn })
@@ -73,16 +94,22 @@ export function createSesWebhookHandler(
     try {
       decisions = decideFromNotification(env.Message)
     } catch (err) {
-      if (!(err instanceof SesNotificationError)) throw err
+      if (!(err instanceof SesNotificationError)) {
+        await opts.dedupe?.release(env.MessageId)
+        throw err
+      }
       log('ses.webhook.ignored', { reason: err.message })
+      await opts.dedupe?.finish?.(env.MessageId, 'ignored', err.message)
       return reply(200, 'ignored: not an SES event')
     }
     try {
       await opts.onDecisions(decisions)
     } catch (err) {
       log('ses.webhook.persist_failed', { error: (err as Error).message })
+      await opts.dedupe?.release(env.MessageId).catch(() => undefined)
       return reply(500, 'could not record feedback, retry')
     }
+    await opts.dedupe?.finish?.(env.MessageId, 'processed')
     return reply(200, `recorded ${decisions.length}`)
   }
 }
