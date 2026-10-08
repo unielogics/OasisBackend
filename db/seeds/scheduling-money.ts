@@ -108,10 +108,17 @@ export async function seedParityOpsMoney(ctx: SeedContext): Promise<void> {
   await seedParityOpsMessages(ctx)
 }
 
-/** What each automatic SMS line of the activity log said. */
-const AUTO_TEXT: Record<string, { key: string; body: (first: string, time: string) => string }> = {
+/**
+ * What each automatic SMS line of the activity log said. The booking thanks is the design's staff message (its thread starts
+ * with `from: 'staff'`, a solid bubble without the "Automated" tag); the others are its system messages.
+ */
+const AUTO_TEXT: Record<
+  string,
+  { key: string; sender?: 'staff'; body: (first: string, time: string) => string }
+> = {
   'Booking created': {
     key: 'booking_thanks',
+    sender: 'staff',
     body: (first) => `Hi ${first}, thanks for booking with Oasis Auto Spa.`,
   },
   'Confirmation + reminder sent': {
@@ -172,7 +179,7 @@ async function seedParityOpsMessages(ctx: SeedContext): Promise<void> {
         employee_id: null,
         appointment_id: row.id,
         direction: 'out',
-        sender_kind: 'system',
+        sender_kind: auto.sender ?? 'system',
         sender_employee_id: null,
         channel: 'sms',
         body: auto.body(first, a.time),

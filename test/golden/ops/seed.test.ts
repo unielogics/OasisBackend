@@ -194,7 +194,7 @@ describe('parity-ops', () => {
       t.db,
     )
     expect(priya.rows.map((r) => [r.template_key, r.sender_kind, r.status])).toEqual([
-      ['booking_thanks', 'system', 'delivered'],
+      ['booking_thanks', 'staff', 'delivered'], // the design's thread opens with a staff message
       ['confirm_request', 'system', 'delivered'],
       ['in_progress', 'system', 'delivered'],
       ['ready', 'system', 'delivered'],
