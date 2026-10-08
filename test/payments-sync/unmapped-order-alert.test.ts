@@ -42,7 +42,9 @@ describe('order_ignored_unmapped', () => {
     const report = await w.runner.run()
     expect(report.ignored).toBe(1)
     const raised = w.alerts.alerts.filter((a) => a.code === 'order_ignored_unmapped')
-    expect(raised).toEqual([expect.objectContaining({ code: 'order_ignored_unmapped', orderId: gift.orderId })])
+    expect(raised).toEqual([
+      expect.objectContaining({ code: 'order_ignored_unmapped', orderId: gift.orderId }),
+    ])
     expect(raised[0]!.message).toContain('GIFTCARD-50')
     // a second pass does not look at the ignored order again
     await w.sync()
