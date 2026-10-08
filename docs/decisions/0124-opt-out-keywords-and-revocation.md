@@ -20,8 +20,9 @@ rules in force since April 11, 2025) says, in short:
 
 * a consumer may revoke consent to calls and texts **by any reasonable means**, and a business cannot make its own method the only
   one;
-* a reply text using the words **"stop", "quit", "end", "revoke", "opt out", "cancel" or "unsubscribe"** is treated as a
-  reasonable, definitive revocation; other wording is judged on the totality of the circumstances;
+* a reply text using the words **"stop", "quit", "end", "revoke", "opt out", "cancel" or "unsubscribe"** is a revocation, and a
+  reply in other words must be treated as one "if a reasonable person would understand those words to have conveyed a request
+  to revoke consent" (47 CFR 64.1200(a)(10), as published; the rule text says nothing about other languages);
 * revocation must be honoured within a reasonable time, at most ten business days, and one confirmation text (no marketing)
   may be sent within five minutes;
 * a separate rule that a revocation covers every unrelated message from the same sender had its effective date postponed (first
@@ -33,9 +34,8 @@ Two consequences for Oasis:
    keeps texting the customer. If a customer who replied CANCEL keeps receiving texts (a reminder, a "your vehicle is ready"), that
    is the exposure the order describes (statutory damages are per message).
 2. **Spanish.** ALTO, PARAR, BAJA (and CANCELAR, NO MÁS) are not keywords today: they reach staff as an ordinary reply and the
-   customer stays opted in. The order's list is English words; whether a Spanish "stop" sent to a business that texts in English is
-   a "reasonable means" is not settled by the list, but a customer writing ALTO plainly wants the texts to stop, and the cost of
-   honouring it is small.
+   customer stays opted in. The rule's list is English words, but its reasonable-person test is not limited to English: a reasonable
+   person would read ALTO or BAJA from a Spanish speaker as "stop", and the cost of honouring it is small.
 
 ## Current behaviour, exactly
 
