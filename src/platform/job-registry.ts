@@ -7,6 +7,7 @@ import { remindersJob, reviewRequestJob } from '../modules/messaging/jobs/remind
 import { sqspJobs } from '../modules/payments-sync/jobs/index.js'
 import { paymentsLagScanJob } from '../modules/payments/jobs.js'
 import { creditExpireJob } from '../modules/payments/jobs-credit.js'
+import { ledgerIntegrityJob } from '../modules/payments/jobs-integrity.js'
 import { settingsJobs } from '../modules/settings/jobs/index.js'
 import { maintenancePurgeJob, maintenanceRetentionJob } from './maintenance.js'
 import { alertsScanJob } from '../modules/scheduling/jobs.js'
@@ -25,6 +26,7 @@ export const jobDefinitions: readonly JobDefinition<never>[] = [
   photoRetentionJob,
   paymentsLagScanJob,
   creditExpireJob,
+  ledgerIntegrityJob,
   ...messagingJobs,
   remindersJob,
   reviewRequestJob,

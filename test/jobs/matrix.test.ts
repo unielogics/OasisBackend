@@ -18,6 +18,7 @@ import {
 import { alertsScanJob } from '../../src/modules/scheduling/jobs.js'
 import { photoFinalizeJob, photoThumbnailJob } from '../../src/modules/scheduling/photo-jobs.js'
 import { paymentsLagScanJob } from '../../src/modules/payments/jobs.js'
+import { ledgerIntegrityJob } from '../../src/modules/payments/jobs-integrity.js'
 import {
   standingAutoconfirmJob,
   standingMaterializeJob,
@@ -256,6 +257,29 @@ const scenarios: Scenario[] = [
       ),
     }),
     changes: false,
+  },
+  {
+    job: 'ledger.integrity_check',
+    defs: [ledgerIntegrityJob],
+    async arrange() {
+      // store credit applied with no FIFO allocation behind it: a problem the check must record and announce
+      const inv = await makeInvoice(db(), env(), { customerId: w.customer('Maria Delgado').id })
+      await addEvent(db(), env(), inv, {
+        type: 'credit_apply',
+        amountCents: 700,
+        method: 'Store credit',
+        methodKind: 'store_credit',
+      })
+    },
+    observe: async () => ({
+      runs: (
+        await db()
+          .selectFrom('ledger_integrity_runs')
+          .select(['check_date', 'ok', 'invoices_checked', 'findings'])
+          .execute()
+      ).map((r) => ({ ...r })),
+      notices: await count('notifications', sql`kind = 'ledger.integrity_failed'`),
+    }),
   },
   {
     job: 'sms.device.healthcheck',
