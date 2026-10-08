@@ -2,7 +2,7 @@
 // the Memberships vertical: each has a narrow interface here plus an in-memory implementation that keeps the services
 // testable and every effect observable. The real implementations are wired in a later wave.
 import { appError } from '../../platform/errors.js'
-import type { AuditActor } from '../../platform/audit.js'
+import type { AuditActor, AuditContext } from '../../platform/audit.js'
 import type { Executor, Tx } from '../../platform/db.js'
 import { taxCents } from '../../platform/money.js'
 import type { StorageProvider } from '../../integrations/ports/storage.js'
@@ -35,8 +35,9 @@ export interface InvoiceItem {
 }
 
 /**
- * What scheduling needs to know about an appointment's invoice. `paidCents` is the money currently held against the
- * invoice (payments minus refunds); `balanceCents` is what is still due (0 on a canceled invoice).
+ * What scheduling needs to know about an appointment's invoice. `paidCents` is the money paid against the invoice: payments
+ * less voided ones, plus store credit applied. Refunds are NOT subtracted (the payments module reports them apart).
+ * `balanceCents` is what is still due (0 on a canceled invoice).
  */
 export interface InvoiceSummary {
   invoiceId: string
@@ -69,6 +70,8 @@ export interface EnsureInvoiceInput {
   packageName: string
   packagePriceCents: number
   addons: { name: string; priceCents: number }[]
+  /** The acting person and request, for the invoice's audit rows (SEC-15). */
+  audit?: AuditContext
 }
 
 /**
@@ -129,7 +132,7 @@ export interface DepositSettlement {
    * A canceled or no-show job comes back to booked: its invoice is revived (a kept deposit counts again). Refused with 409
    * REOPEN_REFUNDED when a refund was issued, because a refund does not reopen the balance and the job would be undercharged.
    */
-  reopen(tx: Tx, req: { appointmentId: string; locationId: string }): Promise<void>
+  reopen(tx: Tx, req: { appointmentId: string; locationId: string; audit?: AuditContext }): Promise<void>
 }
 
 /** The waitlist (standing module): told when a canceled job freed a slot so it can be offered. Optional; off unless the feature is on. */

@@ -4,7 +4,7 @@
 // immutable except through ledger events and the item sync below.
 import { sql } from 'kysely'
 import * as audit from '../../platform/audit.js'
-import type { AuditActor } from '../../platform/audit.js'
+import type { AuditActor, AuditContext } from '../../platform/audit.js'
 import type { Clock } from '../../platform/clock.js'
 import type { Executor, Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
@@ -27,6 +27,7 @@ export interface InvoiceSummary {
   taxCents: number
   tipCents: number
   totalCents: number
+  /** Payments less voided ones, plus store credit applied; refunds are not subtracted (calc.ts `paid`). */
   paidCents: number
   balanceCents: number
   depositCents: number
@@ -51,6 +52,8 @@ export interface EnsureInvoiceInput {
   packageName: string
   packagePriceCents: number
   addons: { name: string; priceCents: number }[]
+  /** Who asked for it and the request (actor, request id, idempotency key, address), for the invoice's audit rows (SEC-15). */
+  audit?: AuditContext
 }
 
 export type InvoiceItemInput = { name: string; priceCents: number; kind: ItemKind }
@@ -217,6 +220,7 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
             entityType: 'invoice',
             entityId: existing.id,
             after: { appointmentId: a.appointmentId },
+            ctx: a.audit,
           })
         }
         await touchInvoice(tx, existing.id, d.clock.now())
@@ -269,6 +273,7 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
           appointmentId: a.appointmentId,
           lines: lines.length,
         },
+        ctx: a.audit,
       })
       await publish(tx, a.locationId, id, 1)
       return summaryOf(tx, a.appointmentId)
