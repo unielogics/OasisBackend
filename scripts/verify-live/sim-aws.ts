@@ -49,8 +49,13 @@ export class AwsSim {
   readonly objects = new Map<string, StoredObject>()
   readonly sentEmails: Array<{
     from: string
+    /** The From header as sent, display name included. */
+    fromHeader: string
     to: string[]
+    replyTo: string[]
     subject: string
+    text: string
+    tags: Record<string, string>
     messageId: string
     configurationSet?: string
   }> = []
@@ -290,7 +295,9 @@ export class AwsSim {
       const req = JSON.parse(body.toString('utf8') || '{}') as {
         FromEmailAddress?: string
         Destination?: { ToAddresses?: string[] }
-        Content?: { Simple?: { Subject?: { Data?: string } } }
+        ReplyToAddresses?: string[]
+        Content?: { Simple?: { Subject?: { Data?: string }; Body?: { Text?: { Data?: string } } } }
+        EmailTags?: Array<{ Name?: string; Value?: string }>
         ConfigurationSetName?: string
       }
       const from = (/<([^>]+)>/.exec(req.FromEmailAddress ?? '')?.[1] ?? req.FromEmailAddress ?? '').trim()
@@ -332,8 +339,12 @@ export class AwsSim {
       const messageId = `0100${randomUUID().replace(/-/g, '')}-sim`
       this.sentEmails.push({
         from,
+        fromHeader: req.FromEmailAddress ?? '',
         to,
+        replyTo: req.ReplyToAddresses ?? [],
         subject: req.Content?.Simple?.Subject?.Data ?? '',
+        text: req.Content?.Simple?.Body?.Text?.Data ?? '',
+        tags: Object.fromEntries((req.EmailTags ?? []).map((t) => [t.Name ?? '', t.Value ?? ''])),
         messageId,
         ...(req.ConfigurationSetName ? { configurationSet: req.ConfigurationSetName } : {}),
       })
