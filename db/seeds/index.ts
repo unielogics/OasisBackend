@@ -1,4 +1,4 @@
-// Seed runner: pnpm seed -- --profile <name> [--url <db url>] [--list]
+// Seed runner: pnpm seed -- --profile <name>[,<name>...] [--url <db url>] [--list]
 // Profiles register themselves in `profiles` (one import per profile file, added by the vertical that owns the data).
 // The runner owns nothing but the plumbing: one transaction, the injected clock, ids and RNG, and the base location.
 import { existsSync } from 'node:fs'
@@ -15,6 +15,7 @@ import { paymentsSeedProfiles } from './payments.js'
 import { membershipsSeedProfiles } from './memberships.js'
 import { messagingProfile } from './messaging.js'
 import { geofenceProfile } from './gaps.js'
+import { demoSeedProfiles } from './demo.js'
 
 export interface SeedContext {
   tx: Tx
@@ -61,6 +62,19 @@ profiles.design!.run = async (ctx) => {
   await messagingProfile.run(ctx)
 }
 for (const [name, profile] of Object.entries(membershipsSeedProfiles)) registerSeedProfile(name, profile)
+for (const [name, profile] of Object.entries(demoSeedProfiles)) registerSeedProfile(name, profile)
+
+/** Every profile of a comma-separated list ("design,demo") with its dependencies, each once, in list order. */
+export function resolveProfiles(list: string): string[] {
+  const out: string[] = []
+  for (const name of list
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean))
+    for (const n of resolveOrder(name)) if (!out.includes(n)) out.push(n)
+  if (out.length === 0) throw new Error('No seed profile given')
+  return out
+}
 
 function resolveOrder(name: string, seen: string[] = []): string[] {
   const p = profiles[name]
@@ -82,7 +96,7 @@ export interface RunSeedOptions {
 }
 
 export async function runSeed(o: RunSeedOptions): Promise<string[]> {
-  const order = resolveOrder(o.profile)
+  const order = resolveProfiles(o.profile)
   const log = o.log ?? (() => undefined)
   const newId = createIdGenerator(o.clock)
   await transaction(o.db, async (tx) => {

@@ -511,7 +511,10 @@ export function eventInstant(
     // An explicit date in the fixtures ("Jun 11") is a date of the design's own day (2026-06-13): keep its distance
     // from "today", so the history stays coherent whatever clock the seed runs with (credit lots expire relative to it).
     const designDay = DateTime.fromISO(DESIGN_DAY, { zone: 'utc' })
-    const d = DateTime.fromFormat(`${dayWord} ${designDay.year}`, 'LLL d yyyy', { locale: 'en-US', zone: 'utc' })
+    const d = DateTime.fromFormat(`${dayWord} ${designDay.year}`, 'LLL d yyyy', {
+      locale: 'en-US',
+      zone: 'utc',
+    })
     if (!d.isValid) throw new Error(`Bad design date "${dayWord}"`)
     day = addDays(today, Math.round(d.diff(designDay, 'days').days))
   }
@@ -532,13 +535,46 @@ const EXPIRY: Record<NonNullable<SeedEvent['expiry']>, CreditExpiry> = {
 
 // --- the profile --------------------------------------------------------------------------------------------------------
 
+/** An invoice the seed created, with the facts a caller needs to attach an appointment to it. */
+export interface SeededInvoice {
+  inv: DesignInvoice
+  invoiceId: string
+  customerId: string
+  bizDate: string
+  occurredAt: Date
+}
+
+export interface SeedInvoicesOptions {
+  /**
+   * The one card payment (by invoice number) recorded as staff took it at the counter and Squarespace has not confirmed yet:
+   * brand-only label, processor_state awaiting_processor. Every other card payment of the history reads as confirmed.
+   */
+  awaitingInvoiceNo?: number
+}
+
 export async function seedParityPay(ctx: SeedContext): Promise<void> {
+  const invoices = designInvoices()
+  const created = await seedDesignInvoices(ctx, invoices)
+  ctx.log(
+    `parity-pay: ${created.length} invoices created (${invoices.length - created.length} already present)`,
+  )
+}
+
+/**
+ * Inserts the given design invoices (skipping numbers already in use) with their ledger events and store-credit
+ * allocations, dated relative to the clock's today, and moves the invoice counter past the highest number.
+ */
+export async function seedDesignInvoices(
+  ctx: SeedContext,
+  invoices: readonly DesignInvoice[],
+  opts: SeedInvoicesOptions = {},
+): Promise<SeededInvoice[]> {
   const { tx, location } = ctx
   const tz = location.timezone
   const now = ctx.clock.now()
   const today = toBizDate(now, tz)
   const taxBp = (await getSetting(tx, location.id, 'tax.rate_bp')).value
-  const invoices = designInvoices()
+  const seeded: SeededInvoice[] = []
 
   const services = new Map(
     (
@@ -597,7 +633,6 @@ export async function seedParityPay(ctx: SeedContext): Promise<void> {
   }
 
   const applies: Array<{ eventId: string; customerId: string; cents: number; at: Date }> = []
-  let created = 0
   for (const inv of invoices) {
     const exists = await tx
       .selectFrom('invoices')
@@ -606,11 +641,12 @@ export async function seedParityPay(ctx: SeedContext): Promise<void> {
       .where('invoice_no', '=', inv.no)
       .executeTakeFirst()
     if (exists) continue
-    created++
     const bizDate = addDays(today, inv.off)
     const occurredAt = wallToInstant(bizDate, parseT(inv.time), tz)
     const customerId = customerIds.get(inv.client)!
     const invoiceId = ctx.newId()
+    seeded.push({ inv, invoiceId, customerId, bizDate, occurredAt })
+    let awaitingPending = opts.awaitingInvoiceNo === inv.no
     await tx
       .insertInto('invoices')
       .values({
@@ -658,6 +694,8 @@ export async function seedParityPay(ctx: SeedContext): Promise<void> {
       const brand = method && kind === 'card' ? brandOf(method) : { brand: null, last4: null }
       const status: RefundStatus = e.type === 'refund' ? (e.status ?? 'done') : 'done'
       const cardLeg = kind === 'card' || kind === 'apple_pay'
+      const awaiting = awaitingPending && e.type === 'pay' && kind === 'card'
+      if (awaiting) awaitingPending = false
       const eventId = ctx.newId()
       const expiry = e.expiry ? EXPIRY[e.expiry] : null
       const expiresAt =
@@ -674,10 +712,11 @@ export async function seedParityPay(ctx: SeedContext): Promise<void> {
           type: e.type,
           amount_cents: e.amountCents,
           status,
-          method,
+          // a card staff took at the counter is labelled by its brand only (the collect sheet never invents digits)
+          method: awaiting ? cardLabel(brand.brand).label : method,
           method_kind: kind,
           brand: brand.brand,
-          last4: brand.last4,
+          last4: awaiting ? null : brand.last4,
           dest: e.type === 'refund' ? (e.dest ?? 'card') : null,
           deposit: e.deposit ?? false,
           reason: e.reason ?? null,
@@ -690,8 +729,9 @@ export async function seedParityPay(ctx: SeedContext): Promise<void> {
           resolved_at: e.type === 'refund' && status !== 'pending' ? at : null,
           source: 'seed',
           // the fixtures are history: money that already went through Squarespace reads as confirmed
-          processor_state:
-            (e.type === 'pay' && cardLeg) || (e.type === 'refund' && status === 'done' && e.dest === 'card')
+          processor_state: awaiting
+            ? 'awaiting_processor'
+            : (e.type === 'pay' && cardLeg) || (e.type === 'refund' && status === 'done' && e.dest === 'card')
               ? 'confirmed'
               : 'na',
         })
@@ -730,7 +770,7 @@ export async function seedParityPay(ctx: SeedContext): Promise<void> {
     .set((eb) => ({ next_no: eb.fn('greatest', ['next_no', eb.val(max + 1)]) }))
     .where('location_id', '=', location.id)
     .execute()
-  ctx.log(`parity-pay: ${created} invoices created (${invoices.length - created} already present)`)
+  return seeded
 }
 
 export const paymentsSeedProfiles: Record<string, SeedProfile> = {
