@@ -9,6 +9,7 @@
   },
   "type": "module",
   "scripts": {
+    "aws:provision": "tsx scripts/aws/provision.ts",
     "bootstrap:verify": "bash scripts/bootstrap/verify.sh",
     "build": "tsc -p tsconfig.build.json",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm openapi --check",
