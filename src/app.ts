@@ -1,6 +1,5 @@
 import cookie from '@fastify/cookie'
 import helmet from '@fastify/helmet'
-import rateLimit from '@fastify/rate-limit'
 import Fastify from 'fastify'
 import { serializerCompiler, validatorCompiler, type ZodTypeProvider } from 'fastify-type-provider-zod'
 import type { DestinationStream } from 'pino'
@@ -9,6 +8,7 @@ import { installErrorHandling } from './http/error-handler.js'
 import { installRequestHooks, installRouteRegistry } from './http/hooks.js'
 import { apiModules, hookModules, type ApiModule } from './http/modules.js'
 import { registerOpenApi } from './http/openapi.js'
+import { installRateLimits } from './http/rate-limit.js'
 import { registerEventsRoute } from './http/routes/events.js'
 import { registerDevStorageRoutes, shouldMountDevStorage } from './http/routes/dev-storage.js'
 import { registerHealthRoutes } from './http/routes/health.js'
@@ -96,15 +96,9 @@ export async function buildApp(deps: AppDeps): Promise<AppInstance> {
     hsts: env.COOKIE_SECURE ? { maxAge: 15_552_000 } : false,
   })
   await app.register(cookie, env.SESSION_SECRET ? { secret: env.SESSION_SECRET } : {})
-  await app.register(rateLimit, {
-    global: true,
-    max: env.RATE_LIMIT_PER_MIN,
-    timeWindow: '1 minute',
-    hook: 'preHandler',
-    keyGenerator: (req) => req.auth?.userId ?? req.ip,
-  })
+  const limits = await installRateLimits(app)
   await registerOpenApi(app)
-  installRequestHooks(app)
+  installRequestHooks(app, limits)
 
   registerHealthRoutes(app)
 
