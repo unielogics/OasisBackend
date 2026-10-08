@@ -40,11 +40,13 @@ export const TEMPLATES = {
     key: 'confirm_request',
     label: 'Confirmation request',
     klass: 'confirm_request',
-    body: 'Your appointment at Oasis Auto Spa is confirmed for {time}. Reply C to confirm.',
+    // the design's seeded text said "is confirmed for {time}. Reply C to confirm.", asking to confirm what it called confirmed;
+    // the request goes to a booking that is not confirmed yet, so it says "booked" and keeps the rest of the design's words
+    body: 'Your appointment at Oasis Auto Spa is booked for {time}. Reply C to confirm.',
     required: ['time'],
     optional: [],
     editable: true,
-    source: 'cc-domain 7.6 confirmed message',
+    source: 'cc-domain 7.6 confirmed message ("is confirmed" -> "is booked")',
   }),
   confirmed: t({
     key: 'confirmed',
