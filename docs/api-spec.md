@@ -674,7 +674,7 @@ Code: `src/modules/payments/**` (routes in `http/`), migration `20261006190000_p
 | `POST /appointments/:id/checklist/bulk {itemIds, done}` | `jobs.checklist` | A section, or every id for "Check all". |
 | `POST /appointments/:id/photos/presign {category, contentType, bytes, note?}` | `jobs.checklist` | Presigned POST (5 min, size policy). JPEG, PNG, WebP up to 15 MB; HEIC is 422. |
 | `POST /appointments/:id/photos/:photoId/complete`, `POST .../photos/note {note}`, `DELETE .../photos/:photoId` | `jobs.checklist` | `complete` HEAD-verifies the object and queues the thumbnail job; a note is an issue with no file. |
-| `GET /customers?q=` / `POST /customers` | `cli.view` / `sched.edit` | Search (a phone or email token cannot match without `cli.contact`; contact fields are null) and find-or-create by phone with a vehicle. |
+| `GET /customers?q=` / `POST /customers` | `cli.view` / `sched.edit` | Search (a phone or email token cannot match without `cli.contact`; contact fields are null) and find-or-create by phone with a vehicle, 201 `{customer, created, masked}`. Without `cli.contact` a number that already belongs to someone answers a masked match (SEC-10, ADR 0120): `created: false, masked: true`, `customer.fullName` the initials ("L. C."), `id` null, no contact, vehicles or VIP flag, and the record is not touched; such a caller finds the customer by name. |
 
 ### 20.2 Errors added
 

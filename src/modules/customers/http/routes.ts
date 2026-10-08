@@ -6,8 +6,10 @@ import { z } from '../../../http/zod.js'
 import type { AppInstance } from '../../../http/types.js'
 import * as audit from '../../../platform/audit.js'
 import { transaction } from '../../../platform/db.js'
+import { normalizePhone } from '../../../platform/phone.js'
 import { canSeeContact } from '../../people/redact.js'
 import {
+  findCustomerByPhone,
   isVipCustomer,
   listVehicles,
   searchCustomers,
@@ -33,6 +35,46 @@ const CustomerHit = z.object({
   vip: z.boolean(),
   needsDetails: z.boolean(),
   vehicles: z.array(Vehicle),
+})
+
+/** What a caller without cli.contact learns about the owner of a number: that one exists, and the initials. */
+const MaskedCustomer = z.object({
+  id: z.null(),
+  fullName: z.string(),
+  phone: z.null(),
+  email: z.null(),
+  vip: z.literal(false),
+  needsDetails: z.literal(false),
+  vehicles: z.array(Vehicle).max(0),
+})
+
+/** "Liam Chen" -> "L. C.": the first two words' initials, nothing that identifies the person further. */
+export function maskedName(fullName: string): string {
+  const letters = fullName
+    .split(/\s+/)
+    .map((w) =>
+      w
+        .replace(/[^\p{L}\p{N}]/gu, '')
+        .slice(0, 1)
+        .toUpperCase(),
+    )
+    .filter(Boolean)
+    .slice(0, 2)
+  return letters.length ? letters.map((l) => `${l}.`).join(' ') : '?'
+}
+
+const masked = (fullName: string) => ({
+  created: false,
+  masked: true,
+  customer: {
+    id: null,
+    fullName: maskedName(fullName),
+    phone: null,
+    email: null,
+    vip: false as const,
+    needsDetails: false as const,
+    vehicles: [],
+  },
 })
 
 const vehicleOut = (v: VehicleRecord) => ({
@@ -91,7 +133,7 @@ export function registerCustomerBookingRoutes(app: AppInstance): void {
         tags: ['customers'],
         summary: 'Find the customer by phone or create one (and the vehicle by plate)',
         description:
-          'The phone is normalised to E.164 and is the identity: an existing live customer is returned with `created: false` and only missing details are filled. Contact fields come back null without cli.contact.',
+          'The phone is normalised to E.164 and is the identity: an existing live customer is returned with `created: false` and only missing details are filled. Contact fields come back null without cli.contact. Without cli.contact a number that belongs to an existing customer answers a masked match (`masked: true`: initials only, no id, contact or vehicles) and the record is left untouched, so the box cannot be used to find out who owns a number; find the customer by name instead.',
         body: z
           .object({
             name: z.string().trim().max(120).nullish(),
@@ -110,12 +152,23 @@ export function registerCustomerBookingRoutes(app: AppInstance): void {
               .nullish(),
           })
           .strict(),
-        response: { 201: z.object({ customer: CustomerHit, created: z.boolean() }) },
+        response: {
+          201: z.object({
+            customer: z.union([CustomerHit, MaskedCustomer]),
+            created: z.boolean(),
+            masked: z.boolean(),
+          }),
+        },
       },
     },
     async (req, reply) => {
       const canContact = canSeeContact(req.auth!)
       const out = await transaction(app.db, async (tx) => {
+        if (!canContact) {
+          const phone = normalizePhone(req.body.phone)
+          const owner = phone ? await findCustomerByPhone(tx, phone) : undefined
+          if (owner) return { kind: 'masked' as const, name: owner.fullName }
+        }
         const now = app.clock.now()
         const r = await upsertCustomerByPhone(tx, {
           newId: app.newId,
@@ -126,6 +179,8 @@ export function registerCustomerBookingRoutes(app: AppInstance): void {
           source: 'dashboard',
           smsOptIn: req.body.smsOptIn ? 'dashboard' : null,
         })
+        // lost a race to someone creating the same number meanwhile: still nothing to see without cli.contact
+        if (!canContact && !r.created) return { kind: 'masked' as const, name: r.customer.fullName }
         const v = req.body.vehicle
         if (
           v &&
@@ -141,14 +196,17 @@ export function registerCustomerBookingRoutes(app: AppInstance): void {
             ctx: auditContextOf(req),
           })
         return {
+          kind: 'full' as const,
           created: r.created,
           customer: r.customer,
           vehicles: await listVehicles(tx, r.customer.id),
           vip: await isVipCustomer(tx, req.auth!.locationId, r.customer.id),
         }
       })
+      if (out.kind === 'masked') return reply.status(201).send(masked(out.name))
       return reply.status(201).send({
         created: out.created,
+        masked: false,
         customer: {
           id: out.customer.id,
           fullName: out.customer.fullName,
