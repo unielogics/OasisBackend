@@ -279,6 +279,25 @@ append-only guard trigger exists). `ledger-check.sh` runs exactly those ledger c
 the scratch copy afterwards. A failure goes to `systemctl --failed` and `failures.log`.
 `--mode schema --schema NAME` does the same inside a scratch schema, for a host where no database can be created.
 
+### PostgreSQL client for Aurora
+
+The production database is Aurora PostgreSQL 17 (cluster `oasis-database`, database `oasis`, role `oasis_app`, TLS with
+`sslmode=verify-full` against the RDS bundle at `/etc/oasis/rds-global-bundle.pem`). Version 15 tools refuse to dump a 17 server,
+and on Amazon Linux 2023 the `postgresql17` packages conflict with the `postgresql15` ones the host already has, so the version 17
+client is unpacked beside them instead of installed:
+
+```bash
+sudo mkdir -p /opt/oasis/pgclient/17 && cd "$(mktemp -d)"
+dnf download postgresql17 postgresql17-private-libs && rpm -K ./*.rpm          # both must say "digests signatures OK"
+for r in ./*.rpm; do rpm2cpio "$r" | sudo cpio -idm --quiet -D /opt/oasis/pgclient/17; done
+echo 'PG_BINDIR=/opt/oasis/pgclient/17/usr/bin' | sudo tee -a /etc/oasis/common.env
+sudo curl -fsSL -o /etc/oasis/rds-global-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+```
+
+`deploy/lib/common.sh` puts `$PG_BINDIR` (and its `../lib64`) first, so backup, restore drill and ledger check use it; the
+connection's `sslmode` and `sslrootcert` travel from `DATABASE_URL` into `PGSSLMODE` and `PGSSLROOTCERT`. Aurora also keeps its
+own automated backups (7 days, point in time); the nightly dumps in S3 are the longer, off-cluster copy.
+
 ## Secrets
 
 * They live in the AWS Secrets Manager secret (above). Change one with a one-line file and `pnpm secrets:push --profile <operator

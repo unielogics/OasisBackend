@@ -284,7 +284,11 @@ describe('email through SES (simulator), by configuration only', () => {
     await jobs!.enqueue('email.send', {})
     const m = await until(async () => sentTo(CUSTOMER)[0], 'the receipt email')
     expectEnvelope(m, 'receipt')
-    const row = await t.db.selectFrom('outbox_emails').select(['state', 'provider_message_id', 'appointment_id']).where('to_email', '=', CUSTOMER).executeTakeFirstOrThrow()
+    // the simulator has the message before the worker records the send: wait for the row (a remote database widens the gap)
+    const row = await until(async () => {
+      const r = await t.db.selectFrom('outbox_emails').select(['state', 'provider_message_id', 'appointment_id']).where('to_email', '=', CUSTOMER).executeTakeFirst()
+      return r?.state === 'sent' ? r : undefined
+    }, 'the receipt row marked sent')
     expect(row).toMatchObject({ state: 'sent', provider_message_id: m.messageId })
 
     const env = notification(cert, sesEvent('Bounce', { messageId: m.messageId, recipient: CUSTOMER, at: new Date() }), { at: new Date() })

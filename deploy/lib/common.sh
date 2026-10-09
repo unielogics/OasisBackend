@@ -19,6 +19,17 @@ JOURNALD_DIR="${JOURNALD_DIR:-${OASIS_ROOT_PREFIX}/etc/systemd/journald.conf.d}"
 NGINX_DIR="${NGINX_DIR:-${OASIS_ROOT_PREFIX}/etc/nginx}"
 LOGROTATE_DIR="${LOGROTATE_DIR:-${OASIS_ROOT_PREFIX}/etc/logrotate.d}"
 DRY_RUN="${DRY_RUN:-0}"
+# A PostgreSQL client newer than the host's packages (Aurora PostgreSQL 17 from an AL2023 host whose postgresql15 packages
+# conflict with postgresql17): PG_BINDIR=/opt/oasis/pgclient/17/bin, with its private libpq in ../lib64. Its psql, pg_dump and
+# pg_restore then come first on the PATH of every deploy script (backup, restore drill, ledger check).
+if [[ -n "${PG_BINDIR:-}" ]]; then
+  PATH="$PG_BINDIR:$PATH"
+  if [[ -d "$PG_BINDIR/../lib64" ]]; then
+    LD_LIBRARY_PATH="$(cd "$PG_BINDIR/../lib64" && pwd)${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export LD_LIBRARY_PATH
+  fi
+  export PATH
+fi
 # Set to 1 to skip everything that changes the host itself (users, packages, chown, systemctl, nginx reloads).
 NO_SYSTEM="${NO_SYSTEM:-0}"
 
@@ -97,8 +108,15 @@ url_to_pgenv() {
   PGDATABASE=$(urldecode "${BASH_REMATCH[8]}")
   export PGUSER PGPASSWORD PGHOST PGPORT PGDATABASE
   local q=${BASH_REMATCH[10]:-} kv
+  # the TLS settings travel too (Aurora/RDS: sslmode=verify-full&sslrootcert=/etc/oasis/rds-global-bundle.pem); without
+  # sslrootcert libpq looks for ~/.postgresql/root.crt and refuses to connect
   for kv in ${q//&/ }; do
-    [[ "$kv" == sslmode=* ]] && export PGSSLMODE=${kv#sslmode=}
+    case $kv in
+      sslmode=*) PGSSLMODE=$(urldecode "${kv#sslmode=}") && export PGSSLMODE ;;
+      sslrootcert=*) PGSSLROOTCERT=$(urldecode "${kv#sslrootcert=}") && export PGSSLROOTCERT ;;
+      sslcert=*) PGSSLCERT=$(urldecode "${kv#sslcert=}") && export PGSSLCERT ;;
+      sslkey=*) PGSSLKEY=$(urldecode "${kv#sslkey=}") && export PGSSLKEY ;;
+    esac
   done
   return 0
 }
