@@ -815,7 +815,7 @@ describe('nginx site', () => {
         const h = parseNginx(
           readText(path.join(t.dir, mode, 'etc/nginx/oasis/security-headers.conf')),
         ).filter((d) => d.name === 'add_header')
-        const csp = h.map((d) => d.args[0]).filter((n) => /content-security-policy|csp/i.test(n))
+        const csp = h.map((d) => d.args[0] ?? '').filter((n) => /content-security-policy|csp/i.test(n))
         expect(csp, mode).toEqual(header ? [header] : [])
       }
     } finally {
