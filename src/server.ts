@@ -1,5 +1,6 @@
 import { buildApp } from './app.js'
-import { loadEnv, type Env } from './config/env.js'
+import type { Env } from './config/env.js'
+import { loadRuntimeEnv } from './config/secrets-source.js'
 import { createPermissiveAuthorizer, type Authorizer } from './http/authorizer.js'
 import { createIdentity, bootstrapAdmin, type IdentityAuthorizer } from './modules/auth/index.js'
 import type { NotificationPort } from './modules/auth/notifications.js'
@@ -43,7 +44,7 @@ function makeAuthorizer(
 }
 
 async function main(): Promise<void> {
-  const env = loadEnv()
+  const env = await loadRuntimeEnv() // the Secrets Manager secret (OASIS_SECRET_ID) under the process environment
   const clock = createClock(env.CLOCK_FREEZE_AT)
   const logger = createLogger({
     level: env.LOG_LEVEL,

@@ -3,6 +3,7 @@
 //   --dir <path> uses another migrations directory.
 import { existsSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { applySecretEnvironment } from '../src/config/secrets-source.js'
 import { createClock } from '../src/platform/clock.js'
 import {
   DEFAULT_MIGRATIONS_DIR,
@@ -28,6 +29,8 @@ function targetUrl(): string {
 }
 
 async function main(): Promise<void> {
+  // DATABASE_URL may live in the Secrets Manager secret (OASIS_SECRET_ID); --url and --test do not need it
+  if ((cmd === 'up' || cmd === 'status') && !flag('--url') && !args.includes('--test')) await applySecretEnvironment()
   const clock = createClock(process.env.CLOCK_FREEZE_AT)
   const opts = { schema: flag('--schema'), dir: flag('--dir') }
   if (cmd === 'up') {

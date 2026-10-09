@@ -6,7 +6,7 @@
 // of the login, and an audit_log row records that it happened and when (but not by whom: the shell user is in the system log).
 import { createInterface } from 'node:readline'
 import { sql } from 'kysely'
-import { loadEnv } from '../../src/config/env.js'
+import { loadRuntimeEnv } from '../../src/config/secrets-source.js'
 import { PasswordHasher, passwordProblem } from '../../src/modules/auth/password.js'
 import * as audit from '../../src/platform/audit.js'
 import { createClock } from '../../src/platform/clock.js'
@@ -86,7 +86,7 @@ async function main(): Promise<void> {
     (envVar ? process.env[envVar] : undefined) ??
     (argv.includes('--password-stdin') ? await readStdin() : await promptHidden('New password: '))
   if (!password) throw new Error('No password given')
-  const env = loadEnv()
+  const env = await loadRuntimeEnv()
   const db = createDb({
     url: env.DATABASE_URL,
     searchPath: env.DB_SEARCH_PATH,

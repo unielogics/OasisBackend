@@ -54419,7 +54419,7 @@
     },
     "/api/v1/system/integrations": {
       "get": {
-        "description": "One row per integration (email, storage, sms, squarespace). `missing` names exactly what must be set (environment variables, or a step such as registering a tablet) before the integration works live; `warnings` are recommended settings and conditions. Secrets are never returned: AWS credentials appear only as their source (`environment`, `profile`, `instance-role`, `none`) and error texts are masked.",
+        "description": "One row per integration (email, storage, sms, squarespace). `missing` names exactly what must be set (environment variables, or a step such as registering a tablet) before the integration works live; `warnings` are recommended settings and conditions. Secrets are never returned: AWS credentials appear only as their source (`environment`, `profile`, `shared-credentials-file`, `instance-role`, `none`) and error texts are masked.",
         "responses": {
           "200": {
             "content": {

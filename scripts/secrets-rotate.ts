@@ -25,6 +25,7 @@ import {
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { sql } from 'kysely'
+import { SecretSourceError, applySecretEnvironment } from '../src/config/secrets-source.js'
 import { createDb } from '../src/platform/db.js'
 import { createSecretBox as createMessagingBox } from '../src/modules/messaging/crypto.js'
 import { createSecretBox as createKeyedBox } from '../src/modules/payments-sync/db/secrets.js'
@@ -349,11 +350,13 @@ export async function main(
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (existsSync('.env') && !process.env.DATABASE_URL) process.loadEnvFile('.env')
-  main(process.argv.slice(2)).then(
+  // DATABASE_URL and the current SECRETS_KEY may live in the Secrets Manager secret (OASIS_SECRET_ID)
+  applySecretEnvironment().then(() => main(process.argv.slice(2))).then(
     (code) => process.exit(code),
     (e: unknown) => {
-      console.error(e instanceof RotationError ? e.message : e)
-      process.exit(e instanceof RotationError ? 2 : 1)
+      const known = e instanceof RotationError || e instanceof SecretSourceError
+      console.error(known ? e.message : e)
+      process.exit(known ? 2 : 1)
     },
   )
 }

@@ -19,5 +19,5 @@ Status: accepted (2026-10-08)
   `warnings` (recommended settings, simulator overrides, an offline tablet), last success and last error with time, and non-secret
   details. Sources: `outbox_emails` (`sent_at`, new `error_at`), `webhook_log` (last SES feedback), `email_suppressions`,
   `appointment_photos` and `job_runs` (photos.thumbnail, photos.retention), `sms_outbox` and `sms_devices`, `sqsp_sync_state` and
-  `sqsp_connections`. Nothing secret is returned: AWS credentials only as their source (`environment`, `profile`, `instance-role`,
+  `sqsp_connections`. Nothing secret is returned: AWS credentials only as their source (`environment`, `profile`, `shared-credentials-file`, `instance-role`,
   `none`), the topic ARNs only as a count, error text masked (addresses, phone numbers, access key ids) and cut at 300 characters.

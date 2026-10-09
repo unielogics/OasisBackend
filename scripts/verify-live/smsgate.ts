@@ -3,6 +3,7 @@
 //
 // SAFE BY DEFAULT: without --send it only reads (GET /health, /messages, /webhooks, /settings) and sends nothing.
 // See docs/live-verification.md for the tablet preparation and the full option list.
+import { applySecretEnvironment } from '../../src/config/secrets-source.js'
 import { randomUUID } from 'node:crypto'
 import dns from 'node:dns/promises'
 import { SmsProviderError, SmsWebhookError } from '../../src/integrations/sms/errors.js'
@@ -1210,5 +1211,12 @@ export async function main(
 }
 
 if (process.argv[1] && process.argv[1].endsWith('smsgate.ts')) {
-  main(process.argv.slice(2)).then((c) => process.exit(c))
+  // the settings may live in the Secrets Manager secret (OASIS_SECRET_ID), like the app's
+  applySecretEnvironment().then(
+    () => main(process.argv.slice(2)).then((c) => process.exit(c)),
+    (e: unknown) => {
+      console.error((e as Error).message)
+      process.exit(2)
+    },
+  )
 }

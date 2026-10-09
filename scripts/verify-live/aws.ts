@@ -5,6 +5,7 @@
 //
 // SAFE BY DEFAULT: without --send only configuration is READ. --send --to <email> adds the two writes: one test email, and the
 // S3 round trip (the object lives for a second and is deleted again).
+import { applySecretEnvironment } from '../../src/config/secrets-source.js'
 import { randomUUID } from 'node:crypto'
 import {
   GetAccountCommand,
@@ -813,5 +814,12 @@ export async function main(
 }
 
 if (process.argv[1] && process.argv[1].endsWith('aws.ts')) {
-  main(process.argv.slice(2)).then((c) => process.exit(c))
+  // the settings may live in the Secrets Manager secret (OASIS_SECRET_ID), like the app's
+  applySecretEnvironment().then(
+    () => main(process.argv.slice(2)).then((c) => process.exit(c)),
+    (e: unknown) => {
+      console.error((e as Error).message)
+      process.exit(2)
+    },
+  )
 }

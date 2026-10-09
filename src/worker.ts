@@ -1,7 +1,8 @@
 // The worker process: registers every job handler and cron schedule and runs them against pg-boss.
 // startWorker() is the factory the tests drive; main() wires it to the environment and process signals.
 import { pathToFileURL } from 'node:url'
-import { loadEnv, type Env } from './config/env.js'
+import type { Env } from './config/env.js'
+import { loadRuntimeEnv } from './config/secrets-source.js'
 import { configureProductionSchedulingJobs } from './composition.js'
 import { notifyManagers } from './modules/messaging/notify.js'
 import { createClock, type Clock } from './platform/clock.js'
@@ -110,7 +111,7 @@ export async function startWorker(o: WorkerOptions): Promise<RunningWorker> {
 }
 
 async function main(): Promise<void> {
-  const env = loadEnv()
+  const env = await loadRuntimeEnv() // the Secrets Manager secret (OASIS_SECRET_ID) under the process environment
   const logger = createLogger({
     level: env.LOG_LEVEL,
     pretty: env.NODE_ENV === 'development' && Boolean(process.stdout.isTTY),

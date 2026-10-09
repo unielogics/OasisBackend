@@ -125,6 +125,7 @@ describe('helpers', () => {
     expect(awsCredentialSource(loadEnv(base))).toBe('instance-role')
     expect(awsCredentialSource(loadEnv({ ...base, AWS_EC2_METADATA_DISABLED: 'true' }))).toBe('none')
     expect(awsCredentialSource(loadEnv({ ...base, AWS_PROFILE: 'oasis' }))).toBe('profile')
+    expect(awsCredentialSource(loadEnv({ ...base, AWS_SHARED_CREDENTIALS_FILE: '/run/credentials/oasis-api.service/aws-credentials', AWS_EC2_METADATA_DISABLED: 'true' }))).toBe('shared-credentials-file')
     expect(awsCredentialSource(loadEnv({ ...base, AWS_ACCESS_KEY_ID: KEY_ID, AWS_SECRET_ACCESS_KEY: SECRET }))).toBe('environment')
     expect(() => loadEnv({ ...base, AWS_ACCESS_KEY_ID: KEY_ID })).toThrow(/AWS_SECRET_ACCESS_KEY/)
   })

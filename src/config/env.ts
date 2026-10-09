@@ -139,8 +139,14 @@ export const envSchema = z
     AWS_SECRET_ACCESS_KEY: z.string().min(16).optional(),
     AWS_SESSION_TOKEN: z.string().optional(),
     AWS_PROFILE: z.string().optional(),
+    // A credentials file in the AWS INI format (the deploy kit's runtime=user: /etc/oasis/aws-credentials, handed to the service by
+    // systemd LoadCredential); the SDK reads it. Declared so the status endpoint can name the source.
+    AWS_SHARED_CREDENTIALS_FILE: z.string().optional(),
     // true: the SDK never asks the EC2 instance metadata service for credentials (set it whenever keys or a profile are used).
     AWS_EC2_METADATA_DISABLED: bool.default('false'),
+    // The AWS Secrets Manager secret (name or ARN) the environment is read from at start (src/config/secrets-source.ts): a JSON
+    // object of NAME -> string value; a variable already set in the process environment wins. Unset: nothing is fetched.
+    OASIS_SECRET_ID: z.string().min(1).optional(),
 
     EMAIL_PROVIDER: provider('sim', 'ses').default('sim'),
     SES_FROM_ADDRESS: z.string().email().optional(),
@@ -211,6 +217,9 @@ export const envSchema = z
   })
 
 export type Env = z.infer<typeof envSchema>
+
+/** Every variable the environment contract declares (what may be set at all, in a file or in the secret). */
+export const ENV_KEYS: ReadonlySet<string> = new Set(Object.keys(envSchema.innerType().shape))
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   const parsed = envSchema.safeParse(source)

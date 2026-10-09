@@ -5,7 +5,7 @@
 // for with echo off; it is never taken from the command line.
 import { existsSync } from 'node:fs'
 import { createInterface } from 'node:readline'
-import { loadEnv } from '../../config/env.js'
+import { loadRuntimeEnv } from '../../config/secrets-source.js'
 import { createClock } from '../../platform/clock.js'
 import { createDb } from '../../platform/db.js'
 import { createIdGenerator } from '../../platform/ids.js'
@@ -70,7 +70,7 @@ async function main(): Promise<void> {
     (await promptHidden('Password: '))
   if (!password) throw new Error('No password given')
 
-  const env = loadEnv()
+  const env = await loadRuntimeEnv()
   const clock = createClock(env.CLOCK_FREEZE_AT)
   const db = createDb({
     url: env.DATABASE_URL,

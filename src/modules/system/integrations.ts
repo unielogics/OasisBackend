@@ -37,12 +37,14 @@ export type IntegrationStatus = z.infer<typeof IntegrationStatus>
 
 export const IntegrationsResponse = z.object({ generatedAt: iso, integrations: z.array(IntegrationStatus) })
 
-export type AwsCredentialSource = 'environment' | 'profile' | 'instance-role' | 'none'
+export type AwsCredentialSource = 'environment' | 'profile' | 'shared-credentials-file' | 'instance-role' | 'none'
 
 /** Where the AWS SDK will find credentials, decided from the environment alone (instance metadata is never contacted). */
 export function awsCredentialSource(env: Env): AwsCredentialSource {
   if (env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY) return 'environment'
   if (env.AWS_PROFILE) return 'profile'
+  // the deploy kit's runtime=user: the oasis-app key in /etc/oasis/aws-credentials, handed over by systemd LoadCredential
+  if (env.AWS_SHARED_CREDENTIALS_FILE) return 'shared-credentials-file'
   return env.AWS_EC2_METADATA_DISABLED ? 'none' : 'instance-role'
 }
 
@@ -63,7 +65,7 @@ function awsCredentials(env: Env, missing: string[], warnings: string[]): AwsCre
   if (src === 'none') missing.push('AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY')
   if (src === 'instance-role')
     warnings.push(
-      'AWS credentials are left to the EC2 instance role, which is not checked here; set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY (pnpm aws:provision --out) and AWS_EC2_METADATA_DISABLED=true',
+      'AWS credentials are left to the EC2 instance role (pnpm aws:provision --runtime role associates oasis-app-profile), which is not checked here; pnpm verify:aws --instance-profile checks it',
     )
   return src
 }
@@ -293,7 +295,7 @@ export function registerIntegrationRoutes(app: AppInstance): void {
         tags: ['system'],
         summary: 'Outside services: provider, configured or not, missing settings, last success and last error',
         description:
-          'One row per integration (email, storage, sms, squarespace). `missing` names exactly what must be set (environment variables, or a step such as registering a tablet) before the integration works live; `warnings` are recommended settings and conditions. Secrets are never returned: AWS credentials appear only as their source (`environment`, `profile`, `instance-role`, `none`) and error texts are masked.',
+          'One row per integration (email, storage, sms, squarespace). `missing` names exactly what must be set (environment variables, or a step such as registering a tablet) before the integration works live; `warnings` are recommended settings and conditions. Secrets are never returned: AWS credentials appear only as their source (`environment`, `profile`, `shared-credentials-file`, `instance-role`, `none`) and error texts are masked.',
         response: { 200: IntegrationsResponse },
       },
     },

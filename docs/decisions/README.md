@@ -63,3 +63,5 @@
 | [0122](0122-sms-channel-notices.md) | SMS channel notices: flap debounce, app restarted without a reboot, texts queued with no device |
 | [0123](0123-ledger-integrity-check.md) | Nightly ledger integrity check |
 | [0124](0124-opt-out-keywords-and-revocation.md) | Opt-out keywords, and the owner's decisions on CANCEL and Spanish replies |
+| [0130](0130-environment-from-secrets-manager.md) | The production environment is read from one AWS Secrets Manager secret |
+| [0131](0131-secrets-push.md) | Writing the secret: pnpm secrets:push, plan first, merge, never a value on screen |

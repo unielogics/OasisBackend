@@ -1,6 +1,7 @@
 // pnpm verify:all  -  runs smsgate, squarespace and aws one after the other with the same flags where they apply, writes each
 // integration's own report plus docs/live-verification/<date>-all.md, and exits with the worst result:
 // 1 if any integration has a FAIL, else 2 if any could not start for lack of configuration, else 0.
+import { applySecretEnvironment } from '../../src/config/secrets-source.js'
 import { writeFileSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import {
@@ -151,5 +152,12 @@ export async function main(
 }
 
 if (process.argv[1] && process.argv[1].endsWith('all.ts')) {
-  main(process.argv.slice(2)).then((c) => process.exit(c))
+  // the settings may live in the Secrets Manager secret (OASIS_SECRET_ID), like the app's
+  applySecretEnvironment().then(
+    () => main(process.argv.slice(2)).then((c) => process.exit(c)),
+    (e: unknown) => {
+      console.error((e as Error).message)
+      process.exit(2)
+    },
+  )
 }

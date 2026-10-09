@@ -25,6 +25,7 @@
     "lint": "eslint .",
     "migrate": "tsx scripts/migrate.ts",
     "openapi": "tsx scripts/openapi.ts",
+    "secrets:push": "tsx scripts/secrets-push.ts",
     "secrets:rotate": "tsx scripts/secrets-rotate.ts",
     "seed": "tsx db/seeds/index.ts",
     "sim:aws": "tsx scripts/verify-live/sim-aws.ts",

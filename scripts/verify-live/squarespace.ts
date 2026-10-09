@@ -4,6 +4,7 @@
 //
 // Everything is GET. The one request that is not is --post-webhook <url>, an explicit opt-in that posts a signed notification of an
 // ignored topic to your own endpoint to prove the signature path.
+import { applySecretEnvironment } from '../../src/config/secrets-source.js'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { SqspOrder, SqspTransaction } from '../../src/integrations/ports/squarespace.js'
@@ -929,5 +930,12 @@ export async function main(
 }
 
 if (process.argv[1] && process.argv[1].endsWith('squarespace.ts')) {
-  main(process.argv.slice(2)).then((c) => process.exit(c))
+  // the settings may live in the Secrets Manager secret (OASIS_SECRET_ID), like the app's
+  applySecretEnvironment().then(
+    () => main(process.argv.slice(2)).then((c) => process.exit(c)),
+    (e: unknown) => {
+      console.error((e as Error).message)
+      process.exit(2)
+    },
+  )
 }
