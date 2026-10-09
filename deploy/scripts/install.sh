@@ -5,7 +5,7 @@
 #   --email ADDRESS        contact address for Let's Encrypt (certbot mode)
 #   --tls certbot|files    certbot (default): obtain a Let's Encrypt certificate with the webroot challenge; files: use --tls-cert/--tls-key
 #   --tls-cert FILE --tls-key FILE
-#   --csp report-only|enforce|off   Content-Security-Policy for the dashboard pages (default report-only, see docs/deployment.md)
+#   --csp app|report-only|enforce|off   Content-Security-Policy from nginx (default app: the dashboard sends its own; docs/deployment.md)
 #   --install-packages     dnf install nginx, certbot, logrotate, the Node 22 runtime and pnpm (otherwise they must already be there)
 #   --install-postgres     dnf install postgresql15-server, initialise it and allow password logins on 127.0.0.1
 #   --local-db             create the oasis database role and database in the local Postgres (needs sudo -u postgres)
@@ -43,7 +43,7 @@ EMAIL=""
 TLS=certbot
 TLS_CERT=""
 TLS_KEY=""
-CSP=report-only
+CSP=app
 INSTALL_PACKAGES=0
 INSTALL_POSTGRES=0
 LOCAL_DB=0
@@ -94,7 +94,7 @@ done
 [[ -n "$DOMAIN" ]] || die "--domain is required (the public host name, e.g. oasis.example.com)"
 [[ "$DOMAIN" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]] || die "--domain $DOMAIN is not a host name"
 [[ "$TLS" == certbot || "$TLS" == files ]] || die "--tls must be certbot or files"
-[[ "$CSP" == report-only || "$CSP" == enforce || "$CSP" == off ]] || die "--csp must be report-only, enforce or off"
+[[ "$CSP" == app || "$CSP" == report-only || "$CSP" == enforce || "$CSP" == off ]] || die "--csp must be app, report-only, enforce or off"
 [[ "$SECRET_ID" =~ ^[A-Za-z0-9/_+=.@:-]{1,2048}$ ]] || die "--secret-id $SECRET_ID is not a secret name or ARN"
 [[ "$AWS_REGION_ARG" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]] || die "--aws-region $AWS_REGION_ARG is not an AWS region"
 [[ "$AWS_RUNTIME" == role || "$AWS_RUNTIME" == user ]] || die "--aws-runtime must be role or user"
@@ -479,12 +479,17 @@ step_systemd() {
 
 # --- 8. nginx and TLS ----------------------------------------------------------------------------------------------------------------
 render_nginx() {
-  local csp_header="Content-Security-Policy" csp_note="Enforced."
+  # app (default): the dashboard enforces its own policy (next.config.mjs: scripts pinned by hash, no unsafe-inline) and nginx adds
+  # none; report-only/enforce: nginx adds the broader policy below as well (two enforced policies both apply); off: no policy at all.
+  local policy="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https://*.amazonaws.com; connect-src 'self' https://*.amazonaws.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+  local csp_line csp_note
   case "$CSP" in
-    report-only) csp_header="Content-Security-Policy-Report-Only"; csp_note="Report-only until every screen has been opened with no violation in the browser console; then run install.sh --csp enforce." ;;
-    off) csp_header="X-Oasis-Csp-Disabled"; csp_note="Disabled with --csp off (this header is inert)." ;;
+    app) csp_line="# (none from nginx)"; csp_note="sent by the dashboard itself (next.config.mjs); nginx passes it through (--csp app)." ;;
+    off) csp_line="# (none)"; csp_note="none from nginx (--csp off); the dashboard still sends its own." ;;
+    report-only) csp_line="add_header Content-Security-Policy-Report-Only \"$policy\" always;"; csp_note="nginx adds a report-only policy next to the dashboard's own (--csp report-only)." ;;
+    enforce) csp_line="add_header Content-Security-Policy \"$policy\" always;"; csp_note="nginx enforces this policy next to the dashboard's own (--csp enforce); both apply." ;;
   esac
-  local common=("DOMAIN=$DOMAIN" "API_PORT=$API_PORT" "WEB_PORT=$WEB_PORT" "NGINX_DIR=$REAL_NGINX" "TLS_CERT=$TLS_CERT" "TLS_KEY=$TLS_KEY" "CSP_HEADER=$csp_header" "CSP_NOTE=$csp_note")
+  local common=("DOMAIN=$DOMAIN" "API_PORT=$API_PORT" "WEB_PORT=$WEB_PORT" "NGINX_DIR=$REAL_NGINX" "TLS_CERT=$TLS_CERT" "TLS_KEY=$TLS_KEY" "CSP_LINE=$csp_line" "CSP_NOTE=$csp_note")
   render_template "$DEPLOY_DIR/nginx/oasis-zones.conf.template" "${common[@]}" | install_content "$NGINX_DIR/conf.d/00-oasis-zones.conf" 0644 root:root
   render_template "$DEPLOY_DIR/nginx/oasis-proxy.conf.template" "${common[@]}" | install_content "$NGINX_DIR/oasis/proxy.conf" 0644 root:root
   render_template "$DEPLOY_DIR/nginx/oasis-security-headers.conf.template" "${common[@]}" | install_content "$NGINX_DIR/oasis/security-headers.conf" 0644 root:root

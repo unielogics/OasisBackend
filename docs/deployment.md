@@ -195,14 +195,14 @@ client sent, and the API is reachable only through nginx (it binds `127.0.0.1`).
 nginx, add `set_real_ip_from <its range>; real_ip_header X-Forwarded-For;` to the `http` block so `$remote_addr` is the visitor.
 
 **Security headers.** The API sends its own (helmet: `default-src 'none'`, `frame-ancestors 'none'`, nosniff, no-referrer, same-origin
-resource and opener policies, HSTS when `COOKIE_SECURE=true`). For the dashboard pages that Next.js produces, nginx adds the matching
-set plus a Content-Security-Policy that allows the dashboard's inline styles and theme script, its embedded fonts, same-origin
-requests, and `https://*.amazonaws.com` for photo uploads and downloads. The API locations get no nginx headers, so none is sent
-twice. **The CSP ships as `Content-Security-Policy-Report-Only`** because it has not been exercised in a browser against the finished
-dashboard. A static look at a built `.next-live` found nothing that conflicts with it (scripts are same-origin files plus Next's inline
-data and theme scripts, no `eval` or `new Function` in the bundles, fonts are served from `/fonts/`, no third-party URLs), so enforcing
-it is expected to work; open every screen with the console visible, and when no violation is reported run
-`install.sh ... --csp enforce` (it rewrites one file and reloads nginx).
+resource and opener policies, HSTS when `COOKIE_SECURE=true`); the API locations get no nginx headers, so none is sent twice. The
+dashboard (next.config.mjs, production build of the live variant) sends its own set and an **enforced Content-Security-Policy** that pins
+its one inline script by hash (no `unsafe-inline` for scripts, no `eval`), allows `https://*.amazonaws.com` for photo uploads and
+downloads and forbids framing. On the dashboard location nginx adds the matching general headers at the strictest value
+(`X-Frame-Options: DENY`, HSTS with `includeSubDomains`, `Permissions-Policy` with `usb=()`) and hides the dashboard's copies of the same
+headers, so each arrives exactly once (two different `X-Frame-Options` values make browsers ignore it). The CSP is the dashboard's:
+`install.sh --csp app` (the default) adds none from nginx; `--csp report-only` or `--csp enforce` add nginx's broader policy as well (two
+enforced policies both apply, so the stricter one wins), `--csp off` adds none.
 
 **TLS.** TLS 1.2 and 1.3, modern ECDHE ciphers, no session tickets, HTTP/2, no OCSP stapling (Let's Encrypt stopped running OCSP responders; the template says how to turn it on for a certificate that has one). HSTS is sent for 180 days.
 
@@ -355,7 +355,7 @@ Not verified (needs the real thing):
 * `tailscale serve`: the JSON shape that `serve-check.mjs` reads follows Tailscale's `ServeConfig` type and the stand-in follows the
   same; confirm with `tailscale-serve.sh --status` on the host. Whether tailscaled and nginx can both use port 443 is untested (hence 8443);
 * the restore drill in **database mode** (the test role may not create databases here; schema mode was run);
-* the dashboard's CSP in a browser (hence report-only), the systemd hardening under a real `systemctl start`, S3 upload of backups
+* the dashboard's CSP in a browser was first exercised on the production host, the systemd hardening under a real `systemctl start`, S3 upload of backups
   with the real `aws` CLI, and the first-boot `BOOTSTRAP_ADMIN` flow on a real empty database through `install.sh`;
 * real AWS: reading the secret with the instance role or the key file, `LoadCredential=` under a real `systemctl start` (systemd 252
   on Amazon Linux 2023 supports it; `systemd-analyze verify` checks the units, not the drop-ins), and `secrets:push` against the real

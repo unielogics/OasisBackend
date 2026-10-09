@@ -542,10 +542,24 @@ describe('nginx site', () => {
     expect(headers['Referrer-Policy']).toBe('no-referrer')
     expect(headers['Cross-Origin-Resource-Policy']).toBe('same-origin')
     expect(headers['Cross-Origin-Opener-Policy']).toBe('same-origin')
-    const csp = headers['Content-Security-Policy-Report-Only']!
-    expect(csp).toContain("frame-ancestors 'none'")
-    expect(csp).toContain("object-src 'none'")
-    expect(csp).toContain("connect-src 'self' https://*.amazonaws.com")
+    expect(headers['X-Frame-Options']).toBe('DENY')
+    expect(headers['Permissions-Policy']).toBe(
+      'camera=(self), microphone=(), geolocation=(), payment=(), usb=()',
+    )
+    // by default the CSP is the dashboard's own (hash-pinned scripts); nginx adds none
+    expect(Object.keys(headers).filter((h) => /content-security-policy/i.test(h))).toEqual([])
+    // every header nginx sets that the dashboard also sends is hidden from upstream, so each arrives once
+    const hidden = find(conf('oasis/security-headers.conf'), 'proxy_hide_header').map((h) => h.args[0])
+    for (const h of [
+      'Strict-Transport-Security',
+      'X-Content-Type-Options',
+      'Referrer-Policy',
+      'X-Frame-Options',
+      'Cross-Origin-Opener-Policy',
+      'Permissions-Policy',
+    ])
+      expect(hidden, h).toContain(h)
+    expect(hidden).not.toContain('Content-Security-Policy')
     // the dashboard location includes them; the API locations do not (helmet already sets them, a second copy would duplicate)
     const locs = httpsLocs()
     expect(find(matchLocation(locationsOf(https()), '/')!.body, 'include').map((i) => i.args[0])).toContain(
@@ -567,14 +581,16 @@ describe('nginx site', () => {
     expect(ups.oasis_web).toBe(`127.0.0.1:${parseEnvFile(read('etc/oasis/web.env')).WEB_PORT}`)
   })
 
-  it('the include files it references exist, and --csp changes only the header name', async () => {
+  it('the include files it references exist, and --csp decides whether nginx adds a policy and which header carries it', async () => {
     for (const inc of text().matchAll(/include ([^;]+);/g))
       expect(existsSync(path.join(stage.root, inc[1]!)), inc[1]).toBe(true)
     const t = tempDir('oasis-csp-')
     try {
       for (const [mode, header] of [
         ['enforce', 'Content-Security-Policy'],
-        ['off', 'X-Oasis-Csp-Disabled'],
+        ['report-only', 'Content-Security-Policy-Report-Only'],
+        ['app', null],
+        ['off', null],
       ] as const) {
         const r = await sh(
           path.join(DEPLOY, 'scripts/install.sh'),
@@ -597,7 +613,8 @@ describe('nginx site', () => {
         const h = parseNginx(
           readText(path.join(t.dir, mode, 'etc/nginx/oasis/security-headers.conf')),
         ).filter((d) => d.name === 'add_header')
-        expect(h.map((d) => d.args[0])).toContain(header)
+        const csp = h.map((d) => d.args[0]).filter((n) => /content-security-policy|csp/i.test(n))
+        expect(csp, mode).toEqual(header ? [header] : [])
       }
     } finally {
       t.cleanup()

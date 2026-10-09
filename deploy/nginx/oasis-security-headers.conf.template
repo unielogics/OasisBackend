@@ -2,15 +2,22 @@
 # The API sets its own (helmet: default-src 'none', frame-ancestors 'none', nosniff, no-referrer, same-origin resource policy, HSTS);
 # these match them for the pages the API does not produce. Included only by the dashboard location, because add_header in a
 # nested block replaces the ones above it and a header sent by both nginx and the API would appear twice.
+# The dashboard (next.config.mjs) sends most of these itself; nginx drops its copies so each header appears once, with the
+# strictest value of the two (two different X-Frame-Options values make browsers ignore the header altogether).
+proxy_hide_header Strict-Transport-Security;
+proxy_hide_header X-Content-Type-Options;
+proxy_hide_header Referrer-Policy;
+proxy_hide_header X-Frame-Options;
+proxy_hide_header Cross-Origin-Opener-Policy;
+proxy_hide_header Permissions-Policy;
 add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
 add_header X-Content-Type-Options "nosniff" always;
 add_header Referrer-Policy "no-referrer" always;
-add_header X-Frame-Options "SAMEORIGIN" always;
+add_header X-Frame-Options "DENY" always;
 add_header X-DNS-Prefetch-Control "off" always;
 add_header X-Permitted-Cross-Domain-Policies "none" always;
 add_header Cross-Origin-Opener-Policy "same-origin" always;
 add_header Cross-Origin-Resource-Policy "same-origin" always;
-add_header Permissions-Policy "camera=(self), microphone=(), geolocation=(), payment=()" always;
-# The dashboard ships inline styles and a small inline theme script, embeds its fonts, posts photos straight to S3 and shows
-# them from presigned S3 URLs. @CSP_NOTE@
-add_header @CSP_HEADER@ "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https://*.amazonaws.com; connect-src 'self' https://*.amazonaws.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'" always;
+add_header Permissions-Policy "camera=(self), microphone=(), geolocation=(), payment=(), usb=()" always;
+# Content-Security-Policy: @CSP_NOTE@
+@CSP_LINE@
