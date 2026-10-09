@@ -137,7 +137,10 @@ step_preflight() {
 # --- 2. packages -----------------------------------------------------------------------------------------------------------------
 step_packages() {
   ((INSTALL_PACKAGES)) || return 0
-  run_system dnf install -y nginx logrotate git openssl curl tar gzip nodejs22 nodejs22-npm postgresql15
+  # AL2023 ships curl-minimal, which conflicts with the full curl package: ask for curl only when no curl is installed
+  local pkgs=(nginx logrotate git openssl tar gzip nodejs22 nodejs22-npm postgresql15)
+  have curl || pkgs+=(curl)
+  run_system dnf install -y "${pkgs[@]}"
   have pnpm || run_system npm install -g pnpm@10.34.6
   if ! have certbot; then
     run_system dnf install -y certbot || {
