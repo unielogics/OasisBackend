@@ -4,7 +4,8 @@
 # Fetch, build, migrate, switch, restart, health-check, and roll back by itself when the new release is not healthy.
 #   1. git fetch both repositories (src/backend, src/dashboard) and resolve the refs (default origin/main)
 #   2. nothing to do when the current release already has those two commits (--force builds anyway)
-#   3. export both trees into releases/<id>, pnpm install --frozen-lockfile, pnpm build (API) and pnpm build:live (dashboard)
+#   3. export both trees into releases/<id>, pnpm install --frozen-lockfile, pnpm build (API) and pnpm build:live (dashboard, with
+#      OASIS_PHOTOS_ORIGINS from S3_BUCKET and AWS_REGION in common.env when STORAGE_PROVIDER=s3, for its Content-Security-Policy)
 #   4. backup.sh --label pre-deploy                    (the safety net for the migration; skipped with --skip-backup)
 #   5. pnpm migrate up with the new code, while the old release is still serving
 #   6. current -> the new release; restart worker, API, dashboard
@@ -40,7 +41,7 @@ while (($#)); do
     --wait) WAIT=$2; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h | --help)
-      sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,/^set -euo pipefail$/p' "$OASIS_HERE/deploy.sh" | sed '$d' | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) die "unknown option $1" ;;
@@ -71,9 +72,27 @@ DB_SHA=$(oasis_read git -C "$OASIS_PREFIX/src/dashboard" rev-parse --verify "$DB
 log "backend  $BE_REF = ${BE_SHA:0:12}"
 log "dashboard $DB_REF = ${DB_SHA:0:12}"
 
+# The photos bucket's origins, for the dashboard's Content-Security-Policy (next.config.mjs reads OASIS_PHOTOS_ORIGINS at BUILD time):
+# with STORAGE_PROVIDER=s3, both host names S3 may use for S3_BUCKET in AWS_REGION (common.env), comma-separated; otherwise empty.
+photos_origins() {
+  local f="$OASIS_ETC/common.env" provider bucket region
+  provider=$(env_get "$f" STORAGE_PROVIDER 2>/dev/null) || provider=""
+  [[ "$provider" == s3 ]] || return 0
+  bucket=$(env_get "$f" S3_BUCKET 2>/dev/null) || bucket=""
+  region=$(env_get "$f" AWS_REGION 2>/dev/null) || region=""
+  region=${region:-us-east-1}
+  [[ "$bucket" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] || die "STORAGE_PROVIDER=s3 but S3_BUCKET in $f is ${bucket:+not a bucket name: }${bucket:-not set}"
+  [[ "$region" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]] || die "AWS_REGION in $f is not an AWS region: $region"
+  printf 'https://%s.s3.%s.amazonaws.com,https://%s.s3.amazonaws.com' "$bucket" "$region" "$bucket"
+}
+PHOTOS_ORIGINS=$(photos_origins)
+log "photos origins for the dashboard build: ${PHOTOS_ORIGINS:-(none: STORAGE_PROVIDER is not s3)}"
+
 # --- 2. anything to do? ---------------------------------------------------------------------------------------------------------
+# (the photos origins are part of the dashboard build, so a changed bucket or region rebuilds too)
 if [[ -n "$OLD" && -f "$OLD/REVISIONS" && "$FORCE" != 1 ]]; then
-  if grep -qx "backend=$BE_SHA" "$OLD/REVISIONS" && grep -qx "dashboard=$DB_SHA" "$OLD/REVISIONS"; then
+  if grep -qx "backend=$BE_SHA" "$OLD/REVISIONS" && grep -qx "dashboard=$DB_SHA" "$OLD/REVISIONS" &&
+    grep -qxF "photos_origins=$PHOTOS_ORIGINS" "$OLD/REVISIONS"; then
     ok "nothing to deploy: $(basename "$OLD") already runs these commits (--force to rebuild)"
     exit 0
   fi
@@ -121,12 +140,12 @@ export_tree dashboard "$DB_SHA" "$PART/dashboard"
 log "building the API"
 as_oasis env HOME="$OASIS_STATE" CI=1 NODE_OPTIONS=--max-old-space-size=2048 bash -c 'cd "$1" && pnpm install --frozen-lockfile && pnpm build' _ "$PART/backend"
 log "building the dashboard (live variant)"
-as_oasis env HOME="$OASIS_STATE" CI=1 NODE_OPTIONS=--max-old-space-size=2048 bash -c 'cd "$1" && pnpm install --frozen-lockfile && pnpm build:live' _ "$PART/dashboard"
+as_oasis env HOME="$OASIS_STATE" CI=1 NODE_OPTIONS=--max-old-space-size=2048 OASIS_PHOTOS_ORIGINS="$PHOTOS_ORIGINS" bash -c 'cd "$1" && pnpm install --frozen-lockfile && pnpm build:live' _ "$PART/dashboard"
 
 if [[ "$DRY_RUN" != 1 ]]; then
   [[ -f "$PART/backend/dist/server.js" && -f "$PART/backend/dist/worker.js" ]] || die "the API build produced no dist/server.js and dist/worker.js"
   [[ -d "$PART/dashboard/.next-live" ]] || die "the dashboard build produced no .next-live"
-  printf 'backend=%s\ndashboard=%s\nbuilt=%s\n' "$BE_SHA" "$DB_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$PART/REVISIONS"
+  printf 'backend=%s\ndashboard=%s\nphotos_origins=%s\nbuilt=%s\n' "$BE_SHA" "$DB_SHA" "$PHOTOS_ORIGINS" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$PART/REVISIONS"
   mv "$PART" "$REL"
 fi
 PART_ACTIVE=0

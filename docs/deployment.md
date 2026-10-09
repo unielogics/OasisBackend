@@ -276,7 +276,10 @@ sudo .../rollback.sh --list ; sudo .../rollback.sh [--to <release id>]
 ```
 
 `deploy.sh`: fetch; stop here if the current release already has these two commits; export both trees (`git archive`) into
-`releases/<id>`; `pnpm install --frozen-lockfile`; `pnpm build` (API) and `pnpm build:live` (dashboard); a `pre-deploy` backup;
+`releases/<id>`; `pnpm install --frozen-lockfile`; `pnpm build` (API) and `pnpm build:live` (dashboard; with `STORAGE_PROVIDER=s3`
+it gets `OASIS_PHOTOS_ORIGINS=https://<S3_BUCKET>.s3.<AWS_REGION>.amazonaws.com,https://<S3_BUCKET>.s3.amazonaws.com` from
+`common.env`, which `next.config.mjs` puts into its Content-Security-Policy at build time instead of any `*.amazonaws.com`; the
+value is recorded in `REVISIONS`, so a changed bucket or region rebuilds even with the same commits); a `pre-deploy` backup;
 `pnpm migrate up` with the new code while the old release still serves; point `current` at the new release; restart worker, API and
 dashboard; wait up to 90 seconds for `healthcheck.sh` (API ready, dashboard answering, and through the public URL
 `PUBLIC_DASHBOARD_URL` from `common.env`: a signed-out `GET /` answers 307 to that URL's `/login`, never `localhost` or another host;

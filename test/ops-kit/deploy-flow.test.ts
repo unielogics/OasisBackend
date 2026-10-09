@@ -80,7 +80,7 @@ echo "pnpm $(basename "$PWD") $*" >> "$SHIM_LOG"
 case "$*" in
   "install --frozen-lockfile") ;;
   "build") [ -e FAIL_BUILD ] && { echo "build broke" >&2; exit 1; }; mkdir -p dist; echo '//' > dist/server.js; echo '//' > dist/worker.js ;;
-  "build:live") mkdir -p .next-live; echo x > .next-live/BUILD_ID ;;
+  "build:live") mkdir -p .next-live; echo x > .next-live/BUILD_ID; printf '%s' "\${OASIS_PHOTOS_ORIGINS-unset}" > "$SHIM_STATE/photos-origins" ;;
   "migrate up") echo "migrate DATABASE_URL=\${DATABASE_URL:+set} SECRETS_KEY=\${SECRETS_KEY:+set} OASIS_SECRET_ID=\${OASIS_SECRET_ID:-} AWS_REGION=\${AWS_REGION:-}" >> "$SHIM_LOG"; [ -e FAIL_MIGRATE ] && { echo "migration broke" >&2; exit 1; }; echo "$PWD" >> "$SHIM_STATE/migrated-by" ;;
   *) echo "unexpected pnpm $*" >&2; exit 1 ;;
 esac
@@ -310,6 +310,31 @@ describe('deploy.sh', () => {
     expect(bad.out).toContain("sends a signed-out visitor to 'https://localhost:3200/login?next=%2F'")
     expect(bad.out).toMatch(/rolled back to .* it is healthy again/)
     expect(w.current()).toBe(good)
+  }, 90_000)
+
+  it('builds the dashboard with the photos bucket origins from common.env (S3 only), and a changed bucket rebuilds', async () => {
+    const w = await makeWorld()
+    const origins = () => readFileSync(path.join(w.state, 'photos-origins'), 'utf8')
+    const r = await w.deploy()
+    expect(r.code, r.out).toBe(0)
+    expect(origins()).toBe('') // STORAGE_PROVIDER=fs (the template's default): no bucket in the policy
+    expect(r.out).toMatch(/photos origins for the dashboard build: \(none: STORAGE_PROVIDER is not s3\)/)
+    const common = path.join(w.root, 'etc/oasis/common.env')
+    const base = readFileSync(common, 'utf8')
+    writeFileSync(common, `${base.replace(/^STORAGE_PROVIDER=.*$/m, 'STORAGE_PROVIDER=s3')}S3_BUCKET=oasis-photos-580446611342\n`)
+    const s3 = await w.deploy() // the same commits, but the build changes: not "nothing to deploy"
+    expect(s3.code, s3.out).toBe(0)
+    expect(origins()).toBe(
+      'https://oasis-photos-580446611342.s3.us-east-1.amazonaws.com,https://oasis-photos-580446611342.s3.amazonaws.com',
+    )
+    expect(readFileSync(path.join(w.prefix, 'current/REVISIONS'), 'utf8')).toContain(
+      'photos_origins=https://oasis-photos-580446611342.s3.us-east-1.amazonaws.com,https://oasis-photos-580446611342.s3.amazonaws.com\n',
+    )
+    expect((await w.deploy()).out).toMatch(/nothing to deploy/)
+    writeFileSync(common, `${base.replace(/^STORAGE_PROVIDER=.*$/m, 'STORAGE_PROVIDER=s3')}S3_BUCKET=Not_A_Bucket\n`)
+    const bad = await w.deploy()
+    expect(bad.code).not.toBe(0)
+    expect(bad.out).toMatch(/S3_BUCKET in .* is not a bucket name: Not_A_Bucket/)
   }, 90_000)
 
   it('rolls back when a service fails to restart', async () => {
