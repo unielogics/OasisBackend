@@ -133,8 +133,12 @@ if ((SKIP_BACKUP)); then
   warn "skipping the pre-deploy backup (--skip-backup)"
 else
   log "pre-deploy backup"
+  # The backup reads DATABASE_URL through the app's loader, which needs installed packages: use the release just built (on a
+  # first deployment the source clone has none, and there is no current release yet).
+  backup_env=()
+  [[ -x "$REL/backend/node_modules/.bin/tsx" ]] && backup_env=(env "OASIS_BACKEND_DIR=$REL/backend")
   # shellcheck disable=SC2086
-  as_oasis_aws ${BACKUP_CMD:-$OASIS_HERE/backup.sh} --label pre-deploy || die "the pre-deploy backup failed; nothing was changed. Fix it, or deploy with --skip-backup if you accept the risk."
+  as_oasis_aws "${backup_env[@]}" ${BACKUP_CMD:-$OASIS_HERE/backup.sh} --label pre-deploy || die "the pre-deploy backup failed; nothing was changed. Fix it, or deploy with --skip-backup if you accept the risk."
 fi
 
 # --- 5. migrate (old release still serving) -----------------------------------------------------------------------------------
