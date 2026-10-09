@@ -222,6 +222,12 @@ describe('secrets-rotate.sh (a host without the secret: common.env)', () => {
       'systemctl restart oasis-api.service',
       'systemctl restart oasis-web.service',
       'health --wait 90',
+      'systemctl is-active oasis-worker.service',
+      'systemctl show -p NRestarts --value oasis-worker.service',
+      'systemctl is-active oasis-api.service',
+      'systemctl show -p NRestarts --value oasis-api.service',
+      'systemctl is-active oasis-web.service',
+      'systemctl show -p NRestarts --value oasis-web.service',
     ])
     expect(parseEnvFile(s.common()).SECRETS_KEY).toBe(Buffer.alloc(32, 7).toString('base64'))
     const backup = readdirSync(stage.etc).find((f) => f.startsWith('common.env.bak-'))!

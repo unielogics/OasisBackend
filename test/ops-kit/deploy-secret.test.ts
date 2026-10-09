@@ -367,6 +367,12 @@ describe('secrets-rotate.sh with the secret', () => {
       'systemctl restart oasis-api.service',
       'systemctl restart oasis-web.service',
       'health --wait 90',
+      'systemctl is-active oasis-worker.service',
+      'systemctl show -p NRestarts --value oasis-worker.service',
+      'systemctl is-active oasis-api.service',
+      'systemctl show -p NRestarts --value oasis-api.service',
+      'systemctl is-active oasis-web.service',
+      'systemctl show -p NRestarts --value oasis-web.service',
     ])
     expect(w.store()).toEqual({ SECRETS_KEY: KEY_NEW, DATABASE_URL: 'postgres://x' })
     expect(w.file('common.env')).toBe(commonBefore)

@@ -90,6 +90,8 @@ esac
     `#!/usr/bin/env bash
 echo "systemctl $*" >> "$SHIM_LOG"
 [ "$1" = restart ] && [ -e "$SHIM_STATE/fail-restart-$2" ] && { echo "Job failed" >&2; exit 1; }
+[ "$1" = show ] && { cat "$SHIM_STATE/restarts-$5" 2>/dev/null || echo 0; }
+[ "$1" = is-active ] && { if [ -e "$SHIM_STATE/restarts-$2" ]; then echo activating; exit 3; else echo active; fi; }
 exit 0
 `,
   )
@@ -206,10 +208,18 @@ describe('deploy.sh', () => {
       'systemctl restart oasis-api.service',
       'systemctl restart oasis-web.service',
       'health --wait 90',
+      'systemctl is-active oasis-worker.service',
+      'systemctl show -p NRestarts --value oasis-worker.service',
+      'systemctl is-active oasis-api.service',
+      'systemctl show -p NRestarts --value oasis-api.service',
+      'systemctl is-active oasis-web.service',
+      'systemctl show -p NRestarts --value oasis-web.service',
     ])
     // the migration ran in the NEW release, with the environment files loaded: they name the secret, and the release's own
     // loader (scripts/migrate.ts) reads DATABASE_URL from it; no secret value passes through the shell
-    expect(calls(w, 'migrate ')[0]).toBe('migrate DATABASE_URL= SECRETS_KEY= OASIS_SECRET_ID=oasis/prod/app AWS_REGION=us-east-1')
+    expect(calls(w, 'migrate ')[0]).toBe(
+      'migrate DATABASE_URL= SECRETS_KEY= OASIS_SECRET_ID=oasis/prod/app AWS_REGION=us-east-1',
+    )
     expect(readFileSync(path.join(w.state, 'migrated-by'), 'utf8').trim()).toBe(path.join(rel, 'backend'))
     // and health was judged against the new release
     expect(calls(w, 'health')[0]).toContain(`current=${w.current()}`)
@@ -276,6 +286,20 @@ describe('deploy.sh', () => {
     // the failing restart is also what the rollback hits, so it must not claim success
     expect(w.current()).toBe(good)
     expect(r.out).toMatch(/rolling back/)
+  }, 60_000)
+
+  it('rolls back when a service keeps restarting although the health check passes (a worker that exits at start)', async () => {
+    const w = await makeWorld()
+    await w.deploy()
+    const good = w.current()
+    await w.commit('backend', { VERSION: 'v2\n' })
+    // systemd has restarted the worker 3 times since the deploy restarted it; the API (and so healthcheck.sh) is fine
+    writeFileSync(path.join(w.state, 'restarts-oasis-worker.service'), '3\n')
+    const r = await w.deploy()
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/oasis-worker did not stay up after the restart/)
+    expect(r.out).toMatch(/rolling back/)
+    expect(w.current()).toBe(good)
   }, 60_000)
 
   it('first deployment that is unhealthy leaves nothing running and no current release', async () => {
@@ -440,6 +464,12 @@ describe('rollback.sh', () => {
       'systemctl restart oasis-api.service',
       'systemctl restart oasis-web.service',
       'health --wait 90',
+      'systemctl is-active oasis-worker.service',
+      'systemctl show -p NRestarts --value oasis-worker.service',
+      'systemctl is-active oasis-api.service',
+      'systemctl show -p NRestarts --value oasis-api.service',
+      'systemctl is-active oasis-web.service',
+      'systemctl show -p NRestarts --value oasis-web.service',
     ])
     // rolling forward again is the same command
     expect((await w.rollback()).code).toBe(0)

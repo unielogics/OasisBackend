@@ -102,7 +102,23 @@ health_gate() {
     return 0
   fi
   # shellcheck disable=SC2086
-  ${HEALTH_CMD:-$OASIS_HERE/healthcheck.sh} --wait "$wait"
+  ${HEALTH_CMD:-$OASIS_HERE/healthcheck.sh} --wait "$wait" || return 1
+  services_stayed_up
+}
+
+# services_stayed_up: every service is still active and systemd has not restarted it since the deploy did. A worker that exits at
+# start does not make the API unready (by design), so healthcheck.sh alone would call a crash-looping worker healthy.
+services_stayed_up() {
+  [[ "$NO_SYSTEM" == 1 ]] && return 0
+  local s n state
+  for s in "${SERVICES[@]}"; do
+    state=$("$SYSTEMCTL" is-active "$s.service" 2>/dev/null) || true
+    n=$("$SYSTEMCTL" show -p NRestarts --value "$s.service" 2>/dev/null) || n=""
+    if [[ -n "$state" && "$state" != active ]] || [[ -n "$n" && "$n" != 0 ]]; then
+      warn "$s did not stay up after the restart (state ${state:-unknown}, restarted ${n:-?} times by systemd): journalctl -u $s"
+      return 1
+    fi
+  done
 }
 
 release_ok() {

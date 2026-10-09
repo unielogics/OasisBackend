@@ -82,7 +82,10 @@ describe('environment templates', () => {
     expect(common.PUBLIC_DASHBOARD_URL).toBe('https://oasis.example.com')
     for (const n of ['common', 'api', 'worker', 'web']) {
       const active = parseEnvFile(read(`etc/oasis/${n}.env`))
-      expect(SECRET_KEYS.filter((k) => active[k] !== undefined), n).toEqual([])
+      expect(
+        SECRET_KEYS.filter((k) => active[k] !== undefined),
+        n,
+      ).toEqual([])
       expect((statSync(path.join(stage.etc, `${n}.env`)).mode & 0o777).toString(8)).toBe('640')
     }
   })
@@ -90,7 +93,12 @@ describe('environment templates', () => {
   it('a new install gets the secret settings generated into a root-only seed file, ready for pnpm secrets:push', () => {
     const seedText = read('etc/oasis/secret-seed.env')
     const seed = parseEnvFile(seedText)
-    expect(Object.keys(seed)).toEqual(['DATABASE_URL', 'SESSION_SECRET', 'SECRETS_KEY', 'STORAGE_SIGNING_SECRET'])
+    expect(Object.keys(seed)).toEqual([
+      'DATABASE_URL',
+      'SESSION_SECRET',
+      'SECRETS_KEY',
+      'STORAGE_SIGNING_SECRET',
+    ])
     expect(Buffer.from(seed.SECRETS_KEY!, 'base64')).toHaveLength(32)
     expect(Buffer.from(seed.SESSION_SECRET!, 'base64').length).toBeGreaterThanOrEqual(32)
     expect(seed.DATABASE_URL).toMatch(/^postgres:\/\/oasis:[0-9a-f]{48}@127\.0\.0\.1:5432\/oasis$/)
@@ -103,10 +111,28 @@ describe('environment templates', () => {
   it('the templates keep every secret key commented out, and the deploy kit names the same secret keys as the app', () => {
     for (const n of ['common', 'api', 'worker', 'web']) {
       const active = parseEnvFile(readText(path.join(DEPLOY, 'env', `${n}.env.example`)))
-      expect(SECRET_KEYS.filter((k) => active[k] !== undefined), n).toEqual([])
+      expect(
+        SECRET_KEYS.filter((k) => active[k] !== undefined),
+        n,
+      ).toEqual([])
     }
-    const bash = /^OASIS_SECRET_KEYS=\(([^)]*)\)$/m.exec(readText(path.join(DEPLOY, 'lib/common.sh')))![1]!.split(/\s+/)
+    const bash = /^OASIS_SECRET_KEYS=\(([^)]*)\)$/m
+      .exec(readText(path.join(DEPLOY, 'lib/common.sh')))![1]!
+      .split(/\s+/)
     expect(bash).toEqual([...SECRET_KEYS])
+  })
+
+  it('the worker loads the same production environment (common + worker, the secret): it validates the same rules', () => {
+    // the production checks (COOKIE_SECURE, SECRETS_KEY, https URLs) run in every process that loads the environment, so a
+    // setting that only api.env carries crash-loops the worker (it happened on the first real host)
+    const env = loadEnv({
+      ...parseEnvFile(read('etc/oasis/secret-seed.env')),
+      ...parseEnvFile(read('etc/oasis/common.env')),
+      ...parseEnvFile(read('etc/oasis/worker.env')),
+      NODE_ENV: 'production',
+    })
+    expect(env.COOKIE_SECURE).toBe(true)
+    expect(env.JOBS_ENABLED).toBe(true)
   })
 
   it('the production environment (common + api, the secret from the seed) passes the app own validation, and is safe', () => {
@@ -241,7 +267,9 @@ describe('systemd units', () => {
       const start = (JSON.parse(readFileSync(dashboardPkg, 'utf8')) as { scripts: Record<string, string> })
         .scripts['start:live']!
       // the dashboard may let LIVE_DIST_DIR override the directory; its default must be the one the unit uses
-      expect(start).toMatch(/NEXT_PUBLIC_VARIANT=live DIST_DIR=(?:\.next-live|\$\{LIVE_DIST_DIR:-\.next-live\}) next start/)
+      expect(start).toMatch(
+        /NEXT_PUBLIC_VARIANT=live DIST_DIR=(?:\.next-live|\$\{LIVE_DIST_DIR:-\.next-live\}) next start/,
+      )
       expect(start).toContain('-H ${WEB_HOST:-127.0.0.1}')
     }
   })
