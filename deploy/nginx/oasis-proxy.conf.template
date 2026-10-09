@@ -9,6 +9,8 @@ proxy_set_header Host $host;
 proxy_set_header X-Real-IP $remote_addr;
 proxy_set_header X-Forwarded-For $remote_addr;
 proxy_set_header X-Forwarded-Proto $scheme;
+# the public host for apps that build absolute URLs from forwarded headers (Next.js middleware ignores Host for request.url)
+proxy_set_header X-Forwarded-Host $host;
 proxy_set_header X-Request-Id $request_id;
 proxy_redirect off;
 # Timeouts live in the server block (60 s) so a location can raise them: nginx refuses the same directive twice in one block.
