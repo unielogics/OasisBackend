@@ -5,11 +5,11 @@
 #   1. git fetch both repositories (src/backend, src/dashboard) and resolve the refs (default origin/main)
 #   2. nothing to do when the current release already has those two commits (--force builds anyway)
 #   3. export both trees into releases/<id>, pnpm install --frozen-lockfile, pnpm build (API) and pnpm build:live (dashboard, with
-#      OASIS_PHOTOS_ORIGINS from S3_BUCKET and AWS_REGION in common.env when STORAGE_PROVIDER=s3, for its Content-Security-Policy)
-#   4. backup.sh --label pre-deploy                    (the safety net for the migration; skipped with --skip-backup)
-#   5. pnpm migrate up with the new code, while the old release is still serving
+#      OASIS_PHOTOS_ORIGINS from S3_BUCKET and AWS_REGION in common.env when STORAGE_PROVIDER=s3, for its Content-Security-Policy);
 #      then the release becomes root:oasis and read-only (Next's cache is a symlink to /var/cache/oasis-web), and its deploy/ must equal
 #      the commit's in a root-owned local mirror when the backend's origin is one
+#   4. backup.sh --label pre-deploy                    (the safety net for the migration; skipped with --skip-backup)
+#   5. pnpm migrate up with the new code, while the old release is still serving
 #   6. current -> the new release; restart worker, API, dashboard
 #   7. healthcheck.sh --wait: API ready (database, migrations, jobs), dashboard answering, the public sign-in redirect, the worker;
 #      healthy: the root-owned kit (/usr/local/lib/oasis/deploy) is refreshed from the new release
@@ -231,7 +231,7 @@ if [[ "$DRY_RUN" == 1 ]]; then
   log "would refresh the deploy kit in $OASIS_KIT_DIR from the new release"
 elif [[ -d "$REL/backend/deploy/scripts" ]]; then
   install_kit "$REL/backend/deploy"
-  ((KIT_VERIFIED)) && ok "the kit matches commit ${BE_SHA:0:12} in the root-owned mirror"
+  if ((KIT_VERIFIED)); then ok "the kit matches commit ${BE_SHA:0:12} in the root-owned mirror"; fi
 else
   warn "the release has no deploy/ kit: $OASIS_KIT_DIR left as it was"
 fi

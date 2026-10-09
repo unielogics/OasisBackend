@@ -373,7 +373,7 @@ install_kit() {
     ok "the deploy kit runs from $dest"
     return 0
   fi
-  if [[ -d "$dest" ]] && diff -rq --no-dereference "$src" "$dest" >/dev/null 2>&1; then
+  if [[ -d "$dest" ]] && diff -rq --no-dereference "$src" "$dest" >/dev/null 2>&1 && kit_pristine "$dest"; then
     ok "$dest is current"
     return 0
   fi
@@ -395,6 +395,16 @@ install_kit() {
   mv -T "$tmp" "$dest"
   [[ -z "$old" ]] || rm -rf -- "$old"
   changed "installed the deploy kit in $dest (from $src)"
+}
+
+# kit_pristine DIR: nothing in DIR writable by group or others, and (as root) everything owned by root.
+kit_pristine() {
+  local d=$1
+  [[ -z "$(find "$d" \( ! -type l -perm /022 \) -print -quit)" ]] || return 1
+  if [[ "$(id -u)" == 0 && "$NO_SYSTEM" != 1 && -z "${OASIS_CHOWN:-}" ]]; then
+    [[ -z "$(find "$d" ! -uid 0 -print -quit)" ]] || return 1
+  fi
+  return 0
 }
 
 # running_from_kit: whether this script is the root-owned copy (or a test's stand-in for it).

@@ -285,11 +285,12 @@ install scripts, and the internet-facing services. So:
   `root:oasis` with `chown -R -h` (links are never followed) and `chmod -R g+rX,go-w`, and only then renames it into place.
   `/opt/oasis` and `/opt/oasis/releases` are `root:root`, so the oasis user can neither rename a release nor touch `current`. The services
   read and execute the release (group oasis) and cannot change the code that runs next.
-* **The kit is checked against the mirror.** When the backend clone's `origin` is a local repository that only root can change (the
-  production host's mirrors in `/opt/oasis/git`), `deploy.sh` compares the built release's `deploy/` with the commit's `deploy/`
-  read by root from that mirror, before the backup and the migration; a difference (a build step changed the kit) or a commit the
-  mirror does not have stops the deploy, nothing changes, the build is kept as `<id>.failed`. Without such a mirror (GitHub) the
-  release's kit is copied as built, and the log says it was not cross-checked.
+* **The kit is checked against the mirror.** When `/opt/oasis/git/backend.git` exists and only root can change it (the production
+  host's mirror; the path is fixed, not taken from the clone's `origin`, which the oasis user could repoint), `deploy.sh` compares the
+  built release's `deploy/` with the commit's `deploy/` read by root from that mirror, before the backup and the migration; a
+  difference (a build step changed the kit) or a commit the mirror does not have stops the deploy, nothing changes, the build is kept
+  as `<id>.failed`. A mirror that group or others can write is reported and not trusted. Without a mirror (a host that pulls from
+  GitHub) the release's kit is copied as built, and the log says it was not cross-checked.
 * **The dashboard writes nowhere in the release.** `oasis-web` lost `ReadWritePaths=/opt/oasis/releases`; it gets
   `CacheDirectory=oasis-web` (`/var/cache/oasis-web`, emptied at each start), and `deploy.sh` replaces the build's
   `.next-live/cache` with a symlink to it. `next start` was run from a release copy with every file read-only: pages, static assets

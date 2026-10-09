@@ -542,7 +542,12 @@ describe('privilege separation: read-only releases and the root-owned kit', () =
     await sh('chmod', ['-R', 'go-w', path.join(w.root, 'origin')])
     const chownLog = path.join(w.state, 'chown.log')
     writeExecutable(path.join(w.root, 'shims/chown'), `#!/usr/bin/env bash\necho "$*" >> "${chownLog}"\n`)
-    const env = { ...w.env, OASIS_CHOWN: path.join(w.root, 'shims/chown'), OASIS_KIT_TRUST_UID: String(process.getuid!()) }
+    const env = {
+      ...w.env,
+      OASIS_CHOWN: path.join(w.root, 'shims/chown'),
+      OASIS_KIT_TRUST_UID: String(process.getuid!()),
+      OASIS_KIT_MIRROR: origin,
+    }
     return { w, env, chownLog, origin }
   }
 
@@ -596,12 +601,13 @@ describe('privilege separation: read-only releases and the root-owned kit', () =
     expect(readFileSync(path.join(kitOf(w), 'scripts/healthcheck.sh'), 'utf8')).toBe(kitBefore)
   }, 120_000)
 
-  it('a commit the mirror does not have is refused; with an origin that is not root-only the kit is refreshed unchecked, and says so', async () => {
+  it('the check cannot be skipped by repointing the clone, refuses a commit the mirror lacks, and a mirror others can write is reported', async () => {
     const { w, env, origin } = await kitWorld()
     expect((await sh(script('deploy.sh'), [], env)).code).toBe(0)
     const good = w.current()
-    // a commit made in the oasis user's clone only
     const clone = path.join(w.prefix, 'src/backend')
+
+    // a commit made in the oasis user's clone only
     writeFileSync(path.join(clone, 'LOCAL'), 'x\n')
     await git(clone, 'add', '-A')
     await git(clone, 'commit', '-q', '-m', 'local only')
@@ -610,13 +616,32 @@ describe('privilege separation: read-only releases and the root-owned kit', () =
     expect(local.out).toMatch(/is not in the mirror/)
     expect(w.current()).toBe(good)
 
-    await w.commit('backend', { VERSION: 'v3\n' })
-    await sh('chmod', ['g+w', path.join(origin, '.git/HEAD')]) // one file the oasis group could change: no longer a trusted mirror
+    // the oasis user points its clone at a repository of its own, with the same commits: the check still uses the mirror
+    await w.commit('backend', { TAMPER_KIT: '1\n' })
+    const own = path.join(w.root, 'oasis-own')
+    await git(w.root, 'clone', '-q', '--bare', origin, own)
+    await git(clone, 'remote', 'set-url', 'origin', own)
+    const repointed = await sh(script('deploy.sh'), [], env)
+    expect(repointed.code).not.toBe(0)
+    expect(repointed.out).toMatch(/the deploy kit in the built release differs from commit/)
+    expect(w.current()).toBe(good)
+    await git(clone, 'remote', 'set-url', 'origin', origin)
+
+    // a mirror the oasis group could change is no trust anchor: reported, and the kit is copied as built
+    await w.commit('backend', { TAMPER_KIT: '__delete__', VERSION: 'v3\n' })
+    await sh('chmod', ['g+w', path.join(origin, '.git/HEAD')])
     const unchecked = await sh(script('deploy.sh'), [], env)
     expect(unchecked.code, unchecked.out).toBe(0)
-    expect(unchecked.out).toMatch(/the backend origin is not a root-owned local mirror: the release's deploy kit is not cross-checked/)
+    expect(unchecked.out).toMatch(/the mirror \S+ \(or its directory\) can be changed by users other than root/)
     expect(unchecked.out).not.toMatch(/the kit matches commit/)
   }, 120_000)
+
+  it('without a local mirror (a host that pulls from GitHub) the kit is refreshed unchecked, and the log says so', async () => {
+    const { w, env } = await kitWorld()
+    const r = await sh(script('deploy.sh'), [], { ...env, OASIS_KIT_MIRROR: path.join(w.root, 'no-such-mirror') })
+    expect(r.code, r.out).toBe(0)
+    expect(r.out).toMatch(/no root-owned mirror of the backend on this host: the release's deploy kit is not cross-checked/)
+  }, 60_000)
 
   it('a rollback switches releases and leaves them and the kit as they are', async () => {
     const { w, env } = await kitWorld()

@@ -95,8 +95,8 @@ On the production host (EC2 i-016774195f325eb0f) the clones in `/opt/oasis/src` 
 mirror in `/opt/oasis/git/<repo>.git`, and only commits that passed the integrator's checks are published into it, so no deploy
 key is needed on the host. The mirrors belong to **root** and nothing in them is writable by group or others (once:
 `sudo chown -R root:root /opt/oasis/git && sudo chmod -R go-w /opt/oasis/git`); the oasis user only reads them. `deploy.sh` then
-compares the kit inside every build with the commit's `deploy/` in the mirror before anything runs, and the kit root copies afterwards
-is exactly what was published. To release (as the operator, from the working copies in `~ec2-user/oasis`):
+compares the kit inside every build with the commit's `deploy/` in `/opt/oasis/git/backend.git` before anything runs, and the kit
+root copies afterwards is exactly what was published. To release (as the operator, from the working copies in `~ec2-user/oasis`):
 
 ```bash
 G="env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*"   # root reading repositories other users own
@@ -108,8 +108,8 @@ cd / && sudo /usr/local/lib/oasis/deploy/scripts/deploy.sh        # fetches orig
 
 No `chown` of the mirrors to oasis any more (that made them, and so the kit, the oasis user's to change), and no `git pull` of the
 `/opt/oasis/src` checkout: `deploy.sh` fetches and exports by commit, and runs from the root-owned kit. A deploy whose kit does not
-match the mirror stops before the backup with "the deploy kit in the built release differs"; one whose mirror is not root-only says
-"not cross-checked" and goes on. After a release that changes the deployment configuration (the deploy says so), re-run
+match the mirror stops before the backup with "the deploy kit in the built release differs"; with a mirror that is not root-only it
+says "can be changed by users other than root ... not cross-checked" and goes on. After a release that changes the deployment configuration (the deploy says so), re-run
 `sudo /usr/local/lib/oasis/deploy/scripts/install.sh` with the same options (the kit is already the new one); it never overwrites
 `/etc/oasis/*.env` but reports variables a newer template added.
 

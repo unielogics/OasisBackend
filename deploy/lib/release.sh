@@ -145,16 +145,21 @@ releases_newest_first() {
     sort -rn | cut -d' ' -f2- | grep -v -E '\.(failed|partial)$' || true
 }
 
-# trusted_kit_origin: the backend clone's origin when it is a local repository that only root can change (the production host's
-# mirrors in /opt/oasis/git, published by the operator): every file owned by root (OASIS_KIT_TRUST_UID, tests) and nothing writable
-# by group or others. Empty for GitHub, or a mirror the oasis user owns.
-trusted_kit_origin() {
-  local url uid=${OASIS_KIT_TRUST_UID:-0}
-  url=$(oasis_read git -C "$OASIS_PREFIX/src/backend" config --get remote.origin.url 2>/dev/null) || return 0
-  url=${url#file://}
-  [[ "$url" == /* && -d "$url" ]] || return 0
-  [[ -z "$(find "$url" \( ! -uid "$uid" -o \( ! -type l -perm /022 \) \) -print -quit 2>/dev/null)" ]] || return 0
-  printf '%s' "$url"
+# trusted_kit_mirror: the local mirror the backend is published to, when only root can change it: OASIS_KIT_MIRROR, by default
+# $OASIS_PREFIX/git/backend.git (the production host's layout), every file owned by root (OASIS_KIT_TRUST_UID, tests) and nothing
+# writable by group or others, its directory too. The path is fixed, not read from the clone's origin: the oasis user owns the clone
+# and could otherwise point it elsewhere to skip the check. Empty when there is no such mirror (a host that pulls from GitHub); a
+# mirror that exists but is not root-only is reported.
+trusted_kit_mirror() {
+  local mirror=${OASIS_KIT_MIRROR:-$OASIS_PREFIX/git/backend.git} uid=${OASIS_KIT_TRUST_UID:-0} parent
+  [[ -d "$mirror" ]] || return 0
+  parent=$(dirname "$mirror")
+  if [[ -n "$(find "$mirror" \( ! -uid "$uid" -o \( ! -type l -perm /022 \) \) -print -quit 2>/dev/null)" ]] ||
+    [[ "$(stat -c %u "$parent")" != "$uid" || -n "$(find "$parent" -maxdepth 0 -perm /022 -print 2>/dev/null)" ]]; then
+    warn "the mirror $mirror (or its directory) can be changed by users other than root: the release's deploy kit is not cross-checked. Make it root-only: sudo chown -R root:root $parent && sudo chmod -R go-w $parent"
+    return 0
+  fi
+  printf '%s' "$mirror"
 }
 
 # verify_kit REL SHA: the deploy kit inside the built release (which root will copy and run) must be exactly the commit's deploy/
@@ -164,10 +169,10 @@ trusted_kit_origin() {
 KIT_VERIFIED=0
 verify_kit() {
   local rel=$1 sha=$2 origin tmp rc=0
-  origin=$(trusted_kit_origin)
+  origin=$(trusted_kit_mirror)
   if [[ -z "$origin" ]]; then
     KIT_VERIFIED=0
-    log "the backend origin is not a root-owned local mirror: the release's deploy kit is not cross-checked (docs/deployment.md, \"Privilege separation\")"
+    log "no root-owned mirror of the backend on this host: the release's deploy kit is not cross-checked (docs/deployment.md, \"Privilege separation\")"
     return 0
   fi
   tmp=$(mktemp -d)
