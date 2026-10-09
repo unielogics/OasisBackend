@@ -2,8 +2,8 @@
 
 How Oasis Auto Spa runs in production on one Amazon Linux 2023 host, and the kit in `deploy/` that sets it up, updates it, backs it
 up and brings it back. The day-to-day procedures (what to do when something breaks) are in [runbook.md](runbook.md); proving the
-tablet, Squarespace and AWS work is in [live-verification.md](live-verification.md). Decisions: ADRs 0100 to 0103, and 0130 to 0133
-for the environment in AWS Secrets Manager and the app's AWS identity.
+tablet, Squarespace and AWS work is in [live-verification.md](live-verification.md). Decisions: ADRs 0100 to 0103, 0130 to 0133
+for the environment in AWS Secrets Manager and the app's AWS identity, and 0140 to 0144 for the launch-day hardening.
 
 ## What runs where
 

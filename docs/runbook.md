@@ -325,6 +325,11 @@ and Squarespace credentials (rotate those at their source as well); a leaked tab
 3. 502 from nginx: the API or dashboard is not listening; `ss -ltn | grep -E '4000|3200'`.
 4. After a deploy: `sudo $D/rollback.sh`.
 5. Certificate expired: `sudo certbot renew --dry-run`, `systemctl status certbot-renew.timer`; DNS still pointing here?
+6. "The domain does not answer" but the health check is fine: check the name the person typed. Only the dashboard's host
+   (`app.<domain>`) points here; the bare domain and `www` are the public website, hosted elsewhere, and need their own records in the
+   DNS zone (a record named literally `@` in Route 53 is NOT the zone apex: there the apex is the empty name). From outside:
+   `dig +short <name> @1.1.1.1`, then `curl -sI https://<name>/`. This host also refuses any other name or a bare IP address on
+   purpose (port 80 closes the connection, port 443 refuses the TLS handshake), so `https://<the Elastic IP>/` failing is expected.
 
 ### SMS device down
 *Sign: a "Needs attention" card about the tablet, texts stay "Queued", customers' replies do not appear.*

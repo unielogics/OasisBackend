@@ -68,3 +68,8 @@
 | [0132](0132-provisioning-without-email-and-the-secret.md) | Provisioning without email or a domain, and the environment secret |
 | [0133](0133-runtime-identity-role-or-user.md) | The app's AWS identity: the instance role (recommended) or a key file, chosen by a flag |
 | [0134](0134-deploy-kit-with-the-secret.md) | The deploy kit with the environment in Secrets Manager |
+| [0140](0140-privilege-separation-of-the-deploy-kit.md) | Root never runs code the oasis user can write: a root-owned kit, read-only releases |
+| [0141](0141-instance-metadata-guard.md) | Only root, oasis and ec2-instance-connect reach the instance metadata service |
+| [0142](0142-nginx-one-host-letter-case-and-error-headers.md) | nginx: one host name, no other letter case of /api, HSTS and nosniff on its own answers |
+| [0143](0143-health-check-and-timers.md) | The health check proves the public sign-in redirect and the worker; timers started; no local database at boot |
+| [0144](0144-runtime-policy-secret-versions-backups-photos.md) | Runtime policy: current secret version only, write-only backups, versioned photos |
