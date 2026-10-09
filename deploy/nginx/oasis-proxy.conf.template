@@ -13,4 +13,8 @@ proxy_set_header X-Forwarded-Proto $scheme;
 proxy_set_header X-Forwarded-Host $host;
 proxy_set_header X-Request-Id $request_id;
 proxy_redirect off;
+# The site adds these two to every answer (oasis.conf, server level, also on nginx's own errors); the upstream's copies are dropped
+# so each arrives once. The API and the dashboard send the same values.
+proxy_hide_header Strict-Transport-Security;
+proxy_hide_header X-Content-Type-Options;
 # Timeouts live in the server block (60 s) so a location can raise them: nginx refuses the same directive twice in one block.

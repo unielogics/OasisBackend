@@ -4,8 +4,7 @@
 # nested block replaces the ones above it and a header sent by both nginx and the API would appear twice.
 # The dashboard (next.config.mjs) sends most of these itself; nginx drops its copies so each header appears once, with the
 # strictest value of the two (two different X-Frame-Options values make browsers ignore the header altogether).
-proxy_hide_header Strict-Transport-Security;
-proxy_hide_header X-Content-Type-Options;
+# (Strict-Transport-Security and X-Content-Type-Options are hidden by proxy.conf, which this location includes too.)
 proxy_hide_header Referrer-Policy;
 proxy_hide_header X-Frame-Options;
 proxy_hide_header Cross-Origin-Opener-Policy;

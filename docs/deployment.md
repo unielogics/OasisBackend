@@ -208,9 +208,11 @@ Check: `sudo iptables -S OASIS-IMDS` (`--uid-owner 0`, the oasis uid, the ec2-in
 
 | URL | Goes to | Notes |
 |---|---|---|
-| `http://` anything | 301 to `https://` | except `/.well-known/acme-challenge/` |
+| another name, or a bare IP address | nothing | port 80: the connection is closed without an answer (444); port 443: the TLS handshake is refused (`ssl_reject_handshake`), so not even the certificate shows |
+| `http://` the domain | 301 to `https://` | except `/.well-known/acme-challenge/` |
 | `/` | dashboard `:3200` | security headers below |
-| `/api/*` | API `:4000` | rate zone `oasis_api` (30 requests/s per address, burst 60) |
+| `/api/*` | API `:4000` | rate zone `oasis_api` (30 requests/s per address, burst 60); `^~`, so no regular expression below applies |
+| any other letter case of `/api`, `/dev-storage`, `/hooks` (`/API/...`, `/Dev-Storage/...`) | nothing: 404 | the dashboard's rewrites are case-insensitive and would hand them to the API around the rules here |
 | `/api/v1/auth/{login,password/forgot,password/reset,invite/accept}` | API | zone `oasis_login` (30 a minute, burst 10) |
 | `/api/v1/events` | API | server-sent events: `proxy_buffering off`, no compression, one-hour reads |
 | `/hooks/squarespace`, `/hooks/ses` | API | POST only, 1 MB body limit, zone `oasis_hooks`; signatures are checked by the app |
@@ -222,6 +224,11 @@ Check: `sudo iptables -S OASIS-IMDS` (`--uid-owner 0`, the oasis uid, the ec2-in
 nginx therefore overwrites the header with `$remote_addr` (`proxy_set_header X-Forwarded-For $remote_addr`) and never appends to what a
 client sent, and the API is reachable only through nginx (it binds `127.0.0.1`). If you ever put a load balancer or CDN in front of
 nginx, add `set_real_ip_from <its range>; real_ip_header X-Forwarded-For;` to the `http` block so `$remote_addr` is the visitor.
+
+**Every answer carries HSTS and nosniff**, nginx's own included (the 403 of `/readyz`, the 404 of `/hooks/*`, a 413 for a large
+body, a 429 from a rate zone, a 502 while a service restarts): the HTTPS server adds `Strict-Transport-Security` and
+`X-Content-Type-Options` with `always`, and `proxy.conf` hides the API's and the dashboard's copies of those two, so a proxied
+answer still has exactly one of each. (Connections closed with 444 carry nothing, by design.)
 
 **Security headers.** The API sends its own (helmet: `default-src 'none'`, `frame-ancestors 'none'`, nosniff, no-referrer, same-origin
 resource and opener policies, HSTS when `COOKIE_SECURE=true`); the API locations get no nginx headers, so none is sent twice. The
@@ -235,8 +242,9 @@ enforced policies both apply, so the stricter one wins), `--csp off` adds none.
 
 **TLS.** TLS 1.2 and 1.3, modern ECDHE ciphers, no session tickets, HTTP/2, no OCSP stapling (Let's Encrypt stopped running OCSP responders; the template says how to turn it on for a certificate that has one). HSTS is sent for 180 days.
 
-Check a change with `nginx -t` before reloading (`install.sh` does). nginx itself could not be run while this kit was written (see
-"What was and was not verified").
+Check a change with `nginx -t` before reloading (`install.sh` does). The tests run the rendered site in a real nginx when one is
+installed (an unprivileged instance on loopback ports with stub upstreams): `nginx -t`, the default servers, the letter-case rule,
+and the headers on proxied answers and on nginx's own 403, 404, 413 and 429.
 
 ## The tailnet side: the SMS Gate webhook
 
@@ -372,7 +380,7 @@ Verified by tests (`pnpm test:ops-kit`):
   value, then moves); `bootstrap-admin.sh` and `secrets-rotate.sh` writing the secret (a stand-in for `secrets:push`);
 * every unit with `systemd-analyze verify` and `systemd-analyze security` (offline);
 * the nginx configuration structurally (a parser, nginx's location-selection rules applied to representative URLs, duplicate
-  directives, zones, includes, header values);
+  directives, zones, includes, header values), and in a real nginx 1.30 when it is installed (`nginx -t` and real requests);
 * `install.sh` (staging directory, dry run, idempotence), `deploy.sh` and `rollback.sh` (real git repositories; stand-ins for pnpm,
   systemctl, the health check and the backup), `healthcheck.sh`, `tailscale-serve.sh` (a stand-in `tailscale`), `bootstrap-admin.sh`,
   `gen-secrets.sh`, `secrets-rotate.sh`, `reset-password.sh` (against the real database), `oasis-admin.sh` (against the real API
@@ -381,7 +389,7 @@ Verified by tests (`pnpm test:ops-kit`):
   links, encryption round trip, and detection of a corrupted file, a wrong manifest, a drifted calculation and a missing guard trigger.
 
 Not verified (needs the real thing):
-* **nginx** (`nginx -t` and a real request; nginx is not installed here), certbot, and the dnf package names (`nodejs22`, `certbot`,
+* certbot, and the dnf package names (`nodejs22`, `certbot`,
   `postgresql15-server`) and the `pg_hba.conf` edit that `--install-packages --install-postgres` perform;
 * **shellcheck** is not installed on the build host. It was run once from a temporary Python virtualenv (`pip install shellcheck-py`, version
   0.11.0, nothing installed system-wide) and the scripts are clean at warning level; the test suite runs it only when `shellcheck` is

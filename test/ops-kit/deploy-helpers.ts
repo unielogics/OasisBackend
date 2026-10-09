@@ -183,7 +183,10 @@ export function locationsOf(server: Directive): Loc[] {
   })
 }
 
-/** nginx's location selection: exact match, then the longest prefix (a ^~ prefix wins outright), then the first matching regex, else that prefix. */
+/**
+ * nginx's location selection: exact match, then the longest prefix; locations nested in that prefix are searched next (the same
+ * rules, one level down); a ^~ prefix then wins outright, otherwise the first matching regex of this level, else that prefix.
+ */
 export function matchLocation(locs: Loc[], uri: string): Loc | undefined {
   const exact = locs.find((l) => l.modifier === '=' && l.pattern === uri)
   if (exact) return exact
@@ -191,6 +194,8 @@ export function matchLocation(locs: Loc[], uri: string): Loc | undefined {
     .filter((l) => (l.modifier === '' || l.modifier === '^~') && uri.startsWith(l.pattern))
     .sort((a, b) => b.pattern.length - a.pattern.length)
   const best = prefixes[0]
+  const nested = best ? matchLocation(locationsOf({ name: 'location', args: [], block: best.body }), uri) : undefined
+  if (nested) return nested
   if (best?.modifier === '^~') return best
   const regex = locs.find(
     (l) =>

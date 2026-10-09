@@ -1,7 +1,9 @@
 // The files install.sh writes (env, systemd, nginx), read back the way systemd and nginx would read them.
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { createServer, type Server } from 'node:http'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { envSchema, loadEnv } from '../../src/config/env.js'
 import { SECRET_KEYS, secretKeyProblems } from '../../src/config/secrets-source.js'
 import { invalidValues, parseDotenv } from '../../scripts/secrets-push.js'
@@ -482,8 +484,9 @@ describe('nginx site', () => {
   const conf = (rel: string): Directive[] => parseNginx(read(`etc/nginx/${rel}`))
   const reader = (p: string): string => readText(path.join(stage.root, p))
   const servers = (): Directive[] => find(find(conf('conf.d/oasis.conf'), 'server'), 'server')
+  const named = (): Directive[] => servers().filter((s) => find(s.block!, 'server_name').length)
   const https = (): Directive =>
-    servers().find((s) => find(s.block!, 'listen').some((l) => l.args[0] === '443'))!
+    named().find((s) => find(s.block!, 'listen').some((l) => l.args[0] === '443'))!
   const httpsLocs = () => locationsOf({ ...https(), block: expandIncludes(https().block!, reader) })
   const text = (): string =>
     ['conf.d/oasis.conf', 'conf.d/00-oasis-zones.conf', 'oasis/proxy.conf', 'oasis/security-headers.conf']
@@ -510,7 +513,8 @@ describe('nginx site', () => {
   })
 
   it('redirects port 80 to HTTPS except the ACME challenge, and serves TLS 1.2+ with the configured certificate', () => {
-    const [plain] = servers()
+    const [plain] = named()
+    expect(find(plain!.block!, 'listen')[0]!.args).toEqual(['80'])
     const locs = locationsOf(plain!)
     expect(find(plain!.block!, 'server_name')[0]!.args).toEqual(['oasis.example.com'])
     expect(locs.find((l) => l.pattern === '/.well-known/acme-challenge/')).toBeDefined()
@@ -545,7 +549,7 @@ describe('nginx site', () => {
     expect(where('/api/v1/events')).toBe('= /api/v1/events')
     expect(where('/api/v1/auth/login')).toMatch(/^~ \^\/api\/v1\/auth\//)
     expect(where('/api/v1/auth/password/forgot')).toMatch(/^~ /)
-    expect(where('/api/v1/auth/logout')).toBe('/api/')
+    expect(where('/api/v1/auth/logout')).toBe('^~ /api/')
     expect(where('/hooks/squarespace')).toBe('= /hooks/squarespace')
     expect(proxied('/hooks/squarespace')).toBe('http://oasis_api')
     expect(where('/hooks/ses')).toBe('= /hooks/ses')
@@ -569,6 +573,44 @@ describe('nginx site', () => {
     }
     expect(text()).not.toMatch(/proxy_pass[^;]*smsgate/)
     expect(text()).not.toMatch(/:3002/) // the hooks listener is reached only through tailscale serve
+  })
+
+  it('serves only its own name: other names and bare addresses get no answer on 80 and no TLS handshake on 443', () => {
+    const defaults = servers().filter((s) => find(s.block!, 'listen').some((l) => l.args.includes('default_server')))
+    expect(defaults).toHaveLength(2)
+    const [d80, d443] = defaults
+    expect(find(d80!.block!, 'listen').map((l) => l.args)).toEqual([
+      ['80', 'default_server'],
+      ['[::]:80', 'default_server'],
+    ])
+    expect(find(d80!.block!, 'return')[0]!.args).toEqual(['444'])
+    expect(find(d443!.block!, 'listen').map((l) => l.args)).toEqual([
+      ['443', 'ssl', 'default_server'],
+      ['[::]:443', 'ssl', 'default_server'],
+    ])
+    expect(find(d443!.block!, 'ssl_reject_handshake')[0]!.args).toEqual(['on'])
+    expect(find(d443!.block!, 'ssl_certificate')).toEqual([]) // nothing to show to a stranger
+    for (const s of defaults) expect(find(s.block!, 'server_name'), 'a default server matches no name').toEqual([])
+    // the site itself is not a default server, and every named server is the domain
+    for (const s of named()) {
+      expect(find(s.block!, 'server_name')[0]!.args).toEqual(['oasis.example.com'])
+      expect(find(s.block!, 'listen').some((l) => l.args.includes('default_server'))).toBe(false)
+    }
+  })
+
+  it('no other letter case of /api, /dev-storage or /hooks reaches Next.js (its rewrites would pass it to the API)', () => {
+    const locs = httpsLocs()
+    // (lower-case /api itself is answered by nginx with a 301 to /api/, its rule for a proxied prefix that ends in a slash)
+    for (const uri of ['/API/v1/openapi.json', '/Api/v1/meta/now', '/aPi/v1/auth/login', '/API/', '/API', '/Dev-Storage/files/x', '/DEV-STORAGE', '/dev-storage', '/HOOKS/smsgate/x', '/Hooks/squarespace']) {
+      const l = matchLocation(locs, uri)!
+      expect(find(l.body, 'proxy_pass'), uri).toEqual([])
+      expect(find(l.body, 'return')[0]!.args[0], uri).toBe('404')
+    }
+    // the lower-case paths still go where they did, and the dashboard keeps everything else
+    expect(find(matchLocation(locs, '/api/v1/customers')!.body, 'proxy_pass')[0]!.args[0]).toBe('http://oasis_api')
+    expect(find(matchLocation(locs, '/apiary')!.body, 'proxy_pass')[0]!.args[0]).toBe('http://oasis_web')
+    expect(find(matchLocation(locs, '/settings/api-keys')!.body, 'proxy_pass')[0]!.args[0]).toBe('http://oasis_web')
+    expect(find(matchLocation(locs, '/hooks/squarespace')!.body, 'proxy_pass')[0]!.args[0]).toBe('http://oasis_api')
   })
 
   it('does not buffer or compress the event stream, and allows long reads', () => {
@@ -618,8 +660,10 @@ describe('nginx site', () => {
     expect(text()).not.toContain('$proxy_add_x_forwarded_for')
     expect(parseEnvFile(read('etc/oasis/api.env')).TRUST_PROXY).toBe('true')
     expect(parseEnvFile(read('etc/oasis/api.env')).HOST).toBe('127.0.0.1')
-    // every proxied location includes the shared proxy settings
-    for (const l of locationsOf(https())) {
+    // every proxied location includes the shared proxy settings (nested ones too)
+    const all = (locs: ReturnType<typeof locationsOf>): ReturnType<typeof locationsOf> =>
+      locs.flatMap((l) => [l, ...all(locationsOf({ name: 'location', args: [], block: l.body }))])
+    for (const l of all(locationsOf(https()))) {
       if (find(l.body, 'proxy_pass').length)
         expect(
           find(l.body, 'include').map((i) => i.args[0]),
@@ -674,8 +718,12 @@ describe('nginx site', () => {
     )
     // by default the CSP is the dashboard's own (hash-pinned scripts); nginx adds none
     expect(Object.keys(headers).filter((h) => /content-security-policy/i.test(h))).toEqual([])
-    // every header nginx sets that the dashboard also sends is hidden from upstream, so each arrives once
-    const hidden = find(conf('oasis/security-headers.conf'), 'proxy_hide_header').map((h) => h.args[0])
+    // every header nginx sets that the dashboard also sends is hidden from upstream, so each arrives once (HSTS and nosniff by
+    // proxy.conf, which the dashboard location includes as well)
+    const hidden = [...find(conf('oasis/security-headers.conf'), 'proxy_hide_header'), ...find(conf('oasis/proxy.conf'), 'proxy_hide_header')].map(
+      (h) => h.args[0],
+    )
+    expect(new Set(hidden).size, 'no header hidden twice in one location').toBe(hidden.length)
     for (const h of [
       'Strict-Transport-Security',
       'X-Content-Type-Options',
@@ -686,12 +734,40 @@ describe('nginx site', () => {
     ])
       expect(hidden, h).toContain(h)
     expect(hidden).not.toContain('Content-Security-Policy')
-    // the dashboard location includes them; the API locations do not (helmet already sets them, a second copy would duplicate)
+    // the dashboard location includes them; the API locations add none of their own (helmet sets the rest)
     const locs = httpsLocs()
     expect(find(matchLocation(locationsOf(https()), '/')!.body, 'include').map((i) => i.args[0])).toContain(
       '/etc/nginx/oasis/security-headers.conf',
     )
     expect(find(matchLocation(locs, '/api/v1/customers')!.body, 'add_header')).toEqual([])
+  })
+
+  it('HSTS and nosniff are on every answer of the site, nginx errors and denials included, exactly once', () => {
+    const server = expandIncludes(https().block!, reader)
+    const serverLevel = find(server, 'add_header').map((h) => `${h.args.join(' ')}`)
+    expect(serverLevel).toEqual([
+      'Strict-Transport-Security max-age=15552000; includeSubDomains always',
+      'X-Content-Type-Options nosniff always',
+    ])
+    // add_header in a location replaces the inherited ones: what a location really sends
+    const effective = (l: { body: Directive[] }): string[] => {
+      const own = find(l.body, 'add_header')
+      return (own.length ? own : find(server, 'add_header')).map((h) => h.args[0]!)
+    }
+    const all = (locs: ReturnType<typeof locationsOf>): ReturnType<typeof locationsOf> =>
+      locs.flatMap((l) => [l, ...all(locationsOf({ name: 'location', args: [], block: l.body }))])
+    const every = all(locationsOf({ ...https(), block: server }))
+    expect(every.length).toBeGreaterThan(10)
+    for (const l of every) {
+      const sent = effective(l)
+      for (const h of ['Strict-Transport-Security', 'X-Content-Type-Options']) {
+        expect(sent.filter((x) => x === h), `${l.modifier} ${l.pattern} ${h}`).toHaveLength(1)
+        // a proxied location drops the upstream's copy, so the visitor sees one
+        if (find(l.body, 'proxy_pass').length)
+          expect(find(l.body, 'proxy_hide_header').map((x) => x.args[0]), `${l.pattern} hides ${h}`).toContain(h)
+      }
+      expect(find(l.body, 'add_header').every((h) => h.args.at(-1) === 'always'), l.pattern).toBe(true)
+    }
     // the app says the same thing about HSTS
     expect(readText(path.join(REPO, 'src/app.ts'))).toContain('maxAge: 15_552_000')
   })
@@ -746,4 +822,161 @@ describe('nginx site', () => {
       t.cleanup()
     }
   })
+})
+
+// The rendered site in a real nginx (when the binary is installed): nginx -t, then real requests on loopback ports against stub
+// upstreams, as an unprivileged user with every path moved into a temporary prefix.
+const NGINX = ['/usr/sbin/nginx', '/usr/bin/nginx'].find((p) => existsSync(p))
+describe.skipIf(!NGINX)('nginx site in a real nginx', () => {
+  const P80 = 4685
+  const P443 = 4686
+  const API = 4687
+  const WEB = 4688
+  let dir = ''
+  let nginx: ChildProcess | undefined
+  const upstreams: Server[] = []
+  const hits: string[] = []
+  const t = tempDir('oasis-nginx-')
+
+  beforeAll(async () => {
+    dir = t.dir
+    for (const d of ['conf.d', 'oasis', 'log', 'tmp']) mkdirSync(path.join(dir, d))
+    const gen = await sh('openssl', [
+      'req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-days', '2',
+      '-subj', '/CN=oasis.example.com', '-addext', 'subjectAltName=DNS:oasis.example.com',
+      '-keyout', path.join(dir, 'key.pem'), '-out', path.join(dir, 'cert.pem'),
+    ])
+    if (gen.code !== 0) throw new Error(gen.out)
+    const move = (text: string): string =>
+      text
+        .replaceAll('/etc/nginx/oasis/', `${dir}/oasis/`)
+        .replaceAll('/var/log/nginx/', `${dir}/log/`)
+        .replaceAll(stage.cert, `${dir}/cert.pem`)
+        .replaceAll(stage.key, `${dir}/key.pem`)
+        .replace(/listen \[::\]:(80|443)[^;]*;\n/g, '')
+        .replace(/listen 80( default_server)?;/g, `listen 127.0.0.1:${P80}$1;`)
+        .replace(/listen 443 ssl( default_server)?;/g, `listen 127.0.0.1:${P443} ssl$1;`)
+        .replace('server 127.0.0.1:4000;', `server 127.0.0.1:${API};`)
+        .replace('server 127.0.0.1:3200;', `server 127.0.0.1:${WEB};`)
+    for (const f of ['conf.d/oasis.conf', 'conf.d/00-oasis-zones.conf', 'oasis/proxy.conf', 'oasis/security-headers.conf'])
+      writeFileSync(path.join(dir, f), move(read(`etc/nginx/${f}`)))
+    const tmp = path.join(dir, 'tmp')
+    writeFileSync(
+      path.join(dir, 'nginx.conf'),
+      `pid ${dir}/nginx.pid;\nerror_log stderr warn;\nevents { worker_connections 64; }\nhttp {\n` +
+        ['client_body', 'proxy', 'fastcgi', 'uwsgi', 'scgi'].map((n) => `  ${n}_temp_path ${tmp}/${n};\n`).join('') +
+        `  access_log off;\n  include ${dir}/conf.d/*.conf;\n}\n`,
+    )
+    // the upstreams send their own HSTS and nosniff, as helmet and next.config.mjs do
+    const upstream = (name: string, port: number) =>
+      new Promise<void>((resolve) => {
+        const s = createServer((req, res) => {
+          hits.push(`${name} ${req.method} ${req.url}`)
+          req.resume()
+          req.on('end', () =>
+            res
+              .writeHead(200, {
+                'strict-transport-security': 'max-age=15552000; includeSubDomains',
+                'x-content-type-options': 'nosniff',
+                'content-type': 'text/plain',
+              })
+              .end(name),
+          )
+        })
+        upstreams.push(s)
+        s.listen(port, '127.0.0.1', resolve)
+      })
+    await upstream('api', API)
+    await upstream('web', WEB)
+  }, 60_000)
+
+  afterAll(async () => {
+    if (nginx?.pid) nginx.kill('SIGTERM')
+    await Promise.all(upstreams.map((s) => new Promise<void>((r) => s.close(() => r()))))
+    t.cleanup()
+  })
+
+  const nginxArgs = () => ['-p', dir, '-e', 'stderr', '-c', path.join(dir, 'nginx.conf')]
+
+  it('nginx -t accepts the rendered site without a warning', async () => {
+    const r = await sh(NGINX!, ['-t', ...nginxArgs()])
+    expect(r.code, r.out).toBe(0)
+    expect(r.out).toMatch(/syntax is ok/)
+    expect(r.out.split('\n').filter((l) => /\[(warn|emerg|alert|crit|error)\]/.test(l))).toEqual([])
+  })
+
+  it('answers only its own name, keeps every other letter case of /api away from Next.js, and every answer has HSTS and nosniff once', async () => {
+    nginx = spawn(NGINX!, [...nginxArgs(), '-g', 'daemon off; master_process off;'], { stdio: 'ignore' })
+    for (let i = 0; i < 50; i++) {
+      if ((await sh('curl', ['-s', '-o', '/dev/null', `http://127.0.0.1:${P80}/`])).code === 52) break
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    const site = `https://oasis.example.com:${P443}`
+    const resolve = ['--resolve', `oasis.example.com:${P443}:127.0.0.1`, '--resolve', `other.example.com:${P443}:127.0.0.1`]
+    const get = async (url: string, extra: string[] = []) => {
+      const r = await sh('curl', ['-sk', '-D', '-', '-o', '/dev/null', '--max-time', '5', ...resolve, ...extra, url])
+      const lines = r.stdout.split('\r\n')
+      const status = Number(/^HTTP\/\S+ (\d+)/.exec(lines[0] ?? '')?.[1] ?? 0)
+      const header = (name: string) =>
+        lines
+          .filter((l) => l.toLowerCase().startsWith(`${name.toLowerCase()}:`))
+          .map((l) => `${name.toLowerCase()}:${l.slice(name.length + 1)}`)
+      return { code: r.code, status, header }
+    }
+    const once = (res: Awaited<ReturnType<typeof get>>, what: string) => {
+      expect(res.header('strict-transport-security'), what).toEqual(['strict-transport-security: max-age=15552000; includeSubDomains'])
+      expect(res.header('x-content-type-options'), what).toEqual(['x-content-type-options: nosniff'])
+    }
+
+    // other names and bare addresses: no answer on 80, no handshake on 443
+    expect((await get(`http://127.0.0.1:${P80}/`)).code).toBe(52) // empty reply (444)
+    expect((await get(`http://127.0.0.1:${P80}/`, ['-H', 'Host: other.example.com'])).code).toBe(52)
+    expect((await get(`https://127.0.0.1:${P443}/login`)).code).toBe(35) // no SNI: handshake refused
+    expect((await get(`https://other.example.com:${P443}/login`)).code).toBe(35)
+    const http = await get(`http://127.0.0.1:${P80}/x`, ['-H', 'Host: oasis.example.com'])
+    expect(http.status).toBe(301)
+    expect(http.header('location')).toEqual(['location: https://oasis.example.com/x'])
+
+    // proxied answers: one copy of each header although the upstream sends its own
+    hits.length = 0
+    const page = await get(`${site}/login`)
+    expect(page.status).toBe(200)
+    once(page, 'dashboard page')
+    const api = await get(`${site}/api/v1/customers`)
+    expect(api.status).toBe(200)
+    once(api, 'API answer')
+    expect(hits).toEqual(['web GET /login', 'api GET /api/v1/customers'])
+
+    // any other letter case: 404 from nginx, nothing reaches either upstream
+    hits.length = 0
+    for (const uri of ['/API/v1/openapi.json', '/Api/v1/meta/now', '/API', '/Dev-Storage/x', '/dev-storage', '/HOOKS/smsgate/x']) {
+      const r = await get(`${site}${uri}`)
+      expect(r.status, uri).toBe(404)
+      once(r, uri)
+    }
+    // lower-case /api: nginx's own 301 to /api/ (a proxied prefix that ends in a slash), never Next.js
+    const bare = await get(`${site}/api`)
+    expect(bare.status).toBe(301)
+    expect(bare.header('location')).toEqual([`location: https://oasis.example.com:${P443}/api/`]) // the port only because the test listens on one
+    once(bare, '301 /api')
+    expect(hits).toEqual([])
+
+    // nginx's own answers carry the headers too: 404 (hooks), 403 (not loopback), 413 (body), 429 (rate)
+    once(await get(`${site}/hooks/smsgate/x`), '404 hooks')
+    const denied = await get(`${site}/readyz`, ['--interface', '127.0.0.3'])
+    expect(denied.status).toBe(403)
+    once(denied, '403 readyz')
+    const big = path.join(dir, 'big.bin')
+    writeFileSync(big, Buffer.alloc(3 * 1024 * 1024))
+    const tooBig = await get(`${site}/api/v1/photos`, ['-X', 'POST', '--data-binary', `@${big}`, '-H', 'content-type: application/octet-stream'])
+    expect(tooBig.status).toBe(413)
+    once(tooBig, '413')
+    let limited: Awaited<ReturnType<typeof get>> | undefined
+    for (let i = 0; i < 20 && !limited; i++) {
+      const r = await get(`${site}/api/v1/auth/login`, ['-X', 'POST', '-d', '{}'])
+      if (r.status === 429) limited = r
+    }
+    expect(limited, 'the login zone answers 429 after its burst').toBeDefined()
+    once(limited!, '429')
+  }, 60_000)
 })
