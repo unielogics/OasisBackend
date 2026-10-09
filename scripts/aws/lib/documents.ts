@@ -3,11 +3,18 @@
 
 export type Sender = { kind: 'address'; identity: string; domain: string } | { kind: 'domain'; identity: string; domain: string }
 
+/** Who the running app is in AWS: the instance role (recommended) or the oasis-app IAM user with a key on disk. */
+export type Runtime = 'role' | 'user'
+
 export interface ProvisionSpec {
   region: string
   account: string
   prefix: string
-  sender: Sender
+  /** The SES sending identity; without it nothing of SES or SNS is created and the runtime policy has no SES statement. */
+  sender?: Sender
+  /** The Secrets Manager secret holding the app's environment (OASIS_SECRET_ID), a name such as oasis/prod/app. */
+  secretId: string
+  runtime: Runtime
   /** Browser origins allowed to POST photos straight to the bucket (the dashboard). */
   dashboardOrigins: string[]
   /** Public https URL of POST /hooks/ses; no subscription without it. */
@@ -29,6 +36,10 @@ export const names = (s: Pick<ProvisionSpec, 'prefix' | 'account' | 'region'>) =
   eventDestination: `${s.prefix}-sns-events`,
   user: `${s.prefix}-app`,
   userArn: `arn:aws:iam::${s.account}:user/${s.prefix}-app`,
+  role: `${s.prefix}-app-role`,
+  roleArn: `arn:aws:iam::${s.account}:role/${s.prefix}-app-role`,
+  instanceProfile: `${s.prefix}-app-profile`,
+  instanceProfileArn: `arn:aws:iam::${s.account}:instance-profile/${s.prefix}-app-profile`,
   policy: `${s.prefix}-app-runtime`,
   policyArn: `arn:aws:iam::${s.account}:policy/${s.prefix}-app-runtime`,
 })
@@ -36,35 +47,59 @@ export const names = (s: Pick<ProvisionSpec, 'prefix' | 'account' | 'region'>) =
 export const sesArn = (s: Pick<ProvisionSpec, 'region' | 'account'>, kind: 'identity' | 'configuration-set', name: string): string =>
   `arn:aws:ses:${s.region}:${s.account}:${kind}/${name}`
 
-/** Least privilege for the running app (the oasis-app user): photos under the prefix, backups, and sending as the sender. */
-export function runtimePolicy(s: ProvisionSpec): object {
+/**
+ * The ARN the runtime may read. Secrets Manager appends a random six-character suffix at creation, so before the secret exists the
+ * grant uses `-??????`, which matches exactly that suffix length and so only this name (AWS's own recommendation); once it exists the
+ * real ARN is used.
+ */
+export const secretArnPattern = (s: Pick<ProvisionSpec, 'region' | 'account' | 'secretId'>): string =>
+  `arn:aws:secretsmanager:${s.region}:${s.account}:secret:${s.secretId}-??????`
+
+/**
+ * Least privilege for the running app (the instance role oasis-app-role, or the oasis-app user): read the environment secret, photos
+ * under the prefix, backups, and, once a sender exists, sending as it. No KMS statement: a secret under the AWS-managed key
+ * aws/secretsmanager is decrypted through Secrets Manager for any principal of the account it lets read the secret.
+ */
+export function runtimePolicy(s: ProvisionSpec, secretArn: string = secretArnPattern(s)): object {
   const n = names(s)
   const photos = `arn:aws:s3:::${n.photosBucket}`
   const backups = `arn:aws:s3:::${n.backupsBucket}`
+  const sender = s.sender
   return {
     Version: '2012-10-17',
     Statement: [
+      { Sid: 'ReadEnvironment', Effect: 'Allow', Action: 'secretsmanager:GetSecretValue', Resource: secretArn },
       { Sid: 'PhotoObjects', Effect: 'Allow', Action: ['s3:PutObject', 's3:GetObject', 's3:DeleteObject'], Resource: `${photos}/${s.keyPrefix}*` },
       // HeadObject of a missing key answers 404 (not 403) only with s3:ListBucket; the app tells "never uploaded" from "denied" by it
       { Sid: 'PhotoHeadMissingKey', Effect: 'Allow', Action: 's3:ListBucket', Resource: photos },
       { Sid: 'BackupObjects', Effect: 'Allow', Action: ['s3:PutObject', 's3:GetObject'], Resource: `${backups}/*` },
       { Sid: 'BackupList', Effect: 'Allow', Action: 's3:ListBucket', Resource: backups },
-      {
-        Sid: 'SendEmail',
-        Effect: 'Allow',
-        Action: ['ses:SendEmail', 'ses:SendRawEmail'],
-        Resource: [
-          sesArn(s, 'identity', s.sender.identity),
-          sesArn(s, 'configuration-set', n.configurationSet),
-          ...s.sandboxRecipients.map((r) => sesArn(s, 'identity', r)),
-        ],
-        Condition:
-          s.sender.kind === 'address'
-            ? { StringEquals: { 'ses:FromAddress': s.sender.identity } }
-            : { StringLike: { 'ses:FromAddress': `*@${s.sender.domain}` } },
-      },
+      ...(sender
+        ? [
+            {
+              Sid: 'SendEmail',
+              Effect: 'Allow',
+              Action: ['ses:SendEmail', 'ses:SendRawEmail'],
+              Resource: [
+                sesArn(s, 'identity', sender.identity),
+                sesArn(s, 'configuration-set', n.configurationSet),
+                ...s.sandboxRecipients.map((r) => sesArn(s, 'identity', r)),
+              ],
+              Condition:
+                sender.kind === 'address'
+                  ? { StringEquals: { 'ses:FromAddress': sender.identity } }
+                  : { StringLike: { 'ses:FromAddress': `*@${sender.domain}` } },
+            },
+          ]
+        : []),
     ],
   }
+}
+
+/** Only EC2 may assume the app role (it becomes the instance's credentials through the instance profile). */
+export const ROLE_TRUST_POLICY = {
+  Version: '2012-10-17',
+  Statement: [{ Effect: 'Allow', Principal: { Service: 'ec2.amazonaws.com' }, Action: 'sts:AssumeRole' }],
 }
 
 /** Refuses any request that is not TLS. */

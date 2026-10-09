@@ -3,6 +3,10 @@
 // with --apply. Nothing is ever deleted: rules, statements and CORS entries it does not own are kept, and a re-run after apply finds
 // nothing to do. The only write that is not a create or an update is IAM's own housekeeping (when the oasis-app-runtime policy
 // already has the maximum of five versions, the oldest non-default version is removed before the new one is added).
+// Without a sender nothing of SES or SNS is read or created; re-running later with --sender adds it (ADR 0132). The runtime identity is
+// the instance role oasis-app-role (recommended) or the IAM user oasis-app with a key file (ADR 0133); the EC2 instance is found by
+// --instance-id or --private-ip, never through instance metadata, and an instance profile that is already associated is replaced
+// only with --replace-instance-profile.
 import { existsSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import {
@@ -49,23 +53,41 @@ import {
   type SNSClient,
 } from '@aws-sdk/client-sns'
 import {
+  AddRoleToInstanceProfileCommand,
+  AttachRolePolicyCommand,
   AttachUserPolicyCommand,
   CreateAccessKeyCommand,
+  CreateInstanceProfileCommand,
   CreatePolicyCommand,
   CreatePolicyVersionCommand,
+  CreateRoleCommand,
   CreateUserCommand,
   DeletePolicyVersionCommand,
+  GetInstanceProfileCommand,
   GetPolicyCommand,
   GetPolicyVersionCommand,
+  GetRoleCommand,
   GetUserCommand,
   ListAccessKeysCommand,
+  ListAttachedRolePoliciesCommand,
   ListAttachedUserPoliciesCommand,
   ListPolicyVersionsCommand,
+  UpdateAssumeRolePolicyCommand,
   type IAMClient,
 } from '@aws-sdk/client-iam'
+import {
+  AssociateIamInstanceProfileCommand,
+  DescribeIamInstanceProfileAssociationsCommand,
+  DescribeInstancesCommand,
+  ReplaceIamInstanceProfileAssociationCommand,
+  type EC2Client,
+  type Instance,
+} from '@aws-sdk/client-ec2'
+import { CreateSecretCommand, DescribeSecretCommand, type SecretsManagerClient } from '@aws-sdk/client-secrets-manager'
 import type { STSClient } from '@aws-sdk/client-sts'
 import {
   PUBLIC_ACCESS_BLOCK,
+  ROLE_TRUST_POLICY,
   SES_EVENT_TYPES,
   SSE_S3,
   TOPIC_DELIVERY_POLICY,
@@ -75,9 +97,11 @@ import {
   photosLifecycle,
   runtimePolicy,
   sameDocument,
+  secretArnPattern,
   tlsOnlyBucketPolicy,
   topicPolicy,
   type ProvisionSpec,
+  type Sender,
 } from './documents.js'
 
 export interface Clients {
@@ -86,6 +110,8 @@ export interface Clients {
   sns: SNSClient
   iam: IAMClient
   sts: STSClient
+  sm: SecretsManagerClient
+  ec2: EC2Client
 }
 
 export type Change = 'ok' | 'create' | 'update' | 'request' | 'skip'
@@ -101,8 +127,14 @@ export interface Step {
 }
 
 export interface PlanOptions {
-  /** Where the oasis-app access key goes (mode 0600); required when a key is to be created. */
+  /** runtime=user: where the oasis-app access key goes (AWS credentials file format, mode 0600); required when a key is to be created. */
   out?: string
+  /** runtime=role: the EC2 instance to associate the instance profile with (never looked up through instance metadata). */
+  instance?: { id: string } | { privateIp: string }
+  /** Replace an instance profile that is already associated with the instance (otherwise it is left alone and reported). */
+  replaceInstanceProfile?: boolean
+  /** Waits between retries while IAM propagates a new instance profile (tests pass a no-op). */
+  sleep?: (ms: number) => Promise<void>
   /** Create a second access key although one exists (key rotation). */
   newAccessKey?: boolean
   /** Submit the SES production-access request (only when explicitly asked). */
@@ -111,6 +143,8 @@ export interface PlanOptions {
 
 export interface Plan {
   spec: ProvisionSpec
+  /** The environment secret's real ARN once it is known (it exists, or apply created it). */
+  secretArn?: string
   steps: Step[]
   /** DNS records the domain owner must add (DKIM CNAMEs, DMARC); filled further by apply when an identity is created. */
   dns: string[]
@@ -541,24 +575,48 @@ async function configurationSetSteps(c: Clients, spec: ProvisionSpec): Promise<S
   return steps
 }
 
-async function iamSteps(c: Clients, spec: ProvisionSpec, plan: Plan, o: PlanOptions): Promise<Step[]> {
-  const n = names(spec)
-  const steps: Step[] = []
-  const user = await describe(c.iam.send(new GetUserCommand({ UserName: n.user })), ['NoSuchEntityException', 'NoSuchEntity'])
-  steps.push({
-    id: 'iam.user',
-    title: `IAM user ${n.user}`,
-    change: user ? 'ok' : 'create',
-    detail: user ? 'exists' : 'create (no console password, tagged app=oasis)',
-    ...(user
-      ? {}
-      : { apply: async () => void (await c.iam.send(new CreateUserCommand({ UserName: n.user, Tags: [{ Key: 'app', Value: 'oasis' }] }))) }),
-  })
+const NO_ENTITY = ['NoSuchEntityException', 'NoSuchEntity']
 
-  const desired = runtimePolicy(spec)
-  const policy = await describe(c.iam.send(new GetPolicyCommand({ PolicyArn: n.policyArn })), ['NoSuchEntityException', 'NoSuchEntity'])
-  if (!policy?.Policy) {
-    steps.push({
+async function secretStep(c: Clients, spec: ProvisionSpec, plan: Plan): Promise<Step> {
+  const title = `Secrets Manager secret ${spec.secretId}`
+  const d = await describe(c.sm.send(new DescribeSecretCommand({ SecretId: spec.secretId })), ['ResourceNotFoundException'])
+  if (d) {
+    if (d.DeletedDate)
+      throw new ProvisionError(`${spec.secretId} is scheduled for deletion: restore it first (aws secretsmanager restore-secret --secret-id ${spec.secretId})`)
+    plan.secretArn = d.ARN
+    if (d.KmsKeyId && !/alias\/aws\/secretsmanager$/.test(d.KmsKeyId))
+      plan.notes.push(`${spec.secretId} is encrypted with the key ${d.KmsKeyId}: the runtime also needs kms:Decrypt on it, which oasis-app-runtime does not grant`)
+    return { id: 'secret', title, change: 'ok', detail: `exists: ${d.ARN} (its values are never read or changed here; pnpm secrets:push fills it)` }
+  }
+  return {
+    id: 'secret',
+    title,
+    change: 'create',
+    detail: 'create it holding an empty JSON object, with the AWS-managed key aws/secretsmanager, tagged app=oasis (pnpm secrets:push fills it)',
+    apply: async () => {
+      const r = await c.sm.send(
+        new CreateSecretCommand({
+          Name: spec.secretId,
+          Description: 'Oasis Auto Spa application environment (OASIS_SECRET_ID); written with pnpm secrets:push',
+          SecretString: '{}',
+          Tags: [{ Key: 'app', Value: 'oasis' }],
+        }),
+      )
+      plan.secretArn = r.ARN
+      plan.results.push(`created the secret ${r.ARN ?? spec.secretId} (empty: fill it with pnpm secrets:push)`)
+    },
+  }
+}
+
+/** The runtime policy as apply will send it: with the secret's real ARN once known. */
+const desiredPolicy = (plan: Plan): object => runtimePolicy(plan.spec, plan.secretArn ?? secretArnPattern(plan.spec))
+
+async function policyStep(c: Clients, spec: ProvisionSpec, plan: Plan): Promise<Step> {
+  const n = names(spec)
+  const desired = desiredPolicy(plan)
+  const policy = await describe(c.iam.send(new GetPolicyCommand({ PolicyArn: n.policyArn })), NO_ENTITY)
+  if (!policy?.Policy)
+    return {
       id: 'iam.policy',
       title: `IAM policy ${n.policy}`,
       change: 'create',
@@ -568,40 +626,54 @@ async function iamSteps(c: Clients, spec: ProvisionSpec, plan: Plan, o: PlanOpti
         void (await c.iam.send(
           new CreatePolicyCommand({
             PolicyName: n.policy,
-            PolicyDocument: JSON.stringify(desired),
-            Description: 'Oasis app runtime: photos and backups in S3, sending email through SES',
+            PolicyDocument: JSON.stringify(desiredPolicy(plan)),
+            Description: 'Oasis app runtime: its environment secret, photos and backups in S3, sending email through SES',
           }),
         )),
-    })
-  } else {
-    const v = await c.iam.send(new GetPolicyVersionCommand({ PolicyArn: n.policyArn, VersionId: policy.Policy.DefaultVersionId }))
-    const current = JSON.parse(decodeURIComponent(v.PolicyVersion?.Document ?? '%7B%7D')) as unknown
-    const same = sameDocument(current, desired)
-    steps.push({
-      id: 'iam.policy',
-      title: `IAM policy ${n.policy}`,
-      change: same ? 'ok' : 'update',
-      detail: same ? `default version ${policy.Policy.DefaultVersionId} is the document below` : 'add a new default version with the document below',
-      document: desired,
-      ...(same
-        ? {}
-        : {
-            apply: async () => {
-              const versions = (await c.iam.send(new ListPolicyVersionsCommand({ PolicyArn: n.policyArn }))).Versions ?? []
-              if (versions.length >= 5) {
-                const oldest = versions
-                  .filter((x) => !x.IsDefaultVersion)
-                  .sort((a, b) => (a.CreateDate?.getTime() ?? 0) - (b.CreateDate?.getTime() ?? 0))[0]
-                if (oldest?.VersionId) {
-                  await c.iam.send(new DeletePolicyVersionCommand({ PolicyArn: n.policyArn, VersionId: oldest.VersionId }))
-                  plan.results.push(`removed the oldest non-default version ${oldest.VersionId} of ${n.policy} (IAM keeps at most five)`)
-                }
+    }
+  const v = await c.iam.send(new GetPolicyVersionCommand({ PolicyArn: n.policyArn, VersionId: policy.Policy.DefaultVersionId }))
+  const current = JSON.parse(decodeURIComponent(v.PolicyVersion?.Document ?? '%7B%7D')) as unknown
+  const same = sameDocument(current, desired)
+  return {
+    id: 'iam.policy',
+    title: `IAM policy ${n.policy}`,
+    change: same ? 'ok' : 'update',
+    detail: same ? `default version ${policy.Policy.DefaultVersionId} is the document below` : 'add a new default version with the document below',
+    document: desired,
+    ...(same
+      ? {}
+      : {
+          apply: async () => {
+            const versions = (await c.iam.send(new ListPolicyVersionsCommand({ PolicyArn: n.policyArn }))).Versions ?? []
+            if (versions.length >= 5) {
+              const oldest = versions
+                .filter((x) => !x.IsDefaultVersion)
+                .sort((a, b) => (a.CreateDate?.getTime() ?? 0) - (b.CreateDate?.getTime() ?? 0))[0]
+              if (oldest?.VersionId) {
+                await c.iam.send(new DeletePolicyVersionCommand({ PolicyArn: n.policyArn, VersionId: oldest.VersionId }))
+                plan.results.push(`removed the oldest non-default version ${oldest.VersionId} of ${n.policy} (IAM keeps at most five)`)
               }
-              await c.iam.send(new CreatePolicyVersionCommand({ PolicyArn: n.policyArn, PolicyDocument: JSON.stringify(desired), SetAsDefault: true }))
-            },
-          }),
-    })
+            }
+            await c.iam.send(new CreatePolicyVersionCommand({ PolicyArn: n.policyArn, PolicyDocument: JSON.stringify(desiredPolicy(plan)), SetAsDefault: true }))
+          },
+        }),
   }
+}
+
+/** runtime=user: the IAM user oasis-app with the policy and one access key, written to --out in the AWS credentials file format. */
+async function userSteps(c: Clients, spec: ProvisionSpec, plan: Plan, o: PlanOptions): Promise<Step[]> {
+  const n = names(spec)
+  const steps: Step[] = []
+  const user = await describe(c.iam.send(new GetUserCommand({ UserName: n.user })), NO_ENTITY)
+  steps.push({
+    id: 'iam.user',
+    title: `IAM user ${n.user}`,
+    change: user ? 'ok' : 'create',
+    detail: user ? 'exists' : 'create (no console password, tagged app=oasis)',
+    ...(user
+      ? {}
+      : { apply: async () => void (await c.iam.send(new CreateUserCommand({ UserName: n.user, Tags: [{ Key: 'app', Value: 'oasis' }] }))) }),
+  })
 
   const attached = user
     ? ((await c.iam.send(new ListAttachedUserPoliciesCommand({ UserName: n.user }))).AttachedPolicies ?? []).some((p) => p.PolicyArn === n.policyArn)
@@ -627,14 +699,16 @@ async function iamSteps(c: Clients, spec: ProvisionSpec, plan: Plan, o: PlanOpti
       id: 'iam.access-key',
       title: `IAM user ${n.user}`,
       change: 'create',
-      detail: `create one access key and write it to ${out} (mode 0600, never printed)${keys.length ? `; the existing ${listed} stays until you deactivate it` : ''}`,
+      detail: `create one access key and write it to ${out} (AWS credentials file, mode 0600, never printed)${keys.length ? `; the existing ${listed} stays until you deactivate it` : ''}`,
       apply: async () => {
         const r = await c.iam.send(new CreateAccessKeyCommand({ UserName: n.user }))
         const k = r.AccessKey
         if (!k?.AccessKeyId || !k.SecretAccessKey) throw new ProvisionError('IAM returned no access key')
         writeFileSync(
           out,
-          `# ${n.user} access key created by pnpm aws:provision; paste both lines into /etc/oasis/common.env, then delete this file\nAWS_ACCESS_KEY_ID=${k.AccessKeyId}\nAWS_SECRET_ACCESS_KEY=${k.SecretAccessKey}\n`,
+          `# ${n.user} access key created by pnpm aws:provision --runtime user. Install it as /etc/oasis/aws-credentials (owner root, mode 0600):\n` +
+            `#   sudo install -o root -g root -m 0600 ${out} /etc/oasis/aws-credentials && shred -u ${out}\n` +
+            `[default]\naws_access_key_id = ${k.AccessKeyId}\naws_secret_access_key = ${k.SecretAccessKey}\n`,
           { mode: 0o600, flag: 'wx' },
         )
         plan.results.push(`access key ${maskKeyId(k.AccessKeyId)} written to ${out} (mode 0600)`)
@@ -644,6 +718,194 @@ async function iamSteps(c: Clients, spec: ProvisionSpec, plan: Plan, o: PlanOpti
     steps.push({ id: 'iam.access-key', title: `IAM user ${n.user}`, change: 'ok', detail: `has ${listed}; pass --new-access-key to rotate` })
   }
   return steps
+}
+
+/** runtime=role: the role oasis-app-role (EC2 only) with the policy, the instance profile holding it, and the association. */
+async function roleSteps(c: Clients, spec: ProvisionSpec, plan: Plan, o: PlanOptions): Promise<Step[]> {
+  const n = names(spec)
+  const steps: Step[] = []
+  const role = await describe(c.iam.send(new GetRoleCommand({ RoleName: n.role })), NO_ENTITY)
+  if (!role?.Role)
+    steps.push({
+      id: 'iam.role',
+      title: `IAM role ${n.role}`,
+      change: 'create',
+      detail: 'create, assumable only by EC2 (trust policy below), tagged app=oasis',
+      document: ROLE_TRUST_POLICY,
+      apply: async () =>
+        void (await c.iam.send(
+          new CreateRoleCommand({
+            RoleName: n.role,
+            AssumeRolePolicyDocument: JSON.stringify(ROLE_TRUST_POLICY),
+            Description: 'Oasis Auto Spa app on its EC2 host (instance profile oasis-app-profile)',
+            Tags: [{ Key: 'app', Value: 'oasis' }],
+          }),
+        )),
+    })
+  else {
+    const trust = JSON.parse(decodeURIComponent(role.Role.AssumeRolePolicyDocument ?? '%7B%7D')) as unknown
+    const same = sameDocument(trust, ROLE_TRUST_POLICY)
+    steps.push({
+      id: 'iam.role',
+      title: `IAM role ${n.role}`,
+      change: same ? 'ok' : 'update',
+      detail: same ? 'exists, assumable only by EC2' : 'replace the trust policy with the one below (only EC2 may assume the role)',
+      document: ROLE_TRUST_POLICY,
+      ...(same
+        ? {}
+        : { apply: async () => void (await c.iam.send(new UpdateAssumeRolePolicyCommand({ RoleName: n.role, PolicyDocument: JSON.stringify(ROLE_TRUST_POLICY) }))) }),
+    })
+  }
+
+  const attached = role?.Role
+    ? ((await c.iam.send(new ListAttachedRolePoliciesCommand({ RoleName: n.role }))).AttachedPolicies ?? []).some((p) => p.PolicyArn === n.policyArn)
+    : false
+  steps.push({
+    id: 'iam.role-attach',
+    title: `IAM role ${n.role}`,
+    change: attached ? 'ok' : 'create',
+    detail: `${n.policy} ${attached ? 'is attached' : 'attach'}`,
+    ...(attached ? {} : { apply: async () => void (await c.iam.send(new AttachRolePolicyCommand({ RoleName: n.role, PolicyArn: n.policyArn }))) }),
+  })
+
+  const profile = (await describe(c.iam.send(new GetInstanceProfileCommand({ InstanceProfileName: n.instanceProfile })), NO_ENTITY))?.InstanceProfile
+  steps.push({
+    id: 'iam.instance-profile',
+    title: `IAM instance profile ${n.instanceProfile}`,
+    change: profile ? 'ok' : 'create',
+    detail: profile ? 'exists' : 'create, tagged app=oasis',
+    ...(profile
+      ? {}
+      : {
+          apply: async () =>
+            void (await c.iam.send(new CreateInstanceProfileCommand({ InstanceProfileName: n.instanceProfile, Tags: [{ Key: 'app', Value: 'oasis' }] }))),
+        }),
+  })
+  const held = (profile?.Roles ?? []).map((r) => r.RoleName)
+  const others = held.filter((r) => r !== n.role)
+  if (others.length)
+    throw new ProvisionError(`${n.instanceProfile} already holds the role ${others.join(', ')} (an instance profile holds one role); it is not ours to change`)
+  steps.push({
+    id: 'iam.instance-profile-role',
+    title: `IAM instance profile ${n.instanceProfile}`,
+    change: held.includes(n.role) ? 'ok' : 'create',
+    detail: held.includes(n.role) ? `holds ${n.role}` : `add ${n.role}`,
+    ...(held.includes(n.role)
+      ? {}
+      : { apply: async () => void (await c.iam.send(new AddRoleToInstanceProfileCommand({ InstanceProfileName: n.instanceProfile, RoleName: n.role }))) }),
+  })
+  steps.push(await associationStep(c, spec, plan, o))
+
+  // a host that ran with runtime=user before: its key keeps working until someone deactivates it
+  const user = await describe(c.iam.send(new GetUserCommand({ UserName: n.user })), NO_ENTITY)
+  if (user)
+    plan.notes.push(
+      `the IAM user ${n.user} exists from a runtime=user setup: once the services run on the role, remove /etc/oasis/aws-credentials and deactivate its access key (the owner, in the IAM console)`,
+    )
+  return steps
+}
+
+const describeInstance = (i: Instance): string => {
+  const name = i.Tags?.find((t) => t.Key === 'Name')?.Value
+  return `${i.InstanceId}${name ? ` "${name}"` : ''} (${i.State?.Name ?? 'unknown'}, private IP ${i.PrivateIpAddress ?? 'none'})`
+}
+
+async function findInstance(c: Clients, where: NonNullable<PlanOptions['instance']>): Promise<Instance> {
+  if ('id' in where) {
+    let r
+    try {
+      r = await c.ec2.send(new DescribeInstancesCommand({ InstanceIds: [where.id] }))
+    } catch (e) {
+      if (errName(e) === 'InvalidInstanceID.NotFound' || errName(e) === 'InvalidInstanceID.Malformed')
+        throw new ProvisionError(`--instance-id ${where.id}: no such instance in this account and region`)
+      throw e
+    }
+    const found = (r.Reservations ?? []).flatMap((x) => x.Instances ?? [])
+    if (found.length !== 1) throw new ProvisionError(`--instance-id ${where.id}: no such instance in this account and region`)
+    return found[0]!
+  }
+  const found: Instance[] = []
+  let NextToken: string | undefined
+  do {
+    const r = await c.ec2.send(
+      new DescribeInstancesCommand({ Filters: [{ Name: 'private-ip-address', Values: [where.privateIp] }], ...(NextToken ? { NextToken } : {}) }),
+    )
+    found.push(...(r.Reservations ?? []).flatMap((x) => x.Instances ?? []).filter((i) => i.State?.Name !== 'terminated'))
+    NextToken = r.NextToken
+  } while (NextToken)
+  if (found.length === 0) throw new ProvisionError(`--private-ip ${where.privateIp}: no instance has this private address in this account and region`)
+  if (found.length > 1)
+    throw new ProvisionError(`--private-ip ${where.privateIp} matches ${found.length} instances (${found.map(describeInstance).join('; ')}): pass --instance-id`)
+  return found[0]!
+}
+
+async function associationStep(c: Clients, spec: ProvisionSpec, plan: Plan, o: PlanOptions): Promise<Step> {
+  const n = names(spec)
+  const title = `EC2 instance profile association`
+  if (!o.instance)
+    return {
+      id: 'ec2.association',
+      title,
+      change: 'skip',
+      detail: `pass --instance-id i-... or --private-ip <address> to associate ${n.instanceProfile} with the app host (instance metadata is never read to find it)`,
+    }
+  const instance = await findInstance(c, o.instance)
+  const id = instance.InstanceId!
+  const assoc = ((await c.ec2.send(new DescribeIamInstanceProfileAssociationsCommand({ Filters: [{ Name: 'instance-id', Values: [id] }] })))
+    .IamInstanceProfileAssociations ?? []).filter((a) => a.State === 'associated' || a.State === 'associating')
+  const current = assoc[0]
+  const ours = (arn: string | undefined): boolean => !!arn && arn.split('/').pop() === n.instanceProfile && arn.includes(`:${spec.account}:`)
+  plan.notes.push(
+    `instance ${describeInstance(instance)}: ${current ? `instance profile ${current.IamInstanceProfile?.Arn ?? '?'} is ${current.State} (${current.AssociationId})` : 'no instance profile associated'}`,
+  )
+  const titled = `${title} ${id}`
+  if (current && ours(current.IamInstanceProfile?.Arn))
+    return { id: 'ec2.association', title: titled, change: 'ok', detail: `${n.instanceProfile} is ${current.State}` }
+  const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  // a profile created a moment ago is not yet visible to EC2 (IAM propagates within seconds): retry a few times
+  const withRetry = async (send: () => Promise<unknown>): Promise<void> => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await send()
+        return
+      } catch (e) {
+        if (errName(e) !== 'InvalidParameterValue' || attempt >= 10) throw e
+        await sleep(3_000)
+      }
+    }
+  }
+  if (!current)
+    return {
+      id: 'ec2.association',
+      title: titled,
+      change: 'create',
+      detail: `associate ${n.instanceProfile} (the services then get the role's credentials from the instance; restart them)`,
+      apply: async () => {
+        await withRetry(() => c.ec2.send(new AssociateIamInstanceProfileCommand({ InstanceId: id, IamInstanceProfile: { Name: n.instanceProfile } })))
+        plan.results.push(`${n.instanceProfile} associated with ${id}`)
+      },
+    }
+  if (!o.replaceInstanceProfile) {
+    plan.notes.push(`${id} keeps ${current.IamInstanceProfile?.Arn ?? '?'}: nothing replaced. Pass --replace-instance-profile to replace it with ${n.instanceProfile} (whatever uses that role on this host loses it).`)
+    return {
+      id: 'ec2.association',
+      title: titled,
+      change: 'skip',
+      detail: `another instance profile is associated (${current.IamInstanceProfile?.Arn ?? '?'}); not replaced without --replace-instance-profile`,
+    }
+  }
+  return {
+    id: 'ec2.association',
+    title: titled,
+    change: 'update',
+    detail: `replace ${current.IamInstanceProfile?.Arn ?? '?'} (${current.AssociationId}) with ${n.instanceProfile}`,
+    apply: async () => {
+      await withRetry(() =>
+        c.ec2.send(new ReplaceIamInstanceProfileAssociationCommand({ AssociationId: current.AssociationId, IamInstanceProfile: { Name: n.instanceProfile } })),
+      )
+      plan.results.push(`${id}: ${current.IamInstanceProfile?.Arn ?? '?'} replaced by ${n.instanceProfile}`)
+    },
+  }
 }
 
 async function accountStep(c: Clients, plan: Plan, o: PlanOptions): Promise<Step | undefined> {
@@ -688,17 +950,30 @@ export async function buildPlan(c: Clients, spec: ProvisionSpec, o: PlanOptions 
   if (o.out && !statSync(path.dirname(path.resolve(o.out))).isDirectory()) throw new ProvisionError(`--out: ${path.dirname(o.out)} is not a directory`)
   plan.steps.push(...(await bucketSteps(c, spec, 'photos')))
   plan.steps.push(...(await bucketSteps(c, spec, 'backups')))
-  plan.steps.push(await identityStep(c, spec, plan, spec.sender.identity, 'sender'))
-  for (const r of spec.sandboxRecipients) plan.steps.push(await identityStep(c, spec, plan, r, 'recipient'))
-  const topic = await topicSteps(c, spec, plan)
-  plan.steps.push(...topic.steps)
-  plan.steps.push(...(await configurationSetSteps(c, spec)))
-  plan.steps.push(await subscriptionStep(c, spec, topic.exists, plan))
-  plan.steps.push(...(await iamSteps(c, spec, plan, o)))
-  const account = await accountStep(c, plan, o)
-  if (account) plan.steps.push(account)
-  if (spec.sender.kind === 'domain')
-    plan.dns.push(`TXT    _dmarc.${spec.sender.domain}  ->  "v=DMARC1; p=none; rua=mailto:dmarc@${spec.sender.domain}"   (recommended)`)
+  plan.steps.push(await secretStep(c, spec, plan))
+  const sender: Sender | undefined = spec.sender
+  if (sender) {
+    plan.steps.push(await identityStep(c, spec, plan, sender.identity, 'sender'))
+    for (const r of spec.sandboxRecipients) plan.steps.push(await identityStep(c, spec, plan, r, 'recipient'))
+    const topic = await topicSteps(c, spec, plan)
+    plan.steps.push(...topic.steps)
+    plan.steps.push(...(await configurationSetSteps(c, spec)))
+    plan.steps.push(await subscriptionStep(c, spec, topic.exists, plan))
+  } else
+    plan.steps.push({
+      id: 'ses',
+      title: 'SES and SNS',
+      change: 'skip',
+      detail: 'no --sender: no identity, configuration set, feedback topic or subscription, and no SES statement in the policy; re-run with --sender later',
+    })
+  plan.steps.push(await policyStep(c, spec, plan))
+  plan.steps.push(...(spec.runtime === 'role' ? await roleSteps(c, spec, plan, o) : await userSteps(c, spec, plan, o)))
+  if (sender) {
+    const account = await accountStep(c, plan, o)
+    if (account) plan.steps.push(account)
+    if (sender.kind === 'domain')
+      plan.dns.push(`TXT    _dmarc.${sender.domain}  ->  "v=DMARC1; p=none; rua=mailto:dmarc@${sender.domain}"   (recommended)`)
+  }
   return plan
 }
 
@@ -732,8 +1007,9 @@ export function renderPlan(plan: Plan): string[] {
     }
   }
   out.push('')
-  out.push(`The oasis-app runtime policy (${n.policy}), in full:`)
-  out.push(JSON.stringify(runtimePolicy(plan.spec), null, 2))
+  out.push(`The app's runtime policy (${n.policy}, attached to ${plan.spec.runtime === 'role' ? `the role ${n.role}` : `the user ${n.user}`}), in full:`)
+  out.push(JSON.stringify(desiredPolicy(plan), null, 2))
+  if (!plan.secretArn) out.push(`(the secret does not exist yet: "-??????" stands for the suffix AWS appends; apply uses the real ARN)`)
   if (plan.notes.length) {
     out.push('')
     for (const x of plan.notes) out.push(`note: ${x}`)
@@ -744,21 +1020,27 @@ export function renderPlan(plan: Plan): string[] {
   return out
 }
 
-/** The settings the app needs afterwards (no secret: the key lives in the --out file). */
+/** The non-secret settings the app needs afterwards, for /etc/oasis/common.env (secrets go to the secret with pnpm secrets:push). */
 export function envLines(spec: ProvisionSpec): string[] {
   const n = names(spec)
+  const sender = spec.sender
   return [
+    `OASIS_SECRET_ID=${spec.secretId}`,
     `AWS_REGION=${spec.region}`,
-    'AWS_EC2_METADATA_DISABLED=true',
-    '# AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY: the two lines of the --out file',
-    'EMAIL_PROVIDER=ses',
-    `SES_FROM_ADDRESS=${spec.sender.kind === 'address' ? spec.sender.identity : `no-reply@${spec.sender.domain}`}`,
-    `SES_CONFIGURATION_SET=${n.configurationSet}`,
-    `SES_SNS_TOPIC_ARNS=${n.topicArn}`,
+    spec.runtime === 'role'
+      ? '# runtime=role: no AWS credentials anywhere on the host; the SDK uses the instance role (leave AWS_EC2_METADATA_DISABLED unset)'
+      : '# runtime=user: install the --out file as /etc/oasis/aws-credentials (root, 0600); the units hand it to the services',
     'STORAGE_PROVIDER=s3',
     `S3_BUCKET=${n.photosBucket}`,
     `S3_KEY_PREFIX=${spec.keyPrefix}`,
     `BACKUP_S3_URI=s3://${n.backupsBucket}/db/`,
+    ...(sender
+      ? [
+          'EMAIL_PROVIDER=ses',
+          `SES_FROM_ADDRESS=${sender.kind === 'address' ? sender.identity : `no-reply@${sender.domain}`}`,
+          `SES_CONFIGURATION_SET=${n.configurationSet}`,
+          `SES_SNS_TOPIC_ARNS=${n.topicArn}`,
+        ]
+      : ['# email: EMAIL_PROVIDER stays sim until a sender exists (re-run with --sender, then set the SES_* lines it prints)']),
   ]
 }
-

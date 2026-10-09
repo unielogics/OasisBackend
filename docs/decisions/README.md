@@ -65,3 +65,5 @@
 | [0124](0124-opt-out-keywords-and-revocation.md) | Opt-out keywords, and the owner's decisions on CANCEL and Spanish replies |
 | [0130](0130-environment-from-secrets-manager.md) | The production environment is read from one AWS Secrets Manager secret |
 | [0131](0131-secrets-push.md) | Writing the secret: pnpm secrets:push, plan first, merge, never a value on screen |
+| [0132](0132-provisioning-without-email-and-the-secret.md) | Provisioning without email or a domain, and the environment secret |
+| [0133](0133-runtime-identity-role-or-user.md) | The app's AWS identity: the instance role (recommended) or a key file, chosen by a flag |

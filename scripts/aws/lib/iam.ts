@@ -18,6 +18,16 @@ type Input = Record<string, unknown>
 const s3b = (i: Input): string => `arn:aws:s3:::${String(i.Bucket)}`
 const ses = (c: IamContext, kind: string, name: unknown): string => `arn:aws:ses:${c.region}:${c.account}:${kind}/${String(name)}`
 const user = (c: IamContext, i: Input): string => `arn:aws:iam::${c.account}:user/${String(i.UserName)}`
+const role = (c: IamContext, name: unknown): string => `arn:aws:iam::${c.account}:role/${String(name)}`
+const profile = (c: IamContext, name: unknown): string => `arn:aws:iam::${c.account}:instance-profile/${String(name)}`
+// the suffix Secrets Manager appends is not known before the call; any six characters stand for it
+const secret = (c: IamContext, name: unknown): string => `arn:aws:secretsmanager:${c.region}:${c.account}:secret:${String(name)}-AbCdEf`
+// AssociateIamInstanceProfile names the profile; IAM checks iam:PassRole on the role it holds (<prefix>-app-profile holds <prefix>-app-role)
+const passRole = (c: IamContext, i: Input): IamCall => ({
+  action: 'iam:PassRole',
+  resource: role(c, String((i.IamInstanceProfile as { Name?: string } | undefined)?.Name ?? '').replace(/-profile$/, '-role')),
+  context: { 'iam:PassedToService': 'ec2.amazonaws.com' },
+})
 
 const S3_BUCKET_ACTIONS: Record<string, string> = {
   HeadBucketCommand: 's3:ListBucket',
@@ -51,6 +61,12 @@ const IAM_USER_ACTIONS: Record<string, string> = {
   CreateAccessKeyCommand: 'iam:CreateAccessKey',
 }
 
+const IAM_ROLE_ACTIONS: Record<string, string> = {
+  GetRoleCommand: 'iam:GetRole',
+  UpdateAssumeRolePolicyCommand: 'iam:UpdateAssumeRolePolicy',
+  ListAttachedRolePoliciesCommand: 'iam:ListAttachedRolePolicies',
+}
+
 const IAM_POLICY_ACTIONS: Record<string, string> = {
   GetPolicyCommand: 'iam:GetPolicy',
   GetPolicyVersionCommand: 'iam:GetPolicyVersion',
@@ -65,6 +81,7 @@ export function iamCallsOf(command: string, input: Input, c: IamContext): IamCal
   if (command in SNS_TOPIC_ACTIONS) return [{ action: SNS_TOPIC_ACTIONS[command]!, resource: String(input.TopicArn) }]
   if (command in IAM_USER_ACTIONS) return [{ action: IAM_USER_ACTIONS[command]!, resource: user(c, input) }]
   if (command in IAM_POLICY_ACTIONS) return [{ action: IAM_POLICY_ACTIONS[command]!, resource: String(input.PolicyArn) }]
+  if (command in IAM_ROLE_ACTIONS) return [{ action: IAM_ROLE_ACTIONS[command]!, resource: role(c, input.RoleName) }]
   switch (command) {
     case 'GetCallerIdentityCommand':
       return [{ action: 'sts:GetCallerIdentity', resource: '*' }]
@@ -103,6 +120,43 @@ export function iamCallsOf(command: string, input: Input, c: IamContext): IamCal
       return [{ action: 'iam:CreateUser', resource: user(c, input) }, ...(input.Tags ? [{ action: 'iam:TagUser', resource: user(c, input) }] : [])]
     case 'AttachUserPolicyCommand':
       return [{ action: 'iam:AttachUserPolicy', resource: user(c, input), context: { 'iam:PolicyARN': String(input.PolicyArn) } }]
+    case 'CreateRoleCommand':
+      return [
+        { action: 'iam:CreateRole', resource: role(c, input.RoleName) },
+        ...(input.Tags ? [{ action: 'iam:TagRole', resource: role(c, input.RoleName) }] : []),
+      ]
+    case 'AttachRolePolicyCommand':
+      return [{ action: 'iam:AttachRolePolicy', resource: role(c, input.RoleName), context: { 'iam:PolicyARN': String(input.PolicyArn) } }]
+    case 'GetInstanceProfileCommand':
+      return [{ action: 'iam:GetInstanceProfile', resource: profile(c, input.InstanceProfileName) }]
+    case 'CreateInstanceProfileCommand':
+      return [
+        { action: 'iam:CreateInstanceProfile', resource: profile(c, input.InstanceProfileName) },
+        ...(input.Tags ? [{ action: 'iam:TagInstanceProfile', resource: profile(c, input.InstanceProfileName) }] : []),
+      ]
+    case 'AddRoleToInstanceProfileCommand':
+      return [
+        { action: 'iam:AddRoleToInstanceProfile', resource: profile(c, input.InstanceProfileName) },
+        { action: 'iam:PassRole', resource: role(c, input.RoleName) },
+      ]
+    case 'DescribeSecretCommand':
+      return [{ action: 'secretsmanager:DescribeSecret', resource: secret(c, input.SecretId) }]
+    case 'CreateSecretCommand':
+      return [
+        { action: 'secretsmanager:CreateSecret', resource: secret(c, input.Name) },
+        ...(input.Tags ? [{ action: 'secretsmanager:TagResource', resource: secret(c, input.Name) }] : []),
+      ]
+    case 'DescribeInstancesCommand':
+      return [{ action: 'ec2:DescribeInstances', resource: '*' }]
+    case 'DescribeIamInstanceProfileAssociationsCommand':
+      return [{ action: 'ec2:DescribeIamInstanceProfileAssociations', resource: '*' }]
+    case 'AssociateIamInstanceProfileCommand':
+      return [
+        { action: 'ec2:AssociateIamInstanceProfile', resource: `arn:aws:ec2:${c.region}:${c.account}:instance/${String(input.InstanceId)}` },
+        passRole(c, input),
+      ]
+    case 'ReplaceIamInstanceProfileAssociationCommand':
+      return [{ action: 'ec2:ReplaceIamInstanceProfileAssociation', resource: '*' }, passRole(c, input)]
     case 'CreatePolicyCommand':
       return [
         { action: 'iam:CreatePolicy', resource: `arn:aws:iam::${c.account}:policy${String(input.Path ?? '/')}${String(input.PolicyName)}` },

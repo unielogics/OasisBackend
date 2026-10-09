@@ -1,5 +1,5 @@
 # 0111 AWS provisioning: one reviewed, idempotent command
-Status: accepted (2026-10-08)
+Status: accepted (2026-10-08). Amended by 0132 (no sender yet, the environment secret) and 0133 (the instance role is the default identity).
 
 The owner gives the integrator a temporary IAM user with a fixed policy (docs/aws-setup.md); everything the application needs in AWS is
 created with `pnpm aws:provision` (scripts/aws/provision.ts), after which the app runs as its own least-privilege user and the temporary

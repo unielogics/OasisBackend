@@ -212,10 +212,11 @@ async function runInner(ctx: RunContext): Promise<RunResult> {
     bucket = env.S3_BUCKET?.trim()
     const need: Array<{ name: string; why: string }> = []
     const haveKeys = !!env.AWS_ACCESS_KEY_ID && !!env.AWS_SECRET_ACCESS_KEY
-    if (!haveKeys && !env.AWS_PROFILE && !args.flag('instance-profile'))
+    // AWS_SHARED_CREDENTIALS_FILE: the deploy kit's runtime=user key (/etc/oasis/aws-credentials), read by the SDK's default chain
+    if (!haveKeys && !env.AWS_PROFILE && !env.AWS_SHARED_CREDENTIALS_FILE && !args.flag('instance-profile'))
       need.push({
         name: 'AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY',
-        why: 'an IAM user key for this check (or AWS_PROFILE=<profile>, or pass --instance-profile on an EC2 host whose role is the one to test). Nothing probes instance metadata unless you pass --instance-profile.',
+        why: 'an IAM user key for this check (or AWS_PROFILE=<profile>, or AWS_SHARED_CREDENTIALS_FILE=<file>, or pass --instance-profile on an EC2 host whose role is the one to test). Nothing probes instance metadata unless you pass --instance-profile.',
       })
     if (wantSes && !from)
       need.push({
@@ -793,7 +794,8 @@ export const HELP = `pnpm verify:aws [options]
 Checks SES and S3 against your AWS account and writes docs/live-verification/<date>-aws.md and .json. Configuration is only READ unless
 --send is given. Exit code 0 = no FAIL, 1 = at least one FAIL, 2 = configuration missing or bad command line.
 
-Environment (or --sim): AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY (or AWS_PROFILE, or --instance-profile) SES_FROM_ADDRESS S3_BUCKET
+Environment (or --sim): AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY (or AWS_PROFILE, AWS_SHARED_CREDENTIALS_FILE, or --instance-profile) SES_FROM_ADDRESS S3_BUCKET
+With OASIS_SECRET_ID set, the settings are read from that secret first, like the app does.
 Optional: AWS_REGION S3_KEY_PREFIX S3_SSE S3_KMS_KEY_ID SES_CONFIGURATION_SET SES_FROM_NAME PUBLIC_DASHBOARD_URL S3_ENDPOINT S3_FORCE_PATH_STYLE
 
   --sim                 run against the built-in AWS simulator (port 4592, --sim-port)

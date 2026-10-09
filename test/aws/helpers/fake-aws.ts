@@ -7,6 +7,8 @@ import * as ses from '@aws-sdk/client-sesv2'
 import * as sns from '@aws-sdk/client-sns'
 import * as iam from '@aws-sdk/client-iam'
 import * as sts from '@aws-sdk/client-sts'
+import * as sm from '@aws-sdk/client-secrets-manager'
+import * as ec2 from '@aws-sdk/client-ec2'
 import type { Clients } from '../../../scripts/aws/lib/provision.js'
 
 export const ACCOUNT = '123456789012'
@@ -32,7 +34,7 @@ export interface Sent {
   input: In
 }
 
-const MUTATING = /^(Create|Put|Set|Subscribe|Attach|Update|Delete)/
+const MUTATING = /^(Create|Put|Set|Subscribe|Attach|Update|Delete|Associate|Replace|AddRole)/
 
 export class FakeAws {
   readonly buckets = new Map<string, Bucket>()
@@ -42,6 +44,14 @@ export class FakeAws {
   readonly topics = new Map<string, { attrs: Record<string, string>; subs: Array<{ Protocol: string; Endpoint: string; SubscriptionArn: string }> }>()
   readonly users = new Map<string, { attached: Set<string>; keys: Array<{ AccessKeyId: string; Status: string }> }>()
   readonly policies = new Map<string, Array<{ VersionId: string; Document: string; IsDefaultVersion: boolean; CreateDate: Date }>>()
+  readonly roles = new Map<string, { trust: string; attached: Set<string> }>()
+  readonly profiles = new Map<string, { roles: string[] }>()
+  /** Secret name -> its value (never read by the script; recorded to prove it is created empty and never overwritten). */
+  readonly secretsManager = new Map<string, { value: string; tags?: unknown; deleted?: boolean; kmsKeyId?: string }>()
+  readonly instances: Array<{ InstanceId: string; PrivateIpAddress: string; State: string; Name?: string }> = []
+  readonly associations: Array<{ AssociationId: string; InstanceId: string; Arn: string; State: string }> = []
+  /** AssociateIamInstanceProfile fails this many times with InvalidParameterValue (IAM propagation) before it works. */
+  profilePropagationFailures = 0
   production = false
   review: string | undefined
   readonly sent: Sent[] = []
@@ -55,7 +65,7 @@ export class FakeAws {
     return this.sent.filter((s) => MUTATING.test(s.command))
   }
 
-  /** Mocks the five client classes; returns a factory for scripts/aws/provision.ts main(). */
+  /** Mocks the client classes; returns a factory for scripts/aws/provision.ts main(). */
   install(): (cfg: { region: string; profile?: string }) => Clients {
     const rec = (service: string, Cmd: { name: string }, fn: (i: In) => unknown) => async (i: In) => {
       this.sent.push({ service, command: Cmd.name, input: i })
@@ -268,19 +278,138 @@ export class FakeAws {
       return {}
     })
 
+    iamon(iam.GetRoleCommand, (i) => {
+      const r = this.roles.get(String(i.RoleName))
+      if (!r) throw awsError('NoSuchEntityException', 404, `The role with name ${String(i.RoleName)} cannot be found.`)
+      return { Role: { RoleName: i.RoleName, Arn: `arn:aws:iam::${ACCOUNT}:role/${String(i.RoleName)}`, AssumeRolePolicyDocument: encodeURIComponent(r.trust) } }
+    })
+    iamon(iam.CreateRoleCommand, (i) => {
+      if (this.roles.has(String(i.RoleName))) throw awsError('EntityAlreadyExistsException', 409)
+      this.roles.set(String(i.RoleName), { trust: String(i.AssumeRolePolicyDocument), attached: new Set() })
+      return { Role: { RoleName: i.RoleName } }
+    })
+    const role = (name: unknown) => {
+      const r = this.roles.get(String(name))
+      if (!r) throw awsError('NoSuchEntityException', 404)
+      return r
+    }
+    iamon(iam.UpdateAssumeRolePolicyCommand, (i) => {
+      role(i.RoleName).trust = String(i.PolicyDocument)
+      return {}
+    })
+    iamon(iam.ListAttachedRolePoliciesCommand, (i) => ({ AttachedPolicies: [...role(i.RoleName).attached].map((PolicyArn) => ({ PolicyArn })) }))
+    iamon(iam.AttachRolePolicyCommand, (i) => {
+      policy(i.PolicyArn)
+      role(i.RoleName).attached.add(String(i.PolicyArn))
+      return {}
+    })
+    iamon(iam.GetInstanceProfileCommand, (i) => {
+      const p = this.profiles.get(String(i.InstanceProfileName))
+      if (!p) throw awsError('NoSuchEntityException', 404, `Instance Profile ${String(i.InstanceProfileName)} cannot be found.`)
+      return {
+        InstanceProfile: {
+          InstanceProfileName: i.InstanceProfileName,
+          Arn: `arn:aws:iam::${ACCOUNT}:instance-profile/${String(i.InstanceProfileName)}`,
+          Roles: p.roles.map((RoleName) => ({ RoleName, Arn: `arn:aws:iam::${ACCOUNT}:role/${RoleName}` })),
+        },
+      }
+    })
+    iamon(iam.CreateInstanceProfileCommand, (i) => {
+      if (this.profiles.has(String(i.InstanceProfileName))) throw awsError('EntityAlreadyExistsException', 409)
+      this.profiles.set(String(i.InstanceProfileName), { roles: [] })
+      return {}
+    })
+    iamon(iam.AddRoleToInstanceProfileCommand, (i) => {
+      const p = this.profiles.get(String(i.InstanceProfileName))
+      if (!p) throw awsError('NoSuchEntityException', 404)
+      role(i.RoleName)
+      if (p.roles.length) throw awsError('LimitExceededException', 409, 'Cannot exceed quota for InstanceSessionsPerInstanceProfile: 1')
+      p.roles.push(String(i.RoleName))
+      return {}
+    })
+
+    const msm = mockClient(sm.SecretsManagerClient)
+    msm.onAnyCommand().rejects(new Error('fake Secrets Manager: command not modelled'))
+    const smon = <C extends { name: string }>(Cmd: C, fn: (i: In) => unknown) => msm.on(Cmd as never).callsFake(rec('secretsmanager', Cmd, fn) as never)
+    const secretArn = (name: string) => `arn:aws:secretsmanager:${this.region}:${ACCOUNT}:secret:${name}-Ab12Cd`
+    smon(sm.DescribeSecretCommand, (i) => {
+      const x = this.secretsManager.get(String(i.SecretId))
+      if (!x) throw awsError('ResourceNotFoundException', 400, "Secrets Manager can't find the specified secret.")
+      return { ARN: secretArn(String(i.SecretId)), Name: i.SecretId, ...(x.kmsKeyId ? { KmsKeyId: x.kmsKeyId } : {}), ...(x.deleted ? { DeletedDate: new Date(0) } : {}) }
+    })
+    smon(sm.CreateSecretCommand, (i) => {
+      const name = String(i.Name)
+      if (this.secretsManager.has(name)) throw awsError('ResourceExistsException', 400)
+      this.secretsManager.set(name, { value: String(i.SecretString), tags: i.Tags, ...(i.KmsKeyId ? { kmsKeyId: String(i.KmsKeyId) } : {}) })
+      return { ARN: secretArn(name), Name: name }
+    })
+
+    const me2 = mockClient(ec2.EC2Client)
+    me2.onAnyCommand().rejects(new Error('fake EC2: command not modelled'))
+    const ec2on = <C extends { name: string }>(Cmd: C, fn: (i: In) => unknown) => me2.on(Cmd as never).callsFake(rec('ec2', Cmd, fn) as never)
+    const instance = (x: (typeof this.instances)[number]) => ({
+      InstanceId: x.InstanceId,
+      PrivateIpAddress: x.PrivateIpAddress,
+      State: { Name: x.State },
+      ...(x.Name ? { Tags: [{ Key: 'Name', Value: x.Name }] } : {}),
+    })
+    ec2on(ec2.DescribeInstancesCommand, (i) => {
+      const ids = i.InstanceIds as string[] | undefined
+      const filters = (i.Filters as Array<{ Name: string; Values: string[] }> | undefined) ?? []
+      if (ids) {
+        const found = this.instances.filter((x) => ids.includes(x.InstanceId))
+        if (!found.length) throw awsError('InvalidInstanceID.NotFound', 400, `The instance ID '${ids.join(',')}' does not exist`)
+        return { Reservations: [{ Instances: found.map(instance) }] }
+      }
+      const ip = filters.find((f) => f.Name === 'private-ip-address')?.Values ?? []
+      return { Reservations: this.instances.filter((x) => ip.includes(x.PrivateIpAddress)).map((x) => ({ Instances: [instance(x)] })) }
+    })
+    ec2on(ec2.DescribeIamInstanceProfileAssociationsCommand, (i) => {
+      const ids = (i.Filters as Array<{ Name: string; Values: string[] }>).find((f) => f.Name === 'instance-id')?.Values ?? []
+      return {
+        IamInstanceProfileAssociations: this.associations
+          .filter((a) => ids.includes(a.InstanceId))
+          .map((a) => ({ AssociationId: a.AssociationId, InstanceId: a.InstanceId, State: a.State, IamInstanceProfile: { Arn: a.Arn, Id: 'AIPAFAKE' } })),
+      }
+    })
+    const profileArn = (name: unknown) => {
+      if (!this.profiles.has(String(name)) || this.profilePropagationFailures > 0) {
+        if (this.profilePropagationFailures > 0) this.profilePropagationFailures -= 1
+        throw awsError('InvalidParameterValue', 400, `Value (${String(name)}) for parameter iamInstanceProfile.name is invalid. Invalid IAM Instance Profile name`)
+      }
+      return `arn:aws:iam::${ACCOUNT}:instance-profile/${String(name)}`
+    }
+    ec2on(ec2.AssociateIamInstanceProfileCommand, (i) => {
+      const id = String(i.InstanceId)
+      if (this.associations.some((a) => a.InstanceId === id && a.State === 'associated'))
+        throw awsError('IncorrectState', 400, `There is an existing association for instance ${id}`)
+      const arn = profileArn((i.IamInstanceProfile as { Name: string }).Name)
+      const AssociationId = `iip-assoc-${String(this.associations.length + 1).padStart(17, '0')}`
+      this.associations.push({ AssociationId, InstanceId: id, Arn: arn, State: 'associated' })
+      return { IamInstanceProfileAssociation: { AssociationId, InstanceId: id, State: 'associating' } }
+    })
+    ec2on(ec2.ReplaceIamInstanceProfileAssociationCommand, (i) => {
+      const a = this.associations.find((x) => x.AssociationId === i.AssociationId)
+      if (!a) throw awsError('InvalidAssociationID.NotFound', 400)
+      a.Arn = profileArn((i.IamInstanceProfile as { Name: string }).Name)
+      return { IamInstanceProfileAssociation: { AssociationId: a.AssociationId, InstanceId: a.InstanceId, State: 'associating' } }
+    })
+
     const mt = mockClient(sts.STSClient)
     mt.onAnyCommand().rejects(new Error('fake STS: command not modelled'))
     mt.on(sts.GetCallerIdentityCommand).callsFake(
       rec('sts', sts.GetCallerIdentityCommand, () => ({ Account: ACCOUNT, Arn: `arn:aws:iam::${ACCOUNT}:user/oasis-setup-temp`, UserId: 'AIDAFAKE' })) as never,
     )
 
-    this.mocks = [m3, me, mn, mi, mt]
+    this.mocks = [m3, me, mn, mi, mt, msm, me2]
     return (cfg) => ({
       s3: new s3.S3Client({ region: cfg.region, credentials: { accessKeyId: 'AKIATEST', secretAccessKey: 'test' } }),
       ses: new ses.SESv2Client({ region: cfg.region, credentials: { accessKeyId: 'AKIATEST', secretAccessKey: 'test' } }),
       sns: new sns.SNSClient({ region: cfg.region, credentials: { accessKeyId: 'AKIATEST', secretAccessKey: 'test' } }),
       iam: new iam.IAMClient({ region: 'us-east-1', credentials: { accessKeyId: 'AKIATEST', secretAccessKey: 'test' } }),
       sts: new sts.STSClient({ region: cfg.region, credentials: { accessKeyId: 'AKIATEST', secretAccessKey: 'test' } }),
+      sm: new sm.SecretsManagerClient({ region: cfg.region, credentials: { accessKeyId: 'AKIATEST', secretAccessKey: 'test' } }),
+      ec2: new ec2.EC2Client({ region: cfg.region, credentials: { accessKeyId: 'AKIATEST', secretAccessKey: 'test' } }),
     })
   }
 

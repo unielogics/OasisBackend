@@ -1,6 +1,7 @@
 // pnpm aws:provision: plan first, apply only with --apply, idempotent on re-run, never deletes, the key only in --out (0600), and
 // every call it makes allowed by the temporary setup policy documented in docs/aws-setup.md. The AWS account is an in-memory fake
-// behind the real SDK client classes (aws-sdk-client-mock).
+// behind the real SDK client classes (aws-sdk-client-mock). The first suites run the runtime=user flow with a sender (the original
+// shape); the later ones cover the default runtime=role, provisioning without a sender, and the environment secret.
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -11,7 +12,9 @@ import {
   names,
   photosCors,
   photosLifecycle,
+  ROLE_TRUST_POLICY,
   runtimePolicy,
+  secretArnPattern,
   tlsOnlyBucketPolicy,
   topicPolicy,
   TOPIC_DELIVERY_POLICY,
@@ -25,12 +28,15 @@ const BACKUPS = `oasis-backups-${ACCOUNT}`
 const TOPIC = `arn:aws:sns:us-east-1:${ACCOUNT}:oasis-ses-events`
 const POLICY_ARN = `arn:aws:iam::${ACCOUNT}:policy/oasis-app-runtime`
 const HOOKS = 'https://oasis.example.com/hooks/ses'
+const SECRET_ARN = `arn:aws:secretsmanager:us-east-1:${ACCOUNT}:secret:oasis/prod/app-Ab12Cd`
+const PROFILE_ARN = `arn:aws:iam::${ACCOUNT}:instance-profile/oasis-app-profile`
 
 let fake: FakeAws
 let dir: string
 const allSent: Array<{ command: string; input: Record<string, unknown> }> = []
 
 beforeEach(() => {
+  process.env.AWS_EC2_METADATA_DISABLED = 'true'
   fake = new FakeAws()
   dir = mkdtempSync(path.join(tmpdir(), 'oasis-provision-'))
 })
@@ -40,7 +46,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-const base = ['--profile', 'oasis-setup', '--sender', 'oasisautospa.com', '--dashboard-origin', 'https://oasis.example.com', '--hooks-url', HOOKS]
+const base = ['--profile', 'oasis-setup', '--runtime', 'user', '--sender', 'oasisautospa.com', '--dashboard-origin', 'https://oasis.example.com', '--hooks-url', HOOKS]
 
 async function run(args: string[], env: Record<string, string | undefined> = {}) {
   const lines: string[] = []
@@ -49,6 +55,7 @@ async function run(args: string[], env: Record<string, string | undefined> = {})
   const code = await main(args, {
     env,
     log: (l) => lines.push(l),
+    sleep: async () => undefined,
     clients: (cfg) => {
       built += 1
       return factory(cfg)
@@ -63,6 +70,8 @@ const spec = (over: Partial<ProvisionSpec> = {}): ProvisionSpec => ({
   account: ACCOUNT,
   prefix: 'oasis',
   sender: { kind: 'domain', identity: 'oasisautospa.com', domain: 'oasisautospa.com' },
+  secretId: 'oasis/prod/app',
+  runtime: 'user',
   dashboardOrigins: ['https://oasis.example.com'],
   hooksUrl: HOOKS,
   keyPrefix: 'prod/',
@@ -95,6 +104,7 @@ describe('refusals', () => {
   it('accepts explicit key variables instead of a profile, and always disables the instance metadata service', async () => {
     delete process.env.AWS_EC2_METADATA_DISABLED
     const r = await run(base.slice(2), { AWS_ACCESS_KEY_ID: 'AKIAENVKEY', AWS_SECRET_ACCESS_KEY: 'secret' })
+    expect(r.out).not.toMatch(/instance metadata|169\.254/)
     expect(r.code).toBe(0)
     expect(process.env.AWS_EC2_METADATA_DISABLED).toBe('true')
   })
@@ -102,6 +112,7 @@ describe('refusals', () => {
   it.each([
     [['--sender', 'not a sender'], /--sender/],
     [['--dashboard-origin', 'http://oasis.example.com'], /https only/],
+    [['--dashboard-origin', 'http://203.0.113.9'], /https only/],
     [['--hooks-url', 'https://oasis.example.com/hooks/smsgate'], /--hooks-url/],
     [['--key-prefix', 'prod'], /--key-prefix/],
     [['--request-ses-production'], /--website-url and --use-case/],
@@ -132,6 +143,7 @@ describe('plan, apply, re-run', () => {
       `  + S3 photos bucket ${PHOTOS}: create in us-east-1 with Object Ownership BucketOwnerEnforced (ACLs disabled)`,
       `  + S3 photos bucket ${PHOTOS}: CORS: POST, GET and HEAD from https://oasis.example.com: set the document below`,
       `  + S3 backups bucket ${BACKUPS}: versioning enabled: set the document below`,
+      '  + Secrets Manager secret oasis/prod/app: create it holding an empty JSON object, with the AWS-managed key aws/secretsmanager, tagged app=oasis (pnpm secrets:push fills it)',
       '  + SES sending identity oasisautospa.com: create the domain identity with Easy DKIM (RSA 2048); the three CNAME records are printed after apply',
       `  + SNS topic oasis-ses-events: create (Standard; SES does not publish to FIFO) with the access policy and the HTTPS delivery policy below; ARN ${TOPIC}`,
       '  + SES configuration set oasis-mail: event destination oasis-sns-events: BOUNCE, COMPLAINT, DELIVERY, REJECT to oasis-ses-events',
@@ -145,9 +157,13 @@ describe('plan, apply, re-run', () => {
       `  S3_BUCKET=${PHOTOS}`,
       '  S3_KEY_PREFIX=prod/',
       `  BACKUP_S3_URI=s3://${BACKUPS}/db/`,
+      '  OASIS_SECRET_ID=oasis/prod/app',
+      '  # runtime=user: install the --out file as /etc/oasis/aws-credentials (root, 0600); the units hand it to the services',
+      '(the secret does not exist yet: "-??????" stands for the suffix AWS appends; apply uses the real ARN)',
     ])
       expect(r.out.split('\n')).toContain(line)
     expect(r.out).toContain(JSON.stringify(runtimePolicy(spec()), null, 2))
+    expect(r.out).toContain(`"Resource": "arn:aws:secretsmanager:us-east-1:${ACCOUNT}:secret:oasis/prod/app-??????"`)
     expect(r.out).toContain(JSON.stringify(tlsOnlyBucketPolicy(PHOTOS), null, 2))
   })
 
@@ -179,13 +195,16 @@ describe('plan, apply, re-run', () => {
       SnsDestination: { TopicArn: TOPIC },
     })
     expect(fake.users.get('oasis-app')!.attached).toEqual(new Set([POLICY_ARN]))
-    expect(JSON.parse(decodeURIComponent(fake.policies.get(POLICY_ARN)![0]!.Document))).toEqual(runtimePolicy(spec()))
+    // the policy grants the secret by its real ARN (apply created the secret first)
+    expect(JSON.parse(decodeURIComponent(fake.policies.get(POLICY_ARN)![0]!.Document))).toEqual(runtimePolicy(spec(), SECRET_ARN))
+    expect(fake.secretsManager.get('oasis/prod/app')).toEqual({ value: '{}', tags: [{ Key: 'app', Value: 'oasis' }] })
 
+    // an AWS credentials file for /etc/oasis/aws-credentials
     const key = readFileSync(out, 'utf8')
     expect(statSync(out).mode & 0o777).toBe(0o600)
     const [id, secret] = fake.secrets.slice(-1).concat(fake.secrets.slice(-2, -1))
-    expect(key).toContain(`AWS_ACCESS_KEY_ID=${id}\n`)
-    expect(key).toContain(`AWS_SECRET_ACCESS_KEY=${secret}\n`)
+    expect(key).toContain(`[default]\naws_access_key_id = ${id}\naws_secret_access_key = ${secret}\n`)
+    expect(key).toContain(`sudo install -o root -g root -m 0600 ${out} /etc/oasis/aws-credentials`)
     expect(first.out).not.toContain(secret!)
     expect(first.out).not.toContain(id!)
     expect(first.out).toContain(`access key ${id!.slice(0, 4)}...${id!.slice(-4)} written to ${out} (mode 0600)`)
@@ -197,7 +216,7 @@ describe('plan, apply, re-run', () => {
     const before = fake.sent.length
     const again = await run(base)
     expect(again.code).toBe(0)
-    expect(fake.sent.slice(before).filter((s) => /^(Create|Put|Set|Subscribe|Attach|Update|Delete)/.test(s.command))).toEqual([])
+    expect(fake.sent.slice(before).filter((s) => /^(Create|Put|Set|Subscribe|Attach|Update|Delete|Associate|Replace|AddRole)/.test(s.command))).toEqual([])
     expect(again.out).toContain('Nothing to change.')
     expect(again.out).not.toMatch(/^ {2}[+~!] /m)
     expect(again.out).toContain(`  = IAM user oasis-app: has ${id!.slice(0, 4)}...${id!.slice(-4)} (Active); pass --new-access-key to rotate`)
@@ -261,7 +280,7 @@ describe('drift and things it does not own', () => {
     expect(r.out).toContain('removed the oldest non-default version v2 of oasis-app-runtime (IAM keeps at most five)')
     expect(fake.mutations().map((m) => m.command)).toEqual(['CreateEmailIdentityCommand', 'DeletePolicyVersionCommand', 'CreatePolicyVersionCommand'])
     const def = versions.find((v) => v.IsDefaultVersion)!
-    expect(JSON.parse(decodeURIComponent(def.Document))).toEqual(runtimePolicy(spec({ sandboxRecipients: ['tester@example.com'] })))
+    expect(JSON.parse(decodeURIComponent(def.Document))).toEqual(runtimePolicy(spec({ sandboxRecipients: ['tester@example.com'] }), SECRET_ARN))
     expect(r.out).toContain('SES emailed a verification link to t***@example.com')
   })
 
@@ -314,11 +333,224 @@ describe('drift and things it does not own', () => {
   })
 })
 
+describe('without a sender (email and domain come last)', () => {
+  const noSender = ['--profile', 'oasis-setup', '--dashboard-origin', 'https://oasis.example.com', '--runtime', 'user']
+
+  it('creates buckets, secret, policy and identity, and touches nothing of SES or SNS', async () => {
+    const r = await run([...noSender, '--out', path.join(dir, 'k'), '--apply'])
+    expect(r.code, r.out).toBe(0)
+    expect(fake.sent.filter((x) => x.service === 'ses' || x.service === 'sns')).toEqual([])
+    expect(r.out).toContain('  - SES and SNS: no --sender: no identity, configuration set, feedback topic or subscription, and no SES statement in the policy; re-run with --sender later')
+    expect(r.out).toContain('  # email: EMAIL_PROVIDER stays sim until a sender exists (re-run with --sender, then set the SES_* lines it prints)')
+    expect(r.out).not.toMatch(/EMAIL_PROVIDER=ses|DNS records/)
+    const doc = JSON.parse(decodeURIComponent(fake.policies.get(POLICY_ARN)![0]!.Document)) as { Statement: Array<{ Sid: string }> }
+    expect(doc.Statement.map((x) => x.Sid)).toEqual(['ReadEnvironment', 'PhotoObjects', 'PhotoHeadMissingKey', 'BackupObjects', 'BackupList'])
+    expect(doc).toEqual(runtimePolicy(spec({ sender: undefined }), SECRET_ARN))
+    const again = await run(noSender)
+    expect(again.out).toContain('Nothing to change.')
+  })
+
+  it('refuses the email-only options without --sender', async () => {
+    for (const extra of [['--hooks-url', HOOKS], ['--sandbox-recipient', 'a@example.com'], ['--request-ses-production', '--website-url', 'https://x.example.com', '--use-case', 'x']]) {
+      const r = await run([...noSender, ...extra])
+      expect(r.code).toBe(2)
+      expect(r.out).toMatch(/need --sender \(email comes last/)
+    }
+  })
+
+  it('re-running later with --sender adds SES and SNS and a new policy version with the SES statement, and keeps everything else', async () => {
+    expect((await run([...noSender, '--out', path.join(dir, 'k'), '--apply'])).code).toBe(0)
+    fake.sent.length = 0
+    const plan = await run([...noSender, '--sender', 'oasisautospa.com', '--hooks-url', HOOKS])
+    expect(plan.out).toContain('  ~ IAM policy oasis-app-runtime: add a new default version with the document below')
+    expect(plan.out).toContain('  + SES sending identity oasisautospa.com: create the domain identity with Easy DKIM (RSA 2048); the three CNAME records are printed after apply')
+    expect(plan.out).toContain('  = Secrets Manager secret oasis/prod/app: exists: ' + SECRET_ARN + ' (its values are never read or changed here; pnpm secrets:push fills it)')
+    const r = await run([...noSender, '--sender', 'oasisautospa.com', '--hooks-url', HOOKS, '--apply'])
+    expect(r.code, r.out).toBe(0)
+    expect(fake.mutations().map((m) => m.command)).toEqual([
+      'CreateEmailIdentityCommand', 'CreateTopicCommand', 'CreateConfigurationSetCommand', 'CreateConfigurationSetEventDestinationCommand',
+      'SubscribeCommand', 'CreatePolicyVersionCommand',
+    ])
+    const versions = fake.policies.get(POLICY_ARN)!
+    expect(versions).toHaveLength(2)
+    expect(JSON.parse(decodeURIComponent(versions.find((v) => v.IsDefaultVersion)!.Document))).toEqual(runtimePolicy(spec(), SECRET_ARN))
+    expect(fake.users.get('oasis-app')!.keys).toHaveLength(1)
+  })
+})
+
+describe('the environment secret', () => {
+  const args = ['--profile', 'oasis-setup', '--dashboard-origin', 'https://oasis.example.com']
+
+  it('is created empty once, and an existing secret is never read or overwritten', async () => {
+    fake.secretsManager.set('oasis/prod/app', { value: '{"DATABASE_URL":"postgres://keep"}' })
+    const r = await run([...args, '--apply'])
+    expect(r.code, r.out).toBe(0)
+    expect(fake.secretsManager.get('oasis/prod/app')!.value).toBe('{"DATABASE_URL":"postgres://keep"}')
+    expect(fake.sent.filter((x) => x.service === 'secretsmanager').map((x) => x.command)).toEqual(['DescribeSecretCommand'])
+    expect(r.out).not.toContain('postgres://keep')
+  })
+
+  it('--secret-id names another secret, and the grant follows it', async () => {
+    const r = await run([...args, '--secret-id', 'oasis/staging/app', '--apply'])
+    expect(r.code, r.out).toBe(0)
+    expect([...fake.secretsManager.keys()]).toEqual(['oasis/staging/app'])
+    const doc = JSON.parse(decodeURIComponent(fake.policies.get(POLICY_ARN)![0]!.Document)) as { Statement: Array<{ Sid: string; Resource: string }> }
+    expect(doc.Statement[0]).toEqual({ Sid: 'ReadEnvironment', Effect: 'Allow', Action: 'secretsmanager:GetSecretValue', Resource: `arn:aws:secretsmanager:us-east-1:${ACCOUNT}:secret:oasis/staging/app-Ab12Cd` })
+    expect(r.out).toContain('  OASIS_SECRET_ID=oasis/staging/app')
+  })
+
+  it('stops on a secret scheduled for deletion, notes a customer KMS key, and refuses an ARN or a suffix-like name', async () => {
+    fake.secretsManager.set('oasis/prod/app', { value: '{}', deleted: true })
+    let r = await run(args)
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/is scheduled for deletion: restore it first/)
+    fake.secretsManager.set('oasis/prod/app', { value: '{}', kmsKeyId: `arn:aws:kms:us-east-1:${ACCOUNT}:key/1234` })
+    r = await run(args)
+    expect(r.out).toContain(`note: oasis/prod/app is encrypted with the key arn:aws:kms:us-east-1:${ACCOUNT}:key/1234: the runtime also needs kms:Decrypt on it, which oasis-app-runtime does not grant`)
+    for (const id of [`arn:aws:secretsmanager:us-east-1:${ACCOUNT}:secret:oasis/prod/app`, 'oasis/prod/app-AbCdEf', 'has space']) {
+      r = await run([...args, '--secret-id', id])
+      expect(r.code, id).toBe(2)
+    }
+  })
+
+  it('the pattern grant before creation matches only that name', () => {
+    expect(secretArnPattern({ region: 'us-east-1', account: ACCOUNT, secretId: 'oasis/prod/app' })).toBe(`arn:aws:secretsmanager:us-east-1:${ACCOUNT}:secret:oasis/prod/app-??????`)
+  })
+})
+
+describe('runtime=role (the default): role, instance profile, association', () => {
+  const args = ['--profile', 'oasis-setup', '--dashboard-origin', 'https://oasis.example.com']
+  const host = (over: Partial<FakeAws['instances'][number]> = {}) =>
+    fake.instances.push({ InstanceId: 'i-0123456789abcdef0', PrivateIpAddress: '172.31.5.10', State: 'running', Name: 'oasis', ...over })
+
+  it('creates the EC2-only role with the policy, the instance profile holding it, and associates it with the instance found by private IP', async () => {
+    host()
+    const plan = await run([...args, '--private-ip', '172.31.5.10'])
+    expect(plan.code, plan.out).toBe(0)
+    for (const line of [
+      '  + IAM role oasis-app-role: create, assumable only by EC2 (trust policy below), tagged app=oasis',
+      '  + IAM role oasis-app-role: oasis-app-runtime attach',
+      '  + IAM instance profile oasis-app-profile: create, tagged app=oasis',
+      '  + IAM instance profile oasis-app-profile: add oasis-app-role',
+      '  + EC2 instance profile association i-0123456789abcdef0: associate oasis-app-profile (the services then get the role\'s credentials from the instance; restart them)',
+      'note: instance i-0123456789abcdef0 "oasis" (running, private IP 172.31.5.10): no instance profile associated',
+      "The app's runtime policy (oasis-app-runtime, attached to the role oasis-app-role), in full:",
+      '  # runtime=role: no AWS credentials anywhere on the host; the SDK uses the instance role (leave AWS_EC2_METADATA_DISABLED unset)',
+    ])
+      expect(plan.out.split('\n')).toContain(line)
+    expect(plan.out).toContain(JSON.stringify(ROLE_TRUST_POLICY, null, 2))
+    expect(fake.mutations()).toEqual([])
+    expect(fake.users.size).toBe(0)
+
+    fake.profilePropagationFailures = 2 // EC2 does not see the new profile for a moment
+    const r = await run([...args, '--private-ip', '172.31.5.10', '--apply'])
+    expect(r.code, r.out).toBe(0)
+    expect(JSON.parse(fake.roles.get('oasis-app-role')!.trust)).toEqual(ROLE_TRUST_POLICY)
+    expect(fake.roles.get('oasis-app-role')!.attached).toEqual(new Set([POLICY_ARN]))
+    expect(fake.profiles.get('oasis-app-profile')).toEqual({ roles: ['oasis-app-role'] })
+    expect(fake.associations).toEqual([{ AssociationId: expect.any(String), InstanceId: 'i-0123456789abcdef0', Arn: PROFILE_ARN, State: 'associated' }])
+    expect(fake.sent.filter((x) => x.command === 'AssociateIamInstanceProfileCommand')).toHaveLength(3)
+    expect(fake.users.size).toBe(0) // no user, no key on disk
+    expect(r.out).toContain('oasis-app-profile associated with i-0123456789abcdef0')
+
+    const again = await run([...args, '--instance-id', 'i-0123456789abcdef0'])
+    expect(again.out).toContain('  = EC2 instance profile association i-0123456789abcdef0: oasis-app-profile is associated')
+    expect(again.out).toContain('Nothing to change.')
+  })
+
+  it('never replaces an instance profile that is already associated unless asked, and says what is associated', async () => {
+    host()
+    fake.associations.push({ AssociationId: 'iip-assoc-0aaa', InstanceId: 'i-0123456789abcdef0', Arn: `arn:aws:iam::${ACCOUNT}:instance-profile/dev-box`, State: 'associated' })
+    const r = await run([...args, '--instance-id', 'i-0123456789abcdef0', '--apply'])
+    expect(r.code, r.out).toBe(0)
+    expect(r.out).toContain(`  - EC2 instance profile association i-0123456789abcdef0: another instance profile is associated (arn:aws:iam::${ACCOUNT}:instance-profile/dev-box); not replaced without --replace-instance-profile`)
+    expect(r.out).toContain(`note: instance i-0123456789abcdef0 "oasis" (running, private IP 172.31.5.10): instance profile arn:aws:iam::${ACCOUNT}:instance-profile/dev-box is associated (iip-assoc-0aaa)`)
+    expect(fake.associations[0]!.Arn).toBe(`arn:aws:iam::${ACCOUNT}:instance-profile/dev-box`)
+    expect(fake.sent.filter((x) => /Associate|Replace/.test(x.command) && !x.command.startsWith('Describe'))).toEqual([])
+
+    const replaced = await run([...args, '--instance-id', 'i-0123456789abcdef0', '--replace-instance-profile', '--apply'])
+    expect(replaced.code, replaced.out).toBe(0)
+    expect(replaced.out).toContain(`  ~ EC2 instance profile association i-0123456789abcdef0: replace arn:aws:iam::${ACCOUNT}:instance-profile/dev-box (iip-assoc-0aaa) with oasis-app-profile`)
+    expect(fake.associations).toEqual([{ AssociationId: 'iip-assoc-0aaa', InstanceId: 'i-0123456789abcdef0', Arn: PROFILE_ARN, State: 'associated' }])
+  })
+
+  it('without an instance it creates role and profile and skips the association; it never asks instance metadata', async () => {
+    const r = await run([...args, '--apply'])
+    expect(r.code, r.out).toBe(0)
+    expect(r.out).toContain('  - EC2 instance profile association: pass --instance-id i-... or --private-ip <address> to associate oasis-app-profile with the app host (instance metadata is never read to find it)')
+    expect(fake.sent.filter((x) => x.service === 'ec2')).toEqual([])
+    expect(fake.profiles.has('oasis-app-profile')).toBe(true)
+    expect(process.env.AWS_EC2_METADATA_DISABLED).toBe('true')
+  })
+
+  it('stops when the instance cannot be identified exactly', async () => {
+    let r = await run([...args, '--private-ip', '172.31.5.10'])
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/--private-ip 172\.31\.5\.10: no instance has this private address/)
+    host()
+    host({ InstanceId: 'i-0fedcba9876543210', Name: 'other-vpc' })
+    r = await run([...args, '--private-ip', '172.31.5.10'])
+    expect(r.out).toMatch(/matches 2 instances .*i-0123456789abcdef0.*i-0fedcba9876543210.*: pass --instance-id/)
+    r = await run([...args, '--instance-id', 'i-00000000000000000'])
+    expect(r.out).toMatch(/--instance-id i-00000000000000000: no such instance/)
+    expect(fake.mutations()).toEqual([])
+  })
+
+  it('repairs a role trust policy someone widened, refuses a profile holding another role, and notes a leftover app user', async () => {
+    host()
+    expect((await run([...args, '--private-ip', '172.31.5.10', '--apply'])).code).toBe(0)
+    fake.roles.get('oasis-app-role')!.trust = JSON.stringify({ Version: '2012-10-17', Statement: [{ Effect: 'Allow', Principal: { AWS: '*' }, Action: 'sts:AssumeRole' }] })
+    fake.users.set('oasis-app', { attached: new Set([POLICY_ARN]), keys: [{ AccessKeyId: 'AKIAOLDKEY000000', Status: 'Active' }] })
+    fake.sent.length = 0
+    const r = await run([...args, '--private-ip', '172.31.5.10', '--apply'])
+    expect(r.out).toContain('  ~ IAM role oasis-app-role: replace the trust policy with the one below (only EC2 may assume the role)')
+    expect(r.out).toMatch(/note: the IAM user oasis-app exists from a runtime=user setup: once the services run on the role, remove \/etc\/oasis\/aws-credentials and deactivate its access key/)
+    expect(fake.mutations().map((m) => m.command)).toEqual(['UpdateAssumeRolePolicyCommand'])
+    expect(JSON.parse(fake.roles.get('oasis-app-role')!.trust)).toEqual(ROLE_TRUST_POLICY)
+    fake.profiles.get('oasis-app-profile')!.roles = ['someone-else']
+    const bad = await run([...args])
+    expect(bad.code).toBe(1)
+    expect(bad.out).toMatch(/oasis-app-profile already holds the role someone-else/)
+  })
+
+  it('refuses options of the other runtime', async () => {
+    for (const [extra, re] of [
+      [['--out', path.join(dir, 'k')], /--out and --new-access-key are for --runtime user/],
+      [['--runtime', 'user', '--private-ip', '172.31.5.10'], /are for --runtime role/],
+      [['--runtime', 'lambda'], /--runtime must be role or user/],
+      [['--instance-id', 'i-0123456789abcdef0', '--private-ip', '172.31.5.10'], /not both/],
+      [['--replace-instance-profile'], /needs --instance-id or --private-ip/],
+      [['--private-ip', 'host.local'], /is not an IPv4 address/],
+    ] as const) {
+      const r = await run([...args, ...extra])
+      expect(r.code, String(extra)).toBe(2)
+      expect(r.out).toMatch(re)
+    }
+  })
+
+  it('accepts the tailnet or private http origin the dashboard has before the domain exists, and nothing else over http', async () => {
+    for (const ok of ['http://100.93.119.123:3240', 'http://oasis-api.tail55a040.ts.net:3240', 'http://10.0.0.5:3200', 'http://localhost:3000'])
+      expect((await run(['--profile', 'oasis-setup', '--dashboard-origin', ok])).code, ok).toBe(0)
+    for (const bad of ['http://oasis.example.com', 'http://8.8.8.8', 'http://100.200.1.1'])
+      expect((await run(['--profile', 'oasis-setup', '--dashboard-origin', bad])).out, bad).toMatch(/https only/)
+  })
+
+  it('a later run with other dashboard origins only changes the CORS rule', async () => {
+    expect((await run([...args, '--apply'])).code).toBe(0)
+    fake.sent.length = 0
+    const r = await run(['--profile', 'oasis-setup', '--dashboard-origin', 'https://oasis.example.com', '--dashboard-origin', 'https://app.oasisautospa.com', '--apply'])
+    expect(r.code, r.out).toBe(0)
+    expect(fake.mutations().map((m) => m.command)).toEqual(['PutBucketCorsCommand'])
+    expect(fake.buckets.get(PHOTOS)!.cors).toEqual(photosCors(['https://oasis.example.com', 'https://app.oasisautospa.com']).CORSRules)
+  })
+})
+
 describe('documents (exact)', () => {
   it('the runtime policy: least privilege for a domain sender and for an address sender', () => {
-    expect(runtimePolicy(spec())).toEqual({
+    expect(runtimePolicy(spec(), SECRET_ARN)).toEqual({
       Version: '2012-10-17',
       Statement: [
+        { Sid: 'ReadEnvironment', Effect: 'Allow', Action: 'secretsmanager:GetSecretValue', Resource: SECRET_ARN },
         { Sid: 'PhotoObjects', Effect: 'Allow', Action: ['s3:PutObject', 's3:GetObject', 's3:DeleteObject'], Resource: `arn:aws:s3:::${PHOTOS}/prod/*` },
         { Sid: 'PhotoHeadMissingKey', Effect: 'Allow', Action: 's3:ListBucket', Resource: `arn:aws:s3:::${PHOTOS}` },
         { Sid: 'BackupObjects', Effect: 'Allow', Action: ['s3:PutObject', 's3:GetObject'], Resource: `arn:aws:s3:::${BACKUPS}/*` },
@@ -335,8 +567,8 @@ describe('documents (exact)', () => {
     const addr = runtimePolicy(spec({ sender: { kind: 'address', identity: 'no-reply@oasisautospa.com', domain: 'oasisautospa.com' }, keyPrefix: '' })) as {
       Statement: Array<{ Sid: string; Resource: unknown; Condition?: unknown }>
     }
-    expect(addr.Statement[0]!.Resource).toBe(`arn:aws:s3:::${PHOTOS}/*`)
-    expect(addr.Statement[4]).toMatchObject({
+    expect(addr.Statement[1]!.Resource).toBe(`arn:aws:s3:::${PHOTOS}/*`)
+    expect(addr.Statement[5]).toMatchObject({
       Resource: [`arn:aws:ses:us-east-1:${ACCOUNT}:identity/no-reply@oasisautospa.com`, `arn:aws:ses:us-east-1:${ACCOUNT}:configuration-set/oasis-mail`],
       Condition: { StringEquals: { 'ses:FromAddress': 'no-reply@oasisautospa.com' } },
     })
@@ -406,7 +638,10 @@ describe('the temporary setup policy (docs/aws-setup.md)', () => {
   const NOW = new Date('2026-10-08T12:00:00Z')
 
   it('is the policy the owner was given: every statement expires, and app names are oasis-app / oasis-app-*', () => {
-    expect(statements.map((s) => s.Sid)).toEqual(['WhoAmI', 'Email', 'Buckets', 'ListBuckets', 'EmailEvents', 'AppUser', 'AppPolicy', 'AttachAppPolicy', 'Firewall', 'Dns'])
+    expect(statements.map((s) => s.Sid)).toEqual([
+      'WhoAmI', 'Email', 'Buckets', 'ListBuckets', 'EmailEvents', 'AppUser', 'AppPolicy', 'AttachAppPolicy',
+      'AppRole', 'AttachAppRolePolicy', 'PassAppRole', 'AppInstanceProfile', 'AssociateInstanceProfile', 'AppSecret', 'Firewall', 'Dns',
+    ])
     for (const s of statements) expect(s.Condition?.DateLessThan?.['aws:CurrentTime'], s.Sid).toBeDefined()
     expect(statements.find((s) => s.Sid === 'AppUser')!.Resource).toBe('arn:aws:iam::*:user/oasis-app')
   })
@@ -429,6 +664,10 @@ describe('the temporary setup policy (docs/aws-setup.md)', () => {
       'CreateTopicCommand', 'GetTopicAttributesCommand', 'ListSubscriptionsByTopicCommand', 'SubscribeCommand', 'CreateUserCommand', 'CreatePolicyCommand',
       'AttachUserPolicyCommand', 'CreateAccessKeyCommand', 'ListAccessKeysCommand', 'GetPolicyVersionCommand', 'ListPolicyVersionsCommand',
       'DeletePolicyVersionCommand', 'CreatePolicyVersionCommand', 'GetAccountCommand', 'PutAccountDetailsCommand',
+      'DescribeSecretCommand', 'CreateSecretCommand', 'GetRoleCommand', 'CreateRoleCommand', 'UpdateAssumeRolePolicyCommand',
+      'ListAttachedRolePoliciesCommand', 'AttachRolePolicyCommand', 'GetInstanceProfileCommand', 'CreateInstanceProfileCommand',
+      'AddRoleToInstanceProfileCommand', 'DescribeInstancesCommand', 'DescribeIamInstanceProfileAssociationsCommand',
+      'AssociateIamInstanceProfileCommand', 'ReplaceIamInstanceProfileAssociationCommand',
     ])
       expect(seen.has(c), c).toBe(true)
     // negative controls: what the policy must refuse
@@ -437,5 +676,9 @@ describe('the temporary setup policy (docs/aws-setup.md)', () => {
     expect(allowedBy(statements, { action: 'iam:AttachUserPolicy', resource: `arn:aws:iam::${ACCOUNT}:user/oasis-app`, context: { 'iam:PolicyARN': 'arn:aws:iam::aws:policy/AdministratorAccess' } }, NOW)).toBe(false)
     expect(allowedBy(statements, { action: 'iam:CreatePolicy', resource: `arn:aws:iam::${ACCOUNT}:policy/oasis-app-runtime` }, new Date('2027-01-01T00:00:00Z'))).toBe(false)
     expect(allowedBy(statements, { action: 'iam:TagPolicy', resource: `arn:aws:iam::${ACCOUNT}:policy/oasis-app-runtime` }, NOW)).toBe(false)
+    expect(allowedBy(statements, { action: 'iam:PassRole', resource: `arn:aws:iam::${ACCOUNT}:role/admin` }, NOW)).toBe(false)
+    expect(allowedBy(statements, { action: 'iam:AttachRolePolicy', resource: `arn:aws:iam::${ACCOUNT}:role/oasis-app-role`, context: { 'iam:PolicyARN': 'arn:aws:iam::aws:policy/AdministratorAccess' } }, NOW)).toBe(false)
+    expect(allowedBy(statements, { action: 'secretsmanager:GetSecretValue', resource: `arn:aws:secretsmanager:us-east-1:${ACCOUNT}:secret:prod/db-AbCdEf` }, NOW)).toBe(false)
+    expect(allowedBy(statements, { action: 'iam:CreateRole', resource: `arn:aws:iam::${ACCOUNT}:role/oasis-admin` }, NOW)).toBe(false)
   })
 })

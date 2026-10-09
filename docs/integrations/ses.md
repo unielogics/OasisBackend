@@ -29,8 +29,9 @@ All declared in `src/config/env.ts` (the email shape lives in `src/integrations/
 | `SES_SNS_TOPIC_ARNS` | empty | Comma-separated SNS topic ARNs `/hooks/ses` accepts. **Empty refuses every notification.** |
 | `SES_ENDPOINT` | unset | SESv2 endpoint override for the AWS simulator (`scripts/verify-live/sim-aws.ts`) only. |
 | `EMAIL_CONSOLE_DIR` | `./.data/mail` | Where the sim driver writes `.eml` files. |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | unset | The `oasis-app` key (read by the AWS SDK; declared so the pair is validated and `GET /system/integrations` can name the source). |
-| `AWS_EC2_METADATA_DISABLED` | `false` | `true` keeps the SDK away from instance metadata; set it whenever keys are used. |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | unset | A key in the environment (development; read by the AWS SDK; declared so the pair is validated and `GET /system/integrations` can name the source). Production uses the instance role, or the `oasis-app` key file (next row); ADR 0133. |
+| `AWS_SHARED_CREDENTIALS_FILE` | unset | runtime=user: the `oasis-app` key in `/etc/oasis/aws-credentials`, handed to the services by systemd (the units set this). |
+| `AWS_EC2_METADATA_DISABLED` | `false` | `true` keeps the SDK away from instance metadata; set with keys or a key file, never with the instance role. |
 
 `GET /api/v1/system/integrations` (`set.billing`) reports for `email`: provider, whether it is configured, exactly which of these are
 missing, the last send, the last error (masked), the last feedback received and the number of suppressed addresses.
@@ -38,7 +39,8 @@ missing, the last send, the last error (masked), the last feedback received and 
 ## One-time AWS setup
 
 **Use `pnpm aws:provision` ([../aws-setup.md](../aws-setup.md))**: it creates the identity, the configuration set `oasis-mail`, the
-topic `oasis-ses-events` with its policy and the HTTPS subscription, and the `oasis-app` user and policy, plan first and idempotently.
+topic `oasis-ses-events` with its policy and the HTTPS subscription (all only once `--sender` is given; email comes last), and the
+app's identity and policy, plan first and idempotently.
 The manual steps below explain what it does (the names in them are examples). Everything is per region; use `AWS_REGION`.
 
 1. **Verify the sending domain with Easy DKIM** (preferred over a single address; it also speeds up production access).
