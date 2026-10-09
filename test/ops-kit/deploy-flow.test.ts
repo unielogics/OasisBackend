@@ -84,7 +84,7 @@ echo "pnpm $(basename "$PWD") $*" >> "$SHIM_LOG"
 case "$*" in
   "install --frozen-lockfile") ;;
   "build") [ -e FAIL_BUILD ] && { echo "build broke" >&2; exit 1; }; [ -e TAMPER_KIT ] && echo 'echo pwned' >> deploy/scripts/healthcheck.sh; mkdir -p dist; echo '//' > dist/server.js; echo '//' > dist/worker.js ;;
-  "build:live") mkdir -p .next-live/cache/webpack; echo x > .next-live/BUILD_ID; printf '%s' "\${OASIS_PHOTOS_ORIGINS-unset}" > "$SHIM_STATE/photos-origins" ;;
+  "build:live") mkdir -p .next-live/cache/webpack; echo x > .next-live/BUILD_ID; printf '%s' "\${OASIS_PHOTOS_ORIGINS-unset}" > "$SHIM_STATE/photos-origins"; printf '%s|%s' "\${OASIS_PUBLIC_HOSTS-unset}" "\${API_ORIGIN-unset}" > "$SHIM_STATE/public-hosts" ;;
   "migrate up") echo "migrate DATABASE_URL=\${DATABASE_URL:+set} SECRETS_KEY=\${SECRETS_KEY:+set} OASIS_SECRET_ID=\${OASIS_SECRET_ID:-} AWS_REGION=\${AWS_REGION:-}" >> "$SHIM_LOG"; [ -e FAIL_MIGRATE ] && { echo "migration broke" >&2; exit 1; }; echo "$PWD" >> "$SHIM_STATE/migrated-by" ;;
   *) echo "unexpected pnpm $*" >&2; exit 1 ;;
 esac
@@ -323,6 +323,9 @@ describe('deploy.sh', () => {
     expect(r.code, r.out).toBe(0)
     expect(origins()).toBe('') // STORAGE_PROVIDER=fs (the template's default): no bucket in the policy
     expect(r.out).toMatch(/photos origins for the dashboard build: \(none: STORAGE_PROVIDER is not s3\)/)
+    // the dashboard build learns the public host from PUBLIC_DASHBOARD_URL and never sees API_ORIGIN (nginx proxies /api)
+    expect(r.out).toMatch(/public hosts for the dashboard build: oasis\.example\.com/)
+    expect(readFileSync(path.join(w.state, 'public-hosts'), 'utf8')).toBe('oasis.example.com|unset')
     const common = path.join(w.root, 'etc/oasis/common.env')
     const base = readFileSync(common, 'utf8')
     writeFileSync(common, `${base.replace(/^STORAGE_PROVIDER=.*$/m, 'STORAGE_PROVIDER=s3')}S3_BUCKET=oasis-photos-580446611342\n`)

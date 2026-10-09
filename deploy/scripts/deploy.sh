@@ -103,11 +103,25 @@ photos_origins() {
 PHOTOS_ORIGINS=$(photos_origins)
 log "photos origins for the dashboard build: ${PHOTOS_ORIGINS:-(none: STORAGE_PROVIDER is not s3)}"
 
+# The host the dashboard may redirect to (next.config.mjs inlines OASIS_PUBLIC_HOSTS at BUILD time; the middleware then never
+# echoes a spoofed Host header): the host of PUBLIC_DASHBOARD_URL in common.env.
+public_hosts() {
+  local url host
+  url=$(env_get "$OASIS_ETC/common.env" PUBLIC_DASHBOARD_URL 2>/dev/null) || url=""
+  [[ -n "$url" ]] || return 0
+  host=${url#*://}
+  host=${host%%/*}
+  [[ "$host" =~ ^[a-z0-9.-]+(:[0-9]+)?$ ]] || die "PUBLIC_DASHBOARD_URL in $OASIS_ETC/common.env has no usable host: $url"
+  printf '%s' "$host"
+}
+PUBLIC_HOSTS=$(public_hosts)
+log "public hosts for the dashboard build: ${PUBLIC_HOSTS:-(none: PUBLIC_DASHBOARD_URL is not set)}"
+
 # --- 2. anything to do? ---------------------------------------------------------------------------------------------------------
 # (the photos origins are part of the dashboard build, so a changed bucket or region rebuilds too)
 if [[ -n "$OLD" && -f "$OLD/REVISIONS" && "$FORCE" != 1 ]]; then
   if grep -qx "backend=$BE_SHA" "$OLD/REVISIONS" && grep -qx "dashboard=$DB_SHA" "$OLD/REVISIONS" &&
-    grep -qxF "photos_origins=$PHOTOS_ORIGINS" "$OLD/REVISIONS"; then
+    grep -qxF "photos_origins=$PHOTOS_ORIGINS" "$OLD/REVISIONS" && grep -qxF "public_hosts=$PUBLIC_HOSTS" "$OLD/REVISIONS"; then
     ok "nothing to deploy: $(basename "$OLD") already runs these commits (--force to rebuild)"
     exit 0
   fi
@@ -155,7 +169,8 @@ export_tree dashboard "$DB_SHA" "$PART/dashboard"
 log "building the API"
 as_oasis env HOME="$OASIS_STATE" CI=1 NODE_OPTIONS=--max-old-space-size=2048 bash -c 'cd "$1" && pnpm install --frozen-lockfile && pnpm build' _ "$PART/backend"
 log "building the dashboard (live variant)"
-as_oasis env HOME="$OASIS_STATE" CI=1 NODE_OPTIONS=--max-old-space-size=2048 OASIS_PHOTOS_ORIGINS="$PHOTOS_ORIGINS" bash -c 'cd "$1" && pnpm install --frozen-lockfile && pnpm build:live' _ "$PART/dashboard"
+# no API_ORIGIN: behind nginx the dashboard must not proxy /api itself (next.config.mjs adds that rewrite only when it is set)
+as_oasis env -u API_ORIGIN HOME="$OASIS_STATE" CI=1 NODE_OPTIONS=--max-old-space-size=2048 OASIS_PHOTOS_ORIGINS="$PHOTOS_ORIGINS" OASIS_PUBLIC_HOSTS="$PUBLIC_HOSTS" bash -c 'cd "$1" && pnpm install --frozen-lockfile && pnpm build:live' _ "$PART/dashboard"
 
 if [[ "$DRY_RUN" != 1 ]]; then
   [[ -f "$PART/backend/dist/server.js" && -f "$PART/backend/dist/worker.js" ]] || die "the API build produced no dist/server.js and dist/worker.js"
@@ -169,7 +184,7 @@ lock_release "$PART"
 if [[ "$DRY_RUN" != 1 ]]; then
   # The kit root will copy from this release must be the commit's own, as the root-owned mirror has it.
   verify_kit "$PART" "$BE_SHA" || die "the deploy kit in the built release differs from commit ${BE_SHA:0:12} in the mirror: a build step changed it. Nothing was changed; the build is kept in $REL.failed for inspection"
-  printf 'backend=%s\ndashboard=%s\nphotos_origins=%s\nbuilt=%s\n' "$BE_SHA" "$DB_SHA" "$PHOTOS_ORIGINS" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$PART/REVISIONS"
+  printf 'backend=%s\ndashboard=%s\nphotos_origins=%s\npublic_hosts=%s\nbuilt=%s\n' "$BE_SHA" "$DB_SHA" "$PHOTOS_ORIGINS" "$PUBLIC_HOSTS" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$PART/REVISIONS"
   chmod 0644 "$PART/REVISIONS"
   mv "$PART" "$REL"
 fi
