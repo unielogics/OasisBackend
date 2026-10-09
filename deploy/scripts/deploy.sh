@@ -54,6 +54,7 @@ for repo in backend dashboard; do
   [[ -d "$OASIS_PREFIX/src/$repo/.git" || -f "$OASIS_PREFIX/src/$repo/HEAD" ]] || die "$OASIS_PREFIX/src/$repo is not a git clone (run install.sh, then clone the repository there)"
 done
 for f in common.env api.env worker.env web.env; do [[ -r "$OASIS_ETC/$f" ]] || die "$OASIS_ETC/$f is missing (run install.sh)"; done
+[[ ! -e "$OASIS_ETC/secret-seed.env" ]] || warn "$OASIS_ETC/secret-seed.env still exists: push it into the secret (docs/aws-setup.md, step 6) and shred it"
 
 OLD=$(current_release)
 if [[ -n "$OLD" ]]; then log "current release: $(basename "$OLD")"; else log "current release: none (first deployment)"; fi
@@ -133,7 +134,7 @@ if ((SKIP_BACKUP)); then
 else
   log "pre-deploy backup"
   # shellcheck disable=SC2086
-  as_oasis ${BACKUP_CMD:-$OASIS_HERE/backup.sh} --label pre-deploy || die "the pre-deploy backup failed; nothing was changed. Fix it, or deploy with --skip-backup if you accept the risk."
+  as_oasis_aws ${BACKUP_CMD:-$OASIS_HERE/backup.sh} --label pre-deploy || die "the pre-deploy backup failed; nothing was changed. Fix it, or deploy with --skip-backup if you accept the risk."
 fi
 
 # --- 5. migrate (old release still serving) -----------------------------------------------------------------------------------

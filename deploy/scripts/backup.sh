@@ -10,7 +10,8 @@
 # holds a readable dump. Create a key with: node deploy/lib/backup-crypt.mjs keygen /etc/oasis/backup.key (and keep a copy elsewhere).
 #
 # The dump and the row counts in the manifest come from ONE exported snapshot, so the restore drill can compare them exactly.
-# Reads DATABASE_URL from the environment or from $OASIS_ETC/common.env. The password never appears on a command line.
+# Reads DATABASE_URL from the environment, else $OASIS_ETC/common.env, else the Secrets Manager secret common.env names
+# (OASIS_SECRET_ID), the way the app does. The password never appears on a command line or in the log.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../lib/common.sh
@@ -40,9 +41,7 @@ done
 [[ "$SCHEMAS" =~ ^(all|[a-z_][a-z0-9_]*(,[a-z_][a-z0-9_]*)*)$ ]] || die "--schemas must be 'all' or a comma list of schema names"
 
 have pg_dump && have psql && have pg_restore || die "pg_dump, psql and pg_restore (postgresql15 client) are required"
-if [[ -z "${DATABASE_URL:-}" ]]; then
-  DATABASE_URL=$(env_get "$OASIS_ETC/common.env" DATABASE_URL) || die "DATABASE_URL is not set and $OASIS_ETC/common.env has none"
-fi
+DATABASE_URL=$(config_value DATABASE_URL) || die "DATABASE_URL is set neither in the environment, nor in $OASIS_ETC/common.env, nor in the secret it names"
 url_to_pgenv "$DATABASE_URL"
 export PGAPPNAME=oasis-backup
 
@@ -171,6 +170,7 @@ fi
 
 if ((UPLOAD)) && [[ -n "${BACKUP_S3_URI:-}" ]]; then
   have aws || die "BACKUP_S3_URI is set but the aws CLI is not installed"
+  use_app_aws_identity
   UPLOAD_FILE="$DAILY/$NAME"
   if [[ -n "${BACKUP_ENCRYPTION_KEY_FILE:-}" ]]; then
     node "$here/../lib/backup-crypt.mjs" encrypt "$DAILY/$NAME" "$WORK/$NAME.enc"

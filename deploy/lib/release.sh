@@ -38,12 +38,36 @@ oasis_read() {
   fi
 }
 
-# in_release_env DIR CMD...: run CMD in DIR with the API's environment files loaded (migrations need DATABASE_URL and friends).
+# as_oasis_aws CMD...: as_oasis, with the app's AWS identity (to read the environment secret, to upload a backup). runtime=role: the
+# instance provides it. runtime=user: the key file is root-only (systemd hands it to the services itself), so when root runs a command
+# as the service user, that user gets a private copy for this one command, removed afterwards.
+as_oasis_aws() {
+  local cred tmp rc=0
+  cred=$(aws_credentials_file)
+  if [[ ! -e "$cred" || -n "${AWS_SHARED_CREDENTIALS_FILE:-}" ]]; then
+    as_oasis "$@"
+    return
+  fi
+  if [[ -z "$OASIS_RUN_AS" || "$DRY_RUN" == 1 ]]; then
+    as_oasis env AWS_SHARED_CREDENTIALS_FILE="$cred" AWS_EC2_METADATA_DISABLED=true "$@"
+    return
+  fi
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/oasis-aws.XXXXXX")
+  install -m 0400 -o "$OASIS_USER" -g "$OASIS_USER" "$cred" "$tmp/credentials"
+  chown "$OASIS_USER" "$tmp"
+  chmod 0500 "$tmp"
+  as_oasis env AWS_SHARED_CREDENTIALS_FILE="$tmp/credentials" AWS_EC2_METADATA_DISABLED=true "$@" || rc=$?
+  rm -rf "$tmp"
+  return "$rc"
+}
+
+# in_release_env DIR CMD...: run CMD in DIR with the API's environment files loaded. Secret settings (DATABASE_URL and friends) come
+# from the secret named by OASIS_SECRET_ID in common.env: every program of the release reads it itself (src/config/secrets-source.ts).
 in_release_env() {
   local dir=$1
   shift
   # HOME: runuser keeps root's, which the service user cannot write (pnpm wants a cache directory)
-  as_oasis env HOME="$OASIS_STATE" bash -c 'set -a; . "$1"; . "$2"; set +a; cd "$3" && shift 3 && exec "$@"' _ "$OASIS_ETC/common.env" "$OASIS_ETC/api.env" "$dir" "$@"
+  as_oasis_aws env HOME="$OASIS_STATE" bash -c 'set -a; . "$1"; . "$2"; set +a; cd "$3" && shift 3 && exec "$@"' _ "$OASIS_ETC/common.env" "$OASIS_ETC/api.env" "$dir" "$@"
 }
 
 # readlink -e: empty (not the link path itself) when the link does not exist yet

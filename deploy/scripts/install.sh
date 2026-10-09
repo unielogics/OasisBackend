@@ -13,13 +13,22 @@
 #   --backend-repo URL --dashboard-repo URL    clone the repositories into /opt/oasis/src (as the oasis user)
 #   --gen-deploy-keys      create SSH deploy keys for the oasis user and print the public halves to add on GitHub (read-only)
 #   --api-port N --web-port N
+#   --secret-id NAME       the AWS Secrets Manager secret the services read their secret settings from (default oasis/prod/app)
+#   --aws-region REGION    its region, AWS_REGION (default us-east-1)
+#   --aws-runtime role|user   the app's AWS identity: role (default) = the instance role, nothing on disk; user = the oasis-app key in
+#                          /etc/oasis/aws-credentials (root, 0600), handed to the services by systemd (a drop-in per unit)
+#   --move-secrets         an existing host whose env files still hold secrets: after checking that the secret holds the same values,
+#                          write OASIS_SECRET_ID/AWS_REGION into common.env and remove those lines (docs/deployment.md)
+#   --secrets-in-files     the old layout without Secrets Manager: generate the secrets into common.env (hosts without AWS)
 #   --dry-run              print everything it would do, change nothing
 #   --no-system            write files only: no users, packages, chown, systemctl or nginx reload (for staging directories)
 #
 # What it does, in order: checks the host, installs packages, creates the oasis user and directories, writes /etc/oasis/*.env from the
-# templates (generating SESSION_SECRET and SECRETS_KEY, never overwriting an existing file), prepares the database, installs the systemd
-# units, the nginx site with TLS, log rotation and the journald limits, and enables the backup and health-check timers. It does not
-# start the application: run deploy.sh for that. Re-running it changes only what differs and reports variables a new template added.
+# templates (never overwriting an existing file; secret settings are not written there: a new install gets them generated into
+# /etc/oasis/secret-seed.env, mode 0600, to push into the secret with pnpm secrets:push and then shred), prepares the database,
+# installs the systemd units (and the runtime=user drop-ins), the nginx site with TLS, log rotation and the journald limits, and enables
+# the backup and health-check timers. It does not start the application: run deploy.sh for that. Re-running it changes only what
+# differs and reports variables a new template added.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DEPLOY_DIR=$(cd "$here/.." && pwd)
@@ -41,6 +50,11 @@ DASHBOARD_REPO=""
 GEN_KEYS=0
 API_PORT=4000
 WEB_PORT=3200
+SECRET_ID=oasis/prod/app
+AWS_REGION_ARG=us-east-1
+AWS_RUNTIME=role
+MOVE_SECRETS=0
+SECRETS_IN_FILES=0
 
 while (($#)); do
   case "$1" in
@@ -59,10 +73,15 @@ while (($#)); do
     --gen-deploy-keys) GEN_KEYS=1; shift ;;
     --api-port) API_PORT=$2; shift 2 ;;
     --web-port) WEB_PORT=$2; shift 2 ;;
+    --secret-id) SECRET_ID=$2; shift 2 ;;
+    --aws-region) AWS_REGION_ARG=$2; shift 2 ;;
+    --aws-runtime) AWS_RUNTIME=$2; shift 2 ;;
+    --move-secrets) MOVE_SECRETS=1; shift ;;
+    --secrets-in-files) SECRETS_IN_FILES=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --no-system) NO_SYSTEM=1; shift ;;
     -h | --help)
-      sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) die "unknown option $1" ;;
@@ -73,6 +92,10 @@ done
 [[ "$DOMAIN" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]] || die "--domain $DOMAIN is not a host name"
 [[ "$TLS" == certbot || "$TLS" == files ]] || die "--tls must be certbot or files"
 [[ "$CSP" == report-only || "$CSP" == enforce || "$CSP" == off ]] || die "--csp must be report-only, enforce or off"
+[[ "$SECRET_ID" =~ ^[A-Za-z0-9/_+=.@:-]{1,2048}$ ]] || die "--secret-id $SECRET_ID is not a secret name or ARN"
+[[ "$AWS_REGION_ARG" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]] || die "--aws-region $AWS_REGION_ARG is not an AWS region"
+[[ "$AWS_RUNTIME" == role || "$AWS_RUNTIME" == user ]] || die "--aws-runtime must be role or user"
+((SECRETS_IN_FILES == 0 || MOVE_SECRETS == 0)) || die "--secrets-in-files and --move-secrets contradict each other"
 if [[ "$TLS" == files ]]; then
   [[ -n "$TLS_CERT" && -n "$TLS_KEY" ]] || die "--tls files needs --tls-cert and --tls-key"
   if [[ "$DRY_RUN" != 1 && "$NO_SYSTEM" != 1 ]]; then [[ -r "$TLS_CERT" && -r "$TLS_KEY" ]] || die "cannot read $TLS_CERT / $TLS_KEY"; fi
@@ -172,6 +195,19 @@ step_user_dirs() {
 }
 
 # --- 4. environment files ---------------------------------------------------------------------------------------------------------
+SEED="$OASIS_ETC/secret-seed.env"
+
+# set_or_uncomment NAME VALUE < content > content: sets NAME=VALUE on its line, active or commented out ("# NAME="); appends it if absent.
+set_or_uncomment() {
+  awk -v n="$1" -v v="$2" '
+    !done && ($0 ~ "^" n "=" || $0 ~ "^# " n "=") { print n "=" v; done = 1; next }
+    { print }
+    END { if (!done) print n "=" v }'
+}
+
+# comment_out NAME < content > content
+comment_out() { awk -v n="$1" '$0 ~ "^" n "=" { print "# " $0; next } { print }'; }
+
 ensure_env() {
   local name=$1 dest="$OASIS_ETC/$1.env" tmpl="$DEPLOY_DIR/env/$1.env.example" content
   if [[ -f "$dest" ]]; then
@@ -184,10 +220,15 @@ ensure_env() {
   content=$(<"$tmpl")
   case "$name" in
     common)
-      DB_PASSWORD=$(random_hex 24)
-      content=$(printf '%s\n' "$content" | set_var SESSION_SECRET "$(random_b64 48)" | set_var SECRETS_KEY "$(random_b64 32)" |
-        set_var PUBLIC_API_URL "https://$DOMAIN" | set_var PUBLIC_DASHBOARD_URL "https://$DOMAIN" |
-        set_var DATABASE_URL "postgres://oasis:${DB_PASSWORD}@127.0.0.1:5432/oasis")
+      content=$(printf '%s\n' "$content" | set_var PUBLIC_API_URL "https://$DOMAIN" | set_var PUBLIC_DASHBOARD_URL "https://$DOMAIN" |
+        set_var AWS_REGION "$AWS_REGION_ARG")
+      if ((SECRETS_IN_FILES)); then
+        DB_PASSWORD=$(random_hex 24)
+        content=$(printf '%s\n' "$content" | comment_out OASIS_SECRET_ID | set_or_uncomment SESSION_SECRET "$(random_b64 48)" |
+          set_or_uncomment SECRETS_KEY "$(random_b64 32)" | set_or_uncomment DATABASE_URL "postgres://oasis:${DB_PASSWORD}@127.0.0.1:5432/oasis")
+      else
+        content=$(printf '%s\n' "$content" | set_var OASIS_SECRET_ID "$SECRET_ID")
+      fi
       CREATED_ENV+=(common)
       ;;
     api) content=$(printf '%s\n' "$content" | set_var PORT "$API_PORT") ;;
@@ -196,14 +237,90 @@ ensure_env() {
   printf '%s\n' "$content" | install_content "$dest" 0640 "root:$OASIS_USER"
 }
 
+# active_secret_keys FILE: the secret keys a file still sets to a non-empty value
+active_secret_keys() {
+  local f=$1 k v
+  for k in "${OASIS_SECRET_KEYS[@]}"; do
+    v=$(env_get "$f" "$k" 2>/dev/null) || continue
+    [[ -n "$v" ]] && printf '%s\n' "$k"
+  done
+  return 0
+}
+
+# A new install: the secret settings are generated into a root-only file, for pnpm secrets:push, never into the env files.
+seed_secrets() {
+  if [[ -f "$SEED" ]]; then
+    ok "$SEED exists (left alone; push it with pnpm secrets:push, then shred it)"
+    return 0
+  fi
+  "$DEPLOY_DIR/scripts/gen-secrets.sh" --secret | install_content "$SEED" 0600 root:root
+  warn "secret settings were generated into $(real "$SEED") (root, 0600; --local-db creates the database role from it). Push them into the secret, keep SECRETS_KEY in a password manager, then shred every copy:"
+  warn "  sudo install -m 600 -o \$USER $(real "$SEED") ~/oasis-secret.env"
+  warn "  pnpm secrets:push --profile <operator profile> --secret-id $SECRET_ID --region $AWS_REGION_ARG --from ~/oasis-secret.env --apply"
+  warn "  shred -u ~/oasis-secret.env && sudo shred -u $(real "$SEED")"
+}
+
+# --move-secrets: an existing host whose env files hold the secret settings; only after the secret is proven to hold the same values.
+move_secrets() {
+  local f k moved=() missing=() differ=() have file_v secret_v
+  local common="$OASIS_ETC/common.env" api="$OASIS_ETC/api.env"
+  have=$(OASIS_SECRET_ID=$SECRET_ID AWS_REGION=$AWS_REGION_ARG secret_env --keys) || die "cannot read the secret $SECRET_ID: see the message above"
+  for f in "$common" "$api"; do
+    [[ -f "$f" ]] || continue
+    for k in $(active_secret_keys "$f"); do
+      if ! grep -qx "$k" <<<"$have"; then
+        missing+=("$k")
+        continue
+      fi
+      file_v=$(env_get "$f" "$k")
+      secret_v=$(OASIS_SECRET_ID=$SECRET_ID AWS_REGION=$AWS_REGION_ARG secret_env --get "$k") || die "cannot read $k from the secret"
+      [[ "$file_v" == "$secret_v" ]] || differ+=("$k")
+    done
+  done
+  ((${#missing[@]} == 0)) || die "the secret $SECRET_ID does not hold ${missing[*]} yet; push them first (as root): pnpm secrets:push --profile <operator profile> --secret-id $SECRET_ID --region $AWS_REGION_ARG --from $(real "$common") --keys $(IFS=,; echo "${missing[*]}") --apply (and --from $(real "$api") for BOOTSTRAP_ADMIN_*)"
+  ((${#differ[@]} == 0)) || die "the secret's ${differ[*]} differ(s) from the env files; nothing was changed. Push the values the host runs with, or remove the lines by hand if the secret is right"
+  env_file_set "$common" OASIS_SECRET_ID "$SECRET_ID"
+  env_file_set "$common" AWS_REGION "$AWS_REGION_ARG"
+  for f in "$common" "$api"; do
+    [[ -f "$f" ]] || continue
+    for k in $(active_secret_keys "$f"); do
+      env_file_unset "$f" "$k"
+      moved+=("$k")
+    done
+  done
+  changed "common.env now names the secret $SECRET_ID; removed from the env files: ${moved[*]:-(nothing)}"
+  warn "the backups $(real "$OASIS_ETC")/*.env.bak-* still hold those values: shred them once the services run from the secret (shred -u $(real "$OASIS_ETC")/*.env.bak-*)"
+}
+
 step_env() {
   ensure_env common
   ensure_env api
   ensure_env worker
   ensure_env web
-  if [[ " ${CREATED_ENV[*]:-} " == *" common "* ]]; then
-    warn "SECRETS_KEY was generated in $OASIS_ETC/common.env: copy it to a password manager now. Without it the stored tablet and Squarespace credentials cannot be read."
+  local common="$OASIS_ETC/common.env"
+  if ((SECRETS_IN_FILES)); then
+    if [[ " ${CREATED_ENV[*]:-} " == *" common "* ]]; then
+      warn "SECRETS_KEY was generated in $OASIS_ETC/common.env: copy it to a password manager now. Without it the stored tablet and Squarespace credentials cannot be read."
+    fi
+    return 0
   fi
+  if ((MOVE_SECRETS)); then
+    if [[ "$DRY_RUN" == 1 ]]; then
+      log "would check that the secret $SECRET_ID holds the secret settings of the env files, then name it in common.env and remove them"
+    else
+      move_secrets
+    fi
+  elif [[ " ${CREATED_ENV[*]:-} " == *" common "* ]]; then
+    seed_secrets
+  elif [[ -f "$common" && -z "$(env_get "$common" OASIS_SECRET_ID 2>/dev/null || true)" ]]; then
+    warn "$common names no OASIS_SECRET_ID: this host still keeps its secrets in the env files. Move them: docs/deployment.md, \"Move an existing host to the secret\" (install.sh --move-secrets)"
+  fi
+  local f still
+  for f in "$common" "$OASIS_ETC/api.env"; do
+    [[ -f "$f" && -n "$(env_get "$common" OASIS_SECRET_ID 2>/dev/null || true)" ]] || continue
+    still=$(active_secret_keys "$f" | tr '\n' ' ')
+    [[ -z "$still" ]] || warn "$f still sets $still: a line there wins over the secret; remove it once the secret holds it (install.sh --move-secrets)"
+  done
 }
 
 # --- 5. database -----------------------------------------------------------------------------------------------------------------
@@ -215,12 +332,13 @@ step_database() {
     return 0
   }
   local url pw
-  url=$(env_get "$OASIS_ETC/common.env" DATABASE_URL 2>/dev/null) || url=""
   if [[ "$DRY_RUN" == 1 || "$NO_SYSTEM" == 1 ]]; then
-    log "would create role oasis and database oasis from DATABASE_URL in $OASIS_ETC/common.env"
+    log "would create role oasis and database oasis from DATABASE_URL ($(real "$SEED"), common.env or the secret)"
     return 0
   fi
-  [[ "$url" =~ ^postgres://oasis:([^@]+)@127\.0\.0\.1:5432/oasis$ ]] || die "--local-db expects DATABASE_URL=postgres://oasis:PASSWORD@127.0.0.1:5432/oasis in common.env"
+  # a new install: the seed file; an existing one: common.env, else the secret (as the app reads it)
+  url=$(env_get "$SEED" DATABASE_URL 2>/dev/null) || url=$(config_value DATABASE_URL) || url=""
+  [[ "$url" =~ ^postgres://oasis:([^@]+)@127\.0\.0\.1:5432/oasis$ ]] || die "--local-db expects DATABASE_URL=postgres://oasis:PASSWORD@127.0.0.1:5432/oasis (in $(real "$SEED"), common.env or the secret)"
   pw=${BASH_REMATCH[1]}
   if [[ " ${CREATED_ENV[*]:-} " == *" common "* ]] || [[ -z "$(psql_admin -A -t -c "select 1 from pg_roles where rolname = 'oasis'")" ]]; then
     psql_admin -c "do \$\$ begin if not exists (select 1 from pg_roles where rolname = 'oasis') then create role oasis login; end if; end \$\$"
@@ -304,11 +422,42 @@ adapt_unit() {
   printf '%s\n' "$text"
 }
 
+# The app's AWS identity. user: a drop-in per unit that reads AWS (the services, backup, drill) hands them /etc/oasis/aws-credentials;
+# role: no drop-in (the instance role), and an old drop-in of ours is removed.
+AWS_UNITS=(oasis-api.service oasis-worker.service oasis-backup.service oasis-restore-drill.service)
+step_aws_runtime() {
+  local unit dropin cred
+  cred="$OASIS_ETC/aws-credentials"
+  for unit in "${AWS_UNITS[@]}"; do
+    dropin="$SYSTEMD_DIR/$unit.d/10-oasis-aws-credentials.conf"
+    if [[ "$AWS_RUNTIME" == user ]]; then
+      adapt_unit "$DEPLOY_DIR/systemd-dropins/aws-credentials.conf" | install_content "$dropin" 0644 root:root
+    elif [[ -f "$dropin" ]]; then
+      run rm -f "$dropin"
+      changed "removed $dropin (runtime=role)"
+    fi
+  done
+  if [[ "$AWS_RUNTIME" == user ]]; then
+    if [[ -f "$cred" ]]; then
+      if [[ "$NO_SYSTEM" != 1 ]]; then
+        run chown root:root "$cred"
+        run chmod 0600 "$cred"
+      fi
+      ok "$cred exists (root, 0600)"
+    else
+      warn "runtime=user: install the oasis-app key before starting the services (they do not start without it): sudo install -o root -g root -m 0600 <the --out file of pnpm aws:provision --runtime user> $(real "$cred")"
+    fi
+  elif [[ -f "$cred" ]]; then
+    warn "runtime=role, but $(real "$cred") exists: the deploy scripts would still use it. Remove it (shred -u) once the services run on the role, and have the owner deactivate the oasis-app key"
+  fi
+}
+
 step_systemd() {
   local unit
   for unit in "$DEPLOY_DIR"/systemd/*; do
     adapt_unit "$unit" | install_content "$SYSTEMD_DIR/$(basename "$unit")" 0644 root:root
   done
+  step_aws_runtime
   install_content "$JOURNALD_DIR/oasis.conf" 0644 root:root <"$DEPLOY_DIR/journald/oasis.conf"
   install_content "$LOGROTATE_DIR/oasis" 0644 root:root <"$DEPLOY_DIR/logrotate/oasis"
   run_system systemctl daemon-reload
@@ -381,9 +530,10 @@ step_nginx
 cat <<NEXT
 
 Done. Next:
+  0. The secret ($SECRET_ID): push the secret settings (pnpm secrets:push; docs/aws-setup.md step 6) before the first start.
   1. Deploy keys / repositories: ${BACKEND_REPO:+cloned. }Make sure $REAL_PREFIX/src/backend and $REAL_PREFIX/src/dashboard are clones (install.sh --backend-repo ... --dashboard-repo ...).
   2. First deployment, as root:   $REAL_PREFIX/src/backend/deploy/scripts/deploy.sh      (builds, migrates, starts, health-checks)
-  3. First Super Admin:            $DEPLOY_DIR/scripts/bootstrap-admin.sh set you@example.com     then deploy or restart oasis-api once
+  3. First Super Admin:            $DEPLOY_DIR/scripts/bootstrap-admin.sh set you@example.com --profile <operator profile>     then deploy or restart oasis-api once
   4. SMS: connect the tablet and run tailscale-serve.sh (docs/runbook.md, "Add or replace the SMS tablet")
   5. Prove the integrations: pnpm verify:all (docs/live-verification.md)
 NEXT

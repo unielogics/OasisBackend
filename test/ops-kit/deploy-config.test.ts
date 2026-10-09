@@ -3,6 +3,8 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, 
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { envSchema, loadEnv } from '../../src/config/env.js'
+import { SECRET_KEYS, secretKeyProblems } from '../../src/config/secrets-source.js'
+import { invalidValues, parseDotenv } from '../../scripts/secrets-push.js'
 import { emailEnvShape } from '../../src/integrations/email/config.js'
 import { storageEnvShape } from '../../src/integrations/storage/config.js'
 import {
@@ -71,19 +73,45 @@ describe('environment templates', () => {
     }
   })
 
-  it('install.sh fills the secrets and URLs, with correct sizes, and keeps the files at 0640', () => {
+  it('install.sh names the secret and fills the URLs, writes no secret into the env files, and keeps them at 0640', () => {
     const common = parseEnvFile(read('etc/oasis/common.env'))
-    expect(Buffer.from(common.SECRETS_KEY!, 'base64')).toHaveLength(32)
-    expect(Buffer.from(common.SESSION_SECRET!, 'base64').length).toBeGreaterThanOrEqual(32)
+    expect(common.OASIS_SECRET_ID).toBe('oasis/prod/app')
+    expect(common.AWS_REGION).toBe('us-east-1')
+    expect(common.AWS_EC2_METADATA_DISABLED).toBeUndefined() // the instance role needs the metadata service
     expect(common.PUBLIC_API_URL).toBe('https://oasis.example.com')
     expect(common.PUBLIC_DASHBOARD_URL).toBe('https://oasis.example.com')
-    expect(common.DATABASE_URL).toMatch(/^postgres:\/\/oasis:[0-9a-f]{48}@127\.0\.0\.1:5432\/oasis$/)
-    for (const n of ['common', 'api', 'worker', 'web'])
+    for (const n of ['common', 'api', 'worker', 'web']) {
+      const active = parseEnvFile(read(`etc/oasis/${n}.env`))
+      expect(SECRET_KEYS.filter((k) => active[k] !== undefined), n).toEqual([])
       expect((statSync(path.join(stage.etc, `${n}.env`)).mode & 0o777).toString(8)).toBe('640')
+    }
   })
 
-  it('the production environment (common + api) passes the app own validation, and is safe', () => {
+  it('a new install gets the secret settings generated into a root-only seed file, ready for pnpm secrets:push', () => {
+    const seedText = read('etc/oasis/secret-seed.env')
+    const seed = parseEnvFile(seedText)
+    expect(Object.keys(seed)).toEqual(['DATABASE_URL', 'SESSION_SECRET', 'SECRETS_KEY', 'STORAGE_SIGNING_SECRET'])
+    expect(Buffer.from(seed.SECRETS_KEY!, 'base64')).toHaveLength(32)
+    expect(Buffer.from(seed.SESSION_SECRET!, 'base64').length).toBeGreaterThanOrEqual(32)
+    expect(seed.DATABASE_URL).toMatch(/^postgres:\/\/oasis:[0-9a-f]{48}@127\.0\.0\.1:5432\/oasis$/)
+    expect((statSync(path.join(stage.etc, 'secret-seed.env')).mode & 0o777).toString(8)).toBe('600')
+    const values = parseDotenv(seedText, 'secret-seed.env')
+    expect(secretKeyProblems(values.keys())).toEqual({ forbidden: [], unknown: [] })
+    expect(invalidValues(values)).toEqual([])
+  })
+
+  it('the templates keep every secret key commented out, and the deploy kit names the same secret keys as the app', () => {
+    for (const n of ['common', 'api', 'worker', 'web']) {
+      const active = parseEnvFile(readText(path.join(DEPLOY, 'env', `${n}.env.example`)))
+      expect(SECRET_KEYS.filter((k) => active[k] !== undefined), n).toEqual([])
+    }
+    const bash = /^OASIS_SECRET_KEYS=\(([^)]*)\)$/m.exec(readText(path.join(DEPLOY, 'lib/common.sh')))![1]!.split(/\s+/)
+    expect(bash).toEqual([...SECRET_KEYS])
+  })
+
+  it('the production environment (common + api, the secret from the seed) passes the app own validation, and is safe', () => {
     const merged = {
+      ...parseEnvFile(read('etc/oasis/secret-seed.env')),
       ...parseEnvFile(read('etc/oasis/common.env')),
       ...parseEnvFile(read('etc/oasis/api.env')),
     }

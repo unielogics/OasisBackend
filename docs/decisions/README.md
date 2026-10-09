@@ -67,3 +67,4 @@
 | [0131](0131-secrets-push.md) | Writing the secret: pnpm secrets:push, plan first, merge, never a value on screen |
 | [0132](0132-provisioning-without-email-and-the-secret.md) | Provisioning without email or a domain, and the environment secret |
 | [0133](0133-runtime-identity-role-or-user.md) | The app's AWS identity: the instance role (recommended) or a key file, chosen by a flag |
+| [0134](0134-deploy-kit-with-the-secret.md) | The deploy kit with the environment in Secrets Manager |

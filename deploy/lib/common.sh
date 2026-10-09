@@ -221,3 +221,85 @@ env_file_unset() {
   chown --reference="$file" "$tmp" 2>/dev/null || true
   mv -f "$tmp" "$file"
 }
+
+# --- the application environment in AWS Secrets Manager (docs/deployment.md, ADR 0130) ---------------------------------------
+# /etc/oasis/common.env names the secret (OASIS_SECRET_ID) and its region (AWS_REGION); the secret holds these keys. The list is the
+# same as SECRET_KEYS in src/config/secrets-source.ts (a test holds them together).
+# shellcheck disable=SC2034 # used by install.sh
+OASIS_SECRET_KEYS=(DATABASE_URL SESSION_SECRET SECRETS_KEY STORAGE_SIGNING_SECRET BOOTSTRAP_ADMIN_EMAIL BOOTSTRAP_ADMIN_PASSWORD SQSP_API_KEY SQSP_WEBHOOK_SECRET SMSGATE_PASSWORD SMSGATE_WEBHOOK_SECRET)
+OASIS_BACKEND_DIR="${OASIS_BACKEND_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+
+# secret_id: OASIS_SECRET_ID from the environment or common.env; empty when this host keeps its secrets in the env files.
+secret_id() {
+  local v=${OASIS_SECRET_ID:-}
+  [[ -n "$v" ]] || v=$(env_get "$OASIS_ETC/common.env" OASIS_SECRET_ID 2>/dev/null) || v=""
+  printf '%s' "$v"
+}
+
+# aws_region: AWS_REGION from the environment or common.env.
+aws_region() {
+  local v=${AWS_REGION:-}
+  [[ -n "$v" ]] || v=$(env_get "$OASIS_ETC/common.env" AWS_REGION 2>/dev/null) || v=""
+  printf '%s' "$v"
+}
+
+# The app's AWS identity for a command the kit runs itself. runtime=user ($OASIS_ETC/aws-credentials exists): the SDK reads that file
+# (the systemd units get it through LoadCredential and set AWS_SHARED_CREDENTIALS_FILE themselves); runtime=role: the instance.
+AWS_CREDENTIALS_FILE_NAME=aws-credentials
+aws_credentials_file() { printf '%s' "$OASIS_ETC/$AWS_CREDENTIALS_FILE_NAME"; }
+
+# use_app_aws_identity: for the aws CLI in this shell: with runtime=user and the key file readable (root), point the CLI at it.
+use_app_aws_identity() {
+  local cred
+  cred=$(aws_credentials_file)
+  if [[ -z "${AWS_SHARED_CREDENTIALS_FILE:-}" && -r "$cred" ]]; then
+    export AWS_SHARED_CREDENTIALS_FILE="$cred" AWS_EC2_METADATA_DISABLED=true
+  fi
+  return 0
+}
+
+# secret_env ARGS...: runs scripts/secret-env.ts (the app's own loader) with the secret's id and region and the app's AWS identity.
+# OASIS_SECRET_ENV_CMD replaces it (tests). Never prints a value except on stdout for --get, which callers capture.
+secret_env() {
+  local sid region cred
+  sid=$(secret_id)
+  region=$(aws_region)
+  [[ -n "$sid" ]] || die "OASIS_SECRET_ID is not set in $OASIS_ETC/common.env"
+  local envs=(OASIS_SECRET_ID="$sid" AWS_REGION="$region")
+  cred=$(aws_credentials_file)
+  if [[ -z "${AWS_SHARED_CREDENTIALS_FILE:-}" && -e "$cred" ]]; then
+    [[ -r "$cred" ]] || die "$cred exists but this user cannot read it: run as root, or through the systemd unit (which hands it over)"
+    envs+=(AWS_SHARED_CREDENTIALS_FILE="$cred" AWS_EC2_METADATA_DISABLED=true)
+  fi
+  if [[ -n "${OASIS_SECRET_ENV_CMD:-}" ]]; then
+    # shellcheck disable=SC2086
+    env "${envs[@]}" $OASIS_SECRET_ENV_CMD "$@"
+  else
+    [[ -x "$OASIS_BACKEND_DIR/node_modules/.bin/tsx" ]] || die "$OASIS_BACKEND_DIR has no node_modules (run from a deployed release)"
+    env "${envs[@]}" "$OASIS_BACKEND_DIR/node_modules/.bin/tsx" "$OASIS_BACKEND_DIR/scripts/secret-env.ts" "$@"
+  fi
+}
+
+# config_value NAME: NAME as the app sees it: the process environment, else common.env (a non-empty line wins over the secret, as in
+# the app), else the secret. Prints the value (capture it; never echo it). Exit 1 when NAME is set nowhere.
+config_value() {
+  local name=$1 v
+  v=${!name:-}
+  if [[ -n "$v" ]]; then printf '%s' "$v"; return 0; fi
+  v=$(env_get "$OASIS_ETC/common.env" "$name" 2>/dev/null) || v=""
+  if [[ -n "$v" ]]; then printf '%s' "$v"; return 0; fi
+  [[ -n "$(secret_id)" ]] || return 1
+  secret_env --get "$name"
+}
+
+# secrets_push ARGS...: pnpm secrets:push from this release, as the operator (root's AWS profile, never the instance role).
+# OASIS_SECRETS_PUSH_CMD replaces it (tests).
+secrets_push() {
+  if [[ -n "${OASIS_SECRETS_PUSH_CMD:-}" ]]; then
+    # shellcheck disable=SC2086
+    $OASIS_SECRETS_PUSH_CMD "$@"
+  else
+    [[ -x "$OASIS_BACKEND_DIR/node_modules/.bin/tsx" ]] || die "$OASIS_BACKEND_DIR has no node_modules (run from a deployed release)"
+    "$OASIS_BACKEND_DIR/node_modules/.bin/tsx" "$OASIS_BACKEND_DIR/scripts/secrets-push.ts" "$@"
+  fi
+}

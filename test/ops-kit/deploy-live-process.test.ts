@@ -1,5 +1,6 @@
 // The production configuration, for real: src/server.ts booted as a process with NODE_ENV=production and the environment that
-// install.sh generates (common.env + api.env), then driven the way an operator would: healthcheck.sh and oasis-admin.sh.
+// install.sh generates (common.env + api.env naming the secret; the secret's content is install.sh's seed, served by a local
+// Secrets Manager endpoint through the real SDK), then driven the way an operator would: healthcheck.sh and oasis-admin.sh.
 // The SMS Gate tablet and Squarespace are the simulators.
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -17,6 +18,7 @@ import { testDatabaseUrl } from '../helpers/env.js'
 import { parseEnvFile, script, sh } from './deploy-helpers.js'
 import { seedSquarespaceSim } from '../../scripts/verify-live/sim-data.js'
 import { useStage } from './deploy-stage.js'
+import { FakeSecretsHttp } from '../aws/helpers/fake-secrets-http.js'
 
 const stage = useStage()
 const API_PORT = 4599
@@ -28,6 +30,7 @@ let output = ''
 let tablet: SimServer
 let sqsp: ReturnType<typeof createSimHttpServer>
 let work: string
+const secrets = new FakeSecretsHttp()
 
 async function until<T>(fn: () => Promise<T | undefined | false>, ms = 40_000): Promise<T> {
   const t0 = performance.now()
@@ -69,11 +72,15 @@ beforeAll(async () => {
     ...parseEnvFile(readFileSync(path.join(stage.etc, 'common.env'), 'utf8')),
     ...parseEnvFile(readFileSync(path.join(stage.etc, 'api.env'), 'utf8')),
   }
+  // what the operator pushes: install.sh's seed (SESSION_SECRET and SECRETS_KEY come from here only)
+  secrets.secrets.set(merged.OASIS_SECRET_ID!, JSON.stringify(parseEnvFile(readFileSync(path.join(stage.etc, 'secret-seed.env'), 'utf8'))))
+  const aws = await secrets.start()
   child = spawn('node_modules/.bin/tsx', ['src/server.ts'], {
     cwd: process.cwd(),
     env: {
       PATH: process.env.PATH ?? '',
       ...merged,
+      ...aws,
       NODE_ENV: 'production',
       LOG_LEVEL: 'warn',
       DATABASE_URL: testDatabaseUrl(),
@@ -106,6 +113,7 @@ afterAll(async () => {
   if (t) await sql`drop schema if exists ${sql.id(t.schema)} cascade`.execute(t.db)
   await t?.close()
   if (work) rmSync(work, { recursive: true, force: true })
+  await secrets.stop()
 })
 
 const admin = (...args: string[]) =>
@@ -119,6 +127,12 @@ const admin = (...args: string[]) =>
 const json = (r: { stdout: string }): any => JSON.parse(r.stdout.slice(r.stdout.indexOf('{')))
 
 describe('the production process', () => {
+  it('reads its secret settings from the secret at start, the explicit environment winning, and logs names only', () => {
+    expect(output).toContain('environment: 3 setting(s) from Secrets Manager secret oasis/prod/app (us-east-1); set in the process environment and kept: DATABASE_URL')
+    const seed = parseEnvFile(readFileSync(path.join(stage.etc, 'secret-seed.env'), 'utf8'))
+    for (const v of Object.values(seed)) expect(output).not.toContain(v)
+  })
+
   it('boots with the generated environment in production mode and answers the probes', async () => {
     const live = await fetch(`${API}/healthz`)
     expect(live.status).toBe(200)

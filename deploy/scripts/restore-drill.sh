@@ -148,7 +148,7 @@ if [[ "$MODE" == database ]]; then
   export PGDATABASE=$SCRATCH
   RESTORE_SCHEMAS=all
 else
-  url_to_pgenv "${RESTORE_URL:-${DATABASE_URL:-$(env_get "$OASIS_ETC/common.env" DATABASE_URL)}}"
+  url_to_pgenv "${RESTORE_URL:-$(config_value DATABASE_URL)}"
   exists=$(psql -X -q -A -t -c "select 1 from pg_namespace where nspname = '$SCHEMA'")
   [[ -z "$exists" ]] || die "schema $SCHEMA already exists in $PGDATABASE; a drill never restores over an existing schema"
   SCRATCH=$SCHEMA

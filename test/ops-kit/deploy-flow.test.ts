@@ -80,7 +80,7 @@ case "$*" in
   "install --frozen-lockfile") ;;
   "build") [ -e FAIL_BUILD ] && { echo "build broke" >&2; exit 1; }; mkdir -p dist; echo '//' > dist/server.js; echo '//' > dist/worker.js ;;
   "build:live") mkdir -p .next-live; echo x > .next-live/BUILD_ID ;;
-  "migrate up") echo "migrate DATABASE_URL=\${DATABASE_URL:+set} SECRETS_KEY=\${SECRETS_KEY:+set}" >> "$SHIM_LOG"; [ -e FAIL_MIGRATE ] && { echo "migration broke" >&2; exit 1; }; echo "$PWD" >> "$SHIM_STATE/migrated-by" ;;
+  "migrate up") echo "migrate DATABASE_URL=\${DATABASE_URL:+set} SECRETS_KEY=\${SECRETS_KEY:+set} OASIS_SECRET_ID=\${OASIS_SECRET_ID:-} AWS_REGION=\${AWS_REGION:-}" >> "$SHIM_LOG"; [ -e FAIL_MIGRATE ] && { echo "migration broke" >&2; exit 1; }; echo "$PWD" >> "$SHIM_STATE/migrated-by" ;;
   *) echo "unexpected pnpm $*" >&2; exit 1 ;;
 esac
 `,
@@ -134,6 +134,8 @@ exit 0
     SHIM_LOG: logFile,
     SHIM_STATE: state,
     OASIS_PREFIX: prefix,
+    // the test runner's own DATABASE_URL (from .env) must not stand in for what the env files provide
+    DATABASE_URL: '',
   }
   const releasesDir = path.join(prefix, 'releases')
   return {
@@ -205,8 +207,9 @@ describe('deploy.sh', () => {
       'systemctl restart oasis-web.service',
       'health --wait 90',
     ])
-    // the migration ran in the NEW release, with the environment files loaded
-    expect(calls(w, 'migrate ')[0]).toBe('migrate DATABASE_URL=set SECRETS_KEY=set')
+    // the migration ran in the NEW release, with the environment files loaded: they name the secret, and the release's own
+    // loader (scripts/migrate.ts) reads DATABASE_URL from it; no secret value passes through the shell
+    expect(calls(w, 'migrate ')[0]).toBe('migrate DATABASE_URL= SECRETS_KEY= OASIS_SECRET_ID=oasis/prod/app AWS_REGION=us-east-1')
     expect(readFileSync(path.join(w.state, 'migrated-by'), 'utf8').trim()).toBe(path.join(rel, 'backend'))
     // and health was judged against the new release
     expect(calls(w, 'health')[0]).toContain(`current=${w.current()}`)

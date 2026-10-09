@@ -34,24 +34,29 @@ Do these in order; each step ends with something you can check.
         --install-packages --install-postgres --local-db --drill-role --gen-deploy-keys
    ```
    Read the plan, then run it without `--dry-run`. It prints the public halves of two SSH deploy keys. Add each as a **read-only deploy
-   key** on its GitHub repository.
-   Check: `ls /etc/oasis` shows `common.env api.env worker.env web.env drill.env`; `systemctl list-unit-files 'oasis*'` lists the units.
-3. **Keep the encryption key.** Copy `SECRETS_KEY` from `/etc/oasis/common.env` into your password manager. Without it, stored
-   credentials (the tablet, Squarespace) cannot be read from a restored database.
+   key** on its GitHub repository. The app's AWS identity: `--aws-runtime role` (default, recommended) or `user`
+   ([aws-setup.md](aws-setup.md)).
+   Check: `ls /etc/oasis` shows `common.env api.env worker.env web.env drill.env secret-seed.env`; `systemctl list-unit-files 'oasis*'`
+   lists the units.
+3. **The secret, and the encryption key.** With the AWS side provisioned ([aws-setup.md](aws-setup.md), steps 1 to 5), push
+   `/etc/oasis/secret-seed.env` into the secret (the commands install.sh printed; aws-setup.md step 6). Copy `SECRETS_KEY` from it into
+   your password manager: without it, stored credentials (the tablet, Squarespace) cannot be read from a restored database. Then shred
+   every copy of the seed.
 4. **Clone the repositories** (as the installer suggests): re-run `install.sh` with `--backend-repo` and `--dashboard-repo`, using the
    aliases `git@github-oasis-backend:OWNER/OasisBackend.git` and `git@github-oasis-dashboard:OWNER/OasisDashboard.git`.
    Check: `ls /opt/oasis/src/backend/deploy/scripts`.
 5. **First deployment:** `sudo /opt/oasis/src/backend/deploy/scripts/deploy.sh` (the first build takes several minutes). Check: it ends
    with `release ... is live`, and `https://your-domain/healthz` answers `{"status":"ok"}`.
-6. **First Super Admin:** `sudo $D/bootstrap-admin.sh set you@example.com`, note the password, `sudo systemctl restart oasis-api`, sign in,
-   change the password, then `sudo $D/bootstrap-admin.sh clear` and `sudo systemctl restart oasis-api`.
+6. **First Super Admin:** `sudo $D/bootstrap-admin.sh set you@example.com --profile <operator profile>` (it goes into the secret), note
+   the password, `sudo systemctl restart oasis-api`, sign in, change the password, then
+   `sudo $D/bootstrap-admin.sh clear --profile <operator profile>` and `sudo systemctl restart oasis-api`.
 7. **Tailscale** (for the tablet): install and join the tailnet (`sudo tailscale up --hostname=oasis-api`), then in the admin console
    enable MagicDNS and HTTPS certificates, tag the nodes, add the two ACL rules and disable key expiry on both nodes
    ([deployment.md](deployment.md), "The tailnet side"). Then `sudo $D/tailscale-serve.sh` and put the URL it prints into `common.env`
    as `SMSGATE_WEBHOOK_PUBLIC_URL`.
 8. **Settings in the dashboard:** working hours, closures, employees and roles, packages (Settings screens).
-9. **Integrations**, each with its own check: the tablet (section 6), Squarespace (section 7), AWS SES and S3 (create everything with
-   `pnpm aws:provision` and the temporary setup user, exactly as in [aws-setup.md](aws-setup.md), then
+9. **Integrations**, each with its own check: the tablet (section 6), Squarespace (section 7), AWS S3 now and SES last (everything with
+   `pnpm aws:provision` and the operator key, exactly as in [aws-setup.md](aws-setup.md), then
    [live-verification.md](live-verification.md), "AWS"). They are off (`sim`) until you switch them: in `common.env` set
    `SMS_PROVIDER=smsgate`, `SQSP_PROVIDER=live`, `EMAIL_PROVIDER=ses`, `STORAGE_PROVIDER=s3` one at a time, `sudo systemctl restart
    oasis-api oasis-worker` after each. `GET /api/v1/system/integrations` (Super Admin) then says per integration whether it is
@@ -126,6 +131,8 @@ sha256sum -c NAME.dump.sha256                                        # if you ha
 sudo -u postgres pg_restore --no-owner --role=oasis -d oasis --exit-on-error NAME.dump
 # bring the schema up to the current release (a no-op if the dump is current)
 cd /opt/oasis/current/backend && sudo -u oasis bash -c 'set -a; . /etc/oasis/common.env; . /etc/oasis/api.env; set +a; pnpm migrate up'
+# (DATABASE_URL comes from the secret common.env names; with runtime=user add
+#  AWS_SHARED_CREDENTIALS_FILE=<a copy of /etc/oasis/aws-credentials the oasis user can read> AWS_EC2_METADATA_DISABLED=true)
 ```
 Before starting the services, **stop texts from going out twice.** The restored queue still shows messages as pending that were
 actually sent after the backup was taken. In `/etc/oasis/common.env` set `SMS_DISPATCH_MODE=off`, then:
@@ -163,7 +170,8 @@ Everything here is in the dashboard, Settings.
   Nobody can read another person's link.
 * **A new Super Admin when you cannot sign in as one:** section 9, "Locked-out Super Admin".
 * **A login for an existing employee from the command line:** `cd /opt/oasis/current/backend && sudo -u oasis env $(grep -v '^#'
-  /etc/oasis/common.env | xargs) pnpm user:create -- --email a@b.c --first Amara --roles super --password-stdin < pw.txt`.
+  /etc/oasis/common.env | xargs) pnpm user:create -- --email a@b.c --first Amara --roles super --password-stdin < pw.txt` (it reads the
+  secret named in `common.env` for `DATABASE_URL`, like the services).
 
 ---
 
@@ -246,16 +254,27 @@ them in Oasis, and Oasis confirms them when the money shows up there.
 
 ## 8. Rotate secrets
 
+**Rotating a value in the secret** (the general recipe): write the new `NAME=value` into a private one-line file (`umask 077`), then
+```bash
+pnpm secrets:push --profile oasis-admin --secret-id oasis/prod/app --from new.env           # the plan: "~ NAME (changes)"
+pnpm secrets:push --profile oasis-admin --secret-id oasis/prod/app --from new.env --apply && shred -u new.env
+sudo systemctl restart oasis-api oasis-worker          # the services read the secret at start only
+```
+Secrets Manager keeps the previous value as the `AWSPREVIOUS` version (to go back: push the old value again). `--remove NAME` deletes
+a key. The operator key is needed for this; create a fresh one for the occasion and deactivate it afterwards ([aws-setup.md](aws-setup.md)).
+On a host without the secret (`--secrets-in-files`), edit the line in `common.env` instead.
+
 | Secret | Where | How | What people notice |
 |---|---|---|---|
-| `SECRETS_KEY` (encrypts stored tablet and Squarespace credentials) | `common.env` | `sudo $D/secrets-rotate.sh --generate` (dry run), then `sudo $D/secrets-rotate.sh --new-key-file /etc/oasis/secrets-key.new --apply`. Store the new key in the password manager, delete the `common.env.bak-*` copies | API and worker stop for under a minute |
-| `SESSION_SECRET` | `common.env` | change the value, `systemctl restart oasis-api oasis-worker` | everyone is signed out |
-| Database password | role `oasis`, `DATABASE_URL` | `sudo -u postgres psql -c "alter role oasis password 'NEW'"`, put the new password in `DATABASE_URL`, restart all three, update `drill.env` if you rotate `oasis_drill` | a short outage |
-| Tablet password | SMS Gate app, device record | change it in the app, then `oasis-admin.sh ... sms-update-device <id> --password-env VAR` (and `SMSGATE_PASSWORD` in `common.env` if you keep it for `verify.sh smsgate`) | none |
-| Tablet webhook signing key | SMS Gate app, device record | `sms-update-device <id> --webhook-secret-env VAR`, set the same key in the app, `sms-register-webhooks <id>` (and `SMSGATE_WEBHOOK_SECRET` if kept for `verify.sh smsgate`) | texts from customers pause until both sides match |
-| Squarespace API key | the database (encrypted), optionally `common.env` | create a new key, `sqsp-connect --key-env VAR` (and `SQSP_API_KEY` if you keep the fallback), restart, then revoke the old key in Squarespace | none |
-| Squarespace webhook secret | Squarespace subscription, `SQSP_WEBHOOK_SECRET` | rotate in Squarespace (it returns the new hex once), update the variable, restart the API | none |
-| AWS (`oasis-app` access key) | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` in `common.env` | with a temporary setup user: `pnpm aws:provision ... --new-access-key --out <new file> --apply` (the old key keeps working), paste the two new lines into `common.env`, restart API and worker, check `GET /api/v1/system/integrations`, then the owner deactivates and deletes the old key in the IAM console ([aws-setup.md](aws-setup.md), "Later") | none |
+| `SECRETS_KEY` (encrypts stored tablet and Squarespace credentials) | the secret | **not** with a plain push (the stored credentials must be re-encrypted): `sudo $D/secrets-rotate.sh --generate` (dry run), then `sudo $D/secrets-rotate.sh --new-key-file /etc/oasis/secrets-key.new --profile <operator profile> --apply` (`pnpm secrets:rotate` re-encrypts, then the new key is pushed into the secret). Store the new key in the password manager, then shred the key file | API and worker stop for under a minute |
+| `SESSION_SECRET` | the secret | the recipe above (`gen-secrets.sh SESSION_SECRET > new.env`) | everyone is signed out |
+| Database password | role `oasis`, `DATABASE_URL` in the secret | `sudo -u postgres psql -c "alter role oasis password 'NEW'"`, push the new `DATABASE_URL`, restart all three; update `drill.env` if you rotate `oasis_drill` | a short outage |
+| Tablet password | SMS Gate app, device record | change it in the app, then `oasis-admin.sh ... sms-update-device <id> --password-env VAR` (and `SMSGATE_PASSWORD` in the secret if you keep it for `verify.sh smsgate`) | none |
+| Tablet webhook signing key | SMS Gate app, device record | `sms-update-device <id> --webhook-secret-env VAR`, set the same key in the app, `sms-register-webhooks <id>` (and `SMSGATE_WEBHOOK_SECRET` in the secret if kept for `verify.sh smsgate`) | texts from customers pause until both sides match |
+| Squarespace API key | the database (encrypted), optionally the secret | create a new key, `sqsp-connect --key-env VAR` (and `SQSP_API_KEY` in the secret if you keep the fallback), restart, then revoke the old key in Squarespace | none |
+| Squarespace webhook secret | Squarespace subscription, `SQSP_WEBHOOK_SECRET` in the secret | rotate in Squarespace (it returns the new hex once), push it, restart the API | none |
+| AWS identity of the app | runtime=role: nothing to rotate (AWS rotates the instance role's credentials). runtime=user: `/etc/oasis/aws-credentials` | runtime=user, with the operator key: `pnpm aws:provision ... --runtime user --new-access-key --out <new file> --apply` (the old key keeps working), `sudo install -o root -g root -m 0600 <new file> /etc/oasis/aws-credentials`, restart API and worker, check `GET /api/v1/system/integrations`, then the owner deactivates and deletes the old key in the IAM console ([aws-setup.md](aws-setup.md)) | none |
+| The operator (administrator) key | the integrator's `~/.aws/credentials` | the owner deactivates it after every setup session and creates a fresh one when needed; nothing the app runs with depends on it | none |
 | Backup encryption key | `BACKUP_ENCRYPTION_KEY_FILE` | `node deploy/lib/backup-crypt.mjs keygen NEWFILE`, point `backup.env` at it. **Keep the old key** to read older backups | none |
 | Deploy keys | GitHub, `/var/lib/oasis/.ssh` | `install.sh --gen-deploy-keys` after removing the old key files, add the new public keys, delete the old ones on GitHub | none |
 
@@ -271,6 +290,11 @@ and Squarespace credentials (rotate those at their source as well); a leaked tab
 1. `$D/healthcheck.sh` shows which part fails. `systemctl status oasis-api oasis-worker oasis-web nginx postgresql`.
 2. API down: `journalctl -u oasis-api --since '15 min ago'`. `Invalid environment` means a bad line in an env file (the message names the
    variable). A database error: is Postgres up, is the disk full (`df -h`)?
+   A line about the secret stops the service before anything else: `secret "oasis/prod/app" in us-east-1 does not exist` (create and
+   fill it: aws-setup.md), `access denied reading secret ...` (runtime=role: is `oasis-app-profile` associated with this instance,
+   `aws ec2 describe-iam-instance-profile-associations` with the operator profile; runtime=user: does `/etc/oasis/aws-credentials` exist
+   and hold the oasis-app key), `no AWS credentials ...` (the same two questions), `holds keys the environment contract does not
+   declare: X` (`pnpm secrets:push ... --remove X --apply`). The secret's values are never in the journal.
 3. 502 from nginx: the API or dashboard is not listening; `ss -ltn | grep -E '4000|3200'`.
 4. After a deploy: `sudo $D/rollback.sh`.
 5. Certificate expired: `sudo certbot renew --dry-run`, `systemctl status certbot-renew.timer`; DNS still pointing here?

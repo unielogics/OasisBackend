@@ -2,7 +2,8 @@
 
 How Oasis Auto Spa runs in production on one Amazon Linux 2023 host, and the kit in `deploy/` that sets it up, updates it, backs it
 up and brings it back. The day-to-day procedures (what to do when something breaks) are in [runbook.md](runbook.md); proving the
-tablet, Squarespace and AWS work is in [live-verification.md](live-verification.md). Decisions: ADRs 0100 to 0103.
+tablet, Squarespace and AWS work is in [live-verification.md](live-verification.md). Decisions: ADRs 0100 to 0103, and 0130 to 0133
+for the environment in AWS Secrets Manager and the app's AWS identity.
 
 ## What runs where
 
@@ -34,7 +35,10 @@ tablet, Squarespace and AWS work is in [live-verification.md](live-verification.
 | `/opt/oasis/src/backend`, `/opt/oasis/src/dashboard` | git clones (read-only deploy keys). `deploy.sh` fetches into them |
 | `/opt/oasis/releases/<id>/{backend,dashboard}` | one built release each: source, `node_modules`, `dist/`, `.next-live/`, `REVISIONS` |
 | `/opt/oasis/current`, `/opt/oasis/previous` | symlinks to the running release and the one before it |
-| `/etc/oasis/{common,api,worker,web}.env` | environment, `0640 root:oasis`. `drill.env` (restore drill role) and `backup.env` (optional) beside them |
+| `/etc/oasis/{common,api,worker,web}.env` | the NON-secret environment, `0640 root:oasis`; `common.env` names the secret (`OASIS_SECRET_ID`). `drill.env` (restore drill role) and `backup.env` (optional) beside them |
+| AWS Secrets Manager secret `oasis/prod/app` | the secret settings: `DATABASE_URL`, `SESSION_SECRET`, `SECRETS_KEY`, `STORAGE_SIGNING_SECRET`, `BOOTSTRAP_ADMIN_*` (first boot only), API keys. Read by every program at start; written only with `pnpm secrets:push` |
+| `/etc/oasis/aws-credentials` | runtime=user only: the `oasis-app` key, `0600 root:root`; systemd hands the services a private copy. Absent with the instance role (the recommendation) |
+| `/etc/oasis/secret-seed.env` | a new install only: the generated secret settings (`0600 root:root`) until they are pushed into the secret; then shredded |
 | `/etc/systemd/system/oasis*.{service,timer,target}` | the units |
 | `/etc/nginx/conf.d/oasis.conf`, `00-oasis-zones.conf`, `/etc/nginx/oasis/{proxy,security-headers}.conf` | the site |
 | `/var/lib/oasis` | state: `files/` (filesystem storage), `mail/` (simulated mail), `drills/` (restore-drill results), the service user's home |
@@ -61,20 +65,54 @@ sudo deploy/scripts/install.sh --domain oasis.example.com --email you@example.co
 * `--dry-run` prints every step and changes nothing. `--no-system` writes the files only (for a staging directory).
 * It is safe to run again: it changes only what differs, never overwrites an existing env file, and reports variables a newer
   template has that your file lacks.
-* Order of work: host checks, packages, the `oasis` user and directories, the env files (with `SESSION_SECRET` and `SECRETS_KEY`
-  generated), the database role and database, deploy keys and clones, systemd units, journald and logrotate settings, nginx and TLS.
-  It does not start the application; `deploy.sh` does.
+* Order of work: host checks, packages, the `oasis` user and directories, the env files (naming the secret: `--secret-id`, default
+  `oasis/prod/app`, and `--aws-region`, default `us-east-1`; the secret settings are generated into `/etc/oasis/secret-seed.env`, never
+  into the env files), the database role and database (from the seed's `DATABASE_URL`), deploy keys and clones, systemd units (plus
+  the runtime=user drop-ins, `--aws-runtime role|user`, default role), journald and logrotate settings, nginx and TLS. It does not
+  start the application; `deploy.sh` does.
+* **Before the first start, push the seed into the secret** and shred it (the commands are printed; [aws-setup.md](aws-setup.md),
+  step 6): `sudo install -m 600 -o $USER /etc/oasis/secret-seed.env ~/oasis-secret.env`,
+  `pnpm secrets:push --profile <operator profile> --secret-id oasis/prod/app --from ~/oasis-secret.env --apply`,
+  `shred -u ~/oasis-secret.env && sudo shred -u /etc/oasis/secret-seed.env`. `deploy.sh` warns while the seed exists.
+* `--secrets-in-files` keeps the old layout (secrets generated into `common.env`) for a host without AWS; everything below works with
+  it too, and `--move-secrets` moves such a host later.
 * TLS: `--tls certbot` (default) installs a port-80-only site, obtains a Let's Encrypt certificate with the webroot challenge, then
   installs the full site and a renewal hook that reloads nginx. `--tls files --tls-cert F --tls-key F` uses certificates you supply.
-* **Copy `SECRETS_KEY` out of `/etc/oasis/common.env` into a password manager now.** It decrypts the tablet and Squarespace
-  credentials stored in the database; the database backups are useless for those without it.
+* **Copy `SECRETS_KEY` (from the seed, before you shred it) into a password manager now.** It decrypts the tablet and Squarespace
+  credentials stored in the database; the database backups are useless for those without it. The secret keeps it too, but a
+  password-manager copy survives a deleted secret or a lost AWS account.
 
 ### Environment files
 
 `deploy/env/*.env.example` document every variable of `src/config/env.ts` (a test fails if one is missing or undocumented).
-`common.env` is read by the API and the worker (database, secrets, integrations), then `api.env` or `worker.env` on top; `web.env`
-belongs to the dashboard alone. Shared secrets live once, in `common.env`, so the API and the worker can never disagree about
-`SECRETS_KEY`.
+`common.env` is read by the API and the worker (non-secret settings, the name of the secret, integrations), then `api.env` or `worker.env` on top;
+`web.env` belongs to the dashboard alone. **The files hold no secret.** Every program (the services, `pnpm migrate`, the seed runner,
+`secrets:rotate`, `verify:*`, the password reset; `src/config/secrets-source.ts`) reads the secret named by `OASIS_SECRET_ID` at start,
+in `AWS_REGION`, and fills what the process environment does not set; the API and the worker read the same secret, so they can never
+disagree about `SECRETS_KEY`. The shell scripts that need a secret value (`backup.sh`, `ledger-check.sh`, the restore drill,
+`bootstrap-admin.sh status`, `secrets-rotate.sh`) get it the same way through `scripts/secret-env.ts`, into a variable, never printed.
+
+Which keys go into the secret (the templates keep them commented out, a test holds the list): `DATABASE_URL`, `SESSION_SECRET`,
+`SECRETS_KEY`, `STORAGE_SIGNING_SECRET`, `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` (first boot only), `SQSP_API_KEY` and
+`SQSP_WEBHOOK_SECRET` (if used), `SMSGATE_PASSWORD` and `SMSGATE_WEBHOOK_SECRET` (only for `verify:smsgate`). Never in the secret:
+`OASIS_SECRET_ID`, `AWS_REGION` and AWS credentials (both the app and `secrets:push` refuse them). Any other declared setting may
+live there, but non-secret settings belong in the files, where they can be read.
+
+**Precedence:** a non-empty `NAME=value` line in an env file (or the process environment) wins over the secret, so one host can
+override one setting; an empty line counts as unset. The start-up line in the journal says what came from where, names only:
+`environment: 4 setting(s) from Secrets Manager secret oasis/prod/app (us-east-1); set in the process environment and kept: ...`.
+A problem stops the service with one line (`secret ... does not exist`, `access denied reading secret ...`, `holds keys the
+environment contract does not declare: ...`); no value of the secret is ever logged. A changed secret takes effect at the next start.
+
+**The app's AWS identity** (`install.sh --aws-runtime`, [aws-setup.md](aws-setup.md), ADR 0133):
+* `role` (default, recommended): nothing on the host; the SDK gets the instance role's credentials (`oasis-app-role` through the
+  instance profile `oasis-app-profile`). `AWS_EC2_METADATA_DISABLED` must stay unset.
+* `user`: `/etc/oasis/aws-credentials` (the `oasis-app` key in the AWS credentials file format, `0600 root:root`). install.sh adds
+  `oasis-{api,worker,backup,restore-drill}.service.d/10-oasis-aws-credentials.conf`: `LoadCredential=aws-credentials:/etc/oasis/aws-credentials`
+  (systemd reads the root-only file and gives the service a private copy that only the service user can read),
+  `AWS_SHARED_CREDENTIALS_FILE=%d/aws-credentials` and `AWS_EC2_METADATA_DISABLED=true`. The deploy scripts that run a command as
+  `oasis` from root (migrate, verify, the pre-deploy backup) hand it a private temporary copy for that command. `--aws-runtime role`
+  removes the drop-ins again.
 
 Rules, because systemd reads these files and a shell does not: `NAME=value` per line, comments on their own line (a `#` after a value
 becomes part of the value), single quotes around anything with spaces or braces, no `export`. An empty value is not "unset": the app
@@ -83,19 +121,39 @@ rejects `BOOTSTRAP_ADMIN_EMAIL=` and similar, which is why optional settings are
 Production switches that matter: `NODE_ENV=production`, `TRUST_PROXY=true` and `COOKIE_SECURE=true` (api.env), `HOST=127.0.0.1`,
 `SMS_DISPATCH_MODE=jobs` (the worker sends texts), and none of `DEV_AUTH_BYPASS`, `CLOCK_FREEZE_AT`, `ALLOW_DEV_ENDPOINTS`.
 
-AWS: `pnpm aws:provision` ([aws-setup.md](aws-setup.md)) creates the buckets, the SES identity, configuration set and feedback topic, and
-the `oasis-app` user; it prints the exact lines for `common.env` (`AWS_REGION`, `SES_FROM_ADDRESS`, `SES_CONFIGURATION_SET`,
-`SES_SNS_TOPIC_ARNS`, `S3_BUCKET`, `S3_KEY_PREFIX`, `BACKUP_S3_URI`) and writes the app's `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`
-to a 0600 file. Keep `AWS_EC2_METADATA_DISABLED=true` (the template's value) so the SDK never falls back to instance metadata.
-`SQSP_PROVIDER=live` needs no `SQSP_API_KEY` when the key is stored with `sqsp-connect`, and `SMS_PROVIDER=smsgate` needs no `SMSGATE_*`
-device values (the app reads the tablets from the database).
+AWS: `pnpm aws:provision` ([aws-setup.md](aws-setup.md)) creates the buckets, the secret, the app's identity and (later, with a sender)
+the SES identity, configuration set and feedback topic; it prints the non-secret lines for `common.env` (`OASIS_SECRET_ID`,
+`AWS_REGION`, `STORAGE_PROVIDER`, `S3_BUCKET`, `S3_KEY_PREFIX`, `BACKUP_S3_URI`, and with a sender `EMAIL_PROVIDER`, `SES_FROM_ADDRESS`,
+`SES_CONFIGURATION_SET`, `SES_SNS_TOPIC_ARNS`). `SQSP_PROVIDER=live` needs no `SQSP_API_KEY` when the key is stored with `sqsp-connect`,
+and `SMS_PROVIDER=smsgate` needs no `SMSGATE_*` device values (the app reads the tablets from the database).
+
+### Move an existing host to the secret
+
+A host installed before the secret (or with `--secrets-in-files`) keeps `DATABASE_URL`, `SESSION_SECRET` and `SECRETS_KEY` in
+`common.env` (and perhaps `BOOTSTRAP_ADMIN_*` in `api.env`). After `pnpm aws:provision` created the secret and the identity:
+
+```bash
+sudo install -m 600 -o $USER /etc/oasis/common.env ~/common.env.copy
+pnpm secrets:push --profile oasis-admin --secret-id oasis/prod/app --from ~/common.env.copy      --keys DATABASE_URL,SESSION_SECRET,SECRETS_KEY            # the plan: + for each, values never shown
+pnpm secrets:push ...same... --apply && shred -u ~/common.env.copy
+sudo /opt/oasis/current/backend/deploy/scripts/install.sh --domain <host> --move-secrets [--aws-runtime role|user]
+sudo systemctl restart oasis-api oasis-worker            # the journal shows "environment: 3 setting(s) from Secrets Manager secret ..."
+sudo shred -u /etc/oasis/*.env.bak-*                      # once it runs: the backups install.sh kept still hold the values
+```
+
+`--move-secrets` first reads the secret with the app's identity and compares, in memory, every secret key the env files still set
+with the secret's value; a key that is missing or different stops it and nothing changes. Then it writes `OASIS_SECRET_ID` and
+`AWS_REGION` into `common.env` and removes those lines (keeping `*.env.bak-<time>`). Run it from the current release (it needs the
+release's `node_modules`).
 
 ### First Super Admin
 
-`deploy/scripts/bootstrap-admin.sh set you@example.com` generates a password, writes `BOOTSTRAP_ADMIN_EMAIL` and
-`BOOTSTRAP_ADMIN_PASSWORD` to `api.env` and prints the password once. On the next API start, if the database has no user at all, the
-Super Admin and the five built-in roles are created. Sign in, change the password, then `bootstrap-admin.sh clear` and restart the
-API. On any later start the variables do nothing.
+`sudo deploy/scripts/bootstrap-admin.sh set you@example.com --profile <operator profile>` generates a password, puts
+`BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` into the secret with `pnpm secrets:push` (as root: the profile is root's, or keep
+`AWS_SHARED_CREDENTIALS_FILE`/`AWS_CONFIG_FILE` through `sudo --preserve-env`) and prints the password once. On the next API start, if
+the database has no user at all, the Super Admin and the five built-in roles are created. Sign in, change the password, then
+`bootstrap-admin.sh clear --profile <operator profile>` and restart the API. On any later start the variables do nothing. (A host
+without the secret gets the two lines in `api.env` instead, without `--profile`.)
 
 ## The services
 
@@ -223,11 +281,18 @@ the scratch copy afterwards. A failure goes to `systemctl --failed` and `failure
 
 ## Secrets
 
-* `SECRETS_KEY` rotates with `deploy/scripts/secrets-rotate.sh` (`pnpm secrets:rotate` underneath): dry run, backup, stop API and
-  worker, re-encrypt every credential in one read-back-verified transaction, replace the key in `common.env`, start, health-check.
+* They live in the AWS Secrets Manager secret (above). Change one with a one-line file and `pnpm secrets:push --profile <operator
+  profile> --secret-id oasis/prod/app --from FILE --apply` (plan first without `--apply`; `--remove KEY` deletes one), then restart
+  `oasis-api` and `oasis-worker`. Secrets Manager keeps the previous version (`AWSPREVIOUS`).
+* `SECRETS_KEY` rotates with `deploy/scripts/secrets-rotate.sh --profile <operator profile>` (`pnpm secrets:rotate` underneath): dry run,
+  a `secrets:push` plan proving the operator may write the secret, backup, stop API and worker, re-encrypt every credential in one
+  read-back-verified transaction, push the new key into the secret, start, health-check.
 * Everything else (session secret, database password, tablet and Squarespace credentials, AWS access) is in
   [runbook.md](runbook.md), "Rotate secrets".
-* `deploy/scripts/gen-secrets.sh` prints freshly generated values from the system CSPRNG.
+* `deploy/scripts/gen-secrets.sh` prints freshly generated values from the system CSPRNG; `gen-secrets.sh --secret` prints the file
+  for a new secret (`DATABASE_URL` with a fresh password, `SESSION_SECRET`, `SECRETS_KEY`, `STORAGE_SIGNING_SECRET`).
+* Still on disk: `/etc/oasis/drill.env` (the `oasis_drill` role's URL; not an app setting, so it cannot live in the secret),
+  `BACKUP_ENCRYPTION_KEY_FILE` (a key file) and, with runtime=user, `/etc/oasis/aws-credentials`.
 
 ## Logs and monitoring
 
@@ -245,8 +310,13 @@ the scratch copy afterwards. A failure goes to `systemctl --failed` and `failure
 Written and tested on this machine without installing anything or touching the running system.
 
 Verified by tests (`pnpm test:ops-kit`):
-* the env templates against `src/config/env.ts`; the generated production environment boots `src/server.ts` as a real process with
-  `NODE_ENV=production`, passes the health check, sends the security headers, and honours `X-Forwarded-For`;
+* the env templates against `src/config/env.ts` (no secret key active in them; the deploy kit's list of secret keys equals the app's);
+  the generated production environment boots `src/server.ts` as a real process with `NODE_ENV=production`, reading `SESSION_SECRET`
+  and `SECRETS_KEY` from the secret through the real SDK against a local Secrets Manager endpoint, passes the health check, sends the
+  security headers, and honours `X-Forwarded-For`;
+* `backup.sh` reading `DATABASE_URL` from the secret through `scripts/secret-env.ts` and the SDK (local endpoint); the precedence
+  environment, common.env, secret; the runtime=user drop-ins and key file; `install.sh --move-secrets` (refuses a missing or different
+  value, then moves); `bootstrap-admin.sh` and `secrets-rotate.sh` writing the secret (a stand-in for `secrets:push`);
 * every unit with `systemd-analyze verify` and `systemd-analyze security` (offline);
 * the nginx configuration structurally (a parser, nginx's location-selection rules applied to representative URLs, duplicate
   directives, zones, includes, header values);
@@ -267,7 +337,10 @@ Not verified (needs the real thing):
   same; confirm with `tailscale-serve.sh --status` on the host. Whether tailscaled and nginx can both use port 443 is untested (hence 8443);
 * the restore drill in **database mode** (the test role may not create databases here; schema mode was run);
 * the dashboard's CSP in a browser (hence report-only), the systemd hardening under a real `systemctl start`, S3 upload of backups
-  with the real `aws` CLI, and the first-boot `BOOTSTRAP_ADMIN` flow on a real empty database through `install.sh`.
+  with the real `aws` CLI, and the first-boot `BOOTSTRAP_ADMIN` flow on a real empty database through `install.sh`;
+* real AWS: reading the secret with the instance role or the key file, `LoadCredential=` under a real `systemctl start` (systemd 252
+  on Amazon Linux 2023 supports it; `systemd-analyze verify` checks the units, not the drop-ins), and `secrets:push` against the real
+  service (tests use the real SDK client with a mocked transport, and a local endpoint for the loader).
 
 ## Known gaps in the application that affect deployment
 

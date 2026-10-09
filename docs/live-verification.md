@@ -13,7 +13,8 @@ writes a report you can keep or send to someone.
 
 ## How to run them
 
-On the server, from the deployed release (the wrapper loads `/etc/oasis/common.env`, runs as the `oasis` user, and keeps the reports in
+On the server, from the deployed release (the wrapper loads `/etc/oasis/common.env`, and the scripts read the secret it names like the app
+does; it runs as the `oasis` user, and keeps the reports in
 `/var/lib/oasis/live-verification`):
 
 ```bash

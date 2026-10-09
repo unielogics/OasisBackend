@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # gen-secrets.sh [NAME ...]    prints NAME=value lines for the secrets Oasis needs, generated from the system CSPRNG (openssl).
+# gen-secrets.sh --secret      prints the file for the environment secret, ready for pnpm secrets:push --from FILE:
+#                              DATABASE_URL (role oasis on the local Postgres, a fresh password), SESSION_SECRET, SECRETS_KEY,
+#                              STORAGE_SIGNING_SECRET. Write it to a private file (umask 077) and shred it after the push.
 # With no names it prints all of them. Nothing is written anywhere; install.sh and you decide where the lines go.
 #
 #   SESSION_SECRET           48 random bytes, base64: signs session cookies
@@ -33,7 +36,14 @@ gen() {
   esac
 }
 
-if (($# == 0)); then
+if [[ "${1:-}" == --secret ]]; then
+  (($# == 1)) || {
+    echo "gen-secrets.sh: --secret takes no other argument" >&2
+    exit 2
+  }
+  printf 'DATABASE_URL=postgres://oasis:%s@127.0.0.1:5432/oasis\n' "$(openssl rand -hex 24)"
+  set -- SESSION_SECRET SECRETS_KEY STORAGE_SIGNING_SECRET
+elif (($# == 0)); then
   set -- SESSION_SECRET SECRETS_KEY SMSGATE_WEBHOOK_SECRET STORAGE_SIGNING_SECRET DB_PASSWORD BOOTSTRAP_ADMIN_PASSWORD BACKUP_ENCRYPTION_KEY
 fi
 for name in "$@"; do gen "$name"; done

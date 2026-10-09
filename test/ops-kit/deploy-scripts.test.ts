@@ -4,6 +4,8 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
 import { loadEnv } from '../../src/config/env.js'
+import { secretKeyProblems } from '../../src/config/secrets-source.js'
+import { invalidValues, parseDotenv } from '../../scripts/secrets-push.js'
 import { DEPLOY, parseEnvFile, script, sh, tempDir, tree, writeExecutable } from './deploy-helpers.js'
 import { useStage } from './deploy-stage.js'
 
@@ -171,10 +173,23 @@ describe('gen-secrets.sh', () => {
     expect((await sh(script('gen-secrets.sh'), ['SECRETS_KEY'])).stdout.trim().split('\n')).toHaveLength(1)
     expect((await sh(script('gen-secrets.sh'), ['NOPE'])).code).not.toBe(0)
   })
+
+  it('--secret prints exactly the file for the environment secret, which pnpm secrets:push accepts as it is', async () => {
+    const out = (await sh(script('gen-secrets.sh'), ['--secret'])).stdout
+    const a = parseEnvFile(out)
+    expect(Object.keys(a)).toEqual(['DATABASE_URL', 'SESSION_SECRET', 'SECRETS_KEY', 'STORAGE_SIGNING_SECRET'])
+    expect(a.DATABASE_URL).toMatch(/^postgres:\/\/oasis:[0-9a-f]{48}@127\.0\.0\.1:5432\/oasis$/)
+    expect(Buffer.from(a.SECRETS_KEY!, 'base64')).toHaveLength(32)
+    const values = parseDotenv(out, 'gen-secrets')
+    expect(secretKeyProblems(values.keys())).toEqual({ forbidden: [], unknown: [] })
+    expect(invalidValues(values)).toEqual([])
+    expect(parseEnvFile((await sh(script('gen-secrets.sh'), ['--secret'])).stdout).SECRETS_KEY).not.toBe(a.SECRETS_KEY)
+    expect((await sh(script('gen-secrets.sh'), ['--secret', 'SECRETS_KEY'])).code).toBe(2)
+  })
 })
 
-describe('bootstrap-admin.sh', () => {
-  const stage = useStage()
+describe('bootstrap-admin.sh (a host without the secret: api.env)', () => {
+  const stage = useStage(['--secrets-in-files'])
   const run = (...args: string[]) =>
     sh(script('bootstrap-admin.sh'), args, { ...stage.env, OASIS_ALLOW_NONROOT: '1' })
   const apiEnv = (): string => readFileSync(path.join(stage.etc, 'api.env'), 'utf8')

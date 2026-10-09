@@ -145,8 +145,8 @@ describe('reset-password (break-glass for a locked-out Super Admin)', () => {
   }, 60_000)
 })
 
-describe('secrets-rotate.sh', () => {
-  const stage = useStage()
+describe('secrets-rotate.sh (a host without the secret: common.env)', () => {
+  const stage = useStage(['--secrets-in-files'])
 
   function setup() {
     const bin = path.join(stage.root, 'shims')
@@ -276,7 +276,7 @@ describe('secrets-rotate.sh', () => {
 })
 
 describe('verify.sh', () => {
-  const stage = useStage()
+  const stage = useStage(['--secrets-in-files'])
 
   it('runs the chosen check from the current release with the environment files loaded, writing reports to the state directory', async () => {
     const bin = path.join(stage.root, 'shims')

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ledger-check.sh [--schema NAME]
 #
-# The restore drill's ledger checks, run read-only against the LIVE database (DATABASE_URL from the environment or common.env):
+# The restore drill's ledger checks, run read-only against the LIVE database (DATABASE_URL from the environment, common.env or the
+# secret it names):
 #   - for every invoice, paid and refunded recomputed from ledger_events equal what invoice_calc reports
 #   - no negative balance; balance = max(0, total - paid), and 0 for a canceled invoice
 #   - ledger_events.seq is unique, every event has an invoice, and the append-only guard trigger exists
@@ -26,9 +27,7 @@ while (($#)); do
   esac
 done
 have psql || die "psql is required"
-if [[ -z "${DATABASE_URL:-}" ]]; then
-  DATABASE_URL=$(env_get "$OASIS_ETC/common.env" DATABASE_URL) || die "DATABASE_URL is not set and $OASIS_ETC/common.env has none"
-fi
+DATABASE_URL=$(config_value DATABASE_URL) || die "DATABASE_URL is set neither in the environment, nor in $OASIS_ETC/common.env, nor in the secret it names"
 url_to_pgenv "$DATABASE_URL"
 export PGAPPNAME=oasis-ledger-check
 export PGOPTIONS="-c default_transaction_read_only=on${SCHEMA:+ -c search_path=$SCHEMA,public}"
