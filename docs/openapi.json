@@ -48979,6 +48979,368 @@
         "x-oasis-access": "pay.reports"
       }
     },
+    "/api/v1/public/hours": {
+      "get": {
+        "description": "No session: the website calls it from the browser and at build time. Computed from the Settings (weekly hours, closures, an active emergency) at the moment of the call in the business timezone; `Cache-Control: public, max-age=60`, and nginx caches it on the website's host. Carries no personal or operations data (no names, counts, message text or ids). Rate limit 60 a minute per address.",
+        "operationId": "getPublicHours",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "closures": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "date": {
+                            "type": "string"
+                          },
+                          "dateLabel": {
+                            "type": "string"
+                          },
+                          "from": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "enum": [
+                              "closed",
+                              "reduced"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "date",
+                          "dateLabel",
+                          "name",
+                          "type"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "generatedAt": {
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+                      "type": "string"
+                    },
+                    "next": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "closed": {
+                              "type": "boolean"
+                            },
+                            "closeMin": {
+                              "anyOf": [
+                                {
+                                  "maximum": 1440,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "closesAt": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "date": {
+                              "type": "string"
+                            },
+                            "day": {
+                              "type": "string"
+                            },
+                            "emergency": {
+                              "type": "boolean"
+                            },
+                            "openMin": {
+                              "anyOf": [
+                                {
+                                  "maximum": 1440,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "opensAt": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "reason": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "\"Regular day off\", the closure name or the emergency closure name; null on an ordinary open day"
+                            },
+                            "reduced": {
+                              "type": "boolean"
+                            },
+                            "weekday": {
+                              "maximum": 6,
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "date",
+                            "weekday",
+                            "day",
+                            "closed",
+                            "openMin",
+                            "closeMin",
+                            "opensAt",
+                            "closesAt",
+                            "reason",
+                            "reduced",
+                            "emergency"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The next day the shop opens after today, within 14 days"
+                    },
+                    "today": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "closed": {
+                          "type": "boolean"
+                        },
+                        "closeMin": {
+                          "anyOf": [
+                            {
+                              "maximum": 1440,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "closesAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "date": {
+                          "type": "string"
+                        },
+                        "day": {
+                          "type": "string"
+                        },
+                        "emergency": {
+                          "type": "boolean"
+                        },
+                        "openMin": {
+                          "anyOf": [
+                            {
+                              "maximum": 1440,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "openNow": {
+                          "type": "boolean"
+                        },
+                        "opensAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "\"Regular day off\", the closure name or the emergency closure name; null on an ordinary open day"
+                        },
+                        "reduced": {
+                          "type": "boolean"
+                        },
+                        "state": {
+                          "enum": [
+                            "open",
+                            "opens_later",
+                            "closed"
+                          ],
+                          "type": "string"
+                        },
+                        "weekday": {
+                          "maximum": 6,
+                          "minimum": 0,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "date",
+                        "weekday",
+                        "day",
+                        "closed",
+                        "openMin",
+                        "closeMin",
+                        "opensAt",
+                        "closesAt",
+                        "reason",
+                        "reduced",
+                        "emergency",
+                        "openNow",
+                        "state"
+                      ],
+                      "type": "object"
+                    },
+                    "tz": {
+                      "type": "string"
+                    },
+                    "week": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "day": {
+                            "type": "string"
+                          },
+                          "from": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "fromMin": {
+                            "anyOf": [
+                              {
+                                "maximum": 1440,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "open": {
+                            "type": "boolean"
+                          },
+                          "to": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "toMin": {
+                            "anyOf": [
+                              {
+                                "maximum": 1440,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "weekday": {
+                            "maximum": 6,
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "weekday",
+                          "day",
+                          "open",
+                          "from",
+                          "to",
+                          "fromMin",
+                          "toMin"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "tz",
+                    "generatedAt",
+                    "today",
+                    "next",
+                    "week",
+                    "closures"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Opening hours for the public website: today, the next open day, the regular week and upcoming closures",
+        "tags": [
+          "public"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
     "/api/v1/roles": {
       "get": {
         "responses": {

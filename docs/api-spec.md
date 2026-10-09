@@ -386,6 +386,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/api/v1/payments/invoices` | pay.reports |  |
 | GET | `/api/v1/payments/reconciliation` | pay.reports | set.billing |  |
 | GET | `/api/v1/payments/summary` | pay.reports |  |
+| GET | `/api/v1/public/hours` | public |  |
 | GET | `/api/v1/roles` | team.view |  |
 | POST | `/api/v1/roles` | team.roles |  |
 | DELETE | `/api/v1/roles/:id` | team.roles |  |
@@ -624,6 +625,22 @@ Handlers take the injected `Clock`; tests move a `FixedClock` (`test/settings-ht
 `pnpm test:settings` runs `test/settings-http` (real Postgres). `oracle.test.ts` compares the API with values read from the
 original Settings prototype (`test/fixtures/golden/settings-original.json`, produced by
 `test/settings-http/golden/extract-settings-oracle.mjs`; commands in `test/fixtures/golden/README.md`).
+
+### 15.7 The public website's hours: `GET /api/v1/public/hours`
+
+The one route of the API that answers without a session (`access.public`, listed in the authz matrix's `PUBLIC_ROUTES`; ADR 0145).
+It exists for the marketing website, whose nginx host proxies exactly this path to the API with cookies stripped both ways and a
+60-second cache in front (`deploy/nginx/oasis-site.conf.template`); the site also reads it at build time (`site-deploy.sh`).
+Code: `src/modules/settings/http/public-routes.ts` over the pure `publicHoursView()` in `src/modules/settings/public-hours.ts`, which
+uses the same `dayInfo()` as the dashboard, so the website never disagrees with the shop.
+
+| Topic | Rule |
+|---|---|
+| Shape | `{tz, generatedAt, today, next, week[7], closures[]}`. `today`/`next`: `{date, weekday, day, closed, openMin, closeMin, opensAt, closesAt, reason, reduced, emergency}`; `today` adds `openNow` and `state` (`open` between the day's times, `opens_later` before them, `closed` on a closed day or after closing). `next` is the next day the shop opens after today within 14 days, or null. `week` is the stored weekly hours, Sunday first (`{weekday, day, open, from, to, fromMin, toMin}`, times null on a closed day). `closures` lists the days of the next 14 that differ from the week: `{date, dateLabel "Monday, Sep 7", name, type closed\|reduced, from?, to?}` (planned closures and emergency days; a regular day off is not a closure). |
+| Sources | Weekly hours, live closures of today..+13 days, the active emergency (`emergencySnapshot`), the default location's timezone; computed at the moment of the call with the app clock. A "rest of today" emergency makes today a reduced day that is over (`state: closed`, `reason` the emergency closure name, `emergency: true`). |
+| No PII or operations data | No names of people, appointment or vehicle counts, message text, ids or history. Closure `name` is the closure's own name, the one customers are told. Tests walk every key. |
+| Caching and limits | `Cache-Control: public, max-age=60`; 60 requests a minute per address (429 `RATE_LIMITED` with `Retry-After`); no cookie is read or set. |
+| Tests | `test/settings/public-hours.test.ts` (pure: open, before and after hours, Sunday closed, week boundary, planned closed and reduced days, emergency variants, forbidden keys), `test/settings-http/public-hours.test.ts` (no session, bogus cookie, cache header, forbidden keys before and after an emergency, state flips with close and reopen, Settings changes, 429), the settings contract and the authz matrix. |
 
 ## 20. Operations: appointments, availability, board, calendar
 

@@ -38,6 +38,7 @@ const EXPECTED: [string, string, string, 'required' | 'optional' | undefined][] 
   ['POST', '/api/v1/services', 'set.services', 'optional'],
   ['PATCH', '/api/v1/services/:id', 'set.services', undefined],
   ['GET', '/api/v1/settings/bundle', 'authenticated', undefined],
+  ['GET', '/api/v1/public/hours', 'public', undefined],
 ]
 
 describe('route permissions match the design (backend.md 5.2 / 6.1)', () => {
@@ -50,6 +51,7 @@ describe('route permissions match the design (backend.md 5.2 / 6.1)', () => {
       '/api/v1/vip',
       '/api/v1/arrival-settings',
       '/api/v1/services',
+      '/api/v1/public/',
     ]
     const registered = h.t.app.routeRegistry.filter((r) => prefixes.some((p) => r.url.startsWith(p)))
     expect(new Set(registered.map((r) => `${r.method} ${r.url}`))).toEqual(mine)

@@ -24,6 +24,8 @@ const PUBLIC_ROUTES = new Set([
   'POST /dev-storage/*',
   // the customer's phone has no session; the per-appointment link token authenticates it (ADR 0083)
   'POST /api/v1/arrivals/ping',
+  // the public website's opening hours: computed from the Settings, no personal or operations data (ADR 0145)
+  'GET /api/v1/public/hours',
 ])
 
 /** 403 codes a permitted caller may still get from a business rule, keyed by "METHOD url". Empty with the generic {} body. */
