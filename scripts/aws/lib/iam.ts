@@ -166,7 +166,7 @@ export function iamCallsOf(command: string, input: Input, c: IamContext): IamCal
   throw new Error(`no IAM mapping for ${command}`)
 }
 
-// ---- a small IAM evaluator (Allow statements only, the condition operators the setup policy uses) ----------------------------
+// ---- a small IAM evaluator (the condition operators the setup and runtime policies use; a Deny wins) -------------------------
 
 export interface PolicyStatement {
   Sid?: string
@@ -194,7 +194,15 @@ function conditionHolds(cond: PolicyStatement['Condition'], call: IamCall, now: 
       } else if (op === 'StringEquals') {
         const actual = call.context?.[key]
         if (actual === undefined || !values.includes(actual)) return false
-      } else return false // an operator this evaluator does not model never grants
+      } else if (op === 'StringNotEquals') {
+        // IAM: a negated operator holds when the key is missing from the request
+        const actual = call.context?.[key]
+        if (actual !== undefined && values.includes(actual)) return false
+      } else if (op === 'Null') {
+        // "true": the key must be absent; "false": present
+        const absent = call.context?.[key] === undefined
+        if (!values.some((v) => (v === 'true') === absent)) return false
+      } else throw new Error(`the IAM evaluator does not model the condition operator ${op}`)
     }
   }
   return true

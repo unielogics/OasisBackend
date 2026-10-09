@@ -143,6 +143,8 @@ describe('plan, apply, re-run', () => {
       `  + S3 photos bucket ${PHOTOS}: create in us-east-1 with Object Ownership BucketOwnerEnforced (ACLs disabled)`,
       `  + S3 photos bucket ${PHOTOS}: CORS: POST, GET and HEAD from https://oasis.example.com: set the document below`,
       `  + S3 backups bucket ${BACKUPS}: versioning enabled: set the document below`,
+      `  + S3 photos bucket ${PHOTOS}: versioning enabled: set the document below`,
+      `  + S3 photos bucket ${PHOTOS}: lifecycle: photos under "prod/" expire after 760 days (old versions after 30), unfinished uploads after 1 day: set the document below`,
       '  + Secrets Manager secret oasis/prod/app: create it holding an empty JSON object, with the AWS-managed key aws/secretsmanager, tagged app=oasis (pnpm secrets:push fills it)',
       '  + SES sending identity oasisautospa.com: create the domain identity with Easy DKIM (RSA 2048); the three CNAME records are printed after apply',
       `  + SNS topic oasis-ses-events: create (Standard; SES does not publish to FIFO) with the access policy and the HTTPS delivery policy below; ARN ${TOPIC}`,
@@ -186,6 +188,7 @@ describe('plan, apply, re-run', () => {
     expect(b.life).toEqual(photosLifecycle(spec()).Rules)
     expect(JSON.parse(b.policy!)).toEqual(tlsOnlyBucketPolicy(PHOTOS))
     expect(fake.buckets.get(BACKUPS)).toMatchObject({ versioning: 'Enabled', life: backupsLifecycle(spec()).Rules })
+    expect(fake.buckets.get(PHOTOS)).toMatchObject({ versioning: 'Enabled', life: photosLifecycle(spec()).Rules })
     expect(JSON.parse(fake.topics.get(TOPIC)!.attrs.Policy!)).toEqual(topicPolicy(spec()))
     expect(JSON.parse(fake.topics.get(TOPIC)!.attrs.DeliveryPolicy!)).toEqual(TOPIC_DELIVERY_POLICY)
     expect(fake.topics.get(TOPIC)!.subs).toEqual([{ Protocol: 'https', Endpoint: HOOKS, SubscriptionArn: 'PendingConfirmation' }])
@@ -259,7 +262,7 @@ describe('drift and things it does not own', () => {
 
     const plan = await run(base)
     expect(plan.out).toContain(`  ~ S3 photos bucket ${PHOTOS}: CORS: POST, GET and HEAD from https://oasis.example.com: replace with the document below`)
-    expect(plan.out).toContain(`  = S3 photos bucket ${PHOTOS}: lifecycle: photos under "prod/" expire after 760 days, unfinished uploads after 1 day: as wanted`)
+    expect(plan.out).toContain(`  = S3 photos bucket ${PHOTOS}: lifecycle: photos under "prod/" expire after 760 days (old versions after 30), unfinished uploads after 1 day: as wanted`)
     expect(plan.out).toContain(`  = S3 photos bucket ${PHOTOS}: bucket policy: deny any request without TLS: as wanted`)
 
     const r = await run([...base, '--apply', '--dashboard-origin', 'https://staging.oasis.example.com'])
@@ -344,7 +347,7 @@ describe('without a sender (email and domain come last)', () => {
     expect(r.out).toContain('  # email: EMAIL_PROVIDER stays sim until a sender exists (re-run with --sender, then set the SES_* lines it prints)')
     expect(r.out).not.toMatch(/EMAIL_PROVIDER=ses|DNS records/)
     const doc = JSON.parse(decodeURIComponent(fake.policies.get(POLICY_ARN)![0]!.Document)) as { Statement: Array<{ Sid: string }> }
-    expect(doc.Statement.map((x) => x.Sid)).toEqual(['ReadEnvironment', 'PhotoObjects', 'PhotoHeadMissingKey', 'BackupObjects', 'BackupList'])
+    expect(doc.Statement.map((x) => x.Sid)).toEqual(['ReadEnvironment', 'OnlyCurrentVersion', 'NoVersionIdReads', 'PhotoObjects', 'PhotoHeadMissingKey', 'BackupWrite'])
     expect(doc).toEqual(runtimePolicy(spec({ sender: undefined }), SECRET_ARN))
     const again = await run(noSender)
     expect(again.out).toContain('Nothing to change.')
@@ -551,10 +554,23 @@ describe('documents (exact)', () => {
       Version: '2012-10-17',
       Statement: [
         { Sid: 'ReadEnvironment', Effect: 'Allow', Action: 'secretsmanager:GetSecretValue', Resource: SECRET_ARN },
+        {
+          Sid: 'OnlyCurrentVersion',
+          Effect: 'Deny',
+          Action: 'secretsmanager:GetSecretValue',
+          Resource: SECRET_ARN,
+          Condition: { StringNotEquals: { 'secretsmanager:VersionStage': 'AWSCURRENT' }, Null: { 'secretsmanager:VersionStage': 'false' } },
+        },
+        {
+          Sid: 'NoVersionIdReads',
+          Effect: 'Deny',
+          Action: 'secretsmanager:GetSecretValue',
+          Resource: SECRET_ARN,
+          Condition: { Null: { 'secretsmanager:VersionId': 'false' } },
+        },
         { Sid: 'PhotoObjects', Effect: 'Allow', Action: ['s3:PutObject', 's3:GetObject', 's3:DeleteObject'], Resource: `arn:aws:s3:::${PHOTOS}/prod/*` },
         { Sid: 'PhotoHeadMissingKey', Effect: 'Allow', Action: 's3:ListBucket', Resource: `arn:aws:s3:::${PHOTOS}` },
-        { Sid: 'BackupObjects', Effect: 'Allow', Action: ['s3:PutObject', 's3:GetObject'], Resource: `arn:aws:s3:::${BACKUPS}/*` },
-        { Sid: 'BackupList', Effect: 'Allow', Action: 's3:ListBucket', Resource: `arn:aws:s3:::${BACKUPS}` },
+        { Sid: 'BackupWrite', Effect: 'Allow', Action: 's3:PutObject', Resource: `arn:aws:s3:::${BACKUPS}/*` },
         {
           Sid: 'SendEmail',
           Effect: 'Allow',
@@ -567,8 +583,8 @@ describe('documents (exact)', () => {
     const addr = runtimePolicy(spec({ sender: { kind: 'address', identity: 'no-reply@oasisautospa.com', domain: 'oasisautospa.com' }, keyPrefix: '' })) as {
       Statement: Array<{ Sid: string; Resource: unknown; Condition?: unknown }>
     }
-    expect(addr.Statement[1]!.Resource).toBe(`arn:aws:s3:::${PHOTOS}/*`)
-    expect(addr.Statement[5]).toMatchObject({
+    expect(addr.Statement[3]!.Resource).toBe(`arn:aws:s3:::${PHOTOS}/*`)
+    expect(addr.Statement[6]).toMatchObject({
       Resource: [`arn:aws:ses:us-east-1:${ACCOUNT}:identity/no-reply@oasisautospa.com`, `arn:aws:ses:us-east-1:${ACCOUNT}:configuration-set/oasis-mail`],
       Condition: { StringEquals: { 'ses:FromAddress': 'no-reply@oasisautospa.com' } },
     })
@@ -596,6 +612,7 @@ describe('documents (exact)', () => {
     expect(photosLifecycle(spec())).toEqual({
       Rules: [
         { ID: 'expire-photos', Status: 'Enabled', Filter: { Prefix: 'prod/' }, Expiration: { Days: 760 } },
+        { ID: 'expire-old-photo-versions', Status: 'Enabled', Filter: { Prefix: '' }, NoncurrentVersionExpiration: { NoncurrentDays: 30 } },
         { ID: 'abort-incomplete-uploads', Status: 'Enabled', Filter: { Prefix: '' }, AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 } },
       ],
     })
@@ -628,6 +645,38 @@ describe('documents (exact)', () => {
       ],
     })
     expect(names({ prefix: 'oasis', account: ACCOUNT, region: 'us-east-1' })).toMatchObject({ user: 'oasis-app', policy: 'oasis-app-runtime', topic: 'oasis-ses-events' })
+  })
+})
+
+describe('the runtime policy, evaluated', () => {
+  const NOW = new Date('2026-10-08T12:00:00Z')
+  const statements = (runtimePolicy(spec(), SECRET_ARN) as { Statement: PolicyStatement[] }).Statement
+  const can = (action: string, resource: string, context?: Record<string, string>) => allowedBy(statements, { action, resource, context }, NOW)
+
+  it('reads the current version of its secret only: no other stage, no version id', () => {
+    expect(can('secretsmanager:GetSecretValue', SECRET_ARN)).toBe(true) // the app: SecretId alone
+    expect(can('secretsmanager:GetSecretValue', SECRET_ARN, { 'secretsmanager:VersionStage': 'AWSCURRENT' })).toBe(true)
+    expect(can('secretsmanager:GetSecretValue', SECRET_ARN, { 'secretsmanager:VersionStage': 'AWSPREVIOUS' })).toBe(false)
+    expect(can('secretsmanager:GetSecretValue', SECRET_ARN, { 'secretsmanager:VersionStage': 'AWSPENDING' })).toBe(false)
+    expect(can('secretsmanager:GetSecretValue', SECRET_ARN, { 'secretsmanager:VersionId': '1c0c1830-0000-4000-8000-000000000000' })).toBe(false)
+    expect(
+      can('secretsmanager:GetSecretValue', SECRET_ARN, {
+        'secretsmanager:VersionStage': 'AWSCURRENT',
+        'secretsmanager:VersionId': '1c0c1830-0000-4000-8000-000000000000',
+      }),
+    ).toBe(false)
+    expect(can('secretsmanager:PutSecretValue', SECRET_ARN)).toBe(false)
+  })
+
+  it('writes backups and can neither read, list nor delete them', () => {
+    const backup = `arn:aws:s3:::${BACKUPS}/db/oasis-20261009T031500Z-nightly.dump.enc`
+    expect(can('s3:PutObject', backup)).toBe(true)
+    for (const a of ['s3:GetObject', 's3:DeleteObject', 's3:GetObjectVersion', 's3:DeleteObjectVersion'])
+      expect(can(a, backup), a).toBe(false)
+    expect(can('s3:ListBucket', `arn:aws:s3:::${BACKUPS}`)).toBe(false)
+    // photos keep what the app needs
+    expect(can('s3:DeleteObject', `arn:aws:s3:::${PHOTOS}/prod/loc/x.jpg`)).toBe(true)
+    expect(can('s3:DeleteObjectVersion', `arn:aws:s3:::${PHOTOS}/prod/loc/x.jpg`)).toBe(false) // old versions survive a deletion
   })
 })
 

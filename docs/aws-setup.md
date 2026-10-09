@@ -29,7 +29,7 @@ Names with the default prefix `oasis`; `<acct>` is the 12-digit account id.
 
 | Resource | Name | Settings |
 |---|---|---|
-| Photos bucket | `oasis-photos-<acct>` | Block Public Access (all four), Object Ownership BucketOwnerEnforced (no ACLs), default encryption SSE-S3, CORS for the dashboard origins (POST, GET, HEAD only), lifecycle: objects under the key prefix expire after 760 days (the 24-month retention job decides first), unfinished uploads after 1 day, bucket policy denying non-TLS requests |
+| Photos bucket | `oasis-photos-<acct>` | Block Public Access (all four), Object Ownership BucketOwnerEnforced (no ACLs), default encryption SSE-S3, CORS for the dashboard origins (POST, GET, HEAD only), versioning (a deleted or overwritten photo stays recoverable for 30 days), lifecycle: objects under the key prefix expire after 760 days (the 24-month retention job decides first), old versions after 30 days (`expire-old-photo-versions`), unfinished uploads after 1 day, bucket policy denying non-TLS requests |
 | Backups bucket | `oasis-backups-<acct>` | Block Public Access, BucketOwnerEnforced, SSE-S3, versioning, lifecycle: objects expire after 400 days (12 monthly dumps plus margin), old versions after 30 days, unfinished uploads after 1 day, TLS-only policy |
 | Environment secret | `--secret-id`, default `oasis/prod/app` | created holding `{}` with the AWS-managed key `aws/secretsmanager`, tag `app=oasis`; an existing secret is never read or changed (`pnpm secrets:push` fills it) |
 | IAM policy | `oasis-app-runtime` | least privilege (below); a change adds a new default version |
@@ -71,10 +71,15 @@ hop limit of 1 (`aws ec2 modify-instance-metadata-options --instance-id <id> --h
   "Statement": [
     { "Sid": "ReadEnvironment", "Effect": "Allow", "Action": "secretsmanager:GetSecretValue",
       "Resource": "arn:aws:secretsmanager:us-east-1:<acct>:secret:oasis/prod/app-AbCdEf" },
+    { "Sid": "OnlyCurrentVersion", "Effect": "Deny", "Action": "secretsmanager:GetSecretValue",
+      "Resource": "arn:aws:secretsmanager:us-east-1:<acct>:secret:oasis/prod/app-AbCdEf",
+      "Condition": { "StringNotEquals": { "secretsmanager:VersionStage": "AWSCURRENT" }, "Null": { "secretsmanager:VersionStage": "false" } } },
+    { "Sid": "NoVersionIdReads", "Effect": "Deny", "Action": "secretsmanager:GetSecretValue",
+      "Resource": "arn:aws:secretsmanager:us-east-1:<acct>:secret:oasis/prod/app-AbCdEf",
+      "Condition": { "Null": { "secretsmanager:VersionId": "false" } } },
     { "Sid": "PhotoObjects", "Effect": "Allow", "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"], "Resource": "arn:aws:s3:::oasis-photos-<acct>/prod/*" },
     { "Sid": "PhotoHeadMissingKey", "Effect": "Allow", "Action": "s3:ListBucket", "Resource": "arn:aws:s3:::oasis-photos-<acct>" },
-    { "Sid": "BackupObjects", "Effect": "Allow", "Action": ["s3:PutObject", "s3:GetObject"], "Resource": "arn:aws:s3:::oasis-backups-<acct>/*" },
-    { "Sid": "BackupList", "Effect": "Allow", "Action": "s3:ListBucket", "Resource": "arn:aws:s3:::oasis-backups-<acct>" }
+    { "Sid": "BackupWrite", "Effect": "Allow", "Action": "s3:PutObject", "Resource": "arn:aws:s3:::oasis-backups-<acct>/*" }
   ]
 }
 ```
@@ -84,9 +89,21 @@ hop limit of 1 (`aws ec2 modify-instance-metadata-options --instance-id <id> --h
   read its environment, not change or list secrets. No `kms:Decrypt` statement: a secret under the AWS-managed key
   `aws/secretsmanager` is decrypted through Secrets Manager for any principal of the account that may read the secret. (If the owner
   ever moves the secret to a customer-managed key, the plan notes that the runtime then also needs `kms:Decrypt` on that key.)
+* **Only the current version of the secret.** Secrets Manager keeps the previous version (`AWSPREVIOUS`), which can still hold values
+  that were removed since (the first-boot `BOOTSTRAP_ADMIN_PASSWORD`, an old key). `OnlyCurrentVersion` refuses a read that names any
+  other stage, `NoVersionIdReads` one that names a version by id. The app reads with the secret id alone, which is `AWSCURRENT`, so it
+  is unaffected. `OnlyCurrentVersion` also requires the stage key to be present (`Null` false): whether IAM fills in `AWSCURRENT` for
+  a read that names no stage is not documented clearly, and a negated operator matches a missing key, so without that guard the Deny
+  could refuse the app's own reads. Operators (`pnpm secrets:push`, the console) use their own identity and are not limited by this.
+* **Backups are write-only.** `BackupWrite` is `s3:PutObject` only: no read, no list, no delete (the bucket is versioned, so an
+  overwrite keeps the old version). `backup.sh` uploads with `aws s3 cp`, which for a single file sends `PutObject`, or
+  `CreateMultipartUpload`/`UploadPart`/`CompleteMultipartUpload` above 8 MB, all authorised by `s3:PutObject`; it never lists the
+  bucket (checked by pointing the CLI at a local endpoint and recording every request), so `s3:ListBucket` was removed too. A failed
+  multipart upload cannot be aborted by the role; the bucket's `abort-incomplete-uploads` rule removes it after a day. Restoring
+  (download) is an operator task with the operator's identity.
 * `s3:ListBucket` on the photos bucket is there on purpose: without it S3 answers a HEAD for a key that was never uploaded with 403
   instead of 404, and the app could not tell an abandoned upload from a permission problem (`pnpm verify:aws` checks this).
-* With `--sender` a sixth statement appears (a new policy version):
+* With `--sender` a seventh statement appears (a new policy version):
   `{ "Sid": "SendEmail", "Action": ["ses:SendEmail", "ses:SendRawEmail"], "Resource": [<identity ARN>, <configuration-set/oasis-mail ARN>], "Condition": { "StringLike": { "ses:FromAddress": "*@<domain>" } } }`
   (`StringEquals` on the address for an address sender; each `--sandbox-recipient` adds its identity ARN).
 * The role's trust policy lets only `ec2.amazonaws.com` assume it.

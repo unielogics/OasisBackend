@@ -56,9 +56,15 @@ export const secretArnPattern = (s: Pick<ProvisionSpec, 'region' | 'account' | '
   `arn:aws:secretsmanager:${s.region}:${s.account}:secret:${s.secretId}-??????`
 
 /**
- * Least privilege for the running app (the instance role oasis-app-role, or the oasis-app user): read the environment secret, photos
- * under the prefix, backups, and, once a sender exists, sending as it. No KMS statement: a secret under the AWS-managed key
- * aws/secretsmanager is decrypted through Secrets Manager for any principal of the account it lets read the secret.
+ * Least privilege for the running app (the instance role oasis-app-role, or the oasis-app user): read the environment secret (its
+ * current version only), photos under the prefix, write backups (never read, list or delete them: restoring is the operator's job),
+ * and, once a sender exists, sending as it. No KMS statement: a secret under the AWS-managed key aws/secretsmanager is decrypted
+ * through Secrets Manager for any principal of the account it lets read the secret.
+ *
+ * The two Deny statements keep older versions of the secret out of reach (AWSPREVIOUS can still hold values that were removed,
+ * such as a first-boot password): a read that names another stage, or names a version by id, is refused. The app reads with the
+ * secret id alone (src/config/secrets-source.ts), which is AWSCURRENT. OnlyCurrentVersion applies only when a stage is named at all
+ * (Null false), so a read without one is never caught by how IAM treats a missing key.
  */
 export function runtimePolicy(s: ProvisionSpec, secretArn: string = secretArnPattern(s)): object {
   const n = names(s)
@@ -69,11 +75,26 @@ export function runtimePolicy(s: ProvisionSpec, secretArn: string = secretArnPat
     Version: '2012-10-17',
     Statement: [
       { Sid: 'ReadEnvironment', Effect: 'Allow', Action: 'secretsmanager:GetSecretValue', Resource: secretArn },
+      {
+        Sid: 'OnlyCurrentVersion',
+        Effect: 'Deny',
+        Action: 'secretsmanager:GetSecretValue',
+        Resource: secretArn,
+        Condition: { StringNotEquals: { 'secretsmanager:VersionStage': 'AWSCURRENT' }, Null: { 'secretsmanager:VersionStage': 'false' } },
+      },
+      {
+        Sid: 'NoVersionIdReads',
+        Effect: 'Deny',
+        Action: 'secretsmanager:GetSecretValue',
+        Resource: secretArn,
+        Condition: { Null: { 'secretsmanager:VersionId': 'false' } },
+      },
       { Sid: 'PhotoObjects', Effect: 'Allow', Action: ['s3:PutObject', 's3:GetObject', 's3:DeleteObject'], Resource: `${photos}/${s.keyPrefix}*` },
       // HeadObject of a missing key answers 404 (not 403) only with s3:ListBucket; the app tells "never uploaded" from "denied" by it
       { Sid: 'PhotoHeadMissingKey', Effect: 'Allow', Action: 's3:ListBucket', Resource: photos },
-      { Sid: 'BackupObjects', Effect: 'Allow', Action: ['s3:PutObject', 's3:GetObject'], Resource: `${backups}/*` },
-      { Sid: 'BackupList', Effect: 'Allow', Action: 's3:ListBucket', Resource: backups },
+      // backup.sh uploads with aws s3 cp: PutObject, or CreateMultipartUpload/UploadPart/CompleteMultipartUpload for a large file,
+      // all authorised by s3:PutObject; it never lists or reads the bucket
+      { Sid: 'BackupWrite', Effect: 'Allow', Action: 's3:PutObject', Resource: `${backups}/*` },
       ...(sender
         ? [
             {
@@ -143,6 +164,8 @@ export function photosLifecycle(s: Pick<ProvisionSpec, 'keyPrefix' | 'photoReten
   return {
     Rules: [
       { ID: 'expire-photos', Status: 'Enabled', Filter: { Prefix: s.keyPrefix }, Expiration: { Days: s.photoRetentionDays } },
+      // the bucket is versioned: a deleted or replaced photo stays recoverable for 30 days, then goes
+      { ID: 'expire-old-photo-versions', Status: 'Enabled', Filter: { Prefix: '' }, NoncurrentVersionExpiration: { NoncurrentDays: 30 } },
       { ID: 'abort-incomplete-uploads', Status: 'Enabled', Filter: { Prefix: '' }, AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 } },
     ],
   }

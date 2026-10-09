@@ -333,19 +333,20 @@ async function bucketSteps(c: Clients, spec: ProvisionSpec, kind: 'photos' | 'ba
         put: () => c.s3.send(new PutBucketCorsCommand({ Bucket, CORSConfiguration: desired })),
       }),
     )
-  } else {
-    const ver = exists ? (await c.s3.send(new GetBucketVersioningCommand({ Bucket }))).Status : undefined
-    steps.push(
-      configStep({
-        id: 'backups.versioning',
-        title,
-        what: 'versioning enabled',
-        current: ver ? { Status: ver } : undefined,
-        desired: { Status: 'Enabled' },
-        put: () => c.s3.send(new PutBucketVersioningCommand({ Bucket, VersioningConfiguration: { Status: 'Enabled' } })),
-      }),
-    )
   }
+  // Both buckets are versioned: an overwritten or deleted photo or backup can be recovered until its lifecycle rule removes the old
+  // version (30 days); the runtime may delete photos, never backups.
+  const ver = exists ? (await c.s3.send(new GetBucketVersioningCommand({ Bucket }))).Status : undefined
+  steps.push(
+    configStep({
+      id: `${kind}.versioning`,
+      title,
+      what: 'versioning enabled',
+      current: ver ? { Status: ver } : undefined,
+      desired: { Status: 'Enabled' },
+      put: () => c.s3.send(new PutBucketVersioningCommand({ Bucket, VersioningConfiguration: { Status: 'Enabled' } })),
+    }),
+  )
 
   const life = (await get(() => c.s3.send(new GetBucketLifecycleConfigurationCommand({ Bucket })), ['NoSuchLifecycleConfiguration']))?.Rules
   const ours = (kind === 'photos' ? photosLifecycle(spec) : backupsLifecycle(spec)).Rules as LifecycleRule[]
@@ -356,7 +357,7 @@ async function bucketSteps(c: Clients, spec: ProvisionSpec, kind: 'photos' | 'ba
       title,
       what:
         kind === 'photos'
-          ? `lifecycle: photos under "${spec.keyPrefix}" expire after ${spec.photoRetentionDays} days, unfinished uploads after 1 day`
+          ? `lifecycle: photos under "${spec.keyPrefix}" expire after ${spec.photoRetentionDays} days (old versions after 30), unfinished uploads after 1 day`
           : `lifecycle: backups expire after ${spec.backupRetentionDays} days (old versions after 30), unfinished uploads after 1 day`,
       current: life ? { Rules: life } : undefined,
       desired: lifeDesired,
