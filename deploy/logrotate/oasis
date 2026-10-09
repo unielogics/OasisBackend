@@ -1,18 +1,7 @@
 # /etc/logrotate.d/oasis  -  installed by deploy/scripts/install.sh. The services log to journald (journalctl -u oasis-api); these are the files.
-
-/var/log/nginx/oasis.access.log /var/log/nginx/oasis.error.log {
-    daily
-    rotate 14
-    compress
-    delaycompress
-    missingok
-    notifempty
-    sharedscripts
-    create 0640 nginx adm
-    postrotate
-        [ -s /run/nginx.pid ] && kill -USR1 "$(cat /run/nginx.pid)" || true
-    endscript
-}
+# nginx's own logs (/var/log/nginx/*.log, the dashboard's and the website's included) are rotated by the nginx package's
+# /etc/logrotate.d/nginx. Naming them here again makes every logrotate run fail ("duplicate log entry ... found error in file oasis,
+# skipping", exit 1), so this file does not.
 
 /var/log/oasis/*.log {
     weekly

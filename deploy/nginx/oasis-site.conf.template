@@ -1,0 +1,147 @@
+# /etc/nginx/conf.d/oasis-site.conf  -  the public website (rendered by deploy/scripts/install.sh --site-domain; edit the template).
+#
+#   http://@SITE_DOMAIN@, http://www.@SITE_DOMAIN@    ACME challenge, everything else 301 to https://@SITE_DOMAIN@
+#   https://www.@SITE_DOMAIN@                      301 to https://@SITE_DOMAIN@ (one canonical name)
+#   https://@SITE_DOMAIN@                          static files from @SITE_ROOT@/current (a release site-deploy.sh built and verified)
+#     /                        clean URLs: /about serves about.html or about/index.html; no-cache, so a deploy shows at once
+#     /assets/*                content-hashed files, cached for a year (immutable)
+#     other static types      cached for a day
+#     /api/v1/public/hours     the ONE API route the site may call (opening hours), proxied to the API without cookies in
+#                             either direction and cached by nginx for 60 seconds
+#     any other /api, /hooks or /dev-storage path, in any letter case: 404 (the API is the dashboard's, on its own host)
+#     dotfiles except /.well-known: 404
+# The default servers that refuse every other name (and a bare address) are in oasis.conf; the rate zones, the oasis_public cache
+# and the oasis_api upstream in 00-oasis-zones.conf; the TLS settings in oasis/tls.conf. Nothing here is a default server.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name @SITE_DOMAIN@ www.@SITE_DOMAIN@;
+    access_log /var/log/nginx/oasis-site.access.log oasis;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type text/plain;
+    }
+
+    location / {
+        return 301 https://@SITE_DOMAIN@$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name www.@SITE_DOMAIN@;
+
+    ssl_certificate @SITE_TLS_CERT@;
+    ssl_certificate_key @SITE_TLS_KEY@;
+    include @NGINX_DIR@/oasis/tls.conf;
+
+    access_log /var/log/nginx/oasis-site.access.log oasis;
+    add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    return 301 https://@SITE_DOMAIN@$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name @SITE_DOMAIN@;
+
+    ssl_certificate @SITE_TLS_CERT@;
+    ssl_certificate_key @SITE_TLS_KEY@;
+    include @NGINX_DIR@/oasis/tls.conf;
+
+    access_log /var/log/nginx/oasis-site.access.log oasis;
+    error_log /var/log/nginx/oasis-site.error.log warn;
+
+    root @SITE_ROOT@/current;
+    index index.html;
+    charset utf-8;
+
+    # A static site takes no body (the hours call is a GET); nginx stops anything larger at once.
+    client_max_body_size 16k;
+    client_body_timeout 15s;
+    client_header_timeout 15s;
+    keepalive_timeout 65s;
+    limit_conn oasis_conn 100;
+    gzip on;
+    gzip_vary on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/manifest+json image/svg+xml;
+    gzip_min_length 1024;
+    # a .gz beside a file (the build may write them) is served as it is
+    gzip_static on;
+
+    error_page 404 /404.html;
+
+    # Every answer carries HSTS and nosniff, nginx's own included (404, 413, 429 ...). A location with add_header of its own does
+    # not inherit these, so site-headers.conf repeats them.
+    add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    # --- the opening hours, live from the dashboard's Settings ---
+    # Same origin as the pages, so the site needs no CORS and the API grants none. No cookie travels to the API (a visitor of the
+    # website is never a dashboard session) and none comes back; nginx caches the answer for 60 seconds and serves a stale copy
+    # while it refreshes it or when the API is down.
+    location = /api/v1/public/hours {
+        limit_req zone=oasis_api burst=20 nodelay;
+        include @NGINX_DIR@/oasis/proxy.conf;
+        proxy_set_header Cookie "";
+        proxy_hide_header Set-Cookie;
+        proxy_ignore_headers Set-Cookie;
+        proxy_cache oasis_public;
+        proxy_cache_valid 200 60s;
+        proxy_cache_lock on;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Cache-Status $upstream_cache_status always;
+        proxy_pass http://oasis_api;
+    }
+
+    # Nothing else of the API, the webhooks or the dev object store exists on this host name, in any letter case.
+    location ~* ^/(api|dev-storage|hooks)(/|$) {
+        default_type application/json;
+        return 404 '{"ok":false,"status":"not_found"}';
+    }
+
+    # The release record of the running build is not a page.
+    location = /REVISION {
+        return 404;
+    }
+
+    # Dotfiles are never served (.git, .env, .DS_Store ...); /.well-known stays reachable.
+    location ~ /\.(?!well-known/) {
+        return 404;
+    }
+
+    # Content-hashed files: cached for a year, never revalidated.
+    location ^~ /assets/ {
+        include @NGINX_DIR@/oasis/site-headers.conf;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        try_files $uri =404;
+
+        location ~ /\. {
+            return 404;
+        }
+    }
+
+    # Other static files: a day.
+    location ~* \.(css|js|mjs|map|png|jpg|jpeg|gif|webp|avif|svg|ico|woff|woff2|ttf|otf|txt|xml|json|webmanifest|pdf)$ {
+        include @NGINX_DIR@/oasis/site-headers.conf;
+        add_header Cache-Control "public, max-age=86400" always;
+        try_files $uri =404;
+    }
+
+    # Pages (clean URLs: /about is about.html or about/index.html, no redirect) and the 404 page: always revalidated, so a deploy
+    # is visible at once.
+    location / {
+        include @NGINX_DIR@/oasis/site-headers.conf;
+        add_header Cache-Control "no-cache" always;
+        try_files $uri $uri.html $uri/index.html =404;
+    }
+}

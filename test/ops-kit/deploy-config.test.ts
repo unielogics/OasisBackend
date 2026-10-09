@@ -448,6 +448,14 @@ esac
         expect(exec, name).not.toMatch(/\/opt\/oasis\/(current|releases|src)\/[^ ]*\.sh/)
   })
 
+  it('the health check loads the website settings when there are any, and a failure is recorded like the other timers', () => {
+    const u = unit('oasis-healthcheck.service')
+    expect(u.Service!.EnvironmentFile).toEqual(['-/etc/oasis/web.env', '-/etc/oasis/api.env', '-/etc/oasis/site.env'])
+    expect(u.Unit!.OnFailure).toEqual(['oasis-notify-failure@%n.service'])
+    for (const n of ['oasis-backup', 'oasis-restore-drill'])
+      expect(unit(`${n}.service`).Unit!.OnFailure, n).toEqual(['oasis-notify-failure@%n.service'])
+  })
+
   it.skipIf(!existsSync('/usr/bin/systemd-analyze'))(
     'pass systemd-analyze verify and stay below an exposure of 3.0 in systemd-analyze security',
     async () => {
@@ -489,6 +497,70 @@ esac
   )
 })
 
+// The nginx package rotates /var/log/nginx/*.log itself (/etc/logrotate.d/nginx). A second stanza naming any of those files makes
+// every logrotate run report "duplicate log entry ... found error in file oasis, skipping" and exit 1 (the logrotate service fails).
+const LOGROTATE = ['/usr/sbin/logrotate', '/usr/bin/logrotate'].find((p) => existsSync(p))
+describe.skipIf(!LOGROTATE)('logrotate', () => {
+  const STOCK_NGINX = `/var/log/nginx/*.log {
+    create 0640 nginx root
+    daily
+    rotate 10
+    missingok
+    notifempty
+    compress
+    delaycompress
+    sharedscripts
+    postrotate
+        /bin/kill -USR1 \`cat /run/nginx.pid 2>/dev/null\` 2>/dev/null || true
+    endscript
+}
+`
+  // Both stanzas moved onto a temporary log tree that holds real files: logrotate only notices a duplicate when the glob matches
+  // something (as an unprivileged user /var/log/nginx is not readable, so the real paths would prove nothing).
+  const dry = async (oasisStanza: string) => {
+    const t = tempDir('oasis-logrotate-')
+    try {
+      const logs = path.join(t.dir, 'logs')
+      for (const f of ['nginx/access.log', 'nginx/oasis.access.log', 'nginx/oasis.error.log', 'nginx/oasis-site.access.log', 'oasis/deploy.log']) {
+        mkdirSync(path.dirname(path.join(logs, f)), { recursive: true })
+        writeFileSync(path.join(logs, f), 'line\n')
+      }
+      const move = (text: string) => text.replaceAll('/var/log/nginx', `${logs}/nginx`).replaceAll('/var/log/oasis', `${logs}/oasis`)
+      const d = path.join(t.dir, 'logrotate.d')
+      mkdirSync(d)
+      writeFileSync(path.join(d, 'nginx'), move(STOCK_NGINX))
+      writeFileSync(path.join(d, 'oasis'), move(oasisStanza))
+      writeFileSync(path.join(t.dir, 'logrotate.conf'), `include ${d}\n`)
+      const r = await sh(LOGROTATE!, ['-d', '-s', path.join(t.dir, 'state'), path.join(t.dir, 'logrotate.conf')])
+      return { ...r, out: r.out.replaceAll(logs, '/var/log') }
+    } finally {
+      t.cleanup()
+    }
+  }
+
+  it('the kit file names only /var/log/oasis/*.log, and logrotate -d accepts it next to the stock nginx stanza', async () => {
+    const ours = readText(path.join(DEPLOY, 'logrotate/oasis'))
+    const stanzas = [...ours.matchAll(/^([^#\n][^{]*)\{/gm)].map((m) => m[1]!.trim())
+    expect(stanzas).toEqual(['/var/log/oasis/*.log'])
+    expect(ours).not.toMatch(/^\s*\/var\/log\/nginx/m)
+    const r = await dry(ours)
+    expect(r.code, r.out).toBe(0)
+    expect(r.out).not.toMatch(/duplicate log entry|found error in file/)
+    expect(r.out).toMatch(/Handling 2 logs/)
+    expect(r.out).toMatch(/rotating pattern: \/var\/log\/oasis\/\*\.log/)
+    expect(r.out).toMatch(/considering log \/var\/log\/oasis\/deploy\.log/)
+    expect(r.out).toMatch(/considering log \/var\/log\/nginx\/oasis-site\.access\.log/) // the package's stanza covers the site's logs
+  })
+
+  it('(control) the old file with its own nginx stanza is what logrotate refused, /var/log/oasis included', async () => {
+    const old = `/var/log/nginx/oasis.access.log /var/log/nginx/oasis.error.log {\n    daily\n    missingok\n}\n\n/var/log/oasis/*.log {\n    weekly\n    missingok\n}\n`
+    const r = await dry(old)
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/duplicate log entry for \/var\/log\/nginx\/oasis\.access\.log/)
+    expect(r.out).toMatch(/found error in file oasis, skipping/)
+  })
+})
+
 describe('nginx site', () => {
   const conf = (rel: string): Directive[] => parseNginx(read(`etc/nginx/${rel}`))
   const reader = (p: string): string => readText(path.join(stage.root, p))
@@ -498,7 +570,7 @@ describe('nginx site', () => {
     named().find((s) => find(s.block!, 'listen').some((l) => l.args[0] === '443'))!
   const httpsLocs = () => locationsOf({ ...https(), block: expandIncludes(https().block!, reader) })
   const text = (): string =>
-    ['conf.d/oasis.conf', 'conf.d/00-oasis-zones.conf', 'oasis/proxy.conf', 'oasis/security-headers.conf']
+    ['conf.d/oasis.conf', 'conf.d/00-oasis-zones.conf', 'oasis/proxy.conf', 'oasis/security-headers.conf', 'oasis/tls.conf']
       .map((f) => read(`etc/nginx/${f}`))
       .join('\n')
 
@@ -510,6 +582,7 @@ describe('nginx site', () => {
         'conf.d/00-oasis-zones.conf',
         'oasis/proxy.conf',
         'oasis/security-headers.conf',
+        'oasis/tls.conf',
       ].forEach(conf),
     ).not.toThrow()
   })
@@ -531,12 +604,17 @@ describe('nginx site', () => {
       '301',
       'https://oasis.example.com$request_uri',
     ])
-    const s = https().block!
+    const s = expandIncludes(https().block!, reader)
     expect(find(s, 'ssl_certificate')[0]!.args[0]).toBe(stage.cert)
     expect(find(s, 'ssl_certificate_key')[0]!.args[0]).toBe(stage.key)
     expect(find(s, 'ssl_protocols')[0]!.args).toEqual(['TLSv1.2', 'TLSv1.3'])
     expect(find(s, 'ssl_session_tickets')[0]!.args).toEqual(['off'])
+    expect(find(s, 'ssl_session_cache')[0]!.args).toEqual(['shared:oasis_ssl:10m'])
     expect(find(s, 'http2')[0]!.args).toEqual(['on'])
+    // the TLS settings are one shared file (the website's servers include the same one), not copies
+    expect(find(https().block!, 'ssl_protocols')).toEqual([])
+    expect(find(https().block!, 'include').map((i) => i.args[0])).toContain('/etc/nginx/oasis/tls.conf')
+    expect(find(conf('oasis/tls.conf'), 'ssl_session_cache')).toHaveLength(1)
     expect(find(find(conf('conf.d/00-oasis-zones.conf'), 'server_tokens'), 'server_tokens')[0]!.args).toEqual(
       ['off'],
     )
@@ -849,7 +927,7 @@ describe.skipIf(!NGINX)('nginx site in a real nginx', () => {
 
   beforeAll(async () => {
     dir = t.dir
-    for (const d of ['conf.d', 'oasis', 'log', 'tmp']) mkdirSync(path.join(dir, d))
+    for (const d of ['conf.d', 'oasis', 'log', 'tmp', 'cache']) mkdirSync(path.join(dir, d))
     const gen = await sh('openssl', [
       'req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-days', '2',
       '-subj', '/CN=oasis.example.com', '-addext', 'subjectAltName=DNS:oasis.example.com',
@@ -860,6 +938,7 @@ describe.skipIf(!NGINX)('nginx site in a real nginx', () => {
       text
         .replaceAll('/etc/nginx/oasis/', `${dir}/oasis/`)
         .replaceAll('/var/log/nginx/', `${dir}/log/`)
+        .replaceAll('/var/cache/nginx/', `${dir}/cache/`)
         .replaceAll(stage.cert, `${dir}/cert.pem`)
         .replaceAll(stage.key, `${dir}/key.pem`)
         .replace(/listen \[::\]:(80|443)[^;]*;\n/g, '')
@@ -867,7 +946,7 @@ describe.skipIf(!NGINX)('nginx site in a real nginx', () => {
         .replace(/listen 443 ssl( default_server)?;/g, `listen 127.0.0.1:${P443} ssl$1;`)
         .replace('server 127.0.0.1:4000;', `server 127.0.0.1:${API};`)
         .replace('server 127.0.0.1:3200;', `server 127.0.0.1:${WEB};`)
-    for (const f of ['conf.d/oasis.conf', 'conf.d/00-oasis-zones.conf', 'oasis/proxy.conf', 'oasis/security-headers.conf'])
+    for (const f of ['conf.d/oasis.conf', 'conf.d/00-oasis-zones.conf', 'oasis/proxy.conf', 'oasis/security-headers.conf', 'oasis/tls.conf'])
       writeFileSync(path.join(dir, f), move(read(`etc/nginx/${f}`)))
     const tmp = path.join(dir, 'tmp')
     writeFileSync(

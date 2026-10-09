@@ -1,6 +1,8 @@
 [Unit]
-Description=Oasis Auto Spa health check (API readiness, dashboard)
+Description=Oasis Auto Spa health check (API readiness, dashboard, public website)
 After=network-online.target
+# A failed check is recorded in /var/log/oasis/failures.log (and /etc/oasis/notify-failure.sh runs when it exists)
+OnFailure=oasis-notify-failure@%n.service
 
 [Service]
 Type=oneshot
@@ -9,6 +11,8 @@ Group=oasis
 Environment=NODE_ENV=production
 EnvironmentFile=-/etc/oasis/web.env
 EnvironmentFile=-/etc/oasis/api.env
+# the public website, when install.sh --site-domain configured one (SITE_URL, SITE_MARKER); absent otherwise, and the probe is skipped
+EnvironmentFile=-/etc/oasis/site.env
 ExecStart=/usr/local/lib/oasis/deploy/scripts/healthcheck.sh --quiet
 SyslogIdentifier=oasis-healthcheck
 NoNewPrivileges=yes

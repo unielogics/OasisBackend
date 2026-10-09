@@ -1,0 +1,11 @@
+# /etc/nginx/oasis/tls.conf  -  the TLS settings every HTTPS server of this host shares (rendered by deploy/scripts/install.sh).
+# Included by oasis.conf (the dashboard) and oasis-site.conf (the public website); the certificate and key stay in each server
+# block, because the two sites have their own. The session cache is one shared zone: nginx allows the same name in several servers.
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+ssl_prefer_server_ciphers off;
+ssl_session_cache shared:oasis_ssl:10m;
+ssl_session_timeout 1d;
+ssl_session_tickets off;
+# No OCSP stapling: Let's Encrypt stopped running OCSP responders. With a certificate that has one, add
+# ssl_stapling on; ssl_stapling_verify on; and a resolver.

@@ -21,6 +21,15 @@
 #   --move-secrets         an existing host whose env files still hold secrets: after checking that the secret holds the same values,
 #                          write OASIS_SECRET_ID/AWS_REGION into common.env and remove those lines (docs/deployment.md)
 #   --secrets-in-files     the old layout without Secrets Manager: generate the secrets into common.env (hosts without AWS)
+#   --site-domain HOST     also host the public website at https://HOST (www.HOST redirects to it): the bare domain, different
+#                          from --domain. Writes /etc/oasis/site.env, the site's nginx servers, a placeholder release so the name
+#                          never answers 404, and (certbot mode) asks for a certificate covering HOST and www.HOST, which needs
+#                          their DNS records to point here: before that it warns and leaves the port-80 bootstrap in place; re-run
+#                          with the same options once they do. Releases come from site-deploy.sh (docs/runbook.md, "The public website")
+#   --site-root DIR        where the website's releases live (default /var/www/site; nginx serves DIR/current)
+#   --site-tls-cert FILE --site-tls-key FILE    with --tls files: the website's certificate (apex and www)
+#   --site-csp POLICY      the website's Content-Security-Policy (default: self only, no inline script; docs/deployment.md)
+#   --site-marker TEXT     text every deployed index.html must contain (default "Oasis Auto Spa"); the health checks look for it
 #   --dry-run              print everything it would do, change nothing
 #   --no-system            write files only: no users, packages, chown, systemctl or nginx reload (for staging directories)
 #
@@ -61,6 +70,12 @@ AWS_REGION_ARG=us-east-1
 AWS_RUNTIME=role
 MOVE_SECRETS=0
 SECRETS_IN_FILES=0
+SITE_DOMAIN=""
+SITE_ROOT_ARG=/var/www/site
+SITE_TLS_CERT=""
+SITE_TLS_KEY=""
+SITE_CSP="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'; upgrade-insecure-requests"
+SITE_MARKER="Oasis Auto Spa"
 
 while (($#)); do
   case "$1" in
@@ -84,6 +99,12 @@ while (($#)); do
     --aws-runtime) AWS_RUNTIME=$2; shift 2 ;;
     --move-secrets) MOVE_SECRETS=1; shift ;;
     --secrets-in-files) SECRETS_IN_FILES=1; shift ;;
+    --site-domain) SITE_DOMAIN=$2; shift 2 ;;
+    --site-root) SITE_ROOT_ARG=$2; shift 2 ;;
+    --site-tls-cert) SITE_TLS_CERT=$2; shift 2 ;;
+    --site-tls-key) SITE_TLS_KEY=$2; shift 2 ;;
+    --site-csp) SITE_CSP=$2; shift 2 ;;
+    --site-marker) SITE_MARKER=$2; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --no-system) NO_SYSTEM=1; shift ;;
     -h | --help)
@@ -109,6 +130,23 @@ else
   TLS_CERT="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
   TLS_KEY="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
   [[ -n "$EMAIL" ]] || warn "no --email: certbot will register without a contact address"
+fi
+if [[ -n "$SITE_DOMAIN" ]]; then
+  [[ "$SITE_DOMAIN" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]] || die "--site-domain $SITE_DOMAIN is not a host name"
+  [[ "${SITE_DOMAIN,,}" != www.* ]] || die "--site-domain is the bare domain (www is implied): ${SITE_DOMAIN#www.}"
+  [[ "${SITE_DOMAIN,,}" != "${DOMAIN,,}" && "www.${SITE_DOMAIN,,}" != "${DOMAIN,,}" ]] || die "--site-domain must differ from --domain ($DOMAIN is the dashboard)"
+  [[ "$SITE_ROOT_ARG" == /* && "$SITE_ROOT_ARG" != */ ]] || die "--site-root must be an absolute path without a trailing slash"
+  [[ "$SITE_MARKER" =~ ^[^\"\'\$\`\\]+$ ]] || die "--site-marker must be plain text (no quotes, \$, backquotes or backslashes)"
+  [[ "$SITE_CSP" =~ ^[^\"\\]+$ ]] || die "--site-csp must not contain double quotes or backslashes"
+  if [[ "$TLS" == files ]]; then
+    [[ -n "$SITE_TLS_CERT" && -n "$SITE_TLS_KEY" ]] || die "--tls files with --site-domain needs --site-tls-cert and --site-tls-key"
+    if [[ "$DRY_RUN" != 1 && "$NO_SYSTEM" != 1 ]]; then [[ -r "$SITE_TLS_CERT" && -r "$SITE_TLS_KEY" ]] || die "cannot read $SITE_TLS_CERT / $SITE_TLS_KEY"; fi
+  else
+    SITE_TLS_CERT="/etc/letsencrypt/live/$SITE_DOMAIN/fullchain.pem"
+    SITE_TLS_KEY="/etc/letsencrypt/live/$SITE_DOMAIN/privkey.pem"
+  fi
+else
+  [[ -z "$SITE_TLS_CERT$SITE_TLS_KEY" ]] || die "--site-tls-cert/--site-tls-key need --site-domain"
 fi
 need_root
 
@@ -204,6 +242,30 @@ step_user_dirs() {
   ensure_dir "$OASIS_BACKUP_DIR" 0700 "$o"
   ensure_dir "$OASIS_LOG_DIR" 0750 "$o"
   ensure_dir "$OASIS_ROOT_PREFIX/var/www/certbot" 0755 "root:root"
+  [[ -z "$SITE_DOMAIN" ]] || step_site_dirs
+}
+
+# --- 3a. the public website's directories ----------------------------------------------------------------------------------------
+# Root-owned throughout: site-deploy.sh builds as oasis in <id>.partial and root moves the verified output into place (ADR 0145).
+# Until the first deploy, a placeholder release answers at the apex (nginx would otherwise 404 the whole site), so the name is
+# never dead between the DNS change and the first build.
+SITE_ROOT="$OASIS_ROOT_PREFIX$SITE_ROOT_ARG"
+step_site_dirs() {
+  ensure_dir "$SITE_ROOT" 0755 root:root
+  ensure_dir "$SITE_ROOT/releases" 0755 root:root
+  if [[ -n "$(readlink -e "$SITE_ROOT/current" 2>/dev/null || true)" ]]; then
+    ok "$(real "$SITE_ROOT")/current exists (left alone: $(basename "$(readlink -e "$SITE_ROOT/current")"))"
+    return 0
+  fi
+  local rel="$SITE_ROOT/releases/bootstrap" page
+  printf -v page '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n<meta name="robots" content="noindex">\n<title>%s</title>\n</head>\n<body>\n<p>%s — coming soon</p>\n</body>\n</html>\n' "$SITE_MARKER" "$SITE_MARKER"
+  ensure_dir "$rel" 0755 root:root
+  printf '%s' "$page" | install_content "$rel/index.html" 0644 root:root
+  printf '%s' "$page" | install_content "$rel/404.html" 0644 root:root
+  printf 'site=bootstrap\nbuilt=%s\nhours=none\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | install_content "$rel/REVISION" 0644 root:root
+  run ln -sfn "$rel" "$SITE_ROOT/current.new"
+  run mv -T "$SITE_ROOT/current.new" "$SITE_ROOT/current"
+  changed "$(real "$SITE_ROOT")/current -> releases/bootstrap (the placeholder page until site-deploy.sh runs)"
 }
 
 # --- 3b. the deploy kit root runs --------------------------------------------------------------------------------------------------
@@ -312,11 +374,33 @@ move_secrets() {
   warn "the backups $(real "$OASIS_ETC")/*.env.bak-* still hold those values: shred them once the services run from the secret (shred -u $(real "$OASIS_ETC")/*.env.bak-*)"
 }
 
+# /etc/oasis/site.env: what site-deploy.sh and the health check know about the website. Rendered from the options every run (it holds
+# no secret and nothing an operator edits by hand: the options are the source; the runbook says to re-run with the same ones).
+# World-readable: the health check runs as oasis, and nothing in it is private.
+step_site_env() {
+  {
+    printf '# /etc/oasis/site.env  -  the public website (written by deploy/scripts/install.sh --site-domain; re-run it to change)\n'
+    printf '# Read by site-deploy.sh (root) and healthcheck.sh; nothing here is secret.\n'
+    printf 'SITE_DOMAIN=%s\n' "$SITE_DOMAIN"
+    printf 'SITE_URL=https://%s\n' "$SITE_DOMAIN"
+    printf 'SITE_ROOT=%s\n' "$SITE_ROOT_ARG"
+    printf 'SITE_MIRROR=%s/git/site.git\n' "$REAL_PREFIX"
+    printf 'SITE_BUILD_DIR=dist\n'
+    printf 'SITE_MARKER="%s"\n' "$SITE_MARKER"
+    printf 'SITE_KEEP=4\n'
+  } | install_content "$OASIS_ETC/site.env" 0644 root:root
+}
+
 step_env() {
   ensure_env common
   ensure_env api
   ensure_env worker
   ensure_env web
+  if [[ -n "$SITE_DOMAIN" ]]; then
+    step_site_env
+  elif [[ -f "$OASIS_ETC/site.env" ]]; then
+    warn "$(real "$OASIS_ETC")/site.env exists but this run has no --site-domain: the website's files are left as they are (pass the same options as last time)"
+  fi
   local common="$OASIS_ETC/common.env"
   if ((SECRETS_IN_FILES)); then
     if [[ " ${CREATED_ENV[*]:-} " == *" common "* ]]; then
@@ -525,8 +609,10 @@ render_nginx() {
     report-only) csp_line="add_header Content-Security-Policy-Report-Only \"$policy\" always;"; csp_note="nginx adds a report-only policy next to the dashboard's own (--csp report-only)." ;;
     enforce) csp_line="add_header Content-Security-Policy \"$policy\" always;"; csp_note="nginx enforces this policy next to the dashboard's own (--csp enforce); both apply." ;;
   esac
-  local common=("DOMAIN=$DOMAIN" "API_PORT=$API_PORT" "WEB_PORT=$WEB_PORT" "NGINX_DIR=$REAL_NGINX" "TLS_CERT=$TLS_CERT" "TLS_KEY=$TLS_KEY" "CSP_LINE=$csp_line" "CSP_NOTE=$csp_note")
+  local common=("DOMAIN=$DOMAIN" "API_PORT=$API_PORT" "WEB_PORT=$WEB_PORT" "NGINX_DIR=$REAL_NGINX" "TLS_CERT=$TLS_CERT" "TLS_KEY=$TLS_KEY" "CSP_LINE=$csp_line" "CSP_NOTE=$csp_note"
+    "SITE_DOMAIN=$SITE_DOMAIN" "SITE_ROOT=$SITE_ROOT_ARG" "SITE_TLS_CERT=$SITE_TLS_CERT" "SITE_TLS_KEY=$SITE_TLS_KEY" "SITE_CSP=$SITE_CSP")
   render_template "$DEPLOY_DIR/nginx/oasis-zones.conf.template" "${common[@]}" | install_content "$NGINX_DIR/conf.d/00-oasis-zones.conf" 0644 root:root
+  render_template "$DEPLOY_DIR/nginx/oasis-tls.conf.template" "${common[@]}" | install_content "$NGINX_DIR/oasis/tls.conf" 0644 root:root
   render_template "$DEPLOY_DIR/nginx/oasis-proxy.conf.template" "${common[@]}" | install_content "$NGINX_DIR/oasis/proxy.conf" 0644 root:root
   render_template "$DEPLOY_DIR/nginx/oasis-security-headers.conf.template" "${common[@]}" | install_content "$NGINX_DIR/oasis/security-headers.conf" 0644 root:root
   if [[ "$1" == bootstrap ]]; then
@@ -534,6 +620,36 @@ render_nginx() {
   else
     render_template "$DEPLOY_DIR/nginx/oasis.conf.template" "${common[@]}" | install_content "$NGINX_DIR/conf.d/oasis.conf" 0644 root:root
   fi
+  # the website: its headers and servers; bootstrap (port 80 only) while its certificate is missing
+  if [[ -n "$SITE_DOMAIN" ]]; then
+    render_template "$DEPLOY_DIR/nginx/oasis-site-headers.conf.template" "${common[@]}" | install_content "$NGINX_DIR/oasis/site-headers.conf" 0644 root:root
+    if [[ "$2" == bootstrap ]]; then
+      render_template "$DEPLOY_DIR/nginx/oasis-site-http-bootstrap.conf.template" "${common[@]}" | install_content "$NGINX_DIR/conf.d/oasis-site.conf" 0644 root:root
+    else
+      render_template "$DEPLOY_DIR/nginx/oasis-site.conf.template" "${common[@]}" | install_content "$NGINX_DIR/conf.d/oasis-site.conf" 0644 root:root
+    fi
+  elif [[ -f "$NGINX_DIR/conf.d/oasis-site.conf" ]]; then
+    warn "$(real "$NGINX_DIR")/conf.d/oasis-site.conf exists but this run has no --site-domain: left as it is"
+  fi
+}
+
+# site_mode: full when the website's certificate exists (or on a staging directory / dry run), bootstrap while certbot still has to
+# issue it; empty without a website.
+site_mode() {
+  [[ -n "$SITE_DOMAIN" ]] || return 0
+  if [[ "$TLS" == certbot && ! -f "$OASIS_ROOT_PREFIX$SITE_TLS_CERT" && "$NO_SYSTEM" != 1 && "$DRY_RUN" != 1 ]]; then
+    printf bootstrap
+  else
+    printf full
+  fi
+}
+
+# certbot_renewal: the hook that reloads nginx after a renewal (both certificates), and the renewal timer. Real systems only.
+certbot_renewal() {
+  mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+  printf '#!/bin/sh\nsystemctl reload nginx\n' >/etc/letsencrypt/renewal-hooks/deploy/oasis-nginx.sh
+  chmod 755 /etc/letsencrypt/renewal-hooks/deploy/oasis-nginx.sh
+  systemctl enable --now certbot-renew.timer 2>/dev/null || warn "enable certificate renewal yourself: systemctl enable --now certbot-renew.timer (or a cron entry for certbot renew)"
 }
 
 nginx_reload() {
@@ -548,20 +664,31 @@ nginx_reload() {
 }
 
 step_nginx() {
+  local contact=(--register-unsafely-without-email)
+  [[ -z "$EMAIL" ]] || contact=(--email "$EMAIL")
   if [[ "$TLS" == certbot && ! -f "$OASIS_ROOT_PREFIX$TLS_CERT" && "$NO_SYSTEM" != 1 && "$DRY_RUN" != 1 ]]; then
     have certbot || die "certbot is not installed (use --install-packages)"
-    render_nginx bootstrap
+    render_nginx bootstrap "$(site_mode)"
     nginx_reload
-    local contact=(--register-unsafely-without-email)
-    [[ -z "$EMAIL" ]] || contact=(--email "$EMAIL")
     certbot certonly --webroot -w /var/www/certbot -d "$DOMAIN" --non-interactive --agree-tos "${contact[@]}" || die "certbot could not issue a certificate for $DOMAIN (does its DNS record point at this host, and is port 80 open?)"
     changed "certificate for $DOMAIN"
-    mkdir -p /etc/letsencrypt/renewal-hooks/deploy
-    printf '#!/bin/sh\nsystemctl reload nginx\n' >/etc/letsencrypt/renewal-hooks/deploy/oasis-nginx.sh
-    chmod 755 /etc/letsencrypt/renewal-hooks/deploy/oasis-nginx.sh
-    systemctl enable --now certbot-renew.timer 2>/dev/null || warn "enable certificate renewal yourself: systemctl enable --now certbot-renew.timer (or a cron entry for certbot renew)"
+    certbot_renewal
   fi
-  render_nginx full
+  # The website's certificate covers the bare domain and www. Its DNS records may not exist yet when this runs (the order is:
+  # this bootstrap, then the records, then this script again): a failure is a warning, the port-80 bootstrap stays, and the
+  # dashboard is not affected.
+  if [[ "$(site_mode)" == bootstrap ]]; then
+    have certbot || die "certbot is not installed (use --install-packages)"
+    render_nginx full bootstrap
+    nginx_reload
+    if certbot certonly --webroot -w /var/www/certbot --cert-name "$SITE_DOMAIN" -d "$SITE_DOMAIN" -d "www.$SITE_DOMAIN" --non-interactive --agree-tos "${contact[@]}"; then
+      changed "certificate for $SITE_DOMAIN and www.$SITE_DOMAIN"
+      certbot_renewal
+    else
+      warn "certbot could not issue a certificate for $SITE_DOMAIN and www.$SITE_DOMAIN: do both DNS records point at this host yet? The website stays on its port-80 bootstrap (ACME only); re-run install.sh with the same options once they do"
+    fi
+  fi
+  render_nginx full "$(site_mode)"
   nginx_reload
 }
 
@@ -606,3 +733,7 @@ Done. Next:
   4. SMS: connect the tablet and run tailscale-serve.sh (docs/runbook.md, "Add or replace the SMS tablet")
   5. Prove the integrations: pnpm verify:all (docs/live-verification.md)
 NEXT
+[[ -z "$SITE_DOMAIN" ]] || cat <<SITE
+  6. The public website ($SITE_DOMAIN): publish the site repository into $REAL_PREFIX/git/site.git (root-only), then
+     $(real "$OASIS_KIT_DIR")/scripts/site-deploy.sh      (docs/runbook.md, "The public website"); until then the placeholder page answers
+SITE

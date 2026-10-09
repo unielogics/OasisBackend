@@ -19,6 +19,10 @@ limit_conn_status 429;
 log_format oasis '$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent '
                  '"$http_referer" "$http_user_agent" rt=$request_time urt=$upstream_response_time rid=$request_id';
 
+# The one API answer the public website proxies (oasis-site.conf: /api/v1/public/hours) is cached here for 60 seconds, so a busy
+# site never sends more than one request a minute to the API for it. nginx creates the directory at start, owned by its worker user.
+proxy_cache_path /var/cache/nginx/oasis_public levels=1:2 keys_zone=oasis_public:1m max_size=10m inactive=10m use_temp_path=off;
+
 upstream oasis_api {
     server 127.0.0.1:@API_PORT@;
     keepalive 16;

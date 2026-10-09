@@ -1,0 +1,14 @@
+# /etc/nginx/oasis/site-headers.conf  -  the headers every page and file of the public website carries (rendered by install.sh).
+# Included by each location of oasis-site.conf that sets a header of its own (Cache-Control): add_header in a location replaces
+# the ones the server block set, so HSTS and nosniff are repeated here and every answer still carries each exactly once.
+# The site is static HTML with its own scripts and styles and one same-origin API call (the opening hours), hence the policy:
+# nothing from elsewhere, no inline script, no framing. install.sh --site-csp replaces it.
+add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header Content-Security-Policy "@SITE_CSP@" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+add_header X-Frame-Options "DENY" always;
+add_header Cross-Origin-Opener-Policy "same-origin" always;
+add_header Cross-Origin-Resource-Policy "same-origin" always;
+add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
+add_header X-Permitted-Cross-Domain-Policies "none" always;

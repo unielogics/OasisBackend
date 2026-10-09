@@ -48,14 +48,8 @@ server {
 
     ssl_certificate @TLS_CERT@;
     ssl_certificate_key @TLS_KEY@;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache shared:oasis_ssl:10m;
-    ssl_session_timeout 1d;
-    ssl_session_tickets off;
-    # No OCSP stapling: Let's Encrypt stopped running OCSP responders. With a certificate that has one, add
-    # ssl_stapling on; ssl_stapling_verify on; and a resolver.
+    # protocols, ciphers and the shared session cache: the same file for every HTTPS server of this host
+    include @NGINX_DIR@/oasis/tls.conf;
 
     access_log /var/log/nginx/oasis.access.log oasis;
     error_log /var/log/nginx/oasis.error.log warn;
