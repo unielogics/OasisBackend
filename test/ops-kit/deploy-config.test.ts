@@ -212,7 +212,8 @@ describe('systemd units', () => {
     if (existsSync(dashboardPkg)) {
       const start = (JSON.parse(readFileSync(dashboardPkg, 'utf8')) as { scripts: Record<string, string> })
         .scripts['start:live']!
-      expect(start).toContain('NEXT_PUBLIC_VARIANT=live DIST_DIR=.next-live next start')
+      // the dashboard may let LIVE_DIST_DIR override the directory; its default must be the one the unit uses
+      expect(start).toMatch(/NEXT_PUBLIC_VARIANT=live DIST_DIR=(?:\.next-live|\$\{LIVE_DIST_DIR:-\.next-live\}) next start/)
       expect(start).toContain('-H ${WEB_HOST:-127.0.0.1}')
     }
   })
