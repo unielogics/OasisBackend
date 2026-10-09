@@ -1,8 +1,10 @@
 [Unit]
 Description=Oasis Auto Spa worker (pg-boss jobs: SMS dispatch, reminders, Squarespace sync)
 Documentation=file:///opt/oasis/current/backend/docs/deployment.md
-After=network-online.target postgresql.service
-Wants=network-online.target postgresql.service
+# No local database: production uses Aurora. install.sh --local-db adds Wants/After=postgresql.service as a drop-in
+# (20-oasis-local-db.conf) on a host whose database is the local PostgreSQL.
+After=network-online.target
+Wants=network-online.target
 PartOf=oasis.target
 StartLimitIntervalSec=300
 StartLimitBurst=8

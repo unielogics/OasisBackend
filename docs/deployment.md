@@ -167,7 +167,10 @@ without the secret gets the two lines in `api.env` instead, without `--profile`.
 | `oasis-healthcheck.timer` / `.service` | `healthcheck.sh --quiet` every 5 minutes | a failing run shows in `systemctl --failed` |
 | `oasis-notify-failure@.service` | records a failed backup or drill in `/var/log/oasis/failures.log` and runs `/etc/oasis/notify-failure.sh UNIT` if you create it | wire your email or SMS there |
 
-All three services restart on failure (3 s delay, at most 8 starts in 5 minutes), start after Postgres, and run sandboxed:
+All three services restart on failure (3 s delay, at most 8 starts in 5 minutes), start after the network, and run sandboxed. They do
+not depend on a local PostgreSQL (production uses Aurora, and nothing should start the development server at boot); on a host whose
+database IS the local server, `install.sh --local-db` adds `Wants=`/`After=postgresql.service` as a drop-in
+(`oasis-{api,worker,backup,restore-drill}.service.d/20-oasis-local-db.conf`), which a later run without the flag keeps. Sandboxing:
 `NoNewPrivileges`, `ProtectSystem=strict` (only `/var/lib/oasis` is writable, plus the release directory for the dashboard cache),
 `ProtectHome`, `PrivateTmp`, `PrivateDevices`, kernel and control-group protections, `RestrictAddressFamilies` (IP and Unix sockets),
 an empty capability set, `SystemCallFilter=@system-service`, `UMask=0077`. `systemd-analyze security` rates the API at 1.7 ("OK").

@@ -8,7 +8,8 @@
 #   --csp app|report-only|enforce|off   Content-Security-Policy from nginx (default app: the dashboard sends its own; docs/deployment.md)
 #   --install-packages     dnf install nginx, certbot, logrotate, the Node 22 runtime and pnpm (otherwise they must already be there)
 #   --install-postgres     dnf install postgresql15-server, initialise it and allow password logins on 127.0.0.1
-#   --local-db             create the oasis database role and database in the local Postgres (needs sudo -u postgres)
+#   --local-db             the database is the local Postgres: create the oasis role and database (needs sudo -u postgres) and order
+#                          the units after postgresql.service (a drop-in; production on Aurora has none)
 #   --drill-role           also create a role that may create databases and write /etc/oasis/drill.env for the monthly restore drill
 #   --backend-repo URL --dashboard-repo URL    clone the repositories into /opt/oasis/src (as the oasis user)
 #   --gen-deploy-keys      create SSH deploy keys for the oasis user and print the public halves to add on GitHub (read-only)
@@ -459,12 +460,29 @@ step_aws_runtime() {
   fi
 }
 
+# The units carry no dependency on a local PostgreSQL (production uses Aurora). --local-db: a drop-in per unit that uses the database
+# orders it after postgresql.service and pulls that in. A drop-in written earlier is kept on a later run without --local-db (the same
+# host still has its local database); delete it by hand when the database moves.
+LOCAL_DB_UNITS=(oasis-api.service oasis-worker.service oasis-backup.service oasis-restore-drill.service)
+step_local_db_dropins() {
+  local unit dropin
+  for unit in "${LOCAL_DB_UNITS[@]}"; do
+    dropin="$SYSTEMD_DIR/$unit.d/20-oasis-local-db.conf"
+    if ((LOCAL_DB)); then
+      install_content "$dropin" 0644 root:root <"$DEPLOY_DIR/systemd-dropins/local-db.conf"
+    elif [[ -f "$dropin" ]]; then
+      ok "$dropin kept (written by an earlier --local-db; remove it when the database is no longer local)"
+    fi
+  done
+}
+
 step_systemd() {
   local unit
   for unit in "$DEPLOY_DIR"/systemd/*; do
     adapt_unit "$unit" | install_content "$SYSTEMD_DIR/$(basename "$unit")" 0644 root:root
   done
   step_aws_runtime
+  step_local_db_dropins
   install_content "$JOURNALD_DIR/oasis.conf" 0644 root:root <"$DEPLOY_DIR/journald/oasis.conf"
   install_content "$LOGROTATE_DIR/oasis" 0644 root:root <"$DEPLOY_DIR/logrotate/oasis"
   run_system systemctl daemon-reload

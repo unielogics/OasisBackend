@@ -220,7 +220,7 @@ describe('systemd units', () => {
     expect(readdirSync(stage.systemd).sort()).toEqual([...units].sort())
   })
 
-  it('run the three services as the oasis user with restart policy, ordering after Postgres and a graceful stop', () => {
+  it('run the three services as the oasis user with restart policy, after the network and a graceful stop', () => {
     for (const n of ['oasis-api', 'oasis-worker', 'oasis-web']) {
       const u = unit(`${n}.service`)
       expect(u.Service!.User, n).toEqual(['oasis'])
@@ -232,7 +232,45 @@ describe('systemd units', () => {
       expect(u.Install!.WantedBy, n).toEqual(['multi-user.target'])
     }
     for (const n of ['oasis-api', 'oasis-worker']) {
-      expect(unit(`${n}.service`).Unit!.After![0], n).toContain('postgresql.service')
+      expect(unit(`${n}.service`).Unit!.After, n).toEqual(['network-online.target'])
+      expect(unit(`${n}.service`).Unit!.Wants, n).toEqual(['network-online.target'])
+    }
+  })
+
+  it('never pull in a local PostgreSQL (production uses Aurora); --local-db adds it as a drop-in, and a later run keeps it', async () => {
+    for (const name of readdirSync(stage.systemd)) {
+      if (!name.endsWith('.service')) continue
+      const u = unit(name).Unit ?? {}
+      for (const key of ['Wants', 'Requires', 'BindsTo', 'After'])
+        expect((u[key] ?? []).join(' '), `${name} ${key}`).not.toContain('postgresql')
+    }
+    expect(readdirSync(stage.systemd).filter((n) => n.endsWith('.d'))).toEqual([])
+    const t = tempDir('oasis-localdb-')
+    try {
+      const install = (extra: string[]) =>
+        sh(
+          path.join(DEPLOY, 'scripts/install.sh'),
+          ['--domain', 'oasis.example.com', '--tls', 'files', '--tls-cert', stage.cert, '--tls-key', stage.key, '--no-system', ...extra],
+          { OASIS_ROOT_PREFIX: t.dir },
+        )
+      const r = await install(['--local-db'])
+      expect(r.code, r.out).toBe(0)
+      const units = ['oasis-api', 'oasis-worker', 'oasis-backup', 'oasis-restore-drill']
+      for (const n of units) {
+        const dropin = path.join(t.dir, `etc/systemd/system/${n}.service.d/20-oasis-local-db.conf`)
+        expect(parse(readFileSync(dropin, 'utf8')).Unit, n).toEqual({
+          Wants: ['postgresql.service'],
+          After: ['postgresql.service'],
+        })
+      }
+      expect(existsSync(path.join(t.dir, 'etc/systemd/system/oasis-web.service.d'))).toBe(false)
+      const again = await install([])
+      expect(again.code, again.out).toBe(0)
+      expect(again.out).toMatch(/20-oasis-local-db\.conf kept/)
+      for (const n of units)
+        expect(existsSync(path.join(t.dir, `etc/systemd/system/${n}.service.d/20-oasis-local-db.conf`)), n).toBe(true)
+    } finally {
+      t.cleanup()
     }
   })
 

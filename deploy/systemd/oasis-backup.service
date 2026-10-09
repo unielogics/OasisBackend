@@ -1,8 +1,9 @@
 [Unit]
 Description=Oasis Auto Spa nightly database backup (pg_dump, custom format)
 Documentation=file:///opt/oasis/current/backend/docs/runbook.md
-After=network-online.target postgresql.service
-Wants=postgresql.service
+# The database may be remote (Aurora); install.sh --local-db adds postgresql.service as a drop-in.
+After=network-online.target
+Wants=network-online.target
 OnFailure=oasis-notify-failure@%n.service
 
 [Service]
