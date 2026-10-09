@@ -487,6 +487,9 @@ step_systemd() {
   install_content "$LOGROTATE_DIR/oasis" 0644 root:root <"$DEPLOY_DIR/logrotate/oasis"
   run_system systemctl daemon-reload
   run_system systemctl enable oasis.target oasis-api.service oasis-worker.service oasis-web.service oasis-backup.timer oasis-healthcheck.timer
+  # Only root, oasis and ec2-instance-connect may reach the instance metadata service (the unit says why and how to remove it).
+  run_system systemctl enable --now oasis-imds-guard.service ||
+    warn "the instance metadata guard did not start (journalctl -u oasis-imds-guard): every local user can still ask for the role's credentials"
   if [[ -f "$OASIS_ETC/drill.env" ]] || ((DRY_RUN)); then
     run_system systemctl enable oasis-restore-drill.timer
   else

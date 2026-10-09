@@ -339,6 +339,94 @@ describe('systemd units', () => {
     expect(unit('oasis-worker.service').Service!.ReadWritePaths).toEqual(['/var/lib/oasis'])
   })
 
+  it('the metadata guard runs before the network and the services, and the web server cannot reach the metadata service', () => {
+    const g = unit('oasis-imds-guard.service')
+    expect(g.Unit!.DefaultDependencies).toEqual(['no'])
+    for (const before of ['network-pre.target', 'oasis-api.service', 'oasis-worker.service', 'oasis-web.service', 'oasis-backup.service'])
+      expect(g.Unit!.Before![0]!.split(' '), before).toContain(before)
+    expect(g.Unit!.Wants).toEqual(['network-pre.target'])
+    expect(g.Service!.Type).toEqual(['oneshot'])
+    expect(g.Service!.RemainAfterExit).toEqual(['yes'])
+    expect(g.Install!.WantedBy).toEqual(['multi-user.target'])
+    expect(unit('oasis-web.service').Service!.IPAddressDeny).toEqual(['169.254.169.254/32'])
+    // the API, the worker and the backup use the instance role: no deny for them
+    for (const n of ['oasis-api', 'oasis-worker', 'oasis-backup'])
+      expect(unit(`${n}.service`).Service!.IPAddressDeny, n).toBeUndefined()
+  })
+
+  it('the metadata guard lets exactly root, oasis and ec2-instance-connect through, starts idempotently and stops cleanly', async () => {
+    const t = tempDir('oasis-imds-')
+    try {
+      // a model of iptables: one file per chain, one rule per line; -C/-D/-X fail the way iptables does
+      const bin = path.join(t.dir, 'bin')
+      mkdirSync(bin)
+      writeFileSync(
+        path.join(bin, 'iptables'),
+        `#!/usr/bin/env bash
+S="$IPT_STATE"; [ "$1" = -w ] && shift
+op=$1 chain=$2; shift 2
+f="$S/$chain"; [ "$chain" = OUTPUT ] && touch "$f"
+case "$op" in
+  -N) [ -e "$f" ] && { echo "Chain already exists" >&2; exit 1; }; : > "$f" ;;
+  -F) [ -e "$f" ] || exit 1; : > "$f" ;;
+  -X) [ -e "$f" ] || exit 1; [ -s "$f" ] && exit 1; grep -qx -- "-j $chain" "$S"/* 2>/dev/null && exit 1; grep -q -- "-j $chain\\$" "$S"/* 2>/dev/null && exit 1; rm "$f" ;;
+  -A) [ -e "$f" ] || exit 1; echo "$*" >> "$f" ;;
+  -I) [ -e "$f" ] || exit 1; [ "$1" = 1 ] && shift; { echo "$*"; cat "$f"; } > "$f.new"; mv "$f.new" "$f" ;;
+  -C) [ -e "$f" ] && grep -qxF -- "$*" "$f" ;;
+  -D) [ -e "$f" ] && grep -qxF -- "$*" "$f" || exit 1; awk -v r="$*" 'BEGIN{d=0} $0==r && !d {d=1; next} {print}' "$f" > "$f.new"; mv "$f.new" "$f" ;;
+  *) echo "unexpected iptables $op" >&2; exit 2 ;;
+esac
+`,
+      )
+      writeFileSync(
+        path.join(bin, 'id'),
+        `#!/usr/bin/env bash\n[ "$1" = -u ] && [ "$2" = ec2-instance-connect ] && [ -n "$HAS_EIC" ] && { echo 994; exit 0; }\nexit 1\n`,
+      )
+      chmodSync(path.join(bin, 'iptables'), 0o755)
+      chmodSync(path.join(bin, 'id'), 0o755)
+      const g = unit('oasis-imds-guard.service').Service!
+      const script = (line: string): { flags: string; body: string } => {
+        const m = /^\/bin\/sh (-e?c) '(.*)'$/.exec(line)
+        expect(m, line).not.toBeNull()
+        return { flags: m![1]!, body: m![2]! }
+      }
+      const start = script(g.ExecStart![0]!)
+      const stop = script(g.ExecStop![0]!)
+      expect(start.flags).toBe('-ec') // a failing step fails the unit (the guard is not silently absent)
+      const state = path.join(t.dir, 'state')
+      const run = (s: { flags: string; body: string }, extra: Record<string, string> = {}) =>
+        sh('/bin/sh', [s.flags, s.body], { PATH: `${bin}:/usr/bin:/bin`, IPT_STATE: state, ...extra })
+      const chain = () => readFileSync(path.join(state, 'OASIS-IMDS'), 'utf8').trim().split('\n')
+      const output = () => readFileSync(path.join(state, 'OUTPUT'), 'utf8').trim().split('\n').filter(Boolean)
+      const allowed = () =>
+        chain()
+          .filter((r) => r.endsWith('-j RETURN'))
+          .map((r) => /--uid-owner (\S+) -j RETURN$/.exec(r)![1])
+
+      mkdirSync(state)
+      writeFileSync(path.join(state, 'OUTPUT'), '-d 10.0.0.0/8 -j ACCEPT\n') // someone else's rule stays where it is
+      for (let i = 0; i < 2; i++) {
+        const r = await run(start, { HAS_EIC: '1' })
+        expect(r.code, r.out).toBe(0)
+        expect(allowed()).toEqual(['0', 'oasis', 'ec2-instance-connect'])
+        expect(chain().at(-1)).toBe('-j REJECT') // everyone else: rejected
+        expect(chain()).toHaveLength(4)
+        expect(output()).toEqual(['-d 169.254.169.254/32 -j OASIS-IMDS', '-d 10.0.0.0/8 -j ACCEPT']) // one jump, first
+      }
+      // a host without EC2 Instance Connect: the same, without that user
+      expect((await run(start)).code).toBe(0)
+      expect(allowed()).toEqual(['0', 'oasis'])
+      for (let i = 0; i < 2; i++) {
+        const r = await run(stop)
+        expect(r.code, r.out).toBe(0)
+        expect(existsSync(path.join(state, 'OASIS-IMDS'))).toBe(false)
+        expect(output()).toEqual(['-d 10.0.0.0/8 -j ACCEPT'])
+      }
+    } finally {
+      t.cleanup()
+    }
+  })
+
   it('back up nightly in shop time and drill monthly, both with persistent timers', () => {
     expect(unit('oasis-backup.timer').Timer!.OnCalendar![0]).toMatch(/^\*-\*-\* 03:15:00 America\/New_York$/)
     expect(unit('oasis-backup.timer').Timer!.Persistent).toEqual(['true'])

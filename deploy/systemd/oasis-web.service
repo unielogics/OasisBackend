@@ -55,6 +55,8 @@ SystemCallErrorNumber=EPERM
 CapabilityBoundingSet=
 AmbientCapabilities=
 UMask=0077
+# The dashboard needs no AWS: the instance metadata service (the role's credentials) is out of its reach entirely.
+IPAddressDeny=169.254.169.254/32
 # Next writes its response cache next to the build.
 ReadWritePaths=/opt/oasis/releases
 

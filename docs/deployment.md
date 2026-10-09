@@ -165,6 +165,7 @@ without the secret gets the two lines in `api.env` instead, without `--profile`.
 | `oasis-backup.timer` / `.service` | `backup.sh --label nightly` at 03:15 shop time | retention below |
 | `oasis-restore-drill.timer` / `.service` | `restore-drill.sh --latest` on the 2nd of each month | enabled when `/etc/oasis/drill.env` exists |
 | `oasis-healthcheck.timer` / `.service` | `healthcheck.sh --quiet` every 5 minutes | a failing run shows in `systemctl --failed` |
+| `oasis-imds-guard.service` | an iptables chain: only root, `oasis` and `ec2-instance-connect` reach the metadata service | below, "Instance metadata guard" |
 | `oasis-notify-failure@.service` | records a failed backup or drill in `/var/log/oasis/failures.log` and runs `/etc/oasis/notify-failure.sh UNIT` if you create it | wire your email or SMS there |
 
 All three services restart on failure (3 s delay, at most 8 starts in 5 minutes), start after the network, and run sandboxed. They do
@@ -177,6 +178,31 @@ an empty capability set, `SystemCallFilter=@system-service`, `UMask=0077`. `syst
 `MemoryDenyWriteExecute` is deliberately off: V8 needs writable and executable memory.
 
 Handy: `systemctl status oasis-api oasis-worker oasis-web`, `journalctl -u oasis-api -f`, `systemctl list-timers 'oasis*'`.
+
+### Instance metadata guard
+
+With the instance role (runtime=role) every local process could ask the instance metadata service (`169.254.169.254`) for the
+role's credentials, and through them read the environment secret. `oasis-imds-guard.service` (a oneshot, enabled and started by
+`install.sh`, ordered before `network-pre.target` and the Oasis units) adds an iptables chain `OASIS-IMDS`, jumped to from `OUTPUT` for
+that address, which lets through only:
+
+* **root** (uid 0). It must stay allowed: `amazon-ec2-net-utils` (`policy-routes@ens5`, `refresh-policy-routes`) runs as root and
+  rebuilds the secondary private IP `172.31.20.222`, which carries the website's Elastic IP, from the metadata at boot and on every
+  refresh. Blocking root would take the site down at the next refresh. cloud-init, the SSM agent and tailscaled are root too.
+* **oasis**: the API, the worker and the backup read the secret and S3 with the role.
+* **ec2-instance-connect**: the EC2 console's Connect button (its `AuthorizedKeysCommand` runs as that user); added only when the user
+  exists.
+
+Everyone else is rejected: by design `ec2-user` tools (`ec2-metadata`, the AWS CLI or SDK falling back to the instance) get "connection
+refused"; use an explicit profile with `AWS_EC2_METADATA_DISABLED=true`, or `sudo`. A process that can `sudo` is root, so this stops
+only what does not. `oasis-web` additionally has `IPAddressDeny=169.254.169.254/32` (it needs no AWS). chronyd's
+`169.254.169.123` and the DNS resolver's `169.254.169.253` are other addresses and unaffected; IPv6 metadata is off on this instance
+(if it is ever turned on, add the same rule with `ip6tables` for `fd00:ec2::254`). Starting it twice rebuilds the chain and never adds
+a second jump; stopping removes the jump and the chain.
+
+Check: `sudo iptables -S OASIS-IMDS` (`--uid-owner 0`, the oasis uid, the ec2-instance-connect uid, then `REJECT`) and
+`sudo iptables -S OUTPUT | head -2`. **Emergency removal:** `sudo systemctl disable --now oasis-imds-guard`, or by hand
+`sudo iptables -D OUTPUT -d 169.254.169.254/32 -j OASIS-IMDS; sudo iptables -F OASIS-IMDS; sudo iptables -X OASIS-IMDS`.
 
 ## nginx
 

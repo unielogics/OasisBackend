@@ -1,0 +1,26 @@
+[Unit]
+Description=Oasis: only root, oasis and ec2-instance-connect may reach the instance metadata service
+Documentation=file:///opt/oasis/current/backend/docs/deployment.md
+# The instance role's credentials come from the metadata service (169.254.169.254); any local process could otherwise ask for them.
+# An iptables chain OASIS-IMDS, jumped to from OUTPUT for that address, lets through root (amazon-ec2-net-utils rebuilds the
+# secondary private IP that carries the website from the metadata at boot and on refresh: it MUST keep working; also cloud-init, the
+# SSM agent, tailscaled), the oasis user (the services read the environment secret and S3 with the role) and ec2-instance-connect
+# (the console's Connect button), and rejects everyone else (ec2-user tools, the review stack, build agents). Users that sudo are root.
+# Emergency removal: sudo systemctl disable --now oasis-imds-guard   (or by hand: iptables -D OUTPUT -d 169.254.169.254/32 -j
+# OASIS-IMDS; iptables -F OASIS-IMDS; iptables -X OASIS-IMDS). docs/deployment.md, "Instance metadata guard"; ADR 0141.
+DefaultDependencies=no
+After=local-fs.target
+Before=network-pre.target oasis-api.service oasis-worker.service oasis-web.service oasis-backup.service oasis-restore-drill.service shutdown.target
+Wants=network-pre.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Idempotent: a second start rebuilds the chain and never adds a second jump.
+ExecStart=/bin/sh -ec 'iptables -w -N OASIS-IMDS 2>/dev/null || iptables -w -F OASIS-IMDS; iptables -w -A OASIS-IMDS -m owner --uid-owner 0 -j RETURN; iptables -w -A OASIS-IMDS -m owner --uid-owner oasis -j RETURN; if id -u ec2-instance-connect >/dev/null 2>&1; then iptables -w -A OASIS-IMDS -m owner --uid-owner ec2-instance-connect -j RETURN; fi; iptables -w -A OASIS-IMDS -j REJECT; iptables -w -C OUTPUT -d 169.254.169.254/32 -j OASIS-IMDS 2>/dev/null || iptables -w -I OUTPUT 1 -d 169.254.169.254/32 -j OASIS-IMDS'
+# Clean: removes every jump, then the chain; stopping twice is fine.
+ExecStop=/bin/sh -c 'while iptables -w -D OUTPUT -d 169.254.169.254/32 -j OASIS-IMDS 2>/dev/null; do :; done; iptables -w -F OASIS-IMDS 2>/dev/null; iptables -w -X OASIS-IMDS 2>/dev/null; true'
+
+[Install]
+WantedBy=multi-user.target
