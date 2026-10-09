@@ -86,6 +86,26 @@ rollback leaves the schema as it is. Add things first; remove or rename them in 
 Deploy outside shop hours when you can: the restart takes the dashboard and API down for a few seconds, and SSE clients reconnect and
 refetch by themselves.
 
+### This host: releases come from local mirrors
+
+On the production host (EC2 i-016774195f325eb0f) the clones in `/opt/oasis/src` do not pull from GitHub: their `origin` is a bare
+mirror in `/opt/oasis/git/<repo>.git`, and only commits that passed the integrator's checks are published into it, so no deploy
+key is needed on the host. To release (as the operator, from the working copies in `~ec2-user/oasis`):
+
+```bash
+G="env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*"   # root reading repositories other users own
+for r in backend dashboard; do
+  sudo $G git -C /opt/oasis/git/$r.git fetch --quiet /home/ec2-user/oasis/$r +main:main
+done
+sudo chown -R oasis:oasis /opt/oasis/git
+cd / && sudo -u oasis env HOME=/var/lib/oasis git -C /opt/oasis/src/backend pull --ff-only   # deploy.sh runs from this checkout
+sudo bash /opt/oasis/src/backend/deploy/scripts/deploy.sh
+```
+
+Run `deploy.sh` from `/` or any directory the oasis user may enter (it changes to `/` itself). After a release that changes the
+deployment configuration (the deploy says so), re-run `install.sh` with the same options; it never overwrites `/etc/oasis/*.env`
+but reports variables a newer template added.
+
 ## 3. Roll back
 
 **Code only** (the usual case, a bad release but a compatible schema):
