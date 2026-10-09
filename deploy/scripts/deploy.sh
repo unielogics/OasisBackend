@@ -8,12 +8,16 @@
 #      OASIS_PHOTOS_ORIGINS from S3_BUCKET and AWS_REGION in common.env when STORAGE_PROVIDER=s3, for its Content-Security-Policy)
 #   4. backup.sh --label pre-deploy                    (the safety net for the migration; skipped with --skip-backup)
 #   5. pnpm migrate up with the new code, while the old release is still serving
+#      then the release becomes root:oasis and read-only (Next's cache is a symlink to /var/cache/oasis-web), and its deploy/ must equal
+#      the commit's in a root-owned local mirror when the backend's origin is one
 #   6. current -> the new release; restart worker, API, dashboard
-#   7. healthcheck.sh --wait: API ready (database, migrations, jobs) and dashboard answering
+#   7. healthcheck.sh --wait: API ready (database, migrations, jobs), dashboard answering, the public sign-in redirect, the worker;
+#      healthy: the root-owned kit (/usr/local/lib/oasis/deploy) is refreshed from the new release
 #   8. unhealthy: current -> the previous release, restart, health-check again, exit 1
 # A build or migration failure changes nothing that is running. Migrations are forward-only and the old code keeps running against
 # the migrated schema after a rollback, so every migration must stay compatible with the release before it (docs/runbook.md).
-# Run as root (sudo); builds and migrations drop to the oasis user. One deploy at a time (flock).
+# Run as root (sudo) from the root-owned kit: sudo /usr/local/lib/oasis/deploy/scripts/deploy.sh. Builds and migrations drop to the oasis
+# user. One deploy at a time (flock).
 set -euo pipefail
 OASIS_HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../lib/common.sh
@@ -53,6 +57,17 @@ mkdir -p "$OASIS_PREFIX" "$OASIS_PREFIX/releases" "$OASIS_LOG_DIR" 2>/dev/null |
 exec 9>"$OASIS_PREFIX/.deploy.lock"
 flock -n 9 || die "another deploy or rollback is running"
 if [[ "$DRY_RUN" != 1 ]]; then exec > >(tee -a "$OASIS_LOG_DIR/deploy.log") 2>&1; fi
+# Releases live in root-owned directories: the oasis user builds inside its own staging directory (<id>.partial) and can neither
+# rename nor replace a finished release, nor the current/previous links (ADR 0140).
+if [[ "$DRY_RUN" != 1 ]]; then
+  for d in "$OASIS_PREFIX" "$OASIS_PREFIX/releases"; do
+    root_own root:root "$d"
+    chmod 0755 "$d"
+  done
+fi
+if ! running_from_kit "$OASIS_HERE"; then
+  warn "running $OASIS_HERE/deploy.sh, not the root-owned kit in $OASIS_KIT_DIR: from the next deploy on, run $(printf '%s' "${OASIS_KIT_DIR#"$OASIS_ROOT_PREFIX"}")/scripts/deploy.sh (this deploy installs it)"
+fi
 
 for repo in backend dashboard; do
   [[ -d "$OASIS_PREFIX/src/$repo/.git" || -f "$OASIS_PREFIX/src/$repo/HEAD" ]] || die "$OASIS_PREFIX/src/$repo is not a git clone (run install.sh, then clone the repository there)"
@@ -145,7 +160,17 @@ as_oasis env HOME="$OASIS_STATE" CI=1 NODE_OPTIONS=--max-old-space-size=2048 OAS
 if [[ "$DRY_RUN" != 1 ]]; then
   [[ -f "$PART/backend/dist/server.js" && -f "$PART/backend/dist/worker.js" ]] || die "the API build produced no dist/server.js and dist/worker.js"
   [[ -d "$PART/dashboard/.next-live" ]] || die "the dashboard build produced no .next-live"
+  # The release becomes read-only; Next's runtime cache moves out of it, to the directory systemd gives oasis-web (CacheDirectory=).
+  # (The build's own cache there, webpack and swc, is not needed at run time.)
+  rm -rf -- "$PART/dashboard/.next-live/cache"
+  ln -s "$OASIS_WEB_CACHE" "$PART/dashboard/.next-live/cache"
+fi
+lock_release "$PART"
+if [[ "$DRY_RUN" != 1 ]]; then
+  # The kit root will copy from this release must be the commit's own, as the root-owned mirror has it.
+  verify_kit "$PART" "$BE_SHA" || die "the deploy kit in the built release differs from commit ${BE_SHA:0:12} in the mirror: a build step changed it. Nothing was changed; the build is kept in $REL.failed for inspection"
   printf 'backend=%s\ndashboard=%s\nphotos_origins=%s\nbuilt=%s\n' "$BE_SHA" "$DB_SHA" "$PHOTOS_ORIGINS" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$PART/REVISIONS"
+  chmod 0644 "$PART/REVISIONS"
   mv "$PART" "$REL"
 fi
 PART_ACTIVE=0
@@ -201,12 +226,22 @@ if ! health_gate "$WAIT"; then rollback; fi
 record_deploy "$ID" ok
 changed "release $ID is live"
 
+# --- 7b. the root-owned kit follows the release that is now live and healthy ----------------------------------------------------------
+if [[ "$DRY_RUN" == 1 ]]; then
+  log "would refresh the deploy kit in $OASIS_KIT_DIR from the new release"
+elif [[ -d "$REL/backend/deploy/scripts" ]]; then
+  install_kit "$REL/backend/deploy"
+  ((KIT_VERIFIED)) && ok "the kit matches commit ${BE_SHA:0:12} in the root-owned mirror"
+else
+  warn "the release has no deploy/ kit: $OASIS_KIT_DIR left as it was"
+fi
+
 # --- 8. did the kit's own configuration change? ----------------------------------------------------------------------------------
 # Units, nginx templates and env templates are installed by install.sh, not by a release: say so when this release changed them.
 if [[ -n "$OLD" && -d "$OLD/backend/deploy" && "$DRY_RUN" != 1 ]]; then
   changed_cfg=$(cd "$OLD/backend/deploy" && for d in systemd nginx env logrotate journald; do [[ -d "$d" ]] && diff -rq "$d" "$REL/backend/deploy/$d" 2>&1 | sed "s#^#  #"; done || true)
   if [[ -n "$changed_cfg" ]]; then
-    warn "this release changes the deployment configuration; apply it with install.sh (safe to repeat, it never overwrites your env files):"
+    warn "this release changes the deployment configuration; apply it with $(printf '%s' "${OASIS_KIT_DIR#"$OASIS_ROOT_PREFIX"}")/scripts/install.sh and the options this host was installed with (safe to repeat, it never overwrites your env files):"
     printf '%s\n' "$changed_cfg" >&2
   fi
 fi

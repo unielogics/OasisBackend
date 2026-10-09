@@ -1,19 +1,23 @@
 // deploy.sh and rollback.sh end to end against real git repositories, with pnpm, systemctl, the health check and the backup replaced by
 // recording stand-ins. Everything else (git fetch/archive, release directories, symlink switching, locking, pruning) is the real code.
 import {
+  cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { script, sh, tempDir, tree, writeExecutable } from './deploy-helpers.js'
+import { DEPLOY, script, sh, tempDir, tree, writeExecutable } from './deploy-helpers.js'
 
 interface World {
   root: string
@@ -79,8 +83,8 @@ async function makeWorld(): Promise<World> {
 echo "pnpm $(basename "$PWD") $*" >> "$SHIM_LOG"
 case "$*" in
   "install --frozen-lockfile") ;;
-  "build") [ -e FAIL_BUILD ] && { echo "build broke" >&2; exit 1; }; mkdir -p dist; echo '//' > dist/server.js; echo '//' > dist/worker.js ;;
-  "build:live") mkdir -p .next-live; echo x > .next-live/BUILD_ID; printf '%s' "\${OASIS_PHOTOS_ORIGINS-unset}" > "$SHIM_STATE/photos-origins" ;;
+  "build") [ -e FAIL_BUILD ] && { echo "build broke" >&2; exit 1; }; [ -e TAMPER_KIT ] && echo 'echo pwned' >> deploy/scripts/healthcheck.sh; mkdir -p dist; echo '//' > dist/server.js; echo '//' > dist/worker.js ;;
+  "build:live") mkdir -p .next-live/cache/webpack; echo x > .next-live/BUILD_ID; printf '%s' "\${OASIS_PHOTOS_ORIGINS-unset}" > "$SHIM_STATE/photos-origins" ;;
   "migrate up") echo "migrate DATABASE_URL=\${DATABASE_URL:+set} SECRETS_KEY=\${SECRETS_KEY:+set} OASIS_SECRET_ID=\${OASIS_SECRET_ID:-} AWS_REGION=\${AWS_REGION:-}" >> "$SHIM_LOG"; [ -e FAIL_MIGRATE ] && { echo "migration broke" >&2; exit 1; }; echo "$PWD" >> "$SHIM_STATE/migrated-by" ;;
   *) echo "unexpected pnpm $*" >&2; exit 1 ;;
 esac
@@ -469,7 +473,7 @@ describe('deploy.sh', () => {
     const changed = await w.deploy()
     expect(changed.code, changed.out).toBe(0)
     expect(changed.out).toMatch(
-      /this release changes the deployment configuration; apply it with install\.sh/,
+      /this release changes the deployment configuration; apply it with \/usr\/local\/lib\/oasis\/deploy\/scripts\/install\.sh/,
     )
     expect(changed.out).toMatch(/oasis-api\.service differ/)
     await w.commit('backend', { VERSION: 'v3\n' })
@@ -502,6 +506,131 @@ describe('deploy.sh', () => {
     rmSync(path.join(w2.root, 'etc/oasis/common.env'))
     expect((await w2.deploy()).out).toMatch(/common\.env is missing/)
   }, 30_000)
+})
+
+describe('privilege separation: read-only releases and the root-owned kit', () => {
+  const kitOf = (w: World) => path.join(w.root, 'usr/local/lib/oasis/deploy')
+  const modes = (dir: string): string[] => {
+    const out: string[] = []
+    const walk = (d: string): void => {
+      for (const n of readdirSync(d)) {
+        const p = path.join(d, n)
+        const st = lstatSync(p)
+        if (st.isSymbolicLink()) continue
+        if ((st.mode & 0o022) !== 0) out.push(`${path.relative(dir, p)} ${(st.mode & 0o777).toString(8)}`)
+        if (st.isDirectory()) walk(p)
+      }
+    }
+    walk(dir)
+    return out
+  }
+  // the backend repository carries the real deploy kit, and its origin is a "root-owned" mirror (owned by the trusted uid, nothing
+  // writable by group or others; OASIS_KIT_TRUST_UID stands in for root)
+  async function kitWorld(): Promise<{ w: World; env: Record<string, string>; chownLog: string; origin: string }> {
+    const w = await makeWorld()
+    const origin = path.join(w.root, 'origin/backend')
+    cpSync(DEPLOY, path.join(origin, 'deploy'), { recursive: true })
+    // (one line more than the kit install.sh put in place, so the first deploy really replaces it)
+    await w.commit('backend', { 'deploy/README.md': `${readFileSync(path.join(DEPLOY, 'README.md'), 'utf8')}\nrelease kit\n` })
+    // every commit to the "mirror" keeps it root-only (the test's umask would leave new objects group-writable)
+    const commit = w.commit.bind(w)
+    w.commit = async (repo, files) => {
+      const sha = await commit(repo, files)
+      await sh('chmod', ['-R', 'go-w', path.join(w.root, 'origin')])
+      return sha
+    }
+    await sh('chmod', ['-R', 'go-w', path.join(w.root, 'origin')])
+    const chownLog = path.join(w.state, 'chown.log')
+    writeExecutable(path.join(w.root, 'shims/chown'), `#!/usr/bin/env bash\necho "$*" >> "${chownLog}"\n`)
+    const env = { ...w.env, OASIS_CHOWN: path.join(w.root, 'shims/chown'), OASIS_KIT_TRUST_UID: String(process.getuid!()) }
+    return { w, env, chownLog, origin }
+  }
+
+  it('first deployment: the release is made root:oasis and read-only, Next cache moves out, and the kit is installed from it', async () => {
+    const { w, env, chownLog } = await kitWorld()
+    const r = await sh(script('deploy.sh'), [], env)
+    expect(r.code, r.out).toBe(0)
+    expect(r.out).toMatch(/warn running \S+\/deploy\.sh, not the root-owned kit in \S+: from the next deploy on, run \/usr\/local\/lib\/oasis\/deploy\/scripts\/deploy\.sh/)
+    const rel = path.join(w.prefix, 'releases', w.current())
+    // read-only for everyone but the owner (root in production), chown without following links
+    expect(modes(rel)).toEqual([])
+    const chowns = readFileSync(chownLog, 'utf8').trim().split('\n')
+    expect(chowns).toContain(`-h -R root:oasis ${rel}.partial`)
+    expect(chowns).toContain(`-h root:root ${w.prefix}`)
+    expect(chowns).toContain(`-h root:root ${path.join(w.prefix, 'releases')}`)
+    expect(chowns.some((c) => /^-h -R root:root \S+\/usr\/local\/lib\/oasis\/deploy\.new\.\w+$/.test(c)), chowns.join('\n')).toBe(true)
+    expect(readFileSync(path.join(kitOf(w), 'README.md'), 'utf8')).toMatch(/release kit\n$/)
+    // the dashboard's runtime cache is a link to the directory systemd gives oasis-web; the build's own cache is gone
+    expect(readlinkSync(path.join(rel, 'dashboard/.next-live/cache'))).toBe('/var/cache/oasis-web')
+    expect((statSync(path.join(rel, 'REVISIONS')).mode & 0o777).toString(8)).toBe('644')
+    // the kit: exactly the release's deploy/, nothing writable by group or others, and checked against the mirror
+    expect((await sh('diff', ['-r', path.join(rel, 'backend/deploy'), kitOf(w)])).code).toBe(0)
+    expect(modes(kitOf(w))).toEqual([])
+    expect(r.out).toMatch(/the kit matches commit \w+ in the root-owned mirror/)
+  }, 90_000)
+
+  it('the next deploy runs from the kit, and a build step that changes the kit stops the deploy before anything runs', async () => {
+    const { w, env } = await kitWorld()
+    expect((await sh(script('deploy.sh'), [], env)).code).toBe(0)
+    const good = w.current()
+    const kitDeploy = path.join(kitOf(w), 'scripts/deploy.sh')
+    await w.commit('backend', { VERSION: 'v2\n' })
+    const fromKit = await sh(kitDeploy, [], env)
+    expect(fromKit.code, fromKit.out).toBe(0)
+    expect(fromKit.out).not.toMatch(/not the root-owned kit/)
+    const second = w.current()
+    expect(second).not.toBe(good)
+    const kitBefore = readFileSync(path.join(kitOf(w), 'scripts/healthcheck.sh'), 'utf8')
+
+    // a dependency's install script (running as oasis) rewrites the kit inside the build
+    await w.commit('backend', { TAMPER_KIT: '1\n' })
+    w.clearLog()
+    const tampered = await sh(kitDeploy, [], env)
+    expect(tampered.code).not.toBe(0)
+    expect(tampered.out).toMatch(/the deploy kit in the built release differs from commit \w+ in the mirror/)
+    expect(w.current()).toBe(second)
+    expect(calls(w, 'migrate')).toEqual([])
+    expect(calls(w, 'systemctl')).toEqual([])
+    expect(calls(w, 'backup')).toEqual([])
+    expect(w.releases().some((n) => n.endsWith('.failed'))).toBe(true)
+    expect(readFileSync(path.join(kitOf(w), 'scripts/healthcheck.sh'), 'utf8')).toBe(kitBefore)
+  }, 120_000)
+
+  it('a commit the mirror does not have is refused; with an origin that is not root-only the kit is refreshed unchecked, and says so', async () => {
+    const { w, env, origin } = await kitWorld()
+    expect((await sh(script('deploy.sh'), [], env)).code).toBe(0)
+    const good = w.current()
+    // a commit made in the oasis user's clone only
+    const clone = path.join(w.prefix, 'src/backend')
+    writeFileSync(path.join(clone, 'LOCAL'), 'x\n')
+    await git(clone, 'add', '-A')
+    await git(clone, 'commit', '-q', '-m', 'local only')
+    const local = await sh(script('deploy.sh'), ['--backend-ref', 'HEAD'], env)
+    expect(local.code).not.toBe(0)
+    expect(local.out).toMatch(/is not in the mirror/)
+    expect(w.current()).toBe(good)
+
+    await w.commit('backend', { VERSION: 'v3\n' })
+    await sh('chmod', ['g+w', path.join(origin, '.git/HEAD')]) // one file the oasis group could change: no longer a trusted mirror
+    const unchecked = await sh(script('deploy.sh'), [], env)
+    expect(unchecked.code, unchecked.out).toBe(0)
+    expect(unchecked.out).toMatch(/the backend origin is not a root-owned local mirror: the release's deploy kit is not cross-checked/)
+    expect(unchecked.out).not.toMatch(/the kit matches commit/)
+  }, 120_000)
+
+  it('a rollback switches releases and leaves them and the kit as they are', async () => {
+    const { w, env } = await kitWorld()
+    expect((await sh(script('deploy.sh'), [], env)).code).toBe(0)
+    const first = w.current()
+    await w.commit('backend', { VERSION: 'v2\n' })
+    expect((await sh(path.join(kitOf(w), 'scripts/deploy.sh'), [], env)).code).toBe(0)
+    const kit = readFileSync(path.join(kitOf(w), 'scripts/deploy.sh'), 'utf8')
+    const r = await sh(path.join(kitOf(w), 'scripts/rollback.sh'), [], env)
+    expect(r.code, r.out).toBe(0)
+    expect(w.current()).toBe(first)
+    expect(modes(path.join(w.prefix, 'releases', first))).toEqual([])
+    expect(readFileSync(path.join(kitOf(w), 'scripts/deploy.sh'), 'utf8')).toBe(kit)
+  }, 120_000)
 })
 
 describe('rollback.sh', () => {

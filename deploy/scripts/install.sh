@@ -24,7 +24,8 @@
 #   --dry-run              print everything it would do, change nothing
 #   --no-system            write files only: no users, packages, chown, systemctl or nginx reload (for staging directories)
 #
-# What it does, in order: checks the host, installs packages, creates the oasis user and directories, writes /etc/oasis/*.env from the
+# What it does, in order: checks the host, installs packages, creates the oasis user and directories, copies this kit into the root-owned
+# /usr/local/lib/oasis/deploy (run everything from there afterwards), writes /etc/oasis/*.env from the
 # templates (never overwriting an existing file; secret settings are not written there: a new install gets them generated into
 # /etc/oasis/secret-seed.env, mode 0600, to push into the secret with pnpm secrets:push and then shred), prepares the database,
 # installs the systemd units (and the runtime=user or --local-db drop-ins), starts the instance metadata guard, the nginx site with TLS,
@@ -191,9 +192,11 @@ step_user_dirs() {
     fi
   fi
   local o="$OASIS_USER:$OASIS_USER"
-  ensure_dir "$OASIS_PREFIX" 0755 "$o"
+  # /opt/oasis and its releases belong to root: the oasis user builds in its own staging directory and cannot rename or replace a
+  # finished release or the current/previous links. Only the clones in src/ are its own (ADR 0140).
+  ensure_dir "$OASIS_PREFIX" 0755 "root:root"
   ensure_dir "$OASIS_PREFIX/src" 0755 "$o"
-  ensure_dir "$OASIS_PREFIX/releases" 0755 "$o"
+  ensure_dir "$OASIS_PREFIX/releases" 0755 "root:root"
   ensure_dir "$OASIS_ETC" 0750 "root:$OASIS_USER"
   ensure_dir "$OASIS_STATE" 0750 "$o"
   ensure_dir "$OASIS_STATE/files" 0750 "$o"
@@ -201,6 +204,14 @@ step_user_dirs() {
   ensure_dir "$OASIS_BACKUP_DIR" 0700 "$o"
   ensure_dir "$OASIS_LOG_DIR" 0750 "$o"
   ensure_dir "$OASIS_ROOT_PREFIX/var/www/certbot" 0755 "root:root"
+}
+
+# --- 3b. the deploy kit root runs --------------------------------------------------------------------------------------------------
+# A root-owned copy of this kit in /usr/local/lib/oasis/deploy: the units and the operator run deploy.sh, rollback.sh, backup.sh,
+# healthcheck.sh, secrets-rotate.sh and this script from there, never from a tree the oasis user can write. deploy.sh refreshes it
+# from every release that went live healthy.
+step_kit() {
+  install_kit "$DEPLOY_DIR"
 }
 
 # --- 4. environment files ---------------------------------------------------------------------------------------------------------
@@ -421,6 +432,7 @@ adapt_unit() {
   local text node
   text=$(<"$1")
   node=$(command -v node 2>/dev/null || echo /usr/bin/node)
+  text=${text//\/usr\/local\/lib\/oasis\/deploy/$(real "$OASIS_KIT_DIR")}
   text=${text//\/opt\/oasis/$REAL_PREFIX}
   text=${text//\/etc\/oasis/$REAL_ETC}
   text=${text//\/usr\/bin\/node/$node}
@@ -576,6 +588,7 @@ step_health_once() {
 step_preflight
 step_packages
 step_user_dirs
+step_kit
 step_env
 step_database
 step_repos
@@ -588,8 +601,8 @@ cat <<NEXT
 Done. Next:
   0. The secret ($SECRET_ID): push the secret settings (pnpm secrets:push; docs/aws-setup.md step 6) before the first start.
   1. Deploy keys / repositories: ${BACKEND_REPO:+cloned. }Make sure $REAL_PREFIX/src/backend and $REAL_PREFIX/src/dashboard are clones (install.sh --backend-repo ... --dashboard-repo ...).
-  2. First deployment, as root:   $REAL_PREFIX/src/backend/deploy/scripts/deploy.sh      (builds, migrates, starts, health-checks)
-  3. First Super Admin:            $DEPLOY_DIR/scripts/bootstrap-admin.sh set you@example.com --profile <operator profile>     then deploy or restart oasis-api once
+  2. Deploy, as root, always from the root-owned kit:   $(real "$OASIS_KIT_DIR")/scripts/deploy.sh      (builds, migrates, starts, health-checks)
+  3. First Super Admin:            $(real "$OASIS_KIT_DIR")/scripts/bootstrap-admin.sh set you@example.com --profile <operator profile>     then deploy or restart oasis-api once
   4. SMS: connect the tablet and run tailscale-serve.sh (docs/runbook.md, "Add or replace the SMS tablet")
   5. Prove the integrations: pnpm verify:all (docs/live-verification.md)
 NEXT

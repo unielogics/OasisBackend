@@ -16,7 +16,7 @@ EnvironmentFile=/etc/oasis/common.env
 EnvironmentFile=-/etc/oasis/backup.env
 # RESTORE_ADMIN_URL (a role that may create databases) lives in /etc/oasis/drill.env, mode 0640 root:oasis.
 EnvironmentFile=-/etc/oasis/drill.env
-ExecStart=/opt/oasis/current/backend/deploy/scripts/restore-drill.sh --latest
+ExecStart=/usr/local/lib/oasis/deploy/scripts/restore-drill.sh --latest
 SyslogIdentifier=oasis-restore-drill
 Nice=15
 IOSchedulingClass=idle

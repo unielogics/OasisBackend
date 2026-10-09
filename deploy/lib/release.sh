@@ -144,3 +144,50 @@ releases_newest_first() {
   find "$OASIS_PREFIX/releases" -mindepth 2 -maxdepth 2 -name REVISIONS -printf '%T@ %h\n' |
     sort -rn | cut -d' ' -f2- | grep -v -E '\.(failed|partial)$' || true
 }
+
+# trusted_kit_origin: the backend clone's origin when it is a local repository that only root can change (the production host's
+# mirrors in /opt/oasis/git, published by the operator): every file owned by root (OASIS_KIT_TRUST_UID, tests) and nothing writable
+# by group or others. Empty for GitHub, or a mirror the oasis user owns.
+trusted_kit_origin() {
+  local url uid=${OASIS_KIT_TRUST_UID:-0}
+  url=$(oasis_read git -C "$OASIS_PREFIX/src/backend" config --get remote.origin.url 2>/dev/null) || return 0
+  url=${url#file://}
+  [[ "$url" == /* && -d "$url" ]] || return 0
+  [[ -z "$(find "$url" \( ! -uid "$uid" -o \( ! -type l -perm /022 \) \) -print -quit 2>/dev/null)" ]] || return 0
+  printf '%s' "$url"
+}
+
+# verify_kit REL SHA: the deploy kit inside the built release (which root will copy and run) must be exactly the commit's deploy/
+# as the trusted mirror has it, read by root. A build step running as oasis could otherwise have changed it. Exit 1 on a
+# difference; 0 when it matches, or when there is no trusted mirror to compare with (KIT_VERIFIED=0, said in the log).
+# shellcheck disable=SC2034 # read by deploy.sh
+KIT_VERIFIED=0
+verify_kit() {
+  local rel=$1 sha=$2 origin tmp rc=0
+  origin=$(trusted_kit_origin)
+  if [[ -z "$origin" ]]; then
+    KIT_VERIFIED=0
+    log "the backend origin is not a root-owned local mirror: the release's deploy kit is not cross-checked (docs/deployment.md, \"Privilege separation\")"
+    return 0
+  fi
+  tmp=$(mktemp -d)
+  mkdir -p "$tmp/from-mirror"
+  if git -c safe.directory="$origin" -C "$origin" cat-file -e "$sha^{commit}" 2>/dev/null; then
+    if git -c safe.directory="$origin" -C "$origin" ls-tree -d --name-only "$sha" deploy | grep -qx deploy; then
+      git -c safe.directory="$origin" -C "$origin" archive "$sha" deploy | tar -x -C "$tmp/from-mirror" || rc=1
+    fi
+    if ((rc == 0)); then
+      if [[ -d "$tmp/from-mirror/deploy" || -e "$rel/backend/deploy" ]]; then
+        diff -r --no-dereference "$tmp/from-mirror/deploy" "$rel/backend/deploy" >"$tmp/diff" 2>&1 || rc=1
+        ((rc == 0)) || warn "$(head -n 5 "$tmp/diff")"
+      fi
+    fi
+  else
+    warn "commit $sha is not in the mirror $origin"
+    rc=1
+  fi
+  rm -rf "$tmp"
+  # shellcheck disable=SC2034 # read by deploy.sh
+  KIT_VERIFIED=$((rc == 0 ? 1 : 0))
+  return "$rc"
+}

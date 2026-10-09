@@ -3,7 +3,9 @@
 What to do, in order, for the jobs that come up and the things that go wrong. Background and the layout of the host are in
 [deployment.md](deployment.md); checking the tablet, Squarespace and AWS is in [live-verification.md](live-verification.md).
 
-Conventions: commands run on the server. `D=/opt/oasis/current/backend/deploy/scripts` is the kit's script directory. "Sign in" means
+Conventions: commands run on the server. `D=/usr/local/lib/oasis/deploy/scripts` is the kit's script directory: a root-owned copy
+that `install.sh` puts there and every healthy deploy refreshes. Never run the kit as root from `/opt/oasis/src` or a release: the oasis
+user can change those (deployment.md, "Privilege separation"). "Sign in" means
 https://your-domain/login. Anything that changes the system needs `sudo`. In commands, `$D/oasis-admin.sh ... COMMAND` stands for
 `$D/oasis-admin.sh --email you@example.com COMMAND`: it asks for your password (or reads `OASIS_ADMIN_PASSWORD`) and needs the
 "Billing & integrations" permission, which a Super Admin has.
@@ -45,8 +47,9 @@ Do these in order; each step ends with something you can check.
 4. **Clone the repositories** (as the installer suggests): re-run `install.sh` with `--backend-repo` and `--dashboard-repo`, using the
    aliases `git@github-oasis-backend:OWNER/OasisBackend.git` and `git@github-oasis-dashboard:OWNER/OasisDashboard.git`.
    Check: `ls /opt/oasis/src/backend/deploy/scripts`.
-5. **First deployment:** `sudo /opt/oasis/src/backend/deploy/scripts/deploy.sh` (the first build takes several minutes). Check: it ends
-   with `release ... is live`, and `https://your-domain/healthz` answers `{"status":"ok"}`.
+5. **First deployment:** `cd / && sudo $D/deploy.sh` (the kit install.sh put in place; the first build takes several minutes). Check:
+   it ends with `release ... is live`, `https://your-domain/healthz` answers `{"status":"ok"}`, and `ls -l /opt/oasis/current/` shows
+   `root oasis`.
 6. **First Super Admin:** `sudo $D/bootstrap-admin.sh set you@example.com --profile <operator profile>` (it goes into the secret), note
    the password, `sudo systemctl restart oasis-api`, sign in, change the password, then
    `sudo $D/bootstrap-admin.sh clear --profile <operator profile>` and `sudo systemctl restart oasis-api`.
@@ -90,21 +93,25 @@ refetch by themselves.
 
 On the production host (EC2 i-016774195f325eb0f) the clones in `/opt/oasis/src` do not pull from GitHub: their `origin` is a bare
 mirror in `/opt/oasis/git/<repo>.git`, and only commits that passed the integrator's checks are published into it, so no deploy
-key is needed on the host. To release (as the operator, from the working copies in `~ec2-user/oasis`):
+key is needed on the host. The mirrors belong to **root** and nothing in them is writable by group or others (once:
+`sudo chown -R root:root /opt/oasis/git && sudo chmod -R go-w /opt/oasis/git`); the oasis user only reads them. `deploy.sh` then
+compares the kit inside every build with the commit's `deploy/` in the mirror before anything runs, and the kit root copies afterwards
+is exactly what was published. To release (as the operator, from the working copies in `~ec2-user/oasis`):
 
 ```bash
 G="env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*"   # root reading repositories other users own
 for r in backend dashboard; do
   sudo $G git -C /opt/oasis/git/$r.git fetch --quiet /home/ec2-user/oasis/$r +main:main
 done
-sudo chown -R oasis:oasis /opt/oasis/git
-cd / && sudo -u oasis env HOME=/var/lib/oasis git -C /opt/oasis/src/backend pull --ff-only   # deploy.sh runs from this checkout
-sudo bash /opt/oasis/src/backend/deploy/scripts/deploy.sh
+cd / && sudo /usr/local/lib/oasis/deploy/scripts/deploy.sh        # fetches origin/main into /opt/oasis/src itself
 ```
 
-Run `deploy.sh` from `/` or any directory the oasis user may enter (it changes to `/` itself). After a release that changes the
-deployment configuration (the deploy says so), re-run `install.sh` with the same options; it never overwrites `/etc/oasis/*.env`
-but reports variables a newer template added.
+No `chown` of the mirrors to oasis any more (that made them, and so the kit, the oasis user's to change), and no `git pull` of the
+`/opt/oasis/src` checkout: `deploy.sh` fetches and exports by commit, and runs from the root-owned kit. A deploy whose kit does not
+match the mirror stops before the backup with "the deploy kit in the built release differs"; one whose mirror is not root-only says
+"not cross-checked" and goes on. After a release that changes the deployment configuration (the deploy says so), re-run
+`sudo /usr/local/lib/oasis/deploy/scripts/install.sh` with the same options (the kit is already the new one); it never overwrites
+`/etc/oasis/*.env` but reports variables a newer template added.
 
 ## 3. Roll back
 
@@ -141,7 +148,7 @@ is failing), `pg_restore` errors, row counts that differ from the manifest, or a
 take a fresh `manual` backup and run the drill on that to see whether the problem is the file or the database.
 
 **Restore for real.** The database is damaged or lost; you have a dump (or you pull one from S3: `aws s3 cp s3://bucket/prefix/NAME.dump.enc .`,
-then `BACKUP_ENCRYPTION_KEY_FILE=/path/key node /opt/oasis/current/backend/deploy/lib/backup-crypt.mjs decrypt NAME.dump.enc NAME.dump`).
+then `BACKUP_ENCRYPTION_KEY_FILE=/path/key node /usr/local/lib/oasis/deploy/lib/backup-crypt.mjs decrypt NAME.dump.enc NAME.dump`).
 ```bash
 sudo systemctl stop oasis-api oasis-worker oasis-web
 # keep the damaged database for evidence

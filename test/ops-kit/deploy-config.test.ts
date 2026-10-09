@@ -433,12 +433,19 @@ esac
     expect(unit('oasis-backup.timer').Timer!.OnCalendar![0]).toMatch(/^\*-\*-\* 03:15:00 America\/New_York$/)
     expect(unit('oasis-backup.timer').Timer!.Persistent).toEqual(['true'])
     expect(unit('oasis-restore-drill.timer').Timer!.OnCalendar![0]).toMatch(/^\*-\*-02 /)
+    // root's units run the root-owned kit, never a script in a release or clone (ADR 0140)
     expect(unit('oasis-backup.service').Service!.ExecStart![0]).toBe(
-      '/opt/oasis/current/backend/deploy/scripts/backup.sh --label nightly',
+      '/usr/local/lib/oasis/deploy/scripts/backup.sh --label nightly',
     )
     expect(unit('oasis-restore-drill.service').Service!.ExecStart![0]).toBe(
-      '/opt/oasis/current/backend/deploy/scripts/restore-drill.sh --latest',
+      '/usr/local/lib/oasis/deploy/scripts/restore-drill.sh --latest',
     )
+    expect(unit('oasis-healthcheck.service').Service!.ExecStart![0]).toBe(
+      '/usr/local/lib/oasis/deploy/scripts/healthcheck.sh --quiet',
+    )
+    for (const name of readdirSync(stage.systemd).filter((n) => !n.endsWith('.d')))
+      for (const exec of [...(unit(name).Service?.ExecStart ?? []), ...(unit(name).Service?.ExecStartPre ?? [])])
+        expect(exec, name).not.toMatch(/\/opt\/oasis\/(current|releases|src)\/[^ ]*\.sh/)
   })
 
   it.skipIf(!existsSync('/usr/bin/systemd-analyze'))(
@@ -453,7 +460,9 @@ esac
           if (name.includes('@')) continue
           writeFileSync(
             path.join(dir, name),
-            read(`etc/systemd/system/${name}`).replaceAll('/opt/oasis/current/backend', REPO),
+            read(`etc/systemd/system/${name}`)
+              .replaceAll('/opt/oasis/current/backend', REPO)
+              .replaceAll('/usr/local/lib/oasis/deploy', DEPLOY),
           )
         }
         for (const s of readdirSync(path.join(DEPLOY, 'scripts')))

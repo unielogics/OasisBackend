@@ -92,6 +92,11 @@ describe('install.sh', () => {
     expect(r.out).toContain('+ systemctl enable --now oasis-imds-guard.service\n')
     expect(r.out).toContain('+ systemctl enable oasis.target oasis-api.service oasis-worker.service oasis-web.service\n')
     expect(r.out).toMatch(/would run the health check once: systemctl start oasis-healthcheck\.service/)
+    // /opt/oasis and its releases belong to root; only the clones are the service user's; the kit goes to its root-owned place
+    expect(r.out).toContain(`+ chown root:root ${t.dir}/opt/oasis\n`)
+    expect(r.out).toContain(`+ chown root:root ${t.dir}/opt/oasis/releases\n`)
+    expect(r.out).toContain(`+ chown oasis:oasis ${t.dir}/opt/oasis/src\n`)
+    expect(r.out).toMatch(/would install the deploy kit from \S+\/deploy into \S+\/usr\/local\/lib\/oasis\/deploy \(root:root, read-only for everyone else\)/)
     // ... after nginx, so the check can go through the public URL
     expect(r.out.indexOf('would run the health check once')).toBeGreaterThan(r.out.indexOf('nginx -t'))
     expect(tree(t.dir).filter((l) => !l.startsWith('etc dir') && !l.startsWith('var dir'))).toEqual([])
@@ -137,6 +142,28 @@ describe('install.sh', () => {
     // a changed option changes only the files it touches
     const csp = await sh(script('install.sh'), [...args, '--csp', 'enforce'], env)
     expect(csp.out.match(/done\s+wrote .*/g)).toEqual([expect.stringContaining('security-headers.conf')])
+  })
+
+  it('copies the kit into its root-owned place, and a run from that copy uses it as it is', async () => {
+    const t = tempDir('oasis-kit-')
+    cleanups.push(t.cleanup)
+    const args = ['--domain', 'oasis.example.com', '--tls', 'files', '--tls-cert', '/c.pem', '--tls-key', '/k.pem', '--no-system']
+    const env = { OASIS_ROOT_PREFIX: t.dir }
+    const first = await sh(script('install.sh'), args, env)
+    expect(first.code, first.out).toBe(0)
+    const kit = path.join(t.dir, 'usr/local/lib/oasis/deploy')
+    expect((await sh('diff', ['-r', DEPLOY, kit])).code).toBe(0)
+    const writable = tree(kit).filter((l) => (parseInt(l.split(' ').at(-1)!, 8) & 0o022) !== 0)
+    expect(writable).toEqual([])
+    // the units name the kit, not a release
+    expect(readFileSync(path.join(t.dir, 'etc/systemd/system/oasis-backup.service'), 'utf8')).toContain(
+      'ExecStart=/usr/local/lib/oasis/deploy/scripts/backup.sh --label nightly',
+    )
+    const again = await sh(path.join(kit, 'scripts/install.sh'), args, env)
+    expect(again.code, again.out).toBe(0)
+    expect(again.out).toMatch(/ok\s+the deploy kit runs from \S+\/usr\/local\/lib\/oasis\/deploy/)
+    expect(again.out).not.toMatch(/\bdone\s+wrote\b/)
+    expect(first.out).toContain('Deploy, as root, always from the root-owned kit:   /usr/local/lib/oasis/deploy/scripts/deploy.sh')
   })
 
   it('rejects unusable input before touching anything', async () => {

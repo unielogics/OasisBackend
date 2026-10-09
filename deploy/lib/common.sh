@@ -18,6 +18,12 @@ SYSTEMD_DIR="${SYSTEMD_DIR:-${OASIS_ROOT_PREFIX}/etc/systemd/system}"
 JOURNALD_DIR="${JOURNALD_DIR:-${OASIS_ROOT_PREFIX}/etc/systemd/journald.conf.d}"
 NGINX_DIR="${NGINX_DIR:-${OASIS_ROOT_PREFIX}/etc/nginx}"
 LOGROTATE_DIR="${LOGROTATE_DIR:-${OASIS_ROOT_PREFIX}/etc/logrotate.d}"
+# The deploy kit root runs: a root-owned copy of deploy/ that the oasis user cannot change (install.sh puts it there, deploy.sh
+# refreshes it from each verified release). Root never executes a file the oasis user can write (docs/deployment.md, ADR 0140).
+OASIS_KIT_DIR="${OASIS_KIT_DIR:-${OASIS_ROOT_PREFIX}/usr/local/lib/oasis/deploy}"
+# Where the dashboard's Next.js cache really lives (the release is read-only; its .next-live/cache is a symlink to this). A path on the
+# running system, not under OASIS_ROOT_PREFIX: systemd creates it for oasis-web (CacheDirectory=oasis-web).
+OASIS_WEB_CACHE="${OASIS_WEB_CACHE:-/var/cache/oasis-web}"
 DRY_RUN="${DRY_RUN:-0}"
 # Set to 1 to skip everything that changes the host itself (users, packages, chown, systemctl, nginx reloads).
 NO_SYSTEM="${NO_SYSTEM:-0}"
@@ -251,7 +257,12 @@ env_file_unset() {
 # same as SECRET_KEYS in src/config/secrets-source.ts (a test holds them together).
 # shellcheck disable=SC2034 # used by install.sh
 OASIS_SECRET_KEYS=(DATABASE_URL SESSION_SECRET SECRETS_KEY STORAGE_SIGNING_SECRET BOOTSTRAP_ADMIN_EMAIL BOOTSTRAP_ADMIN_PASSWORD SQSP_API_KEY SQSP_WEBHOOK_SECRET SMSGATE_PASSWORD SMSGATE_WEBHOOK_SECRET)
-OASIS_BACKEND_DIR="${OASIS_BACKEND_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+# The backend whose node_modules the kit borrows (scripts/secret-env.ts and friends): the checkout this kit sits in, or, for the
+# root-owned copy (no package.json above it), the current release.
+if [[ -z "${OASIS_BACKEND_DIR:-}" ]]; then
+  OASIS_BACKEND_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+  [[ -f "$OASIS_BACKEND_DIR/package.json" ]] || OASIS_BACKEND_DIR="$OASIS_PREFIX/current/backend"
+fi
 
 # secret_id: OASIS_SECRET_ID from the environment or common.env; empty when this host keeps its secrets in the env files.
 secret_id() {
@@ -326,4 +337,68 @@ secrets_push() {
     [[ -x "$OASIS_BACKEND_DIR/node_modules/.bin/tsx" ]] || die "$OASIS_BACKEND_DIR has no node_modules (run from a deployed release)"
     "$OASIS_BACKEND_DIR/node_modules/.bin/tsx" "$OASIS_BACKEND_DIR/scripts/secrets-push.ts" "$@"
   fi
+}
+
+# --- privilege separation (ADR 0140) -----------------------------------------------------------------------------------------------
+# root_own [-R] OWNER PATH...: chown without following symbolic links (-h), so a link the oasis user planted in a tree it built can
+# never hand it a file outside that tree. Only as root on a real system; OASIS_CHOWN replaces chown (tests record the call).
+root_own() {
+  if [[ -n "${OASIS_CHOWN:-}" ]]; then
+    # shellcheck disable=SC2086
+    $OASIS_CHOWN -h "$@"
+  elif [[ "$(id -u)" == 0 && "$NO_SYSTEM" != 1 ]]; then
+    chown -h "$@"
+  fi
+}
+
+# lock_release DIR: a built release becomes root:oasis and read-only for everyone but root (chmod skips symbolic links). The services
+# (user oasis) read and run it; nothing the oasis user runs can change the code that runs next, or the kit copied from it.
+lock_release() {
+  local dir=$1
+  if [[ "$DRY_RUN" == 1 ]]; then
+    log "would make $dir root:$OASIS_USER and read-only (chown -R -h, chmod -R g+rX,go-w)"
+    return 0
+  fi
+  root_own -R "root:$OASIS_USER" "$dir"
+  chmod -R g+rX,go-w "$dir"
+}
+
+# install_kit SRC: copy the deploy kit SRC (a deploy/ directory) into OASIS_KIT_DIR, root:root, nothing writable but by root, and
+# swap it in whole. Nothing to do when SRC is the kit itself or the copy is already identical.
+install_kit() {
+  local src dest=$OASIS_KIT_DIR parent tmp old=""
+  src=$(cd "$1" && pwd -P) || die "no deploy kit at $1"
+  parent=$(dirname "$dest")
+  if [[ -d "$dest" && "$(cd "$dest" && pwd -P)" == "$src" ]]; then
+    ok "the deploy kit runs from $dest"
+    return 0
+  fi
+  if [[ -d "$dest" ]] && diff -rq --no-dereference "$src" "$dest" >/dev/null 2>&1; then
+    ok "$dest is current"
+    return 0
+  fi
+  if [[ "$DRY_RUN" == 1 ]]; then
+    changed "would install the deploy kit from $src into $dest (root:root, read-only for everyone else)"
+    return 0
+  fi
+  mkdir -p "$parent"
+  chmod 0755 "$parent"
+  root_own root:root "$parent"
+  tmp=$(mktemp -d "$dest.new.XXXXXX")
+  cp -R --no-preserve=ownership "$src/." "$tmp/"
+  root_own -R root:root "$tmp"
+  chmod -R u+rwX,go+rX,go-w "$tmp"
+  if [[ -e "$dest" ]]; then
+    old="$dest.old.$$"
+    mv -T "$dest" "$old"
+  fi
+  mv -T "$tmp" "$dest"
+  [[ -z "$old" ]] || rm -rf -- "$old"
+  changed "installed the deploy kit in $dest (from $src)"
+}
+
+# running_from_kit: whether this script is the root-owned copy (or a test's stand-in for it).
+running_from_kit() {
+  local here=$1
+  [[ -d "$OASIS_KIT_DIR" ]] && [[ "$(cd "$here/.." && pwd -P)" == "$(cd "$OASIS_KIT_DIR" && pwd -P)" ]]
 }

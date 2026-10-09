@@ -14,7 +14,8 @@ WorkingDirectory=/opt/oasis/current/backend
 Environment=NODE_ENV=production
 EnvironmentFile=/etc/oasis/common.env
 EnvironmentFile=-/etc/oasis/backup.env
-ExecStart=/opt/oasis/current/backend/deploy/scripts/backup.sh --label nightly
+# The root-owned kit (install.sh, refreshed by every deploy); the working directory is the release whose node_modules it borrows.
+ExecStart=/usr/local/lib/oasis/deploy/scripts/backup.sh --label nightly
 SyslogIdentifier=oasis-backup
 Nice=10
 IOSchedulingClass=idle

@@ -55,10 +55,13 @@ SystemCallErrorNumber=EPERM
 CapabilityBoundingSet=
 AmbientCapabilities=
 UMask=0077
+# The release is read-only (root:oasis, ADR 0140). Next's runtime cache (.next-live/cache, a symlink deploy.sh puts there) lives
+# here instead, writable by this service alone and emptied at each start so it never outgrows a release.
+CacheDirectory=oasis-web
+CacheDirectoryMode=0750
+ExecStartPre=-/usr/bin/find /var/cache/oasis-web -mindepth 1 -delete
 # The dashboard needs no AWS: the instance metadata service (the role's credentials) is out of its reach entirely.
 IPAddressDeny=169.254.169.254/32
-# Next writes its response cache next to the build.
-ReadWritePaths=/opt/oasis/releases
 
 [Install]
 WantedBy=multi-user.target

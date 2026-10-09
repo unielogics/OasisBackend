@@ -32,9 +32,12 @@ for the environment in AWS Secrets Manager and the app's AWS identity.
 
 | Path | What |
 |---|---|
-| `/opt/oasis/src/backend`, `/opt/oasis/src/dashboard` | git clones (read-only deploy keys). `deploy.sh` fetches into them |
-| `/opt/oasis/releases/<id>/{backend,dashboard}` | one built release each: source, `node_modules`, `dist/`, `.next-live/`, `REVISIONS` |
+| `/usr/local/lib/oasis/deploy` | **the deploy kit root runs**: a copy of `deploy/`, `root:root`, writable by root only. `install.sh` puts it there; every deploy that goes live healthy refreshes it from its release. Units and operators run `deploy.sh`, `rollback.sh`, `backup.sh`, `healthcheck.sh`, `secrets-rotate.sh`, `install.sh` ... from here |
+| `/opt/oasis`, `/opt/oasis/releases` | `root:root 0755` |
+| `/opt/oasis/src/backend`, `/opt/oasis/src/dashboard` | git clones, the oasis user's (read-only deploy keys, or the root-owned local mirrors). `deploy.sh` fetches into them |
+| `/opt/oasis/releases/<id>/{backend,dashboard}` | one built release each: source, `node_modules`, `dist/`, `.next-live/`, `REVISIONS`; `root:oasis`, read-only for the services. Built as oasis in `<id>.partial` |
 | `/opt/oasis/current`, `/opt/oasis/previous` | symlinks to the running release and the one before it |
+| `/var/cache/oasis-web` | Next.js's runtime cache (`.next-live/cache` in a release is a symlink to it); systemd creates it for `oasis-web` (`CacheDirectory=`) and the unit empties it at each start |
 | `/etc/oasis/{common,api,worker,web}.env` | the NON-secret environment, `0640 root:oasis`; `common.env` names the secret (`OASIS_SECRET_ID`). `drill.env` (restore drill role) and `backup.env` (optional) beside them |
 | AWS Secrets Manager secret `oasis/prod/app` | the secret settings: `DATABASE_URL`, `SESSION_SECRET`, `SECRETS_KEY`, `STORAGE_SIGNING_SECRET`, `BOOTSTRAP_ADMIN_*` (first boot only), API keys. Read by every program at start; written only with `pnpm secrets:push` |
 | `/etc/oasis/aws-credentials` | runtime=user only: the `oasis-app` key, `0600 root:root`; systemd hands the services a private copy. Absent with the instance role (the recommendation) |
@@ -45,8 +48,9 @@ for the environment in AWS Secrets Manager and the app's AWS identity.
 | `/var/backups/oasis/{daily,weekly,monthly}` | database backups |
 | `/var/log/oasis/{deploy.log,deploys.list,failures.log}` | deploy history and failed timers (the services themselves log to journald) |
 
-Users: `oasis` (system user, no shell) owns everything it runs. Builds and migrations run as `oasis` too; only `deploy.sh`,
-`rollback.sh` and `install.sh` need root, and they drop to `oasis` for the work.
+Users: `oasis` (system user, no shell) runs the services, the builds and the migrations, but owns neither the code it runs nor the
+kit root runs; only `deploy.sh`, `rollback.sh` and `install.sh` need root, and they drop to `oasis` for the work. See "Privilege
+separation" below.
 
 ## Setting up a host: `install.sh`
 
@@ -172,7 +176,7 @@ All three services restart on failure (3 s delay, at most 8 starts in 5 minutes)
 not depend on a local PostgreSQL (production uses Aurora, and nothing should start the development server at boot); on a host whose
 database IS the local server, `install.sh --local-db` adds `Wants=`/`After=postgresql.service` as a drop-in
 (`oasis-{api,worker,backup,restore-drill}.service.d/20-oasis-local-db.conf`), which a later run without the flag keeps. Sandboxing:
-`NoNewPrivileges`, `ProtectSystem=strict` (only `/var/lib/oasis` is writable, plus the release directory for the dashboard cache),
+`NoNewPrivileges`, `ProtectSystem=strict` (only `/var/lib/oasis` is writable, and for the dashboard its cache directory `/var/cache/oasis-web`),
 `ProtectHome`, `PrivateTmp`, `PrivateDevices`, kernel and control-group protections, `RestrictAddressFamilies` (IP and Unix sockets),
 an empty capability set, `SystemCallFilter=@system-service`, `UMask=0077`. `systemd-analyze security` rates the API at 1.7 ("OK").
 `MemoryDenyWriteExecute` is deliberately off: V8 needs writable and executable memory.
@@ -267,10 +271,38 @@ https://<host>.<tailnet>.ts.net:8443/hooks/smsgate/<deviceKey>  ->  http://127.0
 
 Tablet setup, replacing a tablet and failure handling are in [runbook.md](runbook.md) and `docs/integrations/smsgate.md`.
 
+## Privilege separation
+
+Root must never execute a file the oasis user can write (review M2): the oasis user runs `pnpm install` with every dependency's
+install scripts, and the internet-facing services. So:
+
+* **The kit root runs is a root-owned copy**, `/usr/local/lib/oasis/deploy` (`root:root`, nothing writable by group or others,
+  swapped in whole). `install.sh` installs it from the `deploy/` it was started from (or leaves it alone when started from the copy
+  itself); `deploy.sh` refreshes it from each release after that release went live healthy. The units (`oasis-backup`,
+  `oasis-healthcheck`, `oasis-restore-drill`) and the runbook run the scripts from there. When it runs from anywhere else, `deploy.sh`
+  says so.
+* **Releases are root-owned and read-only.** `deploy.sh` builds as oasis in `releases/<id>.partial` (oasis-owned staging), then makes it
+  `root:oasis` with `chown -R -h` (links are never followed) and `chmod -R g+rX,go-w`, and only then renames it into place.
+  `/opt/oasis` and `/opt/oasis/releases` are `root:root`, so the oasis user can neither rename a release nor touch `current`. The services
+  read and execute the release (group oasis) and cannot change the code that runs next.
+* **The kit is checked against the mirror.** When the backend clone's `origin` is a local repository that only root can change (the
+  production host's mirrors in `/opt/oasis/git`), `deploy.sh` compares the built release's `deploy/` with the commit's `deploy/`
+  read by root from that mirror, before the backup and the migration; a difference (a build step changed the kit) or a commit the
+  mirror does not have stops the deploy, nothing changes, the build is kept as `<id>.failed`. Without such a mirror (GitHub) the
+  release's kit is copied as built, and the log says it was not cross-checked.
+* **The dashboard writes nowhere in the release.** `oasis-web` lost `ReadWritePaths=/opt/oasis/releases`; it gets
+  `CacheDirectory=oasis-web` (`/var/cache/oasis-web`, emptied at each start), and `deploy.sh` replaces the build's
+  `.next-live/cache` with a symlink to it. `next start` was run from a release copy with every file read-only: pages, static assets
+  and the image optimizer (which writes `cache/images` through the link) all work.
+
+What it does not cover: a process left running by a build could still write through a file it opened before the `chown`; a
+release built before this change is still oasis-owned until it is pruned (a rollback to one works, but its cache directory is not
+writable); and anything that can `sudo` is root.
+
 ## Deploying and rolling back
 
 ```bash
-sudo /opt/oasis/current/backend/deploy/scripts/deploy.sh            # latest origin/main of both repositories
+cd / && sudo /usr/local/lib/oasis/deploy/scripts/deploy.sh          # latest origin/main of both repositories
 sudo .../deploy.sh --backend-ref origin/some-branch --dashboard-ref <sha> --dry-run
 sudo .../rollback.sh --list ; sudo .../rollback.sh [--to <release id>]
 ```
@@ -291,10 +323,12 @@ restarts, health-checks again and exits 1, keeping the failed build as `<id>.fai
 * **Migrations are forward-only and a rollback does not undo them.** The old code then runs against the migrated schema, so every
   migration must stay compatible with the release before it (add columns and tables first, remove things in a later release). If a
   migration breaks that rule, roll back the code and restore the pre-deploy backup ([runbook.md](runbook.md), "Roll back").
-* The script that runs is the one in the release that is live (the first deployment uses the clone in `src/`); a release that changes
-  `deploy/` takes effect from the deploy after it, and `deploy.sh` says when the units, nginx or env templates changed so you can re-run `install.sh`.
+* The script that runs is the root-owned kit, which the previous healthy deploy refreshed (the first one: `install.sh`); a release that
+  changes `deploy/` takes effect from the deploy after it, and `deploy.sh` says when the units, nginx or env templates changed so you
+  can re-run `/usr/local/lib/oasis/deploy/scripts/install.sh`.
 * One deploy at a time (a lock); it keeps the newest 4 releases plus `current` and `previous`, and at most 2 failed builds.
-* `HEALTH_CMD`, `BACKUP_CMD`, `SYSTEMCTL` and `OASIS_RUN_AS` override the commands it calls (the tests use them).
+* `HEALTH_CMD`, `BACKUP_CMD`, `SYSTEMCTL`, `OASIS_RUN_AS`, `OASIS_CHOWN` and `OASIS_KIT_TRUST_UID` override the commands it calls and
+  the owner a trusted mirror has (the tests use them).
 
 ## Backups and the restore drill
 
