@@ -6,7 +6,8 @@
 #   dashboard  GET /login is 200
 #   sign-in    through the PUBLIC URL (PUBLIC_DASHBOARD_URL: the environment, else common.env; --dashboard-url overrides): a signed-out
 #              GET / answers 307 to that URL's /login (a relative /login is accepted too), never to localhost or another host
-#              (--skip-public: not checked; it is also skipped when no public URL is known)
+#              (--skip-public, or PUBLIC_DASHBOARD_URL= set empty in the environment, e.g. for deploy.sh on a host whose own
+#              name does not resolve to itself: not checked; also skipped when no public URL is known)
 #   worker     systemctl is-active oasis-worker.service says active (--skip-worker: not checked; SYSTEMCTL replaces systemctl)
 #   public     (optional, --public https://oasis.example.com) /healthz is 200 through nginx and /hooks/smsgate/x is 404 there
 #              (the SMS Gate webhook must never be reachable from the internet)
@@ -39,7 +40,7 @@ while (($#)); do
     --wait) WAIT=$2; shift 2 ;;
     --quiet) QUIET=1; shift ;;
     -h | --help)
-      sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,/^set -euo pipefail$/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
