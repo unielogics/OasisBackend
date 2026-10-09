@@ -87,6 +87,7 @@ case "$cmd" in
       echo "BOOTSTRAP_ADMIN_EMAIL:    ${e:-(empty)}"
       echo "BOOTSTRAP_ADMIN_PASSWORD: $([[ -n "$p" ]] && echo '(set)' || echo '(empty)')"
     fi
+    use_pg_client
     if have psql && url=$(config_value DATABASE_URL 2>/dev/null); then
       url_to_pgenv "$url"
       echo "users in the database:    $(psql -X -q -A -t -c 'select count(*) from users' 2>&1 | head -1)"

@@ -2,6 +2,9 @@
 // travel with it: on Aurora/RDS the URL carries sslmode=verify-full&sslrootcert=..., and without PGSSLROOTCERT libpq looks for
 // ~/.postgresql/root.crt and refuses to connect (backups and the restore drill failed against Aurora that way).
 import { spawnSync } from 'node:child_process'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const pgenv = (url: string): Record<string, string> => {
@@ -54,16 +57,23 @@ describe('url_to_pgenv', () => {
       PGSSLROOTCERT: '',
     })
   })
-  it('PG_BINDIR puts a newer client first on the PATH, with its private libraries', () => {
-    const r = spawnSync(
-      'bash',
-      ['-c', 'source deploy/lib/common.sh; printf "%s\\n%s\\n" "${PATH%%:*}" "${LD_LIBRARY_PATH%%:*}"'],
-      {
-        encoding: 'utf8',
-        env: { PATH: process.env.PATH ?? '', PG_BINDIR: '/opt/oasis/pgclient/17/usr/bin' },
-      },
-    )
-    expect(r.status, r.stderr).toBe(0)
-    expect(r.stdout.split('\n')[0]).toBe('/opt/oasis/pgclient/17/usr/bin')
+  it('use_pg_client puts PG_BINDIR first on the PATH, from the environment or from common.env', () => {
+    const run = (env: Record<string, string>): string[] => {
+      const r = spawnSync(
+        'bash',
+        ['-c', 'source deploy/lib/common.sh; use_pg_client; printf "%s\\n" "${PATH%%:*}"'],
+        {
+          encoding: 'utf8',
+          env: { PATH: process.env.PATH ?? '', ...env },
+        },
+      )
+      expect(r.status, r.stderr).toBe(0)
+      return r.stdout.split('\n')
+    }
+    expect(run({ PG_BINDIR: '/opt/oasis/pgclient/17/usr/bin' })[0]).toBe('/opt/oasis/pgclient/17/usr/bin')
+    const etc = mkdtempSync(path.join(tmpdir(), 'oasis-pgclient-'))
+    writeFileSync(path.join(etc, 'common.env'), 'NODE_ENV=production\nPG_BINDIR=/opt/x/17/usr/bin\n')
+    expect(run({ OASIS_ETC: etc })[0]).toBe('/opt/x/17/usr/bin')
+    expect(run({ OASIS_ETC: '/nonexistent' })[0]).not.toContain('pgclient')
   })
 })

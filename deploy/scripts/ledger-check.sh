@@ -26,6 +26,7 @@ while (($#)); do
     *) die "unknown option $1" ;;
   esac
 done
+use_pg_client
 have psql || die "psql is required"
 DATABASE_URL=$(config_value DATABASE_URL) || die "DATABASE_URL is set neither in the environment, nor in $OASIS_ETC/common.env, nor in the secret it names"
 url_to_pgenv "$DATABASE_URL"

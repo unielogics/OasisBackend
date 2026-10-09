@@ -40,6 +40,7 @@ done
 [[ "$LABEL" =~ ^[a-z0-9-]{1,24}$ ]] || die "--label must be lowercase letters, digits and dashes"
 [[ "$SCHEMAS" =~ ^(all|[a-z_][a-z0-9_]*(,[a-z_][a-z0-9_]*)*)$ ]] || die "--schemas must be 'all' or a comma list of schema names"
 
+use_pg_client
 have pg_dump && have psql && have pg_restore || die "pg_dump, psql and pg_restore (postgresql15 client) are required"
 DATABASE_URL=$(config_value DATABASE_URL) || die "DATABASE_URL is set neither in the environment, nor in $OASIS_ETC/common.env, nor in the secret it names"
 url_to_pgenv "$DATABASE_URL"

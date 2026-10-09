@@ -19,17 +19,6 @@ JOURNALD_DIR="${JOURNALD_DIR:-${OASIS_ROOT_PREFIX}/etc/systemd/journald.conf.d}"
 NGINX_DIR="${NGINX_DIR:-${OASIS_ROOT_PREFIX}/etc/nginx}"
 LOGROTATE_DIR="${LOGROTATE_DIR:-${OASIS_ROOT_PREFIX}/etc/logrotate.d}"
 DRY_RUN="${DRY_RUN:-0}"
-# A PostgreSQL client newer than the host's packages (Aurora PostgreSQL 17 from an AL2023 host whose postgresql15 packages
-# conflict with postgresql17): PG_BINDIR=/opt/oasis/pgclient/17/bin, with its private libpq in ../lib64. Its psql, pg_dump and
-# pg_restore then come first on the PATH of every deploy script (backup, restore drill, ledger check).
-if [[ -n "${PG_BINDIR:-}" ]]; then
-  PATH="$PG_BINDIR:$PATH"
-  if [[ -d "$PG_BINDIR/../lib64" ]]; then
-    LD_LIBRARY_PATH="$(cd "$PG_BINDIR/../lib64" && pwd)${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    export LD_LIBRARY_PATH
-  fi
-  export PATH
-fi
 # Set to 1 to skip everything that changes the host itself (users, packages, chown, systemctl, nginx reloads).
 NO_SYSTEM="${NO_SYSTEM:-0}"
 
@@ -94,6 +83,23 @@ env_get() {
 urldecode() {
   local s=$1
   printf '%b' "${s//%/\\x}"
+}
+
+# use_pg_client: a PostgreSQL client newer than the host's packages (Aurora PostgreSQL 17 from an AL2023 host whose postgresql15
+# packages conflict with postgresql17): PG_BINDIR=/opt/oasis/pgclient/17/usr/bin (from the environment or common.env), with its
+# private libpq in ../lib64, goes first on the PATH, so psql, pg_dump and pg_restore are that version. Run outside systemd too
+# (deploy.sh calls backup.sh directly), hence the common.env lookup.
+use_pg_client() {
+  local dir=${PG_BINDIR:-}
+  [[ -n "$dir" ]] || dir=$(env_get "$OASIS_ETC/common.env" PG_BINDIR 2>/dev/null) || dir=""
+  [[ -n "$dir" ]] || return 0
+  PG_BINDIR=$dir
+  PATH="$dir:$PATH"
+  if [[ -d "$dir/../lib64" ]]; then
+    LD_LIBRARY_PATH="$(cd "$dir/../lib64" && pwd)${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export LD_LIBRARY_PATH
+  fi
+  export PATH PG_BINDIR
 }
 
 # url_to_pgenv URL: exports PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE (and PGSSLMODE) so pg tools never see the password on a command line.

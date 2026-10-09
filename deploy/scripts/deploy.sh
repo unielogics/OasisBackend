@@ -19,6 +19,9 @@ OASIS_HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$OASIS_HERE/../lib/common.sh"
 # shellcheck source=../lib/release.sh
 . "$OASIS_HERE/../lib/release.sh"
+# Commands run as the oasis user inherit the working directory, and a caller's home (root's, or an operator's) is not
+# theirs to enter: spawned processes (pnpm, tsx/esbuild, git) then fail with EACCES. Every path below is absolute.
+cd /
 
 BE_REF="${BACKEND_REF:-origin/main}"
 DB_REF="${DASHBOARD_REF:-origin/main}"

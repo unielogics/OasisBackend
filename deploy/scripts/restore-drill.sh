@@ -52,6 +52,7 @@ done
 if [[ "$MODE" == schema ]]; then
   [[ "$SCHEMA" =~ ^[a-z_][a-z0-9_]*$ ]] || die "--mode schema needs --schema NAME"
 fi
+use_pg_client
 have pg_restore && have psql || die "postgresql15 client tools are required"
 have node || die "node is required"
 

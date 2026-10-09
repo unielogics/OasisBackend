@@ -34,6 +34,9 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DEPLOY_DIR=$(cd "$here/.." && pwd)
 # shellcheck source=../lib/common.sh
 . "$DEPLOY_DIR/lib/common.sh"
+# Commands run as the oasis user inherit the working directory, and a caller's home (root's, or an operator's) is not
+# theirs to enter: spawned processes (pnpm, tsx/esbuild, git) then fail with EACCES. Every path below is absolute.
+cd /
 
 DOMAIN=""
 EMAIL=""
