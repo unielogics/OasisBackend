@@ -288,7 +288,7 @@ describe('healthcheck.sh', () => {
   const systemctl = path.join(fakes.dir, 'systemctl')
   writeExecutable(systemctl, '#!/usr/bin/env bash\necho "$*" >> "${SYSTEMCTL_LOG:-/dev/null}"\nst=${WORKER_STATE:-active}; echo "$st"; [ "$st" = active ]\n')
   const hc = (extra: string[] = [], env: Record<string, string | undefined> = {}) =>
-    sh(script('healthcheck.sh'), [...args, ...extra], { SYSTEMCTL: systemctl, PUBLIC_DASHBOARD_URL: '', ...env })
+    sh(script('healthcheck.sh'), [...args, ...extra], { SYSTEMCTL: systemctl, PUBLIC_DASHBOARD_URL: '', SITE_URL: '', ...env })
 
   it('passes when the API is ready and the dashboard answers', async () => {
     await stub({ '/healthz': [200, '{"status":"ok"}'], '/readyz': [200, ready] }, 4595)
@@ -403,6 +403,84 @@ describe('healthcheck.sh', () => {
     const fromFile = await hc([], { PUBLIC_DASHBOARD_URL: undefined, OASIS_ETC: etc.dir })
     expect(fromFile.code).toBe(1)
     expect(fromFile.stderr).toContain("sends a signed-out visitor to 'https://localhost:3200/login'")
+  })
+
+  describe('the public website', () => {
+    const page = '<!doctype html><html><body><h1>Oasis Auto Spa</h1><p>Hand car wash</p></body></html>'
+    const upstreams = async () => {
+      await stub({ '/healthz': [200, '{}'], '/readyz': [200, ready] }, 4595)
+      await stub({ '/login': [200, ''] }, 4594)
+    }
+    // the www host: a redirect (or not) to wherever the test says
+    const www = async (status: number, location?: string) => {
+      const s = createServer((_req, res) => res.writeHead(status, location ? { location } : {}).end())
+      await new Promise<void>((r) => s.listen(4597, '127.0.0.1', r))
+      cleanups.push(() => new Promise<void>((r) => s.close(() => r())))
+    }
+    const SITE = { SITE_URL: 'http://127.0.0.1:4596', SITE_MARKER: 'Oasis Auto Spa', SITE_WWW_URL: 'http://127.0.0.1:4597' }
+
+    it('passes when the front page carries the marker and www answers 301 to the apex', async () => {
+      await upstreams()
+      await stub({ '/': [200, page] }, 4596)
+      await www(301, 'http://127.0.0.1:4596/')
+      const r = await hc([], SITE)
+      expect(r.code, r.out).toBe(0)
+      expect(r.stdout).toContain('worker active, website http://127.0.0.1:4596/ (www 301)')
+      // --site names the URL; without a www URL only the page is probed
+      const only = await hc(['--site', 'http://127.0.0.1:4596'], { SITE_MARKER: 'Oasis Auto Spa' })
+      expect(only.code, only.out).toBe(0)
+      expect(only.stdout).toMatch(/website http:\/\/127\.0\.0\.1:4596\/$/m)
+    })
+
+    it('fails and says why: the marker is missing, www is not a 301 to the apex, the page is down', async () => {
+      await upstreams()
+      await stub({ '/': [200, '<html><body>Under construction</body></html>'] }, 4596)
+      await www(200)
+      const r = await hc([], SITE)
+      expect(r.code).toBe(1)
+      expect(r.stderr).toMatch(/website: http:\/\/127\.0\.0\.1:4596\/ answered 200 but the page does not contain 'Oasis Auto Spa'/)
+      expect(r.stderr).toMatch(/website www: http:\/\/127\.0\.0\.1:4597\/ answered HTTP 200, expected 301 to http:\/\/127\.0\.0\.1:4596\//)
+      const elsewhere = await hc([], { ...SITE, SITE_WWW_URL: 'http://127.0.0.1:4595' })
+      expect(elsewhere.stderr).toMatch(/website www: .* answered HTTP 404, expected 301/)
+      const down = await hc([], { ...SITE, SITE_URL: 'http://127.0.0.1:4593', SITE_WWW_URL: '' })
+      expect(down.code).toBe(1)
+      expect(down.stderr).toMatch(/website: http:\/\/127\.0\.0\.1:4593\/ answered HTTP 000, expected 200/)
+    })
+
+    it('a www redirect to another place is a failure; one to the apex without the slash is fine', async () => {
+      await upstreams()
+      await stub({ '/': [200, page] }, 4596)
+      await www(301, 'https://elsewhere.example/')
+      const r = await hc([], SITE)
+      expect(r.code).toBe(1)
+      expect(r.stderr).toMatch(/website www: .* sends visitors to 'https:\/\/elsewhere\.example\/', expected http:\/\/127\.0\.0\.1:4596\//)
+    })
+
+    it('--skip-site skips it, an unknown URL is silently skipped, and the values come from site.env like the unit loads them', async () => {
+      await upstreams()
+      await stub({ '/': [200, page] }, 4596)
+      await www(301, 'http://127.0.0.1:4596')
+      const skipped = await hc(['--skip-site'], SITE)
+      expect(skipped.code, skipped.out).toBe(0)
+      expect(skipped.stdout).toContain('website skipped')
+      const etc = tempDir('oasis-hc-site-etc-')
+      cleanups.push(etc.cleanup)
+      const unknown = await hc([], { SITE_URL: undefined, OASIS_ETC: etc.dir })
+      expect(unknown.code, unknown.out).toBe(0)
+      expect(unknown.stdout).not.toContain('website')
+      writeFileSync(
+        path.join(etc.dir, 'site.env'),
+        '# the website\nSITE_DOMAIN=example.com\nSITE_URL=http://127.0.0.1:4596\nSITE_MARKER="Oasis Auto Spa"\n',
+      )
+      // (SITE_WWW_URL would be derived as https://www.example.com from SITE_DOMAIN; the test points it at the stub)
+      const fromFile = await hc([], { SITE_URL: undefined, OASIS_ETC: etc.dir, SITE_WWW_URL: 'http://127.0.0.1:4597' })
+      expect(fromFile.code, fromFile.out).toBe(0)
+      expect(fromFile.stdout).toContain('website http://127.0.0.1:4596/ (www 301)')
+      writeFileSync(path.join(etc.dir, 'site.env'), 'SITE_DOMAIN=example.com\nSITE_URL=http://127.0.0.1:4596\nSITE_MARKER="Somebody Else"\n')
+      const wrong = await hc([], { SITE_URL: undefined, OASIS_ETC: etc.dir, SITE_WWW_URL: 'http://127.0.0.1:4597' })
+      expect(wrong.code).toBe(1)
+      expect(wrong.stderr).toMatch(/does not contain 'Somebody Else'/)
+    })
   })
 
   it('fails while the worker is not active, and names it', async () => {
