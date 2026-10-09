@@ -73,3 +73,4 @@
 | [0142](0142-nginx-one-host-letter-case-and-error-headers.md) | nginx: one host name, no other letter case of /api, HSTS and nosniff on its own answers |
 | [0143](0143-health-check-and-timers.md) | The health check proves the public sign-in redirect and the worker; timers started; no local database at boot |
 | [0144](0144-runtime-policy-secret-versions-backups-photos.md) | Runtime policy: current secret version only, write-only backups, versioned photos |
+| [0145](0145-public-website-on-the-same-host.md) | The public website on the same host: static releases behind the same nginx, one public API route, no CORS |

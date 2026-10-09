@@ -15,6 +15,7 @@ https://your-domain/login. Anything that changes the system needs `sudo`. In com
 | see whether everything is up | `$D/healthcheck.sh` (API, dashboard, the public sign-in redirect, the worker) and `systemctl status oasis-api oasis-worker oasis-web` |
 | read the logs | `journalctl -u oasis-api -f` (also `oasis-worker`, `oasis-web`; `--since '30 min ago'`) |
 | deploy the latest code | `sudo $D/deploy.sh` |
+| publish the public website | `sudo $D/site-deploy.sh` (section 10) |
 | go back to the previous release | `sudo $D/rollback.sh` |
 | take a backup now | `sudo -u oasis $D/backup.sh --label manual` |
 | prove the latest backup restores | `sudo systemctl start oasis-restore-drill; journalctl -u oasis-restore-drill -n 40` |
@@ -326,10 +327,11 @@ and Squarespace credentials (rotate those at their source as well); a leaked tab
 4. After a deploy: `sudo $D/rollback.sh`.
 5. Certificate expired: `sudo certbot renew --dry-run`, `systemctl status certbot-renew.timer`; DNS still pointing here?
 6. "The domain does not answer" but the health check is fine: check the name the person typed. Only the dashboard's host
-   (`app.<domain>`) points here; the bare domain and `www` are the public website, hosted elsewhere, and need their own records in the
-   DNS zone (a record named literally `@` in Route 53 is NOT the zone apex: there the apex is the empty name). From outside:
-   `dig +short <name> @1.1.1.1`, then `curl -sI https://<name>/`. This host also refuses any other name or a bare IP address on
-   purpose (port 80 closes the connection, port 443 refuses the TLS handshake), so `https://<the Elastic IP>/` failing is expected.
+   (`app.<domain>`) and, once `install.sh --site-domain` ran, the bare domain and `www` (the public website, section 10) point here;
+   each needs its own record in the DNS zone (a record named literally `@` in Route 53 is NOT the zone apex: there the apex is the
+   empty name). From outside: `dig +short <name> @1.1.1.1`, then `curl -sI https://<name>/`. This host also refuses any other name
+   or a bare IP address on purpose (port 80 closes the connection, port 443 refuses the TLS handshake), so `https://<the Elastic IP>/`
+   failing is expected.
 
 ### SMS device down
 *Sign: a "Needs attention" card about the tablet, texts stay "Queued", customers' replies do not appear.*
@@ -393,6 +395,53 @@ Try these in order, the first that works:
 
 ---
 
+## 10. The public website
+
+The marketing site (`oasisautospanj.com`, `www` redirects to it) is static files served by the same nginx from
+`/var/www/site/current`, built by `site-deploy.sh` from the root-only mirror `/opt/oasis/git/site.git` ([deployment.md](deployment.md),
+"The site build contract"; ADR 0145). Its one live piece of data, the opening hours, comes from the API through
+`https://oasisautospanj.com/api/v1/public/hours` (nginx proxies exactly that path, cookies stripped, cached 60 s).
+
+**Set it up once** (the order matters: the site's server blocks must exist before DNS points here, because this host refuses unknown
+names; the certificate needs DNS to point here):
+1. `sudo $D/install.sh <the options this host was installed with> --site-domain oasisautospanj.com` — writes `/etc/oasis/site.env`,
+   the placeholder release, and the port-80 bootstrap; certbot fails ("do both DNS records point at this host yet?"): expected, a warning.
+2. DNS: A records `oasisautospanj.com` and `www.oasisautospanj.com` to this host's Elastic IP (TTL 300). Check: `dig +short oasisautospanj.com @1.1.1.1`.
+3. The same `install.sh` command again: certbot issues one certificate for both names, the full servers go live, and
+   `https://oasisautospanj.com/` answers the placeholder ("Oasis Auto Spa — coming soon"). Check: `curl -sI https://oasisautospanj.com/`
+   is 200, `curl -sI https://www.oasisautospanj.com/` is 301 to the apex, `curl -sI http://oasisautospanj.com/` is 301,
+   `curl -s https://oasisautospanj.com/api/v1/public/hours` is the hours JSON, `curl -sI https://oasisautospanj.com/api/v1/customers` is 404.
+4. The mirror: `sudo git init --bare /opt/oasis/git/site.git && sudo chown -R root:root /opt/oasis/git && sudo chmod -R go-w /opt/oasis/git`.
+   From then on `install.sh` is re-run with the same options whenever the kit's templates change (section 2), the `--site-*` ones included.
+
+**Publish and deploy** (as the operator, from the working copy in `~ec2-user/oasis/site`, like the application's mirrors):
+```bash
+G="env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*"
+sudo $G git -C /opt/oasis/git/site.git fetch --quiet /home/ec2-user/oasis/site +main:main
+cd / && sudo $D/site-deploy.sh --dry-run      # the commit, the steps
+cd / && sudo $D/site-deploy.sh                # build as oasis, verify, switch, health-check (about a minute)
+```
+It stops by itself when `current` already serves that commit (`--force` rebuilds; `--ref` names another branch, tag or commit of the
+mirror; `--skip-hours` builds without the hours snapshot). Watch for `verified dist/`, then `release <id> is live`. A build that fails
+or breaks the contract (missing 404.html, marker text absent, a localhost URL, an inline script ...) is kept in
+`/var/www/site/releases/<id>.failed` and nothing changes. A release that does not answer through nginx is switched back at once and
+kept as `.failed`; the reasons are in `/var/log/oasis/site-deploy.log` and `/var/log/nginx/oasis-site.error.log`. `--keep N` (default
+`SITE_KEEP=4`) releases plus current and previous stay; `--list` shows them.
+
+**Roll back:** `sudo $D/site-deploy.sh --rollback` (to `previous`; again to go forward) or `--rollback --to <release id>`; the same
+health check runs, exit 3 when it fails. Nothing is rebuilt and nginx is not reloaded: `current` is a symlink.
+
+**When something is wrong:**
+* `curl -sI https://oasisautospanj.com/` is not 200: `sudo nginx -t`; `ls -l /var/www/site/current` (a dangling link? `--rollback`);
+  `tail /var/log/nginx/oasis-site.error.log`.
+* The hours are stale or missing on the site: `curl -si https://oasisautospanj.com/api/v1/public/hours` (`X-Cache-Status` says whether
+  nginx answered from its cache; a 502 means the API is down, section 9) and `curl -s http://127.0.0.1:4000/api/v1/public/hours`
+  on the host. The site shows its built-in fallback hours when the endpoint fails; the next deploy bakes a fresh snapshot.
+* The health check timer complains about `website:` (journalctl -u oasis-healthcheck): the page lost the marker text or `www` stopped
+  redirecting; `site-deploy.sh --list` and `--rollback`.
+* `certbot renew --dry-run` covers both certificates (the dashboard's and the site's); the renewal hook reloads nginx.
+* "the mirror ... can be changed by users other than root": `sudo chown -R root:root /opt/oasis/git && sudo chmod -R go-w /opt/oasis/git`.
+
 ## Appendix: where things are
 
 | Question | Answer |
@@ -402,5 +451,6 @@ Try these in order, the first that works:
 | Is the nightly backup running? | `systemctl list-timers oasis-backup.timer; ls -lt /var/backups/oasis/daily \| head` |
 | Did a timer fail? | `systemctl --failed; cat /var/log/oasis/failures.log` |
 | The configuration | `/etc/oasis/*.env`; the template and the meaning of each variable: `deploy/env/*.env.example` |
-| nginx | `/etc/nginx/conf.d/oasis.conf`; `sudo nginx -t && sudo systemctl reload nginx` |
+| nginx | `/etc/nginx/conf.d/oasis.conf` (the dashboard), `oasis-site.conf` (the website); `sudo nginx -t && sudo systemctl reload nginx` |
+| Which website release is live? | `readlink /var/www/site/current; cat /var/www/site/current/REVISION; tail /var/log/oasis/site-deploys.list` |
 | Everything the tablet and API do | `docs/integrations/smsgate.md`, `docs/api-spec.md` sections 22 and 23 |

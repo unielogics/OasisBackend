@@ -43,7 +43,12 @@ for the environment in AWS Secrets Manager and the app's AWS identity, and 0140 
 | `/etc/oasis/aws-credentials` | runtime=user only: the `oasis-app` key, `0600 root:root`; systemd hands the services a private copy. Absent with the instance role (the recommendation) |
 | `/etc/oasis/secret-seed.env` | a new install only: the generated secret settings (`0600 root:root`) until they are pushed into the secret; then shredded |
 | `/etc/systemd/system/oasis*.{service,timer,target}` | the units |
-| `/etc/nginx/conf.d/oasis.conf`, `00-oasis-zones.conf`, `/etc/nginx/oasis/{proxy,security-headers}.conf` | the site |
+| `/etc/nginx/conf.d/oasis.conf`, `00-oasis-zones.conf`, `/etc/nginx/oasis/{proxy,security-headers,tls}.conf` | the dashboard site; `tls.conf` holds the TLS settings every HTTPS server shares |
+| `/etc/nginx/conf.d/oasis-site.conf`, `/etc/nginx/oasis/site-headers.conf` | the public website's servers and headers (`install.sh --site-domain`; a port-80 bootstrap until its certificate exists) |
+| `/var/www/site/releases/<id>`, `/var/www/site/current`, `previous` | the public website: one verified static build per release (`dist/` plus `REVISION`), `root:root`, read-only; nginx serves `current` (ADR 0145). `releases/bootstrap` is the placeholder page install.sh puts there first |
+| `/opt/oasis/git/site.git` | the root-only bare mirror the website is built from (`site-deploy.sh` refuses any other owner or a group/other-writable file) |
+| `/etc/oasis/site.env` | the website's settings (`SITE_DOMAIN`, `SITE_URL`, `SITE_ROOT`, `SITE_MIRROR`, `SITE_BUILD_DIR`, `SITE_MARKER`, `SITE_KEEP`), `0644 root:root`, rendered from the `install.sh --site-*` options on every run; nothing secret |
+| `/var/cache/nginx/oasis_public` | nginx's 60-second cache of the website's one API answer (`/api/v1/public/hours`) |
 | `/var/lib/oasis` | state: `files/` (filesystem storage), `mail/` (simulated mail), `drills/` (restore-drill results), the service user's home |
 | `/var/backups/oasis/{daily,weekly,monthly}` | database backups |
 | `/var/log/oasis/{deploy.log,deploys.list,failures.log}` | deploy history and failed timers (the services themselves log to journald) |
@@ -80,6 +85,11 @@ sudo deploy/scripts/install.sh --domain oasis.example.com --email you@example.co
   `shred -u ~/oasis-secret.env && sudo shred -u /etc/oasis/secret-seed.env`. `deploy.sh` warns while the seed exists.
 * `--secrets-in-files` keeps the old layout (secrets generated into `common.env`) for a host without AWS; everything below works with
   it too, and `--move-secrets` moves such a host later.
+* `--site-domain <apex>` adds the public website (ADR 0145; [runbook.md](runbook.md), "The public website"): `/etc/oasis/site.env`,
+  root-owned `/var/www/site` with a placeholder release, the site's nginx servers (a port-80 bootstrap until the certificate exists),
+  and in certbot mode one certificate for the apex and `www` (a warning, not an error, while their DNS records do not point here yet:
+  re-run with the same options once they do). `--site-root`, `--site-tls-cert/--site-tls-key` (with `--tls files`), `--site-csp`
+  and `--site-marker` refine it; they belong to "the same options" every later run repeats.
 * TLS: `--tls certbot` (default) installs a port-80-only site, obtains a Let's Encrypt certificate with the webroot challenge, then
   installs the full site and a renewal hook that reloads nginx. `--tls files --tls-cert F --tls-key F` uses certificates you supply.
 * **Copy `SECRETS_KEY` (from the seed, before you shred it) into a password manager now.** It decrypts the tablet and Squarespace
@@ -224,6 +234,28 @@ Check: `sudo iptables -S OASIS-IMDS` (`--uid-owner 0`, the oasis uid, the ec2-in
 | `/healthz` | API | public liveness |
 | `/readyz`, `/api/v1/openapi.json` | API | this host only (readiness shows database and migration detail) |
 
+The public website (`install.sh --site-domain <apex>`; `oasis-site.conf`, ADR 0145), on its own two names:
+
+| URL | Goes to | Notes |
+|---|---|---|
+| `http://<apex>`, `http://www.<apex>` | 301 to `https://<apex>` | except `/.well-known/acme-challenge/` (certbot's webroot) |
+| `https://www.<apex>` | 301 to `https://<apex>` | one canonical name; HSTS and nosniff on the redirect too |
+| `https://<apex>/`, `/about`, `/about/` | files of `/var/www/site/current` | clean URLs (`about.html` or `about/index.html`), `Cache-Control: no-cache`, the site's headers (CSP, `X-Frame-Options: DENY`, referrer policy, COOP/CORP); `error_page 404 /404.html` |
+| `/assets/*` | files | content-hashed: `public, max-age=31536000, immutable` |
+| other static types (`.css .js .png .svg .woff2 .txt .xml .json ...`) | files | `public, max-age=86400` |
+| `/api/v1/public/hours` | API `:4000`, exactly this path | the opening hours; `Cookie` stripped on the way in, `Set-Cookie` on the way out; zone `oasis_api` (burst 20); `proxy_cache oasis_public` 60 s with `proxy_cache_lock` and stale answers while refreshing or when the API is down; `X-Cache-Status` says HIT or MISS |
+| any other `/api`, `/hooks`, `/dev-storage` path, any letter case | nothing: 404 JSON | the API is the dashboard's; the website never needs CORS |
+| dotfiles (except `/.well-known`), `/REVISION` | nothing: 404 | |
+
+**The site build contract** (what `site-deploy.sh` expects of the site repository): `pnpm install --frozen-lockfile && pnpm build`
+runs as the oasis user with `HOME=/var/lib/oasis`, `CI=1`, `NODE_OPTIONS=--max-old-space-size=2048`, `SITE_URL=https://<apex>` and,
+when the API answered, `SITE_HOURS_JSON=<path of a snapshot of /api/v1/public/hours>` (unset otherwise: the build must have a fallback
+and the browser asks the live endpoint). It must write `dist/` (`SITE_BUILD_DIR` in `site.env`) with `index.html` (over 1 KB,
+containing the marker text `SITE_MARKER`, "Oasis Auto Spa" by default) and `404.html`, content-hashed files under `assets/`, no
+symbolic link, no file over 25 MB, 50 KB to 200 MB in all, no `localhost`/`127.0.0.1`/`0.0.0.0`/`:3000`/`:4000`/`:4321` URL in any
+html/js/css, and no inline `<script>` (the policy allows none; `<script type="application/ld+json">` data blocks are fine). A build
+that breaks the contract is kept as `releases/<id>.failed` and nothing is served.
+
 **Real client address.** The API runs with `TRUST_PROXY=true`, which makes Fastify believe the first address in `X-Forwarded-For`.
 nginx therefore overwrites the header with `$remote_addr` (`proxy_set_header X-Forwarded-For $remote_addr`) and never appends to what a
 client sent, and the API is reachable only through nginx (it binds `127.0.0.1`). If you ever put a load balancer or CDN in front of
@@ -244,11 +276,13 @@ headers, so each arrives exactly once (two different `X-Frame-Options` values ma
 `install.sh --csp app` (the default) adds none from nginx; `--csp report-only` or `--csp enforce` add nginx's broader policy as well (two
 enforced policies both apply, so the stricter one wins), `--csp off` adds none.
 
-**TLS.** TLS 1.2 and 1.3, modern ECDHE ciphers, no session tickets, HTTP/2, no OCSP stapling (Let's Encrypt stopped running OCSP responders; the template says how to turn it on for a certificate that has one). HSTS is sent for 180 days.
+**TLS.** TLS 1.2 and 1.3, modern ECDHE ciphers, no session tickets, HTTP/2, no OCSP stapling (Let's Encrypt stopped running OCSP responders; the template says how to turn it on for a certificate that has one). HSTS is sent for 180 days with `includeSubDomains`: safe because every name under the domain that answers is HTTPS only (the dashboard, the website, `www`). The settings are one shared file, `/etc/nginx/oasis/tls.conf` (`oasis-tls.conf.template`), included by every HTTPS server; the certificates stay in the server blocks.
 
 Check a change with `nginx -t` before reloading (`install.sh` does). The tests run the rendered site in a real nginx when one is
 installed (an unprivileged instance on loopback ports with stub upstreams): `nginx -t`, the default servers, the letter-case rule,
-and the headers on proxied answers and on nginx's own 403, 404, 413 and 429.
+and the headers on proxied answers and on nginx's own 403, 404, 413 and 429; and the website next to it (`test/ops-kit/deploy-site.test.ts`):
+pages, the 404 page, cached assets, the www and http redirects, the ACME path, the hours proxied once without cookies and then from
+the cache, and the rest of the API refused.
 
 ## The tailnet side: the SMS Gate webhook
 
