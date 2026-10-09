@@ -141,7 +141,8 @@ step_packages() {
   local pkgs=(nginx logrotate git openssl tar gzip nodejs22 nodejs22-npm postgresql15)
   have curl || pkgs+=(curl)
   run_system dnf install -y "${pkgs[@]}"
-  have pnpm || run_system npm install -g pnpm@10.34.6
+  # the services run as the oasis user, so pnpm must be on the system PATH, not only on the caller's (e.g. ~/.local/bin)
+  [[ -x /usr/local/bin/pnpm || -x /usr/bin/pnpm ]] || run_system npm install -g pnpm@10.34.6
   if ! have certbot; then
     run_system dnf install -y certbot || {
       warn "no certbot package: installing it into /opt/certbot"
