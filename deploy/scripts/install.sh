@@ -27,9 +27,10 @@
 # What it does, in order: checks the host, installs packages, creates the oasis user and directories, writes /etc/oasis/*.env from the
 # templates (never overwriting an existing file; secret settings are not written there: a new install gets them generated into
 # /etc/oasis/secret-seed.env, mode 0600, to push into the secret with pnpm secrets:push and then shred), prepares the database,
-# installs the systemd units (and the runtime=user drop-ins), the nginx site with TLS, log rotation and the journald limits, and enables
-# the backup and health-check timers. It does not start the application: run deploy.sh for that. Re-running it changes only what
-# differs and reports variables a new template added.
+# installs the systemd units (and the runtime=user or --local-db drop-ins), starts the instance metadata guard, the nginx site with TLS,
+# log rotation and the journald limits, enables and starts the backup and health-check timers, and runs the health check once when a
+# release is live. It does not start the application: run deploy.sh for that. Re-running it changes only what differs and reports
+# variables a new template added.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DEPLOY_DIR=$(cd "$here/.." && pwd)
@@ -85,7 +86,7 @@ while (($#)); do
     --dry-run) DRY_RUN=1; shift ;;
     --no-system) NO_SYSTEM=1; shift ;;
     -h | --help)
-      sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,/^set -euo pipefail$/p' "$here/install.sh" | sed '$d' | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) die "unknown option $1" ;;
@@ -486,12 +487,14 @@ step_systemd() {
   install_content "$JOURNALD_DIR/oasis.conf" 0644 root:root <"$DEPLOY_DIR/journald/oasis.conf"
   install_content "$LOGROTATE_DIR/oasis" 0644 root:root <"$DEPLOY_DIR/logrotate/oasis"
   run_system systemctl daemon-reload
-  run_system systemctl enable oasis.target oasis-api.service oasis-worker.service oasis-web.service oasis-backup.timer oasis-healthcheck.timer
+  run_system systemctl enable oasis.target oasis-api.service oasis-worker.service oasis-web.service
+  # Timers must also be STARTED: enabled alone, they only begin after the next boot (the launch day ran with neither).
+  run_system systemctl enable --now oasis-backup.timer oasis-healthcheck.timer
   # Only root, oasis and ec2-instance-connect may reach the instance metadata service (the unit says why and how to remove it).
   run_system systemctl enable --now oasis-imds-guard.service ||
     warn "the instance metadata guard did not start (journalctl -u oasis-imds-guard): every local user can still ask for the role's credentials"
   if [[ -f "$OASIS_ETC/drill.env" ]] || ((DRY_RUN)); then
-    run_system systemctl enable oasis-restore-drill.timer
+    run_system systemctl enable --now oasis-restore-drill.timer
   else
     log "the monthly restore drill timer stays off until /etc/oasis/drill.env exists (install.sh --local-db --drill-role)"
   fi
@@ -550,6 +553,25 @@ step_nginx() {
   nginx_reload
 }
 
+# --- 9. one health check ----------------------------------------------------------------------------------------------------------
+# The timer's own unit, once, now: proves the check runs as configured (user, paths, the public sign-in redirect through nginx, the
+# worker). Before the first deployment there is nothing to check yet.
+step_health_once() {
+  if [[ "$NO_SYSTEM" == 1 || "$DRY_RUN" == 1 ]]; then
+    log "would run the health check once: systemctl start oasis-healthcheck.service"
+    return 0
+  fi
+  if [[ -z "$(readlink -e "$OASIS_PREFIX/current" 2>/dev/null || true)" ]]; then
+    log "no release yet: the health check (every 5 minutes) passes once deploy.sh has run"
+    return 0
+  fi
+  if systemctl start oasis-healthcheck.service; then
+    ok "health check passed (oasis-healthcheck.timer repeats it every 5 minutes; systemctl list-timers 'oasis*')"
+  else
+    warn "the health check FAILED: journalctl -u oasis-healthcheck -n 20 --no-pager"
+  fi
+}
+
 # --- run -------------------------------------------------------------------------------------------------------------------------------
 step_preflight
 step_packages
@@ -559,6 +581,7 @@ step_database
 step_repos
 step_systemd
 step_nginx
+step_health_once
 
 cat <<NEXT
 

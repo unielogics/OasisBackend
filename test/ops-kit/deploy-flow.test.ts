@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { spawn } from 'node:child_process'
+import { createServer } from 'node:http'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { script, sh, tempDir, tree, writeExecutable } from './deploy-helpers.js'
@@ -274,6 +275,42 @@ describe('deploy.sh', () => {
     ])
     expect(readFileSync(path.join(w.root, 'var/log/oasis/deploys.list'), 'utf8')).toMatch(/rolled-back/)
   }, 60_000)
+
+  it('with the real health check: a release whose signed-out redirect leaves the public URL (localhost) is rolled back', async () => {
+    const w = await makeWorld()
+    // the API and the dashboard answer; the public site answers / with the Location the CURRENT release's dashboard would send
+    const servers = [
+      createServer((req, res) =>
+        res.writeHead(200, { 'content-type': 'application/json' }).end(req.url === '/readyz' ? '{"status":"ready"}' : '{}'),
+      ),
+      createServer((_req, res) => res.writeHead(200).end('<html>')),
+      createServer((_req, res) => {
+        const loc = readFileSync(path.join(w.prefix, 'current/dashboard/REDIRECT'), 'utf8').trim()
+        res.writeHead(307, { location: loc }).end()
+      }),
+    ]
+    const ports = [4682, 4683, 4684]
+    await Promise.all(servers.map((s, i) => new Promise<void>((r) => s.listen(ports[i], '127.0.0.1', r))))
+    cleanups.push(() => servers.forEach((s) => s.close()))
+    const env = {
+      ...w.env,
+      HEALTH_CMD: script('healthcheck.sh'),
+      API_PORT: '4682',
+      WEB_PORT: '4683',
+      PUBLIC_DASHBOARD_URL: 'http://127.0.0.1:4684',
+    }
+    await w.commit('dashboard', { REDIRECT: 'http://127.0.0.1:4684/login?next=%2F\n' })
+    const first = await sh(script('deploy.sh'), ['--wait', '2'], env)
+    expect(first.code, first.out).toBe(0)
+    expect(first.out).toContain('sign-in redirect http://127.0.0.1:4684/login, worker active')
+    const good = w.current()
+    await w.commit('dashboard', { REDIRECT: 'https://localhost:3200/login?next=%2F\n' })
+    const bad = await sh(script('deploy.sh'), ['--wait', '2'], env)
+    expect(bad.code).toBe(1)
+    expect(bad.out).toContain("sends a signed-out visitor to 'https://localhost:3200/login?next=%2F'")
+    expect(bad.out).toMatch(/rolled back to .* it is healthy again/)
+    expect(w.current()).toBe(good)
+  }, 90_000)
 
   it('rolls back when a service fails to restart', async () => {
     const w = await makeWorld()

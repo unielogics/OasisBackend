@@ -10,7 +10,7 @@ https://your-domain/login. Anything that changes the system needs `sudo`. In com
 
 | I want to | Command |
 |---|---|
-| see whether everything is up | `$D/healthcheck.sh` and `systemctl status oasis-api oasis-worker oasis-web` |
+| see whether everything is up | `$D/healthcheck.sh` (API, dashboard, the public sign-in redirect, the worker) and `systemctl status oasis-api oasis-worker oasis-web` |
 | read the logs | `journalctl -u oasis-api -f` (also `oasis-worker`, `oasis-web`; `--since '30 min ago'`) |
 | deploy the latest code | `sudo $D/deploy.sh` |
 | go back to the previous release | `sudo $D/rollback.sh` |

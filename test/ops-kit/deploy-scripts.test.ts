@@ -2,7 +2,7 @@ import { createServer, type Server } from 'node:http'
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { loadEnv } from '../../src/config/env.js'
 import { secretKeyProblems } from '../../src/config/secrets-source.js'
 import { invalidValues, parseDotenv } from '../../scripts/secrets-push.js'
@@ -86,6 +86,14 @@ describe('install.sh', () => {
     expect(r.out).toMatch(/\+ dnf install -y nginx/)
     expect(r.out).toMatch(/plan\s+would write .*oasis-api\.service/)
     expect(r.out).toMatch(/plan\s+would write .*conf\.d\/oasis\.conf/)
+    // the timers are started, not only enabled (enabled alone they wait for the next boot), and so is the metadata guard
+    expect(r.out).toContain('+ systemctl enable --now oasis-backup.timer oasis-healthcheck.timer\n')
+    expect(r.out).toContain('+ systemctl enable --now oasis-restore-drill.timer\n')
+    expect(r.out).toContain('+ systemctl enable --now oasis-imds-guard.service\n')
+    expect(r.out).toContain('+ systemctl enable oasis.target oasis-api.service oasis-worker.service oasis-web.service\n')
+    expect(r.out).toMatch(/would run the health check once: systemctl start oasis-healthcheck\.service/)
+    // ... after nginx, so the check can go through the public URL
+    expect(r.out.indexOf('would run the health check once')).toBeGreaterThan(r.out.indexOf('nginx -t'))
     expect(tree(t.dir).filter((l) => !l.startsWith('etc dir') && !l.startsWith('var dir'))).toEqual([])
     expect(readdirSync(t.dir)).toEqual([])
   })
@@ -247,11 +255,18 @@ describe('healthcheck.sh', () => {
   }
   const ready = '{"status":"ready","checks":{}}'
   const args = ['--api', 'http://127.0.0.1:4595', '--web', 'http://127.0.0.1:4594']
+  // hermetic: a systemctl stand-in (WORKER_STATE, default active) and no public URL unless a test gives one
+  const fakes = tempDir('oasis-hc-bin-')
+  afterAll(fakes.cleanup)
+  const systemctl = path.join(fakes.dir, 'systemctl')
+  writeExecutable(systemctl, '#!/usr/bin/env bash\necho "$*" >> "${SYSTEMCTL_LOG:-/dev/null}"\nst=${WORKER_STATE:-active}; echo "$st"; [ "$st" = active ]\n')
+  const hc = (extra: string[] = [], env: Record<string, string | undefined> = {}) =>
+    sh(script('healthcheck.sh'), [...args, ...extra], { SYSTEMCTL: systemctl, PUBLIC_DASHBOARD_URL: '', ...env })
 
   it('passes when the API is ready and the dashboard answers', async () => {
     await stub({ '/healthz': [200, '{"status":"ok"}'], '/readyz': [200, ready] }, 4595)
     await stub({ '/login': [200, '<html>'] }, 4594)
-    const r = await sh(script('healthcheck.sh'), args)
+    const r = await hc()
     expect(r.code, r.out).toBe(0)
     expect(r.stdout).toMatch(/^healthy:/)
   })
@@ -264,7 +279,7 @@ describe('healthcheck.sh', () => {
     writeFileSync(path.join(t.dir, 'etc/web.env'), "WEB_HOST=127.0.0.1\nWEB_PORT='4594'\n")
     await stub({ '/healthz': [200, '{}'], '/readyz': [200, ready] }, 4595)
     await stub({ '/login': [200, ''] }, 4594)
-    const r = await sh(script('healthcheck.sh'), [], { OASIS_ETC: path.join(t.dir, 'etc') })
+    const r = await sh(script('healthcheck.sh'), [], { OASIS_ETC: path.join(t.dir, 'etc'), SYSTEMCTL: systemctl })
     expect(r.code, r.out).toBe(0)
     expect(r.stdout).toContain('api http://127.0.0.1:4595, dashboard http://127.0.0.1:4594')
   })
@@ -277,7 +292,7 @@ describe('healthcheck.sh', () => {
       },
       4595,
     )
-    const r = await sh(script('healthcheck.sh'), args)
+    const r = await hc()
     expect(r.code).toBe(1)
     expect(r.stderr).toMatch(/UNHEALTHY/)
     expect(r.stderr).toMatch(/api readiness: .*\/readyz answered HTTP 503, expected 200.*connection refused/)
@@ -287,7 +302,7 @@ describe('healthcheck.sh', () => {
   it('a 200 from /readyz that does not say ready is still a failure', async () => {
     await stub({ '/healthz': [200, '{}'], '/readyz': [200, '{"status":"degraded"}'] }, 4595)
     await stub({ '/login': [200, ''] }, 4594)
-    const r = await sh(script('healthcheck.sh'), args)
+    const r = await hc()
     expect(r.code).toBe(1)
     expect(r.stderr).toMatch(/does not match/)
   })
@@ -300,7 +315,7 @@ describe('healthcheck.sh', () => {
       server.removeAllListeners('request')
       server.on('request', (_q, res) => res.writeHead(200).end(ready))
     }, 1500)
-    const r = await sh(script('healthcheck.sh'), [...args, '--wait', '10'])
+    const r = await hc(['--wait', '10'])
     expect(r.code, r.out).toBe(0)
     expect(Date.now() - t0).toBeGreaterThan(1200)
   })
@@ -315,9 +330,63 @@ describe('healthcheck.sh', () => {
       4595,
     )
     await stub({ '/login': [200, ''] }, 4594)
-    const r = await sh(script('healthcheck.sh'), [...args, '--public', 'http://127.0.0.1:4595'])
+    const r = await hc(['--public', 'http://127.0.0.1:4595'])
     expect(r.code).toBe(1)
     expect(r.stderr).toMatch(/public sms hook hidden: .* answered HTTP 200, expected 404/)
+  })
+
+  it('checks through the public URL that a signed-out visit goes to that URL /login, never to localhost or another host', async () => {
+    await stub({ '/healthz': [200, '{}'], '/readyz': [200, ready] }, 4595)
+    await stub({ '/login': [200, ''] }, 4594)
+    let reply: [number, string | undefined] = [307, 'http://127.0.0.1:4681/login?next=%2F']
+    const pub = createServer((req, res) => {
+      if (req.url !== '/' || req.headers.cookie) return void res.writeHead(500).end()
+      res.writeHead(reply[0], reply[1] ? { location: reply[1] } : {}).end()
+    })
+    await new Promise<void>((r) => pub.listen(4681, '127.0.0.1', r))
+    cleanups.push(() => new Promise<void>((r) => pub.close(() => r())))
+    const PUBLIC = { PUBLIC_DASHBOARD_URL: 'http://127.0.0.1:4681' }
+
+    const good = await hc([], PUBLIC)
+    expect(good.code, good.out).toBe(0)
+    expect(good.stdout).toContain('sign-in redirect http://127.0.0.1:4681/login, worker active')
+    reply = [307, '/login?next=%2F'] // a relative Location stays on the origin the visitor used
+    expect((await hc([], PUBLIC)).code).toBe(0)
+    for (const bad of [
+      'https://localhost:3200/login?next=%2F', // Next building it from its own listen address (the launch-day bug)
+      'https://evil.example/login',
+      'http://127.0.0.1:4681.evil.example/login',
+      '//evil.example/login',
+      'http://127.0.0.1:4681/elsewhere',
+    ]) {
+      reply = [307, bad]
+      const r = await hc([], PUBLIC)
+      expect(r.code, bad).toBe(1)
+      expect(r.stderr, bad).toContain(`public sign-in redirect: http://127.0.0.1:4681/ sends a signed-out visitor to '${bad}'`)
+    }
+    reply = [200, undefined]
+    expect((await hc([], PUBLIC)).stderr).toMatch(/public sign-in redirect: .* answered HTTP 200, expected 307/)
+    expect((await hc(['--skip-public'], PUBLIC)).code).toBe(0)
+
+    // without the variable, the URL comes from common.env (the timer's unit does not load it)
+    reply = [307, 'https://localhost:3200/login']
+    const etc = tempDir('oasis-hc-etc-')
+    cleanups.push(etc.cleanup)
+    writeFileSync(path.join(etc.dir, 'common.env'), '# public\nPUBLIC_DASHBOARD_URL=http://127.0.0.1:4681\n')
+    const fromFile = await hc([], { PUBLIC_DASHBOARD_URL: undefined, OASIS_ETC: etc.dir })
+    expect(fromFile.code).toBe(1)
+    expect(fromFile.stderr).toContain("sends a signed-out visitor to 'https://localhost:3200/login'")
+  })
+
+  it('fails while the worker is not active, and names it', async () => {
+    await stub({ '/healthz': [200, '{}'], '/readyz': [200, ready] }, 4595)
+    await stub({ '/login': [200, ''] }, 4594)
+    const log = path.join(fakes.dir, 'calls.log')
+    const r = await hc([], { WORKER_STATE: 'activating', SYSTEMCTL_LOG: log })
+    expect(r.code).toBe(1)
+    expect(r.stderr).toMatch(/worker: oasis-worker\.service is activating, expected active/)
+    expect(readFileSync(log, 'utf8')).toContain('is-active oasis-worker.service')
+    expect((await hc(['--skip-worker'], { WORKER_STATE: 'failed' })).code).toBe(0)
   })
 })
 

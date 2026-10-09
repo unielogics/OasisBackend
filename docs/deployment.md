@@ -164,7 +164,7 @@ without the secret gets the two lines in `api.env` instead, without `--profile`.
 | `oasis-web` | `next start` on `:3200`, live variant | `NEXT_PUBLIC_VARIANT=live`, `DIST_DIR=.next-live`, the same as `pnpm start:live` |
 | `oasis-backup.timer` / `.service` | `backup.sh --label nightly` at 03:15 shop time | retention below |
 | `oasis-restore-drill.timer` / `.service` | `restore-drill.sh --latest` on the 2nd of each month | enabled when `/etc/oasis/drill.env` exists |
-| `oasis-healthcheck.timer` / `.service` | `healthcheck.sh --quiet` every 5 minutes | a failing run shows in `systemctl --failed` |
+| `oasis-healthcheck.timer` / `.service` | `healthcheck.sh --quiet` every 5 minutes: API ready, dashboard up, the public sign-in redirect, the worker active | a failing run shows in `systemctl --failed` |
 | `oasis-imds-guard.service` | an iptables chain: only root, `oasis` and `ec2-instance-connect` reach the metadata service | below, "Instance metadata guard" |
 | `oasis-notify-failure@.service` | records a failed backup or drill in `/var/log/oasis/failures.log` and runs `/etc/oasis/notify-failure.sh UNIT` if you create it | wire your email or SMS there |
 
@@ -270,7 +270,9 @@ sudo .../rollback.sh --list ; sudo .../rollback.sh [--to <release id>]
 `deploy.sh`: fetch; stop here if the current release already has these two commits; export both trees (`git archive`) into
 `releases/<id>`; `pnpm install --frozen-lockfile`; `pnpm build` (API) and `pnpm build:live` (dashboard); a `pre-deploy` backup;
 `pnpm migrate up` with the new code while the old release still serves; point `current` at the new release; restart worker, API and
-dashboard; wait up to 90 seconds for `healthcheck.sh`. Unhealthy, or a service that will not restart: it points `current` back,
+dashboard; wait up to 90 seconds for `healthcheck.sh` (API ready, dashboard answering, and through the public URL
+`PUBLIC_DASHBOARD_URL` from `common.env`: a signed-out `GET /` answers 307 to that URL's `/login`, never `localhost` or another host;
+the worker unit active). Unhealthy, or a service that will not restart: it points `current` back,
 restarts, health-checks again and exits 1, keeping the failed build as `<id>.failed`.
 
 * A build or migration failure changes nothing that runs. The migration is one transaction per file, so a failed one leaves the schema
@@ -348,7 +350,10 @@ own automated backups (7 days, point in time); the nightly dumps in S3 are the l
   persistent and bounded (1 GB, one month).
 * nginx: `/var/log/nginx/oasis.access.log` carries `rid=<request id>` that equals `X-Request-Id` in the API log and in every error body.
   logrotate keeps 14 days of nginx logs and 12 weeks of `/var/log/oasis/*.log`.
-* `oasis-healthcheck.timer` runs every 5 minutes. For an outside view, point an uptime monitor at `https://<domain>/healthz`, and run
+* `install.sh` enables **and starts** the backup and health-check timers (enabled alone they would wait for the next boot) and runs
+  the health check once when a release is live. `oasis-healthcheck.timer` runs every 5 minutes; `healthcheck.sh` checks the API's
+  readiness, the dashboard, the sign-in redirect through the public URL (a `Location` on `localhost` or another host fails it;
+  `--skip-public`), and that `oasis-worker` is active (`--skip-worker`). For an outside view, point an uptime monitor at `https://<domain>/healthz`, and run
   `healthcheck.sh --public https://<domain>` from somewhere else to confirm that `/hooks/smsgate` answers 404 from outside.
 * Inside the app, "Needs attention" shows an offline tablet, orders waiting for a match, card money not confirmed after two hours, and
   sync failures.
