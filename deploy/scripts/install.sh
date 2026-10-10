@@ -242,6 +242,9 @@ step_user_dirs() {
   ensure_dir "$OASIS_BACKUP_DIR" 0700 "$o"
   ensure_dir "$OASIS_LOG_DIR" 0750 "$o"
   ensure_dir "$OASIS_ROOT_PREFIX/var/www/certbot" 0755 "root:root"
+  # the parent of proxy_cache_path (00-oasis-zones.conf): nginx creates the cache directory itself, but not its parent, and
+  # nginx -t fails with "mkdir() ... No such file or directory" when it is missing (AL2023 ships no /var/cache/nginx)
+  ensure_dir "$OASIS_ROOT_PREFIX/var/cache/nginx" 0755 "root:root"
   [[ -z "$SITE_DOMAIN" ]] || step_site_dirs
 }
 

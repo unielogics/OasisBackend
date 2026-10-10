@@ -369,6 +369,8 @@ describe('install.sh --site-domain: the rendered website', () => {
     const root = path.join(stage.root, 'var/www/site')
     expect(lstatSync(path.join(root, 'current')).isSymbolicLink()).toBe(true)
     expect(realpathSync(path.join(root, 'current'))).toBe(path.join(root, 'releases/bootstrap'))
+    // nginx creates the proxy_cache_path directory itself but not its parent, and nginx -t fails without it
+    expect(statSync(path.join(stage.root, 'var/cache/nginx')).isDirectory()).toBe(true)
     expect(readdirSync(path.join(root, 'releases/bootstrap')).sort()).toEqual([
       '404.html',
       'REVISION',
