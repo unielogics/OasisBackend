@@ -124,7 +124,7 @@ describe('maintenance.purge', () => {
   it('removes expired idempotency keys, old realtime events and old webhook rows, and keeps the rest', async () => {
     await seedExpiredRows()
     const removed = await runMaintenancePurge(t.db, t.clock)
-    expect(removed).toEqual({ idempotency_keys: 1, realtime_events: 1, webhook_log: 1 })
+    expect(removed).toEqual({ idempotency_keys: 1, realtime_events: 1, webhook_log: 1, public_otp: 0, public_rate_limits: 0 })
     expect((await t.db.selectFrom('idempotency_keys').select('key').execute()).map((r) => r.key)).toEqual([
       'live-key-00001',
     ])
@@ -143,6 +143,8 @@ describe('maintenance.purge', () => {
       idempotency_keys: 0,
       realtime_events: 0,
       webhook_log: 0,
+      public_otp: 0,
+      public_rate_limits: 0,
     })
     const state = await t.db.selectFrom('realtime_state').selectAll().executeTakeFirstOrThrow()
     expect(state.purged_through).toBeGreaterThanOrEqual(1)

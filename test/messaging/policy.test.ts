@@ -58,6 +58,7 @@ describe('class registry', () => {
     expect([...TRANSACTIONAL_CLASSES].sort()).toEqual(
       [
         'addon_approval',
+        'booking_confirmed_web',
         'booking_thanks',
         'confirm_ack',
         'confirm_none',
@@ -65,8 +66,10 @@ describe('class registry', () => {
         'emergency',
         'help_reply',
         'in_progress',
+        'membership_welcome_web',
         'opt_in_confirm',
         'opt_out_confirm',
+        'otp_code',
         'password_reset',
         'payment_link',
         'quick_reply',
