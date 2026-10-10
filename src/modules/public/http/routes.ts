@@ -43,6 +43,14 @@ const reqOf = (req: FastifyRequest): PublicRequest => {
 
 export function registerPublicRoutes(d: PublicDeps): void {
   const { app } = d
+  // The writes stay closed (the same 404 as an unknown route, before validation) until PUBLIC_WRITES_ENABLED: the website
+  // composes texts instead (SITE_BOOKING=sms) until the SMS tablet and online booking are live.
+  const writesOpen = {
+    onRequest: (req: FastifyRequest, _reply: unknown, done: (err?: Error) => void): void => {
+      if (app.env.PUBLIC_WRITES_ENABLED) return done()
+      done(new AppError('ROUTE_NOT_FOUND', { meta: { method: req.method, path: req.url.split('?')[0] ?? '' } }))
+    },
+  }
   const loc = async (): Promise<PublicLocation> => {
     const l = await publicLocation(app.db, app.env.BUSINESS_TZ)
     if (!l) throw new AppError('SERVICE_UNAVAILABLE', { detail: 'The shop is not set up yet' })
@@ -114,6 +122,7 @@ export function registerPublicRoutes(d: PublicDeps): void {
   app.post(
     '/public/otp',
     {
+      ...writesOpen,
       config: {
         access: access.public('A one-time SMS code for a phone number the person typed; identifies a member without a session'),
         rateLimit: { max: 10, timeWindow: '1 minute' },
@@ -139,6 +148,7 @@ export function registerPublicRoutes(d: PublicDeps): void {
   app.post(
     '/public/otp/verify',
     {
+      ...writesOpen,
       config: {
         access: access.public('Verifies a one-time SMS code and issues the opaque member token the booking call may carry'),
         rateLimit: { max: 20, timeWindow: '1 minute' },
@@ -159,6 +169,7 @@ export function registerPublicRoutes(d: PublicDeps): void {
   app.post(
     '/public/bookings',
     {
+      ...writesOpen,
       config: {
         access: access.public('The website books a real appointment for a guest or a verified member; no card data, Idempotency-Key required'),
         idempotency: 'required',
@@ -191,6 +202,7 @@ export function registerPublicRoutes(d: PublicDeps): void {
   app.post(
     '/public/memberships',
     {
+      ...writesOpen,
       config: {
         access: access.public('The website’s join flow: a pending membership awaiting the Squarespace checkout link; no card data'),
         idempotency: 'required',

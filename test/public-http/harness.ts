@@ -93,6 +93,7 @@ export function usePublicHarness(o: { env?: Record<string, string> } = {}): Publ
         SMSGATE_MIN_INTERVAL_MS: '0',
         SMS_DISPATCH_MODE: 'off',
         PUBLIC_SITE_URL: SITE_ORIGIN,
+        PUBLIC_WRITES_ENABLED: 'true',
         ...o.env,
       },
     })

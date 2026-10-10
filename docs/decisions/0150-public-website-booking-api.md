@@ -43,6 +43,9 @@ by every API process: 3 codes per number and 10 per address every 10 minutes, 5 
 joins a day per number). A refused booking still counts. The two record-creating POSTs require an `Idempotency-Key` (the site
 generates it when the sheet opens) and carry a honeypot field (`website`) that answers 202 with a fake reference and writes nothing.
 The website's `Origin` is allowed through `PUBLIC_SITE_URL`; a request without `Origin` and without a cookie was never blocked.
+The writes are closed by default (`PUBLIC_WRITES_ENABLED=false`: the same 404 as an unknown route, before validation, on both
+hosts): they open only with live online booking, once the SMS tablet sends texts and the 2026-10-10 public-surface review's
+findings on unverified writes, enumeration and limits are resolved.
 Expired codes, tokens and old windows are dropped by `maintenance.purge`.
 
 ## No card capture, the fee, and memberships

@@ -1144,7 +1144,9 @@ us to change your plan." for a number with a live membership; the honeypot answe
 ### 26.5 Origin, environment, retention, tests
 
 The public POSTs carry the website's `Origin`: it must be allowed, so the API lists `PUBLIC_SITE_URL` (`https://oasisautospanj.com`)
-beside the dashboard's origins (a request without `Origin` and without a cookie is still allowed, as before). `maintenance.purge`
+beside the dashboard's origins (a request without `Origin` and without a cookie is still allowed, as before). The four POSTs
+answer the same 404 as an unknown route (before validation) while `PUBLIC_WRITES_ENABLED` is false, the default: they open
+together with the website's `SITE_BOOKING=live` once the SMS tablet sends texts; the reads are always open. `maintenance.purge`
 drops codes and tokens a day past their expiry and limit windows two days old. Tests: `test/public/availability.test.ts` (pure),
 `test/public-http/*.test.ts` (the real app over the design seed: contract, reads, codes, bookings including the last-bay race and
 the ops snapshot, joins), the authz matrix, `test/ops-kit/deploy-site.test.ts` (the nginx host, in a real nginx when installed).
