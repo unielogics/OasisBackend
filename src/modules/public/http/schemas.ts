@@ -136,6 +136,8 @@ export const MembershipBody = z
     vehicles: z.array(z.object({ car: Short(80), plate: Short(16).optional() }).strict()).min(1).max(5),
     smsConsent: z.boolean(),
     agree: z.literal(true),
+    /** From POST /public/otp/verify: the owner of a number the shop already has joins with it (otherwise staff confirm first). */
+    memberToken: z.string().regex(TOKEN_SHAPE).optional(),
     website: z.string().max(200).default(''),
   })
   .strict()

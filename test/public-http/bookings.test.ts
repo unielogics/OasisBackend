@@ -5,7 +5,8 @@
 import { describe, expect, it } from 'vitest'
 import { sql } from 'kysely'
 import { createManualMembership } from '../../src/modules/memberships/service.js'
-import { upsertCustomerByPhone } from '../../src/modules/customers/service.js'
+import { upsertCustomerByPhone, upsertVehicleByPlate } from '../../src/modules/customers/service.js'
+import { loadCustomerTarget } from '../../src/modules/messaging/db/recipients.js'
 import { bookingBody, json, PHONES, usePublicHarness } from './harness.js'
 
 const h = usePublicHarness()
@@ -93,18 +94,43 @@ describe('a guest booking', () => {
     expect((await h.texts(PHONES.extra))[0]!.body).toMatch(/^Booked: Express Hand Wash, today at 2:00 PM\. Reply here to change it\./)
   })
 
-  it('links an existing customer by phone without touching their name or email, and records consent only when given', async () => {
-    const existing = await h.db.transaction().execute((tx) =>
-      upsertCustomerByPhone(tx, { newId: h.newId, now: h.clock.now(), fullName: 'Nina Original', phone: PHONES.guest, email: 'original@example.test', source: 'dashboard' }),
-    )
-    const r = await book(bookingBody(h, { name: 'Somebody Else', email: 'other@example.test', smsConsent: false }))
+  it('an unverified booking with the number of an existing customer links the appointment and changes nothing on the record', async () => {
+    const existing = await h.db.transaction().execute(async (tx) => {
+      // a placeholder entered at the desk: no name, no email, never opted in, one car (deleted since)
+      const { customer } = await upsertCustomerByPhone(tx, { newId: h.newId, now: h.clock.now(), phone: PHONES.guest, source: 'dashboard' })
+      await upsertVehicleByPlate(tx, { newId: h.newId, customerId: customer.id, year: 2015, make: 'Honda', model: 'Fit', plate: 'NJ-NINA1' })
+      await sql`update vehicles set deleted_at = app_now() where customer_id = ${customer.id}`.execute(tx)
+      return customer
+    })
+    const before = await h.db.selectFrom('customers').selectAll().where('id', '=', existing.id).executeTakeFirstOrThrow()
+    const carsBefore = await h.db.selectFrom('vehicles').selectAll().where('customer_id', '=', existing.id).execute()
+    const r = await book(bookingBody(h, { name: 'Somebody Else', email: 'attacker@example.test', smsConsent: true, vehicle: { label: '2024 Lamborghini Urus', plate: 'NJ-NINA1' } }))
     expect(r.statusCode, r.body).toBe(201)
-    const c = await h.db.selectFrom('customers').selectAll().where('id', '=', existing.customer.id).executeTakeFirstOrThrow()
-    expect(c).toMatchObject({ full_name: 'Nina Original', email: 'original@example.test', sms_opted_in: false })
+    const [a] = await appointments()
+    expect(a!.customer_id).toBe(existing.id)
+    const after = await h.db.selectFrom('customers').selectAll().where('id', '=', existing.id).executeTakeFirstOrThrow()
+    expect(after).toEqual(before) // name, email, consent, version: all as they were
+    expect(await h.db.selectFrom('vehicles').selectAll().where('customer_id', '=', existing.id).execute()).toEqual(carsBefore)
+    expect((await h.db.selectFrom('appointments').select('vehicle_id').where('id', '=', a!.id).executeTakeFirstOrThrow()).vehicle_id).toBeNull()
     expect(await h.db.selectFrom('customers').select('id').where('synthetic', '=', false).execute()).toHaveLength(1)
-    // no consent: the confirmation is not sent (policy not_opted_in), and the answer says so
-    expect(json(r).confirmationBy).toBe('none')
+    // staff see what was typed, marked as not verified, on the appointment's internal log
+    const notes = await h.db.selectFrom('activity_log').select(['text', 'channels']).where('appointment_id', '=', a!.id).execute()
+    const note = notes.find((n) => /not verified/.test(n.text))
+    expect(note, JSON.stringify(notes)).toBeDefined()
+    expect(note!.text).toContain('Somebody Else')
+    expect(note!.text).toContain('attacker@example.test')
+    expect(note!.text).toContain('2024 Lamborghini Urus')
+    expect(note!.channels).toEqual(['internal'])
+    // never opted in (and the website's consent is not recorded on an unverified number), so nothing is texted
     expect(await h.texts(PHONES.guest)).toEqual([])
+  })
+
+  it('records the website’s consent as the transactional kind: confirmations and reminders yes, marketing never', async () => {
+    expect((await book(bookingBody(h))).statusCode).toBe(201)
+    const c = await h.db.selectFrom('customers').select(['id', 'sms_opted_in', 'sms_opt_in_source']).where('phone_e164', '=', PHONES.guest).executeTakeFirstOrThrow()
+    expect(c).toMatchObject({ sms_opted_in: true, sms_opt_in_source: 'online' })
+    const target = await loadCustomerTarget(h.db, h.locationId, c.id)
+    expect(target!.recipient.consentSource).toBe('web_booking')
   })
 
   it('suppresses the confirmation for a number off the allowlist outside production, and still books', async () => {
@@ -125,8 +151,10 @@ describe('a member booking', () => {
     expect(json(r)).toMatchObject({ member: true, deposit: { dueCents: 0, how: 'counter' }, confirmationBy: 'sms' })
     const texts = (await h.texts(PHONES.member)).filter((t) => t.klass === 'booking_confirmed_web')
     expect(texts[0]!.body).toMatch(/^Booked: Express Hand Wash, today at 1:00 PM\. Members never pay a booking fee\. Reply here to change it\./)
-    const c = await h.db.selectFrom('customers').select(['full_name', 'email']).where('id', '=', id).executeTakeFirstOrThrow()
-    expect(c).toEqual({ full_name: 'Mia Membership', email: 'mia2@example.test' })
+    const c = await h.db.selectFrom('customers').select(['full_name', 'email', 'sms_opted_in']).where('id', '=', id).executeTakeFirstOrThrow()
+    expect(c).toEqual({ full_name: 'Mia Membership', email: 'mia2@example.test', sms_opted_in: true })
+    // the verified owner's car goes on their record
+    expect(await h.db.selectFrom('vehicles').select(['make', 'plate']).where('customer_id', '=', id).execute()).toEqual([{ make: 'Tesla', plate: 'NJ-NINA1' }])
     const activity = await h.db.selectFrom('activity_log').select('text').orderBy('id').execute()
     expect(activity.at(-1)!.text).toBe('Booked on the website · member, no booking fee')
   })

@@ -4,7 +4,7 @@ import '../schema.js'
 import '../../customers/schema.js'
 
 const CONSENT: Record<string, ConsentSource> = {
-  online: 'web_form',
+  online: 'web_booking', // the website's booking and join forms: transactional consent only (canSend.ts)
   squarespace: 'web_form',
   dashboard: 'staff_attested',
   walk_in: 'staff_attested',

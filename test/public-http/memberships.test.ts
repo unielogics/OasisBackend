@@ -4,6 +4,8 @@
 import { describe, expect, it } from 'vitest'
 import { sql } from 'kysely'
 import { ensurePlans } from '../../src/modules/memberships/plans.js'
+import { createManualMembership } from '../../src/modules/memberships/service.js'
+import { upsertCustomerByPhone } from '../../src/modules/customers/service.js'
 import { json, PHONES, usePublicHarness } from './harness.js'
 
 const h = usePublicHarness()
@@ -25,6 +27,77 @@ const joinBody = (extra: Record<string, unknown> = {}): Record<string, unknown> 
 const join = (body: Record<string, unknown>, o: Parameters<typeof h.post>[2] = {}) => h.post('public/memberships', body, o)
 
 const notifications = () => h.db.selectFrom('notifications').select(['kind', 'title', 'body', 'employee_id', 'entity_type', 'entity_id']).orderBy('created_at').execute()
+
+async function tokenFor(phone: string): Promise<string> {
+  const { challengeId } = json(await h.post('public/otp', { phone }))
+  const r = await h.post('public/otp/verify', { challengeId, code: await h.codeSentTo(phone, challengeId) })
+  expect(r.statusCode, r.body).toBe(200)
+  return json(r).memberToken as string
+}
+
+async function existingCustomer(phone: string, o: { member?: boolean } = {}): Promise<string> {
+  return h.db.transaction().execute(async (tx) => {
+    const { customer } = await upsertCustomerByPhone(tx, { newId: h.newId, now: h.clock.now(), fullName: 'Olga Owner', phone, email: 'olga@example.test', source: 'dashboard' })
+    if (o.member)
+      await createManualMembership(tx, { locationId: h.locationId, clock: h.clock, newId: h.newId }, { customerId: customer.id, planKey: 'premium', planLabel: 'Gold' }, { userId: 'test', name: 'Test', audit: {} })
+    return customer.id
+  })
+}
+
+describe('joining with the number of an existing customer', () => {
+  it('without a code: the same 201, nothing on the record changes, no membership, no text; staff are asked to confirm with the owner', async () => {
+    const id = await existingCustomer(PHONES.extra)
+    const before = await h.db.selectFrom('customers').selectAll().where('id', '=', id).executeTakeFirstOrThrow()
+    const r = await join(joinBody({ phone: PHONES.extra, name: 'Mallory Other', email: 'mallory@example.test', smsConsent: true }))
+    expect(r.statusCode, r.body).toBe(201)
+    expect(json(r)).toMatchObject({ status: 'pending_payment', next: 'checkout_link_by_sms', tier: 'gold', plan: 'Gold', confirmationBy: 'sms' })
+    expect(json(r).memberRef).toMatch(/^OAS-M-[0-9A-F]{8}$/)
+    expect(await h.db.selectFrom('customers').selectAll().where('id', '=', id).executeTakeFirstOrThrow()).toEqual(before)
+    expect(await h.db.selectFrom('vehicles').select('id').where('customer_id', '=', id).execute()).toEqual([])
+    expect(await h.db.selectFrom('memberships').select('id').execute()).toEqual([])
+    expect(await h.texts(PHONES.extra)).toEqual([])
+    const n = await notifications()
+    expect(n.length).toBeGreaterThan(0)
+    expect(n[0]!.kind).toBe('membership.web_join')
+    expect(n[0]!.title).toBe('Website join to confirm: Olga Owner (Gold)')
+    expect(n[0]!.body).toContain('not verified')
+    expect(n[0]!.body).toContain('Mallory Other')
+    expect(n[0]!.body).toContain('mallory@example.test')
+    expect(n[0]!.body).toContain(json(r).memberRef)
+    expect(n[0]).toMatchObject({ entity_type: 'customer', entity_id: id })
+  })
+
+  it('without a code, for a number that already has a membership: the same 201 as anyone (nothing reveals the membership)', async () => {
+    const id = await existingCustomer(PHONES.extra, { member: true })
+    const r = await join(joinBody({ phone: PHONES.extra }))
+    expect(r.statusCode, r.body).toBe(201)
+    expect(Object.keys(json(r)).sort()).toEqual(['confirmationBy', 'memberRef', 'next', 'plan', 'status', 'tier'])
+    expect(await h.db.selectFrom('memberships').select('id').where('customer_id', '=', id).execute()).toHaveLength(1)
+    const n = await notifications()
+    expect(n[0]!.body).toContain('They already have a Gold membership (active)')
+  })
+
+  it('with a code for that number: the pending membership, the vehicles, the corrected name and email; a second join is 409', async () => {
+    const id = await existingCustomer(PHONES.joiner)
+    const memberToken = await tokenFor(PHONES.joiner)
+    const r = await join(joinBody({ memberToken, name: 'Olga Owner-Smith', email: 'olga2@example.test' }))
+    expect(r.statusCode, r.body).toBe(201)
+    const m = await h.db.selectFrom('memberships').select(['customer_id', 'status']).executeTakeFirstOrThrow()
+    expect(m).toEqual({ customer_id: id, status: 'pending' })
+    expect(await h.db.selectFrom('customers').select(['full_name', 'email', 'sms_opted_in', 'sms_opt_in_source']).where('id', '=', id).executeTakeFirstOrThrow()).toEqual({
+      full_name: 'Olga Owner-Smith',
+      email: 'olga2@example.test',
+      sms_opted_in: true,
+      sms_opt_in_source: 'online',
+    })
+    expect(await h.db.selectFrom('vehicles').select('plate').where('customer_id', '=', id).orderBy('created_at').execute()).toEqual([{ plate: 'JO-1' }, { plate: null }])
+    expect((await h.texts(PHONES.joiner)).map((t) => t.klass)).toEqual(['otp_code', 'membership_welcome_web'])
+    const again = await join(joinBody({ memberToken, tier: 'vip' }))
+    expect(json(again)).toMatchObject({ status: 409, code: 'PUBLIC_ALREADY_MEMBER' })
+    // a token for another number is refused
+    expect(json(await join(joinBody({ memberToken, phone: PHONES.extra })))).toMatchObject({ status: 422, code: 'PUBLIC_TOKEN_PHONE_MISMATCH' })
+  })
+})
 
 describe('joining on the website', () => {
   it('with an empty product map: the membership stays pending, staff are asked to send the link, an alert is open, the person is texted', async () => {
@@ -82,11 +155,12 @@ describe('joining on the website', () => {
     expect(await h.db.selectFrom('sqsp_alerts').select('id').execute()).toEqual([])
   })
 
-  it('refuses a second membership for the number (409, the design’s voice) and bad input (422), writing nothing', async () => {
+  it('a second join for the number without a code answers the same 201, creates nothing and asks staff to confirm (no 409 oracle); bad input is 422', async () => {
     expect((await join(joinBody())).statusCode).toBe(201)
     const again = await join(joinBody({ tier: 'vip' }))
-    expect(again.statusCode).toBe(409)
-    expect(json(again)).toMatchObject({ code: 'PUBLIC_ALREADY_MEMBER', detail: 'This number already has a membership. Text us to change your plan.' })
+    expect(again.statusCode, again.body).toBe(201)
+    expect(Object.keys(json(again)).sort()).toEqual(['confirmationBy', 'memberRef', 'next', 'plan', 'status', 'tier'])
+    expect(json(again)).toMatchObject({ status: 'pending_payment', next: 'checkout_link_by_sms', tier: 'vip', plan: 'VIP', confirmationBy: 'sms' })
     expect(await h.db.selectFrom('memberships').select('id').execute()).toHaveLength(1)
     for (const [extra, path] of [
       [{ agree: false }, 'body.agree'],

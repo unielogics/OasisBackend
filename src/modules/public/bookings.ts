@@ -147,6 +147,11 @@ export async function createWebBooking(
 
   const start = wallToInstant(input.date, input.startMin, loc.tz)
   const existing = await findCustomerByPhone(tx, phone)
+  // The record of a customer the shop already has changes only when the caller proved the number (a member token issued for this
+  // customer) or by staff. Anyone else's booking is linked to that customer and leaves the record alone: no name, email, consent
+  // or vehicle from a form that proves nothing about who typed the number (review 2026-10-10).
+  const proven = verified !== null && existing !== undefined && verified.customerId === existing.id
+  const linkOnly = existing !== undefined && !proven
   const member = existing ? (await activeMembership(tx, existing.id)) !== undefined : false
   const fee = await getSetting(tx, loc.id, 'booking.guest_fee')
   const dueCents = member ? 0 : fee.value.cents
@@ -170,8 +175,8 @@ export async function createWebBooking(
   let booked
   try {
     booked = await createAppointment(tx, c, actor, {
-      customer: { name: input.name, phone, email: input.email ?? null, smsOptIn: input.smsConsent },
-      vehicle: vehicleOf(input.vehicle),
+      customer: linkOnly ? { id: existing.id } : { name: input.name, phone, email: input.email ?? null, smsOptIn: input.smsConsent },
+      vehicle: linkOnly ? null : vehicleOf(input.vehicle),
       serviceId: pkg.id,
       addonIds: addons.map((a) => a.id),
       start,
@@ -192,6 +197,8 @@ export async function createWebBooking(
     throw e
   }
   const appointmentId = booked.appointment.id
+  if (linkOnly)
+    await logActivity(tx, c, { appointmentId, text: unverifiedDetails(input), channels: ['internal'], actor })
   await logActivity(tx, c, {
     appointmentId,
     text: member
@@ -215,6 +222,19 @@ export async function createWebBooking(
     when: `${when === 'today' ? 'Today' : when === 'tomorrow' ? 'Tomorrow' : when} · ${time}`,
     member,
   }
+}
+
+/** What an unverified caller typed for a customer the shop already has, for staff to confirm (nothing of it reaches the record). */
+function unverifiedDetails(input: WebBookingInput): string {
+  const v = vehicleOf(input.vehicle)
+  const car = v ? [v.year, v.make, v.model].filter((x) => x !== null && x !== '').join(' ') + (v.plate ? ` (${v.plate})` : '') : null
+  const parts = [
+    `name "${input.name.trim()}"`,
+    input.email?.trim() ? `email "${input.email.trim()}"` : null,
+    car ? `vehicle "${car.trim()}"` : null,
+    `texts ${input.smsConsent ? 'yes' : 'no'}`,
+  ].filter(Boolean)
+  return `Booked on the website with the number of this customer, not verified by a code, so their record was left as it is. Typed: ${parts.join(', ')}. Confirm with the customer before changing anything.`
 }
 
 /** Bays still free for the slot once this booking is in (the engine's count, this booking included in the intervals). */

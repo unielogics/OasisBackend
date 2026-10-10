@@ -5,7 +5,12 @@ import { DEFAULT_QUIET_HOURS, isQuietHour, quietHoursEnd, type QuietHoursConfig 
 // canSendSms: the single gate every outbound SMS passes. Order matters: a hard "no" (invalid number, opt-out, synthetic,
 // allowlist, consent) always beats a "hold" (quiet hours), so held messages are only ever ones that are allowed to go.
 
-export type ConsentSource = 'web_form' | 'staff_attested' | 'inbound_reply' | 'import' | 'unknown'
+/**
+ * Where an opt-in came from. `web_booking` is the website's booking and join forms (customers.sms_opt_in_source `online`): consent to
+ * the texts about that booking or membership (confirmations, reminders, receipts), never marketing-grade, because the form proves
+ * nothing about who typed the number (review 2026-10-10). `web_form` is a signed-up web form (Squarespace).
+ */
+export type ConsentSource = 'web_form' | 'web_booking' | 'staff_attested' | 'inbound_reply' | 'import' | 'unknown'
 
 export interface SmsRecipient {
   kind: 'customer' | 'employee'
