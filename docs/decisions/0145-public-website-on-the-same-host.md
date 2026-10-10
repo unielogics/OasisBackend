@@ -87,6 +87,23 @@ The adversarial review of the public surface (2026-10-10) upheld three findings 
   then showed no current release. `previous` now moves only after the new release is healthy, and `--list` shows
   `<- current, previous` when the two links meet.
 
+**Note 2026-10-10 (independent verification of the amendment: PARTIAL, two gaps closed).** (1) Killing the build user's processes
+does not stop work queued for later: the host runs `atd` (at 3.1.23) with an empty `/etc/at.deny`, so a dependency could queue an
+`at` or `batch` job that outlives the kill loop and races the copy. `install.sh` now puts `oasis` and `oasis-site` into
+`/etc/at.deny` (and `/etc/cron.deny` where cron is installed or the file exists; other entries kept, `0600 root:root`, idempotent,
+an `at.allow`/`cron.allow` naming either user is reported), and `site-deploy.sh` refuses to build, and after the build refuses to
+copy, while `atq` (as root) lists a job of `oasis-site`, `crontab -l -u oasis-site` shows anything, or `oasis-site` lingers (a
+systemd user manager). The kill loop now ends only after two consecutive empty `pgrep` passes, and runs once more after the
+scheduled-work check. (2) `cp -R -P` refuses a link only at the last component of each path it opens: a directory of `dist/`
+swapped for a link while `cp` walks it is followed (reproduced with strace: a root `0600` `privkey.pem` landed in the copy as a
+regular file, and the `chmod 0644` and the copy's verification did not notice). The copy now keeps owners and modes
+(`cp -R -P --preserve=mode,ownership,timestamps`), and the whole copy is rejected (kept as `<id>.failed`) when any entry in it is not
+a directory or regular file owned by `oasis-site`, before root writes `REVISION`, chowns it to root or changes a mode. Only then is
+it chowned to root and its modes set. Tests: a scheduled job (at, batch, running, crontab, linger; and one the build queues) refuses
+the deploy; a link or a FIFO appearing in the copy, and (in a user namespace, where a file of the real root shows as a foreign uid) a
+foreign-owned file bind-mounted into the copy, are rejected before `REVISION` or any mode change; the `at.deny` rendering keeps
+foreign entries and is idempotent.
+
 Not changed: the backend and dashboard builds (`deploy.sh`) still run as `oasis` (ADR 0140): their packages run as `oasis` at runtime
 anyway. Possible later hardening, not done: running the site build in a transient systemd unit with `PrivateNetwork=` after an
 offline `pnpm fetch`.

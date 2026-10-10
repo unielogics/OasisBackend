@@ -413,8 +413,10 @@ names; the certificate needs DNS to point here):
    `curl -s https://oasisautospanj.com/api/v1/public/hours` is the hours JSON, `curl -sI https://oasisautospanj.com/api/v1/customers` is 404.
 4. The mirror: `sudo git init --bare /opt/oasis/git/site.git && sudo chown -R root:root /opt/oasis/git && sudo chmod -R go-w /opt/oasis/git`.
    The website is built by its own user `oasis-site` (no shell, not in the group oasis, home `/var/lib/oasis-site`), which
-   `install.sh --site-domain` creates; check `id oasis-site` (no `oasis` in its groups) and `sudo -u oasis-site test -r
-   /etc/oasis/common.env || echo isolated`.
+   `install.sh --site-domain` creates; check `id oasis-site` (no `oasis` in its groups), `sudo -u oasis-site test -r
+   /etc/oasis/common.env || echo isolated`, and `sudo grep -x oasis-site /etc/at.deny` (install.sh denies `at`/`batch`, and cron
+   where it is installed, to `oasis` and `oasis-site`: the deploy kills the build user's processes before taking its output, and a
+   job queued for later would escape that).
    From then on `install.sh` is re-run with the same options whenever the kit's templates change (section 2), the `--site-*` ones included.
 
 **Publish and deploy** (as the operator, from the working copy in `~ec2-user/oasis/site`, like the application's mirrors):
@@ -452,6 +454,17 @@ health check runs, exit 3 when it fails. Nothing is rebuilt and nginx is not rel
   (nothing changed). `sudo pkill -KILL -u oasis-site` and run it again.
 * "hard link in the output" / "a file the build did not create": the build wrote something other than its own regular files into
   `dist/`; fix the site repository (`releases/<id>.failed` shows what).
+* "oasis-site has work scheduled to run later, which no deploy may race": something running as `oasis-site` (a dependency of the
+  site) queued an `at`/`batch` job, a crontab or a lingering user manager. Each line names the command that removes it
+  (`sudo atq` then `sudo atrm <job>`; `sudo crontab -r -u oasis-site`; `sudo loginctl disable-linger oasis-site`). Then re-run
+  `install.sh` with the same options as last time (it keeps `oasis` and `oasis-site` in `/etc/at.deny` and `/etc/cron.deny`; check
+  `sudo cat /etc/at.deny`), find out which package of the site did it before deploying again, and deploy. Refused before the build,
+  nothing was built; after it, nothing was copied out (the build is in `releases/<id>.failed`).
+* "the copy of dist/ holds what the build user oasis-site did not make": an entry of the copy is another user's file, a link or a
+  special file: a path of the build was swapped while root copied it, or something outside the build wrote into it. Nothing went
+  live. Treat it as an attack: `releases/<id>.failed/release` shows the entries (owner and path in the message); find what is still
+  running or scheduled as `oasis-site` (`ps -u oasis-site`, `sudo atq`, `sudo crontab -l -u oasis-site`) and which dependency of
+  the site did it before deploying again.
 
 ### The host cannot resolve its own new name (health check: "answered HTTP 000")
 

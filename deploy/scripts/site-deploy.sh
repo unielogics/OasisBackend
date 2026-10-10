@@ -11,15 +11,22 @@
 #      with an environment of its own (env -i): pnpm install --frozen-lockfile && pnpm build, HOME=/var/lib/oasis-site,
 #      SITE_URL=https://<domain> and SITE_HOURS_JSON=<a snapshot of the API's /api/v1/public/hours on this host, fetched just before by
 #      root into the root-owned <id>.partial; --skip-hours or an API that does not answer: no snapshot, a warning>
-#   5. then every process of oasis-site is killed and <id>.partial becomes root-only (0700): nothing can change the build tree any more.
-#      Root copies dist/ out of it (cp -R -P: links are copied as links, never followed) into a fresh directory of its own, refusing a
-#      hard link or a file the build user does not own, and verifies THE COPY before anything is served: index.html and 404.html present,
-#      index larger than 1 KB and containing the marker text, no localhost/loopback or development-port URL in any html/js/css, no inline
-#      <script> (the Content-Security-Policy allows none; JSON-LD data blocks are not scripts), no symbolic link or special file, no file
-#      over 25 MB, total between 50 KB and 200 MB. A failure keeps the build in <id>.failed (root-only) and changes nothing
-#   6. the copy becomes <site root>/releases/<id> with a REVISION record (site=<commit>, built=<time>, hours=<fetched|skipped|unavailable>),
-#      owned by root, read-only for everyone (nginx reads it); the build tree (sources, node_modules) is removed. Root never writes into,
-#      changes the mode of or renames anything in the build user's tree
+#      Before that it refuses to start while oasis-site has work scheduled to run later: an at or batch job (atq), a crontab
+#      (crontab -l -u oasis-site) or a lingering systemd user manager (install.sh puts oasis and oasis-site in /etc/at.deny and,
+#      with cron installed, /etc/cron.deny)
+#   5. then every process of oasis-site is killed (until two passes in a row find none), the scheduled-work check runs again (a job the
+#      build queued: refused, nothing is copied) and <id>.partial becomes root-only (0700): nothing can change the build tree any more.
+#      Root copies dist/ out of it (cp -R -P --preserve=mode,ownership,timestamps: links are copied as links, owners as they are) into a
+#      fresh directory of its own, refusing a hard link or a file the build user does not own, then REJECTS THE COPY when anything in it
+#      is not a directory or regular file owned by oasis-site (a path swapped for a link while root copied makes cp follow it, and what it
+#      copies then is someone else's), before any REVISION, chown or mode change. It verifies the copy before anything is served:
+#      index.html and 404.html present, index larger than 1 KB and containing the marker text, no localhost/loopback or development-port
+#      URL in any html/js/css, no inline <script> (the Content-Security-Policy allows none; JSON-LD data blocks are not scripts), no
+#      symbolic link or special file, no file over 25 MB, total between 50 KB and 200 MB. A failure keeps the build in <id>.failed
+#      (root-only) and changes nothing
+#   6. only then is the copy chowned to root; it becomes <site root>/releases/<id> with a REVISION record (site=<commit>, built=<time>,
+#      hours=<fetched|skipped|unavailable>), read-only for everyone (nginx reads it); the build tree (sources, node_modules) is removed.
+#      Root never writes into, changes the mode of or renames anything in the build user's tree
 #   7. current -> the new release (atomic). No nginx reload: it follows the link
 #   8. health, through nginx on this host: https://<domain>/ answers 200 with the marker, https://www.<domain>/ answers 301 to the apex,
 #      /api/v1/public/hours answers 200 (a warning only: the site works without live hours). Healthy: previous -> the release before.
@@ -27,8 +34,8 @@
 #   9. keeps SITE_KEEP releases (default 4) plus current and previous, and 2 failed builds
 # --rollback: current -> previous (or --to ID), the same health check (exit 3 when it fails). --list: the releases.
 # Run as root from the root-owned kit: sudo /usr/local/lib/oasis/deploy/scripts/site-deploy.sh. One at a time (a lock).
-# SITE_HEALTH_CMD, SITE_HOURS_URL, OASIS_SITE_RUN_AS, OASIS_SITE_REAP_CMD, OASIS_CHOWN and OASIS_KIT_TRUST_UID replace the commands it
-# calls, OASIS_SITE_BUILD_ENV_PASS names variables to pass into the build, OASIS_SITE_CHECK_ISOLATION=1 forces the isolation check (tests).
+# SITE_HEALTH_CMD, SITE_HOURS_URL, OASIS_SITE_RUN_AS, OASIS_SITE_REAP_CMD, OASIS_SITE_ATQ_CMD, OASIS_SITE_CRONTAB_CMD, OASIS_CHOWN and
+# OASIS_KIT_TRUST_UID replace the commands it calls, OASIS_SITE_BUILD_ENV_PASS names variables to pass into the build, OASIS_SITE_CHECK_ISOLATION=1 forces the isolation check (tests).
 set -euo pipefail
 OASIS_HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../lib/common.sh
@@ -271,7 +278,8 @@ as_site_read() {
   fi
 }
 # site_reap: no process of the build user outlives the build (a dependency could leave one behind to change the output after root
-# looked at it, or the next build). Every process of that user is killed, until none is left.
+# looked at it, or the next build). Every process of that user is killed until two passes in a row find none: a process forking while
+# pkill walks the process table can leave a child the pass did not see, and one empty pgrep could come just before that child shows.
 site_reap() {
   REAPED=1
   if [[ -n "${OASIS_SITE_REAP_CMD:-}" ]]; then
@@ -280,14 +288,54 @@ site_reap() {
     return
   fi
   ((SITE_SEPARATE)) || return 0
-  local i
-  for ((i = 0; i < 50; i++)); do
-    pgrep -U "$SITE_USER" >/dev/null 2>&1 || pgrep -u "$SITE_USER" >/dev/null 2>&1 || return 0
-    pkill -KILL -U "$SITE_USER" 2>/dev/null || true
-    pkill -KILL -u "$SITE_USER" 2>/dev/null || true
+  local i empty=0
+  for ((i = 0; i < 100; i++)); do
+    if pgrep -U "$SITE_USER" >/dev/null 2>&1 || pgrep -u "$SITE_USER" >/dev/null 2>&1; then
+      empty=0
+      pkill -KILL -U "$SITE_USER" 2>/dev/null || true
+      pkill -KILL -u "$SITE_USER" 2>/dev/null || true
+    else
+      empty=$((empty + 1))
+      ((empty < 2)) || return 0
+    fi
     sleep 0.2
   done
   return 1
+}
+# site_scheduled: what the build user left to run after the reaping, one line each with how to remove it. Killing its processes does
+# not stop work that atd, crond or a systemd user manager starts later as that user: such a job could change the build tree while root
+# copies it, or swap a directory of it for a link mid-copy (cp then follows it). install.sh denies at and cron to oasis and oasis-site
+# (/etc/at.deny, /etc/cron.deny); this is the check that nothing got through anyway. at and batch jobs: atq as root lists every user's
+# (job, date, queue, user; queue "=" is a job running now). A crontab: crontab -l -u. Lingering: a user manager that runs its own
+# timers and services. As root on a real host only; the OASIS_SITE_*_CMD stand-ins make the tests ask too.
+site_scheduled() {
+  local out
+  if [[ -n "${OASIS_SITE_ATQ_CMD:-}" ]] || { ((SITE_SEPARATE)) && have atq; }; then
+    # shellcheck disable=SC2086
+    if ! out=$(${OASIS_SITE_ATQ_CMD:-atq} 2>&1); then
+      printf 'the at queue could not be listed, so it may hold its jobs (atq: %s)\n' "$(tr '\n' ' ' <<<"$out")"
+    else
+      awk -v u="$SITE_USER" '$NF == u { printf "at or batch job %s (queue %s): sudo atrm %s\n", $1, $(NF - 1), $1 }' <<<"$out"
+    fi
+  fi
+  if [[ -n "${OASIS_SITE_CRONTAB_CMD:-}" ]] || { ((SITE_SEPARATE)) && have crontab; }; then
+    # crontab -l fails ("no crontab for ...") when there is none
+    # shellcheck disable=SC2086
+    if out=$(${OASIS_SITE_CRONTAB_CMD:-crontab} -l -u "$SITE_USER" 2>/dev/null) && grep -q '[^[:space:]]' <<<"$out"; then
+      printf 'a crontab (sudo crontab -l -u %s): sudo crontab -r -u %s\n' "$SITE_USER" "$SITE_USER"
+    fi
+  fi
+  if [[ -e "$OASIS_ROOT_PREFIX/var/lib/systemd/linger/$SITE_USER" ]]; then
+    printf 'lingering (a systemd user manager that runs its own timers and services): sudo loginctl disable-linger %s\n' "$SITE_USER"
+  fi
+}
+# refuse_scheduled WHAT_HAPPENED: dies listing site_scheduled's findings, if any
+refuse_scheduled() {
+  local found
+  found=$(site_scheduled)
+  [[ -z "$found" ]] || die "$SITE_USER has work scheduled to run later, which no deploy may race:
+$(sed 's/^/  - /' <<<"$found")
+$1 Remove it, then deploy again (install.sh with the same options as last time keeps $SITE_USER in /etc/at.deny and /etc/cron.deny)."
 }
 if ((SITE_SEPARATE)); then
   site_uid=$(id -u "$SITE_USER" 2>/dev/null) || die "there is no user $SITE_USER, which builds the website: re-run install.sh with the same options as last time (--site-domain creates it)"
@@ -310,6 +358,9 @@ if ((SITE_SEPARATE)) || [[ "${OASIS_SITE_CHECK_ISOLATION:-0}" == 1 ]]; then
     die "could not run a command as $SITE_USER"
   [[ -z "$exposed" ]] || die "the website build user $SITE_USER can read (or enter) $(tr '\n' ' ' <<<"$exposed")and must not: its builds run third-party code. Re-run install.sh --site-domain with the same options as last time; /etc/oasis must be 0750 root:$OASIS_USER, /var/lib/oasis 0750 and $SITE_USER outside the group $OASIS_USER"
 fi
+
+# nothing of the build user's may be waiting to run while root works on its tree
+refuse_scheduled "Nothing was built and nothing changed."
 
 # --- 4. export and build as the build user ------------------------------------------------------------------------------------------
 if [[ "$DRY_RUN" == 1 ]]; then
@@ -359,10 +410,19 @@ as_site env "${build_env[@]}" bash -c 'cd "$1" && pnpm install --frozen-lockfile
 site_reap || die "processes of $SITE_USER are still running after the build (ps -u $SITE_USER); nothing was changed. The build is kept in $REL.failed"
 chmod 0700 "$PART"
 ((build_rc == 0)) || die "the website build failed; nothing was changed. The build is kept in $REL.failed for inspection"
+# a job the build queued would run during or after the copy: refused before anything is copied, and the reaping runs once more for
+# anything such a job started meanwhile
+refuse_scheduled "Nothing was copied out of the build and nothing changed; the build is kept in $REL.failed for inspection."
+site_reap || die "processes of $SITE_USER are still running after the build (ps -u $SITE_USER); nothing was changed. The build is kept in $REL.failed"
 
 # --- 5. copy the output out of the build tree, then verify the copy ----------------------------------------------------------------------
-# Root reads the build tree but never writes into it, changes a mode in it or follows a link in it: cp -R -P copies a symbolic link as
-# a link (refused below), and the copy is a fresh directory inside the root-only $PART.
+# Root reads the build tree but never writes into it or changes a mode in it, and the copy is a fresh directory inside the root-only
+# $PART. cp -R -P copies a symbolic link as a link (refused below), but only at the last component of each path it opens: a directory
+# of dist/ swapped for a link while cp walks it is followed, and cp would copy what the link points at (review 2026-10-10: a root 0600
+# private key landed in the copy as a plain file, and the chmod 0644 and the checks below took it for the build's). So nothing of the
+# build user's may run during the copy (the reaping and the scheduled-work check above), and the copy keeps the owners: everything the
+# build made belongs to $SITE_USER, so anything in the copy that does not (or is not a directory or regular file) came from outside
+# the build, and the whole copy is rejected before root writes REVISION into it, chowns it or changes a mode in it.
 BUILT="$PART/src/$SITE_BUILD_DIR"
 STAGE="$PART/release"
 take_problems=()
@@ -380,12 +440,25 @@ else
   ((total <= 200 * 1024 * 1024)) || take_problems+=("total size ${total} bytes is above 200 MB")
 fi
 if ((${#take_problems[@]} == 0)); then
-  cp -R -P --preserve=timestamps -- "$BUILT" "$STAGE" || take_problems+=("copying $SITE_BUILD_DIR/ failed")
+  cp -R -P --preserve=mode,ownership,timestamps -- "$BUILT" "$STAGE" || take_problems+=("copying $SITE_BUILD_DIR/ failed")
 fi
 if ((${#take_problems[@]})); then
   die "the build's $SITE_BUILD_DIR/ is not a deployable site:
 $(printf '  - %s\n' "${take_problems[@]}")
 Nothing was changed; the build is kept in $REL.failed for inspection"
+fi
+# copy_strangers DIR: each entry that is not a directory or regular file owned by the build user ("path (type, owner uid N)"), at most 10
+copy_strangers() {
+  # (find stopped by head is not a failure: the || true keeps pipefail and set -e from ending the script without a word)
+  { find "$1" \( ! -uid "$site_uid" -o ! \( -type f -o -type d \) \) -printf '%y\t%U\t%P\n' || true; } | head -n 10 |
+    awk -F '\t' 'BEGIN { t["f"] = "file"; t["d"] = "directory"; t["l"] = "symbolic link"; t["p"] = "fifo"; t["s"] = "socket"; t["c"] = "character device"; t["b"] = "block device" }
+      { printf "%s (%s, owner uid %s)\n", ($3 == "" ? "." : $3), ($1 in t ? t[$1] : $1), $2 }'
+}
+strangers=$(copy_strangers "$STAGE")
+if [[ -n "$strangers" ]]; then
+  die "the copy of $SITE_BUILD_DIR/ holds what the build user $SITE_USER did not make (another user's file, a link or a special file: a path of the build was swapped while root copied it, or something outside the build wrote into it):
+$(sed 's/^/  - /' <<<"$strangers")
+Nothing was changed; the build is kept in $REL.failed for inspection (root only)"
 fi
 
 verify_dist() {
@@ -423,14 +496,15 @@ fi
 ok "verified $SITE_BUILD_DIR/ ($(du -sh "$STAGE" | cut -f1), $(find "$STAGE" -type f | wc -l) files)"
 
 # --- 6. the release: root-owned, read-only, world-readable; the build tree is not kept ----------------------------------------------------
-# (the copy holds only directories and regular files, checked above: nothing here can lead outside it)
+# (the copy holds only directories and regular files of the build user, checked above: nothing here can lead outside it). Root's from
+# here on (chown also drops any setuid or setgid bit), then root's REVISION and the modes
+root_own -R root:root "$STAGE"
 printf 'site=%s\nbuilt=%s\nhours=%s\n' "$SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$HOURS" >"$STAGE/REVISION"
 find "$STAGE" -type d -exec chmod 0755 {} +
 find "$STAGE" -type f -exec chmod 0644 {} +
 mv -T "$STAGE" "$REL"
 PART_ACTIVE=0
 rm -rf -- "$PART"
-root_own -R root:root "$REL"
 
 # --- 7. switch (no nginx reload: it reads through the link) and health ------------------------------------------------------------------
 # previous moves only once the new release is healthy: a release that is switched back leaves previous where it was, so --rollback

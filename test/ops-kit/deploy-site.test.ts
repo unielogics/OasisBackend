@@ -1,7 +1,7 @@
 // The public website on the same host (ADR 0145): what install.sh --site-domain renders (nginx servers, site.env, the placeholder
 // release), the rendered site in a real nginx when one is installed, site-deploy.sh end to end against a real bare mirror with
 // stand-ins for pnpm, the health check and chown, and the website probes of healthcheck.sh.
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import {
   existsSync,
   lstatSync,
@@ -51,6 +51,11 @@ const BASE_ARGS = [
   '/etc/ssl/oasis/privkey.pem',
   '--no-system',
 ]
+
+// user namespaces with mounts (unshare -rm), and a file this uid does not own to bind-mount: the foreign-file copy test needs both
+const USERNS =
+  statSync('/etc/passwd').uid !== process.getuid!() &&
+  spawnSync('unshare', ['-rm', 'mount', '--bind', '/etc/passwd', '/etc/passwd']).status === 0
 
 const stage = useStage(SITE_ARGS)
 const read = (rel: string): string => readText(path.join(stage.root, rel))
@@ -498,6 +503,49 @@ describe('install.sh --site-domain: the rendered website', () => {
     expect(plain.out).not.toMatch(/oasis-site/)
   })
 
+  it('denies at, batch and cron to oasis and oasis-site: at.deny (and cron.deny) keep their other entries, 0600 root, idempotent', async () => {
+    const t = tempDir('oasis-atdeny-')
+    cleanups.push(t.cleanup)
+    const root = t.dir
+    mkdirSync(path.join(root, 'etc'), { recursive: true })
+    // the host's own entries stay, in order (a blank line is no entry); oasis is already there once
+    writeFileSync(path.join(root, 'etc/at.deny'), '\nguest\noasis\n\nbadbot\n')
+    chmodSync(path.join(root, 'etc/at.deny'), 0o644)
+    writeFileSync(path.join(root, 'etc/cron.deny'), 'someone\n')
+    const install = () => sh(script('install.sh'), [...BASE_ARGS, ...SITE_ARGS], { OASIS_ROOT_PREFIX: root })
+    const first = await install()
+    expect(first.code, first.out).toBe(0)
+    const mode = (f: string) => (statSync(path.join(root, f)).mode & 0o777).toString(8)
+    expect(readFileSync(path.join(root, 'etc/at.deny'), 'utf8')).toBe('guest\noasis\nbadbot\noasis-site\n')
+    expect(mode('etc/at.deny')).toBe('600')
+    expect(readFileSync(path.join(root, 'etc/cron.deny'), 'utf8')).toBe('someone\noasis\noasis-site\n')
+    expect(mode('etc/cron.deny')).toBe('600')
+    // again: nothing changes
+    const second = await install()
+    expect(second.code, second.out).toBe(0)
+    expect(second.out).toMatch(/ok\s+\S+\/etc\/at\.deny unchanged/)
+    expect(second.out).toMatch(/ok\s+\S+\/etc\/cron\.deny unchanged/)
+    expect(readFileSync(path.join(root, 'etc/at.deny'), 'utf8')).toBe('guest\noasis\nbadbot\noasis-site\n')
+    // the right content with a loose mode: the mode is put back
+    chmodSync(path.join(root, 'etc/at.deny'), 0o644)
+    const third = await install()
+    expect(third.code, third.out).toBe(0)
+    expect(mode('etc/at.deny')).toBe('600')
+    // an allow file overrides the deny file: one that lets either user in is reported
+    writeFileSync(path.join(root, 'etc/at.allow'), 'oasis-site\n')
+    const allowed = await install()
+    expect(allowed.code, allowed.out).toBe(0)
+    expect(allowed.out).toMatch(/ \/etc\/at\.allow exists and lists oasis-site/)
+    // without cron.deny and without crontab on this host, no cron.deny is made
+    const fresh = tempDir('oasis-atdeny-fresh-')
+    cleanups.push(fresh.cleanup)
+    const r = await sh(script('install.sh'), [...BASE_ARGS, ...SITE_ARGS], { OASIS_ROOT_PREFIX: fresh.dir })
+    expect(r.code, r.out).toBe(0)
+    expect(readFileSync(path.join(fresh.dir, 'etc/at.deny'), 'utf8')).toBe('oasis\noasis-site\n')
+    const hasCrontab = spawnSync('bash', ['-c', 'command -v crontab']).status === 0
+    expect(existsSync(path.join(fresh.dir, 'etc/cron.deny'))).toBe(hasCrontab)
+  })
+
   it('rejects a www name, the dashboard name, a missing certificate pair, and a dry run creates nothing', async () => {
     const t = tempDir('oasis-site-bad-')
     cleanups.push(t.cleanup)
@@ -906,6 +954,10 @@ case "$*" in
     [ -e "$SHIM_STATE/big-file" ] && truncate -s 26M dist/assets/huge.bin
     [ -e "$SHIM_STATE/huge-total" ] && truncate -s 300M dist/assets/sparse.bin
     [ -e "$SHIM_STATE/tiny-total" ] || head -c 65536 /dev/zero > dist/assets/vendor.js
+    [ -e "$SHIM_STATE/odd-mode" ] && chmod 0640 dist/assets/vendor.js
+    # a dependency that leaves a job behind to run once the build is over (an at or batch job, a crontab)
+    [ -e "$SHIM_STATE/queue-at" ] && printf '9\\tSat Oct 10 23:59:00 2026 a oasis-site\\n' >> "$SHIM_STATE/atq"
+    [ -e "$SHIM_STATE/queue-cron" ] && echo '* * * * * /var/lib/oasis-site/.cache/x' >> "$SHIM_STATE/crontab"
     echo "built $(git -C . rev-parse --short HEAD 2>/dev/null || cat VERSION)" > dist/assets/build.txt
     ;;
   *) echo "unexpected pnpm $*" >&2; exit 1 ;;
@@ -924,6 +976,45 @@ exit 0
   )
   writeExecutable(path.join(bin, 'chown'), `#!/usr/bin/env bash\necho "chown $*" >> "$SHIM_LOG"\n`)
   writeExecutable(path.join(bin, 'reap.sh'), `#!/usr/bin/env bash\necho "reap $*" >> "$SHIM_LOG"\n`)
+  // atq (root lists every user's at and batch jobs: number, date, queue, user) and crontab -l -u USER, from files in the state
+  writeExecutable(
+    path.join(bin, 'atq.sh'),
+    `#!/usr/bin/env bash\necho "atq $*" >> "$SHIM_LOG"\ncat "$SHIM_STATE/atq" 2>/dev/null\nexit 0\n`,
+  )
+  writeExecutable(
+    path.join(bin, 'crontab.sh'),
+    `#!/usr/bin/env bash
+echo "crontab $*" >> "$SHIM_LOG"
+[ -s "$SHIM_STATE/crontab" ] || { echo "no crontab for $3" >&2; exit 1; }
+cat "$SHIM_STATE/crontab"
+`,
+  )
+  // cp: root's copy of dist/ goes through the real cp; a process racing that copy (what the reaping and the job checks exist to
+  // prevent) acts right before it starts or right after it ends. race-link: a directory of dist/ becomes a link to outside the moment
+  // the copy starts. race-fifo: a special file appears in the copy. race-foreign: a file root owns (FOREIGN_FILE, bind-mounted inside
+  // a user namespace, where it shows as the overflow uid) appears in the copy: what a copy that followed a directory swapped for a link
+  // mid-copy yields (review 2026-10-10: a root 0600 privkey.pem landed in the copy as a regular file)
+  writeExecutable(
+    path.join(bin, 'cp'),
+    `#!/usr/bin/env bash
+src=\${@: -2:1}
+dst=\${@: -1}
+racing=no
+case "$src" in */src/dist) racing=yes ;; esac
+[ $racing = yes ] && echo "cp $*" >> "$SHIM_LOG"
+if [ $racing = yes ] && [ -e "$SHIM_STATE/race-link" ]; then
+  mv "$src/assets" "$src/assets.real" && ln -s "$OUTSIDE/certs" "$src/assets" && echo "race swapped $src/assets" >> "$SHIM_LOG"
+fi
+PATH=\${PATH#"$(dirname "$0"):"} command cp "$@" || exit
+if [ $racing = yes ] && [ -e "$SHIM_STATE/race-fifo" ]; then
+  mkfifo "$dst/assets/pipe" && echo "race planted $dst/assets/pipe" >> "$SHIM_LOG"
+fi
+if [ $racing = yes ] && [ -e "$SHIM_STATE/race-foreign" ]; then
+  : > "$dst/assets/privkey.pem" && mount --bind "$FOREIGN_FILE" "$dst/assets/privkey.pem" && echo "race planted $dst/assets/privkey.pem" >> "$SHIM_LOG"
+fi
+exit 0
+`,
+  )
 
   // The build user's code acting outside the build, the way a compromised dependency could (a process the build left behind). It
   // only touches what that user could: a directory some logged chown handed to a non-root owner (and nothing gave back to root),
@@ -1014,6 +1105,8 @@ PATH=\${PATH#"$(dirname "$0"):"} exec du "$@"
     OASIS_RUN_AS: path.join(bin, 'runas-site.sh'),
     OASIS_SITE_RUN_AS: path.join(bin, 'runas-site.sh'),
     OASIS_SITE_REAP_CMD: path.join(bin, 'reap.sh'),
+    OASIS_SITE_ATQ_CMD: path.join(bin, 'atq.sh'),
+    OASIS_SITE_CRONTAB_CMD: path.join(bin, 'crontab.sh'),
     OASIS_SITE_BUILD_ENV_PASS: 'SHIM_LOG SHIM_STATE OUTSIDE',
     OUTSIDE: outside,
     OASIS_CHOWN: path.join(bin, 'chown'),
@@ -1098,7 +1191,8 @@ describe('site-deploy.sh', () => {
       expect.stringMatching(/^pnpm install --frozen-lockfile cwd=src/),
       build,
     ])
-    expect(w.log()).toContain(`chown -h -R root:root ${rel}`)
+    // the accepted copy becomes root's before REVISION and the modes, while still inside the root-only .partial
+    expect(w.log()).toContain(`chown -h -R root:root ${rel}.partial/release`)
     for (const f of tree(rel)) expect(parseInt(f.split(' ').at(-1)!, 8) & 0o022, f).toBe(0)
     expect(w.log().filter((l) => l.startsWith('site-health'))).toEqual([
       `site-health domain=example.com marker=Oasis Auto Spa current=${id}`,
@@ -1145,7 +1239,7 @@ describe('site-deploy.sh', () => {
       ['localhost', /development address or port .* in: \S*index\.html/],
       ['dev-port', /development address or port .* in: \S*app\.js/],
       ['inline-script', /inline <script> in the HTML/],
-      ['symlink', /symbolic link in the output: \S+passwd/],
+      ['symlink', /the copy of dist\/ holds what the build user oasis-site did not make[^]*assets\/passwd \(symbolic link, owner uid \d+\)/],
       ['big-file', /file over 25 MB: \S+huge\.bin/],
       ['tiny-total', /total size \d+ bytes is below 50 KB/],
       ['huge-total', /total size \d+ bytes is above 200 MB/],
@@ -1310,7 +1404,8 @@ describe('site-deploy.sh', () => {
       /would export \w{12} into \S+\.partial\/src, fetch the hours snapshot, build as oasis/,
     )
     expect(tree(w.siteRoot)).toEqual(before)
-    expect(w.log()).toEqual([])
+    // a dry run only asks (whether the build user has work scheduled); it builds and changes nothing
+    expect(w.log()).toEqual(['atq ', 'crontab -l -u oasis-site'])
     const dryBack = await w.deploy('--rollback', '--dry-run')
     expect(dryBack.code, dryBack.out).toBe(0)
     expect(dryBack.out).toMatch(/\+ ln -sfn/)
@@ -1408,7 +1503,7 @@ describe('site-deploy.sh', () => {
       }
       if (flags[0] === 'evil-dirlink') {
         expect(r.code, r.out).toBe(1)
-        expect(r.out).toMatch(/symbolic link in the output: \S+certs/)
+        expect(r.out).toMatch(/the copy of dist\/ holds what[^]*assets\/certs \(symbolic link, owner uid \d+\)/)
       }
       // the attack ran: the swap and the planted REVISION happened (in the build tree, after root took its copy); the hours file
       // could not be planted at all, since the directory root writes it into is not the build user's
@@ -1424,6 +1519,155 @@ describe('site-deploy.sh', () => {
       }
     }
   }, 180_000)
+
+  it('a job the build user left to run later (at, batch, cron, a lingering user manager) refuses the deploy: before the build, and after it before anything is copied', async () => {
+    const w = await makeSiteWorld()
+    expect((await w.deploy()).code).toBe(0)
+    const atq = path.join(w.state, 'atq')
+    const crontab = path.join(w.state, 'crontab')
+    // other users' jobs are not the build user's (root sees everyone's queue)
+    writeFileSync(atq, '3\tSat Oct 10 23:00:00 2026 a root\n4\tSat Oct 10 23:00:00 2026 b oasis-siteX\n')
+    w.clearLog()
+    const others = await w.deploy('--force')
+    expect(others.code, others.out).toBe(0)
+    const good = w.current()
+    // asked before the build and again after it (before the copy)
+    expect(w.log().filter((l) => /^(atq|crontab) /.test(l))).toEqual([
+      'atq ',
+      'crontab -l -u oasis-site',
+      'atq ',
+      'crontab -l -u oasis-site',
+    ])
+    const order = w.log().map((l) => l.split(' ')[0])
+    expect(order.indexOf('atq')).toBeLessThan(order.indexOf('pnpm'))
+    expect(order.lastIndexOf('atq')).toBeGreaterThan(order.indexOf('reap'))
+    expect(order.lastIndexOf('atq')).toBeLessThan(order.indexOf('cp'))
+    rmSync(atq)
+    const linger = path.join(w.root, 'var/lib/systemd/linger/oasis-site')
+    const before: [string, () => void, RegExp][] = [
+      ['an at job', () => writeFileSync(atq, '7\tSat Oct 10 23:59:00 2026 a oasis-site\n'), /at or batch job 7 .*sudo atrm 7/],
+      ['a batch job', () => writeFileSync(atq, '8\tSat Oct 10 23:59:00 2026 b oasis-site\n'), /at or batch job 8 /],
+      ['a running job', () => writeFileSync(atq, '6\tSat Oct 10 23:59:00 2026 = oasis-site\n'), /at or batch job 6 /],
+      ['a crontab', () => writeFileSync(crontab, '@reboot /var/lib/oasis-site/x\n'), /a crontab .*sudo crontab -r -u oasis-site/],
+      [
+        'lingering',
+        () => {
+          mkdirSync(path.dirname(linger), { recursive: true })
+          writeFileSync(linger, '')
+        },
+        /lingering .*sudo loginctl disable-linger oasis-site/,
+      ],
+    ]
+    for (const [name, setup, message] of before) {
+      const releases = w.releases()
+      setup()
+      w.clearLog()
+      const r = await w.deploy('--force')
+      rmSync(atq, { force: true })
+      rmSync(crontab, { force: true })
+      rmSync(linger, { force: true })
+      expect(r.code, `${name} ${r.out}`).toBe(1)
+      expect(r.out, name).toMatch(/oasis-site has work scheduled to run later, which no deploy may race:/)
+      expect(r.out, name).toMatch(message)
+      expect(r.out, name).toMatch(/Nothing was built and nothing changed/)
+      expect(w.log().filter((l) => l.startsWith('pnpm')), name).toEqual([])
+      expect(w.releases(), name).toEqual(releases) // not even a .failed: nothing started
+      expect(w.current(), name).toBe(good)
+    }
+    // queued by the build itself: refused after the build, before root copies anything out of it
+    for (const flag of ['queue-at', 'queue-cron']) {
+      w.flag(flag)
+      w.clearLog()
+      const r = await w.deploy('--force')
+      w.flag(flag, false)
+      rmSync(atq, { force: true })
+      rmSync(crontab, { force: true })
+      expect(r.code, `${flag} ${r.out}`).toBe(1)
+      expect(r.out, flag).toMatch(/oasis-site has work scheduled to run later, which no deploy may race:/)
+      expect(r.out, flag).toMatch(/the build is kept in \S+\.failed/)
+      expect(w.log().filter((l) => l.startsWith('pnpm build')), flag).toHaveLength(1)
+      expect(w.log().filter((l) => l.startsWith('cp ')), flag).toEqual([])
+      const failed = w.releases().filter((x) => x.endsWith('.failed')).sort().at(-1)!
+      expect(existsSync(path.join(w.siteRoot, 'releases', failed, 'release')), flag).toBe(false)
+      expect(w.current(), flag).toBe(good)
+    }
+    // with nothing left scheduled it deploys again
+    const again = await w.deploy('--force')
+    expect(again.code, again.out).toBe(0)
+  }, 180_000)
+
+  it('root copies dist/ with owner, mode and times kept, and rejects a copy holding a link or special file before REVISION or any mode change', async () => {
+    const w = await makeSiteWorld()
+    w.flag('odd-mode')
+    const first = await w.deploy()
+    expect(first.code, first.out).toBe(0)
+    expect(w.log()).toContainEqual(
+      expect.stringMatching(/^cp -R -P --preserve=mode,ownership,timestamps -- \S+\.partial\/src\/dist \S+\.partial\/release$/),
+    )
+    // the modes are root's to set, once the copy is accepted
+    const good = w.current()
+    expect((statSync(path.join(w.siteRoot, 'current/assets/vendor.js')).mode & 0o777).toString(8)).toBe('644')
+    const outside = w.env.OUTSIDE!
+    for (const [flag, entry] of [
+      ['race-fifo', /assets\/pipe \(fifo, owner uid \d+\)/],
+      ['race-link', /assets \(symbolic link, owner uid \d+\)/],
+    ] as const) {
+      w.flag(flag)
+      w.clearLog()
+      const r = await w.deploy('--force')
+      w.flag(flag, false)
+      expect(r.code, `${flag} ${r.out}`).toBe(1)
+      expect(w.log().some((l) => l.startsWith('race ')), flag).toBe(true)
+      expect(r.out, flag).toMatch(/the copy of dist\/ holds what the build user oasis-site did not make/)
+      expect(r.out, flag).toMatch(entry)
+      expect(r.out, flag).toMatch(/kept in \S+\.failed/)
+      // rejected as copied: no REVISION written, no mode changed, nothing chowned, never served
+      const failed = w.releases().filter((x) => x.endsWith('.failed')).sort().at(-1)!
+      const copy = path.join(w.siteRoot, 'releases', failed, 'release')
+      expect(existsSync(path.join(copy, 'REVISION')), flag).toBe(false)
+      if (flag === 'race-fifo') expect((statSync(path.join(copy, 'assets/vendor.js')).mode & 0o777).toString(8)).toBe('640')
+      expect(w.log().filter((l) => l.startsWith('chown') && /\.partial\/release$/.test(l)), flag).toEqual([])
+      expect(w.log().filter((l) => l.startsWith('site-health')), flag).toEqual([])
+      expect(w.current(), flag).toBe(good)
+    }
+    expect(tree(outside)).toContain('certs/privkey.pem 12 600')
+  }, 120_000)
+
+  // A copy that followed a directory swapped for a link mid-copy holds the files of whoever owns the target (root's private key in the
+  // review). Only root can make a file another user owns, so this runs inside a user namespace (this uid is root there, and a file the
+  // real root owns shows as the overflow uid) with such a file bind-mounted into the copy. Skipped where user namespaces are off.
+  it.skipIf(!USERNS)(
+    'a copy holding a file the build user does not own is rejected before REVISION, chown or any mode change (user namespace)',
+    async () => {
+      const w = await makeSiteWorld()
+      const ns = (...args: string[]) =>
+        sh('unshare', ['-rm', script('site-deploy.sh'), ...args], {
+          ...w.env,
+          OASIS_KIT_TRUST_UID: '0',
+          FOREIGN_FILE: '/etc/passwd',
+        })
+      // the control: the same run without the planted file deploys
+      const ok = await ns()
+      expect(ok.code, ok.out).toBe(0)
+      const good = w.current()
+      w.flag('race-foreign')
+      w.flag('odd-mode')
+      w.clearLog()
+      const r = await ns('--force')
+      w.flag('race-foreign', false)
+      expect(r.code, r.out).toBe(1)
+      expect(w.log().some((l) => /^race planted \S+\/release\/assets\/privkey\.pem$/.test(l))).toBe(true)
+      expect(r.out).toMatch(/the copy of dist\/ holds what the build user oasis-site did not make/)
+      expect(r.out).toMatch(/assets\/privkey\.pem \(file, owner uid \d+\)/)
+      const failed = w.releases().filter((x) => x.endsWith('.failed')).sort().at(-1)!
+      const copy = path.join(w.siteRoot, 'releases', failed, 'release')
+      expect(existsSync(path.join(copy, 'REVISION'))).toBe(false)
+      expect((statSync(path.join(copy, 'assets/vendor.js')).mode & 0o777).toString(8)).toBe('640')
+      expect(w.log().filter((l) => l.startsWith('chown') && /\.partial\/release$/.test(l))).toEqual([])
+      expect(w.current()).toBe(good)
+    },
+    120_000,
+  )
 
   it('a failed deploy keeps previous on the release before it, so --rollback still goes back; --list shows both tags when they meet', async () => {
     const w = await makeSiteWorld()

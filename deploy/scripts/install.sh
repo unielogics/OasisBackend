@@ -34,7 +34,8 @@
 #   --dry-run              print everything it would do, change nothing
 #   --no-system            write files only: no users, packages, chown, systemctl or nginx reload (for staging directories)
 #
-# What it does, in order: checks the host, installs packages, creates the oasis user and directories, copies this kit into the root-owned
+# What it does, in order: checks the host, installs packages, creates the oasis user and directories (and lists oasis and oasis-site in
+# /etc/at.deny, and /etc/cron.deny where cron is installed: neither may queue work for later), copies this kit into the root-owned
 # /usr/local/lib/oasis/deploy (run everything from there afterwards), writes /etc/oasis/*.env from the
 # templates (never overwriting an existing file; secret settings are not written there: a new install gets them generated into
 # /etc/oasis/secret-seed.env, mode 0600, to push into the secret with pnpm secrets:push and then shred), prepares the database,
@@ -247,6 +248,46 @@ step_user_dirs() {
   # nginx -t fails with "mkdir() ... No such file or directory" when it is missing (AL2023 ships no /var/cache/nginx)
   ensure_dir "$OASIS_ROOT_PREFIX/var/cache/nginx" 0755 "root:root"
   [[ -z "$SITE_DOMAIN" ]] || step_site_dirs
+  step_deny_scheduling
+}
+
+# --- 3c. no scheduled work for the service users ----------------------------------------------------------------------------------
+# oasis runs the application and oasis-site the website's build dependencies: neither has a reason to queue work for later, and a job
+# atd or crond starts after the build would run outside everything site-deploy.sh does to stop the build user (killing its processes
+# before root copies the output; ADR 0145). Both go into /etc/at.deny (at and batch) and, where cron is installed or a cron.deny
+# exists, /etc/cron.deny; the host's other entries stay, in their order (blank lines dropped), and the files become 0600 root:root
+# (at and crontab are setuid root). oasis-site is listed whether or not --site-domain is given: the name is harmless without the user.
+# An allow file (at.allow, cron.allow) replaces the deny file when it exists: one that lists either user is reported, not changed.
+deny_list_render() {
+  local file=$1 name
+  shift
+  {
+    [[ ! -f "$file" ]] || grep -v '^[[:space:]]*$' "$file" || true
+    for name in "$@"; do
+      [[ -f "$file" ]] && grep -qxF -- "$name" "$file" && continue
+      printf '%s\n' "$name"
+    done
+  }
+}
+step_deny_scheduling() {
+  local f allow users=("$OASIS_USER" "$OASIS_SITE_USER") u
+  for f in at cron; do
+    local deny="$OASIS_ROOT_PREFIX/etc/$f.deny"
+    if [[ "$f" == cron && ! -f "$deny" ]] && ! have crontab; then
+      continue
+    fi
+    deny_list_render "$deny" "${users[@]}" | install_content "$deny" 0600 root:root
+    if [[ -f "$deny" ]]; then
+      run chmod 0600 "$deny"
+      if [[ "$NO_SYSTEM" != 1 ]]; then run chown root:root "$deny"; fi
+    fi
+    allow="$OASIS_ROOT_PREFIX/etc/$f.allow"
+    for u in "${users[@]}"; do
+      if [[ -f "$allow" ]] && grep -qxF -- "$u" "$allow"; then
+        warn "$(real "$allow") exists and lists $u, so $(real "$deny") does not apply to it: remove $u from $(real "$allow") (site-deploy.sh refuses to build while oasis-site has jobs queued)"
+      fi
+    done
+  done
 }
 
 # --- 3a. the public website's directories ----------------------------------------------------------------------------------------

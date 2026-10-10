@@ -344,12 +344,20 @@ install scripts, and the internet-facing services. So:
   user is missing, is root or oasis, is in the group oasis, or can read any `/etc/oasis/*.env`, `*.key` or `aws-credentials` file or
   enter `/var/lib/oasis` or `/var/backups/oasis` (the isolation check). `releases/<id>.partial` is root's; only its `src/` is handed
   to `oasis-site`, and root writes the hours snapshot into the root-owned part. After the build every process of `oasis-site` is
-  killed (`pkill -KILL -U/-u oasis-site` until none is left, so nothing it started outlives it) and `<id>.partial` becomes `0700`, so
-  nothing can reach the build tree any more. Root then reads `dist/` without following links (`cp -R -P` into a fresh root-made
-  directory, refusing a hard link or a file not owned by `oasis-site`), verifies **the copy**, writes `REVISION` into it, fixes its
-  modes (directories `0755`, files `0644`) and renames it to `releases/<id>`; it never writes into, changes a mode in or renames a
-  path the build user controls (review 2026-10-10: a swap of `dist/` for a link after verification made root `chmod -R` and write
-  through it). The build tree is deleted.
+  killed (`pkill -KILL -U/-u oasis-site` until two passes in a row find none, so nothing it started outlives it) and `<id>.partial`
+  becomes `0700`, so nothing can reach the build tree any more. Work queued for later would outlive that, so `oasis` and
+  `oasis-site` cannot queue any: `install.sh` lists both in `/etc/at.deny` (and `/etc/cron.deny` where cron is installed; other
+  entries kept, `0600 root:root`), and `site-deploy.sh` refuses to build, and after the build refuses to copy, while `atq` shows a
+  job of `oasis-site`, `crontab -l -u oasis-site` shows anything or `oasis-site` lingers. Root then copies `dist/`
+  (`cp -R -P --preserve=mode,ownership,timestamps` into a fresh root-made directory, after refusing a hard link or a file not owned
+  by `oasis-site`). `-P` refuses a link only at the last component of each path `cp` opens: a directory swapped for a link while `cp`
+  walks the tree is followed, and the copy then holds someone else's files (verification 2026-10-10: a root `0600` private key landed
+  in the copy as a plain file). Because the copy keeps the owners, such a file shows as not `oasis-site`'s, and the whole copy is
+  rejected (kept as `<id>.failed`) when any entry is not a directory or regular file owned by `oasis-site`, **before** root writes
+  `REVISION`, chowns it or changes a mode. Only then does root verify **the copy**, chown it to root, write `REVISION`, set its modes
+  (directories `0755`, files `0644`) and rename it to `releases/<id>`; it never writes into, changes a mode in or renames a path the
+  build user controls (review 2026-10-10: a swap of `dist/` for a link after verification made root `chmod -R` and write through
+  it). The build tree is deleted.
 
 What it does not cover: a process left running by a build could still write through a file it opened before the `chown`; a
 release built before this change is still oasis-owned until it is pruned (a rollback to one works, but its cache directory is not
