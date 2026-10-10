@@ -12,11 +12,33 @@ export const BizDate = z
 const Phone = z.string().trim().min(1, 'Enter a valid mobile number.').max(32, 'Enter a valid mobile number.')
 const Short = (n: number) => z.string().trim().max(n)
 
-export const AvailabilityQuery = z.object({
-  days: z.coerce.number().int().min(1).max(14).default(5),
-  service: Short(80).optional(),
-  addons: Short(400).optional(),
-})
+/** A catalog key: the slug of a name (keys.ts). */
+const KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+/**
+ * Strict, and in one spelling only (canonical-query.ts checks the raw query before this runs): `days` 1..14 without a leading zero,
+ * `service` a catalog key, `addons` up to 12 keys separated by commas (the site encodes the comma as %2C).
+ */
+export const AvailabilityQuery = z
+  .object({
+    days: z.string().regex(/^(?:[1-9]|1[0-4])$/, 'days is a whole number from 1 to 14').optional(),
+    service: z.string().max(80).regex(KEY, 'Pick a wash from the catalog.').optional(),
+    addons: z
+      .string()
+      .max(400)
+      .regex(/^(?:[a-z0-9-]{1,80}(?:,[a-z0-9-]{1,80}){0,11})?$/, 'Pick add-ons from the catalog.')
+      .optional(),
+  })
+  .strict()
+
+/** The raw characters each availability parameter may use (no percent-encoding but the site's %2C between add-ons). */
+export const AVAILABILITY_RAW_QUERY = {
+  days: /^(?:[1-9]|1[0-4])$/,
+  service: /^[a-z0-9-]{0,80}$/,
+  addons: /^(?:[a-z0-9-]|,|%2[cC]){0,600}$/,
+} as const
+
+/** A cacheable read that takes no query at all. */
+export const NoQuery = z.object({}).strict()
 
 export const BoardSlot = z.object({
   startMin: z.number().int(),

@@ -2,6 +2,7 @@
 // a session. nginx proxies exactly this path from the website's host, with cookies stripped and a 60-second cache in front
 // (deploy/nginx/oasis-site.conf.template); the browser asks it again every few minutes. No personal or operations data leaves here.
 import { access } from '../../../http/access.js'
+import { canonicalQuery } from '../../../http/canonical-query.js'
 import { z } from '../../../http/zod.js'
 import { getDefaultLocation } from '../../../platform/locations.js'
 import { DEFAULT_TZ, addDays, toBizDate } from '../../../platform/time.js'
@@ -93,6 +94,8 @@ export function registerPublicRoutes(rt: SettingsRuntime): void {
         access: access.public('Opening hours for the public website; no personal or operations data'),
         rateLimit: { max: 60, timeWindow: '1 minute' },
       },
+      // no query at all: a cache-busting parameter is a 422, never a fresh computation (review 2026-10-10)
+      preValidation: canonicalQuery({}),
       schema: {
         tags: ['public'],
         operationId: 'getPublicHours',
@@ -101,7 +104,8 @@ export function registerPublicRoutes(rt: SettingsRuntime): void {
         description:
           'No session: the website calls it from the browser and at build time. Computed from the Settings (weekly hours, closures, an active emergency) ' +
           `at the moment of the call in the business timezone; \`Cache-Control: public, max-age=${PUBLIC_HOURS_MAX_AGE}\`, and nginx caches it on the website's host. ` +
-          'Carries no personal or operations data (no names, counts, message text or ids). Rate limit 60 a minute per address.',
+          'Carries no personal or operations data (no names, counts, message text or ids). Rate limit 60 a minute per address. Takes no query (422).',
+        querystring: z.object({}).strict(),
         response: { 200: PublicHoursView },
       },
     },

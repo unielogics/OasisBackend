@@ -59,6 +59,47 @@ describe('GET /public/availability', () => {
     expect((await h.get('public/availability?days=99')).statusCode).toBe(422)
   })
 
+  it('takes the query exactly as the website writes it, add-ons as the site encodes them included', async () => {
+    const wash = h.key('Full Detail')
+    for (const q of [
+      '',
+      '?days=14',
+      `?days=7&service=${wash}&addons=wax%2Codor-removal`, // encodeURIComponent of "wax,odor-removal"
+      `?days=7&service=${wash}&addons=wax,odor-removal`,
+      `?days=7&service=${wash}&addons=`,
+      `?service=${wash}&days=7`,
+    ])
+      expect((await h.get(`public/availability${q}`)).statusCode, q).toBe(200)
+  })
+
+  it('refuses every other spelling of the query (422), so nothing can be used to miss the cache (review 2026-10-10)', async () => {
+    const wash = h.key('Full Detail')
+    for (const q of [
+      '?days=5&zz=1', // an unknown parameter
+      '?days=5&cachebust=123',
+      '?days=014', // the same number, spelled differently
+      '?days=%31%34',
+      '?days=1.0',
+      '?days=+1',
+      '?days=0',
+      '?days=15',
+      '?days=5&days=6', // twice
+      '?%64ays=5', // an encoded name
+      `?service=${wash.replace('-', '%2D')}`, // an encoded key
+      `?service=${wash.toUpperCase()}`,
+      '?addons=<script>',
+      `?addons=${'a,'.repeat(40)}a`,
+    ]) {
+      const r = await h.get(`public/availability${q}`)
+      expect(r.statusCode, q).toBe(422)
+      expect(json(r).code, q).toBe('VALIDATION_FAILED')
+    }
+    for (const route of ['public/catalog?x=1', 'public/hours?x=1', 'public/hours?_=1700000000'])
+      expect((await h.get(route)).statusCode, route).toBe(422)
+    expect((await h.get('public/catalog')).statusCode).toBe(200)
+    expect((await h.get('public/hours')).statusCode).toBe(200)
+  })
+
   it('closes a day the shop closes, with the closure name, and shows "closed" in the pill after an emergency', async () => {
     const created = await h.staff('POST', 'closures', { date: '2026-06-15', name: 'Inventory day', type: 'closed', notify: false })
     expect(created.statusCode, created.body).toBe(201)

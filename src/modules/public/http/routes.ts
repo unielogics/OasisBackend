@@ -5,6 +5,7 @@
 import { randomInt } from 'node:crypto'
 import type { FastifyRequest } from 'fastify'
 import { access } from '../../../http/access.js'
+import { canonicalQuery } from '../../../http/canonical-query.js'
 import { idempotentHandler } from '../../../http/idempotent.js'
 import { z } from '../../../http/zod.js'
 import type { Tx } from '../../../platform/db.js'
@@ -19,6 +20,7 @@ import { publicLocation, type PublicDeps, type PublicLocation, type PublicReques
 import { chargeJoinLimits, joinWeb, memberRefOf } from '../memberships.js'
 import { phoneOrThrow, requestOtp, verifyOtp } from '../otp.js'
 import {
+  AVAILABILITY_RAW_QUERY,
   AvailabilityQuery,
   BoardView,
   BookingBody,
@@ -26,6 +28,7 @@ import {
   CatalogView,
   MembershipBody,
   MembershipResult,
+  NoQuery,
   OtpBody,
   OtpRequested,
   OtpVerified,
@@ -65,13 +68,15 @@ export function registerPublicRoutes(d: PublicDeps): void {
         access: access.public('The website’s open-times board: slot states and free-bay counts, no names, ids or appointment data'),
         rateLimit: { max: 60, timeWindow: '1 minute' },
       },
+      preValidation: canonicalQuery(AVAILABILITY_RAW_QUERY),
       schema: {
         tags: TAGS,
         operationId: 'getPublicAvailability',
         summary: 'Open times for the website: the next days on the 30-minute grid with open / last / vip / booked and free bays',
         description:
           'No session. The slot engine’s answer for an online, non-VIP caller (lead time, cutoff, closures, emergency, VIP holds), reduced to the board’s four states; today drops starts before now plus the online lead time. ' +
-          `\`days\` 1..14 (default ${BOARD_DEFAULT_DAYS}); \`service\` is a catalog key (the first package when absent); \`addons\` is accepted and ignored (add-ons never change the duration). ` +
+          `\`days\` 1..14 (default ${BOARD_DEFAULT_DAYS}); \`service\` is a catalog key (the first package when absent); \`addons\` (catalog keys, comma-separated) is accepted and ignored (add-ons never change the duration). ` +
+          'The query has one spelling: an unknown or repeated parameter, a percent-encoded name or value (but %2C between add-ons) or a number with a leading zero is a 422, so the 60-second cache in front cannot be bypassed. ' +
           `\`now\` is the "N of 3 bays open now" pill. \`Cache-Control: public, max-age=${PUBLIC_MAX_AGE}\`; 60 requests a minute per address.`,
         querystring: AvailabilityQuery,
         response: { 200: BoardView },
@@ -83,7 +88,7 @@ export function registerPublicRoutes(d: PublicDeps): void {
         locationId: l.id,
         tz: l.tz,
         now: app.clock.now(),
-        days: req.query.days,
+        days: req.query.days === undefined ? BOARD_DEFAULT_DAYS : Number(req.query.days),
         serviceKey: req.query.service,
       })
       if (!board)
@@ -103,6 +108,7 @@ export function registerPublicRoutes(d: PublicDeps): void {
         access: access.public('The website’s catalog: services, add-ons and the two plans with keys, durations and prices'),
         rateLimit: { max: 60, timeWindow: '1 minute' },
       },
+      preValidation: canonicalQuery({}),
       schema: {
         tags: TAGS,
         operationId: 'getPublicCatalog',
@@ -110,6 +116,7 @@ export function registerPublicRoutes(d: PublicDeps): void {
         description:
           'No session. Live packages and add-ons from the real catalog (prices in cents, durations in minutes), keyed by the slug of their name; the plans are the website’s two tiers over the dashboard’s plans (no price: the site shows its own). ' +
           `\`Cache-Control: public, max-age=${PUBLIC_MAX_AGE}\`; 60 requests a minute per address.`,
+        querystring: NoQuery,
         response: { 200: CatalogView },
       },
     },
