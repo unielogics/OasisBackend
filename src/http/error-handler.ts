@@ -28,6 +28,11 @@ function pathOf(context: string | undefined, instancePath: string): string {
   return tail ? `${root}.${tail}` : root
 }
 
+/** pg-pool's "no connection within connectionTimeoutMillis" and pg's "the connection did not open in time". */
+const isPoolCheckoutTimeout = (err: unknown): boolean =>
+  err instanceof Error &&
+  (err.message === 'timeout exceeded when trying to connect' || err.message === 'Connection terminated due to connection timeout')
+
 export function toAppError(err: unknown): AppError {
   if (isAppError(err)) return err
   if (hasZodFastifySchemaValidationErrors(err)) {
@@ -52,7 +57,7 @@ export function toAppError(err: unknown): AppError {
     return new AppError('MALFORMED_REQUEST', { cause: err })
   if (typeof e.code === 'string' && SQLSTATE_RETRYABLE.has(e.code))
     return new AppError('CONCURRENT_UPDATE', { cause: err })
-  if (e.code === '57014')
+  if (e.code === '57014' || isPoolCheckoutTimeout(err))
     return new AppError('SERVICE_UNAVAILABLE', { cause: err, headers: { 'Retry-After': '2' } })
   return new AppError('INTERNAL', { cause: err })
 }

@@ -66,6 +66,7 @@ export const envSchema = z
     DATABASE_URL: z.string().url(),
     DB_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
     DB_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(0).default(30_000),
+    DB_CONNECT_TIMEOUT_MS: z.coerce.number().int().min(100).max(120_000).default(10_000), // a full pool fails a checkout (503) after this long instead of queueing forever
     DB_SEARCH_PATH: z.string().optional(), // per-worker test schemas only; leave unset elsewhere
     PGBOSS_SCHEMA: z
       .string()

@@ -4,6 +4,7 @@ import * as audit from '../../src/platform/audit.js'
 import { FixedClock } from '../../src/platform/clock.js'
 import { createDb, currentSchema, transaction } from '../../src/platform/db.js'
 import { AppError } from '../../src/platform/errors.js'
+import { toAppError } from '../../src/http/error-handler.js'
 import { createIdGenerator } from '../../src/platform/ids.js'
 import { ensureLocation, getDefaultLocation } from '../../src/platform/locations.js'
 import { cursorState, publish } from '../../src/platform/realtime.js'
@@ -108,6 +109,61 @@ describe('connection settings', () => {
       },
       'serializable',
     )
+  })
+})
+
+describe('pool exhaustion and dropped sessions (public-surface review 2026-10-10)', () => {
+  it('a full pool fails fast with a 503 instead of queueing the caller forever', async () => {
+    const db = createDb({ url: t.connection.url, searchPath: t.connection.searchPath, poolMax: 1, connectTimeoutMs: 300 })
+    let release!: () => void
+    const held = new Promise<void>((r) => (release = r))
+    const tx = transaction(db, async (x) => {
+      await sql`select 1`.execute(x)
+      await held
+    })
+    try {
+      await new Promise((r) => setTimeout(r, 50))
+      const started = Date.now()
+      const err = await sql`select 1`.execute(db).then(
+        () => null,
+        (e: unknown) => e,
+      )
+      expect(err, 'the second checkout must fail, not wait').not.toBeNull()
+      expect(Date.now() - started).toBeLessThan(5_000)
+      const app = toAppError(err)
+      expect(app.code).toBe('SERVICE_UNAVAILABLE')
+      expect(app.status).toBe(503)
+      expect(app.headers?.['Retry-After']).toBe('2')
+    } finally {
+      release()
+      await tx
+      await db.destroy()
+    }
+  })
+
+  it('a session the server ends while it is checked out does not crash the process, and the pool recovers', async () => {
+    const db = createDb({ url: t.connection.url, searchPath: t.connection.searchPath, poolMax: 1 })
+    const uncaught: unknown[] = []
+    const onUncaught = (e: unknown): void => void uncaught.push(e)
+    process.on('uncaughtException', onUncaught)
+    try {
+      const outcome = await transaction(db, async (x) => {
+        const pid = (await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(x)).rows[0]!.pid
+        // idle in the transaction (no active query) when the server ends the session, as idle_in_transaction_session_timeout does
+        await sql`select pg_terminate_backend(${pid})`.execute(t.db)
+        await new Promise((r) => setTimeout(r, 300))
+        await sql`select 1`.execute(x)
+      }).then(
+        () => 'committed',
+        () => 'failed',
+      )
+      expect(outcome).toBe('failed')
+      expect(uncaught).toEqual([])
+      expect((await sql<{ n: number }>`select 1::int as n`.execute(db)).rows[0]!.n).toBe(1)
+    } finally {
+      process.off('uncaughtException', onUncaught)
+      await db.destroy()
+    }
   })
 })
 

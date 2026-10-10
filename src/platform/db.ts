@@ -27,7 +27,14 @@ export interface DbOptions {
   clock?: Clock
   statementTimeoutMs?: number
   applicationName?: string
+  /**
+   * How long a caller may wait for a pooled connection (or a new one to open) before the checkout fails: a full pool answers 503
+   * quickly instead of queueing every request behind it without limit (default 10 s; DB_CONNECT_TIMEOUT_MS in the services).
+   */
+  connectTimeoutMs?: number
 }
+
+export const DEFAULT_CONNECT_TIMEOUT_MS = 10_000
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i
 
@@ -66,6 +73,7 @@ export function pgConfig(o: DbOptions): pg.PoolConfig {
   return {
     connectionString: o.url,
     max: o.poolMax ?? 10,
+    connectionTimeoutMillis: o.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS,
     options: startupOptions(o),
     application_name: o.applicationName ?? 'oasis-api',
     types: typeParsers,
@@ -121,6 +129,12 @@ export function createDb(o: DbOptions): Db {
   const pool = new pg.Pool(pgConfig(o))
   pool.on('error', () => {
     // idle client errors (server restart) are surfaced by the next query; do not crash the process
+  })
+  // pg-pool listens for errors only while a client is idle. A session the server ends while it is checked out (an idle transaction
+  // past idle_in_transaction_session_timeout, a terminated backend) emits 'error' on the client with nobody listening, which would
+  // crash the process; the pending or next query fails instead and the pool drops the client when it is released.
+  pool.on('connect', (client) => {
+    client.on('error', () => undefined)
   })
   return new Kysely<Database>({ dialect: new OasisDialect(pool, o.clock) })
 }

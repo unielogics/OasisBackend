@@ -56,6 +56,7 @@ async function main(): Promise<void> {
     poolMax: env.DB_POOL_MAX,
     searchPath: env.DB_SEARCH_PATH,
     statementTimeoutMs: env.DB_STATEMENT_TIMEOUT_MS,
+    connectTimeoutMs: env.DB_CONNECT_TIMEOUT_MS,
     clock,
   }
   const db = createDb(conn)

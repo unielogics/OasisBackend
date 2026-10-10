@@ -51,6 +51,7 @@ export async function startWorker(o: WorkerOptions): Promise<RunningWorker> {
       poolMax: env.DB_POOL_MAX,
       searchPath: env.DB_SEARCH_PATH,
       statementTimeoutMs: env.DB_STATEMENT_TIMEOUT_MS,
+      connectTimeoutMs: env.DB_CONNECT_TIMEOUT_MS,
       clock,
       applicationName: 'oasis-worker',
     })
