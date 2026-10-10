@@ -254,6 +254,8 @@ describe('oasis-admin.sh', () => {
       }
       expect(onDevice.webhooks.map((w) => w.id).sort()).toEqual([
         'oasis-app-started',
+        'oasis-mms-downloaded',
+        'oasis-mms-received',
         'oasis-sms-cancelled',
         'oasis-sms-delivered',
         'oasis-sms-failed',
