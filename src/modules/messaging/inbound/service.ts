@@ -1,12 +1,16 @@
 import type { Clock } from '../../../platform/clock.js'
-import type { MmsPart, SmsEvent } from '../../../integrations/ports/sms.js'
+import { MMS_INCOMPLETE_SUFFIX, type MmsPart, type SmsEvent } from '../../../integrations/ports/sms.js'
 import { normalizeE164 } from '../../../integrations/sms/phone.js'
 import type { OptOutRepository } from '../policy/optouts.js'
-import type { CustomerDirectory, InboxRepository } from './repositories.js'
+import type { CustomerDirectory, InboxRepository, InboxRow } from './repositories.js'
 import { mmsText, type MmsAttachmentRecord } from './mms.js'
 import { routeInbound, type InboundCommand, type InboundDecision, type InboundText } from './router.js'
 
 type ReceivedEvent = Extract<SmsEvent, { kind: 'received' }>
+
+/** The provider id of the complete delivery of an MMS, whichever form `providerMessageId` is. */
+const completeIdOf = (providerMessageId: string): string =>
+  providerMessageId.endsWith(MMS_INCOMPLETE_SUFFIX) ? providerMessageId.slice(0, -MMS_INCOMPLETE_SUFFIX.length) : providerMessageId
 
 /** What the host wires to the real system. Each method is one command from the router. */
 export interface InboundEffects {
@@ -26,6 +30,11 @@ export interface InboundEffects {
   staffAlert(alert: Extract<InboundCommand, { type: 'staff_alert' }>): Promise<void>
   /** Saves the pictures of an MMS and records every part on the inbox row; returns the records (stored keys included). */
   recordAttachments?(parts: readonly MmsPart[], ctx: { inboxId: string; providerMessageId: string; deviceId: string }): Promise<MmsAttachmentRecord[]>
+  /**
+   * The complete delivery of an MMS arrived after its incomplete placeholder (`stale`, already marked superseded): take the
+   * placeholder out of the thread and resolve its alert, so the message is not shown twice.
+   */
+  supersede?(stale: InboxRow, by: InboxRow): Promise<void>
 }
 
 export interface InboundServiceOptions {
@@ -55,13 +64,24 @@ export class InboundService {
     if (!event.mms) return this.process({ ...base, body: event.body })
     // An MMS is routed like an SMS. With no text it is filed under a placeholder, never dropped (ADR 0151).
     const { text, placeholder } = mmsText(event.body, event.mms.parts)
-    return this.process({ ...base, body: text, kind: 'mms', placeholder }, event.mms.parts)
+    return this.process({ ...base, body: text, kind: 'mms', placeholder, incomplete: event.mms.incomplete }, event.mms.parts)
   }
 
   async process(msg: InboundText, parts: readonly MmsPart[] = []): Promise<InboundOutcome> {
     const now = this.clock.now()
+    // An MMS can come twice under one device id: first incomplete (its own provider id, filed as a placeholder), then complete.
+    // The complete one is routed as usual and supersedes the placeholder; an incomplete one after the complete one is a repeat.
+    const completeId = msg.kind === 'mms' ? completeIdOf(msg.providerMessageId) : null
+    if (completeId !== null) {
+      await this.inbox.lock?.(msg.deviceId, completeId)
+      if (msg.incomplete && (await this.inbox.find(msg.deviceId, completeId))) return { duplicate: true }
+    }
     const { inserted, row } = await this.inbox.insertIfNew(msg, now)
     if (!inserted) return { duplicate: true }
+    if (completeId !== null && !msg.incomplete) {
+      const stale = await this.inbox.find(msg.deviceId, `${completeId}${MMS_INCOMPLETE_SUFFIX}`)
+      if (stale && stale.supersededBy === null && (await this.inbox.markSuperseded(stale.id, row.id, now))) await this.effects.supersede?.(stale, row)
+    }
     const attachments =
       msg.kind === 'mms' && parts.length > 0 && this.effects.recordAttachments
         ? await this.effects.recordAttachments(parts, { inboxId: row.id, providerMessageId: msg.providerMessageId, deviceId: msg.deviceId })

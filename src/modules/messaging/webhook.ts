@@ -41,26 +41,43 @@ function firstBytes(raw: string, max: number): string {
   return buf.length <= max ? clean : buf.subarray(0, max).toString('utf8')
 }
 
+/** A base64 run this long in a "data" field of a body that is not readable JSON is taken for attachment bytes. */
+const BASE64_RUN = /("data"\s*:\s*")(?:data:[^,"]{0,100},)?[A-Za-z0-9+/=_\-\s\\]{64,}("?)/g
+
 /**
- * The stored copy of an applied mms:downloaded without the attachment bytes (the pictures are in the photos store; the
- * signature no longer verifies, which no longer matters once the event is applied). Anything unreadable is kept as it is.
+ * A stored delivery without its attachment bytes, for every row that is final (processed, ignored, failed, unparsed): the
+ * pictures are in the photos store or were never usable, and 90 days of webhook_log need not hold megabytes of base64 per MMS.
+ * Readable JSON keeps its shape (each part's `data` becomes null with `dataRedacted: true`); anything else (a body cut short,
+ * broken JSON) has its long base64 runs in "data" fields replaced. The signature no longer verifies, which no longer matters
+ * once the delivery is final. A body with nothing to strip is returned as it is.
  */
-export function redactMmsBody(raw: string): string {
+export function stripAttachmentData(raw: string): string {
+  let env: unknown
   try {
-    const env = JSON.parse(raw) as { payload?: { attachments?: unknown } }
-    const parts = env.payload?.attachments
-    if (!Array.isArray(parts)) return raw
-    for (const p of parts) {
-      if (p && typeof p === 'object' && typeof (p as Record<string, unknown>).data === 'string') {
-        ;(p as Record<string, unknown>).data = null
-        ;(p as Record<string, unknown>).dataRedacted = true
-      }
-    }
-    return JSON.stringify(env)
+    env = JSON.parse(raw)
   } catch {
-    return raw
+    return raw.replace(BASE64_RUN, '$1[redacted]$2')
   }
+  const parts = (env as { payload?: { attachments?: unknown } } | null)?.payload?.attachments
+  if (!Array.isArray(parts)) return raw
+  let changed = false
+  for (const p of parts) {
+    if (p && typeof p === 'object' && typeof (p as Record<string, unknown>).data === 'string') {
+      ;(p as Record<string, unknown>).data = null
+      ;(p as Record<string, unknown>).dataRedacted = true
+      changed = true
+    }
+  }
+  return changed ? JSON.stringify(env) : raw
 }
+
+/** The body column update that strips attachment bytes from a final row, or nothing when there is nothing to strip. */
+const stripped = (body: string | null): { body?: string } => {
+  if (body === null) return {}
+  const out = stripAttachmentData(body)
+  return out === body ? {} : { body: out }
+}
+
 const FOREVER = Number.MAX_SAFE_INTEGER
 const SWEEP_AFTER_MS = 30_000
 const GIVE_UP_AFTER_MS = 24 * 3600_000
@@ -168,7 +185,8 @@ export class WebhookService {
         provider: 'smsgate',
         external_id: externalId,
         headers: JSON.stringify(stored),
-        body: firstBytes(raw, UNPARSED_BODY_BYTES),
+        // the bytes go first, so the 4 KB kept show the envelope and its fields rather than the start of a picture
+        body: firstBytes(stripAttachmentData(raw), UNPARSED_BODY_BYTES),
         signature_valid: true,
         received_at: this.rt.clock.now(),
         processed_at: this.rt.clock.now(),
@@ -197,7 +215,11 @@ export class WebhookService {
       const key = (row.headers as Record<string, string>)['x-device-key']
       const device = key ? await this.rt.store.getByKey(key) : null
       if (!device) {
-        await tx.updateTable('webhook_log').set({ status: 'failed', processed_at: this.rt.clock.now(), error: 'unknown device' }).where('id', '=', logId).execute()
+        await tx
+          .updateTable('webhook_log')
+          .set({ status: 'failed', processed_at: this.rt.clock.now(), error: 'unknown device', ...stripped(row.body) })
+          .where('id', '=', logId)
+          .execute()
         return 'ignored' as const
       }
       const parsed = verifyAndParse(row.headers as Record<string, string>, row.body, {
@@ -220,7 +242,7 @@ export class WebhookService {
           processed_at: this.rt.clock.now(),
           error: null,
           // the pictures are saved; 90 days of webhook_log need not hold megabytes of base64 per MMS
-          ...(parsed.eventName === 'mms:downloaded' ? { body: redactMmsBody(row.body) } : {}),
+          ...stripped(row.body),
         })
         .where('id', '=', logId)
         .execute()
@@ -278,17 +300,31 @@ export class WebhookService {
     return result
   }
 
-  /** Applies envelopes that were persisted but never applied (a crash, a lock timeout); gives up on ones older than a day. */
+  /**
+   * Applies envelopes that were persisted but never applied (a crash, a lock timeout); gives up on ones older than a day, which
+   * are failed without their attachment bytes (one row at a time: an MMS body can be megabytes).
+   */
   async sweep(limit = 50): Promise<{ processed: number; abandoned: number }> {
     const now = this.rt.clock.now()
-    const abandoned = await this.rt.db
-      .updateTable('webhook_log')
-      .set({ status: 'failed', processed_at: now, error: 'not applied within 24 hours' })
+    const stale = await this.rt.db
+      .selectFrom('webhook_log')
+      .select('id')
       .where('provider', '=', 'smsgate')
       .where('status', '=', 'received')
       .where('received_at', '<', new Date(now.getTime() - GIVE_UP_AFTER_MS))
-      .returning('id')
       .execute()
+    const abandoned: string[] = []
+    for (const { id } of stale) {
+      const row = await this.rt.db.selectFrom('webhook_log').select('body').where('id', '=', id).where('status', '=', 'received').executeTakeFirst()
+      if (!row) continue
+      const r = await this.rt.db
+        .updateTable('webhook_log')
+        .set({ status: 'failed', processed_at: now, error: 'not applied within 24 hours', ...stripped(row.body) })
+        .where('id', '=', id)
+        .where('status', '=', 'received')
+        .executeTakeFirst()
+      if (Number(r.numUpdatedRows) > 0) abandoned.push(id)
+    }
     const rows = await this.rt.db
       .selectFrom('webhook_log')
       .select('id')

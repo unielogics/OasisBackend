@@ -16,6 +16,6 @@
     "body": "",
     "at": "2026-06-13T16:00:04.000Z",
     "deviceId": "FxDevice0000000001",
-    "providerMessageId": "mms:fx-mms-0005"
+    "providerMessageId": "mms:fx-mms-0005:incomplete"
   }
 }

@@ -239,7 +239,7 @@ describe('InboundService', () => {
       },
     }
     const service = new InboundService(inbox, optouts, directory, effects, clock, { timeZone: 'America/New_York' })
-    return { service, inbox, optouts, calls, directory }
+    return { service, inbox, optouts, calls, directory, effects }
   }
 
   it('STOP records an opt-out by number, replies once and blocks the repeat', async () => {
@@ -252,6 +252,28 @@ describe('InboundService', () => {
     calls.length = 0
     await service.process({ ...msg('STOP'), providerMessageId: 'in-2', eventId: 'evt-2' })
     expect(calls).toEqual(['store:cust-1:false'])
+  })
+
+  it('an incomplete MMS does not take the identity of the complete one: the later STOP is routed, the placeholder superseded once', async () => {
+    const { service, inbox, optouts, calls, effects } = setup()
+    const superseded: string[] = []
+    effects.supersede = async (stale, by) => void superseded.push(`${stale.providerMessageId}->${by.providerMessageId}`)
+    const placeholder = await service.handleReceived({ kind: 'received', eventId: 'e1', from: 'unknown', body: '', at: now, deviceId: 'd1', providerMessageId: 'mms:4:incomplete', mms: { subject: null, parts: [], incomplete: true } })
+    expect(placeholder).toMatchObject({ duplicate: false, decision: { kind: 'quarantined' } })
+    const complete = { kind: 'received' as const, eventId: 'e2', from: '+17865550151', body: 'STOP', at: now, deviceId: 'd1', providerMessageId: 'mms:4', mms: { subject: null, parts: [], incomplete: false } }
+    expect(await service.handleReceived(complete)).toMatchObject({ duplicate: false, decision: { kind: 'opt_out' } })
+    expect(await optouts.findActive('+17865550151')).toMatchObject({ keyword: 'STOP' })
+    expect(superseded).toEqual(['mms:4:incomplete->mms:4'])
+    expect(inbox.rows.map((r) => [r.providerMessageId, r.supersededBy])).toEqual([
+      ['mms:4:incomplete', inbox.rows[1]!.id],
+      ['mms:4', null],
+    ])
+    // a second complete delivery and a late incomplete one are repeats
+    calls.length = 0
+    expect(await service.handleReceived({ ...complete, eventId: 'e3' })).toEqual({ duplicate: true })
+    expect(await service.handleReceived({ ...complete, eventId: 'e4', from: 'unknown', body: '', providerMessageId: 'mms:4:incomplete', mms: { subject: null, parts: [], incomplete: true } })).toEqual({ duplicate: true })
+    expect(calls).toEqual([])
+    expect(superseded).toHaveLength(1)
   })
 
   it('START after STOP clears the opt-out', async () => {

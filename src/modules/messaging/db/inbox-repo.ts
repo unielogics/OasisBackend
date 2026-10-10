@@ -1,4 +1,4 @@
-import type { Selectable } from 'kysely'
+import { sql, type Selectable } from 'kysely'
 import type { Executor } from '../../../platform/db.js'
 import type { NewId } from '../../../platform/ids.js'
 import { normalizeE164 } from '../../../integrations/sms/phone.js'
@@ -20,6 +20,8 @@ const rowOf = (r: Selectable<SmsInboxTable>): InboxRow => ({
   processedAt: r.processed_at,
   decision: r.decision as InboundDecision['kind'] | null,
   quarantined: r.quarantined,
+  messageId: r.message_id,
+  supersededBy: r.superseded_by,
 })
 
 /** sms_inbox: every received text, unique per (device, provider message id). Unknown senders are quarantined, never made customers. */
@@ -58,6 +60,26 @@ export class PgInboxRepository implements InboxRepository {
 
   async markProcessed(id: string, decision: InboundDecision['kind'], quarantined: boolean, at: Date): Promise<void> {
     await this.exec.updateTable('sms_inbox').set({ processed_at: at, decision, quarantined }).where('id', '=', id).execute()
+  }
+
+  async find(deviceId: string, providerMessageId: string): Promise<InboxRow | null> {
+    const r = await this.exec.selectFrom('sms_inbox').selectAll().where('device_id', '=', deviceId).where('provider_message_id', '=', providerMessageId).executeTakeFirst()
+    return r ? rowOf(r) : null
+  }
+
+  async markSuperseded(id: string, byId: string, at: Date): Promise<boolean> {
+    const r = await this.exec
+      .updateTable('sms_inbox')
+      .set({ superseded_by: byId, superseded_at: at })
+      .where('id', '=', id)
+      .where('superseded_by', 'is', null)
+      .executeTakeFirst()
+    return Number(r.numUpdatedRows) > 0
+  }
+
+  /** A transaction-scoped advisory lock: the incomplete and the complete delivery of one MMS never interleave. */
+  async lock(deviceId: string, key: string): Promise<void> {
+    await sql`select pg_advisory_xact_lock(hashtextextended(${`sms_inbox:${deviceId}:${key}`}, 0))`.execute(this.exec)
   }
 
   /** Records the parts of an MMS (what was saved, what was only listed). */

@@ -29,13 +29,27 @@ export interface MmsPart {
   data: Buffer | null
   /** Why `data` is null: the device sent no data, or what it sent was not base64. */
   problem?: 'missing' | 'decode_failed'
+  /** The decoded text of a text part (text/plain, or text/* with a charset), trimmed and capped; absent for other parts. */
+  text?: string
 }
 
-/** What an MMS adds to a received message (its text is in `body`: the trimmed body, else the subject, else ""). */
+/**
+ * What an MMS adds to a received message. Its text is in `body`: the trimmed body, else the text of its text parts, else the
+ * subject, else "".
+ */
 export interface MmsContent {
   subject: string | null
   parts: MmsPart[]
+  /**
+   * The device reported the MMS without what Oasis needs to act on it (no sender, or neither text nor a part with bytes: the
+   * tablet's "MMS content incomplete"). Its provider id then ends in MMS_INCOMPLETE_SUFFIX, so the complete delivery of the
+   * same message that may follow is not taken for a repeat of it (ADR 0151).
+   */
+  incomplete: boolean
 }
+
+/** Appended to the provider id of an incomplete MMS delivery (see MmsContent.incomplete). */
+export const MMS_INCOMPLETE_SUFFIX = ':incomplete'
 
 export type SmsEvent =
   | {

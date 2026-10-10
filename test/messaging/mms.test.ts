@@ -31,6 +31,13 @@ describe('mmsText', () => {
     expect(mmsText('', [part()])).toEqual({ text: PICTURE_MESSAGE_TEXT, placeholder: 'picture' })
     expect(mmsText(' ', [])).toEqual({ text: PICTURE_UNAVAILABLE_TEXT, placeholder: 'unavailable' })
   })
+
+  it('reads the text of text parts when the body is empty, so a STOP there is a STOP, not a placeholder', () => {
+    const textPart = part({ contentType: 'text/plain', data: Buffer.from('STOP'), text: 'STOP' })
+    expect(mmsText('', [part(), textPart])).toEqual({ text: 'STOP', placeholder: null })
+    expect(mmsText('C', [textPart])).toEqual({ text: 'C', placeholder: null })
+    expect(mmsText('', [part({ contentType: 'text/plain', text: '' })])).toEqual({ text: PICTURE_MESSAGE_TEXT, placeholder: 'picture' })
+  })
 })
 
 describe('routing an MMS', () => {
@@ -90,6 +97,8 @@ describe('planAttachments', () => {
   it('makes any device message id a safe key segment', () => {
     expect(messageSegment('abc_DEF-1')).toBe('abc_DEF-1')
     expect(messageSegment('mms:4')).toBe('4')
+    // the incomplete form of a message saves into the folder of the complete one
+    expect(messageSegment('mms:4:incomplete')).toBe('4')
     expect(messageSegment('../x y')).toMatch(/^xy-[0-9a-f]{16}$/)
     expect(messageSegment('///')).toMatch(/^m[0-9a-f]{16}$/)
     expect(messageSegment('a'.repeat(70))).toMatch(/^a{40}-[0-9a-f]{16}$/)

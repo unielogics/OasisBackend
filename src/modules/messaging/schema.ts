@@ -173,6 +173,9 @@ export interface SmsInboxTable {
   reviewed_at: Date | null
   kind: Generated<'sms' | 'mms'>
   attachments: JsonColumn<MmsAttachmentRecord[]> | null
+  /** The inbox row of the complete delivery that replaced this incomplete-MMS placeholder (ADR 0151). */
+  superseded_by: string | null
+  superseded_at: Date | null
 }
 
 export interface SmsOptOutsTable {

@@ -147,9 +147,9 @@ reconnect).
 |---|---|---|
 | `ops` | `sched.view` | `appointment.updated`, `bay.changed`, `kpi.dirty` |
 | `payments` | `pay.reports` | `invoice.updated`, `refund.pending` |
-| `messages` | `cli.view` | `message.in`, `message.status` |
+| `messages` | `cli.view` | `message.in`, `message.status`, `message.removed` |
 | `settings` | any user | `settings.changed`, `rbac.changed` |
-| `notifications` | self only (events carry `targetUserId`) | `notification.new` |
+| `notifications` | self only (events carry `targetUserId`) | `notification.new`, `notification.updated` |
 
 The Authorizer's `canSubscribe` overrides the table. Channels the caller may not read are dropped, not errors, and
 listed in `ready.denied`. Frames:
@@ -856,20 +856,24 @@ caller learns `skipped` (`opted_out`, `not_opted_in`, `no_valid_phone`, `synthet
 `Message` = `{id, direction in|out, from staff|system|customer, senderName, text, time "10:36 AM", at, channel, status, error, templateKey, appointmentId, customerId, segments, read, kind sms|mms, attachments}`.
 `kind` is `mms` for an inbound text that arrived as MMS (`channel` stays `sms`: same thread). `attachments` lists its parts
 (`[]` for an SMS): `{index, name, contentType, size, status stored|listed|unavailable|skipped}`; `stored` pictures are in the
-photos store (no URL or key is exposed yet). An MMS with no text reads `[Picture message]`, or `[Picture message — content
-unavailable]` when the device could not download it.
+photos store (no URL or key is exposed yet). The text of an MMS is its body, else the text of its `text/plain` parts, else its
+subject. An MMS with no text reads `[Picture message]`, or `[Picture message — content unavailable]` when the device could not
+download it; when the complete delivery of such an incomplete MMS arrives later, it is filed normally and the placeholder message is
+removed (`message.removed`).
 `status` is `queued sending sent delivered failed received canceled expired`; the outbox states `accepted` and `sent` both read as `sent`.
 The dashboard's `MessagesPort.thread` is typed as a bare array today; the live wave must read `.items`.
 
 ### 23.3 Realtime
 
 Channel `messages` (needs `cli.view`), full payload (the message as above): `message.out` (queued), `message.in` (received),
-`message.status {id, status, error, customerId, appointmentId, threadId}` on every state change. Channel `notifications`
+`message.status {id, status, error, customerId, appointmentId, threadId}` on every state change, `message.removed {id, customerId,
+appointmentId, threadId, reason: "superseded"}` when an incomplete-MMS placeholder gives way to the complete message. Channel `notifications`
 (targeted at each manager's user): `notification.new {id, kind}` for `sms.device_offline`, `sms.device_recovered` (each at
 most once per device per 30 minutes, ADR 0122), `sms.app_restarted`, `sms.no_device`, `sms.cancel_request`,
 `sms.unattributed_reply`, `sms.picture_message` (an MMS with no text, from anyone: "Picture message from <name or masked number> —
-check the tablet / dashboard"; entity the appointment, else the customer, else none), and `sms.device.health {deviceId, label, from,
-to}` on every device state change.
+check the tablet / dashboard"; entity the appointment, else the customer, else none; once the complete delivery of an incomplete
+MMS arrives, its alert is marked read and reads "The full message arrived later and was filed in its place.", announced as
+`notification.updated {ids, reason: "superseded"}`), and `sms.device.health {deviceId, label, from, to}` on every device state change.
 Channel `ops`: `alerts.changed {source: 'sms'}` when a reply arrives or is read, a device changes state. Managers are active
 employees with a login who hold `set.billing` or `sched.override` (Super Admin, Management, Accounting, plus any per-person Allow).
 
@@ -899,9 +903,10 @@ listener has no such route and answers 404. Verification is HMAC-SHA256 over the
 secret (24 h tolerance, `SMSGATE_WEBHOOK_TOLERANCE_SECONDS`): 401 for a missing header, bad or stale signature, 400 for a signed body
 that is not an envelope or a payload it cannot read, 404 for an unknown device key, 200 for everything accepted (a repeat, an event
 type Oasis ignores), 413 for a body over 16 MB. A signed delivery Oasis cannot use (the 400s and the ignored event types) is kept in
-`webhook_log` with status `unparsed` (body cut to its first 4 KB, event name in `headers.x-event`, purged after 7 days) and logged at
-warn by event name only. `mms:received` is recorded and applies nothing; `mms:downloaded` is routed exactly like `sms:received`
-(ADR 0151; field names in `docs/integrations/smsgate.md` section 1) and its stored copy loses the attachment bytes once applied.
+`webhook_log` with status `unparsed` (attachment bytes stripped, then the body cut to its first 4 KB, event name in `headers.x-event`,
+purged after 7 days) and logged at warn by event name only. `mms:received` is recorded and applies nothing; `mms:downloaded` is routed
+exactly like `sms:received` (ADR 0151; field names in `docs/integrations/smsgate.md` section 1). Every final row (processed, ignored,
+failed: unknown device or given up after 24 hours, unparsed) keeps no attachment bytes.
 The envelope is persisted in `webhook_log` (unique `(provider, external_id)` = envelope id) before the answer; applying it
 (`sms_processed_events`, outbox, message, inbound routing, device health) happens in one transaction afterwards, and a sweep every
 30 s applies envelopes that were persisted but never applied (and abandons them after 24 h).

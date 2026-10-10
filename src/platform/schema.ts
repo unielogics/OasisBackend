@@ -102,6 +102,8 @@ export interface NotificationsTable {
   entity_id: string | null
   created_at: Generated<Date>
   read_at: Date | null
+  /** What the notification is about, for the code that must find it again (e.g. 'sms_inbox:<device>:<provider id>'). Never shown. */
+  source_ref: string | null
 }
 
 export interface PlatformTables {

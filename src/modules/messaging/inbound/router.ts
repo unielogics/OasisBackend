@@ -20,6 +20,11 @@ export interface InboundText {
   kind?: 'sms' | 'mms'
   /** Set when an MMS carried no text: `body` is then a placeholder, never a keyword, and staff get a picture-message alert. */
   placeholder?: MmsPlaceholder | null
+  /**
+   * An MMS delivery without what Oasis needs (MmsContent.incomplete): its provider id carries MMS_INCOMPLETE_SUFFIX, and the
+   * complete delivery of the same message supersedes it.
+   */
+  incomplete?: boolean
 }
 
 export interface InboundContext {

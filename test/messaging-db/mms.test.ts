@@ -4,16 +4,18 @@
 // anything signed that Oasis cannot use is kept in webhook_log as 'unparsed'.
 import { afterEach, describe, expect, it } from 'vitest'
 import { sql } from 'kysely'
-import { SIM_DEVICE_KEY } from '../../db/seeds/messaging.js'
+import { SIM_DEVICE_KEY, SIM_WEBHOOK_SECRET } from '../../db/seeds/messaging.js'
+import { signWebhook } from '../../src/integrations/smsgate/signature.js'
 import type { ObjectStorage } from '../../src/integrations/storage/types.js'
 import { buildHooksApp, type HooksApp } from '../../src/modules/messaging/http/hooks-app.js'
-import { MMS_MAX_PICTURE_BYTES, PICTURE_MESSAGE_TEXT, PICTURE_UNAVAILABLE_TEXT } from '../../src/modules/messaging/inbound/mms.js'
-import { runMaintenancePurge } from '../../src/platform/maintenance.js'
+import { MMS_MAX_PICTURE_BYTES, MMS_SUPERSEDED_NOTE, PICTURE_MESSAGE_TEXT, PICTURE_UNAVAILABLE_TEXT } from '../../src/modules/messaging/inbound/mms.js'
+import { MESSAGE_RETENTION_MONTHS, monthsBefore, runMaintenancePurge } from '../../src/platform/maintenance.js'
 import { STRANGER, useWorld } from './world.js'
 
 // ---- a photos store that keeps objects in memory -------------------------------------------------------------------
 const objects = new Map<string, { body: Buffer; contentType: string }>()
 let storageDown = false
+const deleteFails = new Set<string>()
 const fakeStorage: ObjectStorage = {
   createUpload: () => Promise.reject(new Error('not used')),
   head: async (key) => {
@@ -21,7 +23,10 @@ const fakeStorage: ObjectStorage = {
     return o ? { bytes: o.body.length, contentType: o.contentType } : null
   },
   getDownloadUrl: async (key) => `https://photos.invalid/${key}?signed`,
-  delete: async (key) => void objects.delete(key),
+  delete: async (key) => {
+    if (deleteFails.has(key)) throw new Error('S3 refused the delete')
+    objects.delete(key)
+  },
   get: async (key) => {
     const o = objects.get(key)
     if (!o) throw new Error('no such object')
@@ -40,6 +45,7 @@ const w = useWorld({ deps: { storage: fakeStorage, logger } })
 afterEach(() => {
   objects.clear()
   storageDown = false
+  deleteFails.clear()
   warnings.length = 0
 })
 
@@ -337,6 +343,190 @@ describe('dedupe and mms:received', () => {
     expect(await inMessages()).toHaveLength(1)
     expect(await inbox()).toHaveLength(1)
     expect(objects.size).toBe(1)
+  })
+})
+
+describe('a delivery whose content was incomplete, then the complete one (same device message)', () => {
+  const pictureNotices = () => w.t.db.selectFrom('notifications').select(['kind', 'title', 'body', 'read_at']).where('kind', '=', 'sms.picture_message').execute()
+
+  it('a STOP whose first delivery was "content incomplete" is honoured when the complete one comes; the placeholder is superseded', async () => {
+    await mms('', { senderField: 'none', body: null, messageId: 'late-1' })
+    const [placeholder] = await inbox()
+    expect(placeholder).toMatchObject({ provider_message_id: 'mms:late-1:incomplete', body: PICTURE_UNAVAILABLE_TEXT, quarantined: true, superseded_by: null })
+    expect((await pictureNotices()).length).toBeGreaterThan(0)
+
+    await mms(maria(), { body: 'STOP', messageId: 'late-1', senderField: 'phoneNumber' })
+    expect(await w.t.db.selectFrom('sms_opt_outs').select(['phone_e164', 'source', 'keyword']).execute()).toEqual([{ phone_e164: maria(), source: 'keyword', keyword: 'STOP' }])
+    expect(await w.t.db.selectFrom('sms_outbox').select(['to_e164', 'klass']).execute()).toEqual([{ to_e164: maria(), klass: 'opt_out_confirm' }])
+    const rows = await inbox()
+    expect(rows.map((r) => [r.provider_message_id, r.decision, r.superseded_by])).toEqual([
+      ['mms:late-1:incomplete', 'quarantined', rows[1]!.id],
+      ['mms:late-1', 'opt_out', null],
+    ])
+    expect(rows[0]!.superseded_at).not.toBeNull()
+    // the placeholder's alert is resolved: nobody is sent to the tablet for a message Oasis now has in full
+    const resolved = await pictureNotices()
+    expect(resolved.length).toBeGreaterThan(0)
+    expect(resolved.every((x) => x.read_at !== null && x.body === MMS_SUPERSEDED_NOTE)).toBe(true)
+
+    // a second complete delivery (a new envelope) stays a duplicate, and so does a late incomplete one
+    await mms(maria(), { body: 'STOP', messageId: 'late-1' })
+    await mms('', { senderField: 'none', body: null, messageId: 'late-1' })
+    expect(await inbox()).toHaveLength(2)
+    expect(await w.t.db.selectFrom('sms_outbox').select('klass').execute()).toHaveLength(1)
+    expect(await pictureNotices()).toHaveLength(resolved.length)
+  })
+
+  it('from a customer: the thread shows the complete message once, unread once, routed and attributed as usual', async () => {
+    const appt = await w.appointment({ customer: 'Maria Delgado', at: '2026-06-13T14:00:00-04:00' })
+    const thread = () => w.t.db.selectFrom('message_threads').select('unread_count').where('customer_id', '=', w.customer('Maria Delgado').id).executeTakeFirstOrThrow()
+    await mms(maria(), { body: null, messageId: 'late-2', attachments: [{ contentType: 'image/jpeg', name: 'car.jpg', data: null }] })
+    const first = await inMessages()
+    expect(first.map((m) => m.body)).toEqual([PICTURE_MESSAGE_TEXT])
+    expect((await thread()).unread_count).toBe(1)
+
+    await mms(maria(), { body: 'Running 10 min late', messageId: 'late-2', attachments: [{ contentType: 'image/jpeg', name: 'car.jpg', data: b64(JPEG) }] })
+    const msgs = await inMessages()
+    expect(msgs.map((m) => [m.body, m.kind, m.appointment_id, m.read_at])).toEqual([['Running 10 min late', 'mms', appt, null]])
+    expect(msgs[0]!.attachments?.[0]).toMatchObject({ status: 'stored', key: `messaging/mms/${w.locationId}/late-2/0.jpg` })
+    expect((await thread()).unread_count).toBe(1)
+    const log = await w.t.db.selectFrom('activity_log').select('text').where('appointment_id', '=', appt).where('text', '=', 'Customer replied by MMS').execute()
+    expect(log).toHaveLength(1)
+    const rows = await inbox()
+    expect(rows.map((r) => [r.provider_message_id, r.message_id, r.superseded_by])).toEqual([
+      ['mms:late-2:incomplete', null, rows[1]!.id],
+      ['mms:late-2', msgs[0]!.id, null],
+    ])
+    expect((await pictureNotices()).every((x) => x.read_at !== null)).toBe(true)
+    // the dashboard is told the placeholder went away
+    const removed = await w.t.db.selectFrom('realtime_events').select('payload').where('type', '=', 'message.removed').execute()
+    expect(removed.map((r) => (r.payload as { id: string }).id)).toEqual([first[0]!.id])
+  })
+
+  it('an incomplete delivery after the complete one is dropped as a repeat', async () => {
+    await mms(maria(), { body: 'Hello there', messageId: 'late-3' })
+    await mms('', { senderField: 'none', body: null, messageId: 'late-3' })
+    expect((await inbox()).map((r) => r.provider_message_id)).toEqual(['mms:late-3'])
+    expect(await pictureNotices()).toEqual([])
+    expect((await inMessages()).map((m) => m.body)).toEqual(['Hello there'])
+  })
+})
+
+describe('text carried in text/plain parts', () => {
+  it('a STOP carried only in a text/plain part, with an empty body, opts the number out', async () => {
+    await mms(maria(), { body: null, attachments: [{ contentType: 'text/plain', name: 'text_0.txt', data: b64(Buffer.from('STOP')) }] })
+    expect(await w.t.db.selectFrom('sms_opt_outs').select(['phone_e164', 'keyword']).execute()).toEqual([{ phone_e164: maria(), keyword: 'STOP' }])
+    expect((await inbox())[0]).toMatchObject({ body: 'STOP', decision: 'opt_out' })
+    expect(await w.t.db.selectFrom('sms_outbox').select('klass').execute()).toEqual([{ klass: 'opt_out_confirm' }])
+    expect(await notices()).toEqual([])
+  })
+
+  it('a placeholder is never a keyword: a picture with a STOP-less text part is a picture message', async () => {
+    await mms(maria(), { body: null, attachments: [{ contentType: 'image/jpeg', data: b64(JPEG) }, { contentType: 'text/x-vcard', data: b64(Buffer.from('STOP')) }] })
+    expect(await w.t.db.selectFrom('sms_opt_outs').select('phone_e164').execute()).toEqual([])
+    expect((await inbox())[0]).toMatchObject({ body: PICTURE_MESSAGE_TEXT, decision: 'message' })
+  })
+})
+
+describe('retention of saved pictures', () => {
+  const age = (months: number) => w.clock.set(monthsBefore(w.clock.now(), -months))
+
+  it('the daily purge deletes the saved pictures of the messages and quarantined inbox rows it removes, and nothing else', async () => {
+    const pic = [{ contentType: 'image/jpeg', data: b64(JPEG) }]
+    await mms(maria(), { body: 'old', messageId: 'old-1', attachments: pic })
+    await mms(STRANGER, { body: 'old stranger', messageId: 'old-2', attachments: pic })
+    age(MESSAGE_RETENTION_MONTHS - 11)
+    await mms(maria(), { body: 'new', messageId: 'new-1', attachments: pic })
+    await mms(STRANGER, { body: 'new stranger', messageId: 'new-2', attachments: pic })
+    expect(objects.size).toBe(4)
+    age(12)
+
+    const removed = await runMaintenancePurge(w.t.db, w.clock, 'daily', { storage: () => fakeStorage })
+    expect(removed).toMatchObject({ messages: 1, sms_inbox: 2 })
+    expect([...objects.keys()].sort()).toEqual([`messaging/mms/${w.locationId}/new-1/0.jpg`, `messaging/mms/${w.locationId}/new-2/0.jpg`])
+    expect((await inMessages()).map((m) => m.body)).toEqual(['new'])
+    expect((await inbox()).map((r) => r.provider_message_id)).toEqual(['mms:new-1', 'mms:new-2'])
+    expect(await runMaintenancePurge(w.t.db, w.clock, 'daily', { storage: () => fakeStorage })).toMatchObject({ messages: 0, sms_inbox: 0 })
+    expect(objects.size).toBe(2)
+  })
+
+  it('a picture the store cannot delete keeps its row for the next run; the rest is purged and the run fails so it is retried', async () => {
+    const pic = [{ contentType: 'image/jpeg', data: b64(JPEG) }]
+    await mms(maria(), { body: 'a', messageId: 'keep-a', attachments: pic })
+    await mms(maria(), { body: 'b', messageId: 'keep-b', attachments: pic })
+    await mms(STRANGER, { body: 'c', messageId: 'keep-c', attachments: pic })
+    age(MESSAGE_RETENTION_MONTHS + 1)
+    deleteFails.add(`messaging/mms/${w.locationId}/keep-a/0.jpg`)
+    deleteFails.add(`messaging/mms/${w.locationId}/keep-c/0.jpg`)
+    await expect(runMaintenancePurge(w.t.db, w.clock, 'daily', { storage: () => fakeStorage })).rejects.toThrow(/could not be removed/)
+    expect((await inMessages()).map((m) => m.body)).toEqual(['a'])
+    expect((await inbox()).map((r) => r.provider_message_id)).toEqual(['mms:keep-c'])
+    expect([...objects.keys()].sort()).toEqual([`messaging/mms/${w.locationId}/keep-a/0.jpg`, `messaging/mms/${w.locationId}/keep-c/0.jpg`])
+    deleteFails.clear()
+    expect(await runMaintenancePurge(w.t.db, w.clock, 'daily', { storage: () => fakeStorage })).toMatchObject({ messages: 1, sms_inbox: 1 })
+    expect(objects.size).toBe(0)
+    expect(await inbox()).toEqual([])
+  })
+
+  it('without a photos store the rows that hold pictures are kept (never an orphaned object)', async () => {
+    await mms(maria(), { body: 'a', attachments: [{ contentType: 'image/jpeg', data: b64(JPEG) }] })
+    await mms(maria(), { body: 'plain' })
+    age(MESSAGE_RETENTION_MONTHS + 1)
+    await expect(runMaintenancePurge(w.t.db, w.clock, 'daily')).rejects.toThrow(/could not be removed/)
+    expect((await inMessages()).map((m) => m.body)).toEqual(['a'])
+    expect(objects.size).toBe(1)
+  })
+})
+
+describe('webhook_log never keeps attachment bytes once a delivery is final', () => {
+  const insertReceived = async (deviceKey: string, receivedAt: Date) => {
+    const ev = w.signed('mms:downloaded', mmsPayload(maria(), { body: 'OK', attachments: [{ contentType: 'image/jpeg', data: b64(JPEG) }] }))
+    const id = w.newId()
+    await w.t.db
+      .insertInto('webhook_log')
+      .values({ id, provider: 'smsgate', external_id: ev.id, headers: JSON.stringify({ ...ev.headers, 'x-device-key': deviceKey }), body: ev.body, signature_valid: true, received_at: receivedAt })
+      .execute()
+    return id
+  }
+  const logRow = (id: string) => w.t.db.selectFrom('webhook_log').select(['status', 'body', 'error']).where('id', '=', id).executeTakeFirstOrThrow()
+
+  it('a delivery given up after 24 hours is failed without its base64 data', async () => {
+    const id = await insertReceived(SIM_DEVICE_KEY, new Date(w.clock.now().getTime() - 25 * 3600_000))
+    expect((await w.rt.webhooks.sweep()).abandoned).toBe(1)
+    const row = await logRow(id)
+    expect(row.status).toBe('failed')
+    expect(row.body).not.toContain(b64(JPEG))
+    expect(JSON.parse(row.body!).payload.attachments[0]).toMatchObject({ data: null, dataRedacted: true, contentType: 'image/jpeg' })
+  })
+
+  it('a delivery for a device that no longer exists is failed without its base64 data', async () => {
+    const id = await insertReceived('device-that-was-removed', w.clock.now())
+    expect(await w.rt.webhooks.process(id)).toBe('ignored')
+    const row = await logRow(id)
+    expect(row).toMatchObject({ status: 'failed', error: 'unknown device' })
+    expect(row.body).not.toContain(b64(JPEG))
+  })
+
+  it('an unparsed delivery loses its attachment bytes before it is cut to 4 KB', async () => {
+    const payload = { ...mmsPayload(maria(), { body: 'OK', attachments: [{ contentType: 'image/jpeg', data: b64(Buffer.concat([JPEG, Buffer.alloc(9000, 1)])) }] }), messageId: undefined }
+    const { res } = await deliver('mms:downloaded', payload)
+    expect(res.status).toBe(400)
+    const row = await w.t.db.selectFrom('webhook_log').select(['status', 'body']).executeTakeFirstOrThrow()
+    expect(row.status).toBe('unparsed')
+    expect(Buffer.byteLength(row.body!, 'utf8')).toBeLessThanOrEqual(4096)
+    expect(JSON.parse(row.body!).payload.attachments[0]).toMatchObject({ data: null, dataRedacted: true })
+  })
+
+  it('an unparsed body that is not JSON still has long base64 runs removed before the 4 KB cut', async () => {
+    const data = b64(Buffer.alloc(3000, 7))
+    const raw = `{"id":"env-broken","event":"mms:downloaded","payload":{"attachments":[{"data":"${data}"}]` // truncated JSON
+    const ts = String(Math.floor(w.clock.now().getTime() / 1000))
+    const r = await w.rt.webhooks.receive(SIM_DEVICE_KEY, { 'x-signature': signWebhook(SIM_WEBHOOK_SECRET, raw, ts), 'x-timestamp': ts }, raw)
+    expect(r.status).toBe(400)
+    const row = await w.t.db.selectFrom('webhook_log').select(['status', 'body']).executeTakeFirstOrThrow()
+    expect(row.status).toBe('unparsed')
+    expect(row.body).not.toContain(data.slice(0, 200))
+    expect(row.body).toContain('"data":"[redacted]"')
   })
 })
 

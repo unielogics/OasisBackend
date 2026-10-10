@@ -3,10 +3,13 @@
 //
 // Two groups: 'frequent' runs every 10 minutes (maintenance.purge; the realtime log is only kept for 10 minutes) and
 // 'daily' runs at 03:40 business time (maintenance.retention; sessions, 24-month message retention, ...).
-// audit_log is NEVER purged, and neither is the ledger: no task below touches either table. Photos (24 months) need object
-// storage and live in the photos.retention job.
+// audit_log is NEVER purged, and neither is the ledger: no task below touches either table. Appointment photos (24 months) live
+// in the photos.retention job; the pictures saved from an MMS go with the message or inbox row that lists them (below).
 import { DateTime } from 'luxon'
-import { sql } from 'kysely'
+import { sql, type RawBuilder } from 'kysely'
+import { loadEnv } from '../config/env.js'
+import type { StorageProvider } from '../integrations/ports/storage.js'
+import { createStorageProvider } from '../integrations/storage/config.js'
 import type { Clock } from './clock.js'
 import type { Db } from './db.js'
 import { purgeExpiredKeys } from './idempotency.js'
@@ -31,7 +34,12 @@ export const VIP_RELEASE_RETENTION_MS = 7 * 24 * 3600 * 1000
 export const PURGE_BATCH = 5000
 const MAX_BATCHES = 40
 
-export type PurgeTask = (db: Db, clock: Clock) => Promise<number>
+/** What a task may need besides the database: the photos store, created on first use (saved MMS pictures, ADR 0151). */
+export interface PurgeEnv {
+  storage?: () => Pick<StorageProvider, 'delete'>
+}
+
+export type PurgeTask = (db: Db, clock: Clock, env: PurgeEnv) => Promise<number>
 export type PurgeGroup = 'frequent' | 'daily'
 
 const tasks = new Map<string, { task: PurgeTask; group: PurgeGroup }>()
@@ -106,31 +114,88 @@ registerPurgeTask(
   'daily',
 )
 
-// messages cascade to sms_outbox; sms_inbox.message_id is set null (the inbox row is purged on its own clock below)
+/** A task that removed what it could and kept the rest for the next run; runMaintenancePurge reports it after the others ran. */
+export class PurgeIncomplete extends Error {
+  constructor(
+    readonly task: string,
+    readonly removed: number,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'PurgeIncomplete'
+  }
+}
+
+/**
+ * Deletes the rows of `table` that `expired` selects, together with the photos-store objects their `attachments` list as saved
+ * (MMS pictures under messaging/mms/, ADR 0151): objects first, row second, so a crash or a store outage never leaves an
+ * object nobody can find. A row whose objects could not all be deleted is kept for the next run (the run then fails, so the
+ * job retries and is seen); the others are purged. `ownsObjects` says which rows' objects are this table's to delete.
+ */
+async function purgeWithObjects(
+  db: Db,
+  env: PurgeEnv,
+  table: 'messages' | 'sms_inbox',
+  expired: RawBuilder<boolean>,
+  ownsObjects: RawBuilder<boolean>,
+): Promise<number> {
+  let total = 0
+  let failures = 0
+  let firstError: string | undefined
+  let after = '00000000-0000-0000-0000-000000000000'
+  let storage: Pick<StorageProvider, 'delete'> | undefined
+  for (let i = 0; i < MAX_BATCHES; i++) {
+    const r = await sql<{ id: string; keys: string[] }>`
+      select t.id,
+        case when ${ownsObjects} then coalesce((
+          select array_agg(a->>'key') from jsonb_array_elements(case when jsonb_typeof(t.attachments) = 'array' then t.attachments else '[]'::jsonb end) a
+          where jsonb_typeof(a->'key') = 'string' and a->>'key' <> ''), '{}') else '{}' end as keys
+      from ${sql.table(table)} t
+      where ${expired} and t.id > ${after}::uuid
+      order by t.id
+      limit ${PURGE_BATCH}`.execute(db)
+    const rows = r.rows
+    if (rows.length === 0) break
+    after = rows[rows.length - 1]!.id
+    const gone: string[] = []
+    for (const row of rows) {
+      try {
+        if (row.keys.length > 0) {
+          storage ??= env.storage?.()
+          if (!storage) throw new Error('no photos store to delete them from')
+          for (const key of row.keys) await storage.delete(key)
+        }
+        gone.push(row.id)
+      } catch (err) {
+        failures += 1
+        firstError ??= (err as Error).message.slice(0, 200)
+      }
+    }
+    if (gone.length > 0) total += deleted(await sql`delete from ${sql.table(table)} where id = any(${gone}::uuid[])`.execute(db))
+    if (rows.length < PURGE_BATCH) break
+  }
+  if (failures > 0) throw new PurgeIncomplete(table, total, `${failures} ${table} row(s) kept: their saved pictures could not be removed from storage (${firstError ?? 'unknown error'})`)
+  return total
+}
+
+// messages cascade to sms_outbox; sms_inbox.message_id is set null (the inbox row is purged on its own clock below). An MMS
+// message takes its saved pictures with it.
 registerPurgeTask(
   'messages',
-  (db, clock) => {
+  (db, clock, env) => {
     const cutoff = monthsBefore(clock.now(), MESSAGE_RETENTION_MONTHS)
-    return inBatches(async () =>
-      deleted(
-        await sql`delete from messages where id in (
-          select id from messages where created_at < ${cutoff} limit ${PURGE_BATCH})`.execute(db),
-      ),
-    )
+    return purgeWithObjects(db, env, 'messages', sql<boolean>`t.created_at < ${cutoff}`, sql<boolean>`true`)
   },
   'daily',
 )
 
+// An inbox row filed as a message leaves its pictures to the message (purged above, which sets message_id null); one that never
+// was (a quarantined stranger's, a superseded placeholder's) or whose message is already gone takes them with it.
 registerPurgeTask(
   'sms_inbox',
-  (db, clock) => {
+  (db, clock, env) => {
     const cutoff = monthsBefore(clock.now(), MESSAGE_RETENTION_MONTHS)
-    return inBatches(async () =>
-      deleted(
-        await sql`delete from sms_inbox where id in (
-          select id from sms_inbox where received_at < ${cutoff} limit ${PURGE_BATCH})`.execute(db),
-      ),
-    )
+    return purgeWithObjects(db, env, 'sms_inbox', sql<boolean>`t.received_at < ${cutoff}`, sql<boolean>`t.message_id is null`)
   },
   'daily',
 )
@@ -185,13 +250,28 @@ registerPurgeTask(
   'daily',
 )
 
+/**
+ * Runs every task of the group. A task that fails does not stop the others: the run throws once all of them ran, naming each
+ * failure, so the job is retried (and dead-lettered if it keeps failing).
+ */
 export async function runMaintenancePurge(
   db: Db,
   clock: Clock,
   group: PurgeGroup = 'frequent',
+  env: PurgeEnv = {},
 ): Promise<Record<string, number>> {
   const out: Record<string, number> = {}
-  for (const [name, t] of tasks) if (t.group === group) out[name] = await t.task(db, clock)
+  const failed: string[] = []
+  for (const [name, t] of tasks) {
+    if (t.group !== group) continue
+    try {
+      out[name] = await t.task(db, clock, env)
+    } catch (err) {
+      if (err instanceof PurgeIncomplete) out[name] = err.removed
+      failed.push(`${name}: ${(err as Error).message}`)
+    }
+  }
+  if (failed.length > 0) throw new Error(`maintenance (${group}) incomplete; removed ${JSON.stringify(out)}; ${failed.join('; ')}`)
   return out
 }
 
@@ -214,7 +294,11 @@ export const maintenanceRetentionJob: JobDefinition<Record<string, never>> = {
   cron: '40 3 * * *',
   expireInSeconds: 30 * 60,
   async handler(ctx) {
-    const removed = await runMaintenancePurge(ctx.db, ctx.clock, 'daily')
+    // the photos store is only built when a purged MMS has saved pictures to delete
+    let storage: StorageProvider | undefined
+    const removed = await runMaintenancePurge(ctx.db, ctx.clock, 'daily', {
+      storage: () => (storage ??= createStorageProvider(loadEnv(), { clock: ctx.clock })),
+    })
     ctx.logger.info({ removed }, 'maintenance.retention done')
   },
 }

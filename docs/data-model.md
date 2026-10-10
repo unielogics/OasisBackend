@@ -27,6 +27,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261006410000_notices_and_ledger_integrity.sql` | the debounce record of manager notices that can repeat (SMS device flapping, app restarts, no device) and the nightly ledger integrity results (ADR 0122, 0123) |
 | `20261006500000_public_website.sql`    | the public website's booking surface: one-time SMS codes, member tokens and the durable limit counters of the public routes (ADR 0150)                     |
 | `20261010130000_mms_inbound.sql`       | inbound MMS: `kind` and `attachments` on `messages` and `sms_inbox`, and the `unparsed` status of `webhook_log` (ADR 0151)                                |
+| `20261010140000_mms_supersede.sql`     | `sms_inbox.superseded_by` / `superseded_at` (an incomplete MMS replaced by its complete delivery) and `notifications.source_ref` (ADR 0151)                |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -243,7 +244,10 @@ the message are marked, and the parts are listed.
 | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `messages.kind`, `sms_inbox.kind`         | `sms` (default) or `mms`. `messages.channel` stays `sms`: an MMS is part of the same SMS thread.                                                                                                                              |
 | `messages.attachments`, `sms_inbox.attachments` | JSON array (null for an SMS), one item per part in device order: `index`, `partId`, `name`, `contentType`, `size`, `status` (`stored` \| `listed` \| `unavailable` \| `skipped`), `reason` (`missing`, `decode_failed`, `too_large`, `limit`, `unsupported_type`, `storage_error`) and `key`: the object key in the photos store, `messaging/mms/<location>/<device message id>/<index>.<ext>`, for a saved picture (image/jpeg, png or webp by their bytes, at most five of 5 MB each). The key never leaves the server. |
-| `messages.body` of an MMS with no text    | `[Picture message]` when it had parts, `[Picture message — content unavailable]` when it had none; managers get an `sms.picture_message` notification either way.                                                         |
+| `messages.body` of an MMS with no text    | `[Picture message]` when it had parts, `[Picture message — content unavailable]` when it had none; managers get an `sms.picture_message` notification either way. The text of `text/plain` parts counts as text.         |
+| `sms_inbox.superseded_by`, `superseded_at` (migration `20261010140000_mms_supersede.sql`) | Set together on an incomplete-MMS placeholder (`provider_message_id` `mms:<id>:incomplete`) when the complete delivery of the same message arrived: the id of that delivery's inbox row. The placeholder's message is deleted (`message_id` becomes null) and it leaves the quarantine list. |
+| `notifications.source_ref`                | What a notification is about, for the code that must find it again; never shown. A picture-message alert carries `sms_inbox:<device id>:<provider message id>`, so the alert of a superseded placeholder is resolved. |
+| Retention of saved pictures               | `maintenance.retention` deletes the photos-store objects a purged message lists, and those of a purged inbox row with no message (a quarantined stranger's, a superseded placeholder's), object first, row second; a row whose objects cannot be deleted stays for the next run. |
 
 ## Public website (migration `20261006500000_public_website.sql`, ADR 0150)
 
@@ -1148,8 +1152,9 @@ Primary key `(location_id, key)`. `(location_id)` references `locations(id)` on 
 | `entity_id` | text | yes |  |
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `read_at` | timestamp with time zone | yes |  |
+| `source_ref` | text | yes |  |
 
-Primary key `(id)`. `(location_id)` references `locations(id)` on delete cascade. 1 check constraint. Index `notifications_location_idx` `(location_id, created_at DESC)`. Index `notifications_unread_idx` `(employee_id)` where `read_at IS NULL`.
+Primary key `(id)`. `(location_id)` references `locations(id)` on delete cascade. 1 check constraint. Index `notifications_location_idx` `(location_id, created_at DESC)`. Index `notifications_source_ref_idx` `(source_ref)` where `source_ref IS NOT NULL`. Index `notifications_unread_idx` `(employee_id)` where `read_at IS NULL`.
 
 #### `ops_alert_state`
 
@@ -1510,8 +1515,10 @@ Primary key `(id)`. Unique `(device_key)`. `(location_id)` references `locations
 | `reviewed_at` | timestamp with time zone | yes |  |
 | `kind` | text | no | `'sms'::text` |
 | `attachments` | jsonb | yes |  |
+| `superseded_by` | uuid | yes |  |
+| `superseded_at` | timestamp with time zone | yes |  |
 
-Primary key `(id)`. Unique `(device_id, provider_message_id)`. `(appointment_id)` references `appointments(id)` on delete set null. `(customer_id)` references `customers(id)`. `(device_id)` references `sms_devices(id)` on delete cascade. `(message_id)` references `messages(id)` on delete set null. 3 check constraints. Index `sms_inbox_from_idx` `(from_e164)` where `from_e164 IS NOT NULL`. Index `sms_inbox_quarantine_idx` `(received_at DESC)` where `quarantined AND (reviewed_at IS NULL)`.
+Primary key `(id)`. Unique `(device_id, provider_message_id)`. `(appointment_id)` references `appointments(id)` on delete set null. `(customer_id)` references `customers(id)`. `(device_id)` references `sms_devices(id)` on delete cascade. `(message_id)` references `messages(id)` on delete set null. `(superseded_by)` references `sms_inbox(id)` on delete set null. 4 check constraints. Index `sms_inbox_from_idx` `(from_e164)` where `from_e164 IS NOT NULL`. Index `sms_inbox_quarantine_idx` `(received_at DESC)` where `quarantined AND (reviewed_at IS NULL)`.
 
 #### `sms_opt_outs`
 

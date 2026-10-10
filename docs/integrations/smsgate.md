@@ -132,10 +132,11 @@ attachment bytes already redacted once applied):
 | Field | Read as | If absent or different |
 |---|---|---|
 | envelope `event` | `mms:downloaded` routes; `mms:received` is recorded only (event kind `mms_notified`, `webhook_log` `processed`, no message) | anything else is `unparsed` (below) |
-| `payload.messageId` | the dedupe key with the device, stored as `mms:<messageId>` (`sms_inbox.provider_message_id`; Android numbers MMS on their own, the tablet logged `id=4`, so a bare id could equal an SMS's), and the storage-key segment | missing: 400 and an `unparsed` row |
+| `payload.messageId` | the dedupe key with the device, stored as `mms:<messageId>` (`sms_inbox.provider_message_id`; Android numbers MMS on their own, the tablet logged `id=4`, so a bare id could equal an SMS's), and the storage-key segment. An **incomplete** delivery (no sender, or neither text nor a part with bytes: the tablet's "MMS content incomplete") is stored as `mms:<messageId>:incomplete`, so it never takes the identity of the complete delivery that may follow: that one is routed normally (keywords, opt-out, attribution) and supersedes the placeholder (`sms_inbox.superseded_by`; its thread message removed, its alert marked read with "The full message arrived later and was filed in its place.", gone from the quarantine list). An incomplete delivery after the complete one, and a second complete one, are repeats | missing: 400 and an `unparsed` row |
 | `payload.sender`, else `payload.phoneNumber` | the sender, normalised exactly like `sms:received` | both missing: the sender is `unknown` (quarantined, still stored and announced) |
-| `payload.body` (string or null), else `payload.message` | the text, trimmed | empty: `payload.subject` trimmed; both empty: a placeholder (below) |
-| `payload.subject` | used only when the body is empty | |
+| `payload.body` (string or null), else `payload.message` | the text, trimmed | empty: the text of the text parts (below); then `payload.subject` trimmed; all empty: a placeholder (below), never read as a keyword |
+| `payload.subject` | used only when the body and the text parts are empty | |
+| text parts of `payload.attachments[]` | `text/plain`, and any other `text/*` that declares a charset (contact cards and calendars never), decoded with that charset (UTF-8 when none or unknown), NUL dropped, trimmed, only the first 16 KB read; several are joined by a newline (16 KB in all). Many phones send the words of an MMS only there: a STOP in a `text/plain` part with an empty body is a STOP | |
 | `payload.attachments[]` | `partId` (string or number), `contentType` (parameters dropped, lower-cased; `mimeType` accepted), `name`, `size`, `data` (base64, standard or URL alphabet, an optional `data:...;base64,` prefix, whitespace ignored) | `data` null or missing: the part is `unavailable` (`missing`); not base64: `unavailable` (`decode_failed`) |
 | `payload.receivedAt` | ISO-8601 with offset | the signing time |
 | `recipient`, `simNumber`, `transactionId`, `size`, `contentClass` | not used | |
@@ -295,7 +296,7 @@ Registered webhook URL: `https://oasis-api.<tailnet>.ts.net/hooks/smsgate/<devic
 | Messages stay `accepted` | webhooks lost or carrier gives no receipts | reconciliation resolves them via `GET /messages/{id}` |
 | Inbound from some phones never arrives | RCS on the tablet's Messages app | turn chat features off |
 | A reply shows on the tablet as MMS but not in Oasis | the `oasis-mms-*` webhooks are missing (registered before 2026-10-10), or mobile data is off (MMS download needs it) | register webhooks; check `GET /webhooks` lists nine; keep mobile data on |
-| A thread shows `[Picture message — content unavailable]` | the device could not download the MMS (`MMS content incomplete` in the tablet log) | read it on the tablet; check mobile data and the carrier's MMS APN |
+| A thread shows `[Picture message — content unavailable]` | the device could not download the MMS (`MMS content incomplete` in the tablet log) | if the tablet later downloads it and sends `mms:downloaded` again, the full message replaces the placeholder by itself; otherwise read it on the tablet; check mobile data and the carrier's MMS APN |
 | `webhook_log` rows with status `unparsed` | a signed event Oasis does not handle, or a payload it could not read | `select headers->>'x-event', error, body from webhook_log where status = 'unparsed'`; kept 7 days |
 
 ## 4. Environment variables
@@ -368,14 +369,18 @@ test/fixtures/smsgate/       webhooks/*.json (pre-signed), http.json (recorded e
   opt-out. Keywords are the whole message, trimmed, case-insensitive, edge punctuation ignored. Unknown senders are quarantined and
   no customer is created (a stranger's STOP/START/HELP is still honoured by number). Attribution: job in progress, else nearest
   upcoming within 72 h (an appointment that started up to 2 h ago still counts), else last completed within 14 days.
-- **MMS** (ADR 0151): `mms:downloaded` becomes the same received event as `sms:received` (text = body trimmed, else the subject)
+- **MMS** (ADR 0151): `mms:downloaded` becomes the same received event as `sms:received` (text = body trimmed, else the text of
+  its `text/plain` parts, else the subject)
   and goes through the same router; the inbox row and the message are marked `kind = mms`. Pictures (image/*, at most 5, up to
   5 MB each, JPEG/PNG/WebP by their bytes) are saved in the photos store (`STORAGE_PROVIDER`, never public, no new bucket) under
   `messaging/mms/<location>/<device message id>/<index>.<ext>`; every part is listed in `attachments` (stored, listed, skipped or
   unavailable, with the reason). An MMS with no text is filed as `[Picture message]` (it had parts) or `[Picture message — content
   unavailable]` (it had none) and raises the `sms.picture_message` notification ("Picture message from <name or masked number> —
-  check the tablet / dashboard") whoever sent it. A storage failure loses the picture, never the text. Once applied, the stored
-  `webhook_log` copy loses the base64 bytes.
+  check the tablet / dashboard") whoever sent it. A storage failure loses the picture, never the text. An incomplete delivery
+  (no sender, or no text and no part with bytes) is filed under `mms:<id>:incomplete`; the complete delivery of the same message
+  is routed normally and supersedes it (placeholder message removed, its alert resolved). The saved pictures are deleted with the
+  message (or the quarantined inbox row) that lists them, by the daily retention. Every final `webhook_log` row (processed,
+  ignored, failed, unparsed) loses the base64 bytes; an unparsed one before it is cut to 4 KB.
 - **Unparsed**: a delivery whose signature verifies but whose event Oasis does not handle (answered 200) or whose payload it cannot
   read (answered 400) is kept in `webhook_log` with status `unparsed` (body cut to its first 4 KB, the event name in
   `headers.x-event`), logged at warn with the event name only, and purged after 7 days.

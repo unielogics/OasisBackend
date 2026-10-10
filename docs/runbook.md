@@ -355,14 +355,20 @@ tablet's log says `messageType MMS`.*
    on the tablet (or `sudo $D/verify.sh smsgate`, check SG-B3) must list **nine** `oasis-*` registrations. Fewer: `sms-register-webhooks
    <id>` (the hourly `sms.webhooks.register` job and every app restart do the same).
 2. MMS download needs **mobile data** on the tablet (not only Wi-Fi). With it off, the tablet logs `MMS content incomplete` and Oasis gets
-   at most `[Picture message — content unavailable]` with a "Picture message" notification: read that one on the tablet.
+   at most `[Picture message — content unavailable]` with a "Picture message" notification. If the tablet downloads it later and reports
+   it again, the full message (a STOP included) is filed normally and replaces the placeholder: the placeholder leaves the thread and
+   the quarantine list and its notification is marked read ("The full message arrived later ..."). Otherwise read it on the tablet.
+   `select provider_message_id, superseded_by from sms_inbox where provider_message_id like 'mms:%:incomplete'` lists the placeholders.
+   A STOP sent only in the MMS's text part (empty body) is read from there.
 3. A picture with no text shows as `[Picture message]` and raises "Picture message from <name or masked number> — check the tablet /
    dashboard". The picture is in the photos store under `messaging/mms/` (no new bucket, never public); there is no viewer yet, so read it
-   on the tablet.
+   on the tablet. It is deleted with its message after 24 months (`maintenance.retention`; a delete the store refuses keeps the row and
+   fails that run, so it is retried and shows in the jobs page).
 4. Deliveries the server could not use are kept for 7 days:
    `select received_at, headers->>'x-event' as event, error, left(body, 300) from webhook_log where status = 'unparsed' order by received_at desc;`
    An `mms:downloaded` there means its field names differ from what `docs/integrations/smsgate.md` section 1 assumes: send it to the
-   developer. Nothing in that table is lost text yet: the tablet still holds the message.
+   developer. Nothing in that table is lost text yet: the tablet still holds the message. No final `webhook_log` row keeps picture
+   bytes (they are stripped before the 4 KB cut of an `unparsed` row, and from a `failed` one).
 
 ### Squarespace sync stuck or dead-lettered
 *Sign: payments stay "Awaiting Squarespace", the sync status card shows lag or a dead letter, new orders do not appear.*

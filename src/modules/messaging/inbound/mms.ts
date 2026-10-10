@@ -1,13 +1,18 @@
 // Inbound MMS (ADR 0151): what Oasis keeps of a downloaded MMS besides its text. Pure: deciding which parts are saved and
 // under which key; the effects do the storage I/O. An MMS's text goes through the same router as an SMS.
 import { createHash } from 'node:crypto'
-import type { MmsPart } from '../../../integrations/ports/sms.js'
+import { MMS_INCOMPLETE_SUFFIX, type MmsPart } from '../../../integrations/ports/sms.js'
 import { PHOTO_TYPES } from '../../../integrations/storage/types.js'
 import { sniffImageType } from '../../../integrations/storage/sniff.js'
 
 /** Pictures saved per MMS, and the largest one saved. */
 export const MMS_MAX_SAVED_PICTURES = 5
 export const MMS_MAX_PICTURE_BYTES = 5 * 1024 * 1024
+
+/** The stored keys of an attachments list (the photos-store objects to delete with its row). */
+export function storedKeys(attachments: readonly MmsAttachmentRecord[] | null | undefined): string[] {
+  return (attachments ?? []).flatMap((a) => (a && typeof a.key === 'string' && a.key.length > 0 ? [a.key] : []))
+}
 
 /** The text stored for an MMS with no text: it had parts (a picture), or nothing usable at all. */
 export const PICTURE_MESSAGE_TEXT = '[Picture message]'
@@ -33,9 +38,21 @@ export interface MmsAttachmentRecord {
 /** What the effects must do with each part: save the bytes under `key`, or just record it. */
 export type MmsPlanItem = { record: MmsAttachmentRecord; save: { key: string; body: Buffer; contentType: string } | null }
 
-/** The text an MMS is filed with: its own text, else a placeholder saying a picture came (or that nothing could be read). */
+/** The body of a placeholder's manager alert once the complete delivery of the same MMS arrived (the alert is also marked read). */
+export const MMS_SUPERSEDED_NOTE = 'The full message arrived later and was filed in its place.'
+
+/**
+ * The text an MMS is filed with: its own text, else the text of its text parts (a STOP is often only there), else a placeholder
+ * saying a picture came (or that nothing could be read). A placeholder is never read as a keyword (the router checks).
+ */
 export function mmsText(body: string, parts: readonly MmsPart[]): { text: string; placeholder: MmsPlaceholder | null } {
-  const text = body.trim()
+  const text =
+    body.trim() ||
+    parts
+      .map((p) => p.text ?? '')
+      .filter((t) => t.length > 0)
+      .join('\n')
+      .trim()
   if (text) return { text, placeholder: null }
   return parts.length > 0 ? { text: PICTURE_MESSAGE_TEXT, placeholder: 'picture' } : { text: PICTURE_UNAVAILABLE_TEXT, placeholder: 'unavailable' }
 }
@@ -47,7 +64,9 @@ const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
  * the id itself when already safe, else a readable prefix plus a short hash.
  */
 export function messageSegment(providerMessageId: string): string {
-  const id = providerMessageId.startsWith('mms:') ? providerMessageId.slice(4) : providerMessageId
+  // the incomplete form of a message shares its folder with the complete one, which overwrites rather than adds
+  const bare = providerMessageId.endsWith(MMS_INCOMPLETE_SUFFIX) ? providerMessageId.slice(0, -MMS_INCOMPLETE_SUFFIX.length) : providerMessageId
+  const id = bare.startsWith('mms:') ? bare.slice(4) : bare
   if (SEGMENT.test(id)) return id
   const hash = createHash('sha256').update(id).digest('hex').slice(0, 16)
   const readable = id.replace(/[^A-Za-z0-9_-]+/g, '').replace(/^[^A-Za-z0-9]+/, '').slice(0, 40)

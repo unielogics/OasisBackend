@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { Clock } from '../../platform/clock.js'
-import type { MmsPart, SmsEvent } from '../ports/sms.js'
+import { MMS_INCOMPLETE_SUFFIX, type MmsPart, type SmsEvent } from '../ports/sms.js'
 import { SmsWebhookError } from '../sms/errors.js'
 import { normalizeE164 } from '../sms/phone.js'
 import { verifySignature } from './signature.js'
@@ -79,6 +79,34 @@ export function decodeBase64(raw: string): Buffer | null {
 
 const mediaType = (v: string | undefined): string => (v ? (v.split(';')[0] ?? '').trim().toLowerCase() : '') || 'application/octet-stream'
 
+/** The text read from an MMS's text parts (each, and all of them together) is cut to this many bytes / characters. */
+export const MMS_TEXT_MAX_BYTES = 16 * 1024
+
+/** text/* types that are documents, not the text of the message, whatever their charset. */
+const NOT_MESSAGE_TEXT = new Set(['text/vcard', 'text/x-vcard', 'text/directory', 'text/calendar', 'text/x-vcalendar', 'text/vcalendar'])
+
+function charsetOf(rawType: string | undefined): string | null {
+  const m = rawType ? /;\s*charset\s*=\s*"?([^";\s]+)"?/i.exec(rawType) : null
+  return m ? m[1]!.toLowerCase() : null
+}
+
+/**
+ * The text of a text part: text/plain always, any other text/* only when it declares a charset (contact cards and calendars
+ * never). Decoded with the declared charset (UTF-8 when none, or when the label is unknown), NUL dropped, trimmed, and only
+ * its first MMS_TEXT_MAX_BYTES bytes are read.
+ */
+function partText(rawType: string | undefined, type: string, bytes: Buffer): string | undefined {
+  const charset = charsetOf(rawType)
+  if (type !== 'text/plain' && !(type.startsWith('text/') && charset !== null && !NOT_MESSAGE_TEXT.has(type))) return undefined
+  let decoder: InstanceType<typeof TextDecoder>
+  try {
+    decoder = new TextDecoder(charset ?? 'utf-8')
+  } catch {
+    decoder = new TextDecoder('utf-8')
+  }
+  return noNul(decoder.decode(bytes.subarray(0, MMS_TEXT_MAX_BYTES))).trim()
+}
+
 /** The attachments of mms:downloaded. Each part is kept even when its data is missing or broken (recorded as unavailable). */
 function mmsParts(raw: unknown): MmsPart[] {
   if (!Array.isArray(raw)) return []
@@ -89,7 +117,8 @@ function mmsParts(raw: unknown): MmsPart[] {
     const partId = str(a, 'partId') ?? (typeof a.partId === 'number' ? String(a.partId) : null)
     const declared = num(a, 'size')
     const size = declared !== undefined && Number.isSafeInteger(declared) && declared >= 0 ? declared : null
-    const part: MmsPart = { partId, contentType: mediaType(str(a, 'contentType') ?? str(a, 'mimeType')).slice(0, 255), name: str(a, 'name')?.slice(0, 255) ?? null, size, data: null }
+    const rawType = str(a, 'contentType') ?? str(a, 'mimeType')
+    const part: MmsPart = { partId, contentType: mediaType(rawType).slice(0, 255), name: str(a, 'name')?.slice(0, 255) ?? null, size, data: null }
     const data = str(a, 'data')
     if (data === undefined) part.problem = 'missing'
     else {
@@ -98,6 +127,8 @@ function mmsParts(raw: unknown): MmsPart[] {
       else {
         part.data = bytes
         part.size = bytes.length
+        const text = partText(rawType, part.contentType, bytes)
+        if (text !== undefined) part.text = text
       }
     }
     out.push(part)
@@ -186,16 +217,28 @@ export function verifyAndParse(
       if (!messageId) return fail('bad_body', 'mms:downloaded payload has no messageId')
       const sender = str(p, 'sender') ?? str(p, 'phoneNumber')
       const subject = str(p, 'subject')?.trim() || null
-      const text = (typeof p.body === 'string' ? noNul(p.body) : typeof p.message === 'string' ? noNul(p.message) : '').trim()
+      const parts = mmsParts(p.attachments)
+      const own = (typeof p.body === 'string' ? noNul(p.body) : typeof p.message === 'string' ? noNul(p.message) : '').trim()
+      // Many phones put the words of an MMS in a text/plain part and leave the body empty: a STOP must be read from there too.
+      const fromParts = parts
+        .map((x) => x.text ?? '')
+        .filter((t) => t.length > 0)
+        .join('\n')
+        .slice(0, MMS_TEXT_MAX_BYTES)
+        .trim()
+      const text = own || fromParts || subject || ''
+      // Nothing Oasis can act on (no sender, or neither text nor a part with bytes): filed under its own id, so the complete
+      // delivery of the same message that may follow is routed rather than dropped as a repeat (ADR 0151).
+      const incomplete = !sender || (!text && !parts.some((x) => x.data !== null))
       event = {
         kind: 'received',
         ...base,
         from: sender ? (normalizeE164(sender) ?? sender.trim()) : 'unknown',
-        body: text || subject || '',
+        body: text,
         at: when(p, 'receivedAt', signedAt),
         deviceId: envelope.deviceId,
-        providerMessageId: `${MMS_ID_PREFIX}${messageId}`,
-        mms: { subject, parts: mmsParts(p.attachments) },
+        providerMessageId: `${MMS_ID_PREFIX}${messageId}${incomplete ? MMS_INCOMPLETE_SUFFIX : ''}`,
+        mms: { subject, parts, incomplete },
       }
       break
     }

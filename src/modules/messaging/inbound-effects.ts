@@ -17,7 +17,8 @@ import { loadCustomerTarget, strangerRecipient } from './db/recipients.js'
 import type { PgInboxRepository } from './db/inbox-repo.js'
 import { ensureThread, insertMessage, loadMessageDto, publishMessage, touchThread } from './db/messages.js'
 import type { InboundEffects } from './inbound/service.js'
-import { planAttachments } from './inbound/mms.js'
+import { MMS_SUPERSEDED_NOTE, planAttachments } from './inbound/mms.js'
+import { publishToManagers } from './notify.js'
 import type { DbMessageQueue } from './queue.js'
 
 export interface EffectsEnv {
@@ -39,7 +40,12 @@ export interface ManagerNotice {
   body: string
   entityType: string | null
   entityId: string | null
+  /** notifications.source_ref (never shown): how the alert is found again, e.g. to resolve it. */
+  sourceRef?: string
 }
+
+/** The source_ref of the alerts raised for one received text (picture messages): the inbox row's natural key. */
+export const inboxSourceRef = (deviceId: string, providerMessageId: string): string => `sms_inbox:${deviceId}:${providerMessageId}`
 
 const REPLY_ACTOR_NAME = 'Customer reply'
 
@@ -192,6 +198,47 @@ export function createInboundEffects(
       return records
     },
 
+    async supersede(stale) {
+      const now = e.clock.now()
+      // the placeholder leaves the thread: its message, its "Customer replied by MMS" line and its unread mark
+      const m = stale.messageId
+        ? await tx.selectFrom('messages').select(['id', 'thread_id', 'read_at', 'appointment_id', 'customer_id']).where('id', '=', stale.messageId).executeTakeFirst()
+        : undefined
+      if (m) {
+        if (m.appointment_id)
+          await tx
+            .deleteFrom('activity_log')
+            .where('appointment_id', '=', m.appointment_id)
+            .where(sql<string>`meta->>'messageId'`, '=', m.id)
+            .execute()
+        await tx.deleteFrom('messages').where('id', '=', m.id).execute()
+        if (m.thread_id && m.read_at === null)
+          await tx
+            .updateTable('message_threads')
+            .set({ unread_count: sql<number>`greatest(unread_count - 1, 0)` })
+            .where('id', '=', m.thread_id)
+            .execute()
+        await realtime.publish(tx, {
+          locationId: o.locationId,
+          channel: 'messages',
+          type: 'message.removed',
+          payload: { id: m.id, customerId: m.customer_id, appointmentId: m.appointment_id, threadId: m.thread_id, reason: 'superseded' },
+        })
+      }
+      // its alert is resolved: read, and saying the message arrived in full
+      const resolved = await tx
+        .updateTable('notifications')
+        .set({ read_at: sql<Date>`coalesce(read_at, ${now})`, body: MMS_SUPERSEDED_NOTE })
+        .where('location_id', '=', o.locationId)
+        .where('source_ref', '=', inboxSourceRef(stale.deviceId, stale.providerMessageId))
+        .returning('id')
+        .execute()
+      if (resolved.length > 0) {
+        await publishToManagers(tx, o.locationId, 'notification.updated', { ids: resolved.map((r) => r.id), reason: 'superseded' })
+        await realtime.publish(tx, { locationId: o.locationId, channel: 'ops', type: 'alerts.changed', payload: { source: 'sms', kind: 'picture_message' } })
+      }
+    },
+
     async staffAlert(a) {
       if (a.kind === 'picture_message') {
         const who = a.customerId
@@ -207,6 +254,7 @@ export function createInboundEffects(
           body: a.excerpt,
           entityType: a.appointmentId ? 'appointment' : a.customerId ? 'customer' : null,
           entityId: a.appointmentId ?? a.customerId,
+          sourceRef: inboxSourceRef(o.event.deviceId, o.event.providerMessageId),
         })
       } else if (a.kind === 'cancel_request' || a.kind === 'unattributed_inbound') {
         const who = await tx.selectFrom('customers').select('full_name').where('id', '=', a.customerId).executeTakeFirst()
