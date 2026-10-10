@@ -8610,6 +8610,15 @@
                           "at": {
                             "type": "string"
                           },
+                          "author": {
+                            "enum": [
+                              "staff",
+                              "system",
+                              "customer",
+                              "ai"
+                            ],
+                            "type": "string"
+                          },
                           "channel": {
                             "enum": [
                               "sms",
@@ -8709,6 +8718,7 @@
                           "direction",
                           "from",
                           "senderName",
+                          "author",
                           "text",
                           "time",
                           "at",
@@ -8836,6 +8846,15 @@
                         "at": {
                           "type": "string"
                         },
+                        "author": {
+                          "enum": [
+                            "staff",
+                            "system",
+                            "customer",
+                            "ai"
+                          ],
+                          "type": "string"
+                        },
                         "channel": {
                           "enum": [
                             "sms",
@@ -8935,6 +8954,7 @@
                         "direction",
                         "from",
                         "senderName",
+                        "author",
                         "text",
                         "time",
                         "at",
@@ -17490,6 +17510,15 @@
                           "at": {
                             "type": "string"
                           },
+                          "author": {
+                            "enum": [
+                              "staff",
+                              "system",
+                              "customer",
+                              "ai"
+                            ],
+                            "type": "string"
+                          },
                           "channel": {
                             "enum": [
                               "sms",
@@ -17589,6 +17618,7 @@
                           "direction",
                           "from",
                           "senderName",
+                          "author",
                           "text",
                           "time",
                           "at",

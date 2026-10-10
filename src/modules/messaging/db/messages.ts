@@ -10,9 +10,14 @@ import type { OutboxState } from '../dispatch/types.js'
 import type { MessageStatus, MessagesTable } from '../schema.js'
 import '../schema.js'
 
-/** Classes whose text carries a one-time link: the message row keeps a redacted body and the outbox body is wiped once the message is final. */
-export const SENSITIVE_CLASSES: ReadonlySet<string> = new Set(['staff_invite', 'password_reset', 'otp_code'])
+/**
+ * Classes whose text carries a one-time link or code: the message row keeps a redacted body (or, when the secret was passed as
+ * secretVars, the text with it masked) and the outbox body is wiped once the message is final.
+ */
+export const SENSITIVE_CLASSES: ReadonlySet<string> = new Set(['staff_invite', 'password_reset', 'otp_code', 'personal_link', 'action_confirm'])
 export const REDACTED_BODY = '[link sent privately]'
+/** How the dashboard names the AI assistant's messages (ADR 0160). */
+export const AI_SENDER_NAME = 'Oasis AI'
 
 export function messageStatusOf(state: OutboxState): MessageStatus {
   switch (state) {
@@ -50,6 +55,8 @@ export interface MessageDto {
   /** The design's bubble kinds: staff and system are right-aligned, customer left. */
   from: 'staff' | 'system' | 'customer'
   senderName: string | null
+  /** Who wrote it: like `from`, except that the AI assistant's texts are 'ai' (they show as system bubbles named "Oasis AI"). */
+  author: 'staff' | 'system' | 'customer' | 'ai'
   text: string
   /** "10:36 AM" in the business time zone. */
   time: string
@@ -93,8 +100,9 @@ export function toMessageDto(r: MessageRow, tz: string): MessageDto {
   return {
     id: r.id,
     direction: r.direction,
-    from: r.sender_kind,
-    senderName: r.sender_kind === 'staff' ? staffName(r.first, r.last) : null,
+    from: r.sender_kind === 'ai' ? 'system' : r.sender_kind,
+    senderName: r.sender_kind === 'staff' ? staffName(r.first, r.last) : r.sender_kind === 'ai' ? AI_SENDER_NAME : null,
+    author: r.sender_kind,
     text: r.body,
     time: formatClock(at, tz),
     at: at.toISOString(),

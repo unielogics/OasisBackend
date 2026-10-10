@@ -5,6 +5,7 @@ export const Message = z.object({
   direction: z.enum(['in', 'out']),
   from: z.enum(['staff', 'system', 'customer']),
   senderName: z.string().nullable(),
+  author: z.enum(['staff', 'system', 'customer', 'ai']),
   text: z.string(),
   time: z.string(),
   at: z.string(),

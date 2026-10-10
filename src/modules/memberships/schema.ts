@@ -24,6 +24,12 @@ export interface MembershipPlansTable {
   version: Generated<number>
   created_at: Generated<Date>
   updated_at: Generated<Date>
+  // website/AI fields (migration 20261011000000_catalog_categories.sql, ADR 0160)
+  monthly_price_cents: number | null
+  /** https://...squarespace.com/... only (the membership link redirects there). */
+  checkout_url: string | null
+  /** The name the website and the assistant use (Gold, VIP). */
+  public_label: string | null
 }
 
 export interface PlanCreditRulesTable {
@@ -85,8 +91,32 @@ export interface MembershipCreditEventsTable {
   created_at: Generated<Date>
 }
 
+export type MembershipCheckoutState = 'open' | 'matched' | 'awaiting_match' | 'expired' | 'superseded' | 'abandoned'
+
+/** A membership started through a personal link: the checkout intent the order sync matches first (migration 20261011000500). */
+export interface MembershipCheckoutsTable {
+  id: string
+  location_id: string
+  membership_id: string
+  customer_id: string
+  link_id: string | null
+  plan_key: string
+  product_key: string | null
+  expected_email: string | null
+  checkout_url: string
+  started_at: Date
+  expires_at: Date
+  state: Generated<MembershipCheckoutState>
+  matched_order_id: string | null
+  matched_at: Date | null
+  version: Generated<number>
+  created_at: Generated<Date>
+  updated_at: Generated<Date>
+}
+
 declare module '../../platform/schema.js' {
   interface Database {
+    membership_checkouts: MembershipCheckoutsTable
     membership_plans: MembershipPlansTable
     plan_credit_rules: PlanCreditRulesTable
     memberships: MembershipsTable

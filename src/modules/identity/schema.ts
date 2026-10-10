@@ -1,0 +1,136 @@
+// Kysely types for the identity tables (migration 20261011000200_identity.sql, ADR 0160): personal links and their sessions, the
+// website PIN, the 30-day phone trust, the in-chat actions waiting for a reply number; plus the columns that migration adds to
+// customers and to the website's one-time codes. Registered by module augmentation.
+import type { Generated } from 'kysely'
+import type { JsonColumn, JsonValue } from '../../platform/schema.js'
+
+export type ClientLinkKind = 'calendar' | 'verify' | 'pin' | 'membership' | 'pay' | 'book_again'
+export type ClientLinkIssuer = 'assistant' | 'staff' | 'system'
+/** Why a link or a phone's trust ended before its time. */
+export type IdentityRevokeReason =
+  | 'phone_change'
+  | 'pin_set'
+  | 'pin_reset'
+  | 'pin_cleared'
+  | 'merge'
+  | 'opt_out'
+  | 'staff'
+  | 'epoch'
+  | 'superseded'
+export type LinkSessionTrust = 'link' | 'verified'
+export type VerifiedBy = 'pin' | 'code'
+export type PendingActionKind = 'book' | 'reschedule' | 'cancel'
+export type PendingActionState = 'pending' | 'executed' | 'failed' | 'expired' | 'superseded' | 'locked' | 'canceled'
+export type OtpPurpose = 'website' | 'link_verify' | 'pin_set' | 'pin_reset'
+
+export interface ClientLinksTable {
+  id: string
+  location_id: string
+  token_hash: string
+  kind: ClientLinkKind
+  customer_id: string | null
+  phone_e164: string
+  appointment_id: string | null
+  invoice_id: string | null
+  plan_key: string | null
+  pin_version: Generated<number>
+  phone_version: Generated<number>
+  epoch: number
+  issued_by: ClientLinkIssuer
+  expires_at: Date
+  uses: Generated<number>
+  max_uses: number
+  consumed_at: Date | null
+  revoked_at: Date | null
+  revoke_reason: IdentityRevokeReason | null
+  created_at: Generated<Date>
+}
+
+export interface ClientLinkSessionsTable {
+  token_hash: string
+  link_id: string
+  customer_id: string | null
+  phone_e164: string
+  trust: Generated<LinkSessionTrust>
+  verified_by: VerifiedBy | null
+  step_up_at: Date | null
+  failed_attempts: Generated<number>
+  idle_expires_at: Date
+  expires_at: Date
+  revoked_at: Date | null
+  ip: string | null
+  created_at: Generated<Date>
+  last_used_at: Date | null
+}
+
+export interface CustomerPinsTable {
+  customer_id: string
+  pin_hash: string | null
+  version: Generated<number>
+  failed_attempts: Generated<number>
+  /** 0 none, 1 locked 15 minutes, 2 locked 1 hour, 3 disabled until reset. */
+  lock_level: Generated<number>
+  locked_until: Date | null
+  set_at: Date
+  reset_hold_until: Date | null
+  cleared_at: Date | null
+  updated_at: Generated<Date>
+}
+
+export interface PhoneTrustTable {
+  location_id: string
+  phone_e164: string
+  customer_id: string
+  verified_at: Date
+  verified_by: VerifiedBy
+  expires_at: Date
+  revoked_at: Date | null
+  revoke_reason: IdentityRevokeReason | null
+  created_at: Generated<Date>
+  updated_at: Generated<Date>
+}
+
+export interface AssistantPendingActionsTable {
+  id: string
+  location_id: string
+  conversation_id: string
+  customer_id: string
+  phone_e164: string
+  kind: PendingActionKind
+  payload: JsonColumn<{ [key: string]: JsonValue }>
+  code_hash: string
+  attempts: Generated<number>
+  max_attempts: Generated<number>
+  expires_at: Date
+  state: Generated<PendingActionState>
+  confirm_message_id: string | null
+  appointment_id: string | null
+  error: string | null
+  created_at: Generated<Date>
+  resolved_at: Date | null
+}
+
+declare module '../customers/schema.js' {
+  interface CustomersTable {
+    email_verified: Generated<boolean>
+    /** Bumped on every phone change; a link issued for another version is dead. */
+    phone_version: Generated<number>
+  }
+}
+
+declare module '../public/schema.js' {
+  interface PublicOtpChallengesTable {
+    purpose: Generated<OtpPurpose>
+    link_session_hash: string | null
+  }
+}
+
+declare module '../../platform/schema.js' {
+  interface Database {
+    client_links: ClientLinksTable
+    client_link_sessions: ClientLinkSessionsTable
+    customer_pins: CustomerPinsTable
+    phone_trust: PhoneTrustTable
+    assistant_pending_actions: AssistantPendingActionsTable
+  }
+}

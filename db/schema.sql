@@ -261,6 +261,19 @@ CREATE TABLE public.appointment_addons (
 );
 
 --
+-- Name: appointment_late_texts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.appointment_late_texts (
+    appointment_id uuid NOT NULL,
+    seq smallint NOT NULL,
+    eta_at timestamp with time zone NOT NULL,
+    message_id uuid,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT appointment_late_texts_seq_check CHECK (((seq >= 1) AND (seq <= 2)))
+);
+
+--
 -- Name: appointment_overrides; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -343,6 +356,8 @@ CREATE TABLE public.appointments (
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     arrival_token_expires_at timestamp with time zone,
+    categories text[] DEFAULT '{}'::text[] NOT NULL,
+    CONSTRAINT appointments_categories_check CHECK (((array_position(categories, NULL::text) IS NULL) AND (cardinality(categories) <= 10))),
     CONSTRAINT appointments_check CHECK ((scheduled_end > scheduled_start)),
     CONSTRAINT appointments_check1 CHECK (((status <> 'cleaning'::text) OR (bay_id IS NOT NULL))),
     CONSTRAINT appointments_duration_min_check CHECK ((duration_min > 0)),
@@ -350,7 +365,7 @@ CREATE TABLE public.appointments (
     CONSTRAINT appointments_package_name_check CHECK ((btrim(package_name) <> ''::text)),
     CONSTRAINT appointments_pickup_state_check CHECK (((pickup_state IS NULL) OR (pickup_state = ANY (ARRAY['pending'::text, 'collected'::text])))),
     CONSTRAINT appointments_price_cents_check CHECK ((price_cents >= 0)),
-    CONSTRAINT appointments_source_check CHECK ((source = ANY (ARRAY['dashboard'::text, 'walk_in'::text, 'online'::text, 'phone'::text, 'standing'::text, 'reschedule_link'::text]))),
+    CONSTRAINT appointments_source_check CHECK ((source = ANY (ARRAY['dashboard'::text, 'walk_in'::text, 'online'::text, 'phone'::text, 'standing'::text, 'reschedule_link'::text, 'sms_ai'::text]))),
     CONSTRAINT appointments_status_check CHECK ((status = ANY (ARRAY['booked'::text, 'confirmed'::text, 'arrived'::text, 'cleaning'::text, 'completed'::text, 'canceled'::text, 'no_show'::text])))
 );
 
@@ -411,6 +426,130 @@ CREATE TABLE public.arrival_settings (
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     CONSTRAINT arrival_settings_prep_at_min_check CHECK ((prep_at_min = ANY (ARRAY[10, 15, 20]))),
     CONSTRAINT arrival_settings_radius_m_check CHECK ((radius_m = ANY (ARRAY[150, 300, 500])))
+);
+
+--
+-- Name: assistant_conversations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.assistant_conversations (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    phone_e164 text NOT NULL,
+    customer_id uuid,
+    pending_since timestamp with time zone,
+    last_inbound_at timestamp with time zone,
+    running_since timestamp with time zone,
+    handoff_state text,
+    handoff_reason text,
+    handoff_at timestamp with time zone,
+    last_fallback_at timestamp with time zone,
+    disclosed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT assistant_conversations_check CHECK (((handoff_state IS NULL) = (handoff_at IS NULL))),
+    CONSTRAINT assistant_conversations_handoff_reason_check CHECK (((handoff_reason IS NULL) OR (length(handoff_reason) <= 500))),
+    CONSTRAINT assistant_conversations_handoff_state_check CHECK (((handoff_state IS NULL) OR (handoff_state = ANY (ARRAY['open'::text, 'resolved'::text])))),
+    CONSTRAINT assistant_conversations_phone_e164_check CHECK ((phone_e164 ~ '^\+[1-9][0-9]{6,14}$'::text))
+);
+
+--
+-- Name: assistant_pending_actions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.assistant_pending_actions (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    conversation_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    phone_e164 text NOT NULL,
+    kind text NOT NULL,
+    payload jsonb NOT NULL,
+    code_hash text NOT NULL,
+    attempts smallint DEFAULT 0 NOT NULL,
+    max_attempts smallint DEFAULT 3 NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    state text DEFAULT 'pending'::text NOT NULL,
+    confirm_message_id uuid,
+    appointment_id uuid,
+    error text,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    resolved_at timestamp with time zone,
+    CONSTRAINT assistant_pending_actions_attempts_check CHECK ((attempts >= 0)),
+    CONSTRAINT assistant_pending_actions_check CHECK (((state = 'pending'::text) = (resolved_at IS NULL))),
+    CONSTRAINT assistant_pending_actions_code_hash_check CHECK ((code_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT assistant_pending_actions_error_check CHECK (((error IS NULL) OR (length(error) <= 2000))),
+    CONSTRAINT assistant_pending_actions_kind_check CHECK ((kind = ANY (ARRAY['book'::text, 'reschedule'::text, 'cancel'::text]))),
+    CONSTRAINT assistant_pending_actions_max_attempts_check CHECK ((max_attempts >= 1)),
+    CONSTRAINT assistant_pending_actions_payload_check CHECK ((jsonb_typeof(payload) = 'object'::text)),
+    CONSTRAINT assistant_pending_actions_phone_e164_check CHECK ((phone_e164 ~ '^\+[1-9][0-9]{6,14}$'::text)),
+    CONSTRAINT assistant_pending_actions_state_check CHECK ((state = ANY (ARRAY['pending'::text, 'executed'::text, 'failed'::text, 'expired'::text, 'superseded'::text, 'locked'::text, 'canceled'::text])))
+);
+
+--
+-- Name: assistant_tool_calls; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.assistant_tool_calls (
+    id uuid NOT NULL,
+    turn_id uuid NOT NULL,
+    seq smallint NOT NULL,
+    round smallint NOT NULL,
+    tool text NOT NULL,
+    tool_use_id text,
+    input jsonb NOT NULL,
+    output jsonb,
+    outcome text NOT NULL,
+    error text,
+    latency_ms integer,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT assistant_tool_calls_error_check CHECK (((error IS NULL) OR (length(error) <= 2000))),
+    CONSTRAINT assistant_tool_calls_input_check CHECK ((jsonb_typeof(input) = 'object'::text)),
+    CONSTRAINT assistant_tool_calls_latency_ms_check CHECK (((latency_ms IS NULL) OR (latency_ms >= 0))),
+    CONSTRAINT assistant_tool_calls_outcome_check CHECK ((outcome = ANY (ARRAY['ok'::text, 'error'::text, 'denied'::text]))),
+    CONSTRAINT assistant_tool_calls_round_check CHECK ((round >= 0)),
+    CONSTRAINT assistant_tool_calls_seq_check CHECK ((seq >= 1)),
+    CONSTRAINT assistant_tool_calls_tool_check CHECK ((tool ~ '^[a-z][a-z0-9_]{0,63}$'::text))
+);
+
+--
+-- Name: assistant_turns; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.assistant_turns (
+    id uuid NOT NULL,
+    conversation_id uuid NOT NULL,
+    status text DEFAULT 'running'::text NOT NULL,
+    trust text NOT NULL,
+    provider text NOT NULL,
+    model text,
+    prompt_version text,
+    rounds smallint DEFAULT 0 NOT NULL,
+    tokens_in integer DEFAULT 0 NOT NULL,
+    tokens_out integer DEFAULT 0 NOT NULL,
+    tokens_cache_read integer DEFAULT 0 NOT NULL,
+    tokens_cache_write integer DEFAULT 0 NOT NULL,
+    cost_micros bigint DEFAULT 0 NOT NULL,
+    stop_reason text,
+    latency_ms integer,
+    reply_message_id uuid,
+    transcript jsonb DEFAULT '[]'::jsonb NOT NULL,
+    error text,
+    started_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    finished_at timestamp with time zone,
+    CONSTRAINT assistant_turns_check CHECK (((status = 'running'::text) = (finished_at IS NULL))),
+    CONSTRAINT assistant_turns_cost_micros_check CHECK ((cost_micros >= 0)),
+    CONSTRAINT assistant_turns_error_check CHECK (((error IS NULL) OR (length(error) <= 2000))),
+    CONSTRAINT assistant_turns_latency_ms_check CHECK (((latency_ms IS NULL) OR (latency_ms >= 0))),
+    CONSTRAINT assistant_turns_provider_check CHECK ((provider = ANY (ARRAY['sim'::text, 'bedrock'::text]))),
+    CONSTRAINT assistant_turns_rounds_check CHECK ((rounds >= 0)),
+    CONSTRAINT assistant_turns_status_check CHECK ((status = ANY (ARRAY['running'::text, 'replied'::text, 'handed_off'::text, 'skipped'::text, 'failed'::text]))),
+    CONSTRAINT assistant_turns_tokens_cache_read_check CHECK ((tokens_cache_read >= 0)),
+    CONSTRAINT assistant_turns_tokens_cache_write_check CHECK ((tokens_cache_write >= 0)),
+    CONSTRAINT assistant_turns_tokens_in_check CHECK ((tokens_in >= 0)),
+    CONSTRAINT assistant_turns_tokens_out_check CHECK ((tokens_out >= 0)),
+    CONSTRAINT assistant_turns_transcript_check CHECK ((jsonb_typeof(transcript) = 'array'::text)),
+    CONSTRAINT assistant_turns_trust_check CHECK ((trust = ANY (ARRAY['unknown'::text, 'known'::text, 'trusted'::text])))
 );
 
 --
@@ -508,6 +647,25 @@ CREATE TABLE public.business_hours (
 );
 
 --
+-- Name: catalog_categories; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.catalog_categories (
+    location_id uuid NOT NULL,
+    key text NOT NULL,
+    label text NOT NULL,
+    colour text NOT NULL,
+    sort integer DEFAULT 0 NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT catalog_categories_colour_check CHECK ((colour ~ '^#[0-9A-Fa-f]{6}$'::text)),
+    CONSTRAINT catalog_categories_key_check CHECK ((key ~ '^[a-z][a-z0-9_]{0,31}$'::text)),
+    CONSTRAINT catalog_categories_label_check CHECK (((btrim(label) <> ''::text) AND (length(label) <= 40)))
+);
+
+--
 -- Name: checklist_tasks; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -520,6 +678,77 @@ CREATE TABLE public.checklist_tasks (
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     CONSTRAINT checklist_tasks_label_check CHECK ((btrim(label) <> ''::text)),
     CONSTRAINT checklist_tasks_position_check CHECK (("position" >= 0))
+);
+
+--
+-- Name: client_link_sessions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.client_link_sessions (
+    token_hash text NOT NULL,
+    link_id uuid NOT NULL,
+    customer_id uuid,
+    phone_e164 text NOT NULL,
+    trust text DEFAULT 'link'::text NOT NULL,
+    verified_by text,
+    step_up_at timestamp with time zone,
+    failed_attempts smallint DEFAULT 0 NOT NULL,
+    idle_expires_at timestamp with time zone NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    revoked_at timestamp with time zone,
+    ip text,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    last_used_at timestamp with time zone,
+    CONSTRAINT client_link_sessions_check CHECK (((trust = 'verified'::text) = (verified_by IS NOT NULL))),
+    CONSTRAINT client_link_sessions_check1 CHECK ((idle_expires_at <= expires_at)),
+    CONSTRAINT client_link_sessions_failed_attempts_check CHECK ((failed_attempts >= 0)),
+    CONSTRAINT client_link_sessions_phone_e164_check CHECK ((phone_e164 ~ '^\+[1-9][0-9]{6,14}$'::text)),
+    CONSTRAINT client_link_sessions_token_hash_check CHECK ((token_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT client_link_sessions_trust_check CHECK ((trust = ANY (ARRAY['link'::text, 'verified'::text]))),
+    CONSTRAINT client_link_sessions_verified_by_check CHECK (((verified_by IS NULL) OR (verified_by = ANY (ARRAY['pin'::text, 'code'::text]))))
+);
+
+--
+-- Name: client_links; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.client_links (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    token_hash text NOT NULL,
+    kind text NOT NULL,
+    customer_id uuid,
+    phone_e164 text NOT NULL,
+    appointment_id uuid,
+    invoice_id uuid,
+    plan_key text,
+    pin_version integer DEFAULT 0 NOT NULL,
+    phone_version integer DEFAULT 0 NOT NULL,
+    epoch integer NOT NULL,
+    issued_by text NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    uses integer DEFAULT 0 NOT NULL,
+    max_uses integer NOT NULL,
+    consumed_at timestamp with time zone,
+    revoked_at timestamp with time zone,
+    revoke_reason text,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT client_links_check CHECK ((uses <= max_uses)),
+    CONSTRAINT client_links_check1 CHECK (((revoked_at IS NULL) = (revoke_reason IS NULL))),
+    CONSTRAINT client_links_customer_check CHECK (((customer_id IS NOT NULL) OR (kind = ANY (ARRAY['calendar'::text, 'book_again'::text])))),
+    CONSTRAINT client_links_epoch_check CHECK ((epoch >= 1)),
+    CONSTRAINT client_links_issued_by_check CHECK ((issued_by = ANY (ARRAY['assistant'::text, 'staff'::text, 'system'::text]))),
+    CONSTRAINT client_links_kind_check CHECK ((kind = ANY (ARRAY['calendar'::text, 'verify'::text, 'pin'::text, 'membership'::text, 'pay'::text, 'book_again'::text]))),
+    CONSTRAINT client_links_max_uses_check CHECK ((max_uses >= 1)),
+    CONSTRAINT client_links_membership_plan_check CHECK (((kind <> 'membership'::text) OR (plan_key IS NOT NULL))),
+    CONSTRAINT client_links_pay_invoice_check CHECK (((kind <> 'pay'::text) OR (invoice_id IS NOT NULL))),
+    CONSTRAINT client_links_phone_e164_check CHECK ((phone_e164 ~ '^\+[1-9][0-9]{6,14}$'::text)),
+    CONSTRAINT client_links_phone_version_check CHECK ((phone_version >= 0)),
+    CONSTRAINT client_links_pin_version_check CHECK ((pin_version >= 0)),
+    CONSTRAINT client_links_plan_key_check CHECK (((plan_key IS NULL) OR (plan_key ~ '^[a-z][a-z0-9_]{0,31}$'::text))),
+    CONSTRAINT client_links_revoke_reason_check CHECK (((revoke_reason IS NULL) OR (revoke_reason = ANY (ARRAY['phone_change'::text, 'pin_set'::text, 'pin_reset'::text, 'pin_cleared'::text, 'merge'::text, 'opt_out'::text, 'staff'::text, 'epoch'::text, 'superseded'::text])))),
+    CONSTRAINT client_links_token_hash_check CHECK ((token_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT client_links_uses_check CHECK ((uses >= 0))
 );
 
 --
@@ -581,6 +810,28 @@ CREATE TABLE public.credit_expiries (
 );
 
 --
+-- Name: customer_pins; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_pins (
+    customer_id uuid NOT NULL,
+    pin_hash text,
+    version integer DEFAULT 1 NOT NULL,
+    failed_attempts smallint DEFAULT 0 NOT NULL,
+    lock_level smallint DEFAULT 0 NOT NULL,
+    locked_until timestamp with time zone,
+    set_at timestamp with time zone NOT NULL,
+    reset_hold_until timestamp with time zone,
+    cleared_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT customer_pins_check CHECK (((pin_hash IS NULL) = (cleared_at IS NOT NULL))),
+    CONSTRAINT customer_pins_failed_attempts_check CHECK ((failed_attempts >= 0)),
+    CONSTRAINT customer_pins_lock_level_check CHECK (((lock_level >= 0) AND (lock_level <= 3))),
+    CONSTRAINT customer_pins_pin_hash_check CHECK (((pin_hash IS NULL) OR ((length(pin_hash) >= 20) AND (length(pin_hash) <= 512)))),
+    CONSTRAINT customer_pins_version_check CHECK ((version >= 1))
+);
+
+--
 -- Name: customers; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -604,12 +855,15 @@ CREATE TABLE public.customers (
     version integer DEFAULT 1 NOT NULL,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    email_verified boolean DEFAULT false NOT NULL,
+    phone_version integer DEFAULT 0 NOT NULL,
     CONSTRAINT customers_check CHECK (((NOT synthetic) OR (phone_e164 IS NULL) OR (phone_e164 ~ '^\+1[0-9]{3}55501[0-9]{2}$'::text))),
     CONSTRAINT customers_check1 CHECK (((merged_into IS NULL) OR (merged_into <> id))),
     CONSTRAINT customers_email_check CHECK (((email IS NULL) OR (btrim((email)::text) <> ''::text))),
     CONSTRAINT customers_full_name_check CHECK ((btrim(full_name) <> ''::text)),
     CONSTRAINT customers_phone_e164_check CHECK (((phone_e164 IS NULL) OR (phone_e164 ~ '^\+[1-9][0-9]{6,14}$'::text))),
-    CONSTRAINT customers_sms_opt_in_source_check CHECK (((sms_opt_in_source IS NULL) OR (sms_opt_in_source = ANY (ARRAY['dashboard'::text, 'walk_in'::text, 'online'::text, 'squarespace'::text, 'inbound_sms'::text, 'import'::text, 'keyword'::text])))),
+    CONSTRAINT customers_phone_version_check CHECK ((phone_version >= 0)),
+    CONSTRAINT customers_sms_opt_in_source_check CHECK (((sms_opt_in_source IS NULL) OR (sms_opt_in_source = ANY (ARRAY['dashboard'::text, 'walk_in'::text, 'online'::text, 'squarespace'::text, 'inbound_sms'::text, 'import'::text, 'keyword'::text, 'inbound_text'::text])))),
     CONSTRAINT customers_source_check CHECK ((source = ANY (ARRAY['dashboard'::text, 'walk_in'::text, 'online'::text, 'squarespace'::text, 'inbound_sms'::text, 'import'::text])))
 );
 
@@ -962,6 +1216,35 @@ CREATE TABLE public.job_runs (
 );
 
 --
+-- Name: leads; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.leads (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    phone_e164 text NOT NULL,
+    customer_id uuid,
+    source text NOT NULL,
+    interests text[] DEFAULT '{}'::text[] NOT NULL,
+    status text DEFAULT 'new'::text NOT NULL,
+    first_contact_at timestamp with time zone NOT NULL,
+    last_contact_at timestamp with time zone NOT NULL,
+    follow_up_at timestamp with time zone,
+    follow_up_message_id uuid,
+    booked_appointment_id uuid,
+    closed_at timestamp with time zone,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT leads_check CHECK ((last_contact_at >= first_contact_at)),
+    CONSTRAINT leads_check1 CHECK (((status = ANY (ARRAY['booked'::text, 'closed'::text])) = (closed_at IS NOT NULL))),
+    CONSTRAINT leads_interests_check CHECK (((array_position(interests, NULL::text) IS NULL) AND (cardinality(interests) <= 10))),
+    CONSTRAINT leads_phone_e164_check CHECK ((phone_e164 ~ '^\+[1-9][0-9]{6,14}$'::text)),
+    CONSTRAINT leads_source_check CHECK ((source = ANY (ARRAY['text'::text, 'website'::text, 'walk_in'::text]))),
+    CONSTRAINT leads_status_check CHECK ((status = ANY (ARRAY['new'::text, 'followed_up'::text, 'booked'::text, 'closed'::text])))
+);
+
+--
 -- Name: ledger_events; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1085,6 +1368,37 @@ CREATE TABLE public.locations (
 );
 
 --
+-- Name: membership_checkouts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.membership_checkouts (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    membership_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    link_id uuid,
+    plan_key text NOT NULL,
+    product_key text,
+    expected_email public.citext,
+    checkout_url text NOT NULL,
+    started_at timestamp with time zone NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    state text DEFAULT 'open'::text NOT NULL,
+    matched_order_id uuid,
+    matched_at timestamp with time zone,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT membership_checkouts_check CHECK ((expires_at > started_at)),
+    CONSTRAINT membership_checkouts_check1 CHECK (((state = 'matched'::text) = (matched_at IS NOT NULL))),
+    CONSTRAINT membership_checkouts_checkout_url_check CHECK (((checkout_url ~ '^https://([a-z0-9-]+\.)*squarespace\.com(/[^[:space:]]*)?$'::text) AND (length(checkout_url) <= 2048))),
+    CONSTRAINT membership_checkouts_expected_email_check CHECK (((expected_email IS NULL) OR (btrim((expected_email)::text) <> ''::text))),
+    CONSTRAINT membership_checkouts_plan_key_check CHECK ((plan_key ~ '^[a-z][a-z0-9_]{0,31}$'::text)),
+    CONSTRAINT membership_checkouts_product_key_check CHECK (((product_key IS NULL) OR (length(product_key) <= 200))),
+    CONSTRAINT membership_checkouts_state_check CHECK ((state = ANY (ARRAY['open'::text, 'matched'::text, 'awaiting_match'::text, 'expired'::text, 'superseded'::text, 'abandoned'::text])))
+);
+
+--
 -- Name: membership_credit_events; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1129,10 +1443,16 @@ CREATE TABLE public.membership_plans (
     version integer DEFAULT 1 NOT NULL,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    monthly_price_cents integer,
+    checkout_url text,
+    public_label text,
     CONSTRAINT membership_plans_addon_discount_bp_check CHECK (((addon_discount_bp >= 0) AND (addon_discount_bp <= 10000))),
     CONSTRAINT membership_plans_billing_interval_months_check CHECK (((billing_interval_months >= 1) AND (billing_interval_months <= 12))),
+    CONSTRAINT membership_plans_checkout_url_check CHECK (((checkout_url IS NULL) OR ((checkout_url ~ '^https://([a-z0-9-]+\.)*squarespace\.com(/[^[:space:]]*)?$'::text) AND (length(checkout_url) <= 2048)))),
     CONSTRAINT membership_plans_key_check CHECK ((key = ANY (ARRAY['essential'::text, 'premium'::text, 'executive'::text, 'exotic'::text]))),
+    CONSTRAINT membership_plans_monthly_price_cents_check CHECK (((monthly_price_cents IS NULL) OR (monthly_price_cents >= 0))),
     CONSTRAINT membership_plans_name_check CHECK ((btrim(name) <> ''::text)),
+    CONSTRAINT membership_plans_public_label_check CHECK (((public_label IS NULL) OR ((btrim(public_label) <> ''::text) AND (length(public_label) <= 40)))),
     CONSTRAINT membership_plans_service_discount_bp_check CHECK (((service_discount_bp >= 0) AND (service_discount_bp <= 10000)))
 );
 
@@ -1186,6 +1506,8 @@ CREATE TABLE public.message_threads (
     last_inbound_at timestamp with time zone,
     unread_count integer DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    ai_paused_until timestamp with time zone,
+    ai_paused_by uuid,
     CONSTRAINT message_threads_unread_count_check CHECK ((unread_count >= 0))
 );
 
@@ -1228,7 +1550,7 @@ CREATE TABLE public.messages (
     CONSTRAINT messages_direction_check CHECK ((direction = ANY (ARRAY['in'::text, 'out'::text]))),
     CONSTRAINT messages_encoding_check CHECK (((encoding IS NULL) OR (encoding = ANY (ARRAY['GSM-7'::text, 'UCS-2'::text])))),
     CONSTRAINT messages_segments_check CHECK ((segments >= 1)),
-    CONSTRAINT messages_sender_kind_check CHECK ((sender_kind = ANY (ARRAY['staff'::text, 'system'::text, 'customer'::text]))),
+    CONSTRAINT messages_sender_kind_check CHECK ((sender_kind = ANY (ARRAY['staff'::text, 'system'::text, 'customer'::text, 'ai'::text]))),
     CONSTRAINT messages_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'sending'::text, 'sent'::text, 'delivered'::text, 'failed'::text, 'received'::text, 'canceled'::text, 'expired'::text])))
 );
 
@@ -1352,6 +1674,25 @@ CREATE TABLE public.payment_links (
 );
 
 --
+-- Name: pending_checkin_texts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.pending_checkin_texts (
+    appointment_id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    due_at timestamp with time zone NOT NULL,
+    state text DEFAULT 'pending'::text NOT NULL,
+    drop_reason text,
+    message_id uuid,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    settled_at timestamp with time zone,
+    CONSTRAINT pending_checkin_texts_check CHECK (((state = 'pending'::text) = (settled_at IS NULL))),
+    CONSTRAINT pending_checkin_texts_check1 CHECK (((state = 'dropped'::text) = (drop_reason IS NOT NULL))),
+    CONSTRAINT pending_checkin_texts_drop_reason_check CHECK (((drop_reason IS NULL) OR (drop_reason = ANY (ARRAY['cleaning_started'::text, 'canceled'::text, 'disabled'::text, 'not_sendable'::text])))),
+    CONSTRAINT pending_checkin_texts_state_check CHECK ((state = ANY (ARRAY['pending'::text, 'sent'::text, 'dropped'::text])))
+);
+
+--
 -- Name: permissions; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1361,6 +1702,28 @@ CREATE TABLE public.permissions (
     label text NOT NULL,
     has_limit boolean DEFAULT false NOT NULL,
     sort smallint NOT NULL
+);
+
+--
+-- Name: phone_trust; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.phone_trust (
+    location_id uuid NOT NULL,
+    phone_e164 text NOT NULL,
+    customer_id uuid NOT NULL,
+    verified_at timestamp with time zone NOT NULL,
+    verified_by text NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    revoked_at timestamp with time zone,
+    revoke_reason text,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT phone_trust_check CHECK ((expires_at > verified_at)),
+    CONSTRAINT phone_trust_check1 CHECK (((revoked_at IS NULL) = (revoke_reason IS NULL))),
+    CONSTRAINT phone_trust_phone_e164_check CHECK ((phone_e164 ~ '^\+[1-9][0-9]{6,14}$'::text)),
+    CONSTRAINT phone_trust_revoke_reason_check CHECK (((revoke_reason IS NULL) OR (revoke_reason = ANY (ARRAY['phone_change'::text, 'pin_set'::text, 'pin_reset'::text, 'pin_cleared'::text, 'merge'::text, 'opt_out'::text, 'staff'::text, 'epoch'::text, 'superseded'::text])))),
+    CONSTRAINT phone_trust_verified_by_check CHECK ((verified_by = ANY (ARRAY['pin'::text, 'code'::text])))
 );
 
 --
@@ -1415,10 +1778,14 @@ CREATE TABLE public.public_otp_challenges (
     requested_ip text,
     delivery text DEFAULT 'queued'::text NOT NULL,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    purpose text DEFAULT 'website'::text NOT NULL,
+    link_session_hash text,
     CONSTRAINT public_otp_challenges_attempts_check CHECK ((attempts >= 0)),
     CONSTRAINT public_otp_challenges_consumed_reason_check CHECK (((consumed_reason IS NULL) OR (consumed_reason = ANY (ARRAY['verified'::text, 'superseded'::text, 'locked'::text])))),
+    CONSTRAINT public_otp_challenges_link_purpose_check CHECK (((purpose = 'website'::text) OR (link_session_hash IS NOT NULL))),
     CONSTRAINT public_otp_challenges_max_attempts_check CHECK ((max_attempts > 0)),
-    CONSTRAINT public_otp_challenges_phone_e164_check CHECK ((phone_e164 ~ '^\+[1-9][0-9]{6,14}$'::text))
+    CONSTRAINT public_otp_challenges_phone_e164_check CHECK ((phone_e164 ~ '^\+[1-9][0-9]{6,14}$'::text)),
+    CONSTRAINT public_otp_challenges_purpose_check CHECK ((purpose = ANY (ARRAY['website'::text, 'link_verify'::text, 'pin_set'::text, 'pin_reset'::text])))
 );
 
 --
@@ -1571,11 +1938,26 @@ CREATE TABLE public.services (
     version integer DEFAULT 1 NOT NULL,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    category text,
+    public_name text,
+    description text,
+    member_price_cents integer,
+    guest_price_cents integer,
+    vip_inclusion text DEFAULT 'none'::text NOT NULL,
+    vip_note text,
+    quote_only boolean DEFAULT false NOT NULL,
+    visible_online boolean DEFAULT true NOT NULL,
     CONSTRAINT services_check CHECK ((((kind = 'addon'::text) AND (duration_min = 0)) OR ((kind = 'package'::text) AND ((duration_min >= 1) AND (duration_min <= 720))))),
+    CONSTRAINT services_description_check CHECK (((description IS NULL) OR (length(description) <= 1000))),
+    CONSTRAINT services_guest_price_cents_check CHECK (((guest_price_cents IS NULL) OR (guest_price_cents >= 0))),
     CONSTRAINT services_kind_check CHECK ((kind = ANY (ARRAY['package'::text, 'addon'::text]))),
+    CONSTRAINT services_member_price_cents_check CHECK (((member_price_cents IS NULL) OR (member_price_cents >= 0))),
     CONSTRAINT services_name_check CHECK ((btrim(name) <> ''::text)),
     CONSTRAINT services_price_cents_check CHECK ((price_cents >= 0)),
-    CONSTRAINT services_short_name_check CHECK (((short_name IS NULL) OR (btrim(short_name) <> ''::text)))
+    CONSTRAINT services_public_name_check CHECK (((public_name IS NULL) OR ((btrim(public_name) <> ''::text) AND (length(public_name) <= 80)))),
+    CONSTRAINT services_short_name_check CHECK (((short_name IS NULL) OR (btrim(short_name) <> ''::text))),
+    CONSTRAINT services_vip_inclusion_check CHECK ((vip_inclusion = ANY (ARRAY['included'::text, 'allowance'::text, 'none'::text]))),
+    CONSTRAINT services_vip_note_check CHECK (((vip_note IS NULL) OR ((btrim(vip_note) <> ''::text) AND (length(vip_note) <= 200))))
 );
 
 --
@@ -1686,7 +2068,9 @@ CREATE TABLE public.sms_inbox (
     appointment_id uuid,
     message_id uuid,
     reviewed_at timestamp with time zone,
-    CONSTRAINT sms_inbox_decision_check CHECK (((decision IS NULL) OR (decision = ANY (ARRAY['opt_out'::text, 'opt_in'::text, 'help'::text, 'confirm'::text, 'confirm_nothing'::text, 'cancel_request'::text, 'message'::text, 'quarantined'::text]))))
+    assistant_conversation_id uuid,
+    assistant_turn_id uuid,
+    CONSTRAINT sms_inbox_decision_check CHECK (((decision IS NULL) OR (decision = ANY (ARRAY['opt_out'::text, 'opt_in'::text, 'help'::text, 'confirm'::text, 'confirm_nothing'::text, 'cancel_request'::text, 'message'::text, 'quarantined'::text, 'assistant'::text, 'handoff'::text, 'action_code'::text]))))
 );
 
 --
@@ -2310,6 +2694,13 @@ ALTER TABLE ONLY public.appointment_addons
     ADD CONSTRAINT appointment_addons_pkey PRIMARY KEY (id);
 
 --
+-- Name: appointment_late_texts appointment_late_texts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointment_late_texts
+    ADD CONSTRAINT appointment_late_texts_pkey PRIMARY KEY (appointment_id, seq);
+
+--
 -- Name: appointment_overrides appointment_overrides_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2352,6 +2743,48 @@ ALTER TABLE ONLY public.arrival_settings
     ADD CONSTRAINT arrival_settings_pkey PRIMARY KEY (location_id);
 
 --
+-- Name: assistant_conversations assistant_conversations_location_id_phone_e164_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_conversations
+    ADD CONSTRAINT assistant_conversations_location_id_phone_e164_key UNIQUE (location_id, phone_e164);
+
+--
+-- Name: assistant_conversations assistant_conversations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_conversations
+    ADD CONSTRAINT assistant_conversations_pkey PRIMARY KEY (id);
+
+--
+-- Name: assistant_pending_actions assistant_pending_actions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_pending_actions
+    ADD CONSTRAINT assistant_pending_actions_pkey PRIMARY KEY (id);
+
+--
+-- Name: assistant_tool_calls assistant_tool_calls_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_tool_calls
+    ADD CONSTRAINT assistant_tool_calls_pkey PRIMARY KEY (id);
+
+--
+-- Name: assistant_tool_calls assistant_tool_calls_turn_id_seq_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_tool_calls
+    ADD CONSTRAINT assistant_tool_calls_turn_id_seq_key UNIQUE (turn_id, seq);
+
+--
+-- Name: assistant_turns assistant_turns_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_turns
+    ADD CONSTRAINT assistant_turns_pkey PRIMARY KEY (id);
+
+--
 -- Name: audit_log audit_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2387,11 +2820,39 @@ ALTER TABLE ONLY public.business_hours
     ADD CONSTRAINT business_hours_pkey PRIMARY KEY (location_id, weekday);
 
 --
+-- Name: catalog_categories catalog_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.catalog_categories
+    ADD CONSTRAINT catalog_categories_pkey PRIMARY KEY (location_id, key);
+
+--
 -- Name: checklist_tasks checklist_tasks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.checklist_tasks
     ADD CONSTRAINT checklist_tasks_pkey PRIMARY KEY (id);
+
+--
+-- Name: client_link_sessions client_link_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.client_link_sessions
+    ADD CONSTRAINT client_link_sessions_pkey PRIMARY KEY (token_hash);
+
+--
+-- Name: client_links client_links_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.client_links
+    ADD CONSTRAINT client_links_pkey PRIMARY KEY (id);
+
+--
+-- Name: client_links client_links_token_hash_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.client_links
+    ADD CONSTRAINT client_links_token_hash_key UNIQUE (token_hash);
 
 --
 -- Name: closures closures_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2420,6 +2881,13 @@ ALTER TABLE ONLY public.credit_allocations
 
 ALTER TABLE ONLY public.credit_expiries
     ADD CONSTRAINT credit_expiries_pkey PRIMARY KEY (lot_event_id);
+
+--
+-- Name: customer_pins customer_pins_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_pins
+    ADD CONSTRAINT customer_pins_pkey PRIMARY KEY (customer_id);
 
 --
 -- Name: customers customers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2576,6 +3044,20 @@ ALTER TABLE ONLY public.job_runs
     ADD CONSTRAINT job_runs_pkey PRIMARY KEY (name);
 
 --
+-- Name: leads leads_location_id_phone_e164_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.leads
+    ADD CONSTRAINT leads_location_id_phone_e164_key UNIQUE (location_id, phone_e164);
+
+--
+-- Name: leads leads_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.leads
+    ADD CONSTRAINT leads_pkey PRIMARY KEY (id);
+
+--
 -- Name: ledger_events ledger_events_idempotency_key_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2623,6 +3105,13 @@ ALTER TABLE ONLY public.locations
 
 ALTER TABLE ONLY public.locations
     ADD CONSTRAINT locations_slug_key UNIQUE (slug);
+
+--
+-- Name: membership_checkouts membership_checkouts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_checkouts
+    ADD CONSTRAINT membership_checkouts_pkey PRIMARY KEY (id);
 
 --
 -- Name: membership_credit_events membership_credit_events_idempotency_key_key; Type: CONSTRAINT; Schema: public; Owner: -
@@ -2744,6 +3233,13 @@ ALTER TABLE ONLY public.payment_links
     ADD CONSTRAINT payment_links_pkey PRIMARY KEY (id);
 
 --
+-- Name: pending_checkin_texts pending_checkin_texts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pending_checkin_texts
+    ADD CONSTRAINT pending_checkin_texts_pkey PRIMARY KEY (appointment_id);
+
+--
 -- Name: permissions permissions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2756,6 +3252,13 @@ ALTER TABLE ONLY public.permissions
 
 ALTER TABLE ONLY public.permissions
     ADD CONSTRAINT permissions_sort_key UNIQUE (sort);
+
+--
+-- Name: phone_trust phone_trust_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.phone_trust
+    ADD CONSTRAINT phone_trust_pkey PRIMARY KEY (location_id, phone_e164);
 
 --
 -- Name: plan_credit_rules plan_credit_rules_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3256,6 +3759,12 @@ CREATE INDEX appointment_photos_appointment_idx ON public.appointment_photos USI
 CREATE INDEX appointments_active_idx ON public.appointments USING btree (status) WHERE (status = ANY (ARRAY['booked'::text, 'confirmed'::text, 'arrived'::text, 'cleaning'::text]));
 
 --
+-- Name: appointments_categories_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX appointments_categories_idx ON public.appointments USING gin (categories);
+
+--
 -- Name: appointments_customer_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3292,6 +3801,60 @@ CREATE INDEX appointments_planned_bay_idx ON public.appointments USING btree (pl
 CREATE INDEX arrival_pings_appointment_idx ON public.arrival_pings USING btree (appointment_id, at DESC);
 
 --
+-- Name: assistant_conversations_customer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_conversations_customer_idx ON public.assistant_conversations USING btree (customer_id) WHERE (customer_id IS NOT NULL);
+
+--
+-- Name: assistant_conversations_handoff_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_conversations_handoff_idx ON public.assistant_conversations USING btree (location_id, handoff_at) WHERE (handoff_state = 'open'::text);
+
+--
+-- Name: assistant_conversations_pending_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_conversations_pending_idx ON public.assistant_conversations USING btree (pending_since) WHERE (pending_since IS NOT NULL);
+
+--
+-- Name: assistant_conversations_running_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_conversations_running_idx ON public.assistant_conversations USING btree (running_since) WHERE (running_since IS NOT NULL);
+
+--
+-- Name: assistant_pending_actions_conversation_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_pending_actions_conversation_idx ON public.assistant_pending_actions USING btree (conversation_id);
+
+--
+-- Name: assistant_pending_actions_expiry_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_pending_actions_expiry_idx ON public.assistant_pending_actions USING btree (expires_at) WHERE (state = 'pending'::text);
+
+--
+-- Name: assistant_tool_calls_tool_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_tool_calls_tool_idx ON public.assistant_tool_calls USING btree (tool, created_at);
+
+--
+-- Name: assistant_turns_conversation_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_turns_conversation_idx ON public.assistant_turns USING btree (conversation_id, started_at DESC);
+
+--
+-- Name: assistant_turns_started_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_turns_started_idx ON public.assistant_turns USING btree (started_at);
+
+--
 -- Name: audit_log_actor_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3314,6 +3877,42 @@ CREATE INDEX audit_log_location_at_idx ON public.audit_log USING btree (location
 --
 
 CREATE INDEX checklist_tasks_service_idx ON public.checklist_tasks USING btree (service_id, "position") WHERE (retired_at IS NULL);
+
+--
+-- Name: client_link_sessions_customer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX client_link_sessions_customer_idx ON public.client_link_sessions USING btree (customer_id) WHERE (customer_id IS NOT NULL);
+
+--
+-- Name: client_link_sessions_expiry_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX client_link_sessions_expiry_idx ON public.client_link_sessions USING btree (expires_at);
+
+--
+-- Name: client_link_sessions_link_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX client_link_sessions_link_idx ON public.client_link_sessions USING btree (link_id);
+
+--
+-- Name: client_links_customer_live_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX client_links_customer_live_idx ON public.client_links USING btree (customer_id, kind) WHERE ((consumed_at IS NULL) AND (revoked_at IS NULL));
+
+--
+-- Name: client_links_expiry_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX client_links_expiry_idx ON public.client_links USING btree (expires_at);
+
+--
+-- Name: client_links_phone_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX client_links_phone_idx ON public.client_links USING btree (location_id, phone_e164, created_at DESC);
 
 --
 -- Name: closures_emergency_idx; Type: INDEX; Schema: public; Owner: -
@@ -3448,6 +4047,24 @@ CREATE INDEX job_checklist_items_appointment_idx ON public.job_checklist_items U
 CREATE INDEX job_checklist_items_task_idx ON public.job_checklist_items USING btree (source_task_id) WHERE (source_task_id IS NOT NULL);
 
 --
+-- Name: leads_customer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX leads_customer_idx ON public.leads USING btree (customer_id) WHERE (customer_id IS NOT NULL);
+
+--
+-- Name: leads_follow_up_due_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX leads_follow_up_due_idx ON public.leads USING btree (follow_up_at) WHERE ((status = 'new'::text) AND (follow_up_at IS NOT NULL));
+
+--
+-- Name: leads_open_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX leads_open_idx ON public.leads USING btree (location_id, last_contact_at DESC) WHERE (status = ANY (ARRAY['new'::text, 'followed_up'::text]));
+
+--
 -- Name: ledger_events_awaiting_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3476,6 +4093,24 @@ CREATE INDEX ledger_events_pending_idx ON public.ledger_events USING btree (loca
 --
 
 CREATE INDEX ledger_events_sqsp_order_idx ON public.ledger_events USING btree (sqsp_order_id) WHERE (sqsp_order_id IS NOT NULL);
+
+--
+-- Name: membership_checkouts_customer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX membership_checkouts_customer_idx ON public.membership_checkouts USING btree (customer_id, started_at DESC);
+
+--
+-- Name: membership_checkouts_email_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX membership_checkouts_email_idx ON public.membership_checkouts USING btree (location_id, expected_email) WHERE (state = ANY (ARRAY['open'::text, 'awaiting_match'::text]));
+
+--
+-- Name: membership_checkouts_expiry_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX membership_checkouts_expiry_idx ON public.membership_checkouts USING btree (expires_at) WHERE (state = 'open'::text);
 
 --
 -- Name: membership_credit_events_cycle_idx; Type: INDEX; Schema: public; Owner: -
@@ -3580,6 +4215,18 @@ CREATE INDEX payment_links_active_idx ON public.payment_links USING btree (locat
 CREATE INDEX payment_links_invoice_idx ON public.payment_links USING btree (invoice_id, created_at DESC);
 
 --
+-- Name: pending_checkin_texts_due_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX pending_checkin_texts_due_idx ON public.pending_checkin_texts USING btree (due_at) WHERE (state = 'pending'::text);
+
+--
+-- Name: phone_trust_customer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX phone_trust_customer_idx ON public.phone_trust USING btree (customer_id);
+
+--
 -- Name: plan_credit_rules_plan_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3646,6 +4293,12 @@ CREATE UNIQUE INDEX roles_name_lower_idx ON public.roles USING btree (lower(name
 CREATE UNIQUE INDEX roles_one_locked_idx ON public.roles USING btree (is_locked) WHERE is_locked;
 
 --
+-- Name: services_category_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX services_category_idx ON public.services USING btree (location_id, category) WHERE active;
+
+--
 -- Name: services_listing_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3668,6 +4321,12 @@ CREATE INDEX sessions_user_idx ON public.sessions USING btree (user_id) WHERE (r
 --
 
 CREATE INDEX sms_devices_location_idx ON public.sms_devices USING btree (location_id, enabled, created_at);
+
+--
+-- Name: sms_inbox_assistant_conversation_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sms_inbox_assistant_conversation_idx ON public.sms_inbox USING btree (assistant_conversation_id, received_at) WHERE (assistant_conversation_id IS NOT NULL);
 
 --
 -- Name: sms_inbox_from_idx; Type: INDEX; Schema: public; Owner: -
@@ -3838,6 +4497,18 @@ CREATE UNIQUE INDEX uq_appointments_arrival_token ON public.appointments USING b
 CREATE UNIQUE INDEX uq_arrival_ping_key ON public.arrival_pings USING btree (appointment_id, ping_key) WHERE (ping_key IS NOT NULL);
 
 --
+-- Name: uq_assistant_pending_actions_phone; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_assistant_pending_actions_phone ON public.assistant_pending_actions USING btree (location_id, phone_e164) WHERE (state = 'pending'::text);
+
+--
+-- Name: uq_assistant_turns_running; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_assistant_turns_running ON public.assistant_turns USING btree (conversation_id) WHERE (status = 'running'::text);
+
+--
 -- Name: uq_bay_occupied; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3866,6 +4537,12 @@ CREATE UNIQUE INDEX uq_customers_phone ON public.customers USING btree (phone_e1
 --
 
 CREATE UNIQUE INDEX uq_emergency_one_active ON public.emergency_closures USING btree (location_id) WHERE active;
+
+--
+-- Name: uq_membership_checkouts_open; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_membership_checkouts_open ON public.membership_checkouts USING btree (membership_id) WHERE (state = 'open'::text);
 
 --
 -- Name: uq_memberships_customer_live; Type: INDEX; Schema: public; Owner: -
@@ -4010,6 +4687,20 @@ ALTER TABLE ONLY public.appointment_addons
     ADD CONSTRAINT appointment_addons_service_id_fkey FOREIGN KEY (service_id) REFERENCES public.services(id);
 
 --
+-- Name: appointment_late_texts appointment_late_texts_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointment_late_texts
+    ADD CONSTRAINT appointment_late_texts_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id) ON DELETE CASCADE;
+
+--
+-- Name: appointment_late_texts appointment_late_texts_message_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointment_late_texts
+    ADD CONSTRAINT appointment_late_texts_message_id_fkey FOREIGN KEY (message_id) REFERENCES public.messages(id) ON DELETE SET NULL;
+
+--
 -- Name: appointment_overrides appointment_overrides_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4129,6 +4820,76 @@ ALTER TABLE ONLY public.arrival_settings
     ADD CONSTRAINT arrival_settings_updated_by_fk FOREIGN KEY (updated_by) REFERENCES public.users(id) ON DELETE SET NULL;
 
 --
+-- Name: assistant_conversations assistant_conversations_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_conversations
+    ADD CONSTRAINT assistant_conversations_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id) ON DELETE SET NULL;
+
+--
+-- Name: assistant_conversations assistant_conversations_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_conversations
+    ADD CONSTRAINT assistant_conversations_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: assistant_pending_actions assistant_pending_actions_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_pending_actions
+    ADD CONSTRAINT assistant_pending_actions_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id) ON DELETE SET NULL;
+
+--
+-- Name: assistant_pending_actions assistant_pending_actions_confirm_message_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_pending_actions
+    ADD CONSTRAINT assistant_pending_actions_confirm_message_id_fkey FOREIGN KEY (confirm_message_id) REFERENCES public.messages(id) ON DELETE SET NULL;
+
+--
+-- Name: assistant_pending_actions assistant_pending_actions_conversation_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_pending_actions
+    ADD CONSTRAINT assistant_pending_actions_conversation_id_fkey FOREIGN KEY (conversation_id) REFERENCES public.assistant_conversations(id) ON DELETE CASCADE;
+
+--
+-- Name: assistant_pending_actions assistant_pending_actions_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_pending_actions
+    ADD CONSTRAINT assistant_pending_actions_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id) ON DELETE CASCADE;
+
+--
+-- Name: assistant_pending_actions assistant_pending_actions_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_pending_actions
+    ADD CONSTRAINT assistant_pending_actions_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: assistant_tool_calls assistant_tool_calls_turn_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_tool_calls
+    ADD CONSTRAINT assistant_tool_calls_turn_id_fkey FOREIGN KEY (turn_id) REFERENCES public.assistant_turns(id) ON DELETE CASCADE;
+
+--
+-- Name: assistant_turns assistant_turns_conversation_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_turns
+    ADD CONSTRAINT assistant_turns_conversation_id_fkey FOREIGN KEY (conversation_id) REFERENCES public.assistant_conversations(id) ON DELETE CASCADE;
+
+--
+-- Name: assistant_turns assistant_turns_reply_message_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_turns
+    ADD CONSTRAINT assistant_turns_reply_message_id_fkey FOREIGN KEY (reply_message_id) REFERENCES public.messages(id) ON DELETE SET NULL;
+
+--
 -- Name: audit_log audit_log_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4164,11 +4925,60 @@ ALTER TABLE ONLY public.business_hours
     ADD CONSTRAINT business_hours_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
+-- Name: catalog_categories catalog_categories_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.catalog_categories
+    ADD CONSTRAINT catalog_categories_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
 -- Name: checklist_tasks checklist_tasks_service_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.checklist_tasks
     ADD CONSTRAINT checklist_tasks_service_id_fkey FOREIGN KEY (service_id) REFERENCES public.services(id) ON DELETE CASCADE;
+
+--
+-- Name: client_link_sessions client_link_sessions_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.client_link_sessions
+    ADD CONSTRAINT client_link_sessions_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id) ON DELETE CASCADE;
+
+--
+-- Name: client_link_sessions client_link_sessions_link_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.client_link_sessions
+    ADD CONSTRAINT client_link_sessions_link_id_fkey FOREIGN KEY (link_id) REFERENCES public.client_links(id) ON DELETE CASCADE;
+
+--
+-- Name: client_links client_links_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.client_links
+    ADD CONSTRAINT client_links_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id) ON DELETE CASCADE;
+
+--
+-- Name: client_links client_links_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.client_links
+    ADD CONSTRAINT client_links_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id) ON DELETE CASCADE;
+
+--
+-- Name: client_links client_links_invoice_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.client_links
+    ADD CONSTRAINT client_links_invoice_id_fkey FOREIGN KEY (invoice_id) REFERENCES public.invoices(id) ON DELETE CASCADE;
+
+--
+-- Name: client_links client_links_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.client_links
+    ADD CONSTRAINT client_links_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 -- Name: closures closures_created_by_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -4232,6 +5042,13 @@ ALTER TABLE ONLY public.credit_expiries
 
 ALTER TABLE ONLY public.credit_expiries
     ADD CONSTRAINT credit_expiries_lot_event_id_fkey FOREIGN KEY (lot_event_id) REFERENCES public.ledger_events(id);
+
+--
+-- Name: customer_pins customer_pins_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_pins
+    ADD CONSTRAINT customer_pins_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id) ON DELETE CASCADE;
 
 --
 -- Name: customers customers_merged_into_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -4444,6 +5261,34 @@ ALTER TABLE ONLY public.job_checklist_items
     ADD CONSTRAINT job_checklist_items_source_task_id_fkey FOREIGN KEY (source_task_id) REFERENCES public.checklist_tasks(id) ON DELETE SET NULL;
 
 --
+-- Name: leads leads_booked_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.leads
+    ADD CONSTRAINT leads_booked_appointment_id_fkey FOREIGN KEY (booked_appointment_id) REFERENCES public.appointments(id) ON DELETE SET NULL;
+
+--
+-- Name: leads leads_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.leads
+    ADD CONSTRAINT leads_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id) ON DELETE SET NULL;
+
+--
+-- Name: leads leads_follow_up_message_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.leads
+    ADD CONSTRAINT leads_follow_up_message_id_fkey FOREIGN KEY (follow_up_message_id) REFERENCES public.messages(id) ON DELETE SET NULL;
+
+--
+-- Name: leads leads_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.leads
+    ADD CONSTRAINT leads_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
 -- Name: ledger_events ledger_events_actor_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4528,6 +5373,41 @@ ALTER TABLE ONLY public.ledger_integrity_runs
     ADD CONSTRAINT ledger_integrity_runs_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
+-- Name: membership_checkouts membership_checkouts_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_checkouts
+    ADD CONSTRAINT membership_checkouts_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id) ON DELETE CASCADE;
+
+--
+-- Name: membership_checkouts membership_checkouts_link_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_checkouts
+    ADD CONSTRAINT membership_checkouts_link_id_fkey FOREIGN KEY (link_id) REFERENCES public.client_links(id) ON DELETE SET NULL;
+
+--
+-- Name: membership_checkouts membership_checkouts_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_checkouts
+    ADD CONSTRAINT membership_checkouts_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: membership_checkouts membership_checkouts_matched_order_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_checkouts
+    ADD CONSTRAINT membership_checkouts_matched_order_id_fkey FOREIGN KEY (matched_order_id) REFERENCES public.sqsp_orders(id) ON DELETE SET NULL;
+
+--
+-- Name: membership_checkouts membership_checkouts_membership_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_checkouts
+    ADD CONSTRAINT membership_checkouts_membership_id_fkey FOREIGN KEY (membership_id) REFERENCES public.memberships(id) ON DELETE CASCADE;
+
+--
 -- Name: membership_credit_events membership_credit_events_actor_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4596,6 +5476,13 @@ ALTER TABLE ONLY public.memberships
 
 ALTER TABLE ONLY public.memberships
     ADD CONSTRAINT memberships_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.membership_plans(id);
+
+--
+-- Name: message_threads message_threads_ai_paused_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.message_threads
+    ADD CONSTRAINT message_threads_ai_paused_by_fkey FOREIGN KEY (ai_paused_by) REFERENCES public.employees(id) ON DELETE SET NULL;
 
 --
 -- Name: message_threads message_threads_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -4738,6 +5625,41 @@ ALTER TABLE ONLY public.payment_links
     ADD CONSTRAINT payment_links_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
+-- Name: pending_checkin_texts pending_checkin_texts_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pending_checkin_texts
+    ADD CONSTRAINT pending_checkin_texts_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id) ON DELETE CASCADE;
+
+--
+-- Name: pending_checkin_texts pending_checkin_texts_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pending_checkin_texts
+    ADD CONSTRAINT pending_checkin_texts_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: pending_checkin_texts pending_checkin_texts_message_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pending_checkin_texts
+    ADD CONSTRAINT pending_checkin_texts_message_id_fkey FOREIGN KEY (message_id) REFERENCES public.messages(id) ON DELETE SET NULL;
+
+--
+-- Name: phone_trust phone_trust_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.phone_trust
+    ADD CONSTRAINT phone_trust_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id) ON DELETE CASCADE;
+
+--
+-- Name: phone_trust phone_trust_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.phone_trust
+    ADD CONSTRAINT phone_trust_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
 -- Name: plan_credit_rules plan_credit_rules_plan_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4764,6 +5686,13 @@ ALTER TABLE ONLY public.public_member_tokens
 
 ALTER TABLE ONLY public.public_member_tokens
     ADD CONSTRAINT public_member_tokens_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: public_otp_challenges public_otp_challenges_link_session_hash_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.public_otp_challenges
+    ADD CONSTRAINT public_otp_challenges_link_session_hash_fkey FOREIGN KEY (link_session_hash) REFERENCES public.client_link_sessions(token_hash) ON DELETE CASCADE;
 
 --
 -- Name: public_otp_challenges public_otp_challenges_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -4829,6 +5758,13 @@ ALTER TABLE ONLY public.role_permissions
     ADD CONSTRAINT role_permissions_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE;
 
 --
+-- Name: services services_category_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.services
+    ADD CONSTRAINT services_category_fkey FOREIGN KEY (location_id, category) REFERENCES public.catalog_categories(location_id, key) ON UPDATE CASCADE;
+
+--
 -- Name: services services_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4869,6 +5805,20 @@ ALTER TABLE ONLY public.sms_devices
 
 ALTER TABLE ONLY public.sms_inbox
     ADD CONSTRAINT sms_inbox_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id) ON DELETE SET NULL;
+
+--
+-- Name: sms_inbox sms_inbox_assistant_conversation_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_inbox
+    ADD CONSTRAINT sms_inbox_assistant_conversation_id_fkey FOREIGN KEY (assistant_conversation_id) REFERENCES public.assistant_conversations(id) ON DELETE SET NULL;
+
+--
+-- Name: sms_inbox sms_inbox_assistant_turn_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_inbox
+    ADD CONSTRAINT sms_inbox_assistant_turn_id_fkey FOREIGN KEY (assistant_turn_id) REFERENCES public.assistant_turns(id) ON DELETE SET NULL;
 
 --
 -- Name: sms_inbox sms_inbox_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

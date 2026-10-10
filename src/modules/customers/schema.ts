@@ -5,7 +5,8 @@ import type { Generated } from 'kysely'
 import type { JsonColumn, JsonValue } from '../../platform/schema.js'
 
 export type CustomerSource = 'dashboard' | 'walk_in' | 'online' | 'squarespace' | 'inbound_sms' | 'import'
-export type SmsOptInSource = CustomerSource | 'keyword'
+/** 'inbound_text': a client the AI assistant created from their own texts (transactional consent only; ADR 0160). */
+export type SmsOptInSource = CustomerSource | 'keyword' | 'inbound_text'
 
 export interface CustomersTable {
   id: string
@@ -43,7 +44,7 @@ export interface VehiclesTable {
 
 export type AppointmentStatus =
   'booked' | 'confirmed' | 'arrived' | 'cleaning' | 'completed' | 'canceled' | 'no_show'
-export type AppointmentSource = 'dashboard' | 'walk_in' | 'online' | 'phone' | 'standing' | 'reschedule_link'
+export type AppointmentSource = 'dashboard' | 'walk_in' | 'online' | 'phone' | 'standing' | 'reschedule_link' | 'sms_ai'
 
 export interface AppointmentsTable {
   id: string

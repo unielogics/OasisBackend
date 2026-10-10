@@ -54,7 +54,8 @@ export interface MessageThreadsTable {
 }
 
 export type MessageDirection = 'in' | 'out'
-export type MessageSenderKind = 'staff' | 'system' | 'customer'
+/** 'ai': written by the AI assistant (shown as "Oasis AI"; ADR 0160). */
+export type MessageSenderKind = 'staff' | 'system' | 'customer' | 'ai'
 export type MessageStatus =
   | 'queued'
   | 'sending'
