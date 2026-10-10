@@ -61,6 +61,11 @@ export interface BookingInput {
   override?: OverrideRequest | null
   /** The slot rules to apply: desk (default; overrides possible) or online (lead time, booking windows, paused days). */
   channel?: Channel
+  /**
+   * Whether the VIP slot rules apply (held times, the VIP booking window, the same-day guarantee). Absent: the customer's VIP flag
+   * (vip_clients). The public website passes what the caller proved: false without a verified member token.
+   */
+  vip?: boolean
   /** The customer text queued instead of the booking thanks (the website's confirmation); none when `null`. */
   message?: { templateKey: string; vars: TemplateVars } | null
 }
@@ -210,6 +215,7 @@ export async function createAppointment(
     customerId: customer.id,
     override: input.override,
     channel: input.channel,
+    vip: input.vip,
   })
   const { rules } = await loadSettingsBundle(tx, c.locationId)
   const plannedBayId =

@@ -24,6 +24,8 @@ export interface SlotCheckInput {
   /** Reschedule and reopen: the appointment's own interval must not count against it. */
   excludeAppointmentId?: string
   channel?: Channel
+  /** Whether the VIP rules apply; absent: the customer's VIP flag (vip_clients). */
+  vip?: boolean
   /** Reopening a job at its original, already past start still checks capacity, hours and closures. */
   ignorePast?: boolean
 }
@@ -84,7 +86,7 @@ export async function checkSlot(
     excludeAppointmentId: input.excludeAppointmentId,
   })
   if (input.ignorePast && input.start.getTime() < now.getTime()) data.now = input.start
-  const isVip = (await vipCustomerIds(tx, c.locationId, [input.customerId])).has(input.customerId)
+  const isVip = input.vip ?? (await vipCustomerIds(tx, c.locationId, [input.customerId])).has(input.customerId)
   const sameDayUsed = isVip
     ? await sameDayGuaranteesUsed(tx, {
         locationId: c.locationId,

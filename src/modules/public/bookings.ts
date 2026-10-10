@@ -10,7 +10,8 @@ import { getSetting } from '../../platform/settings.js'
 import { addDays, fmtT, toBizDate, wallToInstant } from '../../platform/time.js'
 import type { Tx } from '../../platform/db.js'
 import { DateTime } from 'luxon'
-import { findCustomerByPhone, updateCustomer } from '../customers/service.js'
+import { findCustomerByPhone, isVipCustomer, updateCustomer } from '../customers/service.js'
+import { loadPlans } from '../memberships/plans.js'
 import { logActivity } from '../scheduling/appointments.js'
 import { createAppointment } from '../scheduling/booking.js'
 import { engineInput, evaluateStart, loadDayData } from '../scheduling/availability-loader.js'
@@ -18,6 +19,7 @@ import { loadBoardServices } from './availability-loader.js'
 import { schedulingCtx, websiteActor, type PublicDeps, type PublicLocation, type PublicRequest } from './deps.js'
 import { enforceLimits, publicLimitChecks } from './limits.js'
 import { activeMembership } from './members.js'
+import { tierOfPlan } from './tiers.js'
 import { phoneOrThrow, resolveMemberToken } from './otp.js'
 import './problems.js'
 
@@ -152,7 +154,10 @@ export async function createWebBooking(
   // or vehicle from a form that proves nothing about who typed the number (review 2026-10-10).
   const proven = verified !== null && existing !== undefined && verified.customerId === existing.id
   const linkOnly = existing !== undefined && !proven
-  const member = existing ? (await activeMembership(tx, existing.id)) !== undefined : false
+  // Member and VIP privileges (no fee, VIP-held times, the longer online window) follow the verified owner only: a number typed
+  // without its code books as anyone's would, and the answer cannot tell a member's number from a stranger's (review 2026-10-10).
+  const privileges = proven ? await privilegesOf(tx, loc.id, existing.id) : { member: false, vip: false }
+  const member = privileges.member
   const fee = await getSetting(tx, loc.id, 'booking.guest_fee')
   const dueCents = member ? 0 : fee.value.cents
   const how = fee.value.collect
@@ -182,6 +187,7 @@ export async function createWebBooking(
       start,
       source: 'online',
       channel: 'online',
+      vip: privileges.vip,
       message: {
         templateKey: 'booking_confirmed_web',
         vars: {
@@ -216,12 +222,26 @@ export async function createWebBooking(
     end: booked.appointment.scheduledEnd,
     bayCount: await baysLeft(tx, d, loc, pkg.durationMin, start),
     deposit: { dueCents, how },
-    confirmationBy: booked.messageQueued ? 'sms' : 'none',
+    // what the policy did is the verified owner's to know; anyone else is told what they asked for (a STOP or a missing opt-in on
+    // the record of a known number would otherwise show through)
+    confirmationBy: verified ? (booked.messageQueued ? 'sms' : 'none') : input.smsConsent ? 'sms' : 'none',
     service: { key: pkg.key, name: pkg.name },
     addons: addons.map((a) => ({ key: a.key, name: a.name })),
     when: `${when === 'today' ? 'Today' : when === 'tomorrow' ? 'Tomorrow' : when} · ${time}`,
     member,
   }
+}
+
+/**
+ * What a verified customer is entitled to online: no fee with an active membership; the VIP slot rules as a VIP client (the staff's
+ * list) or as an active member of the plan the website sells as VIP (tiers.ts).
+ */
+async function privilegesOf(tx: Tx, locationId: string, customerId: string): Promise<{ member: boolean; vip: boolean }> {
+  const m = await activeMembership(tx, customerId)
+  const listed = await isVipCustomer(tx, locationId, customerId)
+  if (!m) return { member: false, vip: listed }
+  const plan = (await loadPlans(tx, locationId)).find((p) => p.id === m.planId)
+  return { member: true, vip: listed || (plan !== undefined && tierOfPlan(plan.key) === 'vip') }
 }
 
 /** What an unverified caller typed for a customer the shop already has, for staff to confirm (nothing of it reaches the record). */

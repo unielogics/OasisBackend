@@ -109,6 +109,7 @@ export function usePublicHarness(o: { env?: Record<string, string>; poolMax?: nu
       memberships, membership_credit_events, sqsp_alerts, sqsp_products,
       public_otp_challenges, public_member_tokens, public_rate_limits restart identity cascade`.execute(t.db)
     await sql`delete from vehicles where customer_id in (select id from customers where synthetic = false)`.execute(t.db)
+    await sql`delete from vip_clients where customer_id in (select id from customers where synthetic = false)`.execute(t.db)
     await sql`delete from customers where synthetic = false`.execute(t.db)
     await sql`delete from settings where key = 'booking.guest_fee'`.execute(t.db)
   })

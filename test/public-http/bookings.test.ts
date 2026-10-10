@@ -133,10 +133,10 @@ describe('a guest booking', () => {
     expect(target!.recipient.consentSource).toBe('web_booking')
   })
 
-  it('suppresses the confirmation for a number off the allowlist outside production, and still books', async () => {
+  it('suppresses the confirmation for a number off the allowlist outside production, and still books (the answer says what was asked for)', async () => {
     const r = await book(bookingBody(h, { phone: PHONES.stranger, name: 'Sam Stranger' }))
     expect(r.statusCode, r.body).toBe(201)
-    expect(json(r).confirmationBy).toBe('none')
+    expect(json(r).confirmationBy).toBe('sms')
     expect(await h.texts(PHONES.stranger)).toEqual([])
     expect(await appointments()).toHaveLength(1)
   })
@@ -159,10 +159,63 @@ describe('a member booking', () => {
     expect(activity.at(-1)!.text).toBe('Booked on the website · member, no booking fee')
   })
 
-  it('without a token an active member still pays no fee (the fee follows the membership, the token only proves the number)', async () => {
-    await member(PHONES.member)
+  it('without a token a member’s number books as a guest’s would: the fee is due and the answer is a guest’s (nothing reveals the membership)', async () => {
+    const id = await member(PHONES.member)
+    await sql`update customers set sms_opted_in = true, sms_opt_in_source = 'dashboard' where id = ${id}`.execute(h.db)
     const r = await book(bookingBody(h, { phone: PHONES.member, name: 'Mia Member' }))
-    expect(json(r)).toMatchObject({ member: true, deposit: { dueCents: 0 } })
+    expect(r.statusCode, r.body).toBe(201)
+    const guest = await book(bookingBody(h, { phone: PHONES.extra, name: 'Gus Guest', startMin: 14 * 60 }))
+    const strip = (x: Record<string, unknown>) => ({ ...x, bookingRef: '', start: '', end: '', when: '', bayCount: 0 })
+    expect(strip(json(r))).toEqual(strip(json(guest)))
+    expect(json(r)).toMatchObject({ member: false, deposit: { dueCents: 2500 }, confirmationBy: 'sms' })
+    // the text goes to the number on file (its owner learns of the booking) with the guest's sentence
+    const texts = await h.texts(PHONES.member)
+    expect(texts[0]!.body).toMatch(/\$25 booking fee due at the shop/)
+    const activity = await h.db.selectFrom('activity_log').select('text').orderBy('id').execute()
+    expect(activity.map((x) => x.text)).toContain('Booked on the website · $25 booking fee due at the counter')
+  })
+
+  it('answers an unverified booking for a known number the same way, whatever the record says (opted out, never opted in)', async () => {
+    const id = await member(PHONES.member)
+    await sql`update customers set sms_opted_out_at = app_now() where id = ${id}`.execute(h.db)
+    const known = json(await book(bookingBody(h, { phone: PHONES.member, smsConsent: true })))
+    const unknown = json(await book(bookingBody(h, { phone: PHONES.extra, smsConsent: true, startMin: 14 * 60 })))
+    expect(known.confirmationBy).toBe('sms')
+    expect(unknown.confirmationBy).toBe('sms')
+    expect(await h.texts(PHONES.member)).toEqual([])
+    const quiet = json(await book(bookingBody(h, { phone: PHONES.joiner, smsConsent: false, startMin: 14 * 60 + 30 })))
+    expect(quiet.confirmationBy).toBe('none')
+  })
+
+  it('VIP rules (held times, the 30-day window) need the VIP’s code: the number alone books as anyone', async () => {
+    const id = await member(PHONES.member)
+    await h.db.insertInto('vip_clients').values({ location_id: h.locationId, customer_id: id, added_by: null }).execute()
+    const held = await book(bookingBody(h, { phone: PHONES.member, date: '2026-06-19', startMin: 16 * 60 }))
+    expect(json(held)).toMatchObject({ status: 409, code: 'PUBLIC_SLOT_VIP' })
+    const far = await book(bookingBody(h, { phone: PHONES.member, date: '2026-07-02', startMin: 13 * 60 }))
+    expect(json(far)).toMatchObject({ status: 409, code: 'PUBLIC_SLOT_TOO_FAR', detail: 'Online booking opens 14 days ahead. Pick a sooner time.' })
+    const memberToken = await tokenFor(PHONES.member)
+    const heldOk = await book(bookingBody(h, { phone: PHONES.member, date: '2026-06-19', startMin: 16 * 60, memberToken }))
+    expect(heldOk.statusCode, heldOk.body).toBe(201)
+    const farOk = await book(bookingBody(h, { phone: PHONES.member, date: '2026-07-02', startMin: 13 * 60, memberToken }))
+    expect(farOk.statusCode, farOk.body).toBe(201)
+  })
+
+  it('a verified member of the website’s VIP tier gets the VIP rules too; a verified Gold member does not', async () => {
+    const vip = await h.db.transaction().execute(async (tx) => {
+      const { customer } = await upsertCustomerByPhone(tx, { newId: h.newId, now: h.clock.now(), fullName: 'Vic Vip', phone: PHONES.joiner, source: 'dashboard' })
+      await createManualMembership(tx, { locationId: h.locationId, clock: h.clock, newId: h.newId }, { customerId: customer.id, planKey: 'executive', planLabel: 'VIP' }, { userId: 'test', name: 'Test', audit: {} })
+      return customer.id
+    })
+    expect(await h.db.selectFrom('vip_clients').select('customer_id').where('customer_id', '=', vip).execute()).toEqual([])
+    const vipToken = await tokenFor(PHONES.joiner)
+    const ok = await book(bookingBody(h, { phone: PHONES.joiner, date: '2026-06-19', startMin: 16 * 60, memberToken: vipToken }))
+    expect(ok.statusCode, ok.body).toBe(201)
+    expect(json(ok)).toMatchObject({ member: true, deposit: { dueCents: 0 } })
+    await member(PHONES.member)
+    const goldToken = await tokenFor(PHONES.member)
+    const gold = await book(bookingBody(h, { phone: PHONES.member, date: '2026-06-19', startMin: 16 * 60, memberToken: goldToken }))
+    expect(json(gold)).toMatchObject({ status: 409, code: 'PUBLIC_SLOT_VIP' })
   })
 
   it('refuses an expired token (401) and a token for another number (422); a pending membership is not a member', async () => {
