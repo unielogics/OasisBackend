@@ -638,6 +638,18 @@ export async function seedDomainReference(ctx: SeedContext): Promise<void> {
   ctx.log('domain: bays, hours, rules, closures, emergency history, catalog, VIP and arrival settings')
 }
 
+/**
+ * The reference data a production location needs before the public website can offer times and the dashboard can book:
+ * the default settings, the two bays and the packages and add-ons with their checklists. Nothing fabricated: no closures,
+ * no emergency history, no VIP holds, no customers (the owner adds and edits all of that in Settings).
+ */
+export async function seedCatalogReference(ctx: SeedContext): Promise<void> {
+  await ensureDomainDefaults(ctx.tx, ctx.location.id)
+  await seedBays(ctx)
+  await seedCatalog(ctx)
+  ctx.log('catalog: default settings, bays, packages and add-ons with their checklists')
+}
+
 export async function seedDomainDesign(ctx: SeedContext): Promise<void> {
   const { tx, location } = ctx
   const optedInAt = ctx.clock.now()
@@ -707,8 +719,14 @@ const domainDesign: SeedProfile = {
 export const domainSeedProfiles: Record<string, SeedProfile> = {
   domain,
   'domain-design': domainDesign,
+  catalog: {
+    description:
+      'Production reference data: default settings, the two bays, the packages and add-ons with their checklists; no closures, history, holds or customers',
+    run: seedCatalogReference,
+  },
   base: {
-    description: 'Reference data every environment needs: roles and employees (people) plus the domain reference data',
+    description:
+      'Reference data every environment needs: roles and employees (people) plus the domain reference data',
     dependsOn: ['people', 'domain'],
     run: async () => undefined,
   },
