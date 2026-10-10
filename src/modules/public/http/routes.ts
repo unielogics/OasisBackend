@@ -7,6 +7,7 @@ import type { FastifyRequest } from 'fastify'
 import { access } from '../../../http/access.js'
 import { idempotentHandler } from '../../../http/idempotent.js'
 import { z } from '../../../http/zod.js'
+import type { Tx } from '../../../platform/db.js'
 import { AppError } from '../../../platform/errors.js'
 import { getSetting } from '../../../platform/settings.js'
 import { fmtT, wallToInstant } from '../../../platform/time.js'
@@ -187,15 +188,23 @@ export function registerPublicRoutes(d: PublicDeps): void {
       },
     },
     idempotent(
-      idempotentHandler(async (req, tx) => {
-        const l = await loc()
-        const b = req.body as z.infer<typeof BookingBody>
-        const r = reqOf(req)
-        if (b.website.trim() !== '') return { status: 202, body: await decoy(d, l, b) }
-        await chargeBookingLimits(d, r, phoneOrThrow(b.phone))
-        const out = await createWebBooking(tx, d, l, r, b)
-        return { status: 201, body: out }
-      }),
+      idempotentHandler(
+        async (req, tx, _reply, p: Prepared) => {
+          const b = req.body as z.infer<typeof BookingBody>
+          if (p.decoy) return { status: 202, body: await decoy(tx, p.loc, b) }
+          return { status: 201, body: await createWebBooking(tx, d, p.loc, reqOf(req), b) }
+        },
+        {
+          // on the pool, before the transaction opens: nothing inside it may wait for a second connection
+          prepare: async (req): Promise<Prepared> => {
+            const l = await loc()
+            const b = req.body as z.infer<typeof BookingBody>
+            if (b.website.trim() !== '') return { loc: l, decoy: true }
+            await chargeBookingLimits(d, reqOf(req), phoneOrThrow(b.phone))
+            return { loc: l, decoy: false }
+          },
+        },
+      ),
     ),
   )
 
@@ -219,26 +228,39 @@ export function registerPublicRoutes(d: PublicDeps): void {
       },
     },
     idempotent(
-      idempotentHandler(async (req, tx) => {
-        const l = await loc()
-        const b = req.body as z.infer<typeof MembershipBody>
-        const r = reqOf(req)
-        if (b.website.trim() !== '')
-          return {
-            status: 202,
-            body: { memberRef: memberRefOf(app.newId()), status: 'pending_payment', next: 'checkout_link_by_sms', tier: b.tier, plan: b.tier === 'gold' ? 'Gold' : 'VIP', confirmationBy: 'sms' },
-          }
-        await chargeJoinLimits(d, r, phoneOrThrow(b.phone))
-        const out = await joinWeb(tx, d, l, r, b)
-        return { status: 201, body: out }
-      }),
+      idempotentHandler(
+        async (req, tx, _reply, p: Prepared) => {
+          const b = req.body as z.infer<typeof MembershipBody>
+          if (p.decoy)
+            return {
+              status: 202,
+              body: { memberRef: memberRefOf(app.newId()), status: 'pending_payment', next: 'checkout_link_by_sms', tier: b.tier, plan: b.tier === 'gold' ? 'Gold' : 'VIP', confirmationBy: 'sms' },
+            }
+          return { status: 201, body: await joinWeb(tx, d, p.loc, reqOf(req), b) }
+        },
+        {
+          prepare: async (req): Promise<Prepared> => {
+            const l = await loc()
+            const b = req.body as z.infer<typeof MembershipBody>
+            if (b.website.trim() !== '') return { loc: l, decoy: true }
+            await chargeJoinLimits(d, reqOf(req), phoneOrThrow(b.phone))
+            return { loc: l, decoy: false }
+          },
+        },
+      ),
     ),
   )
 }
 
-/** The honeypot's answer: shaped like a booking, backed by nothing. */
-async function decoy(d: PublicDeps, l: PublicLocation, b: z.infer<typeof BookingBody>): Promise<z.infer<typeof BookingResult>> {
-  const fee = await getSetting(d.app.db, l.id, 'booking.guest_fee')
+/** What a record-creating POST resolved before its transaction: the location, and whether the honeypot was filled. */
+interface Prepared {
+  loc: PublicLocation
+  decoy: boolean
+}
+
+/** The honeypot's answer: shaped like a booking, backed by nothing (read through the transaction, like everything in it). */
+async function decoy(tx: Tx, l: PublicLocation, b: z.infer<typeof BookingBody>): Promise<z.infer<typeof BookingResult>> {
+  const fee = await getSetting(tx, l.id, 'booking.guest_fee')
   const start = wallToInstant(b.date, b.startMin, l.tz)
   return {
     bookingRef: bookingRefOf(randomInt(10_000, 99_999)),

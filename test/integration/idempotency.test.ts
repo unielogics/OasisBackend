@@ -223,6 +223,40 @@ describe('runIdempotent', () => {
     expect(r.replayed).toBe(false)
   })
 
+  it('a prepare step runs once per executed command, outside the transaction (its writes survive a failing command), never on a replay', async () => {
+    await seedLocation()
+    const calls = { n: 0 }
+    const prepared: string[] = []
+    const prepare = async (): Promise<string> => {
+      // its own autocommit statement: the transaction has not opened yet (no connection is held while it runs)
+      await sql`insert into public_rate_limits (key, window_start, count) values (${`prep-${prepared.length}`}, app_now(), 1)`.execute(t.db)
+      prepared.push('ran')
+      return `p${prepared.length}`
+    }
+    const first = await runIdempotent(t.db, clock(), req(), async (tx, p) => ({ ...(await command(calls)(tx)), body: { p } }), prepare)
+    expect(first).toMatchObject({ replayed: false, body: { p: 'p1' } })
+    const again = await runIdempotent(t.db, clock(), req(), async (tx, p) => ({ ...(await command(calls)(tx)), body: { p } }), prepare)
+    expect(again).toMatchObject({ replayed: true, body: { p: 'p1' } })
+    expect(prepared).toEqual(['ran'])
+    // a command that fails after its prepare step: the prepare's writes stay, the command's roll back, the key is released
+    const failing = runIdempotent(t.db, clock(), req({ key: 'key-0000-0002' }), async (tx) => {
+      await command(calls)(tx)
+      throw new AppError('VERSION_CONFLICT')
+    }, prepare)
+    await expect(failing).rejects.toMatchObject({ code: 'VERSION_CONFLICT' })
+    expect(prepared).toEqual(['ran', 'ran'])
+    expect((await t.db.selectFrom('public_rate_limits').select('key').execute()).map((r) => r.key).sort()).toEqual(['prep-0', 'prep-1'])
+    expect(await sideEffects()).toBe(1)
+    expect(await t.db.selectFrom('idempotency_keys').select('key').where('key', '=', 'key-0000-0002').execute()).toEqual([])
+    // a prepare step that refuses (a rate limit) releases the key too, and the command never runs
+    const refused = runIdempotent(t.db, clock(), req({ key: 'key-0000-0003' }), command(calls), async () => {
+      throw new AppError('RATE_LIMITED')
+    })
+    await expect(refused).rejects.toMatchObject({ code: 'RATE_LIMITED' })
+    expect(calls.n).toBe(2)
+    expect(await t.db.selectFrom('idempotency_keys').select('key').where('key', '=', 'key-0000-0003').execute()).toEqual([])
+  })
+
   it('purgeExpiredKeys removes only expired rows', async () => {
     await seedLocation()
     await runIdempotent(t.db, clock(), req({ key: 'key-old-00001' }), command({ n: 0 }))

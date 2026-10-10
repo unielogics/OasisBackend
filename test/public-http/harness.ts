@@ -58,7 +58,7 @@ export interface PublicHarness {
 let keyN = 0
 let ipN = 0
 
-export function usePublicHarness(o: { env?: Record<string, string> } = {}): PublicHarness {
+export function usePublicHarness(o: { env?: Record<string, string>; poolMax?: number } = {}): PublicHarness {
   let t: TestDb
   let app: TestApp
   let clock: FixedClock
@@ -68,7 +68,7 @@ export function usePublicHarness(o: { env?: Record<string, string> } = {}): Publ
 
   beforeAll(async () => {
     clock = new FixedClock(START)
-    t = await createTestDb({ clock, poolMax: 8 })
+    t = await createTestDb({ clock, poolMax: o.poolMax ?? 8 })
     await truncateAll(t.db)
     await runSeed({ db: t.db, clock, profile: 'design' })
     locationId = (await t.db.selectFrom('locations').select('id').executeTakeFirstOrThrow()).id

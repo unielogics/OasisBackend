@@ -86,17 +86,24 @@ async function claim(db: Db, clock: Clock, r: IdempotentRequest, hash: string): 
   return res.rows.length === 1
 }
 
-export async function runIdempotent<T>(
+/**
+ * Claims the key, then runs `prepare` (when given) and the command. `prepare` runs once per executed command, after the claim and
+ * before the transaction opens, on the pool's own autocommit statements: what it writes survives a failing command (a durable rate
+ * limit charged there still counts), and it never holds a connection while the command's transaction holds another. Whatever it
+ * throws releases the key like a failing command. A replay runs neither.
+ */
+export async function runIdempotent<T, P = undefined>(
   db: Db,
   clock: Clock,
   req: IdempotentRequest,
-  fn: (tx: Tx) => Promise<IdempotentResult<T>>,
+  fn: (tx: Tx, prepared: P) => Promise<IdempotentResult<T>>,
+  prepare?: () => Promise<P>,
 ): Promise<IdempotentOutcome<T>> {
   assertValidKey(req.key)
   const hash = requestHash(req)
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    if (await claim(db, clock, req, hash)) return execute(db, req, hash, fn)
+    if (await claim(db, clock, req, hash)) return execute(db, req, hash, fn, prepare)
 
     const existing = await db
       .selectFrom('idempotency_keys')
@@ -119,15 +126,17 @@ export async function runIdempotent<T>(
   throw new AppError('CONCURRENT_UPDATE')
 }
 
-async function execute<T>(
+async function execute<T, P>(
   db: Db,
   req: IdempotentRequest,
   hash: string,
-  fn: (tx: Tx) => Promise<IdempotentResult<T>>,
+  fn: (tx: Tx, prepared: P) => Promise<IdempotentResult<T>>,
+  prepare: (() => Promise<P>) | undefined,
 ): Promise<IdempotentOutcome<T>> {
   try {
+    const prepared = (prepare ? await prepare() : undefined) as P
     const result = await db.transaction().execute(async (tx) => {
-      const out = await fn(tx)
+      const out = await fn(tx, prepared)
       const done = await tx
         .updateTable('idempotency_keys')
         .set({
