@@ -26,6 +26,15 @@ const PUBLIC_ROUTES = new Set([
   'POST /api/v1/arrivals/ping',
   // the public website's opening hours: computed from the Settings, no personal or operations data (ADR 0145)
   'GET /api/v1/public/hours',
+  // the public website's booking surface (ADR 0150): the open-times board and the catalog (no names, ids or appointment data),
+  // member identification by phone + one-time SMS code, real bookings and joins (Idempotency-Key, honeypot, durable per-phone and
+  // per-address limits); every POST carries the website's own abuse controls instead of a session
+  'GET /api/v1/public/availability',
+  'GET /api/v1/public/catalog',
+  'POST /api/v1/public/otp',
+  'POST /api/v1/public/otp/verify',
+  'POST /api/v1/public/bookings',
+  'POST /api/v1/public/memberships',
 ])
 
 /** 403 codes a permitted caller may still get from a business rule, keyed by "METHOD url". Empty with the generic {} body. */
