@@ -94,9 +94,17 @@ flavour. Local-server and cloud-server webhook sets are independent.
 
 Events (OpenAPI `WebhookEvent`): `sms:received`, `sms:data-received`, `sms:sent`, `sms:delivered`, `sms:failed`, `sms:cancelled`,
 `system:ping`, `mms:received`, `mms:downloaded`, `app:started`, and the batch forms `sms:batch:received`, `sms:batch:data-received`,
-`mms:batch:received`, `mms:batch:downloaded`. Oasis registers seven: `sms:received`, `sms:sent`, `sms:delivered`, `sms:failed`,
-`sms:cancelled`, `system:ping`, `app:started`, with ids `oasis-sms-received`, `oasis-sms-sent`, ... (`oasis-` + event with `:`
-turned into `-`). It removes stale `oasis-*` registrations and never touches ids it does not own.
+`mms:batch:received`, `mms:batch:downloaded`. Oasis registers nine: `sms:received`, `sms:sent`, `sms:delivered`, `sms:failed`,
+`sms:cancelled`, `system:ping`, `app:started`, `mms:received`, `mms:downloaded`, with ids `oasis-sms-received`, `oasis-sms-sent`,
+... `oasis-mms-received`, `oasis-mms-downloaded` (`oasis-` + event with `:` turned into `-`). It removes stale `oasis-*`
+registrations and never touches ids it does not own. A tablet that holds the seven SMS-era registrations converges on the next
+sync (boot, `sms.webhooks.register` hourly, every `app:started`, or `POST /integrations/sms/devices/:id/register-webhooks`): the
+two MMS ones are created, nothing else changes.
+
+**Why MMS (production, 2026-10-10):** the owner's plain "OK" replies reached the tablet as MMS (tablet log `MMS content incomplete
+(id=4, sender=unknown, attachments=0), retrying`, then `ReceiverService::process - message received, messageType MMS`). Phones send
+MMS for group texts, long texts, pictures, and on some carriers for any reply; such a message fires no `sms:received`, so before
+these two subscriptions a STOP, a C or a question sent as MMS never reached Oasis.
 
 Envelope (`WebHookEventDTO`): `{"id": "<nanoid>", "webhookId": "<registration id>", "event": "...", "deviceId": "...", "payload": {...}}`.
 The envelope `id` is generated once per delivery and stored with the queued payload, so **every retry of a delivery carries the same
@@ -114,7 +122,25 @@ Payloads (`SmsEventPayload.kt`, webhooks doc):
 | `sms:cancelled` | `messageId, sender, recipient, simNumber, phoneNumber, cancelledAt` |
 | `system:ping` | the health document (`status, version, releaseId, checks`) |
 | `app:started` | `simCards: [{slotIndex, simNumber, phoneNumber, carrierName, iccid}]` |
+| `mms:received` | the WAP push only, no text: `messageId, sender, recipient, simNumber, transactionId, subject, size, contentClass, receivedAt` |
+| `mms:downloaded` | `messageId, sender, recipient, simNumber, body, subject, attachments: [{partId, contentType, name, size, data}], receivedAt`; `data` is base64 and may be null |
 
+**MMS payload assumptions (docs.sms-gate.app/features/mms and /features/webhooks; not yet seen from the tablet).** Compare these
+with the first real `mms:downloaded` (`select body from webhook_log where provider = 'smsgate' order by received_at desc` shows it,
+attachment bytes already redacted once applied):
+
+| Field | Read as | If absent or different |
+|---|---|---|
+| envelope `event` | `mms:downloaded` routes; `mms:received` is recorded only (event kind `mms_notified`, `webhook_log` `processed`, no message) | anything else is `unparsed` (below) |
+| `payload.messageId` | the dedupe key with the device (`sms_inbox` unique `(device, messageId)`) and the storage-key segment | missing: 400 and an `unparsed` row |
+| `payload.sender`, else `payload.phoneNumber` | the sender, normalised exactly like `sms:received` | both missing: the sender is `unknown` (quarantined, still stored and announced) |
+| `payload.body` (string or null), else `payload.message` | the text, trimmed | empty: `payload.subject` trimmed; both empty: a placeholder (below) |
+| `payload.subject` | used only when the body is empty | |
+| `payload.attachments[]` | `partId` (string or number), `contentType` (parameters dropped, lower-cased; `mimeType` accepted), `name`, `size`, `data` (base64, standard or URL alphabet, an optional `data:...;base64,` prefix, whitespace ignored) | `data` null or missing: the part is `unavailable` (`missing`); not base64: `unavailable` (`decode_failed`) |
+| `payload.receivedAt` | ISO-8601 with offset | the signing time |
+| `recipient`, `simNumber`, `transactionId`, `size`, `contentClass` | not used | |
+
+There are **no delivery receipts for MMS** (Oasis never sends MMS anyway).
 Timestamps are ISO-8601 with an offset (`2026-06-13T12:00:02.000-04:00`). For outbound events `messageId` is **our id** (or the
 retry id described above).
 
@@ -194,6 +220,8 @@ Tick each in `docs/integrations/smsgate.md` when done, and replace the fixtures 
 | 18 | The dual-SIM `simNumber` mapping | send with `simNumber` 1 and 2 | set `SMSGATE_SIM_NUMBER` |
 | 19 | `PATCH /settings` accepts `webhooks.signing_key` (for `SMSGATE_SYNC_SIGNING_KEY=true`) | one call | set the key by hand in the app |
 | 20 | The local server answers on the tailnet interface (not only Wi-Fi) | `curl http://<tablet tailscale ip>:8080/health` from the backend host | check Tailscale ACL and that the tablet's Tailscale app is connected |
+| 21 | `mms:downloaded` carries the field names in section 1 (`sender` or `phoneNumber`, `body`, `subject`, `attachments[].data` base64) and fires for a plain-text MMS such as "OK" | text "OK" from the phone that produced MMS, then a picture; read the stored `webhook_log` body | adjust `verifyAndParse` (`src/integrations/smsgate/webhook.ts`, case `mms:downloaded`); until then such deliveries show as `unparsed` or 400, never silently |
+| 22 | A download that never completes ("MMS content incomplete") ends in an `mms:downloaded` with no content rather than only an `mms:received` | turn mobile data off, send a picture, turn it on after a while | only the `mms:received` row is kept: a follow-up check of `mms:received` without `mms:downloaded` would be needed |
 
 ## 3. Tablet and Tailscale runbook
 
@@ -249,7 +277,7 @@ Registered webhook URL: `https://oasis-api.<tailnet>.ts.net/hooks/smsgate/<devic
 1. From the backend host: `curl http://100.x.y.z:8080/health` (200 `pass`).
 2. `pnpm sim:smsgate` against a local backend first, then switch `SMS_PROVIDER=smsgate`.
 3. Run `registerWebhooks(<url>, SMSGATE_WEBHOOK_SECRET)` (boot, then hourly, and again on every `app:started`). Check
-   `GET /webhooks` on the device lists seven `oasis-*` registrations.
+   `GET /webhooks` on the device lists nine `oasis-*` registrations (seven SMS events, `mms:received`, `mms:downloaded`).
 4. One text out to a test phone to an allow-listed number (`SMS_ALLOWLIST`), see `sent` and `delivered` webhooks.
 5. One text in (`C`, then `STOP`, then `START`, then `HELP`); confirm opt-out and replies.
 6. Turn the tablet's mobile data/VPN off for two minutes: expect `degraded` then `offline`, the queue holds, and on return the
@@ -266,6 +294,9 @@ Registered webhook URL: `https://oasis-api.<tailnet>.ts.net/hooks/smsgate/<devic
 | `app:started` alerts without a reboot | OEM killed the app | unrestricted battery, autostart; webhooks are re-registered automatically |
 | Messages stay `accepted` | webhooks lost or carrier gives no receipts | reconciliation resolves them via `GET /messages/{id}` |
 | Inbound from some phones never arrives | RCS on the tablet's Messages app | turn chat features off |
+| A reply shows on the tablet as MMS but not in Oasis | the `oasis-mms-*` webhooks are missing (registered before 2026-10-10), or mobile data is off (MMS download needs it) | register webhooks; check `GET /webhooks` lists nine; keep mobile data on |
+| A thread shows `[Picture message — content unavailable]` | the device could not download the MMS (`MMS content incomplete` in the tablet log) | read it on the tablet; check mobile data and the carrier's MMS APN |
+| `webhook_log` rows with status `unparsed` | a signed event Oasis does not handle, or a payload it could not read | `select headers->>'x-event', error, body from webhook_log where status = 'unparsed'`; kept 7 days |
 
 ## 4. Environment variables
 
@@ -337,6 +368,19 @@ test/fixtures/smsgate/       webhooks/*.json (pre-signed), http.json (recorded e
   opt-out. Keywords are the whole message, trimmed, case-insensitive, edge punctuation ignored. Unknown senders are quarantined and
   no customer is created (a stranger's STOP/START/HELP is still honoured by number). Attribution: job in progress, else nearest
   upcoming within 72 h (an appointment that started up to 2 h ago still counts), else last completed within 14 days.
+- **MMS** (ADR 0151): `mms:downloaded` becomes the same received event as `sms:received` (text = body trimmed, else the subject)
+  and goes through the same router; the inbox row and the message are marked `kind = mms`. Pictures (image/*, at most 5, up to
+  5 MB each, JPEG/PNG/WebP by their bytes) are saved in the photos store (`STORAGE_PROVIDER`, never public, no new bucket) under
+  `messaging/mms/<location>/<device message id>/<index>.<ext>`; every part is listed in `attachments` (stored, listed, skipped or
+  unavailable, with the reason). An MMS with no text is filed as `[Picture message]` (it had parts) or `[Picture message — content
+  unavailable]` (it had none) and raises the `sms.picture_message` notification ("Picture message from <name or masked number> —
+  check the tablet / dashboard") whoever sent it. A storage failure loses the picture, never the text. Once applied, the stored
+  `webhook_log` copy loses the base64 bytes.
+- **Unparsed**: a delivery whose signature verifies but whose event Oasis does not handle (answered 200) or whose payload it cannot
+  read (answered 400) is kept in `webhook_log` with status `unparsed` (body cut to its first 4 KB, the event name in
+  `headers.x-event`), logged at warn with the event name only, and purged after 7 days.
+- **Body limit**: the hooks listener takes up to 16 MB on `/hooks/smsgate` (an MMS carries its pictures base64-encoded) and answers
+  413 above it; every other path keeps the 1 MB webhook limit.
 
 ## 6. What the integrator wires
 
@@ -348,7 +392,7 @@ test/fixtures/smsgate/       webhooks/*.json (pre-signed), http.json (recorded e
 - **Webhook route** `POST /hooks/smsgate/:deviceKey`: read the raw body (`addContentTypeParser` with `parseAs: 'string'`),
   `provider.parseWebhook(headers, raw)`, `ingestor.ingest(parsed.event, parsed.extras)`, answer 200 fast. Map `SmsWebhookError`
   codes to 401 (signature, timestamp, headers), 400 (body) and 200 for `unsupported_event` so the device stops retrying events we
-  ignore. On `appStarted` call `registerWebhooks`.
+  ignore; the last two are kept as `unparsed`. On `appStarted` call `registerWebhooks`.
 - **Jobs** (pg-boss, single leader via advisory lock): `tick` every second or on wake, `reconcile` every 2 min, health poll every
   60 s (`pollDeviceHealth(provider, monitor, deviceId, clock)`), `registerWebhooks` at boot and hourly.
 - **Hooks**: `monitor.onTransition` raises the `sms_device_down` alert and the e-mail fallback for `p0FallbackCandidates`.
@@ -361,7 +405,8 @@ test/fixtures/smsgate/       webhooks/*.json (pre-signed), http.json (recorded e
 
 ## 7. Simulator
 
-`pnpm sim:smsgate` starts the device API with control endpoints (see the banner it prints): inject inbound texts, delivery
+`pnpm sim:smsgate` starts the device API with control endpoints (see the banner it prints): inject inbound texts (and, through
+`SimDevice.injectMms` / `SimulatorProvider.injectMms`, an MMS as `mms:received` then `mms:downloaded`), delivery
 receipts and failures, an outage (`down`, `error5xx`, `hang`, `hang_after_accept`), duplicate and out-of-order webhooks, ping and
 `app:started`, health warnings. It signs webhooks exactly like the app (re-signed on every retry with the same envelope id) and
 retries a rejecting receiver on the app's schedule shape. `SimulatorProvider` is the in-process equivalent for unit tests and

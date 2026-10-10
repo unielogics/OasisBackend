@@ -230,7 +230,7 @@ $D/oasis-admin.sh --email you@example.com sms-add-device --label "Front desk tab
 ```bash
 $D/oasis-admin.sh ... sms-test <device id>              # reachable, credentials ok
 sudo $D/tailscale-serve.sh                              # once per host; prints SMSGATE_WEBHOOK_PUBLIC_URL for common.env
-$D/oasis-admin.sh ... sms-register-webhooks <device id> # seven oasis-* webhooks on the tablet
+$D/oasis-admin.sh ... sms-register-webhooks <device id> # nine oasis-* webhooks on the tablet (seven SMS events + mms:received, mms:downloaded)
 sudo $D/verify.sh smsgate --send --to +1YOURNUMBER --watch --replies   # one text out, receipts, then reply C, STOP, START, HELP
 ```
 Set `SMS_PROVIDER=smsgate` in `common.env` and restart the API and the worker. Nothing else goes in the environment: the tablet's URL,
@@ -347,6 +347,22 @@ and Squarespace credentials (rotate those at their source as well); a leaked tab
    from outside the tailnet `healthcheck.sh --public https://your-domain` (must show the SMS hook hidden); `sudo $D/verify.sh smsgate --watch`.
 5. While it is down nothing is lost: texts wait in the queue and expire per their class (a "ready for pickup" text lives 4 hours, a
    reminder 2). Staff phone customers whose "ready" or "late" text matters.
+
+### A reply shows on the tablet but not in Oasis (MMS)
+*Sign: the customer's reply (often a plain "OK", a group text, a long text or a picture) is on the tablet but not in the thread; the
+tablet's log says `messageType MMS`.*
+1. Phones send such replies as MMS, which arrive only through the `mms:received` / `mms:downloaded` webhooks (ADR 0151). `GET /webhooks`
+   on the tablet (or `sudo $D/verify.sh smsgate`, check SG-B3) must list **nine** `oasis-*` registrations. Fewer: `sms-register-webhooks
+   <id>` (the hourly `sms.webhooks.register` job and every app restart do the same).
+2. MMS download needs **mobile data** on the tablet (not only Wi-Fi). With it off, the tablet logs `MMS content incomplete` and Oasis gets
+   at most `[Picture message — content unavailable]` with a "Picture message" notification: read that one on the tablet.
+3. A picture with no text shows as `[Picture message]` and raises "Picture message from <name or masked number> — check the tablet /
+   dashboard". The picture is in the photos store under `messaging/mms/` (no new bucket, never public); there is no viewer yet, so read it
+   on the tablet.
+4. Deliveries the server could not use are kept for 7 days:
+   `select received_at, headers->>'x-event' as event, error, left(body, 300) from webhook_log where status = 'unparsed' order by received_at desc;`
+   An `mms:downloaded` there means its field names differ from what `docs/integrations/smsgate.md` section 1 assumes: send it to the
+   developer. Nothing in that table is lost text yet: the tablet still holds the message.
 
 ### Squarespace sync stuck or dead-lettered
 *Sign: payments stay "Awaiting Squarespace", the sync status card shows lag or a dead letter, new orders do not appear.*
