@@ -256,7 +256,7 @@ env_file_unset() {
 # /etc/oasis/common.env names the secret (OASIS_SECRET_ID) and its region (AWS_REGION); the secret holds these keys. The list is the
 # same as SECRET_KEYS in src/config/secrets-source.ts (a test holds them together).
 # shellcheck disable=SC2034 # used by install.sh
-OASIS_SECRET_KEYS=(DATABASE_URL SESSION_SECRET SECRETS_KEY STORAGE_SIGNING_SECRET BOOTSTRAP_ADMIN_EMAIL BOOTSTRAP_ADMIN_PASSWORD SQSP_API_KEY SQSP_WEBHOOK_SECRET SMSGATE_PASSWORD SMSGATE_WEBHOOK_SECRET)
+OASIS_SECRET_KEYS=(DATABASE_URL SESSION_SECRET SECRETS_KEY STORAGE_SIGNING_SECRET BOOTSTRAP_ADMIN_EMAIL BOOTSTRAP_ADMIN_PASSWORD SQSP_API_KEY SQSP_WEBHOOK_SECRET SMSGATE_PASSWORD SMSGATE_WEBHOOK_SECRET PIN_PEPPER)
 # The backend whose node_modules the kit borrows (scripts/secret-env.ts and friends): the checkout this kit sits in, or, for the
 # root-owned copy (no package.json above it), the current release.
 if [[ -z "${OASIS_BACKEND_DIR:-}" ]]; then

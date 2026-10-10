@@ -200,6 +200,7 @@ describe('gen-secrets.sh', () => {
     expect(Buffer.from(a.SESSION_SECRET!, 'base64')).toHaveLength(48)
     expect(Buffer.from(a.SECRETS_KEY!, 'base64')).toHaveLength(32)
     expect(Buffer.from(a.BACKUP_ENCRYPTION_KEY!, 'base64')).toHaveLength(32)
+    expect(Buffer.from(a.PIN_PEPPER!, 'base64')).toHaveLength(32)
     expect(a.SMSGATE_WEBHOOK_SECRET).toMatch(/^[A-Za-z0-9_-]{32}$/)
     expect(a.DB_PASSWORD).toMatch(/^[0-9a-f]{48}$/)
     expect(a.STORAGE_SIGNING_SECRET).toMatch(/^[0-9a-f]{64}$/)

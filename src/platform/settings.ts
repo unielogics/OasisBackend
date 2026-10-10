@@ -8,6 +8,54 @@ import * as realtime from './realtime.js'
 import type { JsonValue } from './schema.js'
 
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:MM (24 hour)')
+const e164 = z.string().regex(/^\+[1-9]\d{6,14}$/, 'Use an E.164 number such as +12015550142')
+const catalogKey = z.string().regex(/^[a-z][a-z0-9_]{0,31}$/, 'Use a lowercase key (letters, digits, underscore)')
+const label = z.string().trim().min(1).max(40)
+const cents = z.number().int().min(0).max(10_000_000)
+
+/**
+ * The tint price matrix (ADR 0160): vehicle types x films, each pair with a member and a guest price range, and the VLT (visible
+ * light transmission, %) options each film comes in. Seeded from the website in wave 2.
+ */
+const tintMatrix = z
+  .object({
+    vehicleTypes: z.array(z.object({ key: catalogKey, label }).strict()).max(20),
+    films: z.array(z.object({ key: catalogKey, label, vlt: z.array(z.number().int().min(1).max(100)).max(10) }).strict()).max(20),
+    prices: z
+      .array(
+        z
+          .object({
+            vehicle: catalogKey,
+            film: catalogKey,
+            memberMinCents: cents,
+            memberMaxCents: cents,
+            guestMinCents: cents,
+            guestMaxCents: cents,
+          })
+          .strict(),
+      )
+      .max(400),
+  })
+  .strict()
+  .superRefine((m, ctx) => {
+    const issue = (path: (string | number)[], message: string): void => ctx.addIssue({ code: 'custom', path, message })
+    const dupes = (keys: string[], path: string): void =>
+      keys.forEach((k, i) => keys.indexOf(k) !== i && issue([path, i, 'key'], `"${k}" is listed twice`))
+    dupes(m.vehicleTypes.map((v) => v.key), 'vehicleTypes')
+    dupes(m.films.map((f) => f.key), 'films')
+    const vehicles = new Set(m.vehicleTypes.map((v) => v.key))
+    const films = new Set(m.films.map((f) => f.key))
+    const pairs = new Set<string>()
+    m.prices.forEach((p, i) => {
+      if (!vehicles.has(p.vehicle)) issue(['prices', i, 'vehicle'], `Unknown vehicle type "${p.vehicle}"`)
+      if (!films.has(p.film)) issue(['prices', i, 'film'], `Unknown film "${p.film}"`)
+      if (p.memberMinCents > p.memberMaxCents) issue(['prices', i, 'memberMaxCents'], 'The range ends below its start')
+      if (p.guestMinCents > p.guestMaxCents) issue(['prices', i, 'guestMaxCents'], 'The range ends below its start')
+      const pair = `${p.vehicle}/${p.film}`
+      if (pairs.has(pair)) issue(['prices', i], `${pair} is priced twice`)
+      pairs.add(pair)
+    })
+  })
 
 export const settingDefs = {
   'tax.rate_bp': { schema: z.number().int().min(0).max(10_000), default: 700 },
@@ -57,6 +105,49 @@ export const settingDefs = {
     schema: z.object({ enabled: z.boolean(), start: hhmm, end: hhmm }),
     default: { enabled: false, start: '21:00', end: '08:00' },
   },
+
+  // The AI text assistant (ADR 0160). Off until the owner turns it on; the stage widens who it answers: the allowlisted numbers
+  // (owner and staff), then known clients, then everyone. A staff reply pauses it on the thread for staff_pause_hours.
+  'assistant.enabled': { schema: z.boolean(), default: false },
+  'assistant.stage': { schema: z.enum(['allowlist', 'customers', 'everyone']), default: 'allowlist' as const },
+  'assistant.allowlist': { schema: z.array(e164).max(50), default: [] as string[] },
+  'assistant.staff_pause_hours': { schema: z.number().int().min(1).max(72), default: 12 },
+  'assistant.faq': {
+    schema: z.array(z.object({ q: z.string().trim().min(1).max(500), a: z.string().trim().min(1).max(500) }).strict()).max(40),
+    default: [] as { q: string; a: string }[],
+  },
+  'assistant.actions_enabled': { schema: z.boolean(), default: false },
+  // Reminders (plan I): reminders.offsets_min above keeps its shape; the confirmation request ("Reply C") for booked visits, and
+  // per-category preparation lines appended to the reminder (e.g. tint: "Plan for 2–3 hours.").
+  'reminders.confirm_request': { schema: z.boolean(), default: true },
+  'reminders.category_prep': {
+    schema: z.record(catalogKey, z.string().trim().min(1).max(160)),
+    default: {} as Record<string, string>,
+  },
+  // Status texts as the car moves (design section 6): checked in (queued checked_in_delay_min after a manual arrival), running
+  // late (cleaning past the promised end + late_grace_min, at most late_max per visit), ready, picked up (with the book-again link
+  // only when this is on and the client has marketing-grade consent).
+  'status_texts.checked_in': { schema: z.boolean(), default: true },
+  'status_texts.checked_in_delay_min': { schema: z.number().int().min(0).max(30), default: 3 },
+  'status_texts.running_late': { schema: z.boolean(), default: true },
+  'status_texts.late_grace_min': { schema: z.number().int().min(0).max(120), default: 10 },
+  'status_texts.late_max': { schema: z.number().int().min(0).max(2), default: 2 },
+  'status_texts.ready': { schema: z.boolean(), default: true },
+  'status_texts.picked_up': { schema: z.boolean(), default: true },
+  'status_texts.book_again_link': { schema: z.boolean(), default: false },
+  // The one automatic follow-up text to a lead who did not book (plan J).
+  'leads.follow_up_enabled': { schema: z.boolean(), default: true },
+  'leads.follow_up_delay_min': { schema: z.number().int().min(15).max(1440), default: 180 },
+  'leads.business_hours_only': { schema: z.boolean(), default: true },
+  'leads.within_hours': { schema: z.number().int().min(1).max(72), default: 24 },
+  // The catalog (plan A): the guest price is the member price plus this markup unless a service sets its own; the tint matrix.
+  'catalog.guest_markup_pct': { schema: z.number().int().min(0).max(200), default: 20 },
+  'catalog.tint_matrix': {
+    schema: tintMatrix,
+    default: { vehicleTypes: [], films: [], prices: [] } as z.infer<typeof tintMatrix>,
+  },
+  // Personal links carry the epoch they were issued in; bumping it kills every link and session at once (incident switch).
+  'links.epoch': { schema: z.number().int().min(1).max(1_000_000), default: 1 },
 } as const
 
 export type SettingDefs = typeof settingDefs

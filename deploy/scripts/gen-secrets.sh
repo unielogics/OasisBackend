@@ -12,6 +12,7 @@
 #   DB_PASSWORD              24 random bytes, hex: the password of the oasis database role (hex needs no URL encoding)
 #   BOOTSTRAP_ADMIN_PASSWORD 18 random bytes, base64url: a first Super Admin password to change after signing in
 #   BACKUP_ENCRYPTION_KEY    32 random bytes, base64: key for encrypted off-host backups
+#   PIN_PEPPER               32 random bytes, base64: HMAC key of the website PINs (into the secret before PUBLIC_LINKS_ENABLED)
 set -euo pipefail
 command -v openssl >/dev/null 2>&1 || {
   echo "gen-secrets.sh: openssl is required" >&2
@@ -29,6 +30,7 @@ gen() {
     DB_PASSWORD) printf 'DB_PASSWORD=%s\n' "$(openssl rand -hex 24)" ;;
     BOOTSTRAP_ADMIN_PASSWORD) printf 'BOOTSTRAP_ADMIN_PASSWORD=%s\n' "$(b64url 18)" ;;
     BACKUP_ENCRYPTION_KEY) printf 'BACKUP_ENCRYPTION_KEY=%s\n' "$(openssl rand -base64 32 | tr -d '\n')" ;;
+    PIN_PEPPER) printf 'PIN_PEPPER=%s\n' "$(openssl rand -base64 32 | tr -d '\n')" ;;
     *)
       echo "gen-secrets.sh: unknown secret $1" >&2
       return 1
@@ -44,6 +46,6 @@ if [[ "${1:-}" == --secret ]]; then
   printf 'DATABASE_URL=postgres://oasis:%s@127.0.0.1:5432/oasis\n' "$(openssl rand -hex 24)"
   set -- SESSION_SECRET SECRETS_KEY STORAGE_SIGNING_SECRET
 elif (($# == 0)); then
-  set -- SESSION_SECRET SECRETS_KEY SMSGATE_WEBHOOK_SECRET STORAGE_SIGNING_SECRET DB_PASSWORD BOOTSTRAP_ADMIN_PASSWORD BACKUP_ENCRYPTION_KEY
+  set -- SESSION_SECRET SECRETS_KEY SMSGATE_WEBHOOK_SECRET STORAGE_SIGNING_SECRET DB_PASSWORD BOOTSTRAP_ADMIN_PASSWORD BACKUP_ENCRYPTION_KEY PIN_PEPPER
 fi
 for name in "$@"; do gen "$name"; done

@@ -50,6 +50,7 @@ export const SECRET_KEYS = [
   'SQSP_WEBHOOK_SECRET',
   'SMSGATE_PASSWORD',
   'SMSGATE_WEBHOOK_SECRET',
+  'PIN_PEPPER',
 ] as const
 
 export class SecretSourceError extends Error {

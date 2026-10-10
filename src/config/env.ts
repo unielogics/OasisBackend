@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { aiEnvShape } from '../integrations/ai/env.js'
 import { emailEnvShape } from '../integrations/email/env.js'
 import { squarespaceEnvSchema } from '../integrations/squarespace/config.js'
 import { storageEnvShape } from '../integrations/storage/env.js'
@@ -83,6 +84,8 @@ export const envSchema = z
     PUBLIC_SITE_URL: z.string().url().optional(), // the public website's origin (https://oasisautospanj.com): allowed on the public POSTs (ADR 0150)
     PUBLIC_WRITES_ENABLED: bool.default('false'), // the website's public POSTs (otp, otp/verify, bookings, memberships); off = 404 until online booking opens (ADR 0150)
     PUBLIC_OTP_TEXTS_PER_HOUR: z.coerce.number().int().min(0).max(60).default(12), // the website's one-time codes texted per rolling hour, all callers together (the tablet sends ~60 an hour for the whole shop)
+    PUBLIC_LINKS_ENABLED: bool.default('false'), // the personal-link routes (/api/v1/public/links/*); off = 404 before validation (ADR 0160)
+    PIN_PEPPER: z.string().min(32).optional(), // HMAC key of the website PINs (base64 of 32 random bytes); secret: lives in the Secrets Manager secret (ADR 0160)
     RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(300),
     SSE_HEARTBEAT_MS: z.coerce.number().int().min(50).default(20_000),
     BUSINESS_TZ: z.string().default('America/New_York'),
@@ -160,6 +163,8 @@ export const envSchema = z
     STORAGE_FS_ROOT: z.string().default('./.data/files'),
     S3_BUCKET: z.string().optional(),
     ...storageEnvShape, // S3_KEY_PREFIX, S3_SSE, S3_KMS_KEY_ID, S3_ENDPOINT, S3_FORCE_PATH_STYLE, STORAGE_SIGNING_SECRET
+
+    ...aiEnvShape, // AI_ENABLED, AI_ACTIONS_ENABLED, AI_PROVIDER, AI_BEDROCK_*, AI_EFFORT, limits, caps, budget and prices (ADR 0160)
   })
   .superRefine((e, ctx) => {
     const need = (cond: boolean, path: string, msg: string) =>
@@ -212,6 +217,17 @@ export const envSchema = z
       !!e.S3_KMS_KEY_ID && e.S3_SSE !== 'aws:kms',
       'S3_KMS_KEY_ID',
       'only used with S3_SSE=aws:kms; set both or neither',
+    )
+    need(
+      e.NODE_ENV === 'production' && e.PUBLIC_LINKS_ENABLED && !e.PIN_PEPPER,
+      'PIN_PEPPER',
+      'required in production when PUBLIC_LINKS_ENABLED=true (base64 of 32 random bytes, in the secret)',
+    )
+    // the simulator's scripted answers must never reach a real client
+    need(
+      e.NODE_ENV === 'production' && e.AI_ENABLED && e.AI_PROVIDER !== 'bedrock',
+      'AI_PROVIDER',
+      'must be bedrock in production when AI_ENABLED=true',
     )
     need(
       !!e.AWS_ACCESS_KEY_ID !== !!e.AWS_SECRET_ACCESS_KEY,
