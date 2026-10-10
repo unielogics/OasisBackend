@@ -8,9 +8,31 @@ const CONSENT: Record<string, ConsentSource> = {
   squarespace: 'web_form',
   dashboard: 'staff_attested',
   walk_in: 'staff_attested',
-  inbound_sms: 'inbound_reply',
+  // a client created from their own texts (the AI assistant, ADR 0160): transactional only, never marketing
+  inbound_sms: 'inbound_text',
+  inbound_text: 'inbound_text',
   keyword: 'inbound_reply',
   import: 'import',
+}
+
+/** The consent kind a customers.sms_opt_in_source value gives (null when there is none, 'unknown' for an unexpected value). */
+export function consentSourceOf(optInSource: string | null): ConsentSource | null {
+  return optInSource ? (CONSENT[optInSource] ?? 'unknown') : null
+}
+
+/**
+ * When the number last texted the shop: the newest inbound text of the location's devices, a stranger's included. The reply-only
+ * classes (the AI's answers, action confirmations, lead follow-ups) need it.
+ */
+export async function lastInboundAt(db: Executor, locationId: string, phone: string): Promise<Date | null> {
+  const r = await db
+    .selectFrom('sms_inbox as i')
+    .innerJoin('sms_devices as d', 'd.id', 'i.device_id')
+    .select((eb) => eb.fn.max('i.received_at').as('at'))
+    .where('i.from_e164', '=', phone)
+    .where('d.location_id', '=', locationId)
+    .executeTakeFirst()
+  return r?.at ? new Date(r.at) : null
 }
 
 export interface CustomerTarget {
@@ -57,7 +79,7 @@ export async function loadCustomerTarget(db: Executor, locationId: string, custo
       smsOptIn: c.sms_opted_in,
       activeOptOut: optedOut,
       synthetic: c.synthetic,
-      consentSource: c.sms_opt_in_source ? (CONSENT[c.sms_opt_in_source] ?? 'unknown') : null,
+      consentSource: consentSourceOf(c.sms_opt_in_source),
     },
   }
 }

@@ -25,6 +25,11 @@ export interface SmsClassSpec {
   ignoresOptOut?: boolean
   /** Sent to staff, not customers. */
   recipient?: 'customer' | 'employee'
+  /**
+   * Only as an answer: refused (no_recent_inbound) unless that number texted the shop within this many seconds. enqueueFor loads
+   * the number's last inbound text for these classes (SmsRecipient.lastInboundAt).
+   */
+  replyWindowSec?: number
 }
 
 const MIN = 60
@@ -67,12 +72,35 @@ export const SMS_CLASSES = {
   help_reply: { priority: 0, category: 'system', transactional: true, ttlSec: 1 * HOUR, footer: 'never', consentExempt: true, ignoresOptOut: true },
   confirm_ack: { priority: 0, category: 'conversation', transactional: true, ttlSec: 1 * HOUR, footer: 'never', consentExempt: true },
   confirm_none: { priority: 0, category: 'conversation', transactional: true, ttlSec: 1 * HOUR, footer: 'never', consentExempt: true },
+  // The AI text assistant (ADR 0160, design section 2). Its answers go 24/7 but only as answers: consent-exempt like the keyword
+  // replies, yet refused unless that number texted in the last 15 minutes, and never to a number that opted out. Lane 1, under the
+  // shop's lane-0 texts; the dispatcher gives them a sub-cap (AI_SMS_SEGMENTS_PER_30MIN). ai_fallback is the fixed "a team member
+  // will text you back" line.
+  ai_reply: { priority: 1, category: 'conversation', transactional: true, ttlSec: 15 * MIN, footer: 'first_only', consentExempt: true, replyWindowSec: 15 * MIN },
+  ai_fallback: { priority: 1, category: 'conversation', transactional: true, ttlSec: 15 * MIN, footer: 'first_only', consentExempt: true, replyWindowSec: 15 * MIN },
+  // A personal link (calendar, verify, PIN, membership, payment, book again): the message row keeps the masked text, the outbox the
+  // real one (secretVars). Normal consent: a client the assistant created has the transactional kind.
+  personal_link: { priority: 1, category: 'transactional', transactional: true, ttlSec: 30 * MIN, footer: 'first_only' },
+  // "<summary>. Reply 4821 to confirm.": the server's reply number for an in-chat action, masked in the message row; it answers the
+  // request it confirms, so the same 15-minute reply window applies.
+  action_confirm: { priority: 1, category: 'transactional', transactional: true, ttlSec: 15 * MIN, footer: 'first_only', replyWindowSec: 15 * MIN },
+  // The one automatic follow-up of a lead: held by quiet hours, only within 24 hours of their last text (that is its consent: a
+  // follow-up to their own question), never to an opted-out number.
+  lead_follow_up: { priority: 2, category: 'automated', transactional: false, ttlSec: 2 * HOUR, footer: 'always', consentExempt: true, replyWindowSec: 24 * HOUR },
+  // Status texts (design section 6): picked up (thank-you, receipt line) and running late (a new estimate). Checked in reuses welcome.
+  picked_up: { priority: 1, category: 'transactional', transactional: true, ttlSec: 2 * HOUR, footer: 'first_only' },
+  job_delay: { priority: 1, category: 'transactional', transactional: true, ttlSec: 20 * MIN, footer: 'first_only' },
 } as const satisfies Record<string, SmsClassSpec>
 
 export type SmsClass = keyof typeof SMS_CLASSES
 
 export function classSpec(klass: SmsClass): SmsClassSpec {
   return SMS_CLASSES[klass]
+}
+
+/** The reply window of a reply-only class (seconds), or null. */
+export function replyWindowOf(klass: SmsClass): number | null {
+  return classSpec(klass).replyWindowSec ?? null
 }
 
 export function isTransactional(klass: SmsClass): boolean {

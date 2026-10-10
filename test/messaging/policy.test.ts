@@ -57,7 +57,10 @@ describe('class registry', () => {
   it('lists the transactional classes explicitly', () => {
     expect([...TRANSACTIONAL_CLASSES].sort()).toEqual(
       [
+        'action_confirm',
         'addon_approval',
+        'ai_fallback',
+        'ai_reply',
         'booking_confirmed_web',
         'booking_thanks',
         'confirm_ack',
@@ -72,6 +75,9 @@ describe('class registry', () => {
         'otp_code',
         'password_reset',
         'payment_link',
+        'personal_link',
+        'picked_up',
+        'job_delay',
         'quick_reply',
         'ready',
         'receipt',
@@ -84,7 +90,7 @@ describe('class registry', () => {
   })
 
   it('holds only automated and marketing classes', () => {
-    expect([...QUIET_HOURS_HELD_CLASSES].sort()).toEqual(['broadcast', 'closure_notice', 'confirm_request', 'late_nudge', 'reminder', 'review'])
+    expect([...QUIET_HOURS_HELD_CLASSES].sort()).toEqual(['broadcast', 'closure_notice', 'confirm_request', 'late_nudge', 'lead_follow_up', 'reminder', 'review'])
   })
 
   it('gives the checked-in message a 15 minute life and puts the emergency blast in the bulk lane', () => {
@@ -165,7 +171,8 @@ describe('canSendSms matrix', () => {
 
   it('quiet hours hold non-transactional classes and release at 08:00', () => {
     for (const klass of QUIET_HOURS_HELD_CLASSES) {
-      const d = canSendSms(customer(), { klass }, ctx({ now: at930pm }))
+      // a lead follow-up goes only within a day of the lead's own text (ADR 0160)
+      const d = canSendSms(customer({ lastInboundAt: new Date(at930pm.getTime() - 60_000) }), { klass }, ctx({ now: at930pm }))
       expect(d, klass).toMatchObject({ verdict: 'hold', allowed: true, reason: 'quiet_hours' })
       if (d.verdict === 'hold') expect(d.holdUntil.toISOString()).toBe(new Date('2026-06-14T08:00:00-04:00').toISOString())
     }
@@ -173,7 +180,8 @@ describe('canSendSms matrix', () => {
 
   it('transactional classes bypass quiet hours: a booking confirmation at 9:30 PM goes out now', () => {
     for (const klass of TRANSACTIONAL_CLASSES) {
-      const rcpt = classSpec(klass).recipient === 'employee' ? customer({ kind: 'employee' }) : customer()
+      // the reply-only classes (the AI's answers, action confirmations) answer a text that just arrived (ADR 0160)
+      const rcpt = classSpec(klass).recipient === 'employee' ? customer({ kind: 'employee' }) : customer({ lastInboundAt: new Date(at930pm.getTime() - 60_000) })
       expect(canSendSms(rcpt, { klass }, ctx({ now: at930pm })).verdict, klass).toBe('allow')
     }
   })

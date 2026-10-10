@@ -8,9 +8,18 @@ import { DEFAULT_QUIET_HOURS, isQuietHour, quietHoursEnd, type QuietHoursConfig 
 /**
  * Where an opt-in came from. `web_booking` is the website's booking and join forms (customers.sms_opt_in_source `online`): consent to
  * the texts about that booking or membership (confirmations, reminders, receipts), never marketing-grade, because the form proves
- * nothing about who typed the number (review 2026-10-10). `web_form` is a signed-up web form (Squarespace).
+ * nothing about who typed the number (review 2026-10-10). `web_form` is a signed-up web form (Squarespace). `inbound_text` is a
+ * client the AI assistant created from their own texts (opt-in sources `inbound_text` and `inbound_sms`): transactional only, never
+ * marketing (ADR 0160).
  */
-export type ConsentSource = 'web_form' | 'web_booking' | 'staff_attested' | 'inbound_reply' | 'import' | 'unknown'
+export type ConsentSource =
+  | 'web_form'
+  | 'web_booking'
+  | 'staff_attested'
+  | 'inbound_reply'
+  | 'inbound_text'
+  | 'import'
+  | 'unknown'
 
 export interface SmsRecipient {
   kind: 'customer' | 'employee'
@@ -24,6 +33,11 @@ export interface SmsRecipient {
   /** Seed and demo data: the number is fake and must never be texted. */
   synthetic: boolean
   consentSource?: ConsentSource | null
+  /**
+   * When this number last texted the shop (any inbound text, a stranger's included). Only the reply-only classes (replyWindowSec)
+   * read it; enqueueFor loads it for them. Absent or null: no recent text.
+   */
+  lastInboundAt?: Date | null
 }
 
 export interface SmsPurpose {
@@ -47,6 +61,8 @@ export type SmsDenyReason =
   | 'not_opted_in'
   | 'consent_source_insufficient'
   | 'recipient_kind_mismatch'
+  /** A reply-only class (the AI's answers, an action confirmation, a lead follow-up) with no recent text from that number. */
+  | 'no_recent_inbound'
 
 export type SmsDecision =
   | { verdict: 'allow'; allowed: true; reason: null; warnings: string[] }
@@ -75,6 +91,11 @@ export function canSendSms(recipient: SmsRecipient, purpose: SmsPurpose, ctx: Sm
   if (recipient.synthetic && (production || !allowlisted)) return deny('synthetic_number')
   if (!production && !allowlisted) return deny('not_allowlisted')
   if (production && ctx.allowlist.length > 0 && !allowlisted) return deny('not_allowlisted')
+
+  if (spec.replyWindowSec !== undefined) {
+    const last = recipient.lastInboundAt
+    if (!last || ctx.now.getTime() - last.getTime() > spec.replyWindowSec * 1000) return deny('no_recent_inbound')
+  }
 
   if (recipient.kind === 'customer' && !spec.consentExempt) {
     if (!recipient.smsOptIn) return deny('not_opted_in')
