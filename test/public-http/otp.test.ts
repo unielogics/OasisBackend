@@ -57,18 +57,23 @@ describe('POST /public/otp', () => {
     expect(row.delivery).toBe('not_allowlisted')
   })
 
-  it('refuses a bad number (422) and limits a number to 3 codes per 10 minutes and an address to 10 (429 with Retry-After)', async () => {
+  it('refuses a bad number (422) and limits a number to 3 codes per 10 minutes from one address, 5 in all, and an address to 10 (429 with Retry-After)', async () => {
     const bad = await request('12')
     expect(bad.statusCode).toBe(422)
     expect(json(bad).errors[0]).toEqual({ path: 'body.phone', message: 'Enter a valid mobile number.' })
-    for (let i = 0; i < 3; i++) expect((await request(PHONES.extra)).statusCode, `code ${i + 1}`).toBe(202)
-    const fourth = await request(PHONES.extra)
+    const one = '10.91.1.1'
+    for (let i = 0; i < 3; i++) expect((await request(PHONES.extra, one)).statusCode, `code ${i + 1}`).toBe(202)
+    const fourth = await request(PHONES.extra, one)
     expect(fourth.statusCode).toBe(429)
     expect(json(fourth)).toMatchObject({ code: 'PUBLIC_RATE_LIMITED', title: 'Slow down' })
     expect(Number(fourth.headers['retry-after'])).toBeGreaterThan(0)
+    // one address cannot use up a number: the person asks from their own phone and still gets codes, up to 5 in the window
+    expect((await request(PHONES.extra, '10.91.1.2')).statusCode).toBe(202)
+    expect((await request(PHONES.extra, '10.91.1.3')).statusCode).toBe(202)
+    expect((await request(PHONES.extra, '10.91.1.4')).statusCode).toBe(429)
     // the window turns over
     h.clock.set('2026-06-13T10:47:00-04:00')
-    expect((await request(PHONES.extra)).statusCode).toBe(202)
+    expect((await request(PHONES.extra, one)).statusCode).toBe(202)
     h.clock.set('2026-06-13T10:36:00-04:00')
     const ip = '10.91.0.1'
     for (let i = 0; i < 10; i++) expect((await request(`+1201555${String(200 + i).padStart(4, '0')}`, ip)).statusCode, `ip call ${i + 1}`).toBe(202)
@@ -76,6 +81,15 @@ describe('POST /public/otp', () => {
     // the counters live in the database, not in the process
     const rows = await sql<{ n: number }>`select count(*)::int as n from public_rate_limits where key like 'otp:%'`.execute(h.db)
     expect(rows.rows[0]!.n).toBeGreaterThan(10)
+  })
+
+  it('one address naming a number over and over cannot lock its owner out: only 3 of its calls count against the number', async () => {
+    const attacker = '10.91.2.1'
+    const answers = []
+    for (let i = 0; i < 10; i++) answers.push((await request(PHONES.member, attacker)).statusCode)
+    expect(answers).toEqual([202, 202, 202, 429, 429, 429, 429, 429, 429, 429])
+    expect((await request(PHONES.member, '10.91.2.2')).statusCode).toBe(202)
+    expect((await request(PHONES.member, '10.91.2.3')).statusCode).toBe(202)
   })
 })
 

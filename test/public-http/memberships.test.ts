@@ -120,13 +120,24 @@ describe('joining on the website', () => {
     expect(await h.db.selectFrom('customers').select('id').where('phone_e164', '=', PHONES.extra).execute()).toEqual([])
   })
 
-  it('limits a number to 3 joins a day (429)', async () => {
-    for (let i = 0; i < 3; i++) {
-      const r = await join(joinBody({ tier: i === 0 ? 'gold' : 'vip' }))
-      expect([201, 409], `join ${i + 1}`).toContain(r.statusCode)
+  it('limits a number to 2 joins a day from one address and 3 in all (429)', async () => {
+    const one = '10.94.1.1'
+    for (let i = 0; i < 2; i++) {
+      const r = await join(joinBody({ tier: i === 0 ? 'gold' : 'vip' }), { ip: one })
+      expect([201, 409], `join ${i + 1}: ${r.body}`).toContain(r.statusCode)
     }
-    const fourth = await join(joinBody())
+    expect(json(await join(joinBody(), { ip: one })).code).toBe('PUBLIC_RATE_LIMITED')
+    expect((await join(joinBody(), { ip: '10.94.1.2' })).statusCode).not.toBe(429)
+    const fourth = await join(joinBody(), { ip: '10.94.1.3' })
     expect(fourth.statusCode).toBe(429)
     expect(json(fourth).code).toBe('PUBLIC_RATE_LIMITED')
+  })
+
+  it('one address naming a number over and over cannot lock its owner out of joining', async () => {
+    const attacker = '10.94.2.1'
+    const answers = []
+    for (let i = 0; i < 10; i++) answers.push((await join(joinBody({ phone: PHONES.extra, name: 'Not The Owner' }), { ip: attacker })).statusCode)
+    expect(answers.slice(2)).toEqual([429, 429, 429, 429, 429, 429, 429, 429])
+    expect((await join(joinBody({ phone: PHONES.extra }), { ip: '10.94.2.2' })).statusCode).not.toBe(429)
   })
 })

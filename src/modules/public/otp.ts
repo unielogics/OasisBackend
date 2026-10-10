@@ -13,7 +13,7 @@ import { findCustomerByPhone, type CustomerRecord } from '../customers/service.j
 import { loadCustomerTarget, strangerRecipient } from '../messaging/db/recipients.js'
 import type { SmsRecipient } from '../messaging/policy/canSend.js'
 import type { PublicDeps, PublicLocation, PublicRequest } from './deps.js'
-import { enforceLimits, PUBLIC_LIMITS } from './limits.js'
+import { enforceLimits, PUBLIC_LIMITS, publicLimitChecks } from './limits.js'
 import { memberView, type MemberView } from './members.js'
 import './problems.js'
 import './schema.js'
@@ -64,10 +64,7 @@ export async function requestOtp(
 ): Promise<OtpRequested> {
   const phone = phoneOrThrow(input.phone)
   const { db, clock, newId } = d.app
-  await enforceLimits(db, clock, [
-    { key: `otp:phone:${phone}`, rule: PUBLIC_LIMITS.otpRequest.phone },
-    { key: `otp:ip:${r.ip}`, rule: PUBLIC_LIMITS.otpRequest.ip },
-  ])
+  await enforceLimits(db, clock, publicLimitChecks('otpRequest', r.ip, phone))
   const now = clock.now()
   const id = newId()
   const code = newCode()

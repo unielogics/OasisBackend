@@ -245,19 +245,32 @@ describe('validation, the honeypot and the limits', () => {
     expect(await h.db.selectFrom('audit_log').select('id').execute()).toEqual([])
   })
 
-  it('limits a number to 5 bookings an hour (a refused booking counts too) and an address to 10', async () => {
+  it('limits a number to 3 bookings an hour from one address and 5 in all (a refused booking counts too), and an address to 10', async () => {
     const times = [11 * 60 + 30, 12 * 60, 12 * 60 + 30, 13 * 60, 13 * 60 + 30, 14 * 60]
-    for (let i = 0; i < 5; i++) expect((await book(bookingBody(h, { startMin: times[i] }))).statusCode, `booking ${i + 1}`).toBe(201)
-    const sixth = await book(bookingBody(h, { startMin: times[5] }))
-    expect(sixth.statusCode).toBe(429)
-    expect(json(sixth)).toMatchObject({ code: 'PUBLIC_RATE_LIMITED', detail: expect.stringMatching(/^Too many requests from this number or device\. Try again in \d+ min\.$/) })
-    expect(sixth.headers['retry-after']).toBeDefined()
-    expect(await appointments()).toHaveLength(5)
+    const one = '10.92.1.1'
+    for (let i = 0; i < 3; i++) expect((await book(bookingBody(h, { startMin: times[i] }), { ip: one })).statusCode, `booking ${i + 1}`).toBe(201)
+    const fourth = await book(bookingBody(h, { startMin: times[3] }), { ip: one })
+    expect(fourth.statusCode).toBe(429)
+    expect(json(fourth)).toMatchObject({ code: 'PUBLIC_RATE_LIMITED', detail: expect.stringMatching(/^Too many requests from this number or device\. Try again in \d+ min\.$/) })
+    expect(fourth.headers['retry-after']).toBeDefined()
+    // a refused booking counts: 11:30 is now taken by this number, and the next try is refused for the slot, yet still counted
+    expect((await book(bookingBody(h, { startMin: 10 * 60 }), { ip: '10.92.1.2' })).statusCode).toBe(409)
+    expect((await book(bookingBody(h, { startMin: times[4] }), { ip: '10.92.1.3' })).statusCode).toBe(201)
+    expect((await book(bookingBody(h, { startMin: times[5] }), { ip: '10.92.1.4' })).statusCode).toBe(429)
+    expect(await appointments()).toHaveLength(4)
     const ip = '10.92.0.1'
     for (let i = 0; i < 10; i++) {
       const r = await book(bookingBody(h, { phone: `+1201555${String(300 + i).padStart(4, '0')}`, startMin: 15 * 60 }), { ip })
       expect([201, 409], `ip booking ${i + 1}: ${r.body}`).toContain(r.statusCode)
     }
     expect((await book(bookingBody(h, { phone: '+12015550399', startMin: 15 * 60 + 30 }), { ip })).statusCode).toBe(429)
+  })
+
+  it('one address naming a number over and over cannot lock its owner out of booking', async () => {
+    const attacker = '10.92.2.1'
+    const answers = []
+    for (let i = 0; i < 10; i++) answers.push((await book(bookingBody(h, { phone: PHONES.member, name: 'Not Mia', startMin: 11 * 60 + 30 + 30 * (i % 3) }), { ip: attacker })).statusCode)
+    expect(answers).toEqual([201, 201, 201, 429, 429, 429, 429, 429, 429, 429])
+    expect((await book(bookingBody(h, { phone: PHONES.member, startMin: 15 * 60 }), { ip: '10.92.2.2' })).statusCode).toBe(201)
   })
 })

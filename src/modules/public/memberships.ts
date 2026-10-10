@@ -15,7 +15,7 @@ import { listProductRows } from '../payments-sync/db/product-map.js'
 import type { ProductMapEntry } from '../payments-sync/product-map.js'
 import { parseVehicleLabel } from './bookings.js'
 import type { PublicDeps, PublicLocation, PublicRequest } from './deps.js'
-import { enforceLimits, PUBLIC_LIMITS } from './limits.js'
+import { enforceLimits, publicLimitChecks } from './limits.js'
 import { phoneOrThrow } from './otp.js'
 import './problems.js'
 import { tierSpec, type PublicTier } from './tiers.js'
@@ -68,10 +68,7 @@ export async function membershipProductFor(
 export const memberRefOf = (membershipId: string): string => `OAS-M-${membershipId.replace(/-/g, '').slice(-8).toUpperCase()}`
 
 export async function chargeJoinLimits(d: PublicDeps, r: PublicRequest, phone: string): Promise<void> {
-  await enforceLimits(d.app.db, d.app.clock, [
-    { key: `membership:phone:${phone}`, rule: PUBLIC_LIMITS.membership.phone },
-    { key: `membership:ip:${r.ip}`, rule: PUBLIC_LIMITS.membership.ip },
-  ])
+  await enforceLimits(d.app.db, d.app.clock, publicLimitChecks('membership', r.ip, phone))
 }
 
 export async function joinWeb(

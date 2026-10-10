@@ -15,13 +15,33 @@ export interface LimitRule {
   windowSec: number
 }
 
-/** The limits of each public action, per phone (where one is known) and per client address. */
+/**
+ * The limits of each public action: per client address, per number from one address, and per number in all. The rules are
+ * charged in that order and stop at the first refusal (enforceLimits), so an address over its limit never counts against the
+ * numbers it names; and the per-number-per-address rule is smaller than the per-number rule over the same window, so no single
+ * address can use up a number's allowance and lock its owner out (review 2026-10-10).
+ */
 export const PUBLIC_LIMITS = {
-  otpRequest: { phone: { max: 3, windowSec: 600 }, ip: { max: 10, windowSec: 600 } },
+  otpRequest: { ip: { max: 10, windowSec: 600 }, phoneIp: { max: 3, windowSec: 600 }, phone: { max: 5, windowSec: 600 } },
   otpVerify: { ip: { max: 30, windowSec: 600 } },
-  booking: { phone: { max: 5, windowSec: 3600 }, ip: { max: 10, windowSec: 3600 } },
-  membership: { phone: { max: 3, windowSec: 86_400 }, ip: { max: 10, windowSec: 3600 } },
+  booking: { ip: { max: 10, windowSec: 3600 }, phoneIp: { max: 3, windowSec: 3600 }, phone: { max: 5, windowSec: 3600 } },
+  membership: { ip: { max: 10, windowSec: 3600 }, phoneIp: { max: 2, windowSec: 86_400 }, phone: { max: 3, windowSec: 86_400 } },
 } as const
+
+export type PhoneLimitedAction = 'otpRequest' | 'booking' | 'membership'
+
+const KEY_PREFIX: Record<PhoneLimitedAction, string> = { otpRequest: 'otp', booking: 'booking', membership: 'membership' }
+
+/** The three checks of an action that names a number, in the order they are charged: the address, the number from it, the number. */
+export function publicLimitChecks(action: PhoneLimitedAction, ip: string, phone: string): { key: string; rule: LimitRule }[] {
+  const rules = PUBLIC_LIMITS[action]
+  const p = KEY_PREFIX[action]
+  return [
+    { key: `${p}:ip:${ip}`, rule: rules.ip },
+    { key: `${p}:phone_ip:${phone}:${ip}`, rule: rules.phoneIp },
+    { key: `${p}:phone:${phone}`, rule: rules.phone },
+  ]
+}
 
 export interface LimitOutcome {
   allowed: boolean
@@ -46,22 +66,21 @@ export async function consume(db: Executor, clock: Clock, key: string, rule: Lim
   return { allowed: count <= rule.max, count, retryAfterSec }
 }
 
-/** Charges every given key; throws 429 PUBLIC_RATE_LIMITED (with Retry-After) when any of them is over its rule. */
+/**
+ * Charges the keys in order and stops at the first one over its rule, throwing 429 PUBLIC_RATE_LIMITED with that rule's
+ * Retry-After: the keys after it are not charged, so a request refused for its address costs the numbers it names nothing.
+ */
 export async function enforceLimits(
   db: Executor,
   clock: Clock,
   checks: readonly { key: string; rule: LimitRule }[],
 ): Promise<void> {
-  let worst: LimitOutcome | null = null
   for (const c of checks) {
     const r = await consume(db, clock, c.key, c.rule)
-    if (!r.allowed && (!worst || r.retryAfterSec > worst.retryAfterSec)) worst = r
-  }
-  if (worst) {
-    const retry = String(worst.retryAfterSec)
+    if (r.allowed) continue
     throw new AppError('PUBLIC_RATE_LIMITED', {
-      params: { minutes: Math.max(1, Math.ceil(worst.retryAfterSec / 60)) },
-      headers: { 'Retry-After': retry },
+      params: { minutes: Math.max(1, Math.ceil(r.retryAfterSec / 60)) },
+      headers: { 'Retry-After': String(r.retryAfterSec) },
     })
   }
 }

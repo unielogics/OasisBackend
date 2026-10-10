@@ -16,7 +16,7 @@ import { createAppointment } from '../scheduling/booking.js'
 import { engineInput, evaluateStart, loadDayData } from '../scheduling/availability-loader.js'
 import { loadBoardServices } from './availability-loader.js'
 import { schedulingCtx, websiteActor, type PublicDeps, type PublicLocation, type PublicRequest } from './deps.js'
-import { enforceLimits, PUBLIC_LIMITS } from './limits.js'
+import { enforceLimits, publicLimitChecks } from './limits.js'
 import { activeMembership } from './members.js'
 import { phoneOrThrow, resolveMemberToken } from './otp.js'
 import './problems.js'
@@ -121,10 +121,7 @@ export function publicSlotError(e: AppError, startMin: number): AppError {
 
 /** Charges the per-phone and per-address limits on the app's pool (outside the booking transaction, so a refused booking still counts). */
 export async function chargeBookingLimits(d: PublicDeps, r: PublicRequest, phone: string): Promise<void> {
-  await enforceLimits(d.app.db, d.app.clock, [
-    { key: `booking:phone:${phone}`, rule: PUBLIC_LIMITS.booking.phone },
-    { key: `booking:ip:${r.ip}`, rule: PUBLIC_LIMITS.booking.ip },
-  ])
+  await enforceLimits(d.app.db, d.app.clock, publicLimitChecks('booking', r.ip, phone))
 }
 
 export async function createWebBooking(
