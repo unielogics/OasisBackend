@@ -12,6 +12,8 @@ const UNSAFE = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 export function allowedOrigins(env: Env): Set<string> {
   const origins = new Set<string>()
   for (const u of [env.PUBLIC_DASHBOARD_URL, env.PUBLIC_API_URL]) origins.add(new URL(u).origin)
+  // the public website posts bookings, codes and joins from its own origin (through its nginx host, same path)
+  if (env.PUBLIC_SITE_URL) origins.add(new URL(env.PUBLIC_SITE_URL).origin)
   for (const o of env.ALLOWED_ORIGINS.split(',')
     .map((s) => s.trim())
     .filter(Boolean))

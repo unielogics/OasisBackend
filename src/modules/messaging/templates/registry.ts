@@ -189,6 +189,40 @@ export const TEMPLATES = {
     editable: false,
     source: 'new: admin-triggered password reset by SMS (people module)',
   }),
+  // the public website (ADR 0150)
+  otp_code: t({
+    key: 'otp_code',
+    label: 'Website sign-in code',
+    klass: 'otp_code',
+    body: 'Your Oasis Auto Spa code is {code}. It expires in 10 minutes. If you didn’t ask for it, ignore this text.',
+    required: ['code'],
+    optional: [],
+    editable: false,
+    source: 'new: website member identification by phone + one-time code (ADR 0150)',
+  }),
+  booking_confirmed_web: t({
+    key: 'booking_confirmed_web',
+    label: 'Website booking confirmed',
+    klass: 'booking_confirmed_web',
+    // the site design's SMS demo: "Booked: Signature Hand Wash, today at 1:00 PM. Members never pay a booking fee. Reply C to change."
+    // The member sentence stays for members; a guest gets the fee sentence instead. "Reply C to change" is "Reply here to change it":
+    // a C reply means confirm in this system.
+    body: 'Booked: {service}, {when} at {time}.{#fee} {fee} booking fee due {how}.{/fee}{#member} Members never pay a booking fee.{/member} Reply here to change it.',
+    required: ['service', 'when', 'time'],
+    optional: ['fee', 'how', 'member'],
+    editable: true,
+    source: 'Oasis Site v2 SMS demo (design logic SMS()), adapted for the C keyword',
+  }),
+  membership_welcome_web: t({
+    key: 'membership_welcome_web',
+    label: 'Website join welcome',
+    klass: 'membership_welcome_web',
+    body: 'Hi {first}, thanks for joining Oasis Auto Spa {tier}. We’ll text your secure checkout link shortly; your membership starts once it’s paid.',
+    required: ['first', 'tier'],
+    optional: [],
+    editable: true,
+    source: 'new: website join (no card capture online, Squarespace checkout by link; ADR 0150)',
+  }),
   addon_approval: t({
     key: 'addon_approval',
     label: 'Add-on approval',

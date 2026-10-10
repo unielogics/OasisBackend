@@ -25,7 +25,7 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
   'maintenance.purge': {
     owner: 'platform',
     purpose:
-      'Drops expired idempotency keys, realtime events older than 10 minutes and webhook log rows older than 90 days.',
+      'Drops expired idempotency keys, realtime events older than 10 minutes, webhook log rows older than 90 days, and the website’s one-time codes, member tokens and limit counters a day or two past their window (ADR 0150).',
     idempotency: 'Deletes by cutoff; a second run finds nothing left to delete.',
     clock: 'Injected clock for every cutoff.',
     tests: 'test/integration/jobs.test.ts, test/jobs/registry.test.ts',

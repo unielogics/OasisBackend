@@ -12,6 +12,8 @@ import type { Db } from './db.js'
 import { purgeExpiredKeys } from './idempotency.js'
 import type { JobDefinition } from './jobs.js'
 import { purgeRealtimeEvents } from './realtime.js'
+import { purgeOtpRows } from '../modules/public/otp.js'
+import { purgeRateLimits } from '../modules/public/limits.js'
 
 export const REALTIME_RETENTION_MS = 10 * 60 * 1000
 export const WEBHOOK_LOG_RETENTION_MS = 90 * 24 * 3600 * 1000
@@ -60,6 +62,9 @@ registerPurgeTask('idempotency_keys', (db, clock) => purgeExpiredKeys(db, clock)
 registerPurgeTask('realtime_events', (db, clock) =>
   purgeRealtimeEvents(db, new Date(clock.now().getTime() - REALTIME_RETENTION_MS)),
 )
+// the website's one-time codes, member tokens (a day past expiry) and limit counters (windows two days old): ADR 0150
+registerPurgeTask('public_otp', (db, clock) => purgeOtpRows(db, clock.now()))
+registerPurgeTask('public_rate_limits', (db, clock) => purgeRateLimits(db, clock))
 registerPurgeTask('webhook_log', async (db, clock) => {
   const cutoff = before(clock, WEBHOOK_LOG_RETENTION_MS)
   const r = await db.deleteFrom('webhook_log').where('received_at', '<', cutoff).executeTakeFirst()

@@ -23,13 +23,14 @@ import {
   type AppointmentRecord,
 } from './appointments.js'
 import { audit } from './audit-helper.js'
-import { candidateStarts, MS_PER_MIN } from './availability.js'
+import { candidateStarts, MS_PER_MIN, type Channel } from './availability.js'
 import { loadDayData } from './availability-loader.js'
 import { addAddonChecklist, snapshotPackageChecklist } from './checklist.js'
 import { loadSettingsBundle, type Actor, type SchedulingCtx } from './context.js'
 import { ensureInvoiceFor } from './invoicing.js'
 import { toCore, type AppointmentCore, type Toast } from './lifecycle.js'
 import type { InvoiceSummary } from './ports.js'
+import type { TemplateVars } from '../messaging/templates/render.js'
 import { checkSlot, recordOverrides, type AppliedOverride, type OverrideRequest } from './slots.js'
 
 export interface BookingInput {
@@ -58,6 +59,10 @@ export interface BookingInput {
   notes?: string | null
   specialInstructions?: string | null
   override?: OverrideRequest | null
+  /** The slot rules to apply: desk (default; overrides possible) or online (lead time, booking windows, paused days). */
+  channel?: Channel
+  /** The customer text queued instead of the booking thanks (the website's confirmation); none when `null`. */
+  message?: { templateKey: string; vars: TemplateVars } | null
 }
 
 export interface BookingResult {
@@ -124,7 +129,8 @@ async function resolveCustomer(
   input: BookingInput,
 ): Promise<{ customer: CustomerRecord; created: boolean }> {
   const walkIn = input.walkIn === true
-  const optIn: SmsOptInSource = walkIn ? 'walk_in' : 'dashboard'
+  const web = input.source === 'online'
+  const optIn: SmsOptInSource = web ? 'online' : walkIn ? 'walk_in' : 'dashboard'
   const now = c.clock.now()
   if (input.customer.id) {
     let customer = await requireCustomer(tx, input.customer.id)
@@ -142,7 +148,7 @@ async function resolveCustomer(
     fullName: input.customer.name,
     phone,
     email: input.customer.email,
-    source: walkIn ? 'walk_in' : 'dashboard',
+    source: web ? 'online' : walkIn ? 'walk_in' : 'dashboard',
     smsOptIn: input.customer.smsOptIn ? optIn : null,
   })
   return { customer: r.customer, created: r.created }
@@ -203,6 +209,7 @@ export async function createAppointment(
     durationMin: pkg.durationMin,
     customerId: customer.id,
     override: input.override,
+    channel: input.channel,
   })
   const { rules } = await loadSettingsBundle(tx, c.locationId)
   const plannedBayId =
@@ -276,18 +283,27 @@ export async function createAppointment(
       actor,
     })
   // a standing visit is booked by the materializer every few weeks; thanking the client each time would be noise
+  const message =
+    input.message === undefined
+      ? { templateKey: 'booking_thanks', vars: { first: customer.fullName.trim().split(/\s+/)[0] } }
+      : input.message
   const sent =
-    input.source === 'standing'
+    input.source === 'standing' || message === null
       ? { queued: false }
       : await c.ports.messages.enqueue(tx, {
           customerId: customer.id,
           appointmentId: id,
-          templateKey: 'booking_thanks',
-          vars: { first: customer.fullName.trim().split(/\s+/)[0] },
+          templateKey: message.templateKey,
+          vars: message.vars,
           purpose: 'booking',
         })
   if (sent.queued)
-    await logActivity(tx, c, { appointmentId: id, text: 'Booking thanks sent', channels: ['sms'], actor })
+    await logActivity(tx, c, {
+      appointmentId: id,
+      text: message?.templateKey === 'booking_thanks' ? 'Booking thanks sent' : 'Booking confirmation sent',
+      channels: ['sms'],
+      actor,
+    })
   await audit(tx, c, actor, 'create', id, null, {
     customerId: customer.id,
     serviceId: pkg.id,

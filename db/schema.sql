@@ -1383,6 +1383,56 @@ CREATE TABLE public.plan_credit_rules (
 );
 
 --
+-- Name: public_member_tokens; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.public_member_tokens (
+    token_hash text NOT NULL,
+    location_id uuid NOT NULL,
+    phone_e164 text NOT NULL,
+    customer_id uuid,
+    challenge_id uuid,
+    expires_at timestamp with time zone NOT NULL,
+    last_used_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT public_member_tokens_phone_e164_check CHECK ((phone_e164 ~ '^\+[1-9][0-9]{6,14}$'::text))
+);
+
+--
+-- Name: public_otp_challenges; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.public_otp_challenges (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    phone_e164 text NOT NULL,
+    code_hash text NOT NULL,
+    attempts smallint DEFAULT 0 NOT NULL,
+    max_attempts smallint DEFAULT 3 NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    consumed_at timestamp with time zone,
+    consumed_reason text,
+    requested_ip text,
+    delivery text DEFAULT 'queued'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT public_otp_challenges_attempts_check CHECK ((attempts >= 0)),
+    CONSTRAINT public_otp_challenges_consumed_reason_check CHECK (((consumed_reason IS NULL) OR (consumed_reason = ANY (ARRAY['verified'::text, 'superseded'::text, 'locked'::text])))),
+    CONSTRAINT public_otp_challenges_max_attempts_check CHECK ((max_attempts > 0)),
+    CONSTRAINT public_otp_challenges_phone_e164_check CHECK ((phone_e164 ~ '^\+[1-9][0-9]{6,14}$'::text))
+);
+
+--
+-- Name: public_rate_limits; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.public_rate_limits (
+    key text NOT NULL,
+    window_start timestamp with time zone NOT NULL,
+    count integer DEFAULT 0 NOT NULL,
+    CONSTRAINT public_rate_limits_count_check CHECK ((count >= 0))
+);
+
+--
 -- Name: rbac_state; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2715,6 +2765,27 @@ ALTER TABLE ONLY public.plan_credit_rules
     ADD CONSTRAINT plan_credit_rules_pkey PRIMARY KEY (id);
 
 --
+-- Name: public_member_tokens public_member_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.public_member_tokens
+    ADD CONSTRAINT public_member_tokens_pkey PRIMARY KEY (token_hash);
+
+--
+-- Name: public_otp_challenges public_otp_challenges_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.public_otp_challenges
+    ADD CONSTRAINT public_otp_challenges_pkey PRIMARY KEY (id);
+
+--
+-- Name: public_rate_limits public_rate_limits_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.public_rate_limits
+    ADD CONSTRAINT public_rate_limits_pkey PRIMARY KEY (key, window_start);
+
+--
 -- Name: rbac_state rbac_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3515,6 +3586,24 @@ CREATE INDEX payment_links_invoice_idx ON public.payment_links USING btree (invo
 CREATE INDEX plan_credit_rules_plan_idx ON public.plan_credit_rules USING btree (plan_id, sort);
 
 --
+-- Name: public_member_tokens_expiry_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX public_member_tokens_expiry_idx ON public.public_member_tokens USING btree (expires_at);
+
+--
+-- Name: public_otp_challenges_phone_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX public_otp_challenges_phone_idx ON public.public_otp_challenges USING btree (phone_e164, created_at DESC);
+
+--
+-- Name: public_rate_limits_window_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX public_rate_limits_window_idx ON public.public_rate_limits USING btree (window_start);
+
+--
 -- Name: realtime_events_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3783,6 +3872,12 @@ CREATE UNIQUE INDEX uq_emergency_one_active ON public.emergency_closures USING b
 --
 
 CREATE UNIQUE INDEX uq_memberships_customer_live ON public.memberships USING btree (customer_id) WHERE (status = ANY (ARRAY['pending'::text, 'active'::text, 'past_due'::text, 'paused'::text]));
+
+--
+-- Name: uq_public_otp_active_phone; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_public_otp_active_phone ON public.public_otp_challenges USING btree (location_id, phone_e164) WHERE (consumed_at IS NULL);
 
 --
 -- Name: uq_services_name; Type: INDEX; Schema: public; Owner: -
@@ -4648,6 +4743,34 @@ ALTER TABLE ONLY public.payment_links
 
 ALTER TABLE ONLY public.plan_credit_rules
     ADD CONSTRAINT plan_credit_rules_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.membership_plans(id) ON DELETE CASCADE;
+
+--
+-- Name: public_member_tokens public_member_tokens_challenge_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.public_member_tokens
+    ADD CONSTRAINT public_member_tokens_challenge_id_fkey FOREIGN KEY (challenge_id) REFERENCES public.public_otp_challenges(id) ON DELETE SET NULL;
+
+--
+-- Name: public_member_tokens public_member_tokens_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.public_member_tokens
+    ADD CONSTRAINT public_member_tokens_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id) ON DELETE CASCADE;
+
+--
+-- Name: public_member_tokens public_member_tokens_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.public_member_tokens
+    ADD CONSTRAINT public_member_tokens_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: public_otp_challenges public_otp_challenges_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.public_otp_challenges
+    ADD CONSTRAINT public_otp_challenges_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 -- Name: realtime_events realtime_events_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

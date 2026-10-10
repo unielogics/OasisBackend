@@ -11,6 +11,7 @@ import { ledgerRevenueSource } from '../modules/payments/revenue.js'
 import { membershipsModule } from '../modules/memberships/module.js'
 import { dbMembershipPort } from '../modules/memberships/port.js'
 import { squarespaceHookModule, squarespaceModule } from '../modules/payments-sync/http/module.js'
+import { createPublicModule } from '../modules/public/module.js'
 import { createSchedulingModule } from '../modules/scheduling/module.js'
 import { settingsModule } from '../modules/settings/http/module.js'
 import { systemModule } from '../modules/system/index.js'
@@ -40,6 +41,20 @@ const schedulingModule: ApiModule = (app, deps) =>
  */
 const paymentsWired: ApiModule = (app, deps) => paymentsModule({ ports: productionPaymentsPorts() })(app, deps)
 
+/**
+ * The public website's routes (ADR 0150): the same invoice gateway, membership port, alert source and messaging queue as the
+ * scheduling module, so a web booking is exactly a dashboard booking made by "Website".
+ */
+const publicModule: ApiModule = createPublicModule((deps) => ({
+  queue: runtimeOf(deps).queue,
+  scheduling: {
+    invoices: createGatewayFor(deps),
+    revenue: ledgerRevenueSource,
+    memberships: dbMembershipPort,
+    externalAlerts: productionExternalAlerts,
+  },
+}))
+
 export const apiModules: ApiModule[] = [
   authModule,
   peopleModule,
@@ -50,6 +65,7 @@ export const apiModules: ApiModule[] = [
   createMessagingModule((deps) => runtimeOf(deps)),
   squarespaceModule,
   membershipsModule,
+  publicModule,
   systemModule,
 ]
 export const hookModules: ApiModule[] = [squarespaceHookModule, sesHookModule]

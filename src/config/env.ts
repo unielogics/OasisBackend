@@ -79,6 +79,7 @@ export const envSchema = z
     PUBLIC_API_URL: z.string().url().default('http://localhost:4000'),
     PUBLIC_DASHBOARD_URL: z.string().url().default('http://localhost:3000'),
     ALLOWED_ORIGINS: z.string().default(''), // extra comma-separated browser origins allowed on unsafe methods
+    PUBLIC_SITE_URL: z.string().url().optional(), // the public website's origin (https://oasisautospanj.com): allowed on the public POSTs (ADR 0150)
     RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(300),
     SSE_HEARTBEAT_MS: z.coerce.number().int().min(50).default(20_000),
     BUSINESS_TZ: z.string().default('America/New_York'),

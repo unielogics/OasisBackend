@@ -11,7 +11,7 @@ import type { MessageStatus, MessagesTable } from '../schema.js'
 import '../schema.js'
 
 /** Classes whose text carries a one-time link: the message row keeps a redacted body and the outbox body is wiped once the message is final. */
-export const SENSITIVE_CLASSES: ReadonlySet<string> = new Set(['staff_invite', 'password_reset'])
+export const SENSITIVE_CLASSES: ReadonlySet<string> = new Set(['staff_invite', 'password_reset', 'otp_code'])
 export const REDACTED_BODY = '[link sent privately]'
 
 export function messageStatusOf(state: OutboxState): MessageStatus {
