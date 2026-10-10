@@ -442,6 +442,16 @@ health check runs, exit 3 when it fails. Nothing is rebuilt and nginx is not rel
 * `certbot renew --dry-run` covers both certificates (the dashboard's and the site's); the renewal hook reloads nginx.
 * "the mirror ... can be changed by users other than root": `sudo chown -R root:root /opt/oasis/git && sudo chmod -R go-w /opt/oasis/git`.
 
+### The host cannot resolve its own new name (health check: "answered HTTP 000")
+
+A name created in Route 53 after a resolver already answered "no such record" stays negative in that resolver for the zone's
+negative-cache time (the SOA minimum; lowered from 86400 to 300 s on 2026-10-10, but the VPC resolver 172.31.0.2 keeps what it
+cached before). Outside resolvers see the record while `curl https://<name>/` on the host fails with HTTP 000 and the health check
+reports the website unhealthy; `resolvectl flush-caches` does not help because the stale answer sits in the VPC resolver. Remedy
+on the host: an `/etc/hosts` line `127.0.0.1 oasisautospanj.com www.oasisautospanj.com` (nginx serves the names by SNI on every
+address), which the production host carries permanently; remove it only if the website moves to another host. certbot is
+unaffected (Let's Encrypt resolves the name itself).
+
 ## Appendix: where things are
 
 | Question | Answer |
