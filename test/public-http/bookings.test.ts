@@ -304,6 +304,10 @@ describe('validation, the honeypot and the limits', () => {
       [{ serviceKey: 'no-such' }, 'body.serviceKey'],
       [{ addonKeys: ['no-such'] }, 'body.addonKeys'],
       [{ date: '13/06/2026' }, 'body.date'],
+      [{ date: '2026-02-30' }, 'body.date'], // the right shape, no such day
+      [{ date: '2026-13-01' }, 'body.date'],
+      [{ startMin: 13 * 60 + 5 }, 'body.startMin'], // 1:05 PM is not on the board's 30-minute grid
+      [{ startMin: 13 * 60 + 15 }, 'body.startMin'],
       [{ startMin: 1500 }, 'body.startMin'],
       [{ card: '4242' }, 'body'],
     ]
@@ -315,6 +319,20 @@ describe('validation, the honeypot and the limits', () => {
     }
     expect(await appointments()).toEqual([])
     expect(await h.db.selectFrom('customers').select('id').where('synthetic', '=', false).execute()).toEqual([])
+  })
+
+  it('a start off the grid next to a VIP-held time is refused like any off-grid start, not booked into the hold', async () => {
+    // Friday 4:00 PM is held; 4:05 used to pass (the hold check matched the exact start only)
+    const r = await book(bookingBody(h, { date: '2026-06-19', startMin: 16 * 60 + 5 }))
+    expect(r.statusCode).toBe(422)
+    expect(json(r).errors).toEqual([{ path: 'body.startMin', message: 'Pick one of the times on the board.' }])
+    expect(await appointments()).toEqual([])
+  })
+
+  it('an impossible date is a 422 for the honeypot too, never a 500', async () => {
+    const r = await book(bookingBody(h, { date: '2026-02-30', website: 'spam' }))
+    expect(r.statusCode).toBe(422)
+    expect(JSON.stringify(json(r).errors)).toContain('body.date')
   })
 
   it('a filled honeypot answers 202 with a fake reference and writes nothing', async () => {

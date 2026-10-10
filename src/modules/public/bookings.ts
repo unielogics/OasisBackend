@@ -147,6 +147,7 @@ export async function createWebBooking(
   const verified = input.memberToken ? await resolveMemberToken(tx, loc, input.memberToken, now) : null
   if (verified && verified.phoneE164 !== phone) throw new AppError('PUBLIC_TOKEN_PHONE_MISMATCH')
 
+  await assertOnTheGrid(tx, d, loc, input.date, input.startMin)
   const start = wallToInstant(input.date, input.startMin, loc.tz)
   const existing = await findCustomerByPhone(tx, phone)
   // The record of a customer the shop already has changes only when the caller proved the number (a member token issued for this
@@ -230,6 +231,19 @@ export async function createWebBooking(
     when: `${when === 'today' ? 'Today' : when === 'tomorrow' ? 'Tomorrow' : when} · ${time}`,
     member,
   }
+}
+
+/**
+ * Online bookings start on the board's grid (opening time plus whole slots): the website only offers those, and a start a few
+ * minutes off one slipped past checks that match the grid's starts exactly, a VIP hold among them (review 2026-10-10). A day the
+ * shop is closed is left to the slot guard, which answers in the design's words.
+ */
+async function assertOnTheGrid(tx: Tx, d: PublicDeps, loc: PublicLocation, date: string, startMin: number): Promise<void> {
+  const data = await loadDayData(tx, { locationId: loc.id, tz: loc.tz, now: d.app.clock.now(), date })
+  const open = data.day.openMin
+  if (data.day.closed || open === null) return
+  const step = data.settings.rules.slotMinutes
+  if ((((startMin - open) % step) + step) % step !== 0) throw bad('startMin', 'Pick one of the times on the board.')
 }
 
 /**

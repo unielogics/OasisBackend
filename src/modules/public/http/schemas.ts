@@ -1,8 +1,13 @@
 // Request and response schemas of the public website routes (strict bodies; the serializer enforces the responses).
 import { z } from '../../../http/zod.js'
+import { isValidBizDate } from '../../../platform/time.js'
 import { TOKEN_SHAPE } from '../../auth/tokens.js'
 
-export const BizDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD')
+// the shape, then a real calendar day: 2026-02-30 is a 422 on the field, never a 500 from the time zone conversion
+export const BizDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD')
+  .refine((s) => isValidBizDate(s), 'Pick a valid date.')
 // the shape check is lenient on purpose: the normaliser answers "Enter a valid mobile number." for anything that is not one
 const Phone = z.string().trim().min(1, 'Enter a valid mobile number.').max(32, 'Enter a valid mobile number.')
 const Short = (n: number) => z.string().trim().max(n)
