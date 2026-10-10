@@ -95,6 +95,8 @@ describe('joining on the website', () => {
       [{ email: 'nope' }, 'body.email'],
       [{ card: '4242 4242 4242 4242' }, 'body'],
       [{ phone: '1' }, 'body.phone'],
+      [{ phone: '+8613800138000' }, 'body.phone'],
+      [{ phone: '+18885551234' }, 'body.phone'],
     ] as [Record<string, unknown>, string][]) {
       const r = await join(joinBody({ ...extra, phone: (extra.phone as string) ?? PHONES.extra }))
       expect(r.statusCode, JSON.stringify(extra)).toBe(422)

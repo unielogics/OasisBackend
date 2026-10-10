@@ -7,7 +7,7 @@ import { createHash, randomInt } from 'node:crypto'
 import { advisoryXactLock, type Db, type Executor, type Tx } from '../../platform/db.js'
 import * as audit from '../../platform/audit.js'
 import { AppError } from '../../platform/errors.js'
-import { maskPhone, normalizePhone } from '../../platform/phone.js'
+import { maskPhone, normalizeTextableNanp } from '../../platform/phone.js'
 import { hashToken, newToken, safeEqual } from '../auth/tokens.js'
 import { findCustomerByPhone, type CustomerRecord } from '../customers/service.js'
 import { loadCustomerTarget, strangerRecipient } from '../messaging/db/recipients.js'
@@ -29,16 +29,14 @@ export const hashCode = (challengeId: string, code: string): string =>
 
 export const newCode = (): string => String(randomInt(0, 10 ** OTP_CODE_LENGTH)).padStart(OTP_CODE_LENGTH, '0')
 
-const invalidPhone = (): AppError =>
-  new AppError('VALIDATION_FAILED', {
-    detail: 'Enter a valid mobile number.',
-    errors: [{ path: 'body.phone', message: 'Enter a valid mobile number.' }],
-  })
+const badPhone = (message: string): AppError =>
+  new AppError('VALIDATION_FAILED', { detail: message, errors: [{ path: 'body.phone', message }] })
 
+/** The E.164 form of a number the website may text (US or Canada, able to take a text, not premium or toll free); 422 otherwise. */
 export const phoneOrThrow = (raw: string): string => {
-  const p = normalizePhone(raw)
-  if (!p) throw invalidPhone()
-  return p
+  const p = normalizeTextableNanp(raw)
+  if (p.ok) return p.e164
+  throw badPhone(p.reason === 'invalid' ? 'Enter a valid mobile number.' : 'We can text US and Canadian mobile numbers only.')
 }
 
 export interface OtpRequested {

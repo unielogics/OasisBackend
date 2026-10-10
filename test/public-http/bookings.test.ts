@@ -217,6 +217,9 @@ describe('validation, the honeypot and the limits', () => {
     const cases: [Record<string, unknown>, string][] = [
       [{ name: '' }, 'body.name'],
       [{ phone: '555' }, 'body.phone'],
+      [{ phone: '+447911123456' }, 'body.phone'],
+      [{ phone: '+19005551234' }, 'body.phone'],
+      [{ phone: '+18765550123' }, 'body.phone'],
       [{ serviceKey: 'no-such' }, 'body.serviceKey'],
       [{ addonKeys: ['no-such'] }, 'body.addonKeys'],
       [{ date: '13/06/2026' }, 'body.date'],

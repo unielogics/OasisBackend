@@ -83,6 +83,17 @@ describe('POST /public/otp', () => {
     expect(rows.rows[0]!.n).toBeGreaterThan(10)
   })
 
+  it('texts US and Canadian mobile numbers only: another country, a premium-rate or toll-free number is 422 and nothing is stored', async () => {
+    for (const phone of ['+447911123456', '+18762345678', '+19005551234', '+18005551234', '+15005550006']) {
+      const r = await request(phone)
+      expect(r.statusCode, phone).toBe(422)
+      expect(json(r).errors[0], phone).toEqual({ path: 'body.phone', message: 'We can text US and Canadian mobile numbers only.' })
+    }
+    expect(await h.db.selectFrom('public_otp_challenges').select('id').execute()).toEqual([])
+    expect(await h.db.selectFrom('sms_outbox').select('id').execute()).toEqual([])
+    expect(await h.db.selectFrom('public_rate_limits').select('key').execute()).toEqual([])
+  })
+
   it('one address naming a number over and over cannot lock its owner out: only 3 of its calls count against the number', async () => {
     const attacker = '10.91.2.1'
     const answers = []
