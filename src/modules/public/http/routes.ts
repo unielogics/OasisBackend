@@ -140,7 +140,9 @@ export function registerPublicRoutes(d: PublicDeps): void {
         operationId: 'requestPublicOtp',
         summary: 'Text a six-digit code to a mobile number (member identification)',
         description:
-          'No session. 202 with the challenge id whether or not the number is known or the text could go out (nothing about the number leaks). The code lives 10 minutes, allows 3 tries and replaces any earlier code for the number. Limits: 3 codes per number and 10 per address every 10 minutes (429 with Retry-After), 10 calls a minute per address.',
+          'No session. 202 with the challenge id whether or not the number is known or the text could go out (nothing about the number leaks). The code lives 10 minutes, allows 3 tries and replaces any earlier code for the number. ' +
+          '422 for a number that is not a US or Canadian mobile-capable number (another country, premium rate, toll free). Limits every 10 minutes: 10 per address, 3 per number from one address and 5 per number in all, charged in that order (a refused call charges nothing after the rule that refused it); 10 calls a minute per address (429 PUBLIC_RATE_LIMITED with Retry-After). ' +
+          'At most PUBLIC_OTP_TEXTS_PER_HOUR codes are texted per rolling hour for every caller together: past it, 429 PUBLIC_CODES_PAUSED with Retry-After (the managers are told once an hour).',
         body: OtpBody,
         response: { 202: OtpRequested },
       },
@@ -188,8 +190,9 @@ export function registerPublicRoutes(d: PublicDeps): void {
         operationId: 'createPublicBooking',
         summary: 'Book a wash from the website',
         description:
-          'No session; Idempotency-Key required (replay answers the stored response). Creates or links the customer by phone (consent recorded; an existing customer’s name and email change only with a member token for that number), books through the same command as the dashboard with the online rules, creates the invoice, queues the confirmation text and the usual ops events. Guests owe the booking fee at the counter or by payment link (`deposit`); an active member owes nothing. ' +
-          '409 PUBLIC_SLOT_TAKEN "That time was just taken. Pick another.", PUBLIC_SLOT_VIP, PUBLIC_SLOT_PAST, PUBLIC_SLOT_CLOSED, PUBLIC_SLOT_TOO_FAR; 401 PUBLIC_TOKEN_INVALID; 422 on validation; 429 over 5 bookings an hour per number or 10 per address. A non-empty `website` field (the honeypot) answers 202 with a fake reference and writes nothing.',
+          'No session; Idempotency-Key required (replay answers the stored response). A new number creates the customer (the transactional kind of SMS consent when asked for); the number of a customer the shop already has links the booking to them and changes their record (name, email, consent, vehicle) only with a member token issued for that customer, otherwise what was typed goes on the appointment’s internal log. Books through the same command as the dashboard with the online rules, on the board’s grid, creates the invoice, queues the confirmation text and the usual ops events. ' +
+          'Member and VIP privileges (no fee, VIP-held times, the VIP booking window) need a member token for the customer: without one the booking is a guest’s, owes the fee at the counter or by payment link (`deposit`), and `member`, `deposit` and `confirmationBy` (what was asked for) answer the same for every number. ' +
+          '409 PUBLIC_SLOT_TAKEN "That time was just taken. Pick another.", PUBLIC_SLOT_VIP, PUBLIC_SLOT_PAST, PUBLIC_SLOT_CLOSED, PUBLIC_SLOT_TOO_FAR; 401 PUBLIC_TOKEN_INVALID; 422 on validation (an impossible date, a start off the grid, a number the website does not text); 429 over 10 bookings an hour per address, 3 per number from one address or 5 per number. A non-empty `website` field (the honeypot) answers 202 with a fake reference and writes nothing.',
         body: BookingBody,
         response: { 201: BookingResult, 202: BookingResult },
       },
@@ -229,7 +232,8 @@ export function registerPublicRoutes(d: PublicDeps): void {
         operationId: 'createPublicMembership',
         summary: 'Join Gold or VIP from the website',
         description:
-          'No session; Idempotency-Key required. Creates or links the customer by phone and their vehicles, then a membership in the pending state tied to the tier’s Squarespace product (when the product map has none the membership still waits and an alert is raised); staff get a notification asking them to text the checkout link; the person gets a welcome text saying so. The membership activates when the Squarespace sync sees the paid order. 409 PUBLIC_ALREADY_MEMBER; 422 on validation; 429 over 3 joins a day per number or 10 an hour per address.',
+          'No session; Idempotency-Key required. A new number: the customer, their vehicles and a membership in the pending state tied to the tier’s Squarespace product (when the product map has none the membership still waits and an alert is raised); staff get a notification asking them to text the checkout link; the person gets a welcome text saying so. The membership activates when the Squarespace sync sees the paid order. ' +
+          'The number of a customer the shop already has, without a member token issued for that customer: the same 201, nothing written to the record and no text; staff get the request to confirm with the customer. With the token: the full path, and 409 PUBLIC_ALREADY_MEMBER for a live membership. 422 on validation; 429 over 10 an hour per address, 2 a day per number from one address or 3 a day per number.',
         body: MembershipBody,
         response: { 201: MembershipResult, 202: MembershipResult },
       },
