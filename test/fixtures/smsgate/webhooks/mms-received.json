@@ -1,7 +1,7 @@
 {
-  "_provenance": "Constructed from the payload shapes in docs.sms-gate.app/features/webhooks and the app source (modules/webhooks/payload/*.kt, PayloadSingingPlugin.kt) and signed with the documented scheme (HMAC-SHA256 over body + X-Timestamp). Not captured from a physical device: replace with real captures from the tablet when available.",
+  "_provenance": "Constructed from the MMS payload shapes in docs.sms-gate.app/features/mms and docs.sms-gate.app/features/webhooks (mms:received = WAP push metadata; mms:downloaded = body, subject and base64 attachments) and signed with the documented scheme (HMAC-SHA256 over body + X-Timestamp, computed with Python hmac). Not captured from a physical device: replace with real captures from the tablet when available.",
   "name": "mms-received",
-  "description": "Unsupported by Oasis: rejected as unsupported_event after the signature verifies",
+  "description": "MMS announced (WAP push, metadata only): recorded, never routed; mms:downloaded carries the text",
   "secret": "fixture-signing-key",
   "headers": {
     "content-type": "application/json",
@@ -11,6 +11,10 @@
   },
   "body": "{\"id\":\"FxEnvelope0000000013\",\"webhookId\":\"oasis-mms-received\",\"event\":\"mms:received\",\"deviceId\":\"FxDevice0000000001\",\"payload\":{\"messageId\":\"fx-mms-0001\",\"sender\":\"+17865550151\",\"recipient\":\"+17865550100\",\"simNumber\":1,\"transactionId\":\"T1\",\"subject\":\"Photo\",\"size\":12345,\"contentClass\":\"IMAGE_BASIC\",\"receivedAt\":\"2026-06-13T12:00:04.000-04:00\"}}",
   "expect": {
-    "error": "unsupported_event"
+    "kind": "mms_notified",
+    "from": "+17865550151",
+    "at": "2026-06-13T16:00:04.000Z",
+    "deviceId": "FxDevice0000000001",
+    "providerMessageId": "fx-mms-0001"
   }
 }

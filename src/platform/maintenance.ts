@@ -17,6 +17,8 @@ import { purgeRateLimits } from '../modules/public/limits.js'
 
 export const REALTIME_RETENTION_MS = 10 * 60 * 1000
 export const WEBHOOK_LOG_RETENTION_MS = 90 * 24 * 3600 * 1000
+/** A signed delivery Oasis could not use ('unparsed', body cut to 4 KB) is kept a week for diagnosis (ADR 0151). */
+export const WEBHOOK_UNPARSED_RETENTION_MS = 7 * 24 * 3600 * 1000
 /** Expired and revoked sessions stay a week (support questions about a recent sign-in), then go. */
 export const SESSION_RETENTION_MS = 7 * 24 * 3600 * 1000
 export const PASSWORD_RESET_RETENTION_MS = 30 * 24 * 3600 * 1000
@@ -67,7 +69,11 @@ registerPurgeTask('public_otp', (db, clock) => purgeOtpRows(db, clock.now()))
 registerPurgeTask('public_rate_limits', (db, clock) => purgeRateLimits(db, clock))
 registerPurgeTask('webhook_log', async (db, clock) => {
   const cutoff = before(clock, WEBHOOK_LOG_RETENTION_MS)
-  const r = await db.deleteFrom('webhook_log').where('received_at', '<', cutoff).executeTakeFirst()
+  const unparsedCutoff = before(clock, WEBHOOK_UNPARSED_RETENTION_MS)
+  const r = await db
+    .deleteFrom('webhook_log')
+    .where((eb) => eb.or([eb('received_at', '<', cutoff), eb.and([eb('status', '=', 'unparsed'), eb('received_at', '<', unparsedCutoff)])]))
+    .executeTakeFirst()
   return Number(r.numDeletedRows)
 })
 

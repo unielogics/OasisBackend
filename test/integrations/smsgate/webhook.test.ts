@@ -62,7 +62,7 @@ describe('signed fixtures: valid', () => {
 
   it('has fixtures for every event Oasis handles', () => {
     const kinds = new Set(supported.map((f) => f.expect.kind))
-    expect([...kinds].sort()).toEqual(['app_started', 'cancelled', 'delivered', 'failed', 'ping', 'received', 'sent'])
+    expect([...kinds].sort()).toEqual(['app_started', 'cancelled', 'delivered', 'failed', 'mms_notified', 'ping', 'received', 'sent'])
   })
 
   it.each(supported.map((f) => [f.name, f] as const))('%s verifies and parses', (_name, f) => {
@@ -174,10 +174,97 @@ describe('signed fixtures: rejected', () => {
   })
 
   it('reports events Oasis does not handle as unsupported once the signature is good', () => {
-    for (const name of ['mms-received', 'sms-batch-received']) {
+    for (const name of ['sms-batch-received']) {
       const u = webhookFixture(name)
       expect(code(() => verifyAndParse(u.headers, u.body, opts())), name).toBe('unsupported_event')
       expect(code(() => verifyAndParse({ ...u.headers, 'x-signature': '0'.repeat(64) }, u.body, opts())), name).toBe('bad_signature')
+    }
+  })
+})
+
+describe('MMS (docs.sms-gate.app/features/mms)', () => {
+  const parse = (name: string) => verifyAndParse(webhookFixture(name).headers, webhookFixture(name).body, opts())
+
+  it('mms:downloaded is a received message: trimmed body, normalised sender, the message id as provider id, the parts decoded', () => {
+    const p = parse('mms-downloaded-ok')
+    expect(p.eventName).toBe('mms:downloaded')
+    expect(p.envelopeId).toBe('FxEnvelope0000000014')
+    const e = p.event
+    if (e.kind !== 'received') throw new Error('expected received')
+    expect(e).toMatchObject({ from: '+17865550151', body: 'OK', providerMessageId: 'fx-mms-0002', eventId: 'FxEnvelope0000000014' })
+    expect(e.mms?.subject).toBeNull()
+    expect(e.mms?.parts.map(({ data, ...rest }) => ({ ...rest, bytes: data?.toString('hex') ?? null }))).toEqual([
+      { partId: '1', contentType: 'image/jpeg', name: 'IMG_0001.jpg', size: 22, bytes: 'ffd8ffe000104a46494600010100000100010000ffd9' },
+      { partId: '2', contentType: 'text/plain', name: 'text_0.txt', size: 2, bytes: Buffer.from('OK').toString('hex') },
+    ])
+  })
+
+  it('reads the sender from phoneNumber when sender is absent (the docs show both)', () => {
+    const e = parse('mms-downloaded-phonenumber').event
+    expect(e).toMatchObject({ kind: 'received', from: '+17865550151', body: 'STOP' })
+    expect(e.kind === 'received' && e.mms?.parts).toEqual([])
+  })
+
+  it('a picture with no text has an empty body; an MMS with nothing at all keeps an unknown sender rather than failing', () => {
+    expect(parse('mms-downloaded-picture-only').event).toMatchObject({ kind: 'received', body: '' })
+    const incomplete = parse('mms-downloaded-incomplete').event
+    expect(incomplete).toMatchObject({ kind: 'received', from: 'unknown', body: '' })
+    expect(incomplete.kind === 'received' && incomplete.mms).toEqual({ subject: null, parts: [] })
+  })
+
+  it('uses the subject when the body is empty, accepts a data: prefix and the URL alphabet, and marks broken or missing data', () => {
+    const ts = '1781366405'
+    const body = JSON.stringify({
+      id: 'env-x',
+      event: 'mms:downloaded',
+      deviceId: 'd',
+      payload: {
+        messageId: 'm-x',
+        sender: '+17865550151',
+        body: '   ',
+        subject: ' C ',
+        attachments: [
+          { partId: '1', contentType: 'IMAGE/PNG; name=a.png', name: 'a.png', size: 4, data: 'data:image/png;base64,iVBORw0KGgo=' },
+          { partId: '2', contentType: 'image/jpeg', name: 'b.jpg', size: 99, data: '***not base64***' },
+          { partId: '3', contentType: 'image/jpeg', name: 'c.jpg', size: 7, data: null },
+          { partId: 4, contentType: 'image/jpeg', name: 'd.jpg', data: '_-8' },
+        ],
+      },
+    })
+    const e = verifyAndParse({ 'x-signature': signWebhook(FIXTURE_SECRET, body, ts), 'x-timestamp': ts }, body, opts()).event
+    if (e.kind !== 'received' || !e.mms) throw new Error('expected an mms')
+    expect(e.body).toBe('C')
+    expect(e.mms.subject).toBe('C')
+    expect(e.mms.parts.map((x) => [x.partId, x.contentType, x.size, x.problem ?? null, x.data?.length ?? null])).toEqual([
+      ['1', 'image/png', 8, null, 8],
+      ['2', 'image/jpeg', 99, 'decode_failed', null],
+      ['3', 'image/jpeg', 7, 'missing', null],
+      ['4', 'image/jpeg', 2, null, 2],
+    ])
+  })
+
+  it('mms:received is a notice only (no text): its own event kind, never a received message', () => {
+    const p = parse('mms-received')
+    expect(p.event).toMatchObject({ kind: 'mms_notified', providerMessageId: 'fx-mms-0001', from: '+17865550151' })
+  })
+
+  it('a signed but unusable event says which event and envelope it was', () => {
+    const f = webhookFixture('sms-batch-received')
+    try {
+      verifyAndParse(f.headers, f.body, opts())
+      throw new Error('no error')
+    } catch (e) {
+      expect(e).toBeInstanceOf(SmsWebhookError)
+      expect(e).toMatchObject({ code: 'unsupported_event', event: 'sms:batch:received', signed: true })
+      expect((e as SmsWebhookError).envelopeId).toBeTruthy()
+    }
+    const ts = '1781366405'
+    const noId = JSON.stringify({ id: 'env-y', event: 'mms:downloaded', deviceId: 'd', payload: { body: 'hi' } })
+    try {
+      verifyAndParse({ 'x-signature': signWebhook(FIXTURE_SECRET, noId, ts), 'x-timestamp': ts }, noId, opts())
+      throw new Error('no error')
+    } catch (e) {
+      expect(e).toMatchObject({ code: 'bad_body', event: 'mms:downloaded', envelopeId: 'env-y', signed: true })
     }
   })
 })

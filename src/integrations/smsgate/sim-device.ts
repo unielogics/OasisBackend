@@ -291,6 +291,48 @@ export class SimDevice {
     return messageId
   }
 
+  /**
+   * An inbound MMS the way the app reports one: mms:received (the WAP push, metadata only), then mms:downloaded with the body
+   * and the attachments (base64). `attachments` items are { contentType, name?, data (base64) | null }.
+   */
+  injectMms(
+    from: string,
+    o: { body?: string; subject?: string; attachments?: Array<{ contentType: string; name?: string; data: string | null }>; simNumber?: number; messageId?: string; at?: Date } = {},
+  ): string {
+    const messageId = o.messageId ?? `mms_${this.nanoid(12)}`
+    const at = offsetIso(o.at ?? this.clock.now())
+    const attachments = (o.attachments ?? []).map((a, i) => ({
+      partId: String(i + 1),
+      contentType: a.contentType,
+      name: a.name ?? `part${i + 1}`,
+      size: a.data === null ? 0 : Buffer.from(a.data, 'base64').length,
+      data: a.data,
+    }))
+    const size = attachments.reduce((n, a) => n + a.size, 0) + (o.body?.length ?? 0)
+    this.emit('mms:received', {
+      messageId,
+      sender: from,
+      recipient: this.phoneNumber,
+      simNumber: o.simNumber ?? 1,
+      transactionId: `T${messageId}`,
+      subject: o.subject ?? null,
+      size,
+      contentClass: null,
+      receivedAt: at,
+    })
+    this.emit('mms:downloaded', {
+      messageId,
+      sender: from,
+      recipient: this.phoneNumber,
+      simNumber: o.simNumber ?? 1,
+      body: o.body ?? null,
+      subject: o.subject ?? null,
+      attachments,
+      receivedAt: at,
+    })
+    return messageId
+  }
+
   ping(): void {
     const h = this.health().body
     this.emit('system:ping', h as unknown as Record<string, unknown>)

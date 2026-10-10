@@ -1,6 +1,7 @@
 // The SMS Gate webhook: verify the HMAC over the raw body, persist the envelope in webhook_log (unique per envelope id),
 // answer 2xx at once, and apply the event asynchronously in one transaction (envelope marker, outbox and message state,
 // inbound routing, device health). A crash between "persisted" and "applied" leaves a `received` row that the sweep picks up.
+import { createHash } from 'node:crypto'
 import { sql } from 'kysely'
 import { transaction, type Tx } from '../../platform/db.js'
 import { SmsProviderError } from '../../integrations/sms/errors.js'
@@ -31,6 +32,35 @@ export interface WebhookResponse {
 }
 
 const STORED_HEADERS = ['x-signature', 'x-timestamp', 'content-type', 'user-agent'] as const
+/** An unparsed delivery keeps only the start of its body: enough to see what the device sent (ADR 0151). */
+export const UNPARSED_BODY_BYTES = 4096
+
+function firstBytes(raw: string, max: number): string {
+  const clean = raw.replaceAll('\u0000', '')
+  const buf = Buffer.from(clean, 'utf8')
+  return buf.length <= max ? clean : buf.subarray(0, max).toString('utf8')
+}
+
+/**
+ * The stored copy of an applied mms:downloaded without the attachment bytes (the pictures are in the photos store; the
+ * signature no longer verifies, which no longer matters once the event is applied). Anything unreadable is kept as it is.
+ */
+export function redactMmsBody(raw: string): string {
+  try {
+    const env = JSON.parse(raw) as { payload?: { attachments?: unknown } }
+    const parts = env.payload?.attachments
+    if (!Array.isArray(parts)) return raw
+    for (const p of parts) {
+      if (p && typeof p === 'object' && typeof (p as Record<string, unknown>).data === 'string') {
+        ;(p as Record<string, unknown>).data = null
+        ;(p as Record<string, unknown>).dataRedacted = true
+      }
+    }
+    return JSON.stringify(env)
+  } catch {
+    return raw
+  }
+}
 const FOREVER = Number.MAX_SAFE_INTEGER
 const SWEEP_AFTER_MS = 30_000
 const GIVE_UP_AFTER_MS = 24 * 3600_000
@@ -87,6 +117,7 @@ export class WebhookService {
       parsed = verifyAndParse(headers, raw, { secret, toleranceSec: this.rt.config.webhookToleranceSec, clock: this.rt.clock })
     } catch (err) {
       if (!(err instanceof SmsWebhookError)) throw err
+      if (err.signed) await this.keepUnparsed(device, headers, raw, err)
       if (err.code === 'unsupported_event') return { status: 200, body: { ok: true, status: 'ignored' } }
       const status = err.code === 'bad_body' ? 400 : 401
       this.rt.log.warn({ device: device.device_key, code: err.code }, 'smsgate webhook rejected')
@@ -117,6 +148,35 @@ export class WebhookService {
     }
     this.schedule(inserted.id)
     return { status: 200, body: { ok: true, status: 'accepted' } }
+  }
+
+  /**
+   * A signed delivery Oasis cannot use (an event it does not handle, a payload it cannot read) is kept as 'unparsed' so it can
+   * be diagnosed (body cut to its first 4 KB, purged after 7 days), and logged by event name only, never its content.
+   */
+  private async keepUnparsed(device: DeviceRow, headers: Record<string, string | undefined>, raw: string, err: SmsWebhookError): Promise<void> {
+    const event = err.event?.slice(0, 64) ?? null
+    this.rt.log.warn({ device: device.device_key, event, code: err.code }, 'smsgate webhook not parsed; kept in webhook_log')
+    const stored: Record<string, string> = { 'x-device-key': device.device_key }
+    for (const h of STORED_HEADERS) if (headers[h]) stored[h] = headers[h]!
+    if (event) stored['x-event'] = event
+    const externalId = err.envelopeId ? err.envelopeId.slice(0, 200) : `unparsed:${createHash('sha256').update(raw).digest('hex').slice(0, 40)}`
+    await this.rt.db
+      .insertInto('webhook_log')
+      .values({
+        id: this.rt.newId(),
+        provider: 'smsgate',
+        external_id: externalId,
+        headers: JSON.stringify(stored),
+        body: firstBytes(raw, UNPARSED_BODY_BYTES),
+        signature_valid: true,
+        received_at: this.rt.clock.now(),
+        processed_at: this.rt.clock.now(),
+        status: 'unparsed',
+        error: `${err.code}: ${err.message}`.replaceAll('\u0000', '').slice(0, 500),
+      })
+      .onConflict((oc) => oc.columns(['provider', 'external_id']).doNothing())
+      .execute()
   }
 
   private schedule(logId: string): void {
@@ -155,7 +215,13 @@ export class WebhookService {
       const ignored = result.outcome === 'duplicate' || (result.outcome === 'handled' && result.result.detail === 'ignored_unknown_message')
       await tx
         .updateTable('webhook_log')
-        .set({ status: ignored ? 'ignored' : 'processed', processed_at: this.rt.clock.now(), error: null })
+        .set({
+          status: ignored ? 'ignored' : 'processed',
+          processed_at: this.rt.clock.now(),
+          error: null,
+          // the pictures are saved; 90 days of webhook_log need not hold megabytes of base64 per MMS
+          ...(parsed.eventName === 'mms:downloaded' ? { body: redactMmsBody(row.body) } : {}),
+        })
         .where('id', '=', logId)
         .execute()
       return ignored ? ('ignored' as const) : ('processed' as const)
@@ -187,6 +253,7 @@ export class WebhookService {
         schedulingCtx: (locationId) => rt.schedulingCtx(locationId),
         notifyManagers: async (t, n) => void (await notifyManagers(t, n, rt.deps)),
         warn: (msg, detail) => rt.log.warn(detail, msg),
+        storage: () => rt.storage(),
       },
       {
         locationId: device.location_id,

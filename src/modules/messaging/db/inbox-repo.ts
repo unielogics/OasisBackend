@@ -4,6 +4,7 @@ import type { NewId } from '../../../platform/ids.js'
 import { normalizeE164 } from '../../../integrations/sms/phone.js'
 import type { InboundDecision, InboundText } from '../inbound/router.js'
 import type { InboxRepository, InboxRow } from '../inbound/repositories.js'
+import type { MmsAttachmentRecord } from '../inbound/mms.js'
 import type { SmsInboxTable } from '../schema.js'
 import '../schema.js'
 
@@ -38,6 +39,7 @@ export class PgInboxRepository implements InboxRepository {
         from_raw: msg.from,
         from_e164: normalizeE164(msg.from),
         body: msg.body,
+        kind: msg.kind ?? 'sms',
         device_received_at: msg.receivedAt,
         received_at: receivedAt,
       })
@@ -56,6 +58,11 @@ export class PgInboxRepository implements InboxRepository {
 
   async markProcessed(id: string, decision: InboundDecision['kind'], quarantined: boolean, at: Date): Promise<void> {
     await this.exec.updateTable('sms_inbox').set({ processed_at: at, decision, quarantined }).where('id', '=', id).execute()
+  }
+
+  /** Records the parts of an MMS (what was saved, what was only listed). */
+  async setAttachments(id: string, attachments: MmsAttachmentRecord[]): Promise<void> {
+    await this.exec.updateTable('sms_inbox').set({ attachments: JSON.stringify(attachments) }).where('id', '=', id).execute()
   }
 
   /** Links the inbox row to the customer, appointment and message the text was filed under. */

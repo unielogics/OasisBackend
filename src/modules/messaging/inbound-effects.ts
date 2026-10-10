@@ -6,6 +6,9 @@ import type { Clock } from '../../platform/clock.js'
 import type { Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
 import { NIL_UUID, type NewId } from '../../platform/ids.js'
+import { maskPhone } from '../../platform/phone.js'
+import { normalizeE164 } from '../../integrations/sms/phone.js'
+import type { ObjectStorage } from '../../integrations/storage/types.js'
 import * as realtime from '../../platform/realtime.js'
 import { confirmAppointment } from '../scheduling/lifecycle.js'
 import type { Actor, SchedulingCtx } from '../scheduling/context.js'
@@ -14,6 +17,7 @@ import { loadCustomerTarget, strangerRecipient } from './db/recipients.js'
 import type { PgInboxRepository } from './db/inbox-repo.js'
 import { ensureThread, insertMessage, loadMessageDto, publishMessage, touchThread } from './db/messages.js'
 import type { InboundEffects } from './inbound/service.js'
+import { planAttachments } from './inbound/mms.js'
 import type { DbMessageQueue } from './queue.js'
 
 export interface EffectsEnv {
@@ -24,6 +28,8 @@ export interface EffectsEnv {
   schedulingCtx(locationId: string): Promise<SchedulingCtx>
   notifyManagers(tx: Tx, n: ManagerNotice): Promise<void>
   warn?: (msg: string, detail: Record<string, unknown>) => void
+  /** The photos store MMS pictures are saved in (created on first use). */
+  storage?: () => ObjectStorage
 }
 
 export interface ManagerNotice {
@@ -135,6 +141,8 @@ export function createInboundEffects(
         direction: 'in',
         sender_kind: 'customer',
         channel: 'sms',
+        kind: m.kind ?? 'sms',
+        attachments: m.attachments ? JSON.stringify(m.attachments) : null,
         body: m.body,
         status: 'received',
         peer_e164: target?.recipient.phone ?? null,
@@ -152,7 +160,7 @@ export function createInboundEffects(
           .values({
             appointment_id: m.appointmentId,
             at: now,
-            text: 'Customer replied by SMS',
+            text: m.kind === 'mms' ? 'Customer replied by MMS' : 'Customer replied by SMS',
             channels: ['sms'],
             actor_type: 'customer',
             meta: JSON.stringify({ messageId: id }) as never,
@@ -162,8 +170,45 @@ export function createInboundEffects(
       if (loaded) await publishMessage(tx, o.locationId, 'message.in', loaded.dto)
     },
 
+    async recordAttachments(parts, ctx) {
+      const plan = planAttachments(o.locationId, ctx.providerMessageId, parts)
+      const records = []
+      for (const item of plan) {
+        if (!item.save) {
+          records.push(item.record)
+          continue
+        }
+        try {
+          if (!e.storage) throw new Error('no photo storage configured')
+          await e.storage().put(item.save.key, item.save.body, item.save.contentType)
+          records.push(item.record)
+        } catch (err) {
+          // the text matters more than the picture: record it as unavailable and carry on (a STOP must never wait on S3)
+          e.warn?.('mms picture not saved', { index: item.record.index, err: (err as Error).message.slice(0, 200) })
+          records.push({ ...item.record, status: 'unavailable' as const, reason: 'storage_error' as const, key: null })
+        }
+      }
+      await o.inbox.setAttachments(ctx.inboxId, records)
+      return records
+    },
+
     async staffAlert(a) {
-      if (a.kind === 'cancel_request' || a.kind === 'unattributed_inbound') {
+      if (a.kind === 'picture_message') {
+        const who = a.customerId
+          ? ((await tx.selectFrom('customers').select('full_name').where('id', '=', a.customerId).executeTakeFirst())?.full_name ?? 'customer')
+          : (() => {
+              const phone = normalizeE164(a.sender)
+              return phone ? maskPhone(phone) : 'an unknown sender'
+            })()
+        await e.notifyManagers(tx, {
+          locationId: o.locationId,
+          kind: 'sms.picture_message',
+          title: `Picture message from ${who} — check the tablet / dashboard`,
+          body: a.excerpt,
+          entityType: a.appointmentId ? 'appointment' : a.customerId ? 'customer' : null,
+          entityId: a.appointmentId ?? a.customerId,
+        })
+      } else if (a.kind === 'cancel_request' || a.kind === 'unattributed_inbound') {
         const who = await tx.selectFrom('customers').select('full_name').where('id', '=', a.customerId).executeTakeFirst()
         await e.notifyManagers(tx, {
           locationId: o.locationId,

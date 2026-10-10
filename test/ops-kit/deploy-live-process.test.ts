@@ -205,7 +205,7 @@ describe('oasis-admin.sh', () => {
   }, 60_000)
 
   it.skipIf(!TABLET_HOST)(
-    'registers a tablet, shows its secret once, tests it, registers the seven webhooks and reads its health',
+    'registers a tablet, shows its secret once, tests it, registers the nine webhooks and reads its health',
     async () => {
       const add = await admin(
         'sms-add-device',

@@ -16,4 +16,14 @@ export const Message = z.object({
   customerId: z.string().nullable(),
   segments: z.number().int(),
   read: z.boolean(),
+  kind: z.enum(['sms', 'mms']),
+  attachments: z.array(
+    z.object({
+      index: z.number().int(),
+      name: z.string().nullable(),
+      contentType: z.string(),
+      size: z.number().int().nullable(),
+      status: z.enum(['stored', 'listed', 'unavailable', 'skipped']),
+    }),
+  ),
 })

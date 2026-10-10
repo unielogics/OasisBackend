@@ -12,6 +12,8 @@ import type { EmailProvider } from '../../integrations/ports/email.js'
 import { withSuppression } from '../../integrations/email/suppression.js'
 import type { SmsProvider } from '../../integrations/ports/sms.js'
 import { SimulatorProvider } from '../../integrations/sms/simulator.js'
+import { createStorageProvider } from '../../integrations/storage/config.js'
+import type { ObjectStorage } from '../../integrations/storage/types.js'
 import type { SchedulingCtx } from '../scheduling/context.js'
 import { locationTimezone } from '../scheduling/context.js'
 import type { SchedulingPorts } from '../scheduling/ports.js'
@@ -55,6 +57,8 @@ export interface RuntimeDeps {
   providerOverride?: (row: DeviceRow, secrets: { password: string | null; webhookSecret: string }) => SmsProvider | undefined
   simAutoProgress?: 'instant' | 'manual'
   fetch?: (input: string, init?: RequestInit) => Promise<Response>
+  /** Replaces the photos store MMS pictures are saved in (tests). */
+  storage?: ObjectStorage
 }
 
 export interface DeviceTick {
@@ -72,6 +76,7 @@ export class MessagingRuntime {
   readonly webhooks: WebhookService
   readonly log: LoggerLike
   private email: EmailProvider | undefined
+  private photos: ObjectStorage | undefined
 
   constructor(readonly deps: RuntimeDeps) {
     this.config = messagingConfig(deps.env)
@@ -113,6 +118,11 @@ export class MessagingRuntime {
       this.deps.emailProvider ?? createEmailProvider(this.deps.env, { clock: this.deps.clock, onSimSend: this.emailSender.capture }),
       dbSuppressionCheck(this.deps.db),
     ))
+  }
+
+  /** The photos store (STORAGE_PROVIDER): inbound MMS pictures are saved there under messaging/mms/, never public. */
+  storage(): ObjectStorage {
+    return (this.photos ??= this.deps.storage ?? createStorageProvider(this.deps.env, { clock: this.deps.clock }))
   }
 
   /** The deployment's single location (the oldest row). */

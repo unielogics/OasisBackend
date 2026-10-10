@@ -1,8 +1,9 @@
 import type { Clock } from '../../../platform/clock.js'
-import type { SmsEvent } from '../../../integrations/ports/sms.js'
+import type { MmsPart, SmsEvent } from '../../../integrations/ports/sms.js'
 import { normalizeE164 } from '../../../integrations/sms/phone.js'
 import type { OptOutRepository } from '../policy/optouts.js'
 import type { CustomerDirectory, InboxRepository } from './repositories.js'
+import { mmsText, type MmsAttachmentRecord } from './mms.js'
 import { routeInbound, type InboundCommand, type InboundDecision, type InboundText } from './router.js'
 
 type ReceivedEvent = Extract<SmsEvent, { kind: 'received' }>
@@ -11,8 +12,20 @@ type ReceivedEvent = Extract<SmsEvent, { kind: 'received' }>
 export interface InboundEffects {
   sendReply(to: string, template: string, vars: Record<string, string>, ctx: { customerId: string | null; inboxId: string }): Promise<void>
   confirmAppointment(appointmentId: string, customerId: string): Promise<void>
-  storeMessage(msg: { customerId: string; appointmentId: string | null; body: string; unread: boolean; providerMessageId: string; receivedAt: Date; deviceId: string }): Promise<void>
+  storeMessage(msg: {
+    customerId: string
+    appointmentId: string | null
+    body: string
+    unread: boolean
+    providerMessageId: string
+    receivedAt: Date
+    deviceId: string
+    kind?: 'sms' | 'mms'
+    attachments?: MmsAttachmentRecord[] | null
+  }): Promise<void>
   staffAlert(alert: Extract<InboundCommand, { type: 'staff_alert' }>): Promise<void>
+  /** Saves the pictures of an MMS and records every part on the inbox row; returns the records (stored keys included). */
+  recordAttachments?(parts: readonly MmsPart[], ctx: { inboxId: string; providerMessageId: string; deviceId: string }): Promise<MmsAttachmentRecord[]>
 }
 
 export interface InboundServiceOptions {
@@ -38,20 +51,21 @@ export class InboundService {
 
   /** Convenience for SmsEventIngestor: accepts the port's received event. */
   async handleReceived(event: ReceivedEvent): Promise<InboundOutcome> {
-    return this.process({
-      eventId: event.eventId,
-      deviceId: event.deviceId,
-      providerMessageId: event.providerMessageId,
-      from: event.from,
-      body: event.body,
-      receivedAt: event.at,
-    })
+    const base = { eventId: event.eventId, deviceId: event.deviceId, providerMessageId: event.providerMessageId, from: event.from, receivedAt: event.at }
+    if (!event.mms) return this.process({ ...base, body: event.body })
+    // An MMS is routed like an SMS. With no text it is filed under a placeholder, never dropped (ADR 0151).
+    const { text, placeholder } = mmsText(event.body, event.mms.parts)
+    return this.process({ ...base, body: text, kind: 'mms', placeholder }, event.mms.parts)
   }
 
-  async process(msg: InboundText): Promise<InboundOutcome> {
+  async process(msg: InboundText, parts: readonly MmsPart[] = []): Promise<InboundOutcome> {
     const now = this.clock.now()
     const { inserted, row } = await this.inbox.insertIfNew(msg, now)
     if (!inserted) return { duplicate: true }
+    const attachments =
+      msg.kind === 'mms' && parts.length > 0 && this.effects.recordAttachments
+        ? await this.effects.recordAttachments(parts, { inboxId: row.id, providerMessageId: msg.providerMessageId, deviceId: msg.deviceId })
+        : null
 
     // Look the sender up with the same normalisation the router uses.
     const phone = normalizeE164(msg.from)
@@ -92,6 +106,7 @@ export class InboundService {
             providerMessageId: msg.providerMessageId,
             receivedAt: msg.receivedAt,
             deviceId: msg.deviceId,
+            ...(msg.kind === 'mms' ? { kind: 'mms' as const, attachments } : {}),
           })
           break
         case 'staff_alert':

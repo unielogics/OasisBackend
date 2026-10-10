@@ -2,7 +2,8 @@ import { normalizeE164 } from '../../../integrations/sms/phone.js'
 import { formatAppointmentTime } from '../templates/format.js'
 import type { TemplateKey } from '../templates/registry.js'
 import { attributeInbound, nextUnconfirmed, DEFAULT_ATTRIBUTION, type AppointmentRef, type Attribution, type AttributionConfig } from './attribution.js'
-import { parseKeyword } from './keywords.js'
+import { parseKeyword, type ParsedKeyword } from './keywords.js'
+import type { MmsPlaceholder } from './mms.js'
 
 // The inbound router: pure. It looks at one received text and the context the caller loaded (who the sender is, whether the
 // number is opted out, their appointments) and returns what should happen, as commands. It performs no I/O.
@@ -15,6 +16,10 @@ export interface InboundText {
   from: string
   body: string
   receivedAt: Date
+  /** 'mms' when it arrived as MMS. Routing is identical; only the stored message is marked. */
+  kind?: 'sms' | 'mms'
+  /** Set when an MMS carried no text: `body` is then a placeholder, never a keyword, and staff get a picture-message alert. */
+  placeholder?: MmsPlaceholder | null
 }
 
 export interface InboundContext {
@@ -31,7 +36,7 @@ export interface InboundContext {
   attribution?: AttributionConfig
 }
 
-export type StaffAlertKind = 'cancel_request' | 'unattributed_inbound' | 'inbound_message'
+export type StaffAlertKind = 'cancel_request' | 'unattributed_inbound' | 'inbound_message' | 'picture_message'
 
 export type InboundCommand =
   | { type: 'record_opt_out'; phone: string; keyword: string }
@@ -40,7 +45,9 @@ export type InboundCommand =
   | { type: 'confirm_appointment'; appointmentId: string; customerId: string }
   /** Keep the text in the customer's thread. `unread` raises the unread badge and the SSE event. */
   | { type: 'store_message'; customerId: string; appointmentId: string | null; unread: boolean }
-  | { type: 'staff_alert'; kind: StaffAlertKind; customerId: string; appointmentId: string | null; excerpt: string }
+  | { type: 'staff_alert'; kind: Exclude<StaffAlertKind, 'picture_message'>; customerId: string; appointmentId: string | null; excerpt: string }
+  /** An MMS with no text (a picture, or content the device could not download): from anyone, customer or not. */
+  | { type: 'staff_alert'; kind: 'picture_message'; customerId: string | null; appointmentId: string | null; excerpt: string; sender: string }
   /** No customer row is created; the text stays in sms_inbox for review. */
   | { type: 'quarantine'; reason: 'unknown_sender' | 'non_e164_sender' }
 
@@ -58,13 +65,16 @@ const excerpt = (body: string): string => (body.length > 140 ? `${body.slice(0, 
 
 export function routeInbound(msg: InboundText, ctx: InboundContext): InboundDecision {
   const phone = normalizeE164(msg.from)
+  // A picture (or an MMS the device could not read) is announced to staff whoever sent it: nobody else will look at the tablet.
+  const pictureAlert = (customerId: string | null, appointmentId: string | null): InboundCommand[] =>
+    msg.placeholder ? [{ type: 'staff_alert', kind: 'picture_message', customerId, appointmentId, excerpt: excerpt(msg.body), sender: msg.from }] : []
   if (phone === null) {
     // Carrier notices, 2FA codes and spam arrive from short codes and alphanumeric ids. None of it is a customer.
-    return { kind: 'quarantined', phone: null, commands: [{ type: 'quarantine', reason: 'non_e164_sender' }], attribution: null }
+    return { kind: 'quarantined', phone: null, commands: [{ type: 'quarantine', reason: 'non_e164_sender' }, ...pictureAlert(null, null)], attribution: null }
   }
 
   const customer = ctx.customer
-  const keyword = parseKeyword(msg.body)
+  const keyword: ParsedKeyword = msg.placeholder ? { kind: 'none' } : parseKeyword(msg.body)
   const attribution = customer ? attributeInbound(ctx.appointments, ctx.now, ctx.attribution ?? DEFAULT_ATTRIBUTION) : null
   const commands: InboundCommand[] = []
   const reply = (template: TemplateKey, vars: Record<string, string> = {}): void => {
@@ -100,7 +110,7 @@ export function routeInbound(msg: InboundText, ctx: InboundContext): InboundDeci
 
   // Everything below needs a known customer. Strangers are quarantined, never turned into customers.
   if (!customer) {
-    commands.push({ type: 'quarantine', reason: 'unknown_sender' })
+    commands.push({ type: 'quarantine', reason: 'unknown_sender' }, ...pictureAlert(null, null))
     return decision('quarantined')
   }
 
@@ -126,6 +136,7 @@ export function routeInbound(msg: InboundText, ctx: InboundContext): InboundDeci
 
   // Plain message (including a YES with nothing to confirm): into the thread, unread, with an alert.
   commands.push({ type: 'store_message', customerId: customer.id, appointmentId: attribution?.appointmentId ?? null, unread: true })
-  commands.push({ type: 'staff_alert', kind: attribution ? 'inbound_message' : 'unattributed_inbound', customerId: customer.id, appointmentId: attribution?.appointmentId ?? null, excerpt: excerpt(msg.body) })
+  if (msg.placeholder) commands.push(...pictureAlert(customer.id, attribution?.appointmentId ?? null))
+  else commands.push({ type: 'staff_alert', kind: attribution ? 'inbound_message' : 'unattributed_inbound', customerId: customer.id, appointmentId: attribution?.appointmentId ?? null, excerpt: excerpt(msg.body) })
   return decision('message')
 }

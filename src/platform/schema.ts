@@ -85,7 +85,8 @@ export interface WebhookLogTable {
   signature_valid: boolean
   received_at: Generated<Date>
   processed_at: Date | null
-  status: Generated<'received' | 'processed' | 'ignored' | 'failed'>
+  /** 'unparsed': signed, but an event Oasis does not handle or could not read (body cut to 4 KB, purged after 7 days). */
+  status: Generated<'received' | 'processed' | 'ignored' | 'failed' | 'unparsed'>
   error: string | null
 }
 

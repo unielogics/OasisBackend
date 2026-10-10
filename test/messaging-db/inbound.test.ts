@@ -265,8 +265,8 @@ describe('webhook verification', () => {
     const headers = { 'x-signature': signWebhook('sim-signing-key-design', body, ts), 'x-timestamp': ts }
     expect((await w.rt.webhooks.receive(SIM_DEVICE_KEY, headers, body)).status).toBe(400)
     expect((await w.rt.webhooks.receive('no-such-device-key', headers, body)).status).toBe(404)
-    const mms = w.signed('mms:received', { messageId: 'x' })
-    expect((await w.rt.webhooks.receive(SIM_DEVICE_KEY, mms.headers, mms.body)).status).toBe(200)
+    const batch = w.signed('sms:batch:received', { messageId: 'x' })
+    expect((await w.rt.webhooks.receive(SIM_DEVICE_KEY, batch.headers, batch.body)).status).toBe(200)
   })
 
   it('applies an envelope that was persisted but never processed (crash recovery sweep)', async () => {
