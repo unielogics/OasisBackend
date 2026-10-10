@@ -22,7 +22,8 @@
 #                          write OASIS_SECRET_ID/AWS_REGION into common.env and remove those lines (docs/deployment.md)
 #   --secrets-in-files     the old layout without Secrets Manager: generate the secrets into common.env (hosts without AWS)
 #   --site-domain HOST     also host the public website at https://HOST (www.HOST redirects to it): the bare domain, different
-#                          from --domain. Writes /etc/oasis/site.env, the site's nginx servers, a placeholder release so the name
+#                          from --domain. Creates the website build user oasis-site (no shell, own group, home /var/lib/oasis-site,
+#                          never in the group oasis). Writes /etc/oasis/site.env, the site's nginx servers, a placeholder release so the name
 #                          never answers 404, and (certbot mode) asks for a certificate covering HOST and www.HOST, which needs
 #                          their DNS records to point here: before that it warns and leaves the port-80 bootstrap in place; re-run
 #                          with the same options once they do. Releases come from site-deploy.sh (docs/runbook.md, "The public website")
@@ -249,11 +250,27 @@ step_user_dirs() {
 }
 
 # --- 3a. the public website's directories ----------------------------------------------------------------------------------------
-# Root-owned throughout: site-deploy.sh builds as oasis in <id>.partial and root moves the verified output into place (ADR 0145).
-# Until the first deploy, a placeholder release answers at the apex (nginx would otherwise 404 the whole site), so the name is
-# never dead between the DNS change and the first build.
+# Root-owned throughout: site-deploy.sh builds as the website build user in <id>.partial/src, then root copies the output out and
+# verifies the copy (ADR 0145). Until the first deploy, a placeholder release answers at the apex (nginx would otherwise 404 the whole
+# site), so the name is never dead between the DNS change and the first build.
 SITE_ROOT="$OASIS_ROOT_PREFIX$SITE_ROOT_ARG"
 step_site_dirs() {
+  # the website build user: runs the site repository's dependencies, so it is not oasis and not in its group (no /etc/oasis, no
+  # state, no backups) and the metadata guard rejects it (no instance role). A system user with its own group, no shell, its home
+  # holding only the pnpm store and caches.
+  if [[ "$NO_SYSTEM" != 1 ]]; then
+    if id "$OASIS_SITE_USER" >/dev/null 2>&1; then
+      ok "user $OASIS_SITE_USER exists"
+      if [[ " $(id -nG "$OASIS_SITE_USER" 2>/dev/null) " == *" $OASIS_USER "* ]]; then
+        run gpasswd -d "$OASIS_SITE_USER" "$OASIS_USER"
+        changed "removed $OASIS_SITE_USER from the group $OASIS_USER (it must not read /etc/oasis)"
+      fi
+    else
+      run useradd --system --home-dir "$(real "$OASIS_SITE_STATE")" --shell /sbin/nologin --user-group "$OASIS_SITE_USER"
+      changed "created user $OASIS_SITE_USER (builds the public website; no access to /etc/oasis, the state or the instance role)"
+    fi
+  fi
+  ensure_dir "$OASIS_SITE_STATE" 0700 "$OASIS_SITE_USER:$OASIS_SITE_USER"
   ensure_dir "$SITE_ROOT" 0755 root:root
   ensure_dir "$SITE_ROOT/releases" 0755 root:root
   if [[ -n "$(readlink -e "$SITE_ROOT/current" 2>/dev/null || true)" ]]; then

@@ -412,6 +412,9 @@ names; the certificate needs DNS to point here):
    is 200, `curl -sI https://www.oasisautospanj.com/` is 301 to the apex, `curl -sI http://oasisautospanj.com/` is 301,
    `curl -s https://oasisautospanj.com/api/v1/public/hours` is the hours JSON, `curl -sI https://oasisautospanj.com/api/v1/customers` is 404.
 4. The mirror: `sudo git init --bare /opt/oasis/git/site.git && sudo chown -R root:root /opt/oasis/git && sudo chmod -R go-w /opt/oasis/git`.
+   The website is built by its own user `oasis-site` (no shell, not in the group oasis, home `/var/lib/oasis-site`), which
+   `install.sh --site-domain` creates; check `id oasis-site` (no `oasis` in its groups) and `sudo -u oasis-site test -r
+   /etc/oasis/common.env || echo isolated`.
    From then on `install.sh` is re-run with the same options whenever the kit's templates change (section 2), the `--site-*` ones included.
 
 **Publish and deploy** (as the operator, from the working copy in `~ec2-user/oasis/site`, like the application's mirrors):
@@ -419,16 +422,16 @@ names; the certificate needs DNS to point here):
 G="env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*"
 sudo $G git -C /opt/oasis/git/site.git fetch --quiet /home/ec2-user/oasis/site +main:main
 cd / && sudo $D/site-deploy.sh --dry-run      # the commit, the steps
-cd / && sudo $D/site-deploy.sh                # build as oasis, verify, switch, health-check (about a minute)
+cd / && sudo $D/site-deploy.sh                # build as oasis-site, copy and verify, switch, health-check (about a minute)
 ```
 It stops by itself when `current` already serves that commit (`--force` rebuilds; `--ref` names another branch, tag or commit of the
 mirror; `--skip-hours` builds without the hours snapshot). Watch for `verified dist/`, then `release <id> is live`. A build that fails
 or breaks the contract (missing 404.html, marker text absent, a localhost URL, an inline script ...) is kept in
 `/var/www/site/releases/<id>.failed` and nothing changes. A release that does not answer through nginx is switched back at once and
-kept as `.failed`; `previous` moves only when the new release is healthy, so after a failed deploy `--rollback` still goes to the
-release before. The reasons are in `/var/log/oasis/site-deploy.log` and `/var/log/nginx/oasis-site.error.log`. `--keep N` (default
-`SITE_KEEP=4`) releases plus current and previous stay; `--list` shows them (`<- current, previous` when both links name one release:
-use `--rollback --to <id>`).
+kept as `.failed` (`root:root 0700`: inspect with sudo); `previous` moves only when the new release is healthy, so after a failed
+deploy `--rollback` still goes to the release before. The reasons are in `/var/log/oasis/site-deploy.log` and
+`/var/log/nginx/oasis-site.error.log`. `--keep N` (default `SITE_KEEP=4`) releases plus current and previous stay; `--list` shows them
+(`<- current, previous` when both links name one release: use `--rollback --to <id>`).
 
 **Roll back:** `sudo $D/site-deploy.sh --rollback` (to `previous`; again to go forward) or `--rollback --to <release id>`; the same
 health check runs, exit 3 when it fails. Nothing is rebuilt and nginx is not reloaded: `current` is a symlink.
@@ -443,6 +446,12 @@ health check runs, exit 3 when it fails. Nothing is rebuilt and nginx is not rel
   redirecting; `site-deploy.sh --list` and `--rollback`.
 * `certbot renew --dry-run` covers both certificates (the dashboard's and the site's); the renewal hook reloads nginx.
 * "the mirror ... can be changed by users other than root": `sudo chown -R root:root /opt/oasis/git && sudo chmod -R go-w /opt/oasis/git`.
+* "there is no user oasis-site" or "the website build user oasis-site can read ...": re-run `install.sh` with the same options as last
+  time (it creates the user and its home and takes it out of the group oasis); `/etc/oasis` must stay `0750 root:oasis`.
+* "processes of oasis-site are still running after the build": `ps -u oasis-site`; the deploy stopped before taking the output
+  (nothing changed). `sudo pkill -KILL -u oasis-site` and run it again.
+* "hard link in the output" / "a file the build did not create": the build wrote something other than its own regular files into
+  `dist/`; fix the site repository (`releases/<id>.failed` shows what).
 
 ### The host cannot resolve its own new name (health check: "answered HTTP 000")
 

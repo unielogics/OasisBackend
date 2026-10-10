@@ -6,15 +6,20 @@
 #   2. the mirror (/opt/oasis/git/site.git) must be owned by root with nothing writable by group or others, or nothing runs:
 #      root reads the commit from it and exports it with git archive. --ref names a branch, tag or commit of the mirror (default main)
 #   3. nothing to do when <site root>/current already runs that commit (--force builds anyway)
-#   4. the tree goes into <site root>/releases/<id>.partial/src, owned by the oasis user, which builds it there:
-#      pnpm install --frozen-lockfile && pnpm build, with SITE_URL=https://<domain> and SITE_HOURS_JSON=<a snapshot of the API's
-#      /api/v1/public/hours on this host, fetched just before; --skip-hours or an API that does not answer: no snapshot, a warning>
-#   5. the build's dist/ is verified before anything is served: index.html and 404.html present, index larger than 1 KB and
-#      containing the marker text, no localhost/loopback or development-port URL in any html/js/css, no inline <script> (the
-#      Content-Security-Policy allows none; JSON-LD data blocks are not scripts), no symbolic link, no file over 25 MB, total between
-#      50 KB and 200 MB. A failure keeps the build in <id>.failed and changes nothing
-#   6. dist/ becomes <site root>/releases/<id> with a REVISION record (site=<commit>, built=<time>, hours=<fetched|skipped|unavailable>),
-#      owned by root, read-only for everyone (nginx reads it); the sources and node_modules are removed
+#   4. the tree goes into <site root>/releases/<id>.partial/src: <id>.partial is root's, src (only) belongs to the website build user
+#      oasis-site (not oasis: no access to /etc/oasis, the app's state or backups, rejected by the metadata guard), which builds it there
+#      with an environment of its own (env -i): pnpm install --frozen-lockfile && pnpm build, HOME=/var/lib/oasis-site,
+#      SITE_URL=https://<domain> and SITE_HOURS_JSON=<a snapshot of the API's /api/v1/public/hours on this host, fetched just before by
+#      root into the root-owned <id>.partial; --skip-hours or an API that does not answer: no snapshot, a warning>
+#   5. then every process of oasis-site is killed and <id>.partial becomes root-only (0700): nothing can change the build tree any more.
+#      Root copies dist/ out of it (cp -R -P: links are copied as links, never followed) into a fresh directory of its own, refusing a
+#      hard link or a file the build user does not own, and verifies THE COPY before anything is served: index.html and 404.html present,
+#      index larger than 1 KB and containing the marker text, no localhost/loopback or development-port URL in any html/js/css, no inline
+#      <script> (the Content-Security-Policy allows none; JSON-LD data blocks are not scripts), no symbolic link or special file, no file
+#      over 25 MB, total between 50 KB and 200 MB. A failure keeps the build in <id>.failed (root-only) and changes nothing
+#   6. the copy becomes <site root>/releases/<id> with a REVISION record (site=<commit>, built=<time>, hours=<fetched|skipped|unavailable>),
+#      owned by root, read-only for everyone (nginx reads it); the build tree (sources, node_modules) is removed. Root never writes into,
+#      changes the mode of or renames anything in the build user's tree
 #   7. current -> the new release (atomic). No nginx reload: it follows the link
 #   8. health, through nginx on this host: https://<domain>/ answers 200 with the marker, https://www.<domain>/ answers 301 to the apex,
 #      /api/v1/public/hours answers 200 (a warning only: the site works without live hours). Healthy: previous -> the release before.
@@ -22,7 +27,8 @@
 #   9. keeps SITE_KEEP releases (default 4) plus current and previous, and 2 failed builds
 # --rollback: current -> previous (or --to ID), the same health check (exit 3 when it fails). --list: the releases.
 # Run as root from the root-owned kit: sudo /usr/local/lib/oasis/deploy/scripts/site-deploy.sh. One at a time (a lock).
-# SITE_HEALTH_CMD, SITE_HOURS_URL, OASIS_RUN_AS, OASIS_CHOWN and OASIS_KIT_TRUST_UID replace the commands it calls (the tests use them).
+# SITE_HEALTH_CMD, SITE_HOURS_URL, OASIS_SITE_RUN_AS, OASIS_SITE_REAP_CMD, OASIS_CHOWN and OASIS_KIT_TRUST_UID replace the commands it
+# calls, OASIS_SITE_BUILD_ENV_PASS names variables to pass into the build, OASIS_SITE_CHECK_ISOLATION=1 forces the isolation check (tests).
 set -euo pipefail
 OASIS_HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../lib/common.sh
@@ -153,7 +159,7 @@ if [[ "$DRY_RUN" != 1 ]]; then exec > >(tee -a "$OASIS_LOG_DIR/site-deploy.log")
 if ! running_from_kit "$OASIS_HERE"; then
   warn "running $OASIS_HERE/site-deploy.sh, not the root-owned kit in $OASIS_KIT_DIR: run $(printf '%s' "${OASIS_KIT_DIR#"$OASIS_ROOT_PREFIX"}")/scripts/site-deploy.sh (deploy.sh installs it)"
 fi
-# the site root and its releases belong to root: the oasis user builds inside <id>.partial only (ADR 0145)
+# the site root and its releases belong to root: the website build user builds inside <id>.partial/src only (ADR 0145)
 if [[ "$DRY_RUN" != 1 ]]; then
   for d in "$SITE_ROOT" "$RELEASES"; do
     root_own root:root "$d"
@@ -220,25 +226,106 @@ PART="$REL.partial"
 log "release $ID"
 
 PART_ACTIVE=0
+BUILD_STARTED=0
+REAPED=0
 on_exit() {
+  if ((BUILD_STARTED && !REAPED)); then site_reap || warn "processes of $SITE_USER may still be running: ps -u $SITE_USER"; fi
   if ((PART_ACTIVE)) && [[ "$DRY_RUN" != 1 && -d "$PART" ]]; then
-    mv "$PART" "$REL.failed" 2>/dev/null && log "kept the unfinished build in $REL.failed for inspection"
+    chmod 0700 "$PART" 2>/dev/null || true
+    mv "$PART" "$REL.failed" 2>/dev/null && log "kept the unfinished build in $REL.failed for inspection (root only)"
   fi
 }
 trap on_exit EXIT
 trap 'log "interrupted"; exit 130' INT TERM
 
-# --- 3. export and build as the oasis user ------------------------------------------------------------------------------------------
+# --- 3. the build user ----------------------------------------------------------------------------------------------------------------
+# The site repository's dependencies run during the build. They run as oasis-site, which owns $PART/src and nothing else of this host
+# that matters: not oasis (whose files hold the production secrets and which the metadata guard lets reach the instance role), not in
+# its group, its own home. As root on a real host the build goes through runuser; OASIS_SITE_RUN_AS replaces that (the tests).
+SITE_USER=$OASIS_SITE_USER
+SITE_HOME=$OASIS_SITE_STATE
+SITE_SEPARATE=0
+if [[ -z "${OASIS_SITE_RUN_AS+x}" ]]; then
+  if [[ "$(id -u)" == 0 && "$NO_SYSTEM" != 1 ]]; then
+    OASIS_SITE_RUN_AS="runuser -u $SITE_USER --"
+    SITE_SEPARATE=1
+  else
+    OASIS_SITE_RUN_AS=""
+  fi
+fi
+as_site() {
+  if [[ -n "$OASIS_SITE_RUN_AS" ]]; then
+    # shellcheck disable=SC2086
+    run $OASIS_SITE_RUN_AS "$@"
+  else
+    run "$@"
+  fi
+}
+# as_site_read CMD...: as_site, also in a dry run (for the checks, which change nothing)
+as_site_read() {
+  if [[ -n "$OASIS_SITE_RUN_AS" ]]; then
+    # shellcheck disable=SC2086
+    $OASIS_SITE_RUN_AS "$@"
+  else
+    "$@"
+  fi
+}
+# site_reap: no process of the build user outlives the build (a dependency could leave one behind to change the output after root
+# looked at it, or the next build). Every process of that user is killed, until none is left.
+site_reap() {
+  REAPED=1
+  if [[ -n "${OASIS_SITE_REAP_CMD:-}" ]]; then
+    # shellcheck disable=SC2086
+    $OASIS_SITE_REAP_CMD "$SITE_USER"
+    return
+  fi
+  ((SITE_SEPARATE)) || return 0
+  local i
+  for ((i = 0; i < 50; i++)); do
+    pgrep -U "$SITE_USER" >/dev/null 2>&1 || pgrep -u "$SITE_USER" >/dev/null 2>&1 || return 0
+    pkill -KILL -U "$SITE_USER" 2>/dev/null || true
+    pkill -KILL -u "$SITE_USER" 2>/dev/null || true
+    sleep 0.2
+  done
+  return 1
+}
+if ((SITE_SEPARATE)); then
+  site_uid=$(id -u "$SITE_USER" 2>/dev/null) || die "there is no user $SITE_USER, which builds the website: re-run install.sh with the same options as last time (--site-domain creates it)"
+  [[ "$site_uid" != 0 && "$site_uid" != "$(id -u "$OASIS_USER" 2>/dev/null || echo -1)" ]] || die "$SITE_USER must be its own unprivileged user, not root or $OASIS_USER"
+  if [[ " $(id -nG "$SITE_USER") " == *" $OASIS_USER "* ]]; then
+    die "$SITE_USER is in the group $OASIS_USER, which can read /etc/oasis: sudo gpasswd -d $SITE_USER $OASIS_USER"
+  fi
+  [[ -d "$SITE_HOME" ]] || die "$SITE_HOME (the home of $SITE_USER) is missing: re-run install.sh with the same options as last time"
+  have pgrep && have pkill || die "pgrep/pkill are missing (dnf install procps-ng): the build user's processes could not be stopped after the build"
+else
+  site_uid=$(id -u)
+fi
+# The isolation check: the build user must not be able to read the app's configuration files or enter its state and backups.
+if ((SITE_SEPARATE)) || [[ "${OASIS_SITE_CHECK_ISOLATION:-0}" == 1 ]]; then
+  guarded=()
+  while IFS= read -r f; do guarded+=("$f"); done < <(find "$OASIS_ETC" -maxdepth 1 -type f \( -name '*.env' -o -name '*.env.bak-*' -o -name '*.key' -o -name "$AWS_CREDENTIALS_FILE_NAME" \) ! -name site.env 2>/dev/null | sort)
+  guarded+=("$OASIS_STATE" "$OASIS_BACKUP_DIR")
+  # shellcheck disable=SC2016
+  exposed=$(as_site_read bash -c 'for p; do if { [ -f "$p" ] && [ -r "$p" ]; } || { [ -d "$p" ] && [ -x "$p" ]; }; then printf "%s\n" "$p"; fi; done' _ "${guarded[@]}") ||
+    die "could not run a command as $SITE_USER"
+  [[ -z "$exposed" ]] || die "the website build user $SITE_USER can read (or enter) $(tr '\n' ' ' <<<"$exposed")and must not: its builds run third-party code. Re-run install.sh --site-domain with the same options as last time; /etc/oasis must be 0750 root:$OASIS_USER, /var/lib/oasis 0750 and $SITE_USER outside the group $OASIS_USER"
+fi
+
+# --- 4. export and build as the build user ------------------------------------------------------------------------------------------
 if [[ "$DRY_RUN" == 1 ]]; then
-  log "would export ${SHA:0:12} into $PART/src, fetch the hours snapshot, build as $OASIS_USER (pnpm install --frozen-lockfile && pnpm build), verify $SITE_BUILD_DIR/, make it $REL and point $SITE_ROOT/current at it, then health-check https://$SITE_DOMAIN/"
+  log "would export ${SHA:0:12} into $PART/src, fetch the hours snapshot, build as $SITE_USER (pnpm install --frozen-lockfile && pnpm build), stop its processes, copy and verify $SITE_BUILD_DIR/, make the copy $REL and point $SITE_ROOT/current at it, then health-check https://$SITE_DOMAIN/"
   exit 0
 fi
-run mkdir -p "$PART/src"
+# $PART is root's (the build user cannot create, replace or rename anything in it); only $PART/src is handed over
+mkdir -m 0755 "$PART"
 PART_ACTIVE=1
-chown "$OASIS_USER:$OASIS_USER" "$PART" "$PART/src" 2>/dev/null || true
-mirror_git archive "$SHA" | as_oasis tar -x -C "$PART/src"
+root_own root:root "$PART"
+mkdir -m 0755 "$PART/src"
+root_own "$SITE_USER:$SITE_USER" "$PART/src"
+mirror_git archive "$SHA" | as_site tar -x -C "$PART/src"
 
-# the hours snapshot: the API on this host (api.env's PORT), so the first paint shows today's hours even before the browser asks
+# the hours snapshot: the API on this host (api.env's PORT), so the first paint shows today's hours even before the browser asks.
+# Written by root into the root-owned $PART, readable by the build.
 HOURS_FILE="$PART/hours.json"
 HOURS=skipped
 if ((SKIP_HOURS)); then
@@ -257,56 +344,95 @@ else
   fi
 fi
 
-log "building the website as $OASIS_USER"
-build_env=()
-[[ "$HOURS" == fetched ]] || build_env+=(-u SITE_HOURS_JSON) # (env options come before the assignments)
-build_env+=(HOME="$OASIS_STATE" CI=1 NODE_OPTIONS=--max-old-space-size=2048 SITE_URL="https://$SITE_DOMAIN")
-[[ "$HOURS" != fetched ]] || build_env+=(SITE_HOURS_JSON="$HOURS_FILE")
-as_oasis env "${build_env[@]}" bash -c 'cd "$1" && pnpm install --frozen-lockfile && pnpm build' _ "$PART/src" || die "the website build failed; nothing was changed. The build is kept in $REL.failed for inspection"
+log "building the website as $SITE_USER"
+# nothing of root's environment reaches the build (an AWS identity, the secret's name ...): only what the build contract names
+build_env=(-i "PATH=$PATH" "HOME=$SITE_HOME" CI=1 NODE_OPTIONS=--max-old-space-size=2048 "SITE_URL=https://$SITE_DOMAIN")
+for v in LANG LC_ALL TZ HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy ${OASIS_SITE_BUILD_ENV_PASS:-}; do
+  [[ "$v" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "OASIS_SITE_BUILD_ENV_PASS: $v is not a variable name"
+  [[ -z "${!v+x}" ]] || build_env+=("$v=${!v}")
+done
+[[ "$HOURS" != fetched ]] || build_env+=("SITE_HOURS_JSON=$HOURS_FILE")
+BUILD_STARTED=1
+build_rc=0
+as_site env "${build_env[@]}" bash -c 'cd "$1" && pnpm install --frozen-lockfile && pnpm build' _ "$PART/src" || build_rc=$?
+# from here on nothing of the build user runs, and nothing new can reach the build tree: $PART is root's and becomes 0700
+site_reap || die "processes of $SITE_USER are still running after the build (ps -u $SITE_USER); nothing was changed. The build is kept in $REL.failed"
+chmod 0700 "$PART"
+((build_rc == 0)) || die "the website build failed; nothing was changed. The build is kept in $REL.failed for inspection"
 
-# --- 4. verify the output before anything is served ---------------------------------------------------------------------------------
-DIST="$PART/src/$SITE_BUILD_DIR"
+# --- 5. copy the output out of the build tree, then verify the copy ----------------------------------------------------------------------
+# Root reads the build tree but never writes into it, changes a mode in it or follows a link in it: cp -R -P copies a symbolic link as
+# a link (refused below), and the copy is a fresh directory inside the root-only $PART.
+BUILT="$PART/src/$SITE_BUILD_DIR"
+STAGE="$PART/release"
+take_problems=()
+if [[ -L "$BUILT" || ! -d "$BUILT" ]]; then
+  take_problems+=("no $SITE_BUILD_DIR/ directory")
+else
+  hits=$(find "$BUILT" -type f -links +1 -print -quit)
+  [[ -z "$hits" ]] || take_problems+=("hard link in the output: $hits")
+  hits=$(find "$BUILT" ! -uid "$site_uid" -print -quit)
+  [[ -z "$hits" ]] || take_problems+=("a file the build did not create (not owned by $SITE_USER): $hits")
+  hits=$(find "$BUILT" ! -type f ! -type d ! -type l -print -quit)
+  [[ -z "$hits" ]] || take_problems+=("not a regular file or directory: $hits")
+  # the size bound before the copy too (apparent size: a sparse file counts in full), so the copy cannot fill the disk
+  total=$(du -sb "$BUILT" | cut -f1)
+  ((total <= 200 * 1024 * 1024)) || take_problems+=("total size ${total} bytes is above 200 MB")
+fi
+if ((${#take_problems[@]} == 0)); then
+  cp -R -P --preserve=timestamps -- "$BUILT" "$STAGE" || take_problems+=("copying $SITE_BUILD_DIR/ failed")
+fi
+if ((${#take_problems[@]})); then
+  die "the build's $SITE_BUILD_DIR/ is not a deployable site:
+$(printf '  - %s\n' "${take_problems[@]}")
+Nothing was changed; the build is kept in $REL.failed for inspection"
+fi
+
 verify_dist() {
-  local problems=() total big
-  [[ -d "$DIST" ]] || { problems+=("no $SITE_BUILD_DIR/ directory"); printf '%s\n' "${problems[@]}"; return 1; }
-  [[ -f "$DIST/index.html" ]] || problems+=("index.html is missing")
-  [[ -f "$DIST/404.html" ]] || problems+=("404.html is missing")
-  if [[ -f "$DIST/index.html" ]]; then
-    (($(stat -c %s "$DIST/index.html") > 1024)) || problems+=("index.html is smaller than 1 KB")
-    [[ -z "$SITE_MARKER" ]] || grep -qF -- "$SITE_MARKER" "$DIST/index.html" || problems+=("index.html does not contain the marker text '$SITE_MARKER'")
+  local d=$1 problems=() total big
+  [[ -d "$d" ]] || { problems+=("no $SITE_BUILD_DIR/ directory"); printf '%s\n' "${problems[@]}"; return 1; }
+  [[ -f "$d/index.html" ]] || problems+=("index.html is missing")
+  [[ -f "$d/404.html" ]] || problems+=("404.html is missing")
+  if [[ -f "$d/index.html" ]]; then
+    (($(stat -c %s "$d/index.html") > 1024)) || problems+=("index.html is smaller than 1 KB")
+    [[ -z "$SITE_MARKER" ]] || grep -qF -- "$SITE_MARKER" "$d/index.html" || problems+=("index.html does not contain the marker text '$SITE_MARKER'")
   fi
   local hits
   # development addresses and ports in anything the browser runs: a build that kept its local API origin would break on the host
-  hits=$(grep -rElI --include='*.html' --include='*.js' --include='*.mjs' --include='*.css' -e 'localhost' -e '127\.0\.0\.1' -e '0\.0\.0\.0' -e '//[A-Za-z0-9.-]+:(3000|4000|4321)([^0-9]|$)' "$DIST" 2>/dev/null | head -n 5 || true)
+  hits=$(grep -rElI --include='*.html' --include='*.js' --include='*.mjs' --include='*.css' -e 'localhost' -e '127\.0\.0\.1' -e '0\.0\.0\.0' -e '//[A-Za-z0-9.-]+:(3000|4000|4321)([^0-9]|$)' "$d" 2>/dev/null | head -n 5 || true)
   [[ -z "$hits" ]] || problems+=("development address or port (localhost, 127.0.0.1, 0.0.0.0, :3000, :4000, :4321) in: $(tr '\n' ' ' <<<"$hits")")
   # every <script> must come from a file (the policy allows no inline script); a JSON-LD data block is not a script
-  hits=$(grep -rhoI --include='*.html' -e '<script[^>]*>' "$DIST" 2>/dev/null | grep -Ev 'src=|type="application/ld\+json"' | head -n 3 || true)
+  hits=$(grep -rhoI --include='*.html' -e '<script[^>]*>' "$d" 2>/dev/null | grep -Ev 'src=|type="application/ld\+json"' | head -n 3 || true)
   [[ -z "$hits" ]] || problems+=("inline <script> in the HTML (the Content-Security-Policy allows none): $(tr '\n' ' ' <<<"$hits")")
-  hits=$(find "$DIST" -type l -print -quit)
+  hits=$(find "$d" -type l -print -quit)
   [[ -z "$hits" ]] || problems+=("symbolic link in the output: $hits")
-  big=$(find "$DIST" -type f -size +25M -print -quit)
+  hits=$(find "$d" ! -type f ! -type d ! -type l -print -quit)
+  [[ -z "$hits" ]] || problems+=("not a regular file or directory: $hits")
+  big=$(find "$d" -type f -size +25M -print -quit)
   [[ -z "$big" ]] || problems+=("file over 25 MB: $big")
-  total=$(du -sb "$DIST" | cut -f1)
+  total=$(du -sb "$d" | cut -f1)
   ((total >= 50 * 1024)) || problems+=("total size ${total} bytes is below 50 KB")
   ((total <= 200 * 1024 * 1024)) || problems+=("total size ${total} bytes is above 200 MB")
   ((${#problems[@]} == 0)) || { printf '%s\n' "${problems[@]}"; return 1; }
 }
-if ! problems=$(verify_dist); then
+if ! problems=$(verify_dist "$STAGE"); then
   die "the build's $SITE_BUILD_DIR/ is not a deployable site:
 $(sed 's/^/  - /' <<<"$problems")
 Nothing was changed; the build is kept in $REL.failed for inspection"
 fi
-ok "verified $SITE_BUILD_DIR/ ($(du -sh "$DIST" | cut -f1), $(find "$DIST" -type f | wc -l) files)"
+ok "verified $SITE_BUILD_DIR/ ($(du -sh "$STAGE" | cut -f1), $(find "$STAGE" -type f | wc -l) files)"
 
-# --- 5. the release: root-owned, read-only, world-readable; the sources are not kept -----------------------------------------------------
-mv "$DIST" "$REL"
+# --- 6. the release: root-owned, read-only, world-readable; the build tree is not kept ----------------------------------------------------
+# (the copy holds only directories and regular files, checked above: nothing here can lead outside it)
+printf 'site=%s\nbuilt=%s\nhours=%s\n' "$SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$HOURS" >"$STAGE/REVISION"
+find "$STAGE" -type d -exec chmod 0755 {} +
+find "$STAGE" -type f -exec chmod 0644 {} +
+mv -T "$STAGE" "$REL"
 PART_ACTIVE=0
 rm -rf -- "$PART"
-printf 'site=%s\nbuilt=%s\nhours=%s\n' "$SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$HOURS" >"$REL/REVISION"
 root_own -R root:root "$REL"
-chmod -R u=rwX,go=rX "$REL"
 
-# --- 6. switch (no nginx reload: it reads through the link) and health ------------------------------------------------------------------
+# --- 7. switch (no nginx reload: it reads through the link) and health ------------------------------------------------------------------
 # previous moves only once the new release is healthy: a release that is switched back leaves previous where it was, so --rollback
 # still goes to the release before
 site_link current "$REL"
@@ -328,7 +454,7 @@ else
   exit 1
 fi
 
-# --- 7. housekeeping -------------------------------------------------------------------------------------------------------------------
+# --- 8. housekeeping -------------------------------------------------------------------------------------------------------------------
 cur=$(site_current)
 prev=$(site_previous)
 i=0

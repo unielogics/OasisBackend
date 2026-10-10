@@ -10,6 +10,7 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
+  chmodSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -460,6 +461,43 @@ describe('install.sh --site-domain: the rendered website', () => {
     expect(existsSync(path.join(t.dir, 'etc/nginx/conf.d/oasis-site.conf'))).toBe(true)
   })
 
+  it('creates the website build user: its own system user and group, no shell, its own home (0700), never in the oasis group', async () => {
+    // the staged run: the home exists, private
+    const home = path.join(stage.root, 'var/lib/oasis-site')
+    expect(statSync(home).isDirectory()).toBe(true)
+    expect((statSync(home).mode & 0o777).toString(8)).toBe('700')
+    // a dry run on a host without that user plans exactly this (an id stand-in: the user does not exist; oasis does)
+    const t = tempDir('oasis-builduser-')
+    cleanups.push(t.cleanup)
+    const bin = path.join(t.dir, 'bin')
+    writeExecutable(
+      path.join(bin, 'id'),
+      `#!/usr/bin/env bash\ncase " $* " in *" oasis-site "*) [ -e "$ID_STATE/site" ] || exit 1; [ "$1" = -nG ] && { echo "oasis-site $ID_GROUPS"; exit 0; }; echo 990; exit 0 ;; *" oasis "*) echo 992; exit 0 ;; esac\nexec /usr/bin/id "$@"\n`,
+    )
+    const env = { OASIS_ROOT_PREFIX: path.join(t.dir, 'root'), PATH: `${bin}:${process.env.PATH}`, ID_STATE: t.dir }
+    const args = ['--domain', 'oasis.example.com', '--site-domain', SITE, '--dry-run']
+    const dry = await sh(script('install.sh'), args, env)
+    expect(dry.code, dry.out).toBe(0)
+    expect(dry.out).toContain(
+      '+ useradd --system --home-dir /var/lib/oasis-site --shell /sbin/nologin --user-group oasis-site\n',
+    )
+    expect(dry.out).toContain(`+ chmod 0700 ${env.OASIS_ROOT_PREFIX}/var/lib/oasis-site\n`)
+    expect(dry.out).toContain(`+ chown oasis-site:oasis-site ${env.OASIS_ROOT_PREFIX}/var/lib/oasis-site\n`)
+    expect(dry.out).not.toMatch(/usermod|gpasswd -a|-G oasis/)
+    // idempotent: an existing user is left alone; one that was put into the oasis group is taken out of it
+    writeFileSync(path.join(t.dir, 'site'), '')
+    const again = await sh(script('install.sh'), args, env)
+    expect(again.code, again.out).toBe(0)
+    expect(again.out).toMatch(/ok\s+user oasis-site exists/)
+    expect(again.out).not.toMatch(/useradd .*oasis-site/)
+    const grouped = await sh(script('install.sh'), args, { ...env, ID_GROUPS: 'wheel oasis' })
+    expect(grouped.code, grouped.out).toBe(0)
+    expect(grouped.out).toContain('+ gpasswd -d oasis-site oasis\n')
+    // without --site-domain there is no such user
+    const plain = await sh(script('install.sh'), ['--domain', 'oasis.example.com', '--dry-run'], { ...env, ID_STATE: path.join(t.dir, 'none') })
+    expect(plain.out).not.toMatch(/oasis-site/)
+  })
+
   it('rejects a www name, the dashboard name, a missing certificate pair, and a dry run creates nothing', async () => {
     const t = tempDir('oasis-site-bad-')
     cleanups.push(t.cleanup)
@@ -846,7 +884,7 @@ async function makeSiteWorld(): Promise<SiteWorld> {
   writeExecutable(
     path.join(bin, 'pnpm'),
     `#!/usr/bin/env bash
-echo "pnpm $* cwd=$(basename "$PWD") uid=$(id -u) HOME=$HOME CI=$CI SITE_URL=\${SITE_URL-unset} SITE_HOURS_JSON=\${SITE_HOURS_JSON-unset} NODE_OPTIONS=\${NODE_OPTIONS-unset}" >> "$SHIM_LOG"
+echo "pnpm $* cwd=$(basename "$PWD") uid=$(id -u) HOME=$HOME CI=$CI SITE_URL=\${SITE_URL-unset} SITE_HOURS_JSON=\${SITE_HOURS_JSON-unset} NODE_OPTIONS=\${NODE_OPTIONS-unset} AWS=\${AWS_ACCESS_KEY_ID-unset} SECRET=\${OASIS_SECRET_ID-unset}" >> "$SHIM_LOG"
 case "$*" in
   "install --frozen-lockfile") ;;
   "build")
@@ -863,7 +901,10 @@ case "$*" in
     echo 'console.log(1)' > dist/assets/app.js
     [ -e "$SHIM_STATE/dev-port" ] && echo 'fetch("http://127.0.0.1:4000/api/v1/public/hours")' > dist/assets/app.js
     [ -e "$SHIM_STATE/symlink" ] && ln -s /etc/passwd dist/assets/passwd
+    [ -e "$SHIM_STATE/evil-dirlink" ] && ln -s "$OUTSIDE/certs" dist/assets/certs
+    [ -e "$SHIM_STATE/evil-hardlink" ] && ln "$OUTSIDE/notes.txt" dist/assets/notes.txt
     [ -e "$SHIM_STATE/big-file" ] && truncate -s 26M dist/assets/huge.bin
+    [ -e "$SHIM_STATE/huge-total" ] && truncate -s 300M dist/assets/sparse.bin
     [ -e "$SHIM_STATE/tiny-total" ] || head -c 65536 /dev/zero > dist/assets/vendor.js
     echo "built $(git -C . rev-parse --short HEAD 2>/dev/null || cat VERSION)" > dist/assets/build.txt
     ;;
@@ -882,6 +923,71 @@ exit 0
 `,
   )
   writeExecutable(path.join(bin, 'chown'), `#!/usr/bin/env bash\necho "chown $*" >> "$SHIM_LOG"\n`)
+  writeExecutable(path.join(bin, 'reap.sh'), `#!/usr/bin/env bash\necho "reap $*" >> "$SHIM_LOG"\n`)
+
+  // The build user's code acting outside the build, the way a compromised dependency could (a process the build left behind). It
+  // only touches what that user could: a directory some logged chown handed to a non-root owner (and nothing gave back to root),
+  // and everything below it. Everything here runs as one uid, so the chown log stands in for the permissions.
+  const outside = path.join(root, 'outside')
+  mkdirSync(path.join(outside, 'certs'), { recursive: true })
+  for (const [f, body] of [
+    ['certs/privkey.pem', 'PRIVATE KEY\n'],
+    ['hours-target', 'ROOT FILE\n'],
+    ['notes.txt', 'NOTES\n'],
+  ] as const) {
+    writeFileSync(path.join(outside, f), body)
+    chmodSync(path.join(outside, f), 0o600)
+  }
+  writeExecutable(
+    path.join(bin, 'evil.sh'),
+    `#!/usr/bin/env bash
+# evil.sh early|late: early = while root prepares the build (before the hours snapshot); late = after root verified dist/
+builder_owns() {
+  local p=$1 verdict=no line a owner
+  while read -r line; do
+    set -- $line; shift
+    while [[ $1 == -* ]]; do shift; done
+    owner=$1; shift
+    for a in "$@"; do
+      if [[ $p == "$a" || $p == "$a"/* ]]; then if [[ $owner == root:* ]]; then verdict=no; else verdict=yes; fi; fi
+    done
+  done < <(grep '^chown ' "$SHIM_LOG")
+  [[ $verdict == yes ]]
+}
+for part in "$SITE_ROOT"/releases/*.partial; do
+  [ -d "$part" ] || continue
+  case "$1" in
+    early)
+      if [ -e "$SHIM_STATE/evil-hours" ] && builder_owns "$part/hours.json"; then
+        ln -s "$OUTSIDE/hours-target" "$part/hours.json" && echo "evil planted $part/hours.json" >> "$SHIM_LOG"
+      fi ;;
+    late)
+      d="$part/src/dist"
+      [ -d "$d" ] && [ ! -L "$d" ] || continue
+      if [ -e "$SHIM_STATE/evil-revision" ] && builder_owns "$d/REVISION"; then
+        ln -s "$OUTSIDE/revision-target" "$d/REVISION" && echo "evil planted $d/REVISION" >> "$SHIM_LOG"
+      fi
+      if [ -e "$SHIM_STATE/evil-swap" ] && builder_owns "$d"; then
+        mv "$d" "$part/src/dist.real" && ln -s "$OUTSIDE/certs" "$d" && echo "evil swapped $d" >> "$SHIM_LOG"
+      fi ;;
+  esac
+done
+exit 0
+`,
+  )
+  // du: the size root reports once dist/ is verified (du -sh): the moment a left-behind process would strike
+  writeExecutable(
+    path.join(bin, 'du'),
+    `#!/usr/bin/env bash
+[ "$1" = -sh ] && "$(dirname "$0")/evil.sh" late
+PATH=\${PATH#"$(dirname "$0"):"} exec du "$@"
+`,
+  )
+  // the service-user wrapper: the build user's code also runs whenever root runs something as that user
+  writeExecutable(
+    path.join(bin, 'runas-site.sh'),
+    `#!/usr/bin/env bash\necho "runas-site $1" >> "$SHIM_LOG"\n"$(dirname "$0")/evil.sh" early\nexec "$@"\n`,
+  )
 
   // the mirror: a bare repository only "root" (this uid) can write, fed from a working copy
   const work = path.join(root, 'work')
@@ -905,7 +1011,11 @@ exit 0
   const env = {
     OASIS_ROOT_PREFIX: root,
     OASIS_ALLOW_NONROOT: '1',
-    OASIS_RUN_AS: '',
+    OASIS_RUN_AS: path.join(bin, 'runas-site.sh'),
+    OASIS_SITE_RUN_AS: path.join(bin, 'runas-site.sh'),
+    OASIS_SITE_REAP_CMD: path.join(bin, 'reap.sh'),
+    OASIS_SITE_BUILD_ENV_PASS: 'SHIM_LOG SHIM_STATE OUTSIDE',
+    OUTSIDE: outside,
     OASIS_CHOWN: path.join(bin, 'chown'),
     OASIS_KIT_TRUST_UID: String(process.getuid!()),
     SITE_HEALTH_CMD: path.join(bin, 'site-health.sh'),
@@ -982,7 +1092,7 @@ describe('site-deploy.sh', () => {
     // the build ran in the staging directory as the service user, with the documented environment; the release is root's, read-only
     const build = w.log().find((l) => l.startsWith('pnpm build'))!
     expect(build).toMatch(
-      /cwd=src uid=\d+ HOME=\S+\/var\/lib\/oasis CI=1 SITE_URL=https:\/\/example\.com SITE_HOURS_JSON=\S+\.partial\/hours\.json NODE_OPTIONS=--max-old-space-size=2048/,
+      /cwd=src uid=\d+ HOME=\S+\/var\/lib\/oasis-site CI=1 SITE_URL=https:\/\/example\.com SITE_HOURS_JSON=\S+\.partial\/hours\.json NODE_OPTIONS=--max-old-space-size=2048/,
     )
     expect(w.log().filter((l) => l.startsWith('pnpm'))).toEqual([
       expect.stringMatching(/^pnpm install --frozen-lockfile cwd=src/),
@@ -1038,6 +1148,7 @@ describe('site-deploy.sh', () => {
       ['symlink', /symbolic link in the output: \S+passwd/],
       ['big-file', /file over 25 MB: \S+huge\.bin/],
       ['tiny-total', /total size \d+ bytes is below 50 KB/],
+      ['huge-total', /total size \d+ bytes is above 200 MB/],
     ]
     for (const [flag, message] of cases) {
       w.flag(flag)
@@ -1053,6 +1164,9 @@ describe('site-deploy.sh', () => {
       ).toHaveLength(1) // never health-checked
     }
     expect(w.releases().filter((r) => r.endsWith('.failed'))).toHaveLength(cases.length)
+    // an output over the size bound is refused before root copies it (a sparse file counts in full: the copy cannot fill the disk)
+    for (const f of w.releases().filter((r) => r.endsWith('.failed')))
+      expect(existsSync(path.join(w.siteRoot, 'releases', f, 'release/assets/sparse.bin')), f).toBe(false)
     expect(w.releases().filter((r) => r.endsWith('.partial'))).toEqual([])
     // a JSON-LD data block is not an inline script; a deploy that goes live keeps at most two failed builds
     w.flag('jsonld')
@@ -1203,15 +1317,38 @@ describe('site-deploy.sh', () => {
     expect(tree(w.siteRoot)).toEqual(before)
   }, 90_000)
 
-  it('the build and the export run through the service-user wrapper, never as the caller', async () => {
+  it('the export and the build run as the website build user (not oasis), with its own home and only the build environment', async () => {
     const w = await makeSiteWorld()
-    const runas = path.join(w.root, 'shims/runas.sh')
-    writeExecutable(runas, `#!/usr/bin/env bash\necho "runas $1" >> "$SHIM_LOG"\nexec "$@"\n`)
-    const r = await sh(script('site-deploy.sh'), [], { ...w.env, OASIS_RUN_AS: runas })
+    const runasOasis = path.join(w.root, 'shims/runas-oasis.sh')
+    writeExecutable(runasOasis, `#!/usr/bin/env bash\necho "runas-oasis $1" >> "$SHIM_LOG"\nexec "$@"\n`)
+    // what root's environment holds never reaches the build (the AWS identity, the secret's name)
+    const r = await sh(script('site-deploy.sh'), [], {
+      ...w.env,
+      OASIS_RUN_AS: runasOasis,
+      AWS_ACCESS_KEY_ID: 'AKIAROOTSKEY',
+      OASIS_SECRET_ID: 'oasis/prod/app',
+    })
     expect(r.code, r.out).toBe(0)
-    const wrapped = w.log().filter((l) => l.startsWith('runas '))
-    expect(wrapped).toEqual(['runas tar', 'runas env'])
-    expect(w.log().filter((l) => l.startsWith('pnpm'))).toHaveLength(2)
+    expect(w.log().filter((l) => l.startsWith('runas-oasis'))).toEqual([])
+    expect(w.log().filter((l) => l.startsWith('runas-site'))).toEqual(['runas-site tar', 'runas-site env'])
+    const build = w.log().find((l) => l.startsWith('pnpm build'))!
+    expect(build).toMatch(/HOME=\S+\/var\/lib\/oasis-site CI=1 /)
+    expect(build).toMatch(/ AWS=unset SECRET=unset/)
+    // only the build directory is handed to that user; the leftovers of the build are stopped before root takes the output
+    expect(w.log().filter((l) => l.startsWith('chown') && !/ root:root /.test(l))).toEqual([
+      expect.stringMatching(/^chown -h oasis-site:oasis-site \S+\.partial\/src$/),
+    ])
+    const order = w.log().map((l) => l.split(' ')[0])
+    expect(order.indexOf('reap')).toBeGreaterThan(order.lastIndexOf('pnpm'))
+    expect(w.log()).toContain('reap oasis-site')
+    expect(order.indexOf('reap')).toBeLessThan(order.indexOf('site-health'))
+    expect(r.out).toMatch(/building the website as oasis-site/)
+    // a failed build is reaped too
+    w.clearLog()
+    w.flag('fail-build')
+    expect((await w.deploy('--force')).code).toBe(1)
+    expect(w.log().filter((l) => l.startsWith('reap'))).toEqual(['reap oasis-site'])
+    w.flag('fail-build', false)
     // and it says when it is not the root-owned kit that runs
     expect(r.out).toMatch(
       /not the root-owned kit in \S+: run \/usr\/local\/lib\/oasis\/deploy\/scripts\/site-deploy\.sh/,
@@ -1223,7 +1360,70 @@ describe('site-deploy.sh', () => {
     )
     expect(kit.code, kit.out).toBe(0)
     expect(kit.out).not.toMatch(/not the root-owned kit/)
+  }, 90_000)
+
+  it('refuses to build when the build user can read the configuration or the state (the isolation check)', async () => {
+    const w = await makeSiteWorld()
+    // here the "build user" is this uid, which owns the staged /etc/oasis: exactly what the check exists to catch
+    const r = await sh(script('site-deploy.sh'), [], { ...w.env, OASIS_SITE_CHECK_ISOLATION: '1' })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/the website build user oasis-site can read \(or enter\) .*\/etc\/oasis\/common\.env.*\/var\/lib\/oasis .*\/var\/backups\/oasis and must not/)
+    expect(r.out).toMatch(/install\.sh --site-domain/)
+    expect(w.log().filter((l) => l.startsWith('pnpm'))).toEqual([])
+    expect(w.current()).toBe('bootstrap')
   }, 60_000)
+
+  it('a build that plants links or swaps paths, during the build or after verification, never makes root write, chmod or serve anything outside the release', async () => {
+    const w = await makeSiteWorld()
+    const outside = w.env.OUTSIDE!
+    const snapshot = (): string[] =>
+      tree(outside).map((l) => {
+        const f = path.join(outside, l.split(' ')[0]!)
+        return statSync(f).isFile() ? `${l} ${readFileSync(f, 'utf8').trim()}` : l
+      })
+    const before = snapshot()
+    expect(before).toContain('certs/privkey.pem 12 600 PRIVATE KEY')
+    const releasesDir = path.join(w.siteRoot, 'releases')
+    for (const flags of [['evil-hours'], ['evil-revision'], ['evil-swap'], ['evil-hardlink'], ['evil-dirlink']]) {
+      w.clearLog()
+      for (const f of flags) w.flag(f)
+      const r = await w.deploy('--force')
+      for (const f of flags) w.flag(f, false)
+      expect(snapshot(), `${flags} ${r.out}`).toEqual(before) // nothing outside changed: modes, contents, no new file
+      expect(existsSync(path.join(outside, 'revision-target')), `${flags}`).toBe(false)
+      expect(existsSync(path.join(outside, 'certs/REVISION')), `${flags}`).toBe(false)
+      // whatever happened, what nginx serves is a real directory in releases/ without a link in it
+      const cur = realpathSync(path.join(w.siteRoot, 'current'))
+      expect(path.dirname(cur), `${flags} ${r.out}`).toBe(releasesDir)
+      expect(lstatSync(path.join(releasesDir, path.basename(cur))).isDirectory()).toBe(true)
+      expect((await sh('find', [cur, '-type', 'l'])).stdout, `${flags}`).toBe('')
+      expect(readFileSync(path.join(cur, 'index.html'), 'utf8'), `${flags}`).toContain('Oasis Auto Spa')
+      expect(
+        w.releases().filter((x) => x.endsWith('.partial')),
+        `${flags}`,
+      ).toEqual([])
+      if (flags[0] === 'evil-hardlink') {
+        expect(r.code, r.out).toBe(1)
+        expect(r.out).toMatch(/hard link in the output: \S+notes\.txt/)
+      }
+      if (flags[0] === 'evil-dirlink') {
+        expect(r.code, r.out).toBe(1)
+        expect(r.out).toMatch(/symbolic link in the output: \S+certs/)
+      }
+      // the attack ran: the swap and the planted REVISION happened (in the build tree, after root took its copy); the hours file
+      // could not be planted at all, since the directory root writes it into is not the build user's
+      if (flags[0] === 'evil-swap') expect(w.log().some((l) => /^evil swapped \S+\.partial\/src\/dist$/.test(l))).toBe(true)
+      if (flags[0] === 'evil-revision')
+        expect(w.log().some((l) => /^evil planted \S+\.partial\/src\/dist\/REVISION$/.test(l))).toBe(true)
+      if (flags[0] === 'evil-hours') expect(w.log().filter((l) => l.startsWith('evil'))).toEqual([])
+      if (flags[0] === 'evil-swap' || flags[0] === 'evil-revision' || flags[0] === 'evil-hours') {
+        expect(r.code, `${flags} ${r.out}`).toBe(0)
+        // the release is the build's own output, and root's REVISION is a file in it
+        expect(lstatSync(path.join(cur, 'REVISION')).isFile()).toBe(true)
+        expect(revision(w).site).toMatch(/^[0-9a-f]{40}$/)
+      }
+    }
+  }, 180_000)
 
   it('a failed deploy keeps previous on the release before it, so --rollback still goes back; --list shows both tags when they meet', async () => {
     const w = await makeSiteWorld()

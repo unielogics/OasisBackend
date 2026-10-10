@@ -9,7 +9,7 @@ there, every healthy deploy refreshes it; docs/deployment.md, "Privilege separat
 | `scripts/install.sh` | first-time setup of a host; idempotent; `--dry-run`, `--no-system`; `--site-domain` adds the public website (its nginx servers, `/etc/oasis/site.env`, a placeholder release, the certificate) |
 | `scripts/deploy.sh`, `rollback.sh` | build a release, migrate, switch, health-check, roll back; switch back by hand |
 | `scripts/healthcheck.sh` | API readiness, dashboard, the signed-out redirect through the public URL, the worker, the public website when one is configured (200 with the marker, www 301), and (with `--public`) that the SMS hook is not reachable from outside |
-| `scripts/site-deploy.sh` | the public website: build a release from the root-only mirror as oasis, verify it, switch `/var/www/site/current`, health-check, roll back by itself; `--rollback`, `--list`, `--dry-run` (docs/runbook.md, "The public website") |
+| `scripts/site-deploy.sh` | the public website: build a release from the root-only mirror as the website build user oasis-site, copy the output out of the build tree and verify the copy, switch `/var/www/site/current`, health-check, roll back by itself; `--rollback`, `--list`, `--dry-run` (docs/runbook.md, "The public website") |
 | `scripts/backup.sh`, `restore-drill.sh`, `ledger-check.sh` | snapshot-consistent dumps with retention; restore into a scratch copy and verify; the ledger invariants on their own |
 | `scripts/tailscale-serve.sh` | exposes only `/hooks/smsgate` on the tailnet |
 | `scripts/bootstrap-admin.sh`, `reset-password.sh` | the first Super Admin; break-glass password reset |

@@ -9,9 +9,13 @@ shopt -u patsub_replacement 2>/dev/null || true # bash 5.2 would otherwise treat
 
 OASIS_ROOT_PREFIX="${OASIS_ROOT_PREFIX:-}"
 OASIS_USER="${OASIS_USER:-oasis}"
+# The public website's build user (ADR 0145): runs the site repository's pnpm install and build and nothing else. Not oasis and not in
+# its group, so it cannot read /etc/oasis, the state or the backups, and the instance metadata guard rejects it (no role credentials).
+OASIS_SITE_USER="${OASIS_SITE_USER:-oasis-site}"
 OASIS_PREFIX="${OASIS_PREFIX:-${OASIS_ROOT_PREFIX}/opt/oasis}"
 OASIS_ETC="${OASIS_ETC:-${OASIS_ROOT_PREFIX}/etc/oasis}"
 OASIS_STATE="${OASIS_STATE:-${OASIS_ROOT_PREFIX}/var/lib/oasis}"
+OASIS_SITE_STATE="${OASIS_SITE_STATE:-${OASIS_ROOT_PREFIX}/var/lib/oasis-site}" # its home: the pnpm store and caches, nothing else
 OASIS_BACKUP_DIR="${OASIS_BACKUP_DIR:-${OASIS_ROOT_PREFIX}/var/backups/oasis}"
 OASIS_LOG_DIR="${OASIS_LOG_DIR:-${OASIS_ROOT_PREFIX}/var/log/oasis}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-${OASIS_ROOT_PREFIX}/etc/systemd/system}"
