@@ -211,7 +211,8 @@ export async function joinWeb(
     next: 'checkout_link_by_sms',
     tier: spec.key,
     plan: spec.label,
-    confirmationBy: sent.queued ? 'sms' : 'none',
+    // the policy's outcome is the verified owner's to know; anyone else is told what they asked for (a STOP would show through)
+    confirmationBy: verified ? (sent.queued ? 'sms' : 'none') : input.smsConsent ? 'sms' : 'none',
   }
 }
 

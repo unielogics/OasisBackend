@@ -100,6 +100,15 @@ describe('joining with the number of an existing customer', () => {
 })
 
 describe('joining on the website', () => {
+  it('answers what was asked for, even for a number that texted STOP to the shop (nothing about the number shows through)', async () => {
+    await sql`insert into sms_opt_outs (id, location_id, phone_e164, opted_out_at, source, keyword)
+      values (${h.newId()}, ${h.locationId}, ${PHONES.extra}, app_now(), 'keyword', 'STOP')`.execute(h.db)
+    const r = await join(joinBody({ phone: PHONES.extra, smsConsent: true }))
+    expect(r.statusCode, r.body).toBe(201)
+    expect(json(r).confirmationBy).toBe('sms')
+    expect(await h.texts(PHONES.extra)).toEqual([])
+  })
+
   it('with an empty product map: the membership stays pending, staff are asked to send the link, an alert is open, the person is texted', async () => {
     const r = await join(joinBody())
     expect(r.statusCode, r.body).toBe(201)
