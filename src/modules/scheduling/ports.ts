@@ -480,7 +480,11 @@ export type AlertTone = 'red' | 'amber' | 'blue' | 'green' | 'violet'
 
 export interface ExternalAlert {
   key: string
-  kind: 'new_reply' | 'sms_device_down' | 'awaiting_processor' | 'unmatched_order'
+  /**
+   * 'ai_handoff': the AI assistant handed a conversation to the staff (ADR 0160); 'sms.picture_message': a text that arrived as a
+   * picture message the staff should look at (the same name as the manager notification of ADR 0151).
+   */
+  kind: 'new_reply' | 'sms_device_down' | 'awaiting_processor' | 'unmatched_order' | 'ai_handoff' | 'sms.picture_message'
   tone: AlertTone
   title: string
   desc: string
@@ -496,6 +500,26 @@ export interface ExternalAlertSource {
 
 export const noExternalAlerts: ExternalAlertSource = { list: async () => [] }
 
+// Status texts --------------------------------------------------------------------------------------------------------
+
+/** One appointment change as lifecycle.finish() reports it (the `change` names: arrived, cleaning, completed, picked_up, ...). */
+export interface StatusTextEvent {
+  appointmentId: string
+  change: string
+  status: string
+}
+
+/**
+ * Implemented by the status-texts module (ADR 0160, design section 6: checked in, running late, picked up). Called inside the
+ * transition's transaction once the change is written; it queues or drops texts and never throws for a business reason. Nothing
+ * calls it yet (wave 3 wires it into lifecycle.finish()); the default does nothing.
+ */
+export interface StatusTextsPort {
+  onChange(tx: Tx, c: SchedulingCtx, e: StatusTextEvent): Promise<void>
+}
+
+export const noStatusTexts: StatusTextsPort = { onChange: async () => undefined }
+
 export interface SchedulingPorts {
   invoices: InvoiceGateway
   messages: MessageQueue
@@ -506,4 +530,6 @@ export interface SchedulingPorts {
   /** Without it a cancel or no-show only records the policy (the in-memory default); production wires the ledger. */
   deposits?: DepositSettlement
   waitlist?: WaitlistPort
+  /** Status texts as the car moves (ADR 0160); absent = noStatusTexts. */
+  statusTexts?: StatusTextsPort
 }
