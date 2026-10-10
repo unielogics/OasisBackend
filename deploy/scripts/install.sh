@@ -307,6 +307,8 @@ ensure_env() {
     common)
       content=$(printf '%s\n' "$content" | set_var PUBLIC_API_URL "https://$DOMAIN" | set_var PUBLIC_DASHBOARD_URL "https://$DOMAIN" |
         set_var AWS_REGION "$AWS_REGION_ARG")
+      # the website's origin is allowed on the public writes (ADR 0150); an existing common.env gets the line by hand (see the warning above)
+      [[ -z "$SITE_DOMAIN" ]] || content=$(printf '%s\n' "$content" | set_or_uncomment PUBLIC_SITE_URL "https://$SITE_DOMAIN")
       if ((SECRETS_IN_FILES)); then
         DB_PASSWORD=$(random_hex 24)
         content=$(printf '%s\n' "$content" | comment_out OASIS_SECRET_ID | set_or_uncomment SESSION_SECRET "$(random_b64 48)" |
