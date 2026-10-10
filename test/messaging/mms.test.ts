@@ -89,6 +89,7 @@ describe('planAttachments', () => {
 
   it('makes any device message id a safe key segment', () => {
     expect(messageSegment('abc_DEF-1')).toBe('abc_DEF-1')
+    expect(messageSegment('mms:4')).toBe('4')
     expect(messageSegment('../x y')).toMatch(/^xy-[0-9a-f]{16}$/)
     expect(messageSegment('///')).toMatch(/^m[0-9a-f]{16}$/)
     expect(messageSegment('a'.repeat(70))).toMatch(/^a{40}-[0-9a-f]{16}$/)

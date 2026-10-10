@@ -88,7 +88,8 @@ function mmsParts(raw: unknown): MmsPart[] {
     const a = item as Record<string, unknown>
     const partId = str(a, 'partId') ?? (typeof a.partId === 'number' ? String(a.partId) : null)
     const declared = num(a, 'size')
-    const part: MmsPart = { partId, contentType: mediaType(str(a, 'contentType') ?? str(a, 'mimeType')), name: str(a, 'name') ?? null, size: declared ?? null, data: null }
+    const size = declared !== undefined && Number.isSafeInteger(declared) && declared >= 0 ? declared : null
+    const part: MmsPart = { partId, contentType: mediaType(str(a, 'contentType') ?? str(a, 'mimeType')).slice(0, 255), name: str(a, 'name')?.slice(0, 255) ?? null, size, data: null }
     const data = str(a, 'data')
     if (data === undefined) part.problem = 'missing'
     else {
@@ -103,6 +104,12 @@ function mmsParts(raw: unknown): MmsPart[] {
   }
   return out
 }
+
+/**
+ * The provider id of an MMS: the device's messageId under an `mms:` prefix. Android numbers MMS on their own (the tablet logged
+ * "id=4"), so a bare id could equal an SMS's and be taken for a repeat of it in the inbox and the reply keys.
+ */
+export const MMS_ID_PREFIX = 'mms:'
 
 function when(payload: Record<string, unknown>, key: string, fallback: Date): Date {
   const raw = str(payload, key)
@@ -187,7 +194,7 @@ export function verifyAndParse(
         body: text || subject || '',
         at: when(p, 'receivedAt', signedAt),
         deviceId: envelope.deviceId,
-        providerMessageId: messageId,
+        providerMessageId: `${MMS_ID_PREFIX}${messageId}`,
         mms: { subject, parts: mmsParts(p.attachments) },
       }
       break
@@ -201,7 +208,7 @@ export function verifyAndParse(
         kind: 'mms_notified',
         ...base,
         deviceId: envelope.deviceId,
-        providerMessageId: messageId,
+        providerMessageId: `${MMS_ID_PREFIX}${messageId}`,
         from: sender ? (normalizeE164(sender) ?? sender.trim()) : null,
         at: when(p, 'receivedAt', signedAt),
       }

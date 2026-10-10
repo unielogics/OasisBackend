@@ -191,7 +191,7 @@ describe('MMS (docs.sms-gate.app/features/mms)', () => {
     expect(p.envelopeId).toBe('FxEnvelope0000000014')
     const e = p.event
     if (e.kind !== 'received') throw new Error('expected received')
-    expect(e).toMatchObject({ from: '+17865550151', body: 'OK', providerMessageId: 'fx-mms-0002', eventId: 'FxEnvelope0000000014' })
+    expect(e).toMatchObject({ from: '+17865550151', body: 'OK', providerMessageId: 'mms:fx-mms-0002', eventId: 'FxEnvelope0000000014' })
     expect(e.mms?.subject).toBeNull()
     expect(e.mms?.parts.map(({ data, ...rest }) => ({ ...rest, bytes: data?.toString('hex') ?? null }))).toEqual([
       { partId: '1', contentType: 'image/jpeg', name: 'IMG_0001.jpg', size: 22, bytes: 'ffd8ffe000104a46494600010100000100010000ffd9' },
@@ -228,6 +228,8 @@ describe('MMS (docs.sms-gate.app/features/mms)', () => {
           { partId: '2', contentType: 'image/jpeg', name: 'b.jpg', size: 99, data: '***not base64***' },
           { partId: '3', contentType: 'image/jpeg', name: 'c.jpg', size: 7, data: null },
           { partId: 4, contentType: 'image/jpeg', name: 'd.jpg', data: '_-8' },
+          { partId: '5', contentType: 'video/mp4', name: 'e.mp4', size: 12.5, data: null },
+          { partId: '6', size: -3, data: null },
         ],
       },
     })
@@ -240,12 +242,14 @@ describe('MMS (docs.sms-gate.app/features/mms)', () => {
       ['2', 'image/jpeg', 99, 'decode_failed', null],
       ['3', 'image/jpeg', 7, 'missing', null],
       ['4', 'image/jpeg', 2, null, 2],
+      ['5', 'video/mp4', null, 'missing', null],
+      ['6', 'application/octet-stream', null, 'missing', null],
     ])
   })
 
   it('mms:received is a notice only (no text): its own event kind, never a received message', () => {
     const p = parse('mms-received')
-    expect(p.event).toMatchObject({ kind: 'mms_notified', providerMessageId: 'fx-mms-0001', from: '+17865550151' })
+    expect(p.event).toMatchObject({ kind: 'mms_notified', providerMessageId: 'mms:fx-mms-0001', from: '+17865550151' })
   })
 
   it('a signed but unusable event says which event and envelope it was', () => {

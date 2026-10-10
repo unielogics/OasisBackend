@@ -132,7 +132,7 @@ attachment bytes already redacted once applied):
 | Field | Read as | If absent or different |
 |---|---|---|
 | envelope `event` | `mms:downloaded` routes; `mms:received` is recorded only (event kind `mms_notified`, `webhook_log` `processed`, no message) | anything else is `unparsed` (below) |
-| `payload.messageId` | the dedupe key with the device (`sms_inbox` unique `(device, messageId)`) and the storage-key segment | missing: 400 and an `unparsed` row |
+| `payload.messageId` | the dedupe key with the device, stored as `mms:<messageId>` (`sms_inbox.provider_message_id`; Android numbers MMS on their own, the tablet logged `id=4`, so a bare id could equal an SMS's), and the storage-key segment | missing: 400 and an `unparsed` row |
 | `payload.sender`, else `payload.phoneNumber` | the sender, normalised exactly like `sms:received` | both missing: the sender is `unknown` (quarantined, still stored and announced) |
 | `payload.body` (string or null), else `payload.message` | the text, trimmed | empty: `payload.subject` trimmed; both empty: a placeholder (below) |
 | `payload.subject` | used only when the body is empty | |

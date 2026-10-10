@@ -15,7 +15,7 @@ question a phone chose to send as MMS (group texts, long texts, pictures, some c
    sync converges a tablet that holds the seven SMS-era ones by creating the two missing ones (boot, hourly, every `app:started`).
 2. **`mms:downloaded` is a received message.** It becomes the same port event as `sms:received` (sender from `sender`, else
    `phoneNumber`, normalised the same way; text = body trimmed, else the subject; dedupe on the envelope id and on
-   `(device, messageId)`) with the parts attached, and goes through the **same router**: keywords (STOP, START, HELP, C, CANCEL),
+   `(device, 'mms:' + messageId)`: the prefix because Android numbers MMS separately and a bare id could equal an SMS's) with the parts attached, and goes through the **same router**: keywords (STOP, START, HELP, C, CANCEL),
    quarantine and attribution are identical. The inbox row and the message carry `kind = 'mms'`; `messages.channel` stays `sms`
    (one thread). `mms:received` is recorded in `webhook_log` and applies nothing: its text is not known yet.
 3. **No text is never dropped.** An MMS with parts and no text is filed as `[Picture message]`; one with neither (the device could

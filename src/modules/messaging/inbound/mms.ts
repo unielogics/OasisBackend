@@ -42,11 +42,15 @@ export function mmsText(body: string, parts: readonly MmsPart[]): { text: string
 
 const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 
-/** A storage-key segment for the device's message id: itself when already safe, else a readable prefix plus a short hash. */
+/**
+ * A storage-key segment for the device's message id (the `mms:` prefix of the provider id dropped: the folder says mms already):
+ * the id itself when already safe, else a readable prefix plus a short hash.
+ */
 export function messageSegment(providerMessageId: string): string {
-  if (SEGMENT.test(providerMessageId)) return providerMessageId
-  const hash = createHash('sha256').update(providerMessageId).digest('hex').slice(0, 16)
-  const readable = providerMessageId.replace(/[^A-Za-z0-9_-]+/g, '').replace(/^[^A-Za-z0-9]+/, '').slice(0, 40)
+  const id = providerMessageId.startsWith('mms:') ? providerMessageId.slice(4) : providerMessageId
+  if (SEGMENT.test(id)) return id
+  const hash = createHash('sha256').update(id).digest('hex').slice(0, 16)
+  const readable = id.replace(/[^A-Za-z0-9_-]+/g, '').replace(/^[^A-Za-z0-9]+/, '').slice(0, 40)
   return readable ? `${readable}-${hash}` : `m${hash}`
 }
 

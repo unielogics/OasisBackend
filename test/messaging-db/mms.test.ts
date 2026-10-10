@@ -340,6 +340,18 @@ describe('dedupe and mms:received', () => {
   })
 })
 
+describe('MMS and SMS ids', () => {
+  it('an MMS whose device id equals an earlier SMS id is a different message (Android numbers MMS on their own)', async () => {
+    await deliver('sms:received', { messageId: '4', sender: maria(), recipient: '+15555550100', simNumber: 1, message: 'Hello', receivedAt: w.clock.now().toISOString() })
+    await mms(maria(), { body: 'STOP', messageId: '4' })
+    expect((await inbox()).map((r) => [r.provider_message_id, r.kind, r.decision])).toEqual([
+      ['4', 'sms', 'message'],
+      ['mms:4', 'mms', 'opt_out'],
+    ])
+    expect(await w.t.db.selectFrom('sms_outbox').select('klass').execute()).toEqual([{ klass: 'opt_out_confirm' }])
+  })
+})
+
 describe('diagnostics: signed deliveries Oasis cannot use', () => {
   it('an unknown event is answered 200 (no retries) and kept as unparsed, body cut to 4 KB, logged by event name only', async () => {
     const payload = { messageId: 'b1', filler: 'x'.repeat(10_000), secret: 'customer text here' }
