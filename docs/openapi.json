@@ -48979,6 +48979,716 @@
         "x-oasis-access": "pay.reports"
       }
     },
+    "/api/v1/public/availability": {
+      "get": {
+        "description": "No session. The slot engine’s answer for an online, non-VIP caller (lead time, cutoff, closures, emergency, VIP holds), reduced to the board’s four states; today drops starts before now plus the online lead time. `days` 1..14 (default 5); `service` is a catalog key (the first package when absent); `addons` is accepted and ignored (add-ons never change the duration). `now` is the \"N of 3 bays open now\" pill. `Cache-Control: public, max-age=60`; 60 requests a minute per address.",
+        "operationId": "getPublicAvailability",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "maximum": 14,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "service",
+            "required": false,
+            "schema": {
+              "maxLength": 80,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "addons",
+            "required": false,
+            "schema": {
+              "maxLength": 400,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "days": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "closed": {
+                            "type": "boolean"
+                          },
+                          "date": {
+                            "type": "string"
+                          },
+                          "dateLabel": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "openCount": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "reason": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "slots": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "bays": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "start": {
+                                  "type": "string"
+                                },
+                                "startMin": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "state": {
+                                  "enum": [
+                                    "open",
+                                    "last",
+                                    "vip",
+                                    "booked"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "startMin",
+                                "start",
+                                "state",
+                                "bays"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "weekday": {
+                            "maximum": 6,
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "date",
+                          "label",
+                          "dateLabel",
+                          "weekday",
+                          "closed",
+                          "reason",
+                          "openCount",
+                          "slots"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "durationMin": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "generatedAt": {
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+                      "type": "string"
+                    },
+                    "now": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "baysFree": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "baysTotal": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "open": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "open",
+                        "baysFree",
+                        "baysTotal"
+                      ],
+                      "type": "object"
+                    },
+                    "serviceKey": {
+                      "type": "string"
+                    },
+                    "tz": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "tz",
+                    "generatedAt",
+                    "serviceKey",
+                    "durationMin",
+                    "now",
+                    "days"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Open times for the website: the next days on the 30-minute grid with open / last / vip / booked and free bays",
+        "tags": [
+          "public"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
+    "/api/v1/public/bookings": {
+      "post": {
+        "description": "No session; Idempotency-Key required (replay answers the stored response). Creates or links the customer by phone (consent recorded; an existing customer’s name and email change only with a member token for that number), books through the same command as the dashboard with the online rules, creates the invoice, queues the confirmation text and the usual ops events. Guests owe the booking fee at the counter or by payment link (`deposit`); an active member owes nothing. 409 PUBLIC_SLOT_TAKEN \"That time was just taken. Pick another.\", PUBLIC_SLOT_VIP, PUBLIC_SLOT_PAST, PUBLIC_SLOT_CLOSED, PUBLIC_SLOT_TOO_FAR; 401 PUBLIC_TOKEN_INVALID; 422 on validation; 429 over 5 bookings an hour per number or 10 per address. A non-empty `website` field (the honeypot) answers 202 with a fake reference and writes nothing.",
+        "operationId": "createPublicBooking",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "addonKeys": {
+                    "default": [],
+                    "items": {
+                      "maxLength": 80,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 12,
+                    "type": "array"
+                  },
+                  "date": {
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                    "type": "string"
+                  },
+                  "email": {
+                    "format": "email",
+                    "maxLength": 120,
+                    "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+                    "type": "string"
+                  },
+                  "memberToken": {
+                    "pattern": "^[A-Za-z0-9_-]{43}$",
+                    "type": "string"
+                  },
+                  "name": {
+                    "maxLength": 80,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "phone": {
+                    "maxLength": 32,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "serviceKey": {
+                    "maxLength": 80,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "smsConsent": {
+                    "type": "boolean"
+                  },
+                  "startMin": {
+                    "maximum": 1439,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "vehicle": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "label": {
+                        "maxLength": 80,
+                        "type": "string"
+                      },
+                      "make": {
+                        "maxLength": 40,
+                        "type": "string"
+                      },
+                      "model": {
+                        "maxLength": 60,
+                        "type": "string"
+                      },
+                      "plate": {
+                        "maxLength": 16,
+                        "type": "string"
+                      },
+                      "year": {
+                        "maximum": 2100,
+                        "minimum": 1900,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "website": {
+                    "default": "",
+                    "maxLength": 200,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "phone",
+                  "serviceKey",
+                  "date",
+                  "startMin",
+                  "smsConsent"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "addons": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "name"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "bayCount": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "bookingRef": {
+                      "type": "string"
+                    },
+                    "confirmationBy": {
+                      "enum": [
+                        "sms",
+                        "none"
+                      ],
+                      "type": "string"
+                    },
+                    "deposit": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "dueCents": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "how": {
+                          "enum": [
+                            "counter",
+                            "link"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "dueCents",
+                        "how"
+                      ],
+                      "type": "object"
+                    },
+                    "end": {
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+                      "type": "string"
+                    },
+                    "member": {
+                      "type": "boolean"
+                    },
+                    "service": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "name"
+                      ],
+                      "type": "object"
+                    },
+                    "start": {
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "booked"
+                      ],
+                      "type": "string"
+                    },
+                    "when": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "bookingRef",
+                    "status",
+                    "start",
+                    "end",
+                    "bayCount",
+                    "deposit",
+                    "confirmationBy",
+                    "service",
+                    "addons",
+                    "when",
+                    "member"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "addons": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "name"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "bayCount": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "bookingRef": {
+                      "type": "string"
+                    },
+                    "confirmationBy": {
+                      "enum": [
+                        "sms",
+                        "none"
+                      ],
+                      "type": "string"
+                    },
+                    "deposit": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "dueCents": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "how": {
+                          "enum": [
+                            "counter",
+                            "link"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "dueCents",
+                        "how"
+                      ],
+                      "type": "object"
+                    },
+                    "end": {
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+                      "type": "string"
+                    },
+                    "member": {
+                      "type": "boolean"
+                    },
+                    "service": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "name"
+                      ],
+                      "type": "object"
+                    },
+                    "start": {
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "booked"
+                      ],
+                      "type": "string"
+                    },
+                    "when": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "bookingRef",
+                    "status",
+                    "start",
+                    "end",
+                    "bayCount",
+                    "deposit",
+                    "confirmationBy",
+                    "service",
+                    "addons",
+                    "when",
+                    "member"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Book a wash from the website",
+        "tags": [
+          "public"
+        ],
+        "x-oasis-access": "public",
+        "x-oasis-idempotency": "required"
+      }
+    },
+    "/api/v1/public/catalog": {
+      "get": {
+        "description": "No session. Live packages and add-ons from the real catalog (prices in cents, durations in minutes), keyed by the slug of their name; the plans are the website’s two tiers over the dashboard’s plans (no price: the site shows its own). `Cache-Control: public, max-age=60`; 60 requests a minute per address.",
+        "operationId": "getPublicCatalog",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "addons": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "priceCents": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "tags": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "name",
+                          "priceCents",
+                          "tags"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "generatedAt": {
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+                      "type": "string"
+                    },
+                    "plans": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "key": {
+                            "enum": [
+                              "gold",
+                              "vip"
+                            ],
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "perks": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "planKey": {
+                            "type": "string"
+                          },
+                          "planName": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "priceCents": {
+                            "type": "null"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "name",
+                          "planKey",
+                          "planName",
+                          "perks",
+                          "priceCents"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "services": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "durationMin": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "priceCents": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "shortName": {
+                            "type": "string"
+                          },
+                          "tags": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "name",
+                          "shortName",
+                          "durationMin",
+                          "priceCents",
+                          "tags"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "generatedAt",
+                    "services",
+                    "addons",
+                    "plans"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Services, add-ons and plans for the website, with the keys the booking and join calls take",
+        "tags": [
+          "public"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
     "/api/v1/public/hours": {
       "get": {
         "description": "No session: the website calls it from the browser and at build time. Computed from the Settings (weekly hours, closures, an active emergency) at the moment of the call in the business timezone; `Cache-Control: public, max-age=60`, and nginx caches it on the website's host. Carries no personal or operations data (no names, counts, message text or ids). Rate limit 60 a minute per address.",
@@ -49335,6 +50045,390 @@
         },
         "security": [],
         "summary": "Opening hours for the public website: today, the next open day, the regular week and upcoming closures",
+        "tags": [
+          "public"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
+    "/api/v1/public/memberships": {
+      "post": {
+        "description": "No session; Idempotency-Key required. Creates or links the customer by phone and their vehicles, then a membership in the pending state tied to the tier’s Squarespace product (when the product map has none the membership still waits and an alert is raised); staff get a notification asking them to text the checkout link; the person gets a welcome text saying so. The membership activates when the Squarespace sync sees the paid order. 409 PUBLIC_ALREADY_MEMBER; 422 on validation; 429 over 3 joins a day per number or 10 an hour per address.",
+        "operationId": "createPublicMembership",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "agree": {
+                    "enum": [
+                      true
+                    ],
+                    "type": "boolean"
+                  },
+                  "email": {
+                    "format": "email",
+                    "maxLength": 120,
+                    "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+                    "type": "string"
+                  },
+                  "name": {
+                    "maxLength": 80,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "phone": {
+                    "maxLength": 32,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "smsConsent": {
+                    "type": "boolean"
+                  },
+                  "tier": {
+                    "enum": [
+                      "gold",
+                      "vip"
+                    ],
+                    "type": "string"
+                  },
+                  "vehicles": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "car": {
+                          "maxLength": 80,
+                          "type": "string"
+                        },
+                        "plate": {
+                          "maxLength": 16,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "car"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 5,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "website": {
+                    "default": "",
+                    "maxLength": 200,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "tier",
+                  "name",
+                  "phone",
+                  "email",
+                  "vehicles",
+                  "smsConsent",
+                  "agree"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "confirmationBy": {
+                      "enum": [
+                        "sms",
+                        "none"
+                      ],
+                      "type": "string"
+                    },
+                    "memberRef": {
+                      "type": "string"
+                    },
+                    "next": {
+                      "enum": [
+                        "checkout_link_by_sms"
+                      ],
+                      "type": "string"
+                    },
+                    "plan": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "pending_payment"
+                      ],
+                      "type": "string"
+                    },
+                    "tier": {
+                      "enum": [
+                        "gold",
+                        "vip"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "memberRef",
+                    "status",
+                    "next",
+                    "tier",
+                    "plan",
+                    "confirmationBy"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "confirmationBy": {
+                      "enum": [
+                        "sms",
+                        "none"
+                      ],
+                      "type": "string"
+                    },
+                    "memberRef": {
+                      "type": "string"
+                    },
+                    "next": {
+                      "enum": [
+                        "checkout_link_by_sms"
+                      ],
+                      "type": "string"
+                    },
+                    "plan": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "pending_payment"
+                      ],
+                      "type": "string"
+                    },
+                    "tier": {
+                      "enum": [
+                        "gold",
+                        "vip"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "memberRef",
+                    "status",
+                    "next",
+                    "tier",
+                    "plan",
+                    "confirmationBy"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Join Gold or VIP from the website",
+        "tags": [
+          "public"
+        ],
+        "x-oasis-access": "public",
+        "x-oasis-idempotency": "required"
+      }
+    },
+    "/api/v1/public/otp": {
+      "post": {
+        "description": "No session. 202 with the challenge id whether or not the number is known or the text could go out (nothing about the number leaks). The code lives 10 minutes, allows 3 tries and replaces any earlier code for the number. Limits: 3 codes per number and 10 per address every 10 minutes (429 with Retry-After), 10 calls a minute per address.",
+        "operationId": "requestPublicOtp",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "phone": {
+                    "maxLength": 32,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "phone"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "challengeId": {
+                      "type": "string"
+                    },
+                    "expiresInSec": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "challengeId",
+                    "expiresInSec"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Text a six-digit code to a mobile number (member identification)",
+        "tags": [
+          "public"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
+    "/api/v1/public/otp/verify": {
+      "post": {
+        "description": "No session. 401 PUBLIC_OTP_INVALID (meta.attemptsLeft) for a wrong code, 429 PUBLIC_OTP_LOCKED after the third, 410 PUBLIC_OTP_EXPIRED for an expired, used or unknown code. The token is hashed at rest and bound to the number (and the customer owning it); `member` is the first name, the website tier (or null), the washes left this cycle and whether the membership is active (no booking fee).",
+        "operationId": "verifyPublicOtp",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "challengeId": {
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+                    "type": "string"
+                  },
+                  "code": {
+                    "maxLength": 12,
+                    "minLength": 4,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "challengeId",
+                  "code"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "expiresInSec": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "member": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "active": {
+                          "type": "boolean"
+                        },
+                        "firstName": {
+                          "type": "string"
+                        },
+                        "plan": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "tier": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "gold",
+                                "vip"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "washesLeft": {
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "firstName",
+                        "tier",
+                        "washesLeft",
+                        "plan",
+                        "active"
+                      ],
+                      "type": "object"
+                    },
+                    "memberToken": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "memberToken",
+                    "expiresInSec",
+                    "member"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Verify a code: an opaque 30-minute member token and what the site may show about the member",
         "tags": [
           "public"
         ],

@@ -25,6 +25,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261006310000_jobs_runtime.sql`      | the per-job run record behind `GET /system/jobs`, and the once-only markers of the VIP-release and credit-expiry scans (ADR 0090 to 0093)              |
 | `20261006400000_email_feedback.sql`    | the SES suppression list, and SES feedback, error time and the job of a receipt on the email outbox (ADR 0110)                                         |
 | `20261006410000_notices_and_ledger_integrity.sql` | the debounce record of manager notices that can repeat (SMS device flapping, app restarts, no device) and the nightly ledger integrity results (ADR 0122, 0123) |
+| `20261006500000_public_website.sql`    | the public website's booking surface: one-time SMS codes, member tokens and the durable limit counters of the public routes (ADR 0150)                     |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -231,6 +232,18 @@ Written by `POST /hooks/ses` (SNS-signed SES events); read before every send.
 The same migration adds to `outbox_emails`: `appointment_id` (a receipt's job, for the activity line), `error_at`, `delivered_at`,
 `feedback soft_bounce|hard_bounce|complaint`, `feedback_at`, `feedback_detail`, and an index on `provider_message_id`.
 
+## Public website (migration `20261006500000_public_website.sql`, ADR 0150)
+
+The website books real appointments and creates pending memberships through the public routes (`/api/v1/public/*`); those rows live in
+the ordinary tables (`customers` with `source = 'online'`, `appointments` with `source = 'online'`, `memberships` in the `pending`
+state). What is new is the identification of a member by phone and the abuse controls of a surface with no session.
+
+| Table                   | Key columns and rules                                                                                                                                                                                                                                                                 |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `public_otp_challenges` | One six-digit code texted to a number: `code_hash` (sha256 of the challenge id and the code: the code is never stored), `attempts` of `max_attempts` (3), `expires_at` (10 minutes), `consumed_at` with `consumed_reason` `verified` / `superseded` / `locked`, `requested_ip`, `delivery` (queued, or the SMS policy's reason it was not). One active row per number (`uq_public_otp_active_phone`): a new code supersedes the earlier one. |
+| `public_member_tokens`  | The opaque token a verified code issued, by its sha256 (`token_hash`, pk); bound to the number and to `customer_id` (the customer owning the number at that moment, null when nobody did), 30 minutes (`expires_at`), `last_used_at`.                                                 |
+| `public_rate_limits`    | Fixed-window counters shared by every API process: `(key, window_start)` with `count`, keys such as `otp:phone:+1201...`, `booking:ip:203.0.113.9`; one upsert per request. Purged two days past the window.                                                                          |
+
 ## Foreign keys
 
 `domain_links` added the keys from the domain tables to `employees` and `users`. Two columns stay plain `uuid` on purpose, and a
@@ -299,7 +312,7 @@ Operations design day re-anchored on **today** in the business time zone with th
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (89 tables, 1 view, 9 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (92 tables, 1 view, 9 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -1228,6 +1241,50 @@ Primary key `(key)`. Unique `(sort)`.
 | `auto_apply` | boolean | no | `false` |
 
 Primary key `(id)`. `(plan_id)` references `membership_plans(id)` on delete cascade. 3 check constraints. Index `plan_credit_rules_plan_idx` `(plan_id, sort)`.
+
+#### `public_member_tokens`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `token_hash` | text | no |  |
+| `location_id` | uuid | no |  |
+| `phone_e164` | text | no |  |
+| `customer_id` | uuid | yes |  |
+| `challenge_id` | uuid | yes |  |
+| `expires_at` | timestamp with time zone | no |  |
+| `last_used_at` | timestamp with time zone | yes |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(token_hash)`. `(challenge_id)` references `public_otp_challenges(id)` on delete set null. `(customer_id)` references `customers(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. 1 check constraint. Index `public_member_tokens_expiry_idx` `(expires_at)`.
+
+#### `public_otp_challenges`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `phone_e164` | text | no |  |
+| `code_hash` | text | no |  |
+| `attempts` | smallint | no | `0` |
+| `max_attempts` | smallint | no | `3` |
+| `expires_at` | timestamp with time zone | no |  |
+| `consumed_at` | timestamp with time zone | yes |  |
+| `consumed_reason` | text | yes |  |
+| `requested_ip` | text | yes |  |
+| `delivery` | text | no | `'queued'::text` |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. `(location_id)` references `locations(id)` on delete cascade. 4 check constraints. Index `public_otp_challenges_phone_idx` `(phone_e164, created_at DESC)`. Unique index `uq_public_otp_active_phone` `(location_id, phone_e164)` where `consumed_at IS NULL`.
+
+#### `public_rate_limits`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `key` | text | no |  |
+| `window_start` | timestamp with time zone | no |  |
+| `count` | integer | no | `0` |
+
+Primary key `(key, window_start)`. 1 check constraint. Index `public_rate_limits_window_idx` `(window_start)`.
 
 #### `rbac_state`
 

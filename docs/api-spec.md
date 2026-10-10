@@ -386,7 +386,13 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/api/v1/payments/invoices` | pay.reports |  |
 | GET | `/api/v1/payments/reconciliation` | pay.reports | set.billing |  |
 | GET | `/api/v1/payments/summary` | pay.reports |  |
+| GET | `/api/v1/public/availability` | public |  |
+| POST | `/api/v1/public/bookings` | public | required |
+| GET | `/api/v1/public/catalog` | public |  |
 | GET | `/api/v1/public/hours` | public |  |
+| POST | `/api/v1/public/memberships` | public | required |
+| POST | `/api/v1/public/otp` | public |  |
+| POST | `/api/v1/public/otp/verify` | public |  |
 | GET | `/api/v1/roles` | team.view |  |
 | POST | `/api/v1/roles` | team.roles |  |
 | DELETE | `/api/v1/roles/:id` | team.roles |  |
@@ -628,9 +634,10 @@ original Settings prototype (`test/fixtures/golden/settings-original.json`, prod
 
 ### 15.7 The public website's hours: `GET /api/v1/public/hours`
 
-The one route of the API that answers without a session (`access.public`, listed in the authz matrix's `PUBLIC_ROUTES`; ADR 0145).
-It exists for the marketing website, whose nginx host proxies exactly this path to the API with cookies stripped both ways and a
-60-second cache in front (`deploy/nginx/oasis-site.conf.template`); the site also reads it at build time (`site-deploy.sh`).
+The first route of the API that answered without a session (`access.public`, listed in the authz matrix's `PUBLIC_ROUTES`; ADR 0145;
+the website's booking routes of section 26 and ADR 0150 followed). It exists for the marketing website, whose nginx host proxies it
+to the API with cookies stripped both ways and a 60-second cache in front (`deploy/nginx/oasis-site.conf.template`); the site also
+reads it at build time (`site-deploy.sh`).
 Code: `src/modules/settings/http/public-routes.ts` over the pure `publicHoursView()` in `src/modules/settings/public-hours.ts`, which
 uses the same `dayInfo()` as the dashboard, so the website never disagrees with the shop.
 
@@ -1078,3 +1085,68 @@ when none ever ran. With `JOBS_ENABLED=false` the answer is `{enabled: false, jo
 | `ledger.integrity_check` | a `ledger_integrity_runs` row per business date; notification `ledger.integrity_failed` to the managers when it finds a new set of problems (ADR 0123) |
 | `sms.device.healthcheck`, `sms.dispatch` | notifications `sms.device_offline` / `sms.device_recovered` debounced per 30-minute flap window with the end state announced when it closes, `sms.no_device` once per episode (ADR 0122) |
 
+
+## 26. Public website API: `/api/v1/public/*`
+
+The marketing website (oasisautospanj.com, ADR 0145) books real appointments and signs members up through six routes that answer
+without a session (ADR 0150). Code: `src/modules/public/**` (routes in `http/`, the pure board projection in `availability.ts`,
+the durable limits in `limits.ts`, codes and tokens in `otp.ts`), registered in `src/http/modules.ts` with the same invoice gateway,
+membership port and messaging queue the dashboard's modules use, so a web booking is exactly a dashboard booking made by "Website".
+Every route is `access.public(reason)` and listed in the authz matrix's `PUBLIC_ROUTES`; the website's nginx host proxies the whole
+`/api/v1/public/` prefix with cookies stripped both ways (GETs cached 60 s, POSTs never; `deploy/nginx/oasis-site.conf.template`).
+Problem copy is the design's where it has one (`src/modules/public/problems.ts`); nothing in an answer names a person, an id or a job.
+
+### 26.1 Reads (cacheable, `Cache-Control: public, max-age=60`, 60 a minute per address)
+
+| Route | Answer |
+|---|---|
+| `GET /public/hours` | section 15.7 (unchanged). |
+| `GET /public/availability?days=5&service=<key>&addons=a,b` | `{tz, generatedAt, serviceKey, durationMin, now {open, baysFree, baysTotal}, days[]}`; each day `{date, label "Today" \| "Tomorrow" \| "Sat", dateLabel "Saturday, Jun 13", weekday, closed, reason, openCount, slots[{startMin, start "8:30 AM", state open \| last \| vip \| booked, bays}]}`. The slot engine's answer (`computeSlots`, channel online, not VIP) on the shop's 30-minute grid from opening to the last start the cutoff allows, reduced to the board's four states: `available` with 2+ free bays is `open`, with one `last`; `vip_held` is `vip` (inside a hold's release window); `blocked` is `booked` (`bays` 0); today's starts before now + the online lead time (30 min) are not listed, nor are cutoff or closed starts. Closed days (a regular day off, a closure, an emergency, "pause online booking") have no slots and carry the `reason` the customer may be told. `now` is the "N of 3 bays open now" pill: active bays minus the jobs occupying one at this instant, `open: false` outside the hours. `days` 1..14 (default 5); `service` defaults to the first package; `addons` is accepted and ignored (add-ons never change the duration). 422 for an unknown service key. |
+| `GET /public/catalog` | `{generatedAt, services[{key, name, shortName, durationMin, priceCents, tags}], addons[{key, name, priceCents, tags}], plans[{key gold \| vip, name, planKey, planName, perks, priceCents: null}]}` from the live catalog in cents. **Keys** are the slug of the service name (`express-hand-wash`, `premium-hand-wash-plus-interior`); a second live service with the same slug carries six characters of its id. The two plans are the website's tiers over the dashboard's plans (`gold` = `premium`, `vip` = `executive`, `src/modules/public/tiers.ts`); the site shows its own prices. |
+
+### 26.2 Member identification: `POST /public/otp`, `POST /public/otp/verify`
+
+| Route | Behaviour |
+|---|---|
+| `POST /public/otp {phone}` | 202 `{challengeId, expiresInSec: 600}` whether or not the number is known or the text could go out (nothing about the number leaks). The six-digit code goes through the messaging queue as class `otp_code` (transactional, consent-exempt, sent even to a number that texted STOP, never held by quiet hours, no STOP footer; the body is redacted in the Messages tab like a password reset); outside production it is suppressed for a number off `SMS_ALLOWLIST` as every text is. Stored: `sha256(challengeId:code)`, 10-minute expiry, 3 tries, one active code per number (a new request supersedes the earlier one). 422 "Enter a valid mobile number." Limits: 3 codes per number and 10 per address every 10 minutes (429 `PUBLIC_RATE_LIMITED`, `Retry-After`), 10 calls a minute per address. |
+| `POST /public/otp/verify {challengeId, code}` | 200 `{memberToken, expiresInSec: 1800, member {firstName, tier gold \| vip \| null, washesLeft, plan, active}}`. The token is opaque (43 characters), stored as its sha256, bound to the number and to the customer owning it at that moment (null when nobody did), 30 minutes. `member`: the first name (empty when the number belongs to nobody or to a placeholder), the website tier of the plan (null for a plan the site does not sell), the washes left this cycle (null = unlimited or not a member), the plan label as sold, `active` (an active membership: no booking fee). 401 `PUBLIC_OTP_INVALID` "That code didn’t match. 2 more tries before you need a new one." (`meta.attemptsLeft`); the third wrong code locks it: 429 `PUBLIC_OTP_LOCKED` "Too many tries. Request a new code." (also for the right code afterwards); 410 `PUBLIC_OTP_EXPIRED` "That code expired. Request a new one." for an expired, used, superseded or unknown code. 30 calls per address every 10 minutes. |
+
+### 26.3 `POST /public/bookings` (Idempotency-Key required)
+
+Body `{name, phone, email?, vehicle? {year?, make?, model?, label?, plate?}, serviceKey, addonKeys[], date "YYYY-MM-DD", startMin,
+smsConsent, memberToken?, website: ""}` (strict). `vehicle.label` is free text ("2021 Tesla Model 3": year, make, model are parsed when
+make and model are absent). A non-empty `website` (the honeypot) answers **202** with a plausible, fake `bookingRef` and writes nothing.
+
+| Step | Rule |
+|---|---|
+| Limits | 5 bookings an hour per number and 10 per address, charged before the booking runs (a refused booking counts); 10 calls a minute per address; `PUBLIC_RATE_LIMITED` 429 with `Retry-After`. The counters are rows of `public_rate_limits`, shared by every API process. |
+| Customer | Created or linked by E.164 phone (`upsertCustomerByPhone`, source `online`, `synthetic = false`); `smsConsent` records the SMS opt-in with source `online`. An existing customer's name and email are **never** replaced by a guest booking (only a placeholder name is filled); a `memberToken` for that number lets the person correct their own name and email. A token for another number is 422 `PUBLIC_TOKEN_PHONE_MISMATCH`; an unknown or expired token 401 `PUBLIC_TOKEN_INVALID`. |
+| Booking | `createAppointment()` with `source: 'online'`, `channel: 'online'` (lead time, booking window, paused days; no overrides: there is nobody to grant one), the package and add-ons by catalog key (422 otherwise), the slot guard under the per-date advisory lock, the invoice through the payments gateway, the checklist snapshot, the audit row (actor "Website"), the `ops` events (`appointment.updated {change: created}`, `availability.changed`, `kpi.dirty`): the dashboard's board updates live. |
+| Fee | Settings key `booking.guest_fee {cents: 2500, collect: counter \| link}`. A customer with an **active** membership owes nothing (`member: true`); anyone else owes `cents`, collected at the counter or through a Squarespace payment link staff text afterwards (the dashboard's payment-link flow, kind deposit). Nothing is charged online: there is no card capture anywhere. The answer says `deposit {dueCents, how}` and the activity log records "Booked on the website · $25 booking fee due at the counter". |
+| Confirmation | Template `booking_confirmed_web` queued in the booking's transaction (class transactional): "Booked: Express Hand Wash, today at 1:00 PM. $25 booking fee due at the shop. Reply here to change it." for a guest; "... Members never pay a booking fee. Reply here to change it." for a member (the design's SMS demo, with "Reply C to change" rewritten because a C reply means confirm). Without consent, or off the allowlist outside production, the policy skips it and `confirmationBy` is `none`. The usual reminders follow from `appointments.reminders`. |
+| Answer | 201 `{bookingRef "OAS-00042" (the appointment's seq), status: "booked", start, end, bayCount (bays still free for that time), deposit {dueCents, how}, confirmationBy sms \| none, service {key, name}, addons[], when "Today · 1:00 PM", member}`. Same key, same body: the stored answer with `Idempotent-Replayed: true`; same key, other body: 422 `IDEMPOTENCY_MISMATCH`; no key: 400. |
+| Slot refusals | 409 in the design's words, never the dashboard's override hints: `PUBLIC_SLOT_TAKEN` "That time was just taken. Pick another." (no bay free, also the loser of two simultaneous bookings for the last bay), `PUBLIC_SLOT_VIP` "4:00 PM is held for VIP members. Join to book it with no fee.", `PUBLIC_SLOT_PAST` "That time has passed. Pick another." (also inside the lead time), `PUBLIC_SLOT_CLOSED` "We’re closed at that time. Pick another.", `PUBLIC_SLOT_TOO_FAR` "Online booking opens 14 days ahead. Pick a sooner time.". |
+
+### 26.4 `POST /public/memberships` (Idempotency-Key required)
+
+Body `{tier gold \| vip, name, phone, email, vehicles[{car, plate?}] (1..5), smsConsent, agree: true, website: ""}` (strict; no card
+fields exist). Limits: 3 joins a day per number, 10 an hour per address. Creates or links the customer by phone (source `online`,
+consent as above) and the vehicles (`car` parsed like `vehicle.label`), then a `memberships` row in the **pending** state (source
+`manual`, `plan_label` "Gold" / "VIP", `manual_status_at` null so the Squarespace inference may take it over, `sqsp_product_key` the
+mapped product's id or SKU when the product map has a membership product for the plan). Staff get a notification
+(`membership.web_join`) asking them to text the Squarespace checkout link, naming the product; when the map has none the notification
+says so and an open `product_map_empty` alert is raised, and nothing fails. The person gets `membership_welcome_web` ("Hi Jo, thanks
+for joining Oasis Auto Spa Gold. We’ll text your secure checkout link shortly; your membership starts once it’s paid."). The membership
+activates when the existing sync sees the paid subscription order. 201 `{memberRef "OAS-M-1A2B3C4D", status: "pending_payment",
+next: "checkout_link_by_sms", tier, plan, confirmationBy}`; 409 `PUBLIC_ALREADY_MEMBER` "This number already has a membership. Text
+us to change your plan." for a number with a live membership; the honeypot answers 202 with a fake reference.
+
+### 26.5 Origin, environment, retention, tests
+
+The public POSTs carry the website's `Origin`: it must be allowed, so the API lists `PUBLIC_SITE_URL` (`https://oasisautospanj.com`)
+beside the dashboard's origins (a request without `Origin` and without a cookie is still allowed, as before). `maintenance.purge`
+drops codes and tokens a day past their expiry and limit windows two days old. Tests: `test/public/availability.test.ts` (pure),
+`test/public-http/*.test.ts` (the real app over the design seed: contract, reads, codes, bookings including the last-bay race and
+the ops snapshot, joins), the authz matrix, `test/ops-kit/deploy-site.test.ts` (the nginx host, in a real nginx when installed).
+Deviations from the first contract are noted in ADR 0150 (source `online` rather than `web`; `bayCount` is the bays left; the grid
+ends at the cutoff; plans carry no price; the OTP text is suppressed off the allowlist outside production like every text).

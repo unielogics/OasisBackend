@@ -159,34 +159,57 @@ describe('install.sh --site-domain: the rendered website', () => {
         (i) => i.args[0] === '/etc/nginx/oasis/site-headers.conf',
       )
 
-    // the one API route: proxied with the shared proxy settings, the API rate zone, the cache, and no cookie either way
-    const hours = at('/api/v1/public/hours')
-    expect(`${hours.modifier} ${hours.pattern}`).toBe('= /api/v1/public/hours')
-    expect(proxied('/api/v1/public/hours')).toBe('http://oasis_api')
-    const raw = locationsOf(apex()).find((l) => l.pattern === '/api/v1/public/hours')!
-    expect(find(raw.body, 'include').map((i) => i.args[0])).toEqual(['/etc/nginx/oasis/proxy.conf'])
-    expect(find(hours.body, 'limit_req')[0]!.args).toEqual(['zone=oasis_api', 'burst=20', 'nodelay'])
-    expect(find(hours.body, 'proxy_cache')[0]!.args).toEqual(['oasis_public'])
-    expect(find(hours.body, 'proxy_cache_valid')[0]!.args).toEqual(['200', '60s'])
-    expect(find(hours.body, 'proxy_cache_lock')[0]!.args).toEqual(['on'])
-    expect(find(hours.body, 'proxy_cache_use_stale')[0]!.args).toEqual(
-      expect.arrayContaining(['error', 'timeout', 'updating', 'http_502', 'http_503']),
-    )
-    expect(find(hours.body, 'proxy_set_header').map((h) => h.args.join(' '))).toContain('Cookie ')
-    expect(find(hours.body, 'proxy_hide_header').map((h) => h.args[0])).toContain('Set-Cookie')
-    expect(find(hours.body, 'proxy_ignore_headers')[0]!.args).toEqual(['Set-Cookie'])
-    expect(find(hours.body, 'proxy_set_header').map((h) => h.args.join(' '))).toContain(
-      'X-Forwarded-For $remote_addr',
-    )
+    // the three read-only API answers: exact locations, GET only, proxied with the shared proxy settings, the API rate zone, the
+    // cache, and no cookie either way
+    for (const name of ['hours', 'availability', 'catalog']) {
+      const uri = `/api/v1/public/${name}`
+      const l = at(uri)
+      expect(`${l.modifier} ${l.pattern}`, uri).toBe(`= ${uri}`)
+      expect(proxied(uri), uri).toBe('http://oasis_api')
+      const raw = locationsOf(apex()).find((x) => x.pattern === uri)!
+      expect(find(raw.body, 'include').map((i) => i.args[0]), uri).toEqual(['/etc/nginx/oasis/proxy.conf'])
+      expect(find(l.body, 'limit_except')[0]!.args, uri).toEqual(['GET'])
+      expect(find(find(l.body, 'limit_except')[0]!.block!, 'deny')[0]!.args, uri).toEqual(['all'])
+      expect(find(l.body, 'limit_req')[0]!.args, uri).toEqual(['zone=oasis_api', 'burst=20', 'nodelay'])
+      expect(find(l.body, 'proxy_cache')[0]!.args, uri).toEqual(['oasis_public'])
+      expect(find(l.body, 'proxy_cache_valid')[0]!.args, uri).toEqual(['200', '60s'])
+      expect(find(l.body, 'proxy_cache_lock')[0]!.args, uri).toEqual(['on'])
+      expect(find(l.body, 'proxy_cache_use_stale')[0]!.args, uri).toEqual(
+        expect.arrayContaining(['error', 'timeout', 'updating', 'http_502', 'http_503']),
+      )
+      expect(find(l.body, 'proxy_set_header').map((h) => h.args.join(' ')), uri).toContain('Cookie ')
+      expect(find(l.body, 'proxy_hide_header').map((h) => h.args[0]), uri).toContain('Set-Cookie')
+      expect(find(l.body, 'proxy_ignore_headers')[0]!.args, uri).toEqual(['Set-Cookie'])
+      expect(find(l.body, 'proxy_set_header').map((h) => h.args.join(' ')), uri).toContain(
+        'X-Forwarded-For $remote_addr',
+      )
+    }
+
+    // the rest of the public prefix (the POSTs: codes, bookings, joins): proxied as it is, never cached, the stricter zone, no cookie
+    for (const uri of ['/api/v1/public/otp', '/api/v1/public/otp/verify', '/api/v1/public/bookings', '/api/v1/public/memberships', '/api/v1/public/hours/']) {
+      const l = at(uri)
+      expect(`${l.modifier} ${l.pattern}`, uri).toBe('^~ /api/v1/public/')
+      expect(proxied(uri), uri).toBe('http://oasis_api')
+      expect(find(l.body, 'proxy_cache'), uri).toEqual([])
+      expect(find(l.body, 'proxy_cache_valid'), uri).toEqual([])
+      expect(find(l.body, 'limit_except'), uri).toEqual([])
+      expect(find(l.body, 'limit_req')[0]!.args, uri).toEqual(['zone=oasis_public_post', 'burst=10', 'nodelay'])
+      expect(find(l.body, 'proxy_set_header').map((h) => h.args.join(' ')), uri).toContain('Cookie ')
+      expect(find(l.body, 'proxy_hide_header').map((h) => h.args[0]), uri).toContain('Set-Cookie')
+      expect(find(l.body, 'proxy_ignore_headers')[0]!.args, uri).toEqual(['Set-Cookie'])
+    }
+    const post = locationsOf(apex()).find((x) => x.pattern === '/api/v1/public/' && x.modifier === '^~')!
+    expect(find(post.body, 'include').map((i) => i.args[0])).toEqual(['/etc/nginx/oasis/proxy.conf'])
 
     // everything else of the API, the hooks and the dev store, in any letter case: 404 from nginx, never proxied
     for (const uri of [
       '/api/v1/customers',
-      '/api/v1/public/hours/',
-      '/api/v1/public/',
+      '/api/v1/public',
+      '/api/v1/publicity',
       '/api',
       '/API/x',
       '/Api/v1/public/hours',
+      '/API/v1/public/bookings',
       '/hooks/x',
       '/hooks/smsgate/x',
       '/dev-storage/files/x',
@@ -233,7 +256,7 @@ describe('install.sh --site-domain: the rendered website', () => {
         apexLocs().flatMap((l) => l.body),
         'proxy_pass',
       ).map((p) => p.args[0]),
-    ).toEqual(['http://oasis_api'])
+    ).toEqual(['http://oasis_api', 'http://oasis_api', 'http://oasis_api', 'http://oasis_api'])
   })
 
   it('shares the TLS file with the dashboard, defines the cache and zones it uses, and every include exists', () => {
@@ -578,8 +601,16 @@ describe.skipIf(!NGINX)('the website in a real nginx', () => {
     // the API: answers the hours like the real one (helmet headers, a cache header) and tries to set a cookie, which must not pass
     await new Promise<void>((resolve) => {
       api = createServer((req, res) => {
-        hits.push(`${req.method} ${req.url} cookie=${req.headers.cookie ?? 'none'}`)
-        req.resume()
+        let body = ''
+        req.setEncoding('utf8')
+        req.on('data', (chunk: string) => (body += chunk))
+        req.on('end', () => {
+          const idem = req.headers['idempotency-key']
+          hits.push(
+            `${req.method} ${req.url} cookie=${req.headers.cookie ?? 'none'}` +
+              (req.method === 'POST' ? ` idem=${typeof idem === 'string' ? idem : 'none'} body=${body}` : ''),
+          )
+        })
         req.on('end', () =>
           res
             .writeHead(200, {
@@ -692,7 +723,7 @@ describe.skipIf(!NGINX)('the website in a real nginx', () => {
     expect((await get(`http://127.0.0.1:${P80}/`, ['-H', 'Host: other.example.com'])).code).toBe(52)
   }, 60_000)
 
-  it('proxies the hours once with the path unchanged and no cookie either way, caches it, and keeps the rest of the API away', async () => {
+  it('proxies the public reads once each with the path unchanged and no cookie either way, caches them, passes the writes through uncached, and keeps the rest of the API away', async () => {
     const site = `https://${SITE}:${P443}`
     hits.length = 0
     const first = await get(`${site}/api/v1/public/hours`, ['-H', 'Cookie: oasis_sid=visitor-cookie'])
@@ -714,11 +745,47 @@ describe.skipIf(!NGINX)('the website in a real nginx', () => {
     expect(query.status).toBe(200)
     expect(hits).toEqual(['GET /api/v1/public/hours cookie=none', 'GET /api/v1/public/hours?x=1 cookie=none'])
 
+    // the board and the catalog: the same treatment, cached per URL
+    hits.length = 0
+    for (const uri of ['/api/v1/public/availability?days=5', '/api/v1/public/catalog']) {
+      const miss = await get(`${site}${uri}`, ['-H', 'Cookie: oasis_sid=visitor-cookie'])
+      expect(miss.status, uri).toBe(200)
+      expect(miss.header('x-cache-status'), uri).toEqual(['MISS'])
+      expect(miss.header('set-cookie'), uri).toEqual([])
+      once(miss, uri)
+      const hit = await get(`${site}${uri}`)
+      expect(hit.header('x-cache-status'), uri).toEqual(['HIT'])
+    }
+    expect(hits).toEqual(['GET /api/v1/public/availability?days=5 cookie=none', 'GET /api/v1/public/catalog cookie=none'])
+    // the cached routes take no POST
+    const postHours = await get(`${site}/api/v1/public/hours`, ['-X', 'POST', '-d', '{}'])
+    expect(postHours.status).toBe(403)
+    once(postHours, 'POST hours')
+    expect(hits).toHaveLength(2)
+
+    // the writes: passed through as they are (method, path, body, Idempotency-Key), never cached, no cookie either way
+    hits.length = 0
+    const args = ['-X', 'POST', '-H', 'Content-Type: application/json', '-H', 'Idempotency-Key: k-0123456789', '-H', 'Cookie: oasis_sid=visitor-cookie', '-d', '{"phone":"+12015550101"}']
+    const booking = await get(`${site}/api/v1/public/bookings`, args)
+    expect(booking.status).toBe(200)
+    expect(booking.header('x-cache-status')).toEqual([])
+    expect(booking.header('set-cookie')).toEqual([])
+    once(booking, 'POST bookings')
+    const again = await get(`${site}/api/v1/public/bookings`, args)
+    expect(again.status).toBe(200)
+    expect(hits).toEqual(['POST /api/v1/public/bookings cookie=none idem=k-0123456789 body={"phone":"+12015550101"}', 'POST /api/v1/public/bookings cookie=none idem=k-0123456789 body={"phone":"+12015550101"}'])
+    for (const uri of ['/api/v1/public/otp', '/api/v1/public/otp/verify', '/api/v1/public/memberships']) {
+      hits.length = 0
+      expect((await get(`${site}${uri}`, args)).status, uri).toBe(200)
+      expect(hits[0], uri).toMatch(new RegExp(`^POST ${uri.replace(/\//g, '\\/')} cookie=none`))
+    }
+
     hits.length = 0
     for (const uri of [
       '/api/v1/customers',
-      '/api/v1/public/hours/',
+      '/api/v1/public',
       '/API/v1/public/hours',
+      '/API/v1/public/bookings',
       '/hooks/smsgate/x',
       '/dev-storage/files/x',
       '/api',

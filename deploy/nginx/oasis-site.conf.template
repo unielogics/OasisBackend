@@ -6,8 +6,10 @@
 #     /                        clean URLs: /about serves about.html or about/index.html; no-cache, so a deploy shows at once
 #     /assets/*                content-hashed files, cached for a year (immutable)
 #     other static types      cached for a day
-#     /api/v1/public/hours     the ONE API route the site may call (opening hours), proxied to the API without cookies in
-#                             either direction and cached by nginx for 60 seconds
+#     /api/v1/public/hours, /availability, /catalog   the site's read-only API answers, proxied to the API without cookies in
+#                             either direction, GET only, cached by nginx for 60 seconds (ADR 0145, 0150)
+#     /api/v1/public/...       the rest of the public prefix (one-time codes, bookings, joins: POST): proxied without cookies,
+#                             never cached, under the stricter oasis_public_post zone (ADR 0150)
 #     any other /api, /hooks or /dev-storage path, in any letter case: 404 (the API is the dashboard's, on its own host)
 #     dotfiles except /.well-known: 404
 # The default servers that refuse every other name (and a bare address) are in oasis.conf; the rate zones, the oasis_public cache
@@ -63,7 +65,7 @@ server {
     index index.html;
     charset utf-8;
 
-    # A static site takes no body (the hours call is a GET); nginx stops anything larger at once.
+    # The site's only bodies are the small JSON documents of a booking, a code or a join; nginx stops anything larger at once.
     client_max_body_size 16k;
     client_body_timeout 15s;
     client_header_timeout 15s;
@@ -83,11 +85,12 @@ server {
     add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
     add_header X-Content-Type-Options "nosniff" always;
 
-    # --- the opening hours, live from the dashboard's Settings ---
+    # --- the site's read-only API answers: the opening hours, the open-times board and the catalog ---
     # Same origin as the pages, so the site needs no CORS and the API grants none. No cookie travels to the API (a visitor of the
-    # website is never a dashboard session) and none comes back; nginx caches the answer for 60 seconds and serves a stale copy
-    # while it refreshes it or when the API is down.
+    # website is never a dashboard session) and none comes back; GET only; nginx caches each answer (per URL, query string included)
+    # for 60 seconds and serves a stale copy while it refreshes it or when the API is down.
     location = /api/v1/public/hours {
+        limit_except GET { deny all; }
         limit_req zone=oasis_api burst=20 nodelay;
         include @NGINX_DIR@/oasis/proxy.conf;
         proxy_set_header Cookie "";
@@ -101,6 +104,61 @@ server {
         add_header X-Content-Type-Options "nosniff" always;
         add_header X-Cache-Status $upstream_cache_status always;
         proxy_pass http://oasis_api;
+    }
+
+    location = /api/v1/public/availability {
+        limit_except GET { deny all; }
+        limit_req zone=oasis_api burst=20 nodelay;
+        include @NGINX_DIR@/oasis/proxy.conf;
+        proxy_set_header Cookie "";
+        proxy_hide_header Set-Cookie;
+        proxy_ignore_headers Set-Cookie;
+        proxy_cache oasis_public;
+        proxy_cache_valid 200 60s;
+        proxy_cache_lock on;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Cache-Status $upstream_cache_status always;
+        proxy_pass http://oasis_api;
+    }
+
+    location = /api/v1/public/catalog {
+        limit_except GET { deny all; }
+        limit_req zone=oasis_api burst=20 nodelay;
+        include @NGINX_DIR@/oasis/proxy.conf;
+        proxy_set_header Cookie "";
+        proxy_hide_header Set-Cookie;
+        proxy_ignore_headers Set-Cookie;
+        proxy_cache oasis_public;
+        proxy_cache_valid 200 60s;
+        proxy_cache_lock on;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Cache-Status $upstream_cache_status always;
+        proxy_pass http://oasis_api;
+    }
+
+    # --- the rest of the public prefix: one-time codes, bookings and joins (POST, ADR 0150) ---
+    # Never cached (no proxy_cache here), no cookie either way, the stricter zone: 20 a minute per address with a burst of 10. The
+    # API applies its own per-phone and per-address limits, the Idempotency-Key and the honeypot behind this. The path is passed as
+    # it is; anything the API does not know under the prefix is its own 404.
+    location ^~ /api/v1/public/ {
+        limit_req zone=oasis_public_post burst=10 nodelay;
+        include @NGINX_DIR@/oasis/proxy.conf;
+        proxy_set_header Cookie "";
+        proxy_hide_header Set-Cookie;
+        proxy_ignore_headers Set-Cookie;
+        add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        proxy_pass http://oasis_api;
+    }
+
+    # The prefix itself is not a route (without this, nginx would answer the bare prefix with a 301 to the slash form).
+    location = /api/v1/public {
+        default_type application/json;
+        return 404 '{"ok":false,"status":"not_found"}';
     }
 
     # Nothing else of the API, the webhooks or the dev object store exists on this host name, in any letter case.
