@@ -66,6 +66,12 @@ registerProblems({
     title: 'You’re already a member',
     detail: 'This number already has a membership. Text us to change your plan.',
   },
+  // the global hourly ceiling on the website's one-time codes (PUBLIC_OTP_TEXTS_PER_HOUR): says nothing about the number
+  PUBLIC_CODES_PAUSED: {
+    status: 429,
+    title: 'Codes are paused',
+    detail: 'We can’t text a code right now. Try again in {minutes} min, or text us.',
+  },
   PUBLIC_RATE_LIMITED: {
     status: 429,
     title: 'Slow down',

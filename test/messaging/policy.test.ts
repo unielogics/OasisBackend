@@ -92,6 +92,14 @@ describe('class registry', () => {
     expect(SMS_CLASSES.emergency.priority).toBe(3)
     expect(SMS_CLASSES.ready.priority).toBe(0)
   })
+
+  it('never puts a text the public website triggers above the shop’s appointment and payment texts (review 2026-10-10)', () => {
+    // lane 0 holds the reserve of the device's window; a stranger asking for codes must not be able to spend it
+    for (const k of ['otp_code', 'booking_confirmed_web', 'membership_welcome_web'] as const)
+      expect(SMS_CLASSES[k].priority, k).toBeGreaterThanOrEqual(SMS_CLASSES.payment_link.priority)
+    expect(SMS_CLASSES.payment_link.priority).toBe(1)
+    expect(SMS_CLASSES.otp_code.priority).toBe(1)
+  })
 })
 
 describe('canSendSms matrix', () => {

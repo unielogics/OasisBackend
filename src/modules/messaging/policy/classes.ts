@@ -45,8 +45,10 @@ export const SMS_CLASSES = {
   staff_invite: { priority: 0, category: 'transactional', transactional: true, ttlSec: 24 * HOUR, footer: 'never', recipient: 'employee' },
   password_reset: { priority: 0, category: 'transactional', transactional: true, ttlSec: 30 * MIN, footer: 'never', recipient: 'employee' },
   // the public website (ADR 0150): a one-time code the person just asked for (consent-exempt, sent even to a number that opted out,
-  // like the keyword replies: the person is at the keyboard asking for it), the booking confirmation and the join welcome
-  otp_code: { priority: 0, category: 'transactional', transactional: true, ttlSec: 10 * MIN, footer: 'never', consentExempt: true, ignoresOptOut: true },
+  // like the keyword replies: the person is at the keyboard asking for it), the booking confirmation and the join welcome. The code
+  // is lane 1, beside the confirmations and payment links, never lane 0: a stranger asking for codes must not spend the window's
+  // reserve that ready-for-pickup texts rely on (review 2026-10-10); the website's hourly ceiling bounds how many there are.
+  otp_code: { priority: 1, category: 'transactional', transactional: true, ttlSec: 10 * MIN, footer: 'never', consentExempt: true, ignoresOptOut: true },
   booking_confirmed_web: { priority: 1, category: 'transactional', transactional: true, ttlSec: 6 * HOUR, footer: 'first_only' },
   membership_welcome_web: { priority: 1, category: 'transactional', transactional: true, ttlSec: 6 * HOUR, footer: 'first_only' },
   // staff typing in the conversation, quick replies

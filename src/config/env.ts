@@ -82,6 +82,7 @@ export const envSchema = z
     ALLOWED_ORIGINS: z.string().default(''), // extra comma-separated browser origins allowed on unsafe methods
     PUBLIC_SITE_URL: z.string().url().optional(), // the public website's origin (https://oasisautospanj.com): allowed on the public POSTs (ADR 0150)
     PUBLIC_WRITES_ENABLED: bool.default('false'), // the website's public POSTs (otp, otp/verify, bookings, memberships); off = 404 until online booking opens (ADR 0150)
+    PUBLIC_OTP_TEXTS_PER_HOUR: z.coerce.number().int().min(0).max(60).default(12), // the website's one-time codes texted per rolling hour, all callers together (the tablet sends ~60 an hour for the whole shop)
     RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(300),
     SSE_HEARTBEAT_MS: z.coerce.number().int().min(50).default(20_000),
     BUSINESS_TZ: z.string().default('America/New_York'),

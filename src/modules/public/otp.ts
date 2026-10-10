@@ -15,6 +15,7 @@ import type { SmsRecipient } from '../messaging/policy/canSend.js'
 import type { PublicDeps, PublicLocation, PublicRequest } from './deps.js'
 import { enforceLimits, PUBLIC_LIMITS, publicLimitChecks } from './limits.js'
 import { memberView, type MemberView } from './members.js'
+import { notifyManagers } from '../messaging/notify.js'
 import './problems.js'
 import './schema.js'
 
@@ -66,7 +67,12 @@ export async function requestOtp(
   const now = clock.now()
   const id = newId()
   const code = newCode()
-  await db.transaction().execute(async (tx) => {
+  const cap = d.app.env.PUBLIC_OTP_TEXTS_PER_HOUR
+  const paused = await db.transaction().execute(async (tx): Promise<{ sent: number; retryAfterSec: number } | null> => {
+    // every code request takes the same lock first, so the count and the new row are one decision across processes
+    await advisoryXactLock(tx, `public-otp-cap:${loc.id}`)
+    const recent = await codesSentWithin(tx, loc.id, now)
+    if (recent.sent >= cap) return { sent: recent.sent, retryAfterSec: recent.retryAfterSec }
     await advisoryXactLock(tx, `public-otp:${loc.id}:${phone}`)
     await tx
       .updateTable('public_otp_challenges')
@@ -110,8 +116,68 @@ export async function requestOtp(
       after: { phone: maskPhone(phone), delivery: out.queued ? 'queued' : out.skipped },
       ctx: { actor: { name: 'Website' }, requestId: r.requestId, ip: r.ip },
     })
+    return null
   })
+  if (paused) {
+    await tellManagersCodesPaused(d, loc, paused.sent)
+    throw new AppError('PUBLIC_CODES_PAUSED', {
+      params: { minutes: Math.max(1, Math.ceil(paused.retryAfterSec / 60)) },
+      headers: { 'Retry-After': String(paused.retryAfterSec) },
+    })
+  }
   return { challengeId: id, expiresInSec: OTP_TTL_SEC }
+}
+
+const HOUR_MS = 3_600_000
+
+/**
+ * The website's codes actually handed to the queue in the hour before `now` (a code suppressed by the policy costs the tablet
+ * nothing), and when the oldest of them leaves that hour.
+ */
+async function codesSentWithin(tx: Tx, locationId: string, now: Date): Promise<{ sent: number; retryAfterSec: number }> {
+  const r = await tx
+    .selectFrom('public_otp_challenges')
+    .select((eb) => [eb.fn.countAll<string>().as('n'), eb.fn.min('created_at').as('oldest')])
+    .where('location_id', '=', locationId)
+    .where('delivery', '=', 'queued')
+    .where('created_at', '>', new Date(now.getTime() - HOUR_MS))
+    .executeTakeFirstOrThrow()
+  const oldest = r.oldest ? new Date(r.oldest as unknown as string | Date) : now
+  return { sent: Number(r.n), retryAfterSec: Math.max(1, Math.ceil((oldest.getTime() + HOUR_MS - now.getTime()) / 1000)) }
+}
+
+/** One notification per manager when the ceiling is reached, at most once an hour (its own transaction: the refusal rolls back). */
+async function tellManagersCodesPaused(d: PublicDeps, loc: PublicLocation, sent: number): Promise<void> {
+  const { db, clock, newId } = d.app
+  const now = clock.now()
+  d.app.log.warn({ sent, cap: d.app.env.PUBLIC_OTP_TEXTS_PER_HOUR }, 'public one-time codes paused: hourly ceiling reached')
+  await db.transaction().execute(async (tx) => {
+    await advisoryXactLock(tx, `public-otp-cap-notice:${loc.id}`)
+    const told = await tx
+      .selectFrom('notifications')
+      .select('id')
+      .where('location_id', '=', loc.id)
+      .where('kind', '=', 'public.otp_cap_reached')
+      .where('created_at', '>', new Date(now.getTime() - HOUR_MS))
+      .limit(1)
+      .executeTakeFirst()
+    if (told) return
+    await notifyManagers(
+      tx,
+      {
+        locationId: loc.id,
+        kind: 'public.otp_cap_reached',
+        title: `Website codes paused: ${sent} sent in the last hour`,
+        body:
+          `The website texted ${sent} one-time codes within an hour, its ceiling (PUBLIC_OTP_TEXTS_PER_HOUR), so new code requests are ` +
+          'refused until the oldest leaves the hour. The ceiling keeps the tablet’s sending budget for the shop’s own texts. If this is ' +
+          'not a busy hour, someone may be abusing the website’s form.',
+        entityType: null,
+        entityId: null,
+      },
+      { newId, clock },
+    )
+  })
 }
 
 export interface OtpVerified {
