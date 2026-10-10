@@ -442,6 +442,29 @@ health check runs, exit 3 when it fails. Nothing is rebuilt and nginx is not rel
 * `certbot renew --dry-run` covers both certificates (the dashboard's and the site's); the renewal hook reloads nginx.
 * "the mirror ... can be changed by users other than root": `sudo chown -R root:root /opt/oasis/git && sudo chmod -R go-w /opt/oasis/git`.
 
+### Online booking: opening the public writes, and what they send staff
+
+The website's writes (`POST /api/v1/public/otp`, `otp/verify`, `bookings`, `memberships`) answer 404 until `PUBLIC_WRITES_ENABLED=true`
+(ADR 0150); the reads (hours, the board, the catalog) are always open. Open them only once the SMS tablet sends texts, together with
+the website's `SITE_BOOKING=live` build:
+1. Re-run `install.sh` with this host's options (section 2) on a release whose nginx templates carry the public rules on both hosts
+   (`grep -c 'location ^~ /api/v1/public/' /etc/nginx/conf.d/oasis.conf` is 1); it runs `nginx -t` and reloads.
+2. In `/etc/oasis/common.env`: `PUBLIC_WRITES_ENABLED=true`; optionally `PUBLIC_OTP_TEXTS_PER_HOUR` (default 12: the website's
+   one-time codes per rolling hour, every caller together). `sudo systemctl restart oasis-api`.
+3. Check: `curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'content-type: application/json' -d '{}' https://oasisautospanj.com/api/v1/public/otp`
+   is 422 (open; 404 means still closed); `curl -s -o /dev/null -w '%{http_code}\n' 'https://oasisautospanj.com/api/v1/public/availability?days=5&x=1'`
+   is 200 from the cache or 422, never a fresh computation.
+
+What staff then see in the dashboard's notifications:
+* **"Website join: send <name> the Gold checkout link"**: a new member; text them the Squarespace checkout link it names.
+* **"Website join to confirm: <customer> (Gold)"**: someone joined with the number of a customer the shop already has, without the
+  code that proves the number, so nothing was changed. Call or text the customer; if they did join, add the membership on their record
+  and send the link. Bookings made that way are on the calendar under the existing customer, with what was typed on the appointment's
+  log ("not verified by a code"); correct the record only after talking to the customer.
+* **"Website codes paused: N sent in the last hour"**: the website asked for more one-time codes than `PUBLIC_OTP_TEXTS_PER_HOUR`
+  within an hour; new code requests answer "try again in N min" until the oldest leaves the hour. Outside a busy hour, someone is
+  probably abusing the form: `grep 'public/otp' /var/log/nginx/oasis-site.access.log | awk '{print $1}' | sort | uniq -c | sort -rn | head`.
+
 ### The host cannot resolve its own new name (health check: "answered HTTP 000")
 
 A name created in Route 53 after a resolver already answered "no such record" stays negative in that resolver for the zone's

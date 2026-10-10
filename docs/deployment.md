@@ -48,7 +48,7 @@ for the environment in AWS Secrets Manager and the app's AWS identity, and 0140 
 | `/var/www/site/releases/<id>`, `/var/www/site/current`, `previous` | the public website: one verified static build per release (`dist/` plus `REVISION`), `root:root`, read-only; nginx serves `current` (ADR 0145). `releases/bootstrap` is the placeholder page install.sh puts there first |
 | `/opt/oasis/git/site.git` | the root-only bare mirror the website is built from (`site-deploy.sh` refuses any other owner or a group/other-writable file) |
 | `/etc/oasis/site.env` | the website's settings (`SITE_DOMAIN`, `SITE_URL`, `SITE_ROOT`, `SITE_MIRROR`, `SITE_BUILD_DIR`, `SITE_MARKER`, `SITE_KEEP`), `0644 root:root`, rendered from the `install.sh --site-*` options on every run; nothing secret |
-| `/var/cache/nginx/oasis_public` | nginx's 60-second cache of the website's read-only API answers (`/api/v1/public/hours`, `/availability`, `/catalog`) |
+| `/var/cache/nginx/oasis_public` | nginx's 60-second cache of the website's read-only API answers (`/api/v1/public/hours`, `/availability`, `/catalog`, on both hosts) |
 | `/var/lib/oasis` | state: `files/` (filesystem storage), `mail/` (simulated mail), `drills/` (restore-drill results), the service user's home |
 | `/var/backups/oasis/{daily,weekly,monthly}` | database backups |
 | `/var/log/oasis/{deploy.log,deploys.list,failures.log}` | deploy history and failed timers (the services themselves log to journald) |
@@ -226,6 +226,7 @@ Check: `sudo iptables -S OASIS-IMDS` (`--uid-owner 0`, the oasis uid, the ec2-in
 | `http://` the domain | 301 to `https://` | except `/.well-known/acme-challenge/` |
 | `/` | dashboard `:3200` | security headers below |
 | `/api/*` | API `:4000` | rate zone `oasis_api` (30 requests/s per address, burst 60); `^~`, so no regular expression below applies |
+| `/api/v1/public/hours`, `/availability`, `/catalog`; any other `/api/v1/public/...` | API `:4000` | the website's API under the website host's rules (next table), so this host is no way around them: the reads GET only, cached 60 s under a fixed key, zone `oasis_api` burst 20; the writes in zone `oasis_public_post` with a 16k body limit; cookies stripped both ways (ADR 0150) |
 | any other letter case of `/api`, `/dev-storage`, `/hooks` (`/API/...`, `/Dev-Storage/...`) | nothing: 404 | the dashboard's rewrites are case-insensitive and would hand them to the API around the rules here |
 | `/api/v1/auth/{login,password/forgot,password/reset,invite/accept}` | API | zone `oasis_login` (30 a minute, burst 10) |
 | `/api/v1/events` | API | server-sent events: `proxy_buffering off`, no compression, one-hour reads |
@@ -243,8 +244,8 @@ The public website (`install.sh --site-domain <apex>`; `oasis-site.conf`, ADR 01
 | `https://<apex>/`, `/about`, `/about/` | files of `/var/www/site/current` | clean URLs (`about.html` or `about/index.html`), `Cache-Control: no-cache`, the site's headers (CSP, `X-Frame-Options: DENY`, referrer policy, COOP/CORP); `error_page 404 /404.html` |
 | `/assets/*` | files | content-hashed: `public, max-age=31536000, immutable` |
 | other static types (`.css .js .png .svg .woff2 .txt .xml .json ...`) | files | `public, max-age=86400` |
-| `/api/v1/public/hours`, `/api/v1/public/availability`, `/api/v1/public/catalog` | API `:4000`, exactly these paths, GET only (403 otherwise) | the opening hours, the open-times board and the catalog; `Cookie` stripped on the way in, `Set-Cookie` on the way out; zone `oasis_api` (burst 20); `proxy_cache oasis_public` 60 s per URL (query string included) with `proxy_cache_lock` and stale answers while refreshing or when the API is down; `X-Cache-Status` says HIT or MISS |
-| any other `/api/v1/public/...` path (the writes: `otp`, `otp/verify`, `bookings`, `memberships`) | API `:4000`, path unchanged | never cached, cookies stripped both ways, zone `oasis_public_post` (20 a minute per address, burst 10); the API's own per-phone and per-address limits, `Idempotency-Key` and honeypot apply behind it (ADR 0150). The API must list the website's origin: `PUBLIC_SITE_URL=https://<apex>` in `common.env` (its POSTs carry `Origin`) |
+| `/api/v1/public/hours`, `/api/v1/public/availability`, `/api/v1/public/catalog` | API `:4000`, exactly these paths, GET only (403 otherwise) | the opening hours, the open-times board and the catalog; `Cookie` stripped on the way in, `Set-Cookie` on the way out; zone `oasis_api` (burst 20); `proxy_cache oasis_public` 60 s under a fixed key (`$scheme$host$uri`, plus `?days=$arg_days&service=$arg_service` for the board: a junk or cache-busting parameter is the same entry, and the API answers 422 to any query it does not take) with `proxy_cache_lock` and stale answers while refreshing or when the API is down; `X-Cache-Status` says HIT or MISS |
+| any other `/api/v1/public/...` path (the writes: `otp`, `otp/verify`, `bookings`, `memberships`) | API `:4000`, path unchanged | never cached, cookies stripped both ways, zone `oasis_public_post` (20 a minute per address, burst 10), the server's 16k body limit; the API's own per-phone and per-address limits, `Idempotency-Key` and honeypot apply behind it (ADR 0150). The API must list the website's origin: `PUBLIC_SITE_URL=https://<apex>` in `common.env` (its POSTs carry `Origin`) |
 | any other `/api`, `/hooks`, `/dev-storage` path, any letter case | nothing: 404 JSON | the API is the dashboard's; the website never needs CORS |
 | dotfiles (except `/.well-known`), `/REVISION` | nothing: 404 | |
 
