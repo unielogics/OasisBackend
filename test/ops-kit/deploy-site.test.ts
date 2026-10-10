@@ -173,6 +173,10 @@ describe('install.sh --site-domain: the rendered website', () => {
       expect(find(l.body, 'limit_req')[0]!.args, uri).toEqual(['zone=oasis_api', 'burst=20', 'nodelay'])
       expect(find(l.body, 'proxy_cache')[0]!.args, uri).toEqual(['oasis_public'])
       expect(find(l.body, 'proxy_cache_valid')[0]!.args, uri).toEqual(['200', '60s'])
+      // the key is fixed (review 2026-10-10): an extra or junk parameter is the same entry, never a miss the API must compute
+      expect(find(l.body, 'proxy_cache_key')[0]!.args, uri).toEqual([
+        name === 'availability' ? '$scheme$host$uri?days=$arg_days&service=$arg_service' : '$scheme$host$uri',
+      ])
       expect(find(l.body, 'proxy_cache_lock')[0]!.args, uri).toEqual(['on'])
       expect(find(l.body, 'proxy_cache_use_stale')[0]!.args, uri).toEqual(
         expect.arrayContaining(['error', 'timeout', 'updating', 'http_502', 'http_503']),
@@ -740,10 +744,11 @@ describe.skipIf(!NGINX)('the website in a real nginx', () => {
     expect(second.header('x-cache-status')).toEqual(['HIT'])
     expect(second.header('set-cookie')).toEqual([])
     expect(hits).toHaveLength(1)
-    // the query string is part of the cache key but never a way around it: still the one upstream path
+    // a query string is not part of the hours' cache key: a cache-busting parameter is served from the cache (review 2026-10-10)
     const query = await get(`${site}/api/v1/public/hours?x=1`)
     expect(query.status).toBe(200)
-    expect(hits).toEqual(['GET /api/v1/public/hours cookie=none', 'GET /api/v1/public/hours?x=1 cookie=none'])
+    expect(query.header('x-cache-status')).toEqual(['HIT'])
+    expect(hits).toEqual(['GET /api/v1/public/hours cookie=none'])
 
     // the board and the catalog: the same treatment, cached per URL
     hits.length = 0
@@ -757,11 +762,16 @@ describe.skipIf(!NGINX)('the website in a real nginx', () => {
       expect(hit.header('x-cache-status'), uri).toEqual(['HIT'])
     }
     expect(hits).toEqual(['GET /api/v1/public/availability?days=5 cookie=none', 'GET /api/v1/public/catalog cookie=none'])
+    // the board's key is its two parameters: add-ons, junk and order do not make a new entry; another day count does
+    for (const uri of ['/api/v1/public/availability?days=5&addons=wax%2Cclay', '/api/v1/public/availability?days=5&cb=1', '/api/v1/public/catalog?v=2'])
+      expect((await get(`${site}${uri}`)).header('x-cache-status'), uri).toEqual(['HIT'])
+    expect((await get(`${site}/api/v1/public/availability?days=6`)).header('x-cache-status')).toEqual(['MISS'])
+    expect(hits).toHaveLength(3)
     // the cached routes take no POST
     const postHours = await get(`${site}/api/v1/public/hours`, ['-X', 'POST', '-d', '{}'])
     expect(postHours.status).toBe(403)
     once(postHours, 'POST hours')
-    expect(hits).toHaveLength(2)
+    expect(hits).toHaveLength(3)
 
     // the writes: passed through as they are (method, path, body, Idempotency-Key), never cached, no cookie either way
     hits.length = 0

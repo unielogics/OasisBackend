@@ -3,6 +3,8 @@
 #   /                     the dashboard (Next.js, 127.0.0.1:@WEB_PORT@)
 #   /api/                 the API (Fastify, 127.0.0.1:@API_PORT@), same origin as the dashboard so there is no CORS
 #   /api/v1/events        the Server-Sent Events stream: no buffering, one-hour reads
+#   /api/v1/public/*      the website's API under the website host's rules (ADR 0150): reads cached 60 s under a fixed key, writes
+#                         in the oasis_public_post zone with a 16k body limit, no cookies either way
 #   /hooks/squarespace    Squarespace webhook (signed, public), 1 MB body limit, POST only
 #   /hooks/ses            Amazon SNS feedback (signed, public)
 #   /hooks/*              everything else, including /hooks/smsgate, answers 404 here. The SMS Gate webhook is served only on
@@ -141,6 +143,75 @@ server {
         gzip off;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
+        proxy_pass http://oasis_api;
+    }
+
+    # --- the public website's API (ADR 0150): the very rules of the website's host (oasis-site.conf), so this host is no way around
+    # them (review 2026-10-10): the three reads cached 60 s under a fixed key, GET only; the writes (codes, bookings, joins) under the
+    # stricter oasis_public_post zone with the website's 16k body limit; no cookie either way (a website call is never a session).
+    location = /api/v1/public/hours {
+        limit_except GET { deny all; }
+        limit_req zone=oasis_api burst=20 nodelay;
+        include @NGINX_DIR@/oasis/proxy.conf;
+        proxy_set_header Cookie "";
+        proxy_hide_header Set-Cookie;
+        proxy_ignore_headers Set-Cookie;
+        proxy_cache oasis_public;
+        proxy_cache_key "$scheme$host$uri";
+        proxy_cache_valid 200 60s;
+        proxy_cache_lock on;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Cache-Status $upstream_cache_status always;
+        proxy_pass http://oasis_api;
+    }
+
+    location = /api/v1/public/availability {
+        limit_except GET { deny all; }
+        limit_req zone=oasis_api burst=20 nodelay;
+        include @NGINX_DIR@/oasis/proxy.conf;
+        proxy_set_header Cookie "";
+        proxy_hide_header Set-Cookie;
+        proxy_ignore_headers Set-Cookie;
+        proxy_cache oasis_public;
+        proxy_cache_key "$scheme$host$uri?days=$arg_days&service=$arg_service";
+        proxy_cache_valid 200 60s;
+        proxy_cache_lock on;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Cache-Status $upstream_cache_status always;
+        proxy_pass http://oasis_api;
+    }
+
+    location = /api/v1/public/catalog {
+        limit_except GET { deny all; }
+        limit_req zone=oasis_api burst=20 nodelay;
+        include @NGINX_DIR@/oasis/proxy.conf;
+        proxy_set_header Cookie "";
+        proxy_hide_header Set-Cookie;
+        proxy_ignore_headers Set-Cookie;
+        proxy_cache oasis_public;
+        proxy_cache_key "$scheme$host$uri";
+        proxy_cache_valid 200 60s;
+        proxy_cache_lock on;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Cache-Status $upstream_cache_status always;
+        proxy_pass http://oasis_api;
+    }
+
+    location ^~ /api/v1/public/ {
+        limit_req zone=oasis_public_post burst=10 nodelay;
+        client_max_body_size 16k;
+        include @NGINX_DIR@/oasis/proxy.conf;
+        proxy_set_header Cookie "";
+        proxy_hide_header Set-Cookie;
+        proxy_ignore_headers Set-Cookie;
+        add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+        add_header X-Content-Type-Options "nosniff" always;
         proxy_pass http://oasis_api;
     }
 

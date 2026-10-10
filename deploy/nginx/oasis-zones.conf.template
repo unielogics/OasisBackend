@@ -8,7 +8,7 @@ server_tokens off;
 #   login        sign-in, password reset and invite endpoints. 30 a minute allows a whole shop signing in behind one address.
 #   api          everything else under /api
 #   hooks        the public webhook endpoints
-#   public_post  the website's writes (codes, bookings, joins): 20 a minute per address, a burst of 10 (ADR 0150)
+#   public_post  the website's writes (codes, bookings, joins) on both hosts: 20 a minute per address, a burst of 10 (ADR 0150)
 limit_req_zone $binary_remote_addr zone=oasis_login:10m rate=30r/m;
 limit_req_zone $binary_remote_addr zone=oasis_api:10m rate=30r/s;
 limit_req_zone $binary_remote_addr zone=oasis_hooks:10m rate=20r/s;
@@ -21,9 +21,10 @@ limit_conn_status 429;
 log_format oasis '$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent '
                  '"$http_referer" "$http_user_agent" rt=$request_time urt=$upstream_response_time rid=$request_id';
 
-# The public website's read-only API answers (oasis-site.conf: /api/v1/public/hours, /availability, /catalog) are cached here for
-# 60 seconds (per URL, query string included), so a busy site sends the API about one request a minute for each. nginx creates
-# the directory at start, owned by its worker user.
+# The public website's read-only API answers (/api/v1/public/hours, /availability, /catalog, on the website's host and the dashboard's)
+# are cached here for 60 seconds under a fixed key (the path, plus days and service for the board), so a busy site sends the API
+# about one request a minute for each and a cache-busting parameter changes nothing. nginx creates the directory at start, owned by
+# its worker user.
 proxy_cache_path /var/cache/nginx/oasis_public levels=1:2 keys_zone=oasis_public:1m max_size=10m inactive=10m use_temp_path=off;
 
 upstream oasis_api {

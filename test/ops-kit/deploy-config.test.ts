@@ -644,6 +644,40 @@ describe('nginx site', () => {
     expect(where('/readyz')).toBe('= /readyz')
   })
 
+  it('gives the website’s public API on this host the website host’s rules: cached reads with a fixed key, the write zone, 16k bodies, no cookies (review 2026-10-10)', () => {
+    const locs = httpsLocs()
+    const at = (uri: string) => matchLocation(locs, uri)!
+    const args = (uri: string, name: string): string[][] => find(at(uri).body, name).map((d) => d.args)
+    for (const [name, key] of [
+      ['hours', '$scheme$host$uri'],
+      ['availability', '$scheme$host$uri?days=$arg_days&service=$arg_service'],
+      ['catalog', '$scheme$host$uri'],
+    ] as const) {
+      const uri = `/api/v1/public/${name}`
+      expect(`${at(uri).modifier} ${at(uri).pattern}`, uri).toBe(`= ${uri}`)
+      expect(args(uri, 'proxy_pass'), uri).toEqual([['http://oasis_api']])
+      expect(args(uri, 'limit_req'), uri).toEqual([['zone=oasis_api', 'burst=20', 'nodelay']])
+      expect(args(uri, 'proxy_cache'), uri).toEqual([['oasis_public']])
+      expect(args(uri, 'proxy_cache_key'), uri).toEqual([[key]])
+      expect(args(uri, 'proxy_cache_valid'), uri).toEqual([['200', '60s']])
+      expect(find(find(at(uri).body, 'limit_except')[0]!.block!, 'deny')[0]!.args, uri).toEqual(['all'])
+      expect(args(uri, 'proxy_set_header').map((a) => a.join(' ')), uri).toContain('Cookie ')
+      expect(args(uri, 'proxy_ignore_headers'), uri).toEqual([['Set-Cookie']])
+    }
+    for (const uri of ['/api/v1/public/otp', '/api/v1/public/otp/verify', '/api/v1/public/bookings', '/api/v1/public/memberships', '/api/v1/public/hours/']) {
+      expect(`${at(uri).modifier} ${at(uri).pattern}`, uri).toBe('^~ /api/v1/public/')
+      expect(args(uri, 'limit_req'), uri).toEqual([['zone=oasis_public_post', 'burst=10', 'nodelay']])
+      expect(args(uri, 'client_max_body_size'), uri).toEqual([['16k']])
+      expect(args(uri, 'proxy_cache'), uri).toEqual([])
+      expect(args(uri, 'proxy_pass'), uri).toEqual([['http://oasis_api']])
+      expect(args(uri, 'proxy_set_header').map((a) => a.join(' ')), uri).toContain('Cookie ')
+      expect(args(uri, 'proxy_hide_header').map((a) => a[0]), uri).toContain('Set-Cookie')
+    }
+    // the dashboard's own API is untouched
+    expect(`${at('/api/v1/customers').modifier} ${at('/api/v1/customers').pattern}`).toBe('^~ /api/')
+    expect(`${at('/api/v1/publicity').modifier} ${at('/api/v1/publicity').pattern}`).toBe('^~ /api/')
+  })
+
   it('answers 404 for /hooks/smsgate and everything else under /hooks, and never proxies it', () => {
     const locs = httpsLocs()
     for (const uri of [
@@ -1066,5 +1100,34 @@ describe.skipIf(!NGINX)('nginx site in a real nginx', () => {
     }
     expect(limited, 'the login zone answers 429 after its burst').toBeDefined()
     once(limited!, '429')
+  }, 60_000)
+
+  it('treats the website’s public API on this host as the website’s host does: cached reads, 16k bodies, the write zone', async () => {
+    const site = `https://oasis.example.com:${P443}`
+    const resolve = ['--resolve', `oasis.example.com:${P443}:127.0.0.1`]
+    const call = async (url: string, extra: string[] = []) => {
+      const r = await sh('curl', ['-sk', '-D', '-', '-o', '/dev/null', '--max-time', '5', ...resolve, ...extra, url])
+      const lines = r.stdout.split('\r\n')
+      return {
+        status: Number(/^HTTP\/\S+ (\d+)/.exec(lines[0] ?? '')?.[1] ?? 0),
+        cache: lines.find((l) => l.toLowerCase().startsWith('x-cache-status:'))?.slice(15).trim(),
+      }
+    }
+    hits.length = 0
+    expect(await call(`${site}/api/v1/public/availability?days=5`)).toEqual({ status: 200, cache: 'MISS' })
+    expect(await call(`${site}/api/v1/public/availability?days=5`)).toEqual({ status: 200, cache: 'HIT' })
+    // an extra parameter is the same cache entry: it never reaches the API
+    expect(await call(`${site}/api/v1/public/availability?days=5&zz=${Date.now()}`)).toEqual({ status: 200, cache: 'HIT' })
+    expect(await call(`${site}/api/v1/public/hours`)).toEqual({ status: 200, cache: 'MISS' })
+    expect(await call(`${site}/api/v1/public/hours?_=${Date.now()}`)).toEqual({ status: 200, cache: 'HIT' })
+    expect(hits).toEqual(['api GET /api/v1/public/availability?days=5', 'api GET /api/v1/public/hours'])
+    // a body over 16k is refused by nginx; the writes have the website's zone (20 a minute, a burst of 10)
+    const big = path.join(dir, 'public-big.json')
+    writeFileSync(big, `{"name":"${'x'.repeat(20 * 1024)}"}`)
+    expect((await call(`${site}/api/v1/public/bookings`, ['-X', 'POST', '--data-binary', `@${big}`, '-H', 'content-type: application/json'])).status).toBe(413)
+    const answers: number[] = []
+    for (let i = 0; i < 14; i++) answers.push((await call(`${site}/api/v1/public/otp`, ['-X', 'POST', '-d', '{}', '-H', 'content-type: application/json'])).status)
+    expect(answers.filter((x) => x === 200).length).toBeLessThanOrEqual(11)
+    expect(answers.at(-1)).toBe(429)
   }, 60_000)
 })
