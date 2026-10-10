@@ -1225,6 +1225,49 @@ describe('site-deploy.sh', () => {
     expect(kit.out).not.toMatch(/not the root-owned kit/)
   }, 60_000)
 
+  it('a failed deploy keeps previous on the release before it, so --rollback still goes back; --list shows both tags when they meet', async () => {
+    const w = await makeSiteWorld()
+    const ids: string[] = []
+    for (const v of ['v2', 'v3']) {
+      await w.commit({ VERSION: `${v}\n` })
+      const r = await w.deploy()
+      expect(r.code, r.out).toBe(0)
+      ids.push(w.current())
+    }
+    const [a, b] = ids as [string, string]
+    expect([w.current(), w.previous()]).toEqual([b, a])
+    // a new release that nginx does not serve healthily: switched back, and previous is still a
+    w.flag('bad')
+    const failed = await w.deploy('--force')
+    w.flag('bad', false)
+    expect(failed.code).toBe(1)
+    expect([w.current(), w.previous()]).toEqual([b, a])
+    const list = await w.deploy('--list')
+    expect(list.stdout.trim().split('\n')).toEqual([
+      'bootstrap bootstrap',
+      expect.stringMatching(new RegExp(`^${a} \\w{12} <- previous$`)),
+      expect.stringMatching(new RegExp(`^${b} \\w{12} <- current$`)),
+    ])
+    // the one-command rollback works: back to a, and forward again
+    const back = await w.deploy('--rollback')
+    expect(back.code, back.out).toBe(0)
+    expect([w.current(), w.previous()]).toEqual([a, b])
+    const forward = await w.deploy('--rollback')
+    expect(forward.code, forward.out).toBe(0)
+    expect([w.current(), w.previous()]).toEqual([b, a])
+    // a verification failure changes neither link either
+    w.flag('no-404')
+    expect((await w.deploy('--force')).code).toBe(1)
+    w.flag('no-404', false)
+    expect([w.current(), w.previous()]).toEqual([b, a])
+    // a host whose links already meet (left so by an older kit): --list says so instead of hiding current
+    symlinkSync(path.join(w.siteRoot, 'releases', b), path.join(w.siteRoot, 'previous.tmp'))
+    await sh('mv', ['-T', path.join(w.siteRoot, 'previous.tmp'), path.join(w.siteRoot, 'previous')])
+    const met = await w.deploy('--list')
+    expect(met.stdout).toMatch(new RegExp(`^${b} \\w{12} <- current, previous$`, 'm'))
+    expect((await w.deploy('--rollback')).out).toMatch(/is already the current release \(try --list, then --rollback --to <id>\)/)
+  }, 120_000)
+
   it('needs site.env, and the --help text describes every step', async () => {
     const t = tempDir('oasis-site-noenv-')
     cleanups.push(t.cleanup)

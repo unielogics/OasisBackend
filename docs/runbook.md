@@ -425,8 +425,10 @@ It stops by itself when `current` already serves that commit (`--force` rebuilds
 mirror; `--skip-hours` builds without the hours snapshot). Watch for `verified dist/`, then `release <id> is live`. A build that fails
 or breaks the contract (missing 404.html, marker text absent, a localhost URL, an inline script ...) is kept in
 `/var/www/site/releases/<id>.failed` and nothing changes. A release that does not answer through nginx is switched back at once and
-kept as `.failed`; the reasons are in `/var/log/oasis/site-deploy.log` and `/var/log/nginx/oasis-site.error.log`. `--keep N` (default
-`SITE_KEEP=4`) releases plus current and previous stay; `--list` shows them.
+kept as `.failed`; `previous` moves only when the new release is healthy, so after a failed deploy `--rollback` still goes to the
+release before. The reasons are in `/var/log/oasis/site-deploy.log` and `/var/log/nginx/oasis-site.error.log`. `--keep N` (default
+`SITE_KEEP=4`) releases plus current and previous stay; `--list` shows them (`<- current, previous` when both links name one release:
+use `--rollback --to <id>`).
 
 **Roll back:** `sudo $D/site-deploy.sh --rollback` (to `previous`; again to go forward) or `--rollback --to <release id>`; the same
 health check runs, exit 3 when it fails. Nothing is rebuilt and nginx is not reloaded: `current` is a symlink.

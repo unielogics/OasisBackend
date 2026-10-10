@@ -15,10 +15,10 @@
 #      50 KB and 200 MB. A failure keeps the build in <id>.failed and changes nothing
 #   6. dist/ becomes <site root>/releases/<id> with a REVISION record (site=<commit>, built=<time>, hours=<fetched|skipped|unavailable>),
 #      owned by root, read-only for everyone (nginx reads it); the sources and node_modules are removed
-#   7. current -> the new release (atomic; previous -> the one before). No nginx reload: it follows the link
+#   7. current -> the new release (atomic). No nginx reload: it follows the link
 #   8. health, through nginx on this host: https://<domain>/ answers 200 with the marker, https://www.<domain>/ answers 301 to the apex,
-#      /api/v1/public/hours answers 200 (a warning only: the site works without live hours). Unhealthy: current -> the old release,
-#      the new one becomes <id>.failed, exit 1
+#      /api/v1/public/hours answers 200 (a warning only: the site works without live hours). Healthy: previous -> the release before.
+#      Unhealthy: current -> the old release, previous unchanged, the new one becomes <id>.failed, exit 1
 #   9. keeps SITE_KEEP releases (default 4) plus current and previous, and 2 failed builds
 # --rollback: current -> previous (or --to ID), the same health check (exit 3 when it fails). --list: the releases.
 # Run as root from the root-owned kit: sudo /usr/local/lib/oasis/deploy/scripts/site-deploy.sh. One at a time (a lock).
@@ -138,7 +138,7 @@ if ((LIST)); then
   while IFS= read -r r; do
     tag=""
     [[ "$r" == "$cur" ]] && tag=" <- current"
-    [[ "$r" == "$prev" ]] && tag=" <- previous"
+    if [[ "$r" == "$prev" ]]; then if [[ -n "$tag" ]]; then tag="$tag, previous"; else tag=" <- previous"; fi; fi
     printf '%s %s%s\n' "$(basename "$r")" "$(release_commit "$r" | cut -c1-12)" "$tag"
   done < <(site_releases_newest_first | tac) # oldest first, by build time
   exit 0
@@ -167,7 +167,7 @@ OLD=$(site_current)
 if ((ROLLBACK)); then
   if [[ -n "$TO" ]]; then target="$RELEASES/$TO"; else target=$(site_previous); fi
   [[ -n "$target" && -d "$target" && -f "$target/REVISION" ]] || die "no release to go back to (try --list)"
-  [[ "$target" != "$OLD" ]] || die "$(basename "$target") is already the current release"
+  [[ "$target" != "$OLD" ]] || die "$(basename "$target") is already the current release (try --list, then --rollback --to <id>)"
   log "rolling the website back from $(basename "${OLD:-none}") to $(basename "$target")"
   [[ -z "$OLD" ]] || site_link previous "$OLD"
   site_link current "$target"
@@ -307,9 +307,11 @@ root_own -R root:root "$REL"
 chmod -R u=rwX,go=rX "$REL"
 
 # --- 6. switch (no nginx reload: it reads through the link) and health ------------------------------------------------------------------
-[[ -z "$OLD" ]] || site_link previous "$OLD"
+# previous moves only once the new release is healthy: a release that is switched back leaves previous where it was, so --rollback
+# still goes to the release before
 site_link current "$REL"
 if site_health; then
+  [[ -z "$OLD" ]] || site_link previous "$OLD"
   record_site_deploy "$ID" ok
   changed "release $ID is live at https://$SITE_DOMAIN/"
 else
