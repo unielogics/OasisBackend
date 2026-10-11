@@ -40,8 +40,15 @@ describe('the judge request', () => {
     )
     // the rubric: language-agnostic, the five fail classes, the strict JSON answer
     expect(JUDGE_RUBRIC.startsWith(POLICY_JUDGE_HEADER)).toBe(true)
-    for (const part of ['(a) price:', '(b) promise:', '(c) secret:', '(d) link_or_phone:', '(e) other:', 'in any language', TRUSTED_OPEN, '{"ok":true,"category":"none","reason":""}'])
+    for (const part of ['(a) price:', '(b) promise:', '(c) secret:', '(d) link_or_phone:', '(e) other:', 'in any language', 'Decide by MEANING', TRUSTED_OPEN])
       expect(JUDGE_RUBRIC).toContain(part)
+    // the reason comes first (the judge explains, then decides: verdict-first answers flipped and wrote a second object, W4a)
+    expect(JUDGE_RUBRIC).toContain('{"reason":"<what the assistant\'s own text says or asks, at most 120 characters>","category":"none","ok":true}')
+    expect(parseVerdict('{"reason":"a greeting","category":"none","ok":true}')).toEqual({ ok: true, category: 'none', reason: 'a greeting' })
+    // W4a: Bedrock caches a prefix only from 1024 tokens up (Sonnet 4.6). The tuned rubric is just above it (about 4.3 characters a
+    // token measured: 4300 characters read ~1003 cached tokens); a shorter rubric silently stops caching (eval:guard prints the
+    // cache reads: they must not be 0)
+    expect(JUDGE_RUBRIC.length).toBeGreaterThan(4400)
     // Bedrock gets the temperature and the cache point after the rubric
     const input = toConverseInput(req, { modelId: 'us.anthropic.claude-sonnet-4-6' })
     expect(input.inferenceConfig).toEqual({ maxTokens: 120, temperature: 0 })

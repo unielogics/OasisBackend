@@ -12,7 +12,8 @@
 // Options: --fixture <path> (default test/assistant/fixtures/guard-eval.json), --concurrency <n> (default 4), --cat A,B,...,
 // --source v3-probe|earlier-rounds|v4-placement, --limit <n>, --no-judge (the deterministic layer only), --json <path> (every row's
 // result), --rpm <n> (judge calls started a minute; default 40 on Bedrock, below the account's quota of 50 a minute: a throttled
-// call is a judge error), --budget-usd <x> (default 2: no judge call starts once the run's cost reaches it; the report says
+// call is a judge error), --throttle-retries <n> (default 3 on Bedrock: the quota is the account's, shared with everything else; the
+// report counts the retries), --budget-usd <x> (default 2: no judge call starts once the run's cost reaches it; the report says
 // STOPPED). Exit 0 when it ran (the numbers are for people to read), 2 on a usage or settings error, 3 when the spend limit stopped
 // it.
 import { writeFileSync } from 'node:fs'
@@ -36,6 +37,8 @@ export interface EvalGuardOptions {
   rpm: number | null
   /** The run's spend limit in US dollars (the judge's cost); no call starts once it is reached. */
   budgetUsd: number
+  /** Retries of a throttled judge call (null = 3 on Bedrock, whose quota other work on the account shares; 0 otherwise). */
+  throttleRetries: number | null
 }
 
 /** The default spend limit of one run (a full run on Sonnet 4.6 costs about $0.80). */
@@ -44,7 +47,7 @@ export const DEFAULT_BUDGET_USD = 2
 export const DEFAULT_BEDROCK_RPM = 40
 
 export function parseArgs(argv: readonly string[]): EvalGuardOptions {
-  const o: EvalGuardOptions = { fixture: DEFAULT_FIXTURE, concurrency: 4, cats: null, source: null, limit: null, judge: true, json: null, rpm: null, budgetUsd: DEFAULT_BUDGET_USD }
+  const o: EvalGuardOptions = { fixture: DEFAULT_FIXTURE, concurrency: 4, cats: null, source: null, limit: null, judge: true, json: null, rpm: null, budgetUsd: DEFAULT_BUDGET_USD, throttleRetries: null }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!
     const value = (): string => {
@@ -59,6 +62,7 @@ export function parseArgs(argv: readonly string[]): EvalGuardOptions {
     else if (a === '--limit') o.limit = Math.max(1, Number.parseInt(value(), 10) || 1)
     else if (a === '--no-judge') o.judge = false
     else if (a === '--json') o.json = value()
+    else if (a === '--throttle-retries') o.throttleRetries = Math.max(0, Number.parseInt(value(), 10) || 0)
     else if (a === '--rpm') o.rpm = Math.max(0, Number.parseInt(value(), 10) || 0)
     else if (a === '--budget-usd') {
       const usd = Number(value())
@@ -89,6 +93,7 @@ export async function evalGuard(argv: readonly string[], env: NodeJS.ProcessEnv 
     rows,
     rpm,
     maxCostMicros: Math.round(o.budgetUsd * 1e6),
+    throttleRetries: o.throttleRetries ?? (ai.AI_PROVIDER === 'bedrock' ? 3 : 0),
   })
   if (o.json) writeFileSync(o.json, `${JSON.stringify(report, null, 1)}\n`)
   return { report, lines: formatEvalReport(report) }
