@@ -511,8 +511,8 @@ export interface StatusTextEvent {
 
 /**
  * Implemented by the status-texts module (ADR 0160, design section 6: checked in, running late, picked up). Called inside the
- * transition's transaction once the change is written; it queues or drops texts and never throws for a business reason. Nothing
- * calls it yet (wave 3 wires it into lifecycle.finish()); the default does nothing.
+ * transition's transaction once the change is written (lifecycle.finish()); it queues or drops texts and never throws for a business
+ * reason. The default does nothing; src/http/modules.ts and src/composition.ts wire src/modules/status-texts (statusTextsFor).
  */
 export interface StatusTextsPort {
   onChange(tx: Tx, c: SchedulingCtx, e: StatusTextEvent): Promise<void>

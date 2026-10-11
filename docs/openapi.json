@@ -4302,7 +4302,7 @@
     },
     "/api/v1/appointments/{id}/arrive": {
       "post": {
-        "description": "`source: geofence` also records the geofence check-in and queues the welcome SMS.",
+        "description": "`source: geofence` also records the geofence check-in and queues the welcome SMS. A manual arrival queues the checked-in text status_texts.checked_in_delay_min later, dropped if the wash starts first (only while Settings → Reminders turns it on; ADR 0160).",
         "parameters": [
           {
             "in": "path",
@@ -5956,6 +5956,7 @@
     },
     "/api/v1/appointments/{id}/complete": {
       "post": {
+        "description": "The ready-for-pickup SMS goes unless Settings → Reminders turned it off (status_texts.ready, on by default; ADR 0160).",
         "parameters": [
           {
             "in": "path",
@@ -10359,7 +10360,7 @@
     },
     "/api/v1/appointments/{id}/pickup": {
       "post": {
-        "description": "Not gated on payment, as in the design. No message is sent.",
+        "description": "Not gated on payment, as in the design. Collected sends the picked-up thank-you once per visit (with \"Paid in full\" when nothing is owed, and a book-again link only with marketing-grade consent) while Settings → Reminders turns it on (status_texts.picked_up, off by default; ADR 0160).",
         "parameters": [
           {
             "in": "path",

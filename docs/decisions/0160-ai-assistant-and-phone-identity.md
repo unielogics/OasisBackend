@@ -381,3 +381,48 @@ default: every route answers the unknown-route 404 while `PUBLIC_LINKS_ENABLED` 
 - **Files of other packages touched** (minimal): `src/http/modules.ts` (the module and its wiring), `src/modules/customers/schema.ts`
   (`AppointmentSource` gains `link`), the authz matrix's `PUBLIC_ROUTES`, the website contract test's filter (the link routes have their
   own contract test), the ops-kit nginx tests (both hosts, static and in a real nginx).
+
+## Wave W3d: status texts as the car moves
+
+`src/modules/status-texts/**` implements the scheduling `StatusTextsPort`; `lifecycle.finish()` now calls it in every transition's
+transaction (wired in `src/http/modules.ts` and `src/composition.ts`). Jobs `appointments.checkin_texts` (every minute) and
+`appointments.late_texts` (every 2 minutes). Contract: docs/api-spec.md section 23.4b. No migration (W1's `pending_checkin_texts` and
+`appointment_late_texts` are used as designed). Notes and deviations:
+
+- **Off by default** (wave rule: nothing switches on by itself in production): `status_texts.checked_in`, `running_late` and
+  `picked_up` now default to **false** (W1 had true); `ready` stays true (it was sent before). The owner turns them on in Settings ->
+  Reminders. The jobs read one setting per location and do nothing else while off.
+- **Ready reads `status_texts.ready`** at completion (off: no text, `ready_notified_at` null, an activity line, toast "Moved to
+  pickup"). The staff's explicit "notify ready" button always sends: it is a person's choice, not an automatic text.
+- **Checked in** is the `welcome` template **without the bay**: after a manual check-in the car is already with the team and the
+  planned bay may change (the geofence welcome keeps its bay). A geofence arrival gets no checked-in text (its welcome went). A row is
+  sent at most 15 minutes after its moment (the welcome class's life), else dropped `not_sendable`; one row per visit, so a reopened
+  visit arriving again gets no second text.
+- **Promised end** (design: "cleaning past the promised end"): the booked end, or cleaning start + the service's duration when the
+  wash began later, so a client who arrived late is not told the shop is behind. The second text is due past the first estimate +
+  the grace. A late text is never sent more than 30 minutes after its moment (a visit left "cleaning" after the car went home, a
+  worker that was down). An attempt that could not go (STOP) still takes its `seq`, so the job does not retry every 2 minutes.
+  ETA = now + 15 minutes rounded **up** to 5.
+- **Picked up**: the receipt line is "Paid in full: $54.00." (the invoice total) when the visit's invoice owes nothing (`invoice_calc_of`
+  balance, a payment awaiting Squarespace included), the total is above zero (a free member visit gets no line) and no `receipt` text
+  went to the client in the last 2 hours. A placeholder name (`needs_details`) is never used as the first name.
+- **Book-again link**: only with `status_texts.book_again_link`, **`PUBLIC_LINKS_ENABLED`** (added: a link to pages that answer 404
+  would be a dead link) and marketing-grade consent (`hasMarketingConsent`, exported from `policy/canSend.ts`: opted in from `web_form`
+  or `inbound_reply`, not opted out). A personal link is a secret, so it cannot ride in the `picked_up` class (its stored body is
+  readable): the link variant is the new template **`picked_up_link` in class `personal_link`** (masked in the message row, outbox
+  wiped once final), and `picked_up` lost its `{link}` placeholder. The link is `book_again`, issued by `system`, bound to the client
+  but **not** to the visit (an appointment on a book-again link could read as "this visit" to the link API); the issue and the enqueue
+  share a savepoint, so a link exists only if its text was queued.
+- **Dedupe**: message idempotency keys `status:checked_in:<a>`, `status:running_late:<a>:<seq>`, `status:picked_up:<a>`; a picked-up
+  text already queued is checked before a link is issued.
+- **Never blocks a transition**: the port's work runs in a savepoint; an unexpected error is rolled back to it and logged, and the
+  staff's arrival / start / pickup still commits.
+- **Settings preview** (`buildPreview`, W2e's file) now composes the status texts through `status-texts/compose.ts` (checked in without
+  the bay; picked up with a sample "Paid in full: $45.00."; the `picked_up_link` variant when `bookAgainLink` is on), so it is the
+  exact text sent.
+- Activity lines (actor `automation`, channel sms): "Checked-in text sent", "Running-late text sent · new estimate 11:05 AM",
+  "Picked-up text sent", or "... not sent (customer opted out of SMS)".
+- For the evaluation / rollout wave: turn the three texts on in Settings -> Reminders on production only after a live run on the
+  owner's phone (arrive manually, wait 3 minutes; leave a wash past its end + 10 minutes; pick up a paid visit). The book-again link
+  needs `PUBLIC_LINKS_ENABLED=true` (W3 link API) and a client with marketing-grade consent; the site's `#/c/<token>` page must treat a
+  `book_again` link like a calendar link with one booking.

@@ -15,6 +15,7 @@ import { ledgerRevenueSource } from './modules/payments/revenue.js'
 import type { ExternalAlertSource, SchedulingPorts } from './modules/scheduling/ports.js'
 import { syncChecklistTemplate } from './modules/scheduling/checklist-sync.js'
 import { configureSchedulingJobs } from './modules/scheduling/jobs.js'
+import { statusTextsFor } from './modules/status-texts/index.js'
 import { ActivityClosureNotifier, ActivityEmergencyNotifier } from './modules/settings/db-adapters/index.js'
 import { configureSettings } from './modules/settings/http/runtime.js'
 import type { Clock } from './platform/clock.js'
@@ -45,6 +46,7 @@ export function schedulingPortsFor(deps: MessagingDeps, rt: MessagingRuntime): S
     externalAlerts: productionExternalAlerts,
     revenue: ledgerRevenueSource,
     storage: unusedStorage(),
+    statusTexts: statusTextsFor(rt),
   }
 }
 

@@ -23,7 +23,7 @@ import {
   type CustomerBrief,
 } from './appointments.js'
 import { can, firstName, loadSettingsBundle, type Actor, type SchedulingCtx } from './context.js'
-import type { InvoiceSummary, QueuedResult } from './ports.js'
+import { noStatusTexts, type InvoiceSummary, type QueuedResult } from './ports.js'
 import { audit as audited } from './audit-helper.js'
 import { depositSentence } from './cancellation.js'
 import { settleClosed, settlementLog, type Settlement } from './closing.js'
@@ -170,6 +170,8 @@ async function finish(
     bayIds: (o.bayIds ?? []).filter((x): x is string => x !== null),
     availability: o.availabilityDates,
   })
+  // status texts as the car moves (ADR 0160): checked in, picked up; it never throws for a business reason
+  await (c.ports.statusTexts ?? noStatusTexts).onChange(tx, c, { appointmentId: fresh.id, change, status: fresh.status })
   return {
     appointment: await toCore(tx, c, fresh),
     toast: o.toast,
@@ -434,11 +436,13 @@ export async function completeAppointment(
     .where('done', '=', false)
     .returning('id')
     .execute()
+  // the ready-for-pickup text can be switched off in Settings -> Reminders (status_texts.ready, on by default; ADR 0160)
+  const readyText = (await getSetting(tx, c.locationId, 'status_texts.ready')).value
   await applyPatch(tx, a, {
     status: 'completed',
     completed_at: now,
     pickup_state: 'pending',
-    ready_notified_at: now,
+    ready_notified_at: readyText ? now : null,
   })
   await c.ports.invoices.freezeDate?.(tx, a.id, now)
   const credit = await c.ports.memberships.autoApplyCredit?.(tx, c, actor, a.id)
@@ -458,13 +462,21 @@ export async function completeAppointment(
       actorType: 'system',
       meta: { autoChecked: auto.length },
     })
-  const sent = await queue(tx, c, a, customer, { templateKey: 'ready', purpose: 'complete' })
-  await logActivity(tx, c, {
-    appointmentId: a.id,
-    text: withDelivery('Ready-for-pickup sent', sent),
-    channels: ['sms'],
-    actor,
-  })
+  if (readyText) {
+    const sent = await queue(tx, c, a, customer, { templateKey: 'ready', purpose: 'complete' })
+    await logActivity(tx, c, {
+      appointmentId: a.id,
+      text: withDelivery('Ready-for-pickup sent', sent),
+      channels: ['sms'],
+      actor,
+    })
+  } else
+    await logActivity(tx, c, {
+      appointmentId: a.id,
+      text: 'Ready-for-pickup text is off in Settings',
+      channels: ['internal'],
+      actor,
+    })
   await audited(
     tx,
     c,
@@ -475,7 +487,7 @@ export async function completeAppointment(
     { status: 'completed', autoChecked: auto.length },
   )
   return finish(tx, c, a, 'completed', {
-    toast: { title: 'Job completed', detail: 'Ready-for-pickup sent · moved to pickup' },
+    toast: { title: 'Job completed', detail: readyText ? 'Ready-for-pickup sent · moved to pickup' : 'Moved to pickup' },
     bayIds: [a.bayId],
   })
 }

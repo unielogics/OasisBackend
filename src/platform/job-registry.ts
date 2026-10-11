@@ -16,6 +16,7 @@ import { photoRetentionJob } from '../modules/scheduling/jobs-retention.js'
 import { photoFinalizeJob, photoThumbnailJob } from '../modules/scheduling/photo-jobs.js'
 import { standingJobs } from '../modules/standing/jobs.js'
 import { leadJobs } from '../modules/leads/jobs.js'
+import { statusTextJobs } from '../modules/status-texts/jobs.js'
 
 export const jobDefinitions: readonly JobDefinition<never>[] = [
   maintenancePurgeJob,
@@ -31,6 +32,7 @@ export const jobDefinitions: readonly JobDefinition<never>[] = [
   ...messagingJobs,
   remindersJob,
   reviewRequestJob,
+  ...statusTextJobs,
   vipHoldReleaseJob,
   ...sqspJobs,
   ...membershipJobs,

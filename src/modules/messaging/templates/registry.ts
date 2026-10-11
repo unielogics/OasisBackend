@@ -330,15 +330,28 @@ export const TEMPLATES = {
     editable: false,
     source: 'new: book-again link (ADR 0160)',
   }),
+  // The picked-up thank-you (status texts, wave W3d). {receipt} is "Paid in full: $54.00." when nothing is owed and no receipt text
+  // went in the last 2 hours. The variant with the book-again link is picked_up_link: a personal link is a secret (only its hash is
+  // stored), so it rides in the personal_link class, whose message row keeps the link masked and whose outbox body is wiped.
   picked_up: t({
     key: 'picked_up',
     label: 'Picked up',
     klass: 'picked_up',
-    body: 'Thanks for visiting Oasis Auto Spa{#first}, {first}{/first}!{#receipt} {receipt}{/receipt}{#link} Book your next visit: {link}{/link}',
+    body: 'Thanks for visiting Oasis Auto Spa{#first}, {first}{/first}!{#receipt} {receipt}{/receipt}',
     required: [],
-    optional: ['first', 'receipt', 'link'],
+    optional: ['first', 'receipt'],
     editable: true,
-    source: 'new: status text "picked up" (owner decision 2026-10-10; the link only with marketing-grade consent)',
+    source: 'new: status text "picked up" (owner decision 2026-10-10)',
+  }),
+  picked_up_link: t({
+    key: 'picked_up_link',
+    label: 'Picked up (book-again link)',
+    klass: 'personal_link',
+    body: 'Thanks for visiting Oasis Auto Spa{#first}, {first}{/first}!{#receipt} {receipt}{/receipt} Book your next visit: {link}',
+    required: ['link'],
+    optional: ['first', 'receipt'],
+    editable: false,
+    source: 'new: status text "picked up" with the book-again link (only with marketing-grade consent; owner decision 2026-10-10)',
   }),
   job_delay: t({
     key: 'job_delay',

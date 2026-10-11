@@ -16,6 +16,7 @@ import { squarespaceHookModule, squarespaceModule } from '../modules/payments-sy
 import { createPublicModule } from '../modules/public/module.js'
 import { createPublicLinksModule, type PublicLinksWiring } from '../modules/public/links/module.js'
 import { createSchedulingModule } from '../modules/scheduling/module.js'
+import { statusTextsFor } from '../modules/status-texts/index.js'
 import { settingsModule } from '../modules/settings/http/module.js'
 import { systemModule } from '../modules/system/index.js'
 import type { AppInstance } from './types.js'
@@ -27,7 +28,8 @@ const runtimeOf = (deps: AppDeps): ReturnType<typeof messagingRuntimeFor> => mes
 /**
  * Scheduling composed with the real invoice gateway (payments), cash-basis revenue from the ledger, the messaging
  * outbox (every notification is queued as an SMS), the real memberships port and the combined alert source
- * (new reply, device down, card money awaiting Squarespace, orders in the manual queue).
+ * (new reply, device down, card money awaiting Squarespace, orders in the manual queue), and the status texts as the car moves
+ * (ADR 0160: checked in, picked up; off until Settings -> Reminders turns them on).
  */
 const schedulingModule: ApiModule = (app, deps) =>
   createSchedulingModule({
@@ -36,6 +38,7 @@ const schedulingModule: ApiModule = (app, deps) =>
     messages: runtimeOf(deps).queue,
     memberships: dbMembershipPort,
     externalAlerts: productionExternalAlerts,
+    statusTexts: statusTextsFor(runtimeOf(deps)),
   })(app, deps)
 
 /**
