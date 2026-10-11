@@ -595,3 +595,31 @@ nothing; both jobs return at once while `AI_ENABLED=false`). Notes and deviation
   intake as an unknown number. The reply-number handler is passed to `useAssistant` only when W3b's is not the contract stub.
 - **Jobs**: `ai.respond` (queue only, stately, retry 0, expiry 180 s) and `ai.sweep` (every minute, stately). pg-boss runs one `ai.respond` at a
   time per worker (its work loop is serial), so turns are answered one after another; enough for the rollout's volumes, to watch in W5.
+
+## W3 integration (the seams, end to end)
+
+W3a's suites ran the turn with contract stubs and W3b's ran the tools without the turn. `test/assistant/runtime-e2e.test.ts` runs
+whole conversations through the real runtime (webhook, gate, `NewTexters.adopt`, `createToolRegistry`, `buildShopFacts`, guard v4,
+the policy judge, `ActionCodeHandler`, the leads' follow-up job, the status texts), with the SimAiProvider scripting the assistant
+and the judge. What it found, fixed in the owning files:
+
+- **Prices to the model** (seam 1): `list_services`, `get_membership_info` and `get_business_info {fee}` handed the model cents and
+  told it to write "starts at $X", which guard v4 refuses (every price answer would have been rewritten, then the fallback). They now
+  hand out only the placeholders `placeholderValues` renders: items `priceKey` `{price:<key>}` (quote-only too), tint rows
+  `{price:tint:<vehicle>:<film>}` with their keys, plans `{plan:<tier>}`, the fee `{fee}`, and the rule "never write an amount: the
+  placeholder as its own sentence". `get_balance` shows no amount either (`hasOpenBalance`); its `amountsCents` (the total first) is
+  what `{balance}` renders. A test collects every placeholder the tools hand out and checks it is exactly the set that renders.
+- **Tint class** (`set_my_vehicle`): its types `sedan_coupe | suv_crossover | truck_van` never matched the website matrix's vehicle
+  keys (`sedan`, `suv`, `truck`), so `tintClass` was always null; a class now matches its own key or its first word, and the tool
+  answers the class's tint placeholders (`tintPriceKeys`).
+- **The assistant's actor**: `assistantActor` used the nil uuid as its user id, which `createAppointment` writes to
+  `appointments.created_by` (a foreign key to users): every booking confirmed by a reply number failed and rolled the whole webhook
+  back (the client's number was lost, no answer). The actor's user id is now `assistant` (not a uuid, like the website's and the link
+  pages' actors): `created_by` stays null, the audit actor is still "Oasis AI (SMS)".
+- **The proposal's instruction**: `propose_*` told the model to "ask them to reply with that number", which the judge's rubric (c)
+  fails (asking for a number the client received); the tool now tells it to say only that it texted the details to confirm. The
+  server's `action_confirm` text carries the number.
+- **Opt-out in words**: after `opt_out` ("Send nothing else") the turn went on to the model, an empty answer, the guard's rewrite and
+  then the fallback and a handoff alert for a number that had just opted out. The turn now ends after that tool round (`skipped`,
+  `opted_out`): no reply, no judge, no handoff.
+- **The booked text's fee** is written like the `{fee}` placeholder ("$25", not "$25.00"), so one conversation states it one way.

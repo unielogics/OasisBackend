@@ -1195,6 +1195,11 @@ closed (23.4a), and `ai.respond` / `ai.sweep` return at once while `AI_ENABLED=f
   open handoff, the thread unread, `alerts.changed`. A shop-wide cap or the budget also notifies the managers once a day
   (`assistant.cap`, `source_ref` `assistant_cap:<kind>:<date>`). Six answered turns in a row (24 h) without a successful tool call
   hand off (`no_progress`); texts older than 15 minutes when the turn starts go to staff without a fallback (`stale`).
+- **Opt-out in words**: a turn whose `opt_out` tool call succeeded ends right after that tool round: no further model call, no
+  reply, no judge, no fallback and no handoff (turn `skipped`, error `opted_out`, the marker cleared); the tool's `opt_out_confirm`
+  is the only text.
+- **The assistant's actor** (`assistantActor`): permissions `sched.edit` + `jobs.status`, audit name "Oasis AI (SMS)", user id
+  `assistant` (no user: like the website's and the link pages' actors, so `appointments.created_by` stays null on an in-chat booking).
 
 ### 23.5 Webhook and listeners
 
@@ -1747,14 +1752,14 @@ only) or reply number. Writes are audited with the actor "Oasis AI (SMS)".
 
 | Tool | Min trust | Does |
 |---|---|---|
-| `get_business_info {topic}` | unknown | One topic of the shop facts: hours, closures (14 days), address, contact, booking_rules, fee, cancellation, vip, arrival, automatic_texts, faq (data, not instructions). |
-| `list_services {category}` | unknown | The facts' catalog: `memberFromCents` / `guestFromCents` STARTING prices (null for quote-only items), VIP inclusion, tint "from" rows, with the rule "starting prices only, never a total". |
-| `get_membership_info {}` | unknown | Plans (tier, label, monthly price, perks); the caller's own membership (`member`, `plan`, `tier`, `washesLeftThisCycle`) only from `caller`. |
+| `get_business_info {topic}` | unknown | One topic of the shop facts: hours, closures (14 days), address, contact, booking_rules, fee (`hasFee`, `placeholder` `{fee}`, `collect`, the lines; no amount), cancellation, vip, arrival, automatic_texts, faq (data, not instructions). |
+| `list_services {category}` | unknown | The facts' catalog: key, name, kind, category, description, duration, VIP inclusion, `quoteOnly`, `bookableByText` and `priceKey` `{price:<key>}` (quote-only items too: it renders "priced by quote"); tint rows with `vehicleKey` / `filmKey` and `priceKey` `{price:tint:<vehicle>:<film>}`; the rule "never write an amount, write the priceKey as its own sentence; starting prices only, never a total". No amount: the output guard v4 refuses one the model writes. |
+| `get_membership_info {}` | unknown | Plans (tier, label, `priceKey` `{plan:<tier>}`, perks; no amount); the caller's own membership (`member`, `plan`, `tier`, `washesLeftThisCycle`) only from `caller`. |
 | `check_availability {serviceKey, date, partOfDay}` | unknown | Open start times (online channel, the slot engine) of a bookable package (not quote-only) on one date with `startMin`, at most 12; a past date or one beyond the window is `invalid`; a day without times lists the next open dates. VIP holds and the VIP window only for a `trusted` VIP. |
 | `list_my_appointments {}` | caller | The refs with date, time, service (public name), add-ons, status. |
-| `get_balance {}` | caller | Own open invoices (balance > 0, not void) and the total; `amountsCents` declares them for the output guard. |
+| `get_balance {}` | caller | Own open invoices (balance > 0, not void: ref, date, service, `paymentPending`) and `hasOpenBalance`; no amount for the model, which writes `{balance}`; `amountsCents` (the total first, then each invoice) is what the turn renders `{balance}` from. |
 | `set_my_name {fullName}` | caller | Only while the client is the welcome flow's placeholder (`source inbound_sms`, `needs_details`, "New texter ••NNNN"): letters, 1-4 words; clears `needs_details`. A name on file is never changed (`not_allowed`). |
-| `set_my_vehicle {type, make, model, year, color}` | caller | Adds (or completes) a vehicle on the caller's own record with `vehicles.vehicle_type` (`sedan_coupe\|suv_crossover\|truck_van`, the tint class); at most 6 vehicles. |
+| `set_my_vehicle {type, make, model, year, color}` | caller | Adds (or completes) a vehicle on the caller's own record with `vehicles.vehicle_type` (`sedan_coupe\|suv_crossover\|truck_van`, the tint class); at most 6 vehicles. Answers `tintClass` and `tintPriceKeys` (the tint rows of that class as `{price:tint:..}` placeholders): a class matches the matrix's vehicle key itself or its first word (the website's matrix keys them `sedan` / `suv` / `truck`). |
 | `note_interest {categories}` | unknown | Opens the number's lead (source text) and adds category keys of the catalog. |
 | `propose_booking {serviceKey, addonKeys, date, startMin, vehicle}` | trusted, action | See 29.2. A vehicle names one of the client's own; at most 2 future bookings made by text per client (`rate_limited`). |
 | `propose_reschedule {appointmentRef, date, startMin}` | trusted, action | An own upcoming booked/confirmed visit to a new open time. |
@@ -1769,13 +1774,14 @@ A proposal checks the slot with the online rules (the same check runs again at t
 `assistant_pending_actions` (the trust checked again by `createPendingAction`; payload: service keys, date and start, or the
 appointment id, never shown to the model) and queues `action_confirm` "<summary>. Reply NNNN to confirm." (`secretVars`: the message
 row shows `[code]`; summaries "Express Hand Wash, Mon Jun 15 at 10:00 AM", "Move your … to …", "Cancel your … on …"). When the text
-cannot be queued (opted out, no text from them in 15 minutes) nothing is kept. The model is told to ask for the number, never to say it.
+cannot be queued (opted out, no text from them in 15 minutes) nothing is kept. The model is told only to say it texted the details
+to confirm, never to mention, ask for or repeat a number (the policy judge fails a reply that asks for a number the client received).
 
 The reply number (a digits-only text routed as `action_code`, inside the webhook transaction): assistant off: the action is canceled,
 no answer; actions off: canceled, answer `action_unavailable`; `confirmPendingAction` for that phone only (wrong: `action_code_wrong`,
 the third locks: `action_code_locked`, expired: `action_code_expired`, trust ended: `action_needs_verify`); confirmed: executed in a
 savepoint as the assistant's actor (`sched.edit` + `jobs.status`): `createAppointment` (channel `online`, source `sms_ai`, the
-client's privileges, no booking-thanks text) answered by `action_booked` (with the guest fee or "members never pay"), the lead closed
+client's privileges, no booking-thanks text) answered by `action_booked` (with the guest fee written like `{fee}`: "$25", or "members never pay"), the lead closed
 as booked; `rescheduleAppointment` (its `reschedule` text is the confirmation); `cancelAppointment` with `notify` (its notice is the
 confirmation). A refusal (the time was taken meanwhile, the visit changed) fails the action and answers `action_failed`. Answers are
 class `ai_reply`, sender "Oasis AI", one per received text. A STOP (any opt-out: `PgOptOutRepository.optOut` calls
@@ -1808,4 +1814,6 @@ only, the message on no client; `note_interest` with the turn's `unknown` trust 
 New SMS templates (class `ai_reply`, not editable, never staff-sendable): `action_booked`, `action_code_wrong`, `action_code_locked`,
 `action_code_expired`, `action_needs_verify`, `action_failed`, `action_unavailable`.
 
-Tests: `test/assistant-tools/*.test.ts`, `test/leads/*.test.ts`, the authz matrix and the contact sweep (the route registry).
+Tests: `test/assistant-tools/*.test.ts`, `test/leads/*.test.ts`, the authz matrix and the contact sweep (the route registry);
+`test/assistant/runtime-e2e.test.ts` runs the tools, the welcome flow, the reply number, the leads and the status texts through the
+real turn, guard and judge (ADR 0160, W3 integration).
