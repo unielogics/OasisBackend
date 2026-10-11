@@ -8,6 +8,7 @@ import * as realtime from '../../platform/realtime.js'
 import { addDays, dateLabel, fmtT, minutesOfDay, toBizDate } from '../../platform/time.js'
 import { DateTime } from 'luxon'
 import '../customers/schema.js'
+import '../catalog/schema.js'
 import type { ActivityChannel, AppointmentSource, AppointmentStatus } from '../customers/schema.js'
 import { actorName, firstName, type Actor, type SchedulingCtx } from './context.js'
 import './problems.js'
@@ -46,6 +47,8 @@ export interface AppointmentRecord {
   specialInstructions: string | null
   membershipId: string | null
   emergencyClosureId: string | null
+  /** The category keys of the package and live add-ons, in category order (appointments.categories, ADR 0160 plan K). */
+  categories: string[]
   version: number
   createdBy: string | null
   createdAt: Date
@@ -85,6 +88,7 @@ export const APPOINTMENT_COLUMNS = [
   'special_instructions',
   'membership_id',
   'emergency_closure_id',
+  'categories',
   'version',
   'created_by',
   'created_at',
@@ -124,6 +128,7 @@ type Row = {
   special_instructions: string | null
   membership_id: string | null
   emergency_closure_id: string | null
+  categories: string[]
   version: number
   created_by: string | null
   created_at: Date
@@ -163,6 +168,7 @@ export const toAppointment = (r: Row): AppointmentRecord => ({
   specialInstructions: r.special_instructions,
   membershipId: r.membership_id,
   emergencyClosureId: r.emergency_closure_id,
+  categories: r.categories ?? [],
   version: r.version,
   createdBy: r.created_by,
   createdAt: r.created_at,

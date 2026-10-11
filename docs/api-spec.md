@@ -422,6 +422,8 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/services` | set.services | optional |
 | PATCH | `/api/v1/services/:id` | set.services |  |
 | PUT | `/api/v1/services/:id/checklist` | set.services |  |
+| GET | `/api/v1/settings/assistant` | authenticated |  |
+| PUT | `/api/v1/settings/assistant` | set.hours |  |
 | PUT | `/api/v1/settings/auto-federal-holidays` | set.hours |  |
 | GET | `/api/v1/settings/bundle` | authenticated |  |
 | GET | `/api/v1/settings/cancellation-policy` | authenticated |  |

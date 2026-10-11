@@ -1,0 +1,114 @@
+// Settings → Assistant (ADR 0160, design section 8, plan G): GET/PUT /settings/assistant over the assistant.* settings, one version
+// token for the section (the sum of its six setting versions), validation, audit and settings.changed per changed key, set.hours to
+// save (the permission of the shop's other business settings: hours, rules, location, cancellation policy, reminders).
+import { access } from '../../../http/access.js'
+import { z } from '../../../http/zod.js'
+import {
+  loadAssistantSettings,
+  saveAssistantSettings,
+  type AssistantPatch,
+  type AssistantSettings,
+} from './assistant-service.js'
+import { etag, inTx, requestContext, requiredVersion, storedUserId, type SettingsRuntime } from './runtime.js'
+
+const FaqPair = z.object({
+  q: z.string().describe('The question as a client would ask it, plain text, 500 characters at most'),
+  a: z.string().describe('The answer the assistant gives, plain text, 500 characters at most'),
+})
+
+const Fields = z.object({
+  enabled: z.boolean().describe('The assistant answers texts (with AI_ENABLED on the server); off: texts reach staff as today'),
+  actionsEnabled: z
+    .boolean()
+    .describe('The assistant may book, reschedule and cancel in the chat, each confirmed by a reply number (with AI_ACTIONS_ENABLED on the server)'),
+  stage: z
+    .enum(['allowlist', 'customers', 'everyone'])
+    .describe('Who it answers: only the allowlisted numbers, then also known clients, then everyone'),
+  allowlist: z
+    .array(z.string())
+    .describe('The numbers of the first stage (the owner and staff), E.164 (+12015550142; "(201) 555-0142" is read too), US/Canada, at most 50, each once'),
+  staffPauseHours: z.number().int().describe('A staff reply pauses the assistant on that thread this many hours, 1 to 72'),
+  faq: z.array(FaqPair).describe('Questions and answers the assistant answers from, at most 40 pairs, plain text, each question once'),
+})
+
+export const AssistantView = Fields.extend({
+  server: z
+    .object({
+      aiEnabled: z.boolean().describe('AI_ENABLED: off, the assistant answers nobody whatever this section says'),
+      actionsEnabled: z.boolean().describe('AI_ACTIONS_ENABLED: off, no in-chat booking, rescheduling or cancelling'),
+    })
+    .describe('Read-only: the server switches (environment), which this section cannot change'),
+  active: z.boolean().describe('Read-only: the assistant answers texts now (AI_ENABLED and enabled)'),
+  version: z.number().int().describe('The section’s version (ETag): send it back with PUT'),
+})
+
+const Patch = Fields.partial().strict()
+
+export function registerAssistantRoutes(rt: SettingsRuntime): void {
+  const { app } = rt
+
+  const view = (s: AssistantSettings): z.infer<typeof AssistantView> => ({
+    ...s.values,
+    server: { aiEnabled: app.env.AI_ENABLED, actionsEnabled: app.env.AI_ACTIONS_ENABLED },
+    active: app.env.AI_ENABLED && s.values.enabled,
+    version: s.version,
+  })
+
+  app.get(
+    '/settings/assistant',
+    {
+      config: { access: access.authenticated() },
+      schema: {
+        tags: ['settings'],
+        operationId: 'getSettingsAssistant',
+        summary: 'The AI text assistant: on/off, in-chat actions, stage, allowlist, staff pause and FAQ (ETag = version)',
+        response: { 200: AssistantView },
+      },
+    },
+    async (req, reply) => {
+      const c = requestContext(req)
+      const s = await loadAssistantSettings(app.db, c.locationId)
+      etag(reply, s.version)
+      return view(s)
+    },
+  )
+
+  app.put(
+    '/settings/assistant',
+    {
+      config: { access: access.perm('set.hours') },
+      schema: {
+        tags: ['settings'],
+        operationId: 'putSettingsAssistant',
+        summary: 'Save the Assistant section (the dirty-tracked save)',
+        description:
+          'Partial: any field; the rest stays (`allowlist` and `faq` are replaced as a whole). `version` (or If-Match) is required and must be the section’s current version: 412 VERSION_CONFLICT otherwise, 428 without one. ' +
+          'Validated against the settings registry plus the section’s rules (allowlist: E.164 US/Canadian numbers, each once, at most 50; FAQ: at most 40 pairs of plain text, 500 characters each, no hidden characters or HTML, each question once). ' +
+          'Each changed setting is audited (settings.update) and published as `settings.changed` (section assistant). The server switches (`server`) are read-only.',
+        body: Patch.extend({
+          version: z.number().int().min(0).optional(),
+          // read-only fields of GET /settings/assistant, accepted so a loaded view can be sent back as it is
+          server: z.unknown().optional(),
+          active: z.unknown().optional(),
+        }).strict(),
+        response: { 200: AssistantView.extend({ changed: z.array(z.string()).describe('The setting keys this save changed') }) },
+      },
+    },
+    async (req, reply) => {
+      const c = requestContext(req)
+      const version = requiredVersion(req, req.body.version)
+      const { enabled, actionsEnabled, stage, allowlist, staffPauseHours, faq } = req.body
+      const out = await inTx(app.db, async (tx) =>
+        saveAssistantSettings(tx, {
+          locationId: c.locationId,
+          patch: { enabled, actionsEnabled, stage, allowlist, staffPauseHours, faq } as AssistantPatch,
+          expectedVersion: version,
+          updatedBy: await storedUserId(tx, c.userId),
+          audit: c.audit,
+        }),
+      )
+      etag(reply, out.version)
+      return { ...view(out), changed: out.changed }
+    },
+  )
+}

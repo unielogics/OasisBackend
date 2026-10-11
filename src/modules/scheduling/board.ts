@@ -19,6 +19,7 @@ import {
 import type { SchedulingCtx } from './context.js'
 import type { InvoiceSummary, MembershipInfo } from './ports.js'
 import { photoCounts } from './photos.js'
+import { visitCategory } from '../catalog/appointment-categories.js'
 
 export interface BoardRow {
   a: AppointmentRecord
@@ -255,6 +256,10 @@ export interface OpsCard {
   vehicleLine: string
   vehicleShort: string
   service: string
+  /** The category keys of the package and live add-ons, in category order (the chips). */
+  categories: string[]
+  /** The one word the visit counts under: its category ignoring add-ons, "mixed" for two or more, null for none. */
+  category: string | null
   startsAt: string
   endsAt: string
   /** "10:15 AM". */
@@ -307,6 +312,8 @@ export function toCard(
     vehicleLine: vehicleLine(v),
     vehicleShort: v ? [v.make, v.model].filter(Boolean).join(' ') : 'Vehicle',
     service: a.packageName,
+    categories: a.categories ?? [],
+    category: visitCategory(a.categories ?? []),
     startsAt: a.scheduledStart.toISOString(),
     endsAt: a.scheduledEnd.toISOString(),
     time: fmtT(minutesOfDay(a.scheduledStart, o.tz)),

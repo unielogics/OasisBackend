@@ -321,6 +321,19 @@ export const Summary = z.object({
     all: z.array(PendingApproval),
   }),
   awaitingProcessor: z.object({ count: z.number().int(), cents: z.number().int() }),
+  byCategory: z
+    .array(
+      z.object({
+        key: z.string().describe('A category key, "mixed" (two or more categories other than add-ons), or "_none" (no category)'),
+        label: z.string(),
+        colour: z.string().nullable().describe('#RRGGBB of the category; null for "mixed", "_none" and an unknown key'),
+        count: z.number().int().describe('Invoices of the range counted under it'),
+        grossCents: z.number().int(),
+        netCents: z.number().int(),
+        outstandingCents: z.number().int(),
+      }),
+    )
+    .describe('The range’s invoices split by visit category (ADR 0160, plan K), each once: every active category (zero included) in the categories’ order, then "mixed"; an inactive category and "_none" only when something counts under them'),
 })
 
 export const ListRow = z.object({
@@ -342,6 +355,11 @@ export const ListRow = z.object({
   refundPending: z.boolean(),
   awaiting: z.enum(['payment', 'refund']).nullable(),
   adjusted: z.boolean(),
+  categories: z.array(z.string()).describe('The visit’s category keys (its appointment’s), in the categories’ order: the chips'),
+  category: z
+    .string()
+    .nullable()
+    .describe('The one word the visit counts under: its category ignoring add-ons, "mixed" for two or more, null for none'),
 })
 export const ListResult = z.object({ items: z.array(ListRow), nextCursor: z.string().nullable() })
 

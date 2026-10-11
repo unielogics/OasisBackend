@@ -59,6 +59,15 @@ export const InvoiceSummary = z.object({
   payMethodLabel: z.string().nullable(),
 })
 
+/** appointments.categories (ADR 0160, plan K): the category keys of the package and live add-ons, in category order. */
+export const Categories = z
+  .array(z.string())
+  .describe('The category keys the visit holds (package and live add-ons), in the categories’ order: the chips')
+export const VisitCategory = z
+  .string()
+  .nullable()
+  .describe('The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, "mixed" for two or more, the add-ons category for add-ons alone, null for none')
+
 export const Vehicle = z.object({
   year: z.number().int().nullable(),
   make: z.string().nullable(),
@@ -80,6 +89,8 @@ export const OpsCard = z.object({
   vehicleLine: z.string(),
   vehicleShort: z.string(),
   service: z.string(),
+  categories: Categories,
+  category: VisitCategory,
   startsAt: Instant,
   endsAt: Instant,
   time: z.string(),
@@ -157,11 +168,28 @@ export const BayCard = z.object({
   nextUpAppointmentId: z.string().nullable(),
 })
 
+/** The per-category counts of the KPI strip (ADR 0160, plan K). */
+export const CategoryCounts = z
+  .object({
+    bizDate: BizDate,
+    total: z.number().int().describe('Today’s jobs that are not canceled or no-show'),
+    items: z.array(
+      z.object({
+        key: z.string().describe('A category key, "mixed" (two or more categories other than add-ons), or "_none" (no category)'),
+        label: z.string(),
+        colour: z.string().nullable().describe('#RRGGBB of the category; null for "mixed", "_none" and an unknown key'),
+        count: z.number().int(),
+      }),
+    ),
+  })
+  .describe('Today’s visits by category, each counted once: every active category (zero included) in the categories’ order, then "mixed"; an inactive category and "_none" only when something counts under them. Search and window never affect it.')
+
 export const OpsSnapshot = z.object({
   now: z.object({ iso: Instant, tz: z.string(), bizDate: BizDate, time: z.string(), dateLabel: z.string() }),
   window: z.enum(['next24', 'today', 'tomorrow', 'week']),
   q: z.string(),
   kpis: z.array(Kpi),
+  categoryCounts: CategoryCounts,
   alerts: z.array(Alert),
   inFacilityLabel: z.string(),
   timeline: z.object({
@@ -297,6 +325,8 @@ export const AppointmentCore = z.object({
   pickupState: z.enum(['pending', 'collected']).nullable(),
   late: z.boolean(),
   canDrag: z.boolean(),
+  categories: Categories,
+  category: VisitCategory,
 })
 
 export const Toast = z.object({ title: z.string(), detail: z.string() })
@@ -389,6 +419,8 @@ export const AppointmentFile = z.object({
   badge: z.object({ label: z.string(), color: z.string() }),
   canDrag: z.boolean(),
   next: z.object({ label: z.string(), step: NextStep }),
+  categories: Categories,
+  category: VisitCategory,
   customer: z.object({
     id: z.string(),
     name: z.string(),
@@ -494,6 +526,8 @@ export const AppointmentFile = z.object({
         service: z.string(),
         status: z.string(),
         priceCents: z.number().int(),
+        categories: Categories,
+        category: VisitCategory,
       }),
     ),
   }),
@@ -506,6 +540,8 @@ export const AddonChange = z.object({
   invoice: InvoiceSummary,
   checklist: ChecklistProgress,
   toast: Toast,
+  categories: Categories.describe('The appointment’s categories after the change (a tint add-on makes a wash "mixed")'),
+  category: VisitCategory,
 })
 
 export const ChecklistChange = z.object({ progress: ChecklistProgress, changed: z.number().int() })

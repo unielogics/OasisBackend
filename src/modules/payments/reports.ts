@@ -24,6 +24,8 @@ import {
   type ResolvedRange,
 } from './ranges.js'
 import type { InvoiceCalcRow, InvoiceStatus } from './schema.js'
+import { visitCategory } from '../catalog/appointment-categories.js'
+import { loadCategoryRefs, splitByCategory, type CategoryCount } from '../catalog/category-split.js'
 import './problems.js'
 
 export const FILTER_KEYS = ['all', 'unpaid', 'refunds', 'adjusted', 'credits'] as const
@@ -50,16 +52,31 @@ interface RangeRow extends InvoiceCalcRow {
   first_item: string | null
   item_count: number
   item_names: string | null
+  /** The visit's categories (its appointment's; without one, those of the invoiced services), in category order. */
+  categories: string[]
   /** Only the list query selects it. */
   awaiting?: 'payment' | 'refund' | null
 }
+
+/**
+ * An invoice's categories (ADR 0160, plan K): its appointment's (appointments.categories), else those of the services its items
+ * name, in category order (an invoice without an appointment is rare: imported history).
+ */
+const INVOICE_CATEGORIES = sql`coalesce(
+             (select ap.categories from appointments ap where ap.id = i.appointment_id),
+             (select coalesce(array_agg(x.key order by x.sort, x.key), '{}'::text[]) from (
+                select distinct cc.key, cc.sort from invoice_items it
+                  join services s on s.id = it.service_id
+                  join catalog_categories cc on cc.location_id = s.location_id and cc.key = s.category
+                 where it.invoice_id = i.id) x)) as categories`
 
 async function rangeRows(db: Executor, locationId: string, from: string, to: string): Promise<RangeRow[]> {
   const r = await sql<RangeRow>`
     select c.*, i.invoice_no, i.biz_date, i.occurred_at, i.customer_id, i.client_name, i.vehicle_label, i.staff_label, i.tax_bp,
            (select it.name from invoice_items it where it.invoice_id = i.id order by it.position limit 1) as first_item,
            (select count(*)::int from invoice_items it where it.invoice_id = i.id) as item_count,
-           (select string_agg(it.name, '; ' order by it.position) from invoice_items it where it.invoice_id = i.id) as item_names
+           (select string_agg(it.name, '; ' order by it.position) from invoice_items it where it.invoice_id = i.id) as item_names,
+           ${INVOICE_CATEGORIES}
     from invoices i cross join lateral invoice_calc_of(i.id) c
     where i.location_id = ${locationId} and i.biz_date between ${from}::date and ${to}::date`.execute(db)
   return r.rows
@@ -126,6 +143,17 @@ export interface Summary {
   pendingApprovals: { count: number; text: string; first: PendingApproval | null; all: PendingApproval[] }
   /** Global: card money recorded in Oasis that Squarespace has not confirmed yet. Counts in every KPI above. */
   awaitingProcessor: { count: number; cents: number }
+  /** The range's invoices split by visit category (ADR 0160, plan K): each invoice once, "mixed" for a multi-category visit. */
+  byCategory: CategorySplitRow[]
+}
+
+export interface CategorySplitRow extends CategoryCount {
+  /** Sum of the items (the "Gross sales" KPI's definition). */
+  grossCents: number
+  /** Net revenue (the invoices' net: items + adjustments - refunds without their tax). */
+  netCents: number
+  /** Open balances. */
+  outstandingCents: number
 }
 
 export async function pendingApprovals(
@@ -174,7 +202,10 @@ export async function pendingApprovals(
 
 export async function summary(db: Executor, c: ReportContext, key: RangeKey): Promise<Summary> {
   const range = resolveRange(key, c.now, c.tz)
-  const rows = await rangeRows(db, c.locationId, range.from, range.to)
+  const [rows, categoryRefs] = await Promise.all([
+    rangeRows(db, c.locationId, range.from, range.to),
+    loadCategoryRefs(db, c.locationId),
+  ])
   const sum = (f: (r: RangeRow) => number): number => rows.reduce((a, r) => a + f(r), 0)
   const gross = sum((r) => r.items)
   const adj = sum((r) => r.adj)
@@ -268,6 +299,11 @@ export async function summary(db: Executor, c: ReportContext, key: RangeKey): Pr
       all: pend,
     },
     awaitingProcessor: { count: aw.rows[0]?.n ?? 0, cents: aw.rows[0]?.cents ?? 0 },
+    byCategory: splitByCategory(rows, (r) => r.categories, categoryRefs, {
+      grossCents: (r) => r.items,
+      netCents: (r) => r.net,
+      outstandingCents: (r) => r.balance,
+    }),
   }
 }
 
@@ -302,6 +338,9 @@ export interface InvoiceListRow {
   /** Card money recorded by staff and not yet confirmed in Squarespace: a refund wins over a payment. */
   awaiting: 'payment' | 'refund' | null
   adjusted: boolean
+  /** The visit's categories (chips) and the word it counts under (ADR 0160, plan K). */
+  categories: string[]
+  category: string | null
 }
 
 export interface ListQuery {
@@ -340,6 +379,7 @@ function listSql(
              (select it.name from invoice_items it where it.invoice_id = i.id order by it.position limit 1) as first_item,
              (select count(*)::int from invoice_items it where it.invoice_id = i.id) as item_count,
              (select string_agg(it.name, '; ' order by it.position) from invoice_items it where it.invoice_id = i.id) as item_names,
+             ${INVOICE_CATEGORIES},
              (select case when bool_or(e.type = 'refund') then 'refund' when count(*) > 0 then 'payment' end
                 from ledger_events e where e.invoice_id = i.id and e.processor_state = 'awaiting_processor') as awaiting
       from invoices i cross join lateral invoice_calc_of(i.id) c
@@ -371,6 +411,8 @@ function toListRow(r: RangeRow & { id: string }, today: string, tz: string): Inv
     refundPending,
     awaiting: r.awaiting ?? null,
     adjusted: r.adj !== 0,
+    categories: r.categories,
+    category: visitCategory(r.categories),
   }
 }
 

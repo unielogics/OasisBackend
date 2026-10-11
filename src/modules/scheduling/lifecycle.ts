@@ -4,6 +4,7 @@ import { advisoryXactLock, type Executor, type Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
 import { getSetting } from '../../platform/settings.js'
 import { toBizDate } from '../../platform/time.js'
+import { visitCategory } from '../catalog/appointment-categories.js'
 import '../customers/schema.js'
 import type { AppointmentStatus } from '../customers/schema.js'
 import {
@@ -51,6 +52,9 @@ export interface AppointmentCore {
   pickupState: 'pending' | 'collected' | null
   late: boolean
   canDrag: boolean
+  /** appointments.categories after the command (ADR 0160, plan K). */
+  categories: string[]
+  category: string | null
 }
 
 export interface CommandResult {
@@ -86,6 +90,8 @@ export async function toCore(db: Executor, c: SchedulingCtx, a: AppointmentRecor
     pickupState: a.pickupState,
     late: isLate(a, c.clock.now(), late.value),
     canDrag: canDrag(a.status),
+    categories: a.categories,
+    category: visitCategory(a.categories),
   }
 }
 

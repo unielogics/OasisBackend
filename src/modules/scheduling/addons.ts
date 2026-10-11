@@ -3,7 +3,7 @@
 // refused by the invoice gateway (409 ADDON_REMOVE_OVERPAID) and rolls the whole change back.
 import type { Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
-import { refreshAppointmentCategories } from '../catalog/appointment-categories.js'
+import { refreshAppointmentCategories, visitCategory } from '../catalog/appointment-categories.js'
 import { requireService } from '../catalog/service.js'
 import '../customers/schema.js'
 import { invalidTransition, lockAppointment, logActivity, publishOps } from './appointments.js'
@@ -28,6 +28,14 @@ export interface AddonChange {
   invoice: InvoiceSummary
   checklist: ChecklistProgress
   toast: { title: string; detail: string }
+  /** appointments.categories after the change and the word the visit counts under (ADR 0160, plan K). */
+  categories: string[]
+  category: string | null
+}
+
+async function categoriesNow(tx: Tx, appointmentId: string): Promise<{ categories: string[]; category: string | null }> {
+  const r = await tx.selectFrom('appointments').select('categories').where('id', '=', appointmentId).executeTakeFirstOrThrow()
+  return { categories: r.categories, category: visitCategory(r.categories) }
 }
 
 export async function addAddon(
@@ -90,6 +98,7 @@ export async function addAddon(
     invoice,
     checklist: await checklistProgress(tx, a.id),
     toast: { title: 'Invoice + checklist updated', detail: `Added ${svc.name}` },
+    ...(await categoriesNow(tx, a.id)),
   }
 }
 
@@ -112,6 +121,7 @@ export async function removeAddon(
       invoice: await syncInvoiceItems(tx, c, a),
       checklist: await checklistProgress(tx, a.id),
       toast: { title: 'Invoice + checklist updated', detail: `Removed ${svc.name}` },
+      ...(await categoriesNow(tx, a.id)),
     }
   }
   await tx
@@ -152,5 +162,6 @@ export async function removeAddon(
     invoice,
     checklist: await checklistProgress(tx, a.id),
     toast: { title: 'Invoice + checklist updated', detail: `Removed ${live.name}` },
+    ...(await categoriesNow(tx, a.id)),
   }
 }
