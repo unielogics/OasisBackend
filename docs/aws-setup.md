@@ -288,6 +288,13 @@ assistant on: `AI_PROVIDER=bedrock` and `AI_ENABLED=true` are set in the staged 
    the account's own rates (a geographic `us.` profile can cost more than the list): set all four `AI_PRICE_*` from the Bedrock
    pricing page (cross-region on-demand) and change them together with `AI_BEDROCK_MODEL_ID`, so `cost_micros`, the daily budget
    `AI_DAILY_BUDGET_USD` and the spend in `GET /api/v1/system/integrations` (row `ai`, `priceSource` says which applies) are right.
+   The output guard's policy judge (ADR 0160, design 3c) is one more call on every reply. It runs on `AI_GUARD_MODEL_ID` (unset:
+   the same model), and its cost is in the same budget. A judge model other than `AI_BEDROCK_MODEL_ID` is priced at its list prices.
+   **Before any rollout (W4)**, measure the guard against Bedrock from the operator's machine. The command makes about 275 small
+   judge calls, roughly one US dollar on Sonnet 4.6:
+   `AWS_PROFILE=<operator> AI_PROVIDER=bedrock AI_BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-4-6 pnpm eval:guard --concurrency 4 --json guard-eval-results.json`.
+   It prints recall per category, the false-block rate of the ordinary replies, the judge's errors (a turn fails closed on them),
+   its tokens, cost and latency.
 7. **An AWS Budgets alarm** as the account-level backstop (the app's own daily budget is the hard stop). Claude on Bedrock is billed
    partly through AWS Marketplace, so a whole-account cost budget catches it where a Bedrock-only filter might not. The first two
    budgets are free:

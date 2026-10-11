@@ -1073,24 +1073,38 @@ closed (23.4a), and `ai.respond` / `ai.sweep` return at once while `AI_ENABLED=f
   hours, closures of the next 30 days, today, booking rules, guest fee, cancellation, VIP, arrival, automatic texts, the catalog with
   member/guest STARTING prices, tint "from" prices and quote-only items, the plans, the FAQ), cached per location by a hash of the
   source rows, the business date and the env values; byte-stable; Settings free text flattened to one line.
-- **Output guard v3** (`guard.ts`; design 3c, ADR 0160 W3a notes): amounts are SERVER-RENDERED, never written by the model. The
-  model writes placeholders: `{price:<itemKey>}` / `{price:tint:<vehicle>:<film>}` (the starting-price wording "starts at $45 for
-  members, $54 otherwise"; quote-only "is priced by quote - text us a photo"), `{plan:<key>}` ("is $99 a month"), `{fee}` ("a $25
-  booking fee for guests"), `{balance}` (the client's own open balance; only after `get_balance` in the turn) and `{linkN}`; the
-  facts and the prompt name keys, never figures. The guard checks the RAW text, then `facts.ts placeholderValues` renders the
-  placeholders from the current facts. Refused, each with one rewrite call and then the fallback: an unknown placeholder
-  (`unknown_placeholder`); a currency sign or money word (`money`); a number (digits or words) that is not a clock time, a date, a
-  duration, a bare hour about opening times or a count of 1-10 before a noun (`number`; the address, catalog/plan names, the
-  client's vehicles on file and the shop's own phone numbers are server-owned literals); a group of 4+ digits, even split by spaces,
-  dashes, dots or slashes (`digits`); any mention of PINs, codes, passwords, digits, logins or card numbers, the safety line included
-  (`secret`); promise words, time promises, legal/insurance/damage words (`promise_words`); anything host-shaped, an IP, "http",
-  "hxxp", "www", "://" but `{linkN}` and the shop's own host as text (`url`). Word and host checks read the plain text and a
-  skeleton (accents stripped, look-alikes mapped, spaced letters joined, "[.]" / " dot " folded). Markdown stripped, GSM-7, at most
-  320 characters after rendering (one shorten call, else cut at a sentence), at most one question (one rewrite, else cut after the
-  first). A rewrite that still trips a rule hands off (`policy_words` for promise words, else `guard`). A refusal, a cut answer, an
-  unknown stop, a provider error or a timeout hand off too. A reply with a `verify`, `pin`, `membership` or `pay` link gets the
-  server's line "For your security, enter codes and your PIN only on the secure page, never by text." after it. Phone numbers are
-  masked for the model and in the stored transcript by one shared pattern set (`transcript.ts PHONE_PATTERNS`).
+- **Output guard v4** (`guard.ts`, `judge.ts`; design 3c, ADR 0160 W3a notes): three layers. (1) Amounts are SERVER-RENDERED as
+  self-contained phrases that name their own subject: `{price:<itemKey>}` "Signature Hand Wash starts at $45 for members, $54
+  otherwise" (quote-only "<name> is priced by quote - text us a photo"), `{price:tint:<vehicle>:<film>}` "Carbon tint for a
+  sedan/coupe starts at $229 ...", `{plan:<key>}` "Gold is $99 a month", `{fee}` "Guests pay a $25 booking fee" ("There is no
+  booking fee"), `{balance}` "Your open balance is $12.50" (only after `get_balance` in the turn), and `{linkN}`. The facts and the
+  prompt name keys, never figures. A placeholder must stand as its own clause: it starts the text or follows `. ! ? ; :`, a spaced
+  dash or a line break, and ends the text or is followed by `. ! ? ; : ,` or a spaced dash (`placement`). (2) A small deterministic
+  layer on the RAW text: an unknown placeholder (`unknown_placeholder`); a currency sign or money word (dollar(s), dólar(es),
+  cent(s), centavo(s), peso(s), USD, buck(s) but not the name "Buck") (`money`); a code or phone number: 5+ digits in a row, 7+
+  digits in one group split by spaces, dashes, dots, slashes or underscores, 3+ numeric tokens holding 7+ digits (clock-time and
+  duration disguises), 5+ spelled digits, an extension, a vanity number, look-alike letters for digits (`digits`; the shop's own
+  numbers, address and the client's vehicles excepted); anything host-shaped incl. "period com", "punto com", "-dot-", ";com",
+  "<word> com slash", an IP, "http", "hxxp", "www", "://" but `{linkN}` and the shop's own host as plain text (`url`); unambiguous
+  secret words (pin, passcode, password, OTP, code, digits, CVV, card number, código, contraseña, clave, ...) (`secret`) and
+  promise words (free, discount, refund, coupon, guarantee, warranty, complimentary, on the house, % off, gratis, gratuito,
+  descuento, reembolso, garantía, ...) (`promise_words`), on the plain text and a skeleton; the client's own first name and
+  vehicles are never checked against the word lists. Ordinary numbers pass ("2 to 3 days", "open 8 to 6", "bay 2", "October 12,
+  2026"). Each problem gets one rewrite call, then the fallback (`policy_words` for promise words, else `guard`). (3) The POLICY
+  JUDGE: every reply that passed is read once more, rendered, by one extra model call (`AI_GUARD_MODEL_ID`, default
+  `AI_BEDROCK_MODEL_ID`; temperature 0, at most 120 tokens, 8 s) with a fixed, cached rubric; the server's segments (rendered
+  placeholders, links as "[link]", the safety line, the shop's phone numbers, address and website) are marked trusted; it never
+  sees the client's phone, an id, a token or a URL. It answers strict JSON `{ok, category: none|price|promise|secret|
+  link_or_phone|other, reason}`. A fail gets one rewrite with the category's hint, then the guard and the judge again, then the
+  fallback (`policy_judge`); a judge error, timeout or an answer that is not the JSON fails closed (fallback, `judge_error`). Each
+  judgement is an `assistant_tool_calls` row (tool `policy_judge`, redacted) and its cost is in the turn's `cost_micros` (the
+  daily budget). `AI_GUARD_JUDGE` (default: on whenever `AI_ENABLED`). Markdown stripped, GSM-7, at most 320 characters after
+  rendering (one shorten call, else cut at a sentence), at most one question (one rewrite, else cut after the first). A refusal,
+  a cut answer, an unknown stop, a provider error or a timeout hand off too. A reply with a `verify`, `pin`, `membership` or
+  `pay` link gets the server's line "For your security, enter codes and your PIN only on the secure page, never by text." after
+  it. Phone numbers (any dash or an underscore as separator too) are masked for the model and in the stored transcript by one
+  shared pattern set (`transcript.ts PHONE_PATTERNS`). `pnpm eval:guard` runs the whole guard over
+  `test/assistant/fixtures/guard-eval.json` and prints recall per category and the false-block rate (W4: against Bedrock).
 - **Reply**: free text through `enqueueFor` with `senderKind: 'ai'`, rendered from the `ai_reply` template (the first AI text of a
   conversation: "Oasis Auto Spa’s automated assistant here." + the STOP footer, never the AGENT offer; `disclosed_at`), class
   `ai_reply`, or `personal_link` with the links as `secretVars` (the thread shows `[private link]`); a registered link the reply
