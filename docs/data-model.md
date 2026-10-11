@@ -871,7 +871,7 @@ Primary key `(customer_id)`. `(customer_id)` references `customers(id)` on delet
 | `phone_version` | integer | no | `0` |
 | `archived_at` | timestamp with time zone | yes |  |
 
-Primary key `(id)`. `(merged_into)` references `customers(id)`. 9 check constraints. Index `customers_archived_phone_idx` `(phone_e164)` where `archived_at IS NOT NULL`. Index `customers_email_trgm` `(((email)::text) public.gin_trgm_ops)`. Index `customers_full_name_trgm` `(full_name public.gin_trgm_ops)`. Index `customers_merged_into_idx` `(merged_into)` where `merged_into IS NOT NULL`. Index `customers_phone_trgm` `(phone_e164 public.gin_trgm_ops)`. Index `customers_provisional_idx` `(created_at)` where `(source = 'inbound_sms'::text) AND needs_details AND (deleted_at IS NULL) AND (merged_into IS NULL)`. Unique index `uq_customers_phone` `(phone_e164)` where `(phone_e164 IS NOT NULL) AND (merged_into IS NULL) AND (deleted_at IS NULL)`.
+Primary key `(id)`. `(merged_into)` references `customers(id)`. 9 check constraints. Index `customers_archived_phone_idx` `(phone_e164)` where `archived_at IS NOT NULL`. Index `customers_email_trgm` `(((email)::text) public.gin_trgm_ops)`. Index `customers_full_name_trgm` `(full_name public.gin_trgm_ops)`. Index `customers_merged_into_idx` `(merged_into)` where `merged_into IS NOT NULL`. Index `customers_phone_trgm` `(phone_e164 public.gin_trgm_ops)`. Index `customers_provisional_idx` `(created_at)` where `(source = 'inbound_sms'::text) AND needs_details AND (deleted_at IS NULL) AND (merged_into IS NULL)`. Unique index `uq_customers_phone` `(phone_e164)` where `(phone_e164 IS NOT NULL) AND (merged_into IS NULL) AND (deleted_at IS NULL)`. Trigger: `customers_email_unverify`.
 
 #### `email_suppressions`
 
