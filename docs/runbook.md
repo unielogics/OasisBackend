@@ -529,7 +529,9 @@ the worker do not come back after the restart:
    pnpm secrets:push --profile oasis-admin --secret-id oasis/prod/app --from pin.env --apply && shred -u pin.env
    sudo systemctl restart oasis-api oasis-worker          # still with PUBLIC_LINKS_ENABLED=false: proves the secret is read
    ```
-2. Only then, in `/etc/oasis/common.env`: `PUBLIC_LINKS_ENABLED=true`, and `sudo systemctl restart oasis-api oasis-worker`.
+2. Only then, in `/etc/oasis/common.env`: `PUBLIC_LINKS_ENABLED=true`, and `sudo systemctl restart oasis-api oasis-worker`. (The
+   nginx location and zone of `/api/v1/public/links/` come with `install.sh` from wave W3c on: re-run it once after that deploy, before
+   this step, so `nginx -T | grep oasis_public_links` shows the zone.)
 3. Check: `systemctl is-active oasis-api oasis-worker` is `active` twice. If the API does not start, `journalctl -u oasis-api -n 50`
    names `PIN_PEPPER`: set `PUBLIC_LINKS_ENABLED=false` again, restart, and redo step 1.
 

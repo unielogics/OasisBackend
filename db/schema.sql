@@ -423,7 +423,7 @@ CREATE TABLE public.appointments (
     CONSTRAINT appointments_package_name_check CHECK ((btrim(package_name) <> ''::text)),
     CONSTRAINT appointments_pickup_state_check CHECK (((pickup_state IS NULL) OR (pickup_state = ANY (ARRAY['pending'::text, 'collected'::text])))),
     CONSTRAINT appointments_price_cents_check CHECK ((price_cents >= 0)),
-    CONSTRAINT appointments_source_check CHECK ((source = ANY (ARRAY['dashboard'::text, 'walk_in'::text, 'online'::text, 'phone'::text, 'standing'::text, 'reschedule_link'::text, 'sms_ai'::text]))),
+    CONSTRAINT appointments_source_check CHECK ((source = ANY (ARRAY['dashboard'::text, 'walk_in'::text, 'online'::text, 'phone'::text, 'standing'::text, 'reschedule_link'::text, 'sms_ai'::text, 'link'::text]))),
     CONSTRAINT appointments_status_check CHECK ((status = ANY (ARRAY['booked'::text, 'confirmed'::text, 'arrived'::text, 'cleaning'::text, 'completed'::text, 'canceled'::text, 'no_show'::text])))
 );
 
