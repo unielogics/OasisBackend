@@ -6,7 +6,7 @@ import { sql } from 'kysely'
 import { SIM_DEVICE_KEY } from '../../db/seeds/messaging.js'
 import { CODE_MASK } from '../../src/modules/messaging/inbound/keywords.js'
 import { hasPendingAction, handoffSourceRef } from '../../src/modules/messaging/assistant/inbox.js'
-import type { ActionCodeInput } from '../../src/modules/assistant/ports.js'
+import { noNewTexters, type ActionCodeInput, type NewTexterInput } from '../../src/modules/assistant/ports.js'
 import { messagingAlertSource } from '../../src/modules/messaging/adapters/alerts.js'
 import { STRANGER, useWorld } from './world.js'
 
@@ -121,6 +121,60 @@ describe('the gate', () => {
     expect(await lastInbox()).toMatchObject({ decision: 'assistant', quarantined: false, customer_id: null })
     expect(await conversations()).toMatchObject([{ phone_e164: STRANGER, customer_id: null }])
     expect(await w.t.db.selectFrom('customers').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()).toEqual(customersBefore)
+  })
+
+  it("the welcome flow: wave 3's port creates the provisional client in the webhook transaction; the first text is in its thread", async () => {
+    await assistantOn()
+    const adopted: NewTexterInput[] = []
+    let created: string | null = null
+    w.rt.useAssistant({
+      newTexters: {
+        adopt: async (tx, i) => {
+          adopted.push(i)
+          created = w.newId()
+          await tx
+            .insertInto('customers')
+            .values({
+              id: created,
+              full_name: `New texter ••${i.phone.slice(-4)}`,
+              phone_e164: i.phone,
+              source: 'inbound_sms',
+              needs_details: true,
+              sms_opt_in_source: 'inbound_text',
+              synthetic: true,
+            })
+            .execute()
+          return { customerId: created }
+        },
+      },
+    })
+    try {
+      await inbound(STRANGER, 'How much is a wash?')
+      expect(adopted).toHaveLength(1)
+      expect(adopted[0]).toMatchObject({ locationId: w.locationId, phone: STRANGER, receivedAt: w.clock.now() })
+      const row = await lastInbox()
+      expect(row).toMatchObject({ decision: 'assistant', quarantined: false, customer_id: created })
+      expect(row.message_id).not.toBeNull()
+      const [c] = await conversations()
+      expect(c).toMatchObject({ phone_e164: STRANGER, customer_id: created })
+      expect(row.assistant_conversation_id).toBe(c!.id)
+      const msgs = await w.t.db.selectFrom('messages').select(['direction', 'body', 'read_at']).where('customer_id', '=', created!).execute()
+      expect(msgs).toMatchObject([{ direction: 'in', body: 'How much is a wash?' }])
+      expect(msgs[0]!.read_at).not.toBeNull()
+      expect((await w.t.db.selectFrom('message_threads').select('unread_count').where('customer_id', '=', created!).executeTakeFirstOrThrow()).unread_count).toBe(0)
+      expect(await notifications()).toEqual([])
+      expect(kicked).toEqual([[c!.id]])
+
+      // the next text comes from a client: no second adoption
+      w.clock.advance(5000)
+      await inbound(STRANGER, 'for an SUV')
+      expect(adopted).toHaveLength(1)
+      expect(await lastInbox()).toMatchObject({ decision: 'assistant', customer_id: created })
+    } finally {
+      w.rt.useAssistant({ newTexters: noNewTexters })
+      // the stranger stays a stranger for the other tests
+      if (created) await w.t.db.updateTable('customers').set({ phone_e164: null }).where('id', '=', created).execute()
+    }
   })
 
   it('a +44 sender, a short code and our own number get nothing from the AI (filed as before)', async () => {

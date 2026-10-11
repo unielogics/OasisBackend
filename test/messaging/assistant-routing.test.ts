@@ -187,7 +187,7 @@ describe('reply numbers', () => {
 
 // ---- the service -----------------------------------------------------------------------------------------------------
 
-function harness(o: { gate?: AssistantGateVerdict; pending?: boolean; assistant?: boolean } = {}) {
+function harness(o: { gate?: AssistantGateVerdict; pending?: boolean; assistant?: boolean; adopt?: string | null } = {}) {
   const inbox = new InMemoryInboxRepository()
   const directory = new InMemoryCustomerDirectory()
   directory.add('+17865550151', { id: 'cust-1', firstName: 'Liam' })
@@ -204,6 +204,14 @@ function harness(o: { gate?: AssistantGateVerdict; pending?: boolean; assistant?
     },
     handoff: async (c) => void calls.push({ kind: 'handoff', arg: c }),
     actionCode: async (c) => void calls.push({ kind: 'action_code', arg: c }),
+    ...(o.adopt !== undefined
+      ? {
+          adoptNewTexter: async (c: { phone: string; inboxId: string; receivedAt: Date }) => {
+            calls.push({ kind: 'adopt', arg: c })
+            return o.adopt ? { customerId: o.adopt } : null
+          },
+        }
+      : {}),
   }
   const assistant: InboundAssistant = {
     gate: async (input) => {
@@ -228,6 +236,34 @@ describe('InboundService with the assistant', () => {
     expect(calls.map((c) => c.kind)).toEqual(['store', 'assistant'])
     expect(calls[1]!.arg).toEqual({ phone: '+17865550151', customerId: 'cust-1', inboxId: inbox.rows[0]!.id, receivedAt: now })
     expect(inbox.rows[0]).toMatchObject({ decision: 'assistant', quarantined: false, body: 'hi there' })
+  })
+
+  it("the welcome flow: a stranger's text the gate admits is adopted (provisional client) and filed read in its thread", async () => {
+    const { svc, inbox, calls } = harness({ adopt: 'new-cust' })
+    const out = await svc.process(msg('How much is a wash?', { from: '+13055550199' }))
+    expect(out).toMatchObject({ decision: { kind: 'assistant' }, assistantConversations: ['conv-1'] })
+    expect(calls.map((c) => c.kind)).toEqual(['adopt', 'store', 'assistant'])
+    expect(calls[0]!.arg).toEqual({ phone: '+13055550199', inboxId: inbox.rows[0]!.id, receivedAt: now })
+    expect(calls[1]!.arg).toMatchObject({ customerId: 'new-cust', appointmentId: null, body: 'How much is a wash?', unread: false })
+    expect(calls[2]!.arg).toMatchObject({ phone: '+13055550199', customerId: 'new-cust' })
+    expect(inbox.rows[0]).toMatchObject({ decision: 'assistant', quarantined: false })
+  })
+
+  it('the welcome flow declining (null) leaves the text with the stranger; clients, codes, AGENT and a closed gate never adopt', async () => {
+    const declined = harness({ adopt: null })
+    await declined.svc.process(msg('hello', { from: '+13055550199' }))
+    expect(declined.calls.map((c) => c.kind)).toEqual(['adopt', 'assistant'])
+    expect(declined.calls[1]!.arg).toMatchObject({ customerId: null })
+
+    const client = harness({ adopt: 'new-cust' })
+    await client.svc.process(msg('hello'))
+    expect(client.calls.map((c) => c.kind)).toEqual(['store', 'assistant'])
+
+    for (const [body, gate] of [['4821', ALLOW], ['AGENT', ALLOW], ['hello', GATE_OFF], ['hello', PAUSED]] as const) {
+      const h = harness({ adopt: 'new-cust', gate })
+      await h.svc.process(msg(body, { from: '+13055550199' }))
+      expect(h.calls.map((c) => c.kind)).not.toContain('adopt')
+    }
   })
 
   it('files a code as [code] everywhere and hands the digits only to the reply-number handler', async () => {

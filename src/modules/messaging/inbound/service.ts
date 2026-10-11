@@ -42,6 +42,11 @@ export interface InboundEffects {
    * transaction. Returns the conversation the post-commit kick starts a turn for.
    */
   assistant?(cmd: { phone: string; customerId: string | null; inboxId: string; receivedAt: Date }): Promise<{ conversationId: string }>
+  /**
+   * The welcome flow (owner, 2026-10-11): a stranger's text the assistant takes. Creates the provisional client (wave 3) in the same
+   * transaction and returns it, or null to leave the text with the stranger. Absent: strangers stay strangers until the turn.
+   */
+  adoptNewTexter?(cmd: { phone: string; inboxId: string; receivedAt: Date }): Promise<{ customerId: string } | null>
   /** AGENT: a handoff on the number's conversation (no AI until staff resolve it). */
   handoff?(cmd: { phone: string; customerId: string | null; inboxId: string; reason: string }): Promise<void>
   /** A reply number for a pending in-chat action (the code itself never leaves this call). */
@@ -185,7 +190,26 @@ export class InboundService {
           break
         case 'assistant': {
           if (!this.effects.assistant) throw new Error('inbound: the assistant gate allowed a text but no assistant effect is wired')
-          const { conversationId } = await this.effects.assistant({ phone: cmd.phone, customerId: cmd.customerId, inboxId: row.id, receivedAt: now })
+          let customerId = cmd.customerId
+          // a first text from a number with no client: the welcome flow may create the provisional client right here, so the text
+          // is in that client's thread from the start (read: the AI answers it)
+          if (customerId === null && this.effects.adoptNewTexter) {
+            const adopted = await this.effects.adoptNewTexter({ phone: cmd.phone, inboxId: row.id, receivedAt: now })
+            if (adopted) {
+              customerId = adopted.customerId
+              await this.effects.storeMessage({
+                customerId,
+                appointmentId: null,
+                body,
+                unread: false,
+                providerMessageId: msg.providerMessageId,
+                receivedAt: msg.receivedAt,
+                deviceId: msg.deviceId,
+                ...(msg.kind === 'mms' ? { kind: 'mms' as const, attachments } : {}),
+              })
+            }
+          }
+          const { conversationId } = await this.effects.assistant({ phone: cmd.phone, customerId, inboxId: row.id, receivedAt: now })
           assistantConversations.push(conversationId)
           break
         }

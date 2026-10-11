@@ -10,7 +10,7 @@ import { maskPhone } from '../../platform/phone.js'
 import { normalizeE164 } from '../../integrations/sms/phone.js'
 import type { ObjectStorage } from '../../integrations/storage/types.js'
 import * as realtime from '../../platform/realtime.js'
-import type { ActionCodeHandler, AssistantInbox } from '../assistant/ports.js'
+import type { ActionCodeHandler, AssistantInbox, NewTexters } from '../assistant/ports.js'
 import { confirmAppointment } from '../scheduling/lifecycle.js'
 import type { Actor, SchedulingCtx } from '../scheduling/context.js'
 import type { MessageQueue } from '../scheduling/ports.js'
@@ -35,7 +35,7 @@ export interface EffectsEnv {
   /** The photos store MMS pictures are saved in (created on first use). */
   storage?: () => ObjectStorage
   /** The assistant's conversation store and reply-number handler (ADR 0160); absent: the router never asks for them. */
-  assistant?: { inbox: AssistantInbox | null; actionCodes: ActionCodeHandler }
+  assistant?: { inbox: AssistantInbox | null; actionCodes: ActionCodeHandler; newTexters?: NewTexters }
 }
 
 export interface ManagerNotice {
@@ -264,6 +264,12 @@ export function createInboundEffects(
       const inbox = e.assistant?.inbox
       if (!inbox) throw new Error('inbound: no assistant conversation store is wired')
       return inbox.markPending(tx, { locationId: o.locationId, phone: cmd.phone, customerId: cmd.customerId, inboxId: cmd.inboxId, receivedAt: cmd.receivedAt })
+    },
+
+    async adoptNewTexter(cmd) {
+      const port = e.assistant?.newTexters
+      if (!port) return null
+      return port.adopt(tx, { locationId: o.locationId, phone: cmd.phone, inboxId: cmd.inboxId, receivedAt: cmd.receivedAt })
     },
 
     async handoff(cmd) {

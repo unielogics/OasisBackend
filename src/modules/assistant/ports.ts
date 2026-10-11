@@ -7,6 +7,8 @@
 //                      handoff a customer asks for with AGENT
 //   AssistantKick      after the webhook's transaction commits: start the turn (wave 3: pg-boss `ai.respond`, debounced)
 //   ActionCodeHandler  a digits-only reply while an in-chat action waits for its reply number (wave 3 checks and executes it)
+//   NewTexters         the welcome flow's first step (owner, 2026-10-11): a text the gate admits from a number with no client
+//                      creates the provisional client + lead in the webhook's transaction, so the thread exists from the start
 //
 // Everything defaults to OFF: with the defaults below (and with the real gate while AI_ENABLED=false or assistant.enabled=false)
 // every inbound text is routed exactly as before the assistant existed. The messaging module's Postgres implementations are in
@@ -133,12 +135,38 @@ export interface ActionCodeHandler {
 /** Default: no action is ever pending (nothing creates one until wave 3). */
 export const noActionCodes: ActionCodeHandler = { hasPending: async () => false, handle: async () => undefined }
 
+export interface NewTexterInput {
+  locationId: string
+  /** The sender, a US/CA mobile number (the gate admitted it), E.164. */
+  phone: string
+  /** The sms_inbox row of the text (the conversation is marked right after). */
+  inboxId: string
+  /** When the shop received the text (the server's clock). */
+  receivedAt: Date
+}
+
+/**
+ * The welcome flow's first step (design sections 0 and 3, owner 2026-10-11): the FIRST text the gate admits from a number with no
+ * client. Called inside the webhook's transaction, before the marker is written. Wave 3 creates the provisional client (source
+ * inbound_sms, consent inbound_text, needs_details, name "New texter ••NNNN") and opens the lead, idempotently per phone, and returns
+ * it: the messaging core then files the text into that client's thread (read: the AI answers it) and marks the conversation with the
+ * client. Returning null leaves the text with the stranger (inbox only; the turn's claim may still create the client and pick up
+ * the inbox rows linked to the conversation). Never called for keywords, codes, AGENT or picture-only texts.
+ */
+export interface NewTexters {
+  adopt(tx: Tx, input: NewTexterInput): Promise<{ customerId: string } | null>
+}
+
+/** Default: no client is created here (until wave 3 wires the welcome flow). */
+export const noNewTexters: NewTexters = { adopt: async () => null }
+
 export interface AssistantPorts {
   gate: AssistantGate
   inbox: AssistantInbox | null
   kick: AssistantKick
   actionCodes: ActionCodeHandler
+  newTexters: NewTexters
 }
 
 /** Everything off: the routing the shop had before the assistant. */
-export const ASSISTANT_OFF: AssistantPorts = Object.freeze({ gate: assistantOff, inbox: null, kick: noKick, actionCodes: noActionCodes })
+export const ASSISTANT_OFF: AssistantPorts = Object.freeze({ gate: assistantOff, inbox: null, kick: noKick, actionCodes: noActionCodes, newTexters: noNewTexters })

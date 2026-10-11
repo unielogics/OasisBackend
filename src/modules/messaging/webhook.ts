@@ -309,7 +309,7 @@ export class WebhookService {
         notifyManagers: async (t, n) => void (await notifyManagers(t, n, rt.deps)),
         warn: (msg, detail) => rt.log.warn(detail, msg),
         storage: () => rt.storage(),
-        assistant: { inbox: assistant.inbox, actionCodes: assistant.actionCodes },
+        assistant: { inbox: assistant.inbox, actionCodes: assistant.actionCodes, newTexters: assistant.newTexters },
       },
       {
         locationId: device.location_id,
