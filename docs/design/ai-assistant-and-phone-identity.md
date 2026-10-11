@@ -13,8 +13,12 @@ the builders. Where it says MUST, a test must prove it.
 - Every booking verified: verify once on the page (PIN or texted code) → that phone trusted 30 days → the AI may book/
   reschedule/cancel in chat, EACH action confirmed by a server reply number ("… Reply 4821 to confirm"; the model never
   sees it). Outside the window the AI sends a verify link first. Memberships and payments always need a fresh PIN/code.
-- Unknown numbers: AI answers; creates the client when they book (asks the name). A handoff from a stranger creates a
-  lead record so staff can reply.
+- Unknown numbers (owner, 2026-10-11): the FIRST text from an unknown number starts the welcome flow. The client record
+  is created at once as a provisional client (source inbound_sms, consent inbound_text, needs_details, name placeholder
+  "New texter ••NNNN") so staff see the thread from the start; the AI welcomes (disclosure line), answers the question,
+  asks the name (fills the placeholder via set_my_name) and steers to a booking (offers real open times for the wash they
+  are interested in; verify link when trust is missing). A lead record is opened in the same step. Provisional clients
+  that never give a name and never book are archived (soft-deleted, thread kept for retention) after 30 days.
 - Status texts: checked in / wash started, running late, ready for pickup, picked up (thank-you + receipt).
 - Settings is the single source of services/prices/details for website, bookings and AI; initial content = the
   website's current lists (Signature/Exterior with member/guest prices, add-ons with VIP inclusion, tint matrix,
@@ -96,6 +100,9 @@ the builders. Where it says MUST, a test must prove it.
   from:'system', senderName 'Oasis AI', author:'ai'.
 
 ## 3. Inbound → AI
+- Welcome flow: when the gate admits a number with no client, the turn first creates the provisional client + lead in its
+  claim transaction (idempotent per phone), and the context tells the model "new client, name unknown, first contact":
+  reply = disclosure + answer + one question for the name + a booking nudge (never more than one question per text).
 - Router keeps keyword order (STOP, START/YES-opt-in, HELP, C/CONFIRM, CANCEL) + new `AGENT` → handoff (no AI). Plain
   texts (incl. MMS text) from US/CA mobile numbers (normalizeTextableNanp) → command `assistant` when the gate allows
   (AI_ENABLED, settings enabled + stage/allowlist, not opted out, thread not paused, conversation not in open handoff).
@@ -130,7 +137,7 @@ the builders. Where it says MUST, a test must prove it.
 | check_availability {serviceKey, date, partOfDay?} | caller | loadBoard (VIP-aware only when verified) |
 | list_my_appointments {} | caller | own upcoming/recent as refs |
 | get_balance {} | caller | own open invoices |
-| create_client {fullName} | caller, unknown number | upsertCustomerByPhone(source inbound_sms → consent inbound_text), backfill thread |
+| set_my_name {fullName} | caller, provisional client only | fills the placeholder name (never overwrites a real name) |
 | note_interest {categories[]} | caller | leads.interests |
 | propose_booking {serviceKey, addonKeys[], date, startMin, vehicle?} | trusted (30 d) | validates slot, creates assistant_pending_actions, server texts "… Reply NNNN to confirm"; on the correct reply: createAppointment(channel online, source sms_ai, categories) |
 | propose_reschedule {appointmentRef, date, startMin} | trusted | same two-step → rescheduleAppointment |
