@@ -42,3 +42,30 @@ Migrations `20261011000000` to `20261011000500` (catalog fields and categories, 
 membership checkouts), the Kysely types, the environment and settings keys, the consent source, the SMS classes and templates, the
 status-texts port (called by nothing yet), the `ai_handoff` and `sms.picture_message` alert kinds, and the AI provider port with its
 simulator. No route, job or behaviour beyond the policy gate and the masked message bodies; later waves build the modules.
+
+## Wave W2c (the Bedrock provider)
+
+- `BedrockProvider` (`src/integrations/ai/bedrock.ts`) implements the port with `ConverseCommand` of
+  `@aws-sdk/client-bedrock-runtime@3.1146.0`: system blocks each followed by a `cachePoint` when `cache` is set, the tools (strict,
+  `toolChoice: auto`) followed by a `cachePoint` with `cacheTools`, `inferenceConfig.maxTokens`, reasoning blocks passed back
+  unchanged (text + signature, or the redacted bytes as base64 in the port), at most four cache points. The mapping is pure and
+  key-ordered, so the same request is the same bytes (tested over HTTP). `AI_PROVIDER=bedrock` builds it; building contacts nothing.
+- **Effort**: the SDK has Converse's own `outputConfig.effort`; whether Sonnet 5.5 on Bedrock takes it (or the Anthropic
+  `output_config` through `additionalModelRequestFields`) is not known yet, so `AI_BEDROCK_EFFORT_MODE` (`off` | `output_config` |
+  `additional_fields`) defaults to **off** and `pnpm verify:ai --probe-effort` decides. While off the model runs at its default
+  effort (`high` for Sonnet 5.5).
+- **toolChoice `none`** does not exist in Converse: without tool blocks in the conversation the tools are left out; with them
+  Bedrock requires the tool configuration, so it goes out unchanged (auto) and the assistant must treat a tool call on its final
+  "reply now" call as a fallback (and say "reply now without tools" in that call's text).
+- **Errors**: one SDK retry (`maxAttempts: 2`) for throttling and outages, a per-call `AbortSignal` (`AI_TIMEOUT_MS`, combined with
+  the caller's turn deadline). Kinds: `throttled` / `unavailable` retryable; `access_denied`, `invalid_request`, `timeout`, `aborted`,
+  `unknown` not. "Not available for this account" (the account quota of 0) is `access_denied` whatever exception carries it. Messages
+  carry the exception name and the AWS text masked, without quoted parts, cut at 200 characters (never the prompt).
+- **Stop reasons**: `refusal` → `refused`, `content_filtered` / `guardrail_intervened` → `content_filtered`, anything else unknown
+  (malformed output, context window exceeded, a new value) → `other`, raw value kept. A content block the port cannot carry is an
+  error rather than a shortened transcript.
+- **Cost**: `aiCostMicros(usage, aiPricesFromEnv(env))`: tokens × USD per MTok = micro-dollars; Bedrock's input count excludes the
+  cache reads and writes.
+- **IAM / ops**: `pnpm aws:provision --bedrock` (statements `InvokeClaude` on the inference profile, `InvokeClaudeRouted` on the
+  foundation model in the three routed regions only through it); `pnpm verify:ai` (one-token ping; IAM, model access, quota named);
+  `GET /system/integrations` row `ai`. docs/aws-setup.md has the quota support case, the Budgets alarm and invocation logging off.

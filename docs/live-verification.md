@@ -1,6 +1,6 @@
 # Live verification
 
-Three commands that prove the real thing works, one per integration. Each walks the checklist that is already written in
+Four commands that prove the real thing works, one per integration. Each walks the checklist that is already written in
 `docs/integrations/` (the numbered items you will see in the output), tells you PASS, FAIL or SKIP for every item with the reason, and
 writes a report you can keep or send to someone.
 
@@ -9,7 +9,8 @@ writes a report you can keep or send to someone.
 | `pnpm verify:smsgate` | the tablet sends and receives texts, receipts come back, STOP/START/HELP/C work | the tablet set up (below), its address and login, a phone to text |
 | `pnpm verify:squarespace` | the API key works, what orders and payments look like, which products are memberships | a read-only API key |
 | `pnpm verify:aws` | SES sends mail from your address, the photo bucket accepts uploads, nothing is missing from the permissions | an AWS login or an instance role, a verified sender, a bucket |
-| `pnpm verify:all` | all three in a row, one summary | all of the above |
+| `pnpm verify:ai` | the app's identity can call Claude on Amazon Bedrock (one-token ping), and names IAM, model access or the account quota when it cannot | an AWS login or the instance role (`--instance-profile`) |
+| `pnpm verify:all` | all four in a row, one summary | all of the above |
 
 ## How to run them
 
@@ -252,11 +253,29 @@ Without any credentials, or with `--only ses` / `--only s3` to look at one servi
 The check tells permission problems from credential problems: a refused action is a missing permission and is named; a rejected key or an
 expired token is reported as such, with the variables to check.
 
+## AI assistant: Claude on Amazon Bedrock (ADR 0160)
+
+What to prepare and why each step is needed: [aws-setup.md](aws-setup.md), "The AI assistant: Claude on Amazon Bedrock".
+
+```bash
+sudo $D/verify.sh ai --instance-profile                  # one Converse call of one output token (far below a cent)
+sudo $D/verify.sh ai --instance-profile --probe-effort   # + up to two more: which effort field the model takes
+```
+
+| # | What it checks |
+|---|---|
+| AI-01 | `AI_BEDROCK_MODEL_ID` is a Claude inference profile (`us.anthropic.claude-sonnet-5-5`) and `AI_BEDROCK_REGION` a region; notes `AI_PROVIDER` and `AI_ENABLED` |
+| AI-02 | the ping through the app's own `BedrockProvider`, sent exactly as the app would (its `AI_BEDROCK_EFFORT_MODE` included). A FAIL says which: **IAM** (`pnpm aws:provision --bedrock`), **MODEL ACCESS** (the Anthropic use-case form and agreement), **QUOTA** (the account's tokens-per-minute quota for the model is 0, AWS says "not available for this account": a support case), throttling, an outage, or a rejected request |
+| AI-03 | with `--probe-effort`: whether `outputConfig.effort` and the Anthropic `output_config` field are accepted, so `AI_BEDROCK_EFFORT_MODE` can be switched from `off` |
+
+`--sim` runs against a built-in stand-in (`--sim-scenario ok|access_denied|model_access|quota|throttled|unavailable|invalid_model|refusal|no_effort`)
+to see each message without an account.
+
 ---
 
 ## Reading and keeping the reports
 
-`<date>-smsgate.md`, `-squarespace.md`, `-aws.md` (and `-all.md` for `verify:all`) are the human report: a table of every item with its
+`<date>-smsgate.md`, `-squarespace.md`, `-aws.md`, `-ai.md` (and `-all.md` for `verify:all`) are the human report: a table of every item with its
 result, the fixes, evidence, notes (battery and health, device settings with secrets hidden, the proposed product map) and the source
 document of each item. The `.json` next to each has the same content for tools. They contain no secrets, but they describe your account
 and devices, so they stay out of git; the wrapper keeps them in `/var/lib/oasis/live-verification`.

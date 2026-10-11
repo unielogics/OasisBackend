@@ -36,6 +36,7 @@ Names with the default prefix `oasis`; `<acct>` is the 12-digit account id.
 | runtime=role (default) | role `oasis-app-role`, instance profile `oasis-app-profile` | the role may be assumed by EC2 only and has `oasis-app-runtime` attached; the profile holds it and is associated with the instance given by `--instance-id` or `--private-ip` |
 | runtime=user | IAM user `oasis-app` | no console password; `oasis-app-runtime` attached; one access key written to `--out` (AWS credentials file, mode 0600), never printed |
 | later, with `--sender` | SES identity, configuration set `oasis-mail`, SNS topic `oasis-ses-events`, HTTPS subscription to `--hooks-url` | domain: Easy DKIM (RSA 2048), the CNAME records are printed; event destination BOUNCE, COMPLAINT, DELIVERY, REJECT to the topic; topic policy lets SES publish for `oasis-mail` only; HTTPS delivery policy 12 retries over about 25 minutes |
+| later, with `--bedrock` | two statements in `oasis-app-runtime` (a new policy version) | `bedrock:InvokeModel` on the `us.` inference profile of Claude Sonnet 5.5 and, only through it, on the model in us-east-1, us-east-2 and us-west-2 ([below](#the-ai-assistant-claude-on-amazon-bedrock-adr-0160)) |
 
 It **describes before it creates** (Describe/Get/Head/List calls only until `--apply`), **never deletes** (CORS entries, lifecycle
 rules and policy statements it does not own are kept; an instance profile already associated with the instance is left alone unless
@@ -106,6 +107,7 @@ hop limit of 1 (`aws ec2 modify-instance-metadata-options --instance-id <id> --h
 * With `--sender` a seventh statement appears (a new policy version):
   `{ "Sid": "SendEmail", "Action": ["ses:SendEmail", "ses:SendRawEmail"], "Resource": [<identity ARN>, <configuration-set/oasis-mail ARN>], "Condition": { "StringLike": { "ses:FromAddress": "*@<domain>" } } }`
   (`StringEquals` on the address for an address sender; each `--sandbox-recipient` adds its identity ARN).
+* With `--bedrock` two more statements appear, `InvokeClaude` and `InvokeClaudeRouted` (the AI assistant, below).
 * The role's trust policy lets only `ec2.amazonaws.com` assume it.
 
 ## The sequence now (no email, no domain)
@@ -217,6 +219,78 @@ With a fresh operator key (deactivated again afterwards):
   install it as `/etc/oasis/aws-credentials`, restart, then the owner deactivates and deletes the old key.
 * **Retention**: `--photo-retention-days` and `--backup-retention-days` change only the lifecycle rules.
 
+## The AI assistant: Claude on Amazon Bedrock (ADR 0160)
+
+The text assistant calls **Claude Sonnet 5.5** through Bedrock's Converse API with the app's own identity (the instance role), as the
+cross-region inference profile `us.anthropic.claude-sonnet-5-5`: Bedrock may serve a call in us-east-1, us-east-2 or us-west-2 (the
+data stays in the US). Nothing here switches the assistant on: `AI_PROVIDER=bedrock` and `AI_ENABLED=true` are set in the staged
+rollout (ADR 0160, W5), after these steps pass. Code: `src/integrations/ai/bedrock.ts`; the check: `pnpm verify:ai`
+([live-verification.md](live-verification.md)).
+
+1. **Model access** (owner approval, once per account). Anthropic models need the Anthropic use-case form and the model agreement
+   (a pay-as-you-go AWS Marketplace offer). Done on 2026-10-10 for `anthropic.claude-sonnet-5-5` (and `anthropic.claude-opus-5-5`, the
+   evaluation judge, which the operator profile calls, never the app). Check:
+   `aws bedrock get-foundation-model-availability --model-id anthropic.claude-sonnet-5-5 --region us-east-1 --profile <operator>`
+   shows the agreement and authorization as available. Until then the ping fails with **MODEL ACCESS**.
+2. **The account quota: Claude 5.5 needs an AWS support case on this account.** On 2026-10-11 the account's Bedrock quotas
+   "On-demand model inference tokens per minute" (and requests per minute) for Claude Sonnet 5.5 and Opus 5.5 were **0** (the AWS
+   defaults are in the millions); a call then fails with "... is not available for this account" (`pnpm verify:ai` reports
+   **QUOTA**). The Service Quotas API refuses a request at or below the default value and the Support API needs a paid plan, so the
+   owner opens a free case in the console: Support, Create case, **Account and billing**, "Service limit / quota", text such as:
+   > Please apply the default Amazon Bedrock on-demand quotas (tokens per minute and requests per minute) for Anthropic Claude
+   > Sonnet 5.5 (cross-region inference, us.anthropic.claude-sonnet-5-5) in us-east-1 for account <acct>. They currently show 0, so
+   > every call answers "not available for this account". Expected use: a small business text assistant, under 100k tokens per
+   > minute at peak.
+
+   Check afterwards: `aws service-quotas list-service-quotas --service-code bedrock --region us-east-1 --profile <operator> --query
+   "Quotas[?contains(QuotaName, 'Sonnet 5.5')].[QuotaName,Value]"`.
+3. **The app's permission.** Re-run provisioning with `--bedrock` (plan first, then `--apply`):
+   `pnpm aws:provision --profile <operator> ...the same flags as before... --bedrock`. It adds a policy version with:
+   ```json
+   { "Sid": "InvokeClaude", "Effect": "Allow", "Action": "bedrock:InvokeModel",
+     "Resource": "arn:aws:bedrock:us-east-1:<acct>:inference-profile/us.anthropic.claude-sonnet-5-5" },
+   { "Sid": "InvokeClaudeRouted", "Effect": "Allow", "Action": "bedrock:InvokeModel",
+     "Resource": ["arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-5-5",
+                  "arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-5-5",
+                  "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-5-5"],
+     "Condition": { "ArnLike": { "bedrock:InferenceProfileArn": "arn:aws:bedrock:us-east-1:<acct>:inference-profile/us.anthropic.claude-sonnet-5-5" } } }
+   ```
+   Converse needs `bedrock:InvokeModel` on the profile and on the model in whichever region the profile routes to; the condition
+   allows the model only through that profile, so the app cannot call it (or any other model) directly. No streaming action, no
+   other Bedrock call (logging, jobs, agents) is allowed. **Pass `--bedrock` on every later run**: the policy is rebuilt from the
+   flags, and a run without it removes the grant (the plan prints a note saying so). `--bedrock-model anthropic.claude-...` grants
+   another Claude model instead. The output also prints `AI_BEDROCK_REGION` and `AI_BEDROCK_MODEL_ID` for `common.env` (the
+   defaults already match).
+4. **Ping it** on the host, as the app's role: `sudo $D/verify.sh ai --instance-profile`. One Converse call of one output token
+   through the app's own provider (well below a cent). FAIL names the cause: **IAM** (step 3), **MODEL ACCESS** (step 1),
+   **QUOTA** (step 2), throttling or an outage.
+5. **Effort.** `AI_BEDROCK_EFFORT_MODE=off` (default) sends no effort field, so the model runs at its own default effort (for Sonnet
+   5.5 that is `high`: more thinking tokens, slower and dearer answers). `sudo $D/verify.sh ai --instance-profile --probe-effort`
+   says whether Converse's `outputConfig.effort` (`output_config`) or the Anthropic field passed through `additionalModelRequestFields`
+   (`additional_fields`) is accepted; set the accepted one in `common.env` so `AI_EFFORT=low` takes effect, then run the ping again.
+6. **Prices.** `AI_PRICE_*` default to Anthropic's list prices for Sonnet 5.5 ($2 input, $10 output, $0.20 cache read, $2.50 cache
+   write per million tokens); set the Bedrock prices of the account (Bedrock pricing page, cross-region on-demand) so `cost_micros`,
+   the daily budget `AI_DAILY_BUDGET_USD` and the spend in `GET /api/v1/system/integrations` (row `ai`) are right.
+7. **An AWS Budgets alarm** as the account-level backstop (the app's own daily budget is the hard stop). Claude on Bedrock is billed
+   partly through AWS Marketplace, so a whole-account cost budget catches it where a Bedrock-only filter might not. The first two
+   budgets are free:
+   ```
+   aws budgets create-budget --account-id <acct> --profile <operator> \
+     --budget '{"BudgetName":"oasis-monthly","BudgetLimit":{"Amount":"150","Unit":"USD"},"TimeUnit":"MONTHLY","BudgetType":"COST"}' \
+     --notifications-with-subscribers '[
+       {"Notification":{"NotificationType":"ACTUAL","ComparisonOperator":"GREATER_THAN","Threshold":80,"ThresholdType":"PERCENTAGE"},
+        "Subscribers":[{"SubscriptionType":"EMAIL","Address":"<owner address>"}]},
+       {"Notification":{"NotificationType":"FORECASTED","ComparisonOperator":"GREATER_THAN","Threshold":100,"ThresholdType":"PERCENTAGE"},
+        "Subscribers":[{"SubscriptionType":"EMAIL","Address":"<owner address>"}]}]'
+   ```
+   Pick the amount from the current monthly bill plus the expected AI spend (about $80 a month at 30 conversations a day).
+8. **Model invocation logging stays off.** Prompts and answers contain clients' texts; the app keeps its own redacted transcript
+   (`assistant_turns`, owner-only, 90 days). `aws bedrock get-model-invocation-logging-configuration --region us-east-1 --profile
+   <operator>` must answer `{}` (nothing configured); if it ever shows a configuration, remove it with
+   `aws bedrock delete-model-invocation-logging-configuration --region us-east-1`. The app's role cannot change it.
+9. **Kill switches** (no AWS change needed): `AI_ENABLED=false`, `AI_ACTIONS_ENABLED=false`, Settings, Assistant (on/off, stage),
+   then a restart for the environment ones. Removing the grant (a provisioning run without `--bedrock`) stops every call at AWS.
+
 ## A narrow operator policy (if the owner prefers it to an administrator key)
 
 Everything `pnpm aws:provision` and `pnpm secrets:push` call is allowed by this inline policy, and nothing more is needed (a test
@@ -293,7 +367,12 @@ action and resource, evaluated against the narrow policy above; plan, apply and 
 sender (the policy gains the SES statement as a new version), the secret created empty and never overwritten, the grant on the exact
 secret ARN, finding the instance by private IP or id (none, several), an association that exists (left alone, or replaced with the
 flag), IAM propagation retries, drift and foreign rules, five policy versions, pending subscriptions, key rotation, the production
-request and the refusals (test/aws/provision.test.ts, secrets-push.test.ts, secrets-source.test.ts). The loader was also run in real
+request and the refusals (test/aws/provision.test.ts, secrets-push.test.ts, secrets-source.test.ts). The `--bedrock` statements are
+pinned exactly and evaluated (the profile, the routed models only through it, nothing else), and the Bedrock provider and
+`pnpm verify:ai` run the real SDK over HTTP/2 against a local Converse stand-in (test/integrations/ai). Not verified against the real
+account: a Converse call itself (the account's Claude 5.5 quota was 0 on 2026-10-11), whether `bedrock:InferenceProfileArn` is the
+key AWS evaluates for the routed call (AWS documents it; `pnpm verify:ai --instance-profile` proves it on the host), and which effort
+field Sonnet 5.5 accepts through Converse (`--probe-effort`). The loader was also run in real
 processes against a local Secrets Manager endpoint (test/aws/secret-entry-points.test.ts).
 Not verified against a real account (no credentials were used): AWS's exact echo of lifecycle and CORS documents (compared on the
 fields that matter, so a cosmetic difference would show as `~` and be re-applied harmlessly), how long IAM takes to propagate a new
