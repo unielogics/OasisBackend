@@ -8,6 +8,7 @@ import {
   messageSegment,
   mmsText,
   planAttachments,
+  mmsAttachmentKey,
 } from '../../src/modules/messaging/inbound/mms.js'
 import { routeInbound, type InboundContext, type InboundText } from '../../src/modules/messaging/inbound/router.js'
 
@@ -75,14 +76,14 @@ describe('routing an MMS', () => {
 
 describe('planAttachments', () => {
   it('saves pictures by their bytes under a deterministic key and lists the rest', () => {
-    const plan = planAttachments('loc-1', 'msg-1', [part(), part({ contentType: 'text/plain', name: 't.txt', data: Buffer.from('hi') })])
-    expect(plan[0]!.record).toMatchObject({ status: 'stored', key: 'messaging/mms/loc-1/msg-1/0.jpg', contentType: 'image/jpeg' })
-    expect(plan[0]!.save).toEqual({ key: 'messaging/mms/loc-1/msg-1/0.jpg', body: JPEG, contentType: 'image/jpeg' })
+    const plan = planAttachments('loc-1', 'dev-1', 'msg-1', [part(), part({ contentType: 'text/plain', name: 't.txt', data: Buffer.from('hi') })])
+    expect(plan[0]!.record).toMatchObject({ status: 'stored', key: 'messaging/mms/loc-1/dev-1/msg-1/0.jpg', contentType: 'image/jpeg' })
+    expect(plan[0]!.save).toEqual({ key: 'messaging/mms/loc-1/dev-1/msg-1/0.jpg', body: JPEG, contentType: 'image/jpeg' })
     expect(plan[1]).toEqual({ record: expect.objectContaining({ status: 'listed', reason: null, key: null }), save: null })
   })
 
   it('a declared image whose bytes are not JPEG, PNG or WebP is skipped; an oversized one too', () => {
-    const plan = planAttachments('l', 'm', [
+    const plan = planAttachments('l', 'd', 'm', [
       part({ data: Buffer.from('GIF89a') }),
       part({ data: Buffer.concat([JPEG, Buffer.alloc(MMS_MAX_PICTURE_BYTES)]) }),
       part({ data: null, problem: 'decode_failed' }),
@@ -94,11 +95,18 @@ describe('planAttachments', () => {
     ])
   })
 
+  it('puts the device in the key, so two tablets that number an MMS alike never share an object', () => {
+    expect(mmsAttachmentKey('loc', 'dev-a', 'mms:4', 0, 'jpg')).toBe('messaging/mms/loc/dev-a/4/0.jpg')
+    expect(mmsAttachmentKey('loc', 'dev-a', 'mms:4', 0, 'jpg')).not.toBe(mmsAttachmentKey('loc', 'dev-b', 'mms:4', 0, 'jpg'))
+    expect(mmsAttachmentKey('loc', '../x', 'mms:4', 0, 'jpg')).toMatch(/^messaging\/mms\/loc\/x-[0-9a-f]{16}\/4\/0\.jpg$/)
+  })
+
   it('makes any device message id a safe key segment', () => {
     expect(messageSegment('abc_DEF-1')).toBe('abc_DEF-1')
     expect(messageSegment('mms:4')).toBe('4')
-    // the incomplete form of a message saves into the folder of the complete one
-    expect(messageSegment('mms:4:incomplete')).toBe('4')
+    // the incomplete form of a message keeps its own folder: a placeholder and the complete message share no object
+    expect(messageSegment('mms:4:incomplete')).toBe('4-incomplete')
+    expect(messageSegment('mms:4:incomplete')).not.toBe(messageSegment('mms:4'))
     expect(messageSegment('../x y')).toMatch(/^xy-[0-9a-f]{16}$/)
     expect(messageSegment('///')).toMatch(/^m[0-9a-f]{16}$/)
     expect(messageSegment('a'.repeat(70))).toMatch(/^a{40}-[0-9a-f]{16}$/)

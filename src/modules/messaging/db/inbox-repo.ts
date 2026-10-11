@@ -25,6 +25,9 @@ const rowOf = (r: Selectable<SmsInboxTable>): InboxRow => ({
 })
 
 /** sms_inbox: every received text, unique per (device, provider message id). Unknown senders are quarantined, never made customers. */
+/** A device message id repeated this long after its first arrival is a new message, not a retry. */
+export const INBOX_ID_REUSE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
+
 export class PgInboxRepository implements InboxRepository {
   constructor(
     private readonly exec: Executor,
@@ -55,6 +58,28 @@ export class PgInboxRepository implements InboxRepository {
       .where('device_id', '=', msg.deviceId)
       .where('provider_message_id', '=', msg.providerMessageId)
       .executeTakeFirstOrThrow()
+    // A real repeat (a webhook retry, a sweep) comes within a day. The same device id long after the first row is the device
+    // numbering again (app data cleared, a reset): a new message, filed under the id plus its arrival, never dropped as a
+    // repeat (a STOP must not be lost).
+    if (receivedAt.getTime() - new Date(existing.received_at).getTime() > INBOX_ID_REUSE_AFTER_MS) {
+      const again = await this.exec
+        .insertInto('sms_inbox')
+        .values({
+          id: this.newId(),
+          device_id: msg.deviceId,
+          provider_message_id: `${msg.providerMessageId}@${receivedAt.getTime()}`,
+          from_raw: msg.from,
+          from_e164: normalizeE164(msg.from),
+          body: msg.body,
+          kind: msg.kind ?? 'sms',
+          device_received_at: msg.receivedAt,
+          received_at: receivedAt,
+        })
+        .onConflict((oc) => oc.columns(['device_id', 'provider_message_id']).doNothing())
+        .returningAll()
+        .executeTakeFirst()
+      if (again) return { inserted: true, row: rowOf(again) }
+    }
     return { inserted: false, row: rowOf(existing) }
   }
 

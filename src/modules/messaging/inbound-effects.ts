@@ -177,7 +177,7 @@ export function createInboundEffects(
     },
 
     async recordAttachments(parts, ctx) {
-      const plan = planAttachments(o.locationId, ctx.providerMessageId, parts)
+      const plan = planAttachments(o.locationId, o.event.deviceId, ctx.providerMessageId, parts)
       const records = []
       for (const item of plan) {
         if (!item.save) {

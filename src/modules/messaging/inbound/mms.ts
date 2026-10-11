@@ -63,19 +63,29 @@ const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
  * A storage-key segment for the device's message id (the `mms:` prefix of the provider id dropped: the folder says mms already):
  * the id itself when already safe, else a readable prefix plus a short hash.
  */
-export function messageSegment(providerMessageId: string): string {
-  // the incomplete form of a message shares its folder with the complete one, which overwrites rather than adds
-  const bare = providerMessageId.endsWith(MMS_INCOMPLETE_SUFFIX) ? providerMessageId.slice(0, -MMS_INCOMPLETE_SUFFIX.length) : providerMessageId
-  const id = bare.startsWith('mms:') ? bare.slice(4) : bare
+const safeSegment = (id: string): string => {
   if (SEGMENT.test(id)) return id
   const hash = createHash('sha256').update(id).digest('hex').slice(0, 16)
   const readable = id.replace(/[^A-Za-z0-9_-]+/g, '').replace(/^[^A-Za-z0-9]+/, '').slice(0, 40)
   return readable ? `${readable}-${hash}` : `m${hash}`
 }
 
-/** messaging/mms/<location>/<message>/<index>.<ext>: deterministic, so a retried event overwrites rather than duplicates. */
-export function mmsAttachmentKey(locationId: string, providerMessageId: string, index: number, ext: string): string {
-  return `messaging/mms/${locationId}/${messageSegment(providerMessageId)}/${index}.${ext}`
+export function messageSegment(providerMessageId: string): string {
+  // The incomplete form of a message keeps a folder of its own (<id>-incomplete): a superseded placeholder and the complete
+  // message never share an object, so the purge of one can never take the other's pictures (ADR 0151).
+  const incomplete = providerMessageId.endsWith(MMS_INCOMPLETE_SUFFIX)
+  const bare = incomplete ? providerMessageId.slice(0, -MMS_INCOMPLETE_SUFFIX.length) : providerMessageId
+  const id = bare.startsWith('mms:') ? bare.slice(4) : bare
+  const seg = safeSegment(id)
+  return incomplete ? `${seg.slice(0, 52)}-incomplete` : seg
+}
+
+/**
+ * messaging/mms/<location>/<device>/<message>/<index>.<ext>: deterministic, so a retried event overwrites rather than
+ * duplicates; the device is part of the key because every tablet numbers its MMS on its own (two tablets' "4" never meet).
+ */
+export function mmsAttachmentKey(locationId: string, deviceId: string, providerMessageId: string, index: number, ext: string): string {
+  return `messaging/mms/${locationId}/${safeSegment(deviceId)}/${messageSegment(providerMessageId)}/${index}.${ext}`
 }
 
 /**
@@ -83,7 +93,7 @@ export function mmsAttachmentKey(locationId: string, providerMessageId: string, 
  * MMS_MAX_PICTURE_BYTES each, in a format the photos store accepts (checked on the bytes, not only the declared type).
  * Everything else is recorded by name, type and size; a part whose bytes are missing or broken is 'unavailable'.
  */
-export function planAttachments(locationId: string, providerMessageId: string, parts: readonly MmsPart[]): MmsPlanItem[] {
+export function planAttachments(locationId: string, deviceId: string, providerMessageId: string, parts: readonly MmsPart[]): MmsPlanItem[] {
   let saved = 0
   return parts.map((p, index) => {
     const record: MmsAttachmentRecord = { index, partId: p.partId, name: p.name, contentType: p.contentType, size: p.size, status: 'listed', reason: null, key: null }
@@ -95,7 +105,7 @@ export function planAttachments(locationId: string, providerMessageId: string, p
     if (!sniffed || !ext) return { record: { ...record, status: 'skipped', reason: 'unsupported_type' }, save: null }
     if (saved >= MMS_MAX_SAVED_PICTURES) return { record: { ...record, status: 'skipped', reason: 'limit' }, save: null }
     saved += 1
-    const key = mmsAttachmentKey(locationId, providerMessageId, index, ext)
+    const key = mmsAttachmentKey(locationId, deviceId, providerMessageId, index, ext)
     return { record: { ...record, contentType: sniffed, status: 'stored', key }, save: { key, body: p.data, contentType: sniffed } }
   })
 }
