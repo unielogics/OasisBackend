@@ -5,6 +5,11 @@ binding). This document merges the backend architecture, the threat model and th
 the builders. Where it says MUST, a test must prove it.
 
 ## 0. Owner decisions (binding)
+- INTERIM MODEL (owner, 2026-10-11): the account's Claude 5.x token quotas are 0 until AWS support raises them (case
+  opened by the owner); until then the assistant runs on Claude Sonnet 4.6 (`us.anthropic.claude-sonnet-4-6`, agreement
+  active, 6M TPM, tested OK) and evaluations are judged by Opus 4.6 (`us.anthropic.claude-opus-4-6-v1`). The model is
+  configuration only (AI_BEDROCK_MODEL_ID); the IAM statement must allow every configured model (a list), and switching
+  to Sonnet 5.5 is one setting once its quota is raised.
 - Claude Sonnet 5.5 on Bedrock: Converse API, modelId `us.anthropic.claude-sonnet-5-5` (cross-region profile, us-east-1),
   `@aws-sdk/client-bedrock-runtime@3.1146.0`, instance-role credentials. Judge for evals: `us.anthropic.claude-opus-5-5`.
 - AI answers 24/7 to anyone; staff follow AI conversations ONLY in existing places (appointment Messages tab with an
@@ -13,8 +18,19 @@ the builders. Where it says MUST, a test must prove it.
 - Every booking verified: verify once on the page (PIN or texted code) → that phone trusted 30 days → the AI may book/
   reschedule/cancel in chat, EACH action confirmed by a server reply number ("… Reply 4821 to confirm"; the model never
   sees it). Outside the window the AI sends a verify link first. Memberships and payments always need a fresh PIN/code.
-- Unknown numbers: AI answers; creates the client when they book (asks the name). A handoff from a stranger creates a
-  lead record so staff can reply.
+- Unknown numbers (owner, 2026-10-11): the FIRST text from an unknown number starts the welcome flow. The client record
+  is created at once as a provisional client (source inbound_sms, consent inbound_text, needs_details, name placeholder
+  "New texter ••NNNN") so staff see the thread from the start; the AI welcomes (disclosure line), answers the question,
+  asks the name (fills the placeholder via set_my_name) and steers to a booking (offers real open times for the wash they
+  are interested in; verify link when trust is missing). A lead record is opened in the same step. Provisional clients
+  that never give a name and never book are archived (soft-deleted, thread kept for retention) after 30 days.
+- Intake order for new texters (owner, 2026-10-11), one question per text, skipping anything already known:
+  (1) the NAME (answer their question first if they asked one); (2) their INTENT (book a wash, tint, detailing, or only
+  information) — when they want to book, move toward a time; (3) PRESENT THE MEMBERSHIPS (Gold/VIP prices and perks from
+  the Settings catalog, short, once, before the first booking; membership link if interested, else back to booking);
+  (4) LAST, the VEHICLE: type (sedan/coupe | SUV/crossover | truck/van — the tint price classes), brand, model.
+  Do NOT offer a human up front: the welcome is only "Oasis Auto Spa's automated assistant" + the mandatory STOP footer;
+  AGENT and handoff still work and are offered only when the client asks for a person, is upset, or the AI cannot help.
 - Status texts: checked in / wash started, running late, ready for pickup, picked up (thank-you + receipt).
 - Settings is the single source of services/prices/details for website, bookings and AI; initial content = the
   website's current lists (Signature/Exterior with member/guest prices, add-ons with VIP inclusion, tint matrix,
@@ -96,6 +112,9 @@ the builders. Where it says MUST, a test must prove it.
   from:'system', senderName 'Oasis AI', author:'ai'.
 
 ## 3. Inbound → AI
+- Welcome flow: when the gate admits a number with no client, the turn first creates the provisional client + lead in its
+  claim transaction (idempotent per phone), and the context tells the model "new client, name unknown, first contact":
+  reply = disclosure + answer + one question for the name + a booking nudge (never more than one question per text).
 - Router keeps keyword order (STOP, START/YES-opt-in, HELP, C/CONFIRM, CANCEL) + new `AGENT` → handoff (no AI). Plain
   texts (incl. MMS text) from US/CA mobile numbers (normalizeTextableNanp) → command `assistant` when the gate allows
   (AI_ENABLED, settings enabled + stage/allowlist, not opted out, thread not paused, conversation not in open handoff).
@@ -111,7 +130,8 @@ the builders. Where it says MUST, a test must prove it.
   [cachePoint], turn context; tools with cachePoint; toolChoice auto; ≤4 tool rounds then a "reply now" call; 20 s per
   call, 60 s per turn; append-only transcript incl. reasoning blocks) → output guard → enqueue `ai_reply` (first AI text
   of a conversation prefixed with the disclosure "Oasis automated assistant · reply AGENT for a person · STOP to opt
-  out.") → audit `assistant.reply` → re-kick if newer texts arrived.
+  out." — owner 2026-10-11: the first text carries only the automated-assistant line and the STOP footer, NOT the AGENT
+  offer) → audit `assistant.reply` → re-kick if newer texts arrived.
 - Output guard: strip markdown, GSM-7, ≤320 chars (one shorten call else cut at a sentence), no URLs except server
   `{link1}` placeholders, every $ amount must appear in this turn's tool outputs, refund/discount/free/guarantee/"ready
   by"/legal words → handoff, never asks for PIN/code/card numbers; a refusal/max-tokens/unknown stop → fallback.
@@ -121,16 +141,36 @@ the builders. Where it says MUST, a test must prove it.
 - Loop breakers: 3 identical inbound texts, > 5 texts/min, 6 turns without progress, own number/short codes/alnum
   senders → no AI.
 
+## 3b. Shop facts and pricing (owner, 2026-10-11)
+- The assistant's baseline is EVERY setting in the system, assembled server-side into one read-only "shop facts" document
+  (src/modules/assistant/facts.ts): business name, address, contact numbers (texting vs calling), hours per weekday,
+  closures (next 30 days), today's state and any emergency closure, booking rules (online lead time, cutoff, slot size,
+  booking windows standard/VIP, same-day rules), guest booking fee and how it is collected, cancellation and no-show
+  policy, VIP rules in plain words, arrival instructions, which automatic texts clients receive (status texts, reminders),
+  the catalog (categories, services and add-ons with public names, descriptions, durations, member and guest STARTING
+  prices, VIP inclusion, quote-only items, tint price classes as "starting at"), membership plans (public label, monthly
+  price, perks), and the Settings FAQ. It is rebuilt whenever a settings/catalog version changes (cache keyed by a hash of
+  the source versions) and placed in the cached system prefix; time-sensitive facts (availability, the client's own
+  appointments, balance) still come from tools at the moment of the question.
+- PRICING IS NOT THE AI'S TASK: it never quotes a final price, never adds up totals, never prices combinations, never
+  computes discounts. It may state STARTING prices only ("Signature Hand Wash starts at $45 for members, $54 otherwise";
+  "window tint starts at $229"), membership monthly prices, and the guest booking fee, all from the facts; for an exact
+  price it says the team confirms it at the shop, or offers "text us a photo for a quote" for tint/detailing/quote-only.
+  Output guard: every $ amount in a reply must equal a starting price, a plan price or the fee from the current facts,
+  and a service price must be introduced by "starts at"/"from"/"starting at"; anything else is blocked (fallback or a
+  rewrite call) — tested.
+
 ## 4. Tools (zod-validated, strict schemas, customer bound server-side, refs A1..A3 resolve only to own rows)
 | tool | trust | does |
 |---|---|---|
 | get_business_info {topic} | caller | hours (public-hours view), closures 14 d, address, policies, fee settings |
-| list_services {category?} | caller | catalog from Settings (the ONLY price source) |
+| list_services {category?} | caller | catalog from Settings (the ONLY price source; starting prices only) |
 | get_membership_info {} | caller | plans with prices/perks + the client's membership view |
 | check_availability {serviceKey, date, partOfDay?} | caller | loadBoard (VIP-aware only when verified) |
 | list_my_appointments {} | caller | own upcoming/recent as refs |
 | get_balance {} | caller | own open invoices |
-| create_client {fullName} | caller, unknown number | upsertCustomerByPhone(source inbound_sms → consent inbound_text), backfill thread |
+| set_my_name {fullName} | caller, provisional client only | fills the placeholder name (never overwrites a real name) |
+| set_my_vehicle {type: sedan_coupe\|suv_crossover\|truck_van, make, model, year?, color?} | caller (own record; adds, never edits another's) | upsertVehicle for the client; type maps to the tint price class |
 | note_interest {categories[]} | caller | leads.interests |
 | propose_booking {serviceKey, addonKeys[], date, startMin, vehicle?} | trusted (30 d) | validates slot, creates assistant_pending_actions, server texts "… Reply NNNN to confirm"; on the correct reply: createAppointment(channel online, source sms_ai, categories) |
 | propose_reschedule {appointmentRef, date, startMin} | trusted | same two-step → rescheduleAppointment |
