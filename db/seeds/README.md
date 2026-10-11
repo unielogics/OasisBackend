@@ -4,19 +4,20 @@
 one transaction, after making sure the single location row and the default settings exist (both idempotent).
 `pnpm seed -- --list` prints the registered profiles.
 
-| Profile          | What it adds                                                                                                             |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `empty`          | location and default settings only                                                                                       |
-| `people`         | the five roles and the seven design employees (logins only when `SEED_DEV_PASSWORD` is set)                              |
-| `domain`         | bays, hours, rules, the design closures and emergency history, catalog, VIP and arrival settings                         |
-| `domain-design`  | the design customers and vehicles (synthetic numbers) and the VIP clients                                                |
-| `base`, `design` | compositions: `people` + `domain`; `base` + `domain-design` (+ the simulator SMS device)                                 |
-| `messaging`      | one simulator SMS device                                                                                                 |
-| `geofence`       | placeholder shop coordinates for the arrival geofence (only when none are set)                                           |
-| `memberships`    | the four plans and the design members with this cycle's credits                                                          |
-| `parity-ops`     | the Operations design day frozen at 2026-06-13 10:36 AM and its calendar (parity database only)                          |
-| `parity-pay`     | the Payments design's 105 invoices (parity database only)                                                                |
-| `demo`           | the Operations design day on **today**, as it stands at the moment the seed runs, with the Payments history and calendar |
+| Profile           | What it adds                                                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `empty`           | location and default settings only                                                                                       |
+| `people`          | the five roles and the seven design employees (logins only when `SEED_DEV_PASSWORD` is set)                              |
+| `domain`          | bays, hours, rules, the design closures and emergency history, catalog, VIP and arrival settings                         |
+| `domain-design`   | the design customers and vehicles (synthetic numbers) and the VIP clients                                                |
+| `base`, `design`  | compositions: `people` + `domain`; `base` + `domain-design` (+ the simulator SMS device)                                 |
+| `messaging`       | one simulator SMS device                                                                                                 |
+| `geofence`        | placeholder shop coordinates for the arrival geofence (only when none are set)                                           |
+| `memberships`     | the four plans and the design members with this cycle's credits                                                          |
+| `website-catalog` | the website's services, prices, tint matrix and Gold/VIP plans as the catalog; other services deactivated (ADR 0160)     |
+| `parity-ops`      | the Operations design day frozen at 2026-06-13 10:36 AM and its calendar (parity database only)                          |
+| `parity-pay`      | the Payments design's 105 invoices (parity database only)                                                                |
+| `demo`            | the Operations design day on **today**, as it stands at the moment the seed runs, with the Payments history and calendar |
 
 ## The demo profile (`db/seeds/demo.ts`)
 

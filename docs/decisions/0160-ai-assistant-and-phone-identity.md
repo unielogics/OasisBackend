@@ -42,3 +42,25 @@ Migrations `20261011000000` to `20261011000500` (catalog fields and categories, 
 membership checkouts), the Kysely types, the environment and settings keys, the consent source, the SMS classes and templates, the
 status-texts port (called by nothing yet), the `ai_handoff` and `sms.picture_message` alert kinds, and the AI provider port with its
 simulator. No route, job or behaviour beyond the policy gate and the masked message bodies; later waves build the modules.
+
+## Wave W2a (one catalog in Settings)
+
+- **Staff API** `/api/v1/catalog/*` (api-spec section 15.8): a service's website fields, categories (key immutable, the five defaults
+  never deleted, a category in use never deleted, at most 20), the tint matrix and guest markup settings, the plans' public label,
+  monthly price, perks and Squarespace checkout link. Reads for any signed-in user, writes `set.services` (the existing "Services,
+  pricing & checklists" permission; no new permission key), whole-object `PUT`s with a required version like the hours save. The
+  routes live under `/catalog` rather than `/settings/catalog` and are registered through `registerCatalogRoutes`, so the Settings
+  module list and its contract test stay as they were.
+- **One pricing rule** (`src/modules/catalog/pricing.ts`): member = `member_price_cents` else `price_cents`; guest =
+  `guest_price_cents` else member + `catalog.guest_markup_pct`, rounded half up to whole dollars (the website's own rounding). Tint is
+  priced by the matrix: a tint package names its film by a tag and shows the film's lowest prices. `price_cents` stays what a booking
+  charges today (the seed sets it to the guest price); charging members their price at booking is a later wave's.
+- **Public catalog** (`GET /public/catalog`) extended in place (every field the website reads today kept): categories, member/guest
+  prices, VIP inclusion, quote-only items, the tint matrix, the guest fee, plan prices and perks. Checkout URLs stay internal: only a
+  verified membership link leads to one.
+- **`appointments.categories`** maintained by `createAppointment`, add-on add/remove and a service's category change (open visits);
+  `visitCategory()` gives the chip/KPI word (`mixed` when two categories other than add-ons meet).
+- **Seed `website-catalog`** makes the website's content the production catalog and deactivates (never deletes) the rest; idempotent.
+  Durations the design does not give were chosen by the seed (tint 180, interior detail 150, full detail 240, quotes 120/480/300/30
+  minutes) for the owner to review.
+
