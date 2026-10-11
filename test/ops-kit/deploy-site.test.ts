@@ -1162,6 +1162,13 @@ const revision = (w: SiteWorld, rel = w.current()): Record<string, string> =>
   )
 
 describe('site-deploy.sh', () => {
+  it('sends kill -1 only through runuser as the unprivileged build user (as root it would signal every process on the host)', () => {
+    const src = readFileSync(script('site-deploy.sh'), 'utf8')
+    const kills = src.split('\n').filter((l) => /\bkill\b[^#]*-1\b/.test(l) && !l.trim().startsWith('#'))
+    expect(kills).toEqual(['      $OASIS_SITE_RUN_AS kill -s KILL -1 2>/dev/null || true'])
+    expect(src).toMatch(/if \[\[ -n "\$OASIS_SITE_RUN_AS" && "\$SITE_USER" != root && "\$\(id -u "\$SITE_USER" 2>\/dev\/null\)" =~ \^\[1-9\]\[0-9\]\*\$ \]\]; then\n\s+# shellcheck disable=SC2086\n\s+\$OASIS_SITE_RUN_AS kill -s KILL -1/)
+  })
+
   it('first deploy: exports the commit, fetches the hours, builds as the service user, verifies, switches, and records it', async () => {
     const w = await makeSiteWorld()
     expect(w.current()).toBe('bootstrap')
@@ -1434,15 +1441,18 @@ describe('site-deploy.sh', () => {
       expect.stringMatching(/^chown -h oasis-site:oasis-site \S+\.partial\/src$/),
     ])
     const order = w.log().map((l) => l.split(' ')[0])
-    expect(order.indexOf('reap')).toBeGreaterThan(order.lastIndexOf('pnpm'))
-    expect(w.log()).toContain('reap oasis-site')
-    expect(order.indexOf('reap')).toBeLessThan(order.indexOf('site-health'))
+    // anything left of the build user goes before the build, and the build's own leftovers before root takes the output
+    expect(order.indexOf('reap')).toBeLessThan(order.indexOf('pnpm'))
+    expect(order.lastIndexOf('reap')).toBeGreaterThan(order.lastIndexOf('pnpm'))
+    // before the build, after it, and once more after the check for scheduled work
+    expect(w.log().filter((l) => l.startsWith('reap'))).toEqual(['reap oasis-site', 'reap oasis-site', 'reap oasis-site'])
+    expect(order.lastIndexOf('reap')).toBeLessThan(order.indexOf('site-health'))
     expect(r.out).toMatch(/building the website as oasis-site/)
     // a failed build is reaped too
     w.clearLog()
     w.flag('fail-build')
     expect((await w.deploy('--force')).code).toBe(1)
-    expect(w.log().filter((l) => l.startsWith('reap'))).toEqual(['reap oasis-site'])
+    expect(w.log().filter((l) => l.startsWith('reap'))).toEqual(['reap oasis-site', 'reap oasis-site'])
     w.flag('fail-build', false)
     // and it says when it is not the root-owned kit that runs
     expect(r.out).toMatch(
@@ -1540,7 +1550,8 @@ describe('site-deploy.sh', () => {
     ])
     const order = w.log().map((l) => l.split(' ')[0])
     expect(order.indexOf('atq')).toBeLessThan(order.indexOf('pnpm'))
-    expect(order.lastIndexOf('atq')).toBeGreaterThan(order.indexOf('reap'))
+    const reapAfterBuild = order.findIndex((x, i) => x === 'reap' && i > order.lastIndexOf('pnpm'))
+    expect(order.lastIndexOf('atq')).toBeGreaterThan(reapAfterBuild)
     expect(order.lastIndexOf('atq')).toBeLessThan(order.indexOf('cp'))
     rmSync(atq)
     const linger = path.join(w.root, 'var/lib/systemd/linger/oasis-site')

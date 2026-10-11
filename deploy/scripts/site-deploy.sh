@@ -278,8 +278,9 @@ as_site_read() {
   fi
 }
 # site_reap: no process of the build user outlives the build (a dependency could leave one behind to change the output after root
-# looked at it, or the next build). Every process of that user is killed until two passes in a row find none: a process forking while
-# pkill walks the process table can leave a child the pass did not see, and one empty pgrep could come just before that child shows.
+# looked at it, or the next build). Each pass first sends SIGKILL to -1 AS the build user: kill(-1) reaches every process of that uid in
+# one kernel walk that a fork cannot race (a process that keeps forking and exiting slips past a pgrep/pkill scan; verified 2026-10-11).
+# pkill by uid then catches anything left, and the loop ends after two passes in a row find nothing.
 site_reap() {
   REAPED=1
   if [[ -n "${OASIS_SITE_REAP_CMD:-}" ]]; then
@@ -290,6 +291,11 @@ site_reap() {
   ((SITE_SEPARATE)) || return 0
   local i empty=0
   for ((i = 0; i < 100; i++)); do
+    # only ever through runuser as the unprivileged build user: kill -1 as root would signal every process on the host
+    if [[ -n "$OASIS_SITE_RUN_AS" && "$SITE_USER" != root && "$(id -u "$SITE_USER" 2>/dev/null)" =~ ^[1-9][0-9]*$ ]]; then
+      # shellcheck disable=SC2086
+      $OASIS_SITE_RUN_AS kill -s KILL -1 2>/dev/null || true
+    fi
     if pgrep -U "$SITE_USER" >/dev/null 2>&1 || pgrep -u "$SITE_USER" >/dev/null 2>&1; then
       empty=0
       pkill -KILL -U "$SITE_USER" 2>/dev/null || true
@@ -367,6 +373,9 @@ if [[ "$DRY_RUN" == 1 ]]; then
   log "would export ${SHA:0:12} into $PART/src, fetch the hours snapshot, build as $SITE_USER (pnpm install --frozen-lockfile && pnpm build), stop its processes, copy and verify $SITE_BUILD_DIR/, make the copy $REL and point $SITE_ROOT/current at it, then health-check https://$SITE_DOMAIN/"
   exit 0
 fi
+# anything still running as the build user (a survivor of an earlier deploy) goes first: nothing may watch this build's tree
+site_reap || die "processes of $SITE_USER from before this deploy are still running (ps -u $SITE_USER); nothing was built"
+REAPED=0
 # $PART is root's (the build user cannot create, replace or rename anything in it); only $PART/src is handed over
 mkdir -m 0755 "$PART"
 PART_ACTIVE=1
