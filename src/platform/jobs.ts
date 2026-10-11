@@ -153,6 +153,51 @@ const MAX_ERROR_LENGTH = 500
 
 const iso = (d: Date | null | undefined): string | null => (d ? d.toISOString() : null)
 
+/** How long start() waits for another process's queue setup before going ahead without the lock (deadlocks still retry). */
+const SETUP_LOCK_WAIT_MS = 120_000
+
+/** Runs fn while holding a session advisory lock named after the pg-boss schema, so processes set queues up one at a time. */
+export async function withSetupLock(
+  db: Db,
+  schema: string,
+  logger: Logger,
+  fn: () => Promise<void>,
+  waitMs = SETUP_LOCK_WAIT_MS,
+): Promise<void> {
+  const key = `oasis-jobs-setup:${schema}`
+  await db.connection().execute(async (conn) => {
+    const deadline = performance.now() + waitMs
+    let locked = false
+    while (!locked) {
+      const r = await sql<{ ok: boolean }>`select pg_try_advisory_lock(hashtext(${key})) as ok`.execute(conn)
+      locked = r.rows[0]?.ok === true
+      if (locked) break
+      if (performance.now() >= deadline) {
+        logger.warn({ schema }, 'job queue setup: another process held the setup lock too long; continuing without it')
+        break
+      }
+      await new Promise((r) => setTimeout(r, 200))
+    }
+    try {
+      await fn()
+    } finally {
+      if (locked) await sql`select pg_advisory_unlock(hashtext(${key}))`.execute(conn)
+    }
+  })
+}
+
+/** Retries fn when Postgres reports a deadlock (40P01): Postgres aborted our transaction, the other one went through. */
+export async function retryOnDeadlock<T>(fn: () => Promise<T>, attempts = 5): Promise<T> {
+  for (let i = 1; ; i++) {
+    try {
+      return await fn()
+    } catch (e) {
+      if ((e as { code?: string }).code !== '40P01' || i >= attempts) throw e
+      await new Promise((r) => setTimeout(r, 150 * i))
+    }
+  }
+}
+
 export function createJobs(cfg: JobsConfig): Jobs {
   if (!cfg.enabled) {
     return {
@@ -365,27 +410,35 @@ export function createJobs(cfg: JobsConfig): Jobs {
     async start({ workers }) {
       await boss.start()
       started = true
-      for (const def of defs) {
-        const dead = deadLetterQueueOf(def.name)
-        await boss.createQueue(dead, {
-          name: dead,
-          policy: 'standard',
-          retryLimit: 0,
-          retentionMinutes: DEAD_LETTER_RETENTION_MINUTES,
-        })
-        const options = {
-          name: def.name,
-          policy: def.policy ?? 'standard',
-          retryLimit: def.retryLimit ?? 3,
-          retryDelay: def.retryDelaySeconds ?? 30,
-          retryBackoff: true,
-          deadLetter: dead,
-          ...(def.expireInSeconds ? { expireInSeconds: def.expireInSeconds } : {}),
-        } as const
-        await boss.createQueue(def.name, options)
-        // createQueue only inserts when missing: re-apply so a changed definition reaches an existing deployment
-        await boss.updateQueue(def.name, options)
-      }
+      // The API and the worker both run start(), and a deploy restarts them back to back: two processes creating the same
+      // NEW queue at once deadlock inside pg-boss (both create_queue transactions insert into <schema>.queue and attach a
+      // job partition), which crashed the worker during a deploy on 2026-10-11. The queue setup therefore runs under one
+      // advisory lock per pg-boss schema, and a deadlock that still happens (pg-boss's own maintenance) is retried.
+      await withSetupLock(cfg.db, schema, cfg.logger, async () => {
+        for (const def of defs) {
+          const dead = deadLetterQueueOf(def.name)
+          await retryOnDeadlock(() =>
+            boss.createQueue(dead, {
+              name: dead,
+              policy: 'standard',
+              retryLimit: 0,
+              retentionMinutes: DEAD_LETTER_RETENTION_MINUTES,
+            }),
+          )
+          const options = {
+            name: def.name,
+            policy: def.policy ?? 'standard',
+            retryLimit: def.retryLimit ?? 3,
+            retryDelay: def.retryDelaySeconds ?? 30,
+            retryBackoff: true,
+            deadLetter: dead,
+            ...(def.expireInSeconds ? { expireInSeconds: def.expireInSeconds } : {}),
+          } as const
+          await retryOnDeadlock(() => boss.createQueue(def.name, options))
+          // createQueue only inserts when missing: re-apply so a changed definition reaches an existing deployment
+          await retryOnDeadlock(() => boss.updateQueue(def.name, options))
+        }
+      })
       if (!workers) return
       const wanted = new Set<string>()
       for (const def of defs) {
