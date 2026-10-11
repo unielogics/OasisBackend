@@ -166,6 +166,41 @@ describe('install.sh', () => {
     expect(first.out).toContain('Deploy, as root, always from the root-owned kit:   /usr/local/lib/oasis/deploy/scripts/deploy.sh')
   })
 
+  it('refuses PIN_PEPPER in a plain env file: it lives in the secret only (the app refuses it there too; ADR 0160)', async () => {
+    const t = tempDir('oasis-pepper-')
+    cleanups.push(t.cleanup)
+    const args = ['--domain', 'oasis.example.com', '--tls', 'files', '--tls-cert', '/c.pem', '--tls-key', '/k.pem', '--no-system']
+    const env = { OASIS_ROOT_PREFIX: t.dir }
+    expect((await sh(script('install.sh'), args, env)).code).toBe(0)
+    const pepper = Buffer.alloc(32, 5).toString('base64')
+    for (const file of ['common.env', 'api.env']) {
+      const p = path.join(t.dir, 'etc/oasis', file)
+      const before = readFileSync(p, 'utf8')
+      writeFileSync(p, `${before}PIN_PEPPER=${pepper}\n`)
+      const r = await sh(script('install.sh'), args, env)
+      expect(r.code, r.out).not.toBe(0)
+      expect(r.out).toMatch(new RegExp(`error .*${file} sets PIN_PEPPER`))
+      expect(r.out).not.toContain(pepper)
+      writeFileSync(p, before)
+    }
+    // the other secret keys stay a warning (the operator moves them with --move-secrets)
+    const common = path.join(t.dir, 'etc/oasis/common.env')
+    writeFileSync(common, `${readFileSync(common, 'utf8')}SESSION_SECRET=${'s'.repeat(48)}\n`)
+    const warned = await sh(script('install.sh'), args, env)
+    expect(warned.code, warned.out).toBe(0)
+    expect(warned.out).toMatch(/warn .*still sets SESSION_SECRET/)
+    // and so does the old layout without the secret: there the app could never use the pepper in production
+    const old = tempDir('oasis-pepper-files-')
+    cleanups.push(old.cleanup)
+    const oldEnv = { OASIS_ROOT_PREFIX: old.dir }
+    expect((await sh(script('install.sh'), [...args, '--secrets-in-files'], oldEnv)).code).toBe(0)
+    const oldCommon = path.join(old.dir, 'etc/oasis/common.env')
+    writeFileSync(oldCommon, `${readFileSync(oldCommon, 'utf8')}PIN_PEPPER=${pepper}\n`)
+    const r = await sh(script('install.sh'), [...args, '--secrets-in-files'], oldEnv)
+    expect(r.code, r.out).not.toBe(0)
+    expect(r.out).toMatch(/common\.env sets PIN_PEPPER/)
+  })
+
   it('rejects unusable input before touching anything', async () => {
     const t = tempDir('oasis-bad-')
     cleanups.push(t.cleanup)

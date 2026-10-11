@@ -6,7 +6,8 @@
 //
 // Precedence: a variable already set to a non-empty value in the process environment (systemd EnvironmentFile, the shell, .env in
 // development) wins over the secret, so one setting can be overridden on one host without touching the secret. An EMPTY value
-// counts as unset: an old template's `SESSION_SECRET=` line does not hide the secret's value.
+// counts as unset: an old template's `SESSION_SECRET=` line does not hide the secret's value. The exception is PIN_PEPPER in
+// production: the loader records which keys it filled (secretKeysOf) and loadEnv() refuses a pepper that did not come from here.
 //
 // Credentials come from the SDK's default chain: the EC2 instance role (the recommendation), or a credentials file named by
 // AWS_SHARED_CREDENTIALS_FILE (runtime=user), or AWS_PROFILE. No value of the secret is ever logged or put in an error message;
@@ -17,6 +18,9 @@ import {
   type GetSecretValueCommandOutput,
 } from '@aws-sdk/client-secrets-manager'
 import { ENV_KEYS, loadEnv, type Env } from './env.js'
+import { recordSecretFill, secretKeysOf } from './secret-provenance.js'
+
+export { secretKeysOf }
 
 export const SECRET_ID_VAR = 'OASIS_SECRET_ID'
 
@@ -136,7 +140,7 @@ export interface SecretSourceOptions {
 export interface SecretSourceResult {
   /** Undefined when OASIS_SECRET_ID is not set (nothing was fetched). */
   secretId?: string
-  /** Keys taken from the secret. */
+  /** Keys taken from the secret (also recorded on the environment object: secretKeysOf(env)). */
   filled: string[]
   /** Keys the secret has but the process environment already set (the environment won). */
   kept: string[]
@@ -173,6 +177,8 @@ export async function applySecretEnvironment(o: SecretSourceOptions = {}): Promi
   }
   filled.sort()
   kept.sort()
+  // what the secret supplied, per environment object: loadEnv() accepts PIN_PEPPER in production only from here (ADR 0160)
+  recordSecretFill(env, filled)
   ;(o.log ?? defaultLog)(
     `environment: ${filled.length} setting(s) from Secrets Manager secret ${secretId} (${region})` +
       (kept.length ? `; set in the process environment and kept: ${kept.join(', ')}` : ''),

@@ -109,7 +109,10 @@ disagree about `SECRETS_KEY`. The shell scripts that need a secret value (`backu
 Which keys go into the secret (the templates keep them commented out, a test holds the list): `DATABASE_URL`, `SESSION_SECRET`,
 `SECRETS_KEY`, `STORAGE_SIGNING_SECRET`, `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` (first boot only), `SQSP_API_KEY` and
 `SQSP_WEBHOOK_SECRET` (if used), `SMSGATE_PASSWORD` and `SMSGATE_WEBHOOK_SECRET` (only for `verify:smsgate`), `PIN_PEPPER` (the website
-PINs' HMAC key, `gen-secrets.sh PIN_PEPPER`; required before `PUBLIC_LINKS_ENABLED=true` in production, ADR 0160). Never in the secret:
+PINs' HMAC key, `gen-secrets.sh PIN_PEPPER`, 32 bytes; required before `PUBLIC_LINKS_ENABLED=true` in production, ADR 0160). `PIN_PEPPER`
+is the one secret key that may live ONLY in the secret: in production the app refuses to start when it comes from an env file or the
+process environment (the loader records what the secret filled), and `install.sh` stops on a `PIN_PEPPER=` line in `/etc/oasis/*.env`
+instead of warning. Never in the secret:
 `OASIS_SECRET_ID`, `AWS_REGION` and AWS credentials (both the app and `secrets:push` refuse them). Any other declared setting may
 live there, but non-secret settings belong in the files, where they can be read.
 

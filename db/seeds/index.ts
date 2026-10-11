@@ -3,7 +3,7 @@
 // The runner owns nothing but the plumbing: one transaction, the injected clock, ids and RNG, and the base location.
 import { existsSync } from 'node:fs'
 import { loadEnv } from '../../src/config/env.js'
-import { applySecretEnvironment } from '../../src/config/secrets-source.js'
+import { applySecretEnvironment, secretKeysOf } from '../../src/config/secrets-source.js'
 import { createClock, type Clock } from '../../src/platform/clock.js'
 import { createDb, transaction, type Db, type Tx } from '../../src/platform/db.js'
 import { createIdGenerator, type NewId } from '../../src/platform/ids.js'
@@ -119,7 +119,7 @@ async function main(): Promise<void> {
     return
   }
   await applySecretEnvironment()
-  const env = loadEnv({ ...process.env, ...(flag('--url') ? { DATABASE_URL: flag('--url')! } : {}) })
+  const env = loadEnv({ ...process.env, ...(flag('--url') ? { DATABASE_URL: flag('--url')! } : {}) }, { secretKeys: secretKeysOf(process.env) })
   const clock = createClock(env.CLOCK_FREEZE_AT)
   const db = createDb({
     url: env.DATABASE_URL,

@@ -334,6 +334,19 @@ active_secret_keys() {
   return 0
 }
 
+# PIN_PEPPER (the website PINs' HMAC key, ADR 0160) lives in the Secrets Manager secret and nowhere else: the app refuses to start in
+# production with one from an env file, so a line there is an error here, not a warning (the other secret keys stay a warning).
+refuse_plain_pepper() {
+  local f
+  for f in "$OASIS_ETC"/{common,api,worker,web}.env; do
+    [[ -f "$f" ]] || continue
+    if [[ -n "$(env_get "$f" PIN_PEPPER 2>/dev/null || true)" ]]; then
+      die "$(real "$f") sets PIN_PEPPER: it belongs in the Secrets Manager secret only (the app refuses it from an env file in production). Push it (pnpm secrets:push --keys PIN_PEPPER ...) or generate a new one (gen-secrets.sh PIN_PEPPER), then delete the line and run this again"
+    fi
+  done
+  return 0
+}
+
 # A new install: the secret settings are generated into a root-only file, for pnpm secrets:push, never into the env files.
 seed_secrets() {
   if [[ -f "$SEED" ]]; then
@@ -408,6 +421,7 @@ step_env() {
   fi
   local common="$OASIS_ETC/common.env"
   if ((SECRETS_IN_FILES)); then
+    refuse_plain_pepper
     if [[ " ${CREATED_ENV[*]:-} " == *" common "* ]]; then
       warn "SECRETS_KEY was generated in $OASIS_ETC/common.env: copy it to a password manager now. Without it the stored tablet and Squarespace credentials cannot be read."
     fi
@@ -424,6 +438,8 @@ step_env() {
   elif [[ -f "$common" && -z "$(env_get "$common" OASIS_SECRET_ID 2>/dev/null || true)" ]]; then
     warn "$common names no OASIS_SECRET_ID: this host still keeps its secrets in the env files. Move them: docs/deployment.md, \"Move an existing host to the secret\" (install.sh --move-secrets)"
   fi
+  # --move-secrets has moved a pepper into the secret by now (a dry run only plans it)
+  ((MOVE_SECRETS)) && [[ "$DRY_RUN" == 1 ]] || refuse_plain_pepper
   local f still
   for f in "$common" "$OASIS_ETC/api.env"; do
     [[ -f "$f" && -n "$(env_get "$common" OASIS_SECRET_ID 2>/dev/null || true)" ]] || continue

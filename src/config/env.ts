@@ -3,6 +3,7 @@ import { aiEnvShape } from '../integrations/ai/env.js'
 import { emailEnvShape } from '../integrations/email/env.js'
 import { squarespaceEnvSchema } from '../integrations/squarespace/config.js'
 import { storageEnvShape } from '../integrations/storage/env.js'
+import { secretKeysOf } from './secret-provenance.js'
 
 const provider = <T extends [string, ...string[]]>(...v: T) => z.enum(v)
 const bool = z.enum(['true', 'false', '1', '0']).transform((v) => v === 'true' || v === '1')
@@ -57,6 +58,23 @@ const squarespaceTuning = squarespaceEnvSchema.pick({
 
 const validSecretsKey = (v: string | undefined): boolean => !!v && Buffer.from(v, 'base64').length === 32
 
+/**
+ * The 32 bytes of a PIN_PEPPER value, or null. Accepted: hex (64 digits), base64 (44 characters with its "=") and base64url (43,
+ * optionally padded), each exactly 32 bytes; nothing else (no whitespace, no other lengths: Buffer.from would quietly drop what it
+ * does not understand).
+ */
+export function decodePinPepper(v: string): Buffer | null {
+  let b: Buffer
+  if (/^[0-9A-Fa-f]{64}$/.test(v)) b = Buffer.from(v, 'hex')
+  else if (/^[A-Za-z0-9+/]{43}=$/.test(v)) b = Buffer.from(v, 'base64')
+  else if (/^[A-Za-z0-9_-]{43}=?$/.test(v)) b = Buffer.from(v.replace(/=$/, ''), 'base64url')
+  else return null
+  return b.length === 32 ? b : null
+}
+
+/** Stands in for PIN_PEPPER outside production while PUBLIC_LINKS_ENABLED is false (never in production). Not a secret. */
+export const DEV_PIN_PEPPER = '6f617369732d6465762d6f6e6c792d70696e2d7065707065722d6e6f742d7365'
+
 // Fail-fast, typed environment contract. `*_PROVIDER=sim` needs no other variable for that integration.
 export const envSchema = z
   .object({
@@ -85,7 +103,9 @@ export const envSchema = z
     PUBLIC_WRITES_ENABLED: bool.default('false'), // the website's public POSTs (otp, otp/verify, bookings, memberships); off = 404 until online booking opens (ADR 0150)
     PUBLIC_OTP_TEXTS_PER_HOUR: z.coerce.number().int().min(0).max(60).default(12), // the website's one-time codes texted per rolling hour, all callers together (the tablet sends ~60 an hour for the whole shop)
     PUBLIC_LINKS_ENABLED: bool.default('false'), // the personal-link routes (/api/v1/public/links/*); off = 404 before validation (ADR 0160)
-    PIN_PEPPER: z.string().min(32).optional(), // HMAC key of the website PINs (base64 of 32 random bytes); secret: lives in the Secrets Manager secret (ADR 0160)
+    // HMAC key of the website PINs: 32 random bytes as base64, base64url or hex (gen-secrets.sh PIN_PEPPER). Production: only from the
+    // Secrets Manager secret (loadEnv refuses it from anywhere else); elsewhere a fixed development value while links are off (ADR 0160)
+    PIN_PEPPER: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()),
     RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(300),
     SSE_HEARTBEAT_MS: z.coerce.number().int().min(50).default(20_000),
     BUSINESS_TZ: z.string().default('America/New_York'),
@@ -221,7 +241,17 @@ export const envSchema = z
     need(
       e.NODE_ENV === 'production' && e.PUBLIC_LINKS_ENABLED && !e.PIN_PEPPER,
       'PIN_PEPPER',
-      'required in production when PUBLIC_LINKS_ENABLED=true (base64 of 32 random bytes, in the secret)',
+      'required in production when PUBLIC_LINKS_ENABLED=true (32 random bytes from gen-secrets.sh PIN_PEPPER, in the Secrets Manager secret)',
+    )
+    need(
+      e.NODE_ENV !== 'production' && e.PUBLIC_LINKS_ENABLED && !e.PIN_PEPPER,
+      'PIN_PEPPER',
+      'required when PUBLIC_LINKS_ENABLED=true (32 random bytes: gen-secrets.sh PIN_PEPPER); the development value stands in only while links are off',
+    )
+    need(
+      !!e.PIN_PEPPER && decodePinPepper(e.PIN_PEPPER) === null,
+      'PIN_PEPPER',
+      'must decode (base64, base64url or hex) to exactly 32 bytes: generate it with gen-secrets.sh PIN_PEPPER',
     )
     // the simulator's scripted answers must never reach a real client
     need(
@@ -241,11 +271,30 @@ export type Env = z.infer<typeof envSchema>
 /** Every variable the environment contract declares (what may be set at all, in a file or in the secret). */
 export const ENV_KEYS: ReadonlySet<string> = new Set(Object.keys(envSchema.innerType().shape))
 
-export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
+/** Settings that production accepts only from the Secrets Manager secret, never from an env file or the process environment. */
+export const SECRET_ONLY_IN_PRODUCTION = ['PIN_PEPPER'] as const
+
+export interface LoadEnvOptions {
+  /**
+   * The keys whose value came from the Secrets Manager secret (src/config/secrets-source.ts records them per environment object).
+   * Default: the record of `source` itself; pass secretKeysOf(original) when validating a copy.
+   */
+  secretKeys?: ReadonlySet<string>
+}
+
+export function loadEnv(source: NodeJS.ProcessEnv = process.env, o: LoadEnvOptions = {}): Env {
   const parsed = envSchema.safeParse(source)
-  if (!parsed.success) {
-    const lines = parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`)
-    throw new Error(`Invalid environment:\n${lines.join('\n')}`)
+  const lines = parsed.success ? [] : parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`)
+  if (parsed.success && parsed.data.NODE_ENV === 'production') {
+    const fromSecret = o.secretKeys ?? secretKeysOf(source)
+    for (const k of SECRET_ONLY_IN_PRODUCTION)
+      if (parsed.data[k] !== undefined && !fromSecret.has(k))
+        lines.push(
+          `  ${k}: must come from the Secrets Manager secret (OASIS_SECRET_ID) in production, not from an env file or the process environment: remove it there and push it with pnpm secrets:push`,
+        )
   }
-  return parsed.data
+  if (lines.length) throw new Error(`Invalid environment:\n${lines.join('\n')}`)
+  const env = parsed.data!
+  if (env.NODE_ENV !== 'production' && !env.PUBLIC_LINKS_ENABLED && env.PIN_PEPPER === undefined) return { ...env, PIN_PEPPER: DEV_PIN_PEPPER }
+  return env
 }

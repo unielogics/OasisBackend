@@ -1,7 +1,7 @@
 // The AI assistant's environment (ADR 0160, design section 1 "Env"): off and simulated by default, PIN_PEPPER a secret that
-// production needs once personal links are on, and no simulated assistant answering real clients in production.
+// production needs once personal links are on (and takes only from the Secrets Manager secret), and no simulated assistant answering real clients in production.
 import { describe, expect, it } from 'vitest'
-import { ENV_KEYS, loadEnv } from '../../src/config/env.js'
+import { DEV_PIN_PEPPER, ENV_KEYS, loadEnv } from '../../src/config/env.js'
 import { FORBIDDEN_SECRET_KEYS, SECRET_KEYS } from '../../src/config/secrets-source.js'
 import { aiEnvShape } from '../../src/integrations/ai/env.js'
 
@@ -40,7 +40,7 @@ describe('AI environment', () => {
       AI_DAILY_BUDGET_USD: 10,
       PUBLIC_LINKS_ENABLED: false,
     })
-    expect(e.PIN_PEPPER).toBeUndefined()
+    expect(e.PIN_PEPPER).toBe(DEV_PIN_PEPPER) // a development stand-in while links are off (test/ai-foundation/pin-pepper.test.ts)
     for (const k of ['AI_PRICE_INPUT_PER_MTOK', 'AI_PRICE_OUTPUT_PER_MTOK', 'AI_PRICE_CACHE_READ_PER_MTOK', 'AI_PRICE_CACHE_WRITE_PER_MTOK'] as const)
       expect(e[k]).toBeGreaterThan(0)
   })
@@ -65,12 +65,14 @@ describe('AI environment', () => {
   it('production: personal links need PIN_PEPPER; the AI may only answer through Bedrock', () => {
     expect(loadEnv(prod).PUBLIC_LINKS_ENABLED).toBe(false)
     expect(() => loadEnv({ ...prod, PUBLIC_LINKS_ENABLED: 'true' })).toThrow(/PIN_PEPPER: required in production when PUBLIC_LINKS_ENABLED/)
-    expect(loadEnv({ ...prod, PUBLIC_LINKS_ENABLED: 'true', PIN_PEPPER: PEPPER }).PUBLIC_LINKS_ENABLED).toBe(true)
+    // and only from the Secrets Manager secret (the loader's record; test/ai-foundation/pin-pepper.test.ts)
+    expect(() => loadEnv({ ...prod, PUBLIC_LINKS_ENABLED: 'true', PIN_PEPPER: PEPPER })).toThrow(/PIN_PEPPER: must come from the Secrets Manager secret/)
+    expect(loadEnv({ ...prod, PUBLIC_LINKS_ENABLED: 'true', PIN_PEPPER: PEPPER }, { secretKeys: new Set(['PIN_PEPPER']) }).PUBLIC_LINKS_ENABLED).toBe(true)
     expect(() => loadEnv({ ...prod, AI_ENABLED: 'true' })).toThrow(/AI_PROVIDER: must be bedrock in production when AI_ENABLED/)
     expect(loadEnv({ ...prod, AI_ENABLED: 'true', AI_PROVIDER: 'bedrock' }).AI_ENABLED).toBe(true)
     // the simulator stays usable everywhere while the AI is off, and outside production with it on
     expect(loadEnv({ ...prod, AI_PROVIDER: 'sim' }).AI_PROVIDER).toBe('sim')
     expect(loadEnv({ ...base, AI_ENABLED: 'true' }).AI_PROVIDER).toBe('sim')
-    expect(loadEnv({ ...base, PUBLIC_LINKS_ENABLED: 'true' }).PIN_PEPPER).toBeUndefined()
+    expect(() => loadEnv({ ...base, PUBLIC_LINKS_ENABLED: 'true' })).toThrow(/PIN_PEPPER: required when PUBLIC_LINKS_ENABLED=true/)
   })
 })
