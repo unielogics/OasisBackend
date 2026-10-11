@@ -5,7 +5,7 @@ import { expiryFor } from '../policy/body.js'
 import { replyRuleOf, type SmsDenyReason, type SmsPolicyContext, type SmsRecipient } from '../policy/canSend.js'
 import { classSpec, isTransactional, replyContextOf, type SmsClass } from '../policy/classes.js'
 import { DEFAULT_QUIET_HOURS, isQuietHour, type QuietHoursConfig } from '../policy/quietHours.js'
-import { canSpend, DEFAULT_BUDGET, nextFit, snapshot, type BudgetConfig, type BudgetSnapshot } from './budget.js'
+import { aiCapAllows, canSpend, DEFAULT_BUDGET, nextFit, snapshot, type AiCapConfig, type BudgetConfig, type BudgetSnapshot, type UsagePoint } from './budget.js'
 import { estimateQueue, type QueueEstimate } from './eta.js'
 import { planEnqueue } from './enqueue.js'
 import { DeviceHealthMonitor, type HealthEvaluation } from './health.js'
@@ -38,6 +38,8 @@ export interface DispatcherConfig {
   quietHours: QuietHoursConfig
   environment: SmsPolicyContext['environment']
   allowlist: readonly string[]
+  /** The AI classes' share of the window (AI_SMS_SEGMENTS_PER_30MIN, ADR 0160); null: no sub-cap. */
+  aiCap: AiCapConfig | null
 }
 
 export function defaultDispatcherConfig(overrides: Partial<DispatcherConfig> & Pick<DispatcherConfig, 'deviceId'>): DispatcherConfig {
@@ -56,6 +58,7 @@ export function defaultDispatcherConfig(overrides: Partial<DispatcherConfig> & P
     quietHours: DEFAULT_QUIET_HOURS,
     environment: 'production',
     allowlist: [],
+    aiCap: null,
     ...overrides,
   }
 }
@@ -97,6 +100,8 @@ export interface TickReport {
   authFailure: boolean
   /** Lane-0 items stranded long enough that the host should fall back to e-mail. */
   p0FallbackCandidates: string[]
+  /** AI texts (ai_reply, ai_fallback, personal_link, action_confirm) left waiting because the AI's sub-cap is spent. */
+  aiCapped: number
 }
 
 /** One word for the operator: what the dispatcher is doing right now. */
@@ -196,6 +201,7 @@ export class Dispatcher {
       offline: false,
       authFailure: false,
       p0FallbackCandidates: [],
+      aiCapped: 0,
     }
 
     // A crash between claim and result leaves an item inflight. Put it back; the provider answers 409/status for its id.
@@ -265,7 +271,8 @@ export class Dispatcher {
     })
     eligible.sort((a, b) => a.priority - b.priority || a.queuedAt.getTime() - b.queuedAt.getTime() || (a.id < b.id ? -1 : 1))
 
-    const usage = (await this.outbox.listUsage(new Date(now.getTime() - this.cfg.budget.windowMs))).map((u) => ({ at: u.at, segments: u.segments }))
+    const lookback = Math.max(this.cfg.budget.windowMs, this.cfg.aiCap?.windowMs ?? 0)
+    const usage: UsagePoint[] = (await this.outbox.listUsage(new Date(now.getTime() - lookback))).map((u) => ({ at: u.at, segments: u.segments, klass: u.klass ?? null }))
     // a send time in the future (tablet clock ahead) must not stall the pacing gap until real time catches up
     let lastSendAt = Math.min(now.getTime(), usage.reduce((m, u) => Math.max(m, u.at.getTime()), Number.NEGATIVE_INFINITY))
 
@@ -274,6 +281,11 @@ export class Dispatcher {
       if (now.getTime() - lastSendAt < this.cfg.minIntervalMs) {
         report.paced = true
         break
+      }
+      // the AI's texts wait (and expire after their 15-30 minutes) once its share of the window is spent; the shop's texts go on
+      if (!aiCapAllows(item.klass, usage, now, item.segments, this.cfg.aiCap)) {
+        report.aiCapped += 1
+        continue
       }
       if (!canSpend(usage, now, item.segments, item.priority, this.cfg.budget)) {
         report.rateLimited = true
@@ -301,7 +313,7 @@ export class Dispatcher {
           priority: claimed.priority,
         })
         await this.onAccepted(claimed, result.providerMessageId, result.state, now)
-        usage.push({ at: now, segments: claimed.segments })
+        usage.push({ at: now, segments: claimed.segments, klass: claimed.klass })
         lastSendAt = now.getTime()
         report.sent.push(result.providerMessageId)
         await this.health.record(this.cfg.deviceId, { kind: 'poll_ok', at: now })
@@ -327,7 +339,7 @@ export class Dispatcher {
   }
 
   private async onAccepted(item: OutboxItem, providerId: string, deviceState: SmsState, now: Date): Promise<void> {
-    await this.outbox.recordUsage({ providerMessageId: providerId, segments: item.segments, acceptedAt: now })
+    await this.outbox.recordUsage({ providerMessageId: providerId, segments: item.segments, acceptedAt: now, klass: item.klass })
     if (deviceState === 'Failed') {
       await this.applyDeviceFailure({ ...item, providerMessageId: providerId, acceptedAt: now }, 'device reported Failed on submit', now)
       return

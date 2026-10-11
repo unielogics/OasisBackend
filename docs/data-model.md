@@ -1918,8 +1918,9 @@ Primary key `(event_id)`.
 | `segments` | smallint | no |  |
 | `accepted_at` | timestamp with time zone | no |  |
 | `sent_at` | timestamp with time zone | yes |  |
+| `klass` | text | yes |  |
 
-Primary key `(id)`. `(device_id)` references `sms_devices(id)` on delete cascade. 1 check constraint. Index `sms_usage_provider_idx` `(provider_message_id)`. Index `sms_usage_window_idx` `(device_id, COALESCE(sent_at, accepted_at))`.
+Primary key `(id)`. `(device_id)` references `sms_devices(id)` on delete cascade. 2 check constraints. Index `sms_usage_provider_idx` `(provider_message_id)`. Index `sms_usage_window_idx` `(device_id, COALESCE(sent_at, accepted_at))`.
 
 #### `sqsp_alerts`
 

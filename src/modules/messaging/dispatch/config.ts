@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { BudgetConfig } from './budget.js'
+import { AI_CAP_WINDOW_MS, type BudgetConfig } from './budget.js'
 import { defaultDispatcherConfig, type DispatcherConfig } from './dispatcher.js'
 import { DEFAULT_HEALTH, type HealthConfig } from './health.js'
 import { DEFAULT_QUIET_HOURS, type QuietHoursConfig } from '../policy/quietHours.js'
@@ -34,6 +34,8 @@ const schema = z.object({
   SMSGATE_HEARTBEAT_STALE_SECONDS: z.coerce.number().int().min(60).default(600),
   SMSGATE_ONLINE_WITHIN_SECONDS: z.coerce.number().int().min(30).default(180),
   SMSGATE_SIM_NUMBER: z.coerce.number().int().min(1).max(3).optional(),
+  /** The AI classes' share of a device's 30-minute window (ADR 0160); the same variable as src/integrations/ai/env.ts. */
+  AI_SMS_SEGMENTS_PER_30MIN: z.coerce.number().int().min(0).max(1000).default(12),
 })
 
 export type DispatchEnvValues = z.infer<typeof schema>
@@ -62,6 +64,7 @@ export function dispatcherConfigFromValues(
       quietHours: parseQuietHours(e.SMS_QUIET_HOURS, e.BUSINESS_TZ),
       environment: e.NODE_ENV,
       allowlist,
+      aiCap: { segments: e.AI_SMS_SEGMENTS_PER_30MIN, windowMs: AI_CAP_WINDOW_MS },
     }),
     health: { ...DEFAULT_HEALTH, offlineAfterMs: e.SMSGATE_HEARTBEAT_STALE_SECONDS * 1000, onlineWithinMs: e.SMSGATE_ONLINE_WITHIN_SECONDS * 1000 },
   }
