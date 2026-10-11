@@ -51,13 +51,45 @@ alter table services
     references catalog_categories (location_id, key) on update cascade;
 create index services_category_idx on services (location_id, category) where active;
 
--- Existing services get a category from their tags (the dashboard design's catalog): the washes, details and add-ons.
-update services set category = 'addons' where kind = 'addon' and category is null;
-update services set category = 'wash'
-where kind = 'package' and category is null and tags && array['express', 'premium', 'executive', 'handwash'];
-update services set category = 'detail'
-where kind = 'package' and category is null and tags && array['detail', 'ceramic', 'exotic'];
-update services set category = 'tint' where kind = 'package' and category is null and tags && array['tint'];
+-- Every service has a category. The rule, for the backfill and for a new row inserted without one (the catalog API names it
+-- explicitly from wave 2 on): add-ons are add-ons; a package tagged tint is tint; detail, ceramic, exotic and executive are details
+-- (Executive Detail and Executive Detail + Ceramic are details, not washes); any other package is a wash.
+create function catalog_default_category(p_kind text, p_tags text[]) returns text
+language sql immutable as $$
+  select case
+    when p_kind = 'addon' then 'addons'
+    when p_tags && array['tint'] then 'tint'
+    when p_tags && array['detail', 'ceramic', 'exotic', 'executive'] then 'detail'
+    else 'wash'
+  end
+$$;
+
+-- The defaults (key, label, colour, sort) the migration seeds and ensureCatalogCategories inserts; the insert trigger below adds the
+-- one a new service needs when its location lacks it (a location created without ensureDomainDefaults).
+create function services_default_category() returns trigger
+language plpgsql as $$
+begin
+  if new.category is null then
+    new.category := catalog_default_category(new.kind, new.tags);
+    insert into catalog_categories (location_id, key, label, colour, sort)
+    select new.location_id, c.key, c.label, c.colour, c.sort
+    from (values
+      ('wash', 'Wash', '#1FB6FF', 10),
+      ('addons', 'Add-ons', '#7FD6FF', 20),
+      ('tint', 'Tint', '#2EE59D', 30),
+      ('detail', 'Detail', '#FFB547', 40)
+    ) as c(key, label, colour, sort)
+    where c.key = new.category
+    on conflict do nothing;
+  end if;
+  return new;
+end
+$$;
+
+update services set category = catalog_default_category(kind, tags) where category is null;
+alter table services alter column category set not null;
+create trigger services_default_category before insert on services
+  for each row execute function services_default_category();
 
 -- The categories an appointment holds (its package and live add-ons), in category order; maintained on book, edit and add-on
 -- change from wave 2 on. Several entries make a "mixed" visit.

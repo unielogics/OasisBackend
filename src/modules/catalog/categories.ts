@@ -1,6 +1,8 @@
 // The catalog's categories (ADR 0160, plan K): Wash, Add-ons, Tint, Detail, Quote by default, in the website's palette. Every
 // service names one; every appointment keeps the categories it holds. Migration 20261011000000 seeded these rows for the locations
-// that existed; ensureCatalogCategories gives a new location the same rows (idempotent, never overwrites an edited row).
+// that existed; ensureCatalogCategories gives a new location the same rows (idempotent, never overwrites an edited row). The services
+// insert trigger (services_default_category) carries a copy of the first four, to add the one a new service needs when a location
+// lacks it: test/ai-foundation/schema.test.ts holds the two together.
 import type { Executor } from '../../platform/db.js'
 import './schema.js'
 

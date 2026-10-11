@@ -139,7 +139,8 @@ export const settingDefs = {
   'leads.follow_up_enabled': { schema: z.boolean(), default: true },
   'leads.follow_up_delay_min': { schema: z.number().int().min(15).max(1440), default: 180 },
   'leads.business_hours_only': { schema: z.boolean(), default: true },
-  'leads.within_hours': { schema: z.number().int().min(1).max(72), default: 24 },
+  // at most the lead_follow_up class's reply window (24 hours): a longer setting could never be honoured
+  'leads.within_hours': { schema: z.number().int().min(1).max(24), default: 24 },
   // The catalog (plan A): the guest price is the member price plus this markup unless a service sets its own; the tint matrix.
   'catalog.guest_markup_pct': { schema: z.number().int().min(0).max(200), default: 20 },
   'catalog.tint_matrix': {

@@ -71,6 +71,8 @@ describe('AI foundation settings', () => {
     bad('status_texts.late_grace_min', 121)
     bad('leads.follow_up_delay_min', 10)
     bad('leads.within_hours', 0)
+    // the lead follow-up's reply window (lead_follow_up class) is 24 hours: a longer setting could never be honoured
+    bad('leads.within_hours', 25)
     bad('catalog.guest_markup_pct', -1)
     bad('catalog.guest_markup_pct', 201)
     bad('links.epoch', 0)

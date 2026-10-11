@@ -51,6 +51,11 @@ describe('the AI foundation migrations on top of existing data', () => {
         [4, 'package', 'Mystery Package', []],
         [5, 'addon', 'Wax', []],
         [6, 'addon', 'Clay bar', []],
+        [7, 'package', 'Executive Detail', ['executive']],
+        [8, 'package', 'Executive Detail + Ceramic', ['executive', 'ceramic']],
+        [9, 'package', 'Exotic Detail Package', ['exotic']],
+        [10, 'addon', 'Ceramic maintenance', ['ceramic']],
+        [11, 'package', 'Family Wash + Pet Hair', ['handwash', 'family']],
       ]
       for (const [n, kind, name, tags] of services)
         await sql`insert into services (id, location_id, kind, name, price_cents, duration_min, tags)
@@ -59,7 +64,7 @@ describe('the AI foundation migrations on top of existing data', () => {
       const appts: [number, number][] = [
         [1, 1], // a wash with a live add-on and a removed one
         [2, 2], // a detail
-        [3, 4], // an uncategorised package
+        [3, 4], // a package without a mapped tag (a wash)
       ]
       for (const [n, s] of appts)
         await sql`insert into appointments (id, location_id, customer_id, service_id, package_name, price_cents, duration_min,
@@ -79,11 +84,15 @@ describe('the AI foundation migrations on top of existing data', () => {
 
       const byService = await sql<{ id: string; category: string | null; vip_inclusion: string; visible_online: boolean }>`
         select id, category, vip_inclusion, visible_online from services order by id`.execute(db)
-      expect(byService.rows.map((r) => r.category)).toEqual(['wash', 'detail', 'detail', null, 'addons', 'addons'])
+      // every service gets one: executive and exotic are details, a package without a mapped tag is a wash, add-ons are add-ons
+      expect(byService.rows.map((r) => r.category)).toEqual(['wash', 'detail', 'detail', 'wash', 'addons', 'addons', 'detail', 'detail', 'detail', 'addons', 'wash'])
+      const nullable = await sql<{ is_nullable: string }>`
+        select is_nullable from information_schema.columns where table_schema = ${schema} and table_name = 'services' and column_name = 'category'`.execute(db)
+      expect(nullable.rows).toEqual([{ is_nullable: 'NO' }])
       expect(byService.rows.every((r) => r.vip_inclusion === 'none' && r.visible_online)).toBe(true)
 
       const byAppt = await sql<{ id: string; categories: string[] }>`select id, categories from appointments order by id`.execute(db)
-      expect(byAppt.rows.map((r) => r.categories)).toEqual([['wash', 'addons'], ['detail'], []])
+      expect(byAppt.rows.map((r) => r.categories)).toEqual([['wash', 'addons'], ['detail'], ['wash']])
     } finally {
       await db.destroy()
     }

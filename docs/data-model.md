@@ -246,7 +246,7 @@ state). What is new is the identification of a member by phone and the abuse con
 
 | Table                   | Key columns and rules                                                                                                                                                                                                                                                                 |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `public_otp_challenges` | One six-digit code texted to a number: `code_hash` (sha256 of the challenge id and the code: the code is never stored), `attempts` of `max_attempts` (3), `expires_at` (10 minutes), `consumed_at` with `consumed_reason` `verified` / `superseded` / `locked`, `requested_ip`, `delivery` (queued, or the SMS policy's reason it was not). One active row per number (`uq_public_otp_active_phone`): a new code supersedes the earlier one. |
+| `public_otp_challenges` | One six-digit code texted to a number: `code_hash` (sha256 of the challenge id and the code: the code is never stored), `attempts` of `max_attempts` (3, never more), `expires_at` (10 minutes), `consumed_at` with `consumed_reason` `verified` / `superseded` / `locked`, `requested_ip`, `delivery` (queued, or the SMS policy's reason it was not). One active row per number (`uq_public_otp_active_phone`): a new code supersedes the earlier one. |
 | `public_member_tokens`  | The opaque token a verified code issued, by its sha256 (`token_hash`, pk); bound to the number and to `customer_id` (the customer owning the number at that moment, null when nobody did), 30 minutes (`expires_at`), `last_used_at`.                                                 |
 | `public_rate_limits`    | Fixed-window counters shared by every API process: `(key, window_start)` with `count`, keys such as `otp:phone:+1201...`, `booking:ip:203.0.113.9`; one upsert per request. Purged two days past the window.                                                                          |
 
@@ -262,21 +262,21 @@ HMAC. Location-scoped tables lead their unique keys with `location_id`; a phone 
 | `assistant_conversations`   | One per `(location_id, phone_e164)`: `customer_id` (null for a stranger), the durable marker `pending_since`, `last_inbound_at`, the turn lease `running_since`, `handoff_state open\|resolved` with reason and time, `last_fallback_at`, `disclosed_at`. |
 | `assistant_turns`           | One per answer: `status running\|replied\|handed_off\|skipped\|failed` (one running per conversation), `trust unknown\|known\|trusted`, `provider sim\|bedrock`, `model`, `prompt_version`, `rounds`, token counts, `cost_micros`, `stop_reason`, `latency_ms`, `reply_message_id`, redacted `transcript`, `error`. |
 | `assistant_tool_calls`      | `(turn_id, seq)` unique: `round`, `tool`, provider `tool_use_id`, redacted `input`/`output`, `outcome ok\|error\|denied`, `latency_ms`.                                                                                                            |
-| `client_links`              | A personal link: `token_hash` unique (sha256 of a 32-byte base64url token), `kind calendar\|verify\|pin\|membership\|pay\|book_again`, `customer_id` (null only for a stranger's calendar or book-again link), `phone_e164`, appointment/invoice/plan bindings, `pin_version`, `phone_version`, `epoch`, `issued_by`, `expires_at`, `uses` of `max_uses`, `consumed_at`, `revoked_at` + `revoke_reason`. |
+| `client_links`              | A personal link: `token_hash` unique (sha256 of a 32-byte base64url token), `kind calendar\|verify\|pin\|membership\|pay\|book_again`, `customer_id` (null only for a stranger's calendar or book-again link), `phone_e164`, appointment/invoice/plan bindings (the plan: fk `(location_id, plan_key)` to the location's plans), `pin_version`, `phone_version`, `epoch`, `issued_by`, `expires_at` (after `created_at`), `uses` of `max_uses`, `consumed_at`, `revoked_at` + `revoke_reason`. |
 | `client_link_sessions`      | The bearer session a link is exchanged for, by `token_hash`: `trust link\|verified`, `verified_by pin\|code`, `step_up_at`, `failed_attempts`, `idle_expires_at` (15 minutes) within `expires_at` (1 hour), `revoked_at`, `ip`.                    |
 | `customer_pins`             | pk `customer_id`: `pin_hash` (null once cleared, the row keeps counting), `version` (bumped on set, reset, clear), `failed_attempts`, `lock_level` 0-3, `locked_until`, `set_at`, `reset_hold_until`, `cleared_at`.                            |
-| `phone_trust`               | pk `(location_id, phone_e164)`: the client, `verified_at`, `verified_by pin\|code`, `expires_at` (+30 days), `revoked_at` + `revoke_reason`.                                                                                                 |
+| `phone_trust`               | pk `(location_id, phone_e164)`: the client, `verified_at`, `verified_by pin\|code`, `expires_at` (+30 days at most, an hour of slack), `revoked_at` + `revoke_reason`.                                                                                                 |
 | `assistant_pending_actions` | An in-chat `book\|reschedule\|cancel` proposal waiting for its reply number: `payload`, `code_hash`, `attempts` of `max_attempts` (3), `expires_at` (+15 minutes), `state` (one `pending` per phone), `confirm_message_id`, `appointment_id`, `resolved_at`. |
 | `leads`                     | One per `(location_id, phone_e164)`: `customer_id`, `source text\|website\|walk_in`, `interests` (category keys), `status new\|followed_up\|booked\|closed` (`closed_at` iff booked or closed), contact times, `follow_up_at` (due index), `follow_up_message_id`, `booked_appointment_id`. |
 | `pending_checkin_texts`     | pk `appointment_id`: the "checked in" text due 3 minutes after a manual arrival, `state pending\|sent\|dropped` (with `drop_reason`), `message_id`, `settled_at`.                                                                              |
 | `appointment_late_texts`    | pk `(appointment_id, seq)`, `seq` 1 or 2: the running-late texts of a visit, `eta_at`, `message_id`.                                                                                                                                        |
-| `membership_checkouts`      | A link-started membership's checkout intent: `membership_id` (one `open` each), `customer_id`, `link_id`, `plan_key`, `product_key`, `expected_email`, `checkout_url` (squarespace.com), `started_at`, `expires_at` (+72 hours), `state open\|matched\|awaiting_match\|expired\|superseded\|abandoned`, `matched_order_id`. |
+| `membership_checkouts`      | A link-started membership's checkout intent: `membership_id` (one `open` each), `customer_id` (the membership's own: fk `(membership_id, customer_id)`), `plan_key` (fk to the location's plans), `link_id`, `product_key`, `expected_email`, `checkout_url` (squarespace.com), `started_at`, `expires_at` (+72 hours), `state open\|matched\|awaiting_match\|expired\|superseded\|abandoned`, `matched_order_id`. |
 
 Columns added to existing tables:
 
 | Column                                                                                         | Meaning                                                                                                                       |
 | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `services.category`                                                                            | fk `(location_id, category)` to `catalog_categories`; backfilled from tags (express/premium/executive/handwash: wash; detail/ceramic/exotic: detail; add-ons: addons) |
+| `services.category`                                                                            | NOT NULL, fk `(location_id, category)` to `catalog_categories`; backfill and default for a new row without one (`catalog_default_category`, insert trigger): add-ons: addons; tint: tint; detail/ceramic/exotic/executive: detail; any other package: wash |
 | `services.public_name`, `.description`, `.member_price_cents`, `.guest_price_cents`             | the website/AI copy and prices (null prices: the plain `price_cents`)                                                         |
 | `services.vip_inclusion`, `.vip_note`, `.quote_only`, `.visible_online`                         | `included\|allowance\|none`; quote-only services show no price and are never booked online; `visible_online` defaults true    |
 | `appointments.categories`                                                                      | the category keys of the package and live add-ons, in category order (GIN index); backfilled                                |
@@ -284,10 +284,10 @@ Columns added to existing tables:
 | `membership_plans.monthly_price_cents`, `.checkout_url`, `.public_label`                        | the plan's price, Squarespace checkout (https, squarespace.com only) and website name (Gold, VIP)                             |
 | `customers.email_verified`, `.phone_version`                                                   | an email confirmed on a link page; bumped on every phone change (links carry the version)                                    |
 | `customers.sms_opt_in_source`                                                                  | gains `inbound_text` (a client the assistant created: transactional consent only)                                            |
-| `public_otp_challenges.purpose`, `.link_session_hash`                                          | `website\|link_verify\|pin_set\|pin_reset`; a link page's code names its session                                              |
+| `public_otp_challenges.purpose`, `.link_session_hash`                                          | `website\|link_verify\|pin_set\|pin_reset`; a link page's code names its session (set null when the session goes: the row stays for the hourly ceiling); a website code never names one |
 | `sms_inbox.assistant_conversation_id`, `.assistant_turn_id`, `.decision`                        | the conversation and turn that took the text; decisions gain `assistant`, `handoff`, `action_code`                             |
 | `messages.sender_kind`                                                                         | gains `ai` (shown as "Oasis AI")                                                                                              |
-| `message_threads.ai_paused_until`, `.ai_paused_by`                                             | a staff reply pauses the AI on the thread                                                                                     |
+| `message_threads.ai_paused_until`, `.ai_paused_by`                                             | a staff reply pauses the AI on the thread; `ai_paused_by` only with `ai_paused_until`                                         |
 
 ## Foreign keys
 
@@ -357,7 +357,7 @@ Operations design day re-anchored on **today** in the business time zone with th
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (105 tables, 1 view, 9 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (105 tables, 1 view, 11 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -562,7 +562,7 @@ Primary key `(id)`. Unique `(location_id, phone_e164)`. `(customer_id)` referenc
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `resolved_at` | timestamp with time zone | yes |  |
 
-Primary key `(id)`. `(appointment_id)` references `appointments(id)` on delete set null. `(confirm_message_id)` references `messages(id)` on delete set null. `(conversation_id)` references `assistant_conversations(id)` on delete cascade. `(customer_id)` references `customers(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. 9 check constraints. Index `assistant_pending_actions_conversation_idx` `(conversation_id)`. Index `assistant_pending_actions_expiry_idx` `(expires_at)` where `state = 'pending'::text`. Unique index `uq_assistant_pending_actions_phone` `(location_id, phone_e164)` where `state = 'pending'::text`.
+Primary key `(id)`. `(appointment_id)` references `appointments(id)` on delete set null. `(confirm_message_id)` references `messages(id)` on delete set null. `(conversation_id)` references `assistant_conversations(id)` on delete cascade. `(customer_id)` references `customers(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. 10 check constraints. Index `assistant_pending_actions_conversation_idx` `(conversation_id)`. Index `assistant_pending_actions_expiry_idx` `(expires_at)` where `state = 'pending'::text`. Unique index `uq_assistant_pending_actions_phone` `(location_id, phone_e164)` where `state = 'pending'::text`.
 
 #### `assistant_tool_calls`
 
@@ -751,7 +751,7 @@ Primary key `(token_hash)`. `(customer_id)` references `customers(id)` on delete
 | `revoke_reason` | text | yes |  |
 | `created_at` | timestamp with time zone | no | `app_now()` |
 
-Primary key `(id)`. Unique `(token_hash)`. `(appointment_id)` references `appointments(id)` on delete cascade. `(customer_id)` references `customers(id)` on delete cascade. `(invoice_id)` references `invoices(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. 16 check constraints. Index `client_links_customer_live_idx` `(customer_id, kind)` where `(consumed_at IS NULL) AND (revoked_at IS NULL)`. Index `client_links_expiry_idx` `(expires_at)`. Index `client_links_phone_idx` `(location_id, phone_e164, created_at DESC)`.
+Primary key `(id)`. Unique `(token_hash)`. `(appointment_id)` references `appointments(id)` on delete cascade. `(customer_id)` references `customers(id)` on delete cascade. `(invoice_id)` references `invoices(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. `(location_id, plan_key)` references `membership_plans(location_id, key)`. 17 check constraints. Index `client_links_customer_live_idx` `(customer_id, kind)` where `(consumed_at IS NULL) AND (revoked_at IS NULL)`. Index `client_links_expiry_idx` `(expires_at)`. Index `client_links_phone_idx` `(location_id, phone_e164, created_at DESC)`.
 
 #### `closures`
 
@@ -1255,7 +1255,7 @@ Primary key `(id)`. Unique `(slug)`. 3 check constraints.
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `updated_at` | timestamp with time zone | no | `app_now()` |
 
-Primary key `(id)`. `(customer_id)` references `customers(id)` on delete cascade. `(link_id)` references `client_links(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. `(matched_order_id)` references `sqsp_orders(id)` on delete set null. `(membership_id)` references `memberships(id)` on delete cascade. 7 check constraints. Index `membership_checkouts_customer_idx` `(customer_id, started_at DESC)`. Index `membership_checkouts_email_idx` `(location_id, expected_email)` where `state = ANY (ARRAY['open'::text, 'awaiting_match'::text])`. Index `membership_checkouts_expiry_idx` `(expires_at)` where `state = 'open'::text`. Unique index `uq_membership_checkouts_open` `(membership_id)` where `state = 'open'::text`.
+Primary key `(id)`. `(customer_id)` references `customers(id)` on delete cascade. `(link_id)` references `client_links(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. `(matched_order_id)` references `sqsp_orders(id)` on delete set null. `(membership_id, customer_id)` references `memberships(id, customer_id)`. `(membership_id)` references `memberships(id)` on delete cascade. `(location_id, plan_key)` references `membership_plans(location_id, key)`. 7 check constraints. Index `membership_checkouts_customer_idx` `(customer_id, started_at DESC)`. Index `membership_checkouts_email_idx` `(location_id, expected_email)` where `state = ANY (ARRAY['open'::text, 'awaiting_match'::text])`. Index `membership_checkouts_expiry_idx` `(expires_at)` where `state = 'open'::text`. Unique index `uq_membership_checkouts_open` `(membership_id)` where `state = 'open'::text`.
 
 #### `membership_credit_events`
 
@@ -1336,7 +1336,7 @@ Primary key `(id)`. Unique `(location_id, key)`. `(location_id)` references `loc
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `updated_at` | timestamp with time zone | no | `app_now()` |
 
-Primary key `(id)`. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. `(plan_id)` references `membership_plans(id)`. 4 check constraints. Index `memberships_plan_idx` `(plan_id)`. Index `memberships_status_idx` `(location_id, status)`. Unique index `uq_memberships_customer_live` `(customer_id)` where `status = ANY (ARRAY['pending'::text, 'active'::text, 'past_due'::text, 'paused'::text])`.
+Primary key `(id)`. Unique `(id, customer_id)`. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. `(plan_id)` references `membership_plans(id)`. 4 check constraints. Index `memberships_plan_idx` `(plan_id)`. Index `memberships_status_idx` `(location_id, status)`. Unique index `uq_memberships_customer_live` `(customer_id)` where `status = ANY (ARRAY['pending'::text, 'active'::text, 'past_due'::text, 'paused'::text])`.
 
 #### `message_threads`
 
@@ -1352,7 +1352,7 @@ Primary key `(id)`. `(customer_id)` references `customers(id)`. `(location_id)` 
 | `ai_paused_until` | timestamp with time zone | yes |  |
 | `ai_paused_by` | uuid | yes |  |
 
-Primary key `(id)`. Unique `(location_id, customer_id)`. `(ai_paused_by)` references `employees(id)` on delete set null. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. 1 check constraint. Index `message_threads_unread_idx` `(location_id, last_inbound_at DESC)` where `unread_count > 0`.
+Primary key `(id)`. Unique `(location_id, customer_id)`. `(ai_paused_by)` references `employees(id)` on delete set null. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. 2 check constraints. Index `message_threads_unread_idx` `(location_id, last_inbound_at DESC)` where `unread_count > 0`.
 
 #### `messages`
 
@@ -1592,7 +1592,7 @@ Primary key `(token_hash)`. `(challenge_id)` references `public_otp_challenges(i
 | `purpose` | text | no | `'website'::text` |
 | `link_session_hash` | text | yes |  |
 
-Primary key `(id)`. `(link_session_hash)` references `client_link_sessions(token_hash)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. 6 check constraints. Index `public_otp_challenges_phone_idx` `(phone_e164, created_at DESC)`. Unique index `uq_public_otp_active_phone` `(location_id, phone_e164)` where `consumed_at IS NULL`.
+Primary key `(id)`. `(link_session_hash)` references `client_link_sessions(token_hash)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. 6 check constraints. Index `public_otp_challenges_phone_idx` `(phone_e164, created_at DESC)`. Unique index `uq_public_otp_active_phone` `(location_id, phone_e164)` where `consumed_at IS NULL`.
 
 #### `public_rate_limits`
 
@@ -1716,7 +1716,7 @@ Primary key `(name)`.
 | `version` | integer | no | `1` |
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `updated_at` | timestamp with time zone | no | `app_now()` |
-| `category` | text | yes |  |
+| `category` | text | no |  |
 | `public_name` | text | yes |  |
 | `description` | text | yes |  |
 | `member_price_cents` | integer | yes |  |
@@ -1726,7 +1726,7 @@ Primary key `(name)`.
 | `quote_only` | boolean | no | `false` |
 | `visible_online` | boolean | no | `true` |
 
-Primary key `(id)`. `(location_id, category)` references `catalog_categories(location_id, key)`. `(location_id)` references `locations(id)` on delete cascade. 11 check constraints. Index `services_category_idx` `(location_id, category)` where `active`. Index `services_listing_idx` `(location_id, kind, sort, id)`. Unique index `uq_services_name` `(location_id, kind, lower(name))`.
+Primary key `(id)`. `(location_id, category)` references `catalog_categories(location_id, key)`. `(location_id)` references `locations(id)` on delete cascade. 11 check constraints. Index `services_category_idx` `(location_id, category)` where `active`. Index `services_listing_idx` `(location_id, kind, sort, id)`. Unique index `uq_services_name` `(location_id, kind, lower(name))`. Trigger: `services_default_category`.
 
 #### `sessions`
 
@@ -2353,6 +2353,7 @@ Primary key `(id)`. Unique `(provider, external_id)`. 2 check constraints. Index
 - view `invoice_calc`
 - function `app_now() returns timestamp with time zone`
 - function `audit_log_immutable() returns trigger`
+- function `catalog_default_category(p_kind text, p_tags text[]) returns text`
 - function `credit_allocations_guard() returns trigger`
 - function `ensure_location(p_id uuid, p_slug text, p_name text, p_timezone text DEFAULT 'America/New_York'::text) returns uuid`
 - function `invoice_calc_of(p_invoice uuid) returns TABLE(invoice_id uuid, items bigint, adj bigint, sub bigint, tax bigint, tip bigint, total bigint, paid_orig bigint, credit_applied bigint, paid bigint, refunded bigint, ref_orig bigint, pending_amt bigint, pending_n bigint, issued bigint, balance bigint, refundable bigint, to_orig_max bigint, net bigint, overpaid bigint, status text)`
@@ -2360,4 +2361,5 @@ Primary key `(id)`. Unique `(provider, external_id)`. 2 check constraints. Index
 - function `realtime_channel_name() returns text`
 - function `realtime_events_notify() returns trigger`
 - function `realtime_purge(p_before timestamp with time zone) returns bigint`
+- function `services_default_category() returns trigger`
 <!-- schema-reference:end -->

@@ -5,6 +5,10 @@
 -- the membership itself 'canceled' with cancel_reason 'checkout_abandoned' (no new membership status, so the dashboard and the API
 -- keep their five states).
 
+-- A checkout belongs to the membership's own client: the composite key below follows the membership (a merge that moves it moves
+-- its checkouts too).
+alter table memberships add constraint uq_memberships_id_customer unique (id, customer_id);
+
 create table membership_checkouts (
   id uuid primary key,
   location_id uuid not null references locations(id) on delete cascade,
@@ -28,7 +32,11 @@ create table membership_checkouts (
   created_at timestamptz not null default app_now(),
   updated_at timestamptz not null default app_now(),
   check (expires_at > started_at),
-  check ((state = 'matched') = (matched_at is not null))
+  check ((state = 'matched') = (matched_at is not null)),
+  constraint membership_checkouts_membership_customer_fkey foreign key (membership_id, customer_id)
+    references memberships (id, customer_id) on update cascade on delete cascade,
+  constraint membership_checkouts_plan_fkey foreign key (location_id, plan_key)
+    references membership_plans (location_id, key) on update cascade
 );
 -- one open checkout per membership; the sync's checkout-intent tier looks up open intents by email and by client
 create unique index uq_membership_checkouts_open on membership_checkouts (membership_id) where state = 'open';

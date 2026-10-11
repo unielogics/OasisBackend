@@ -103,7 +103,9 @@ alter table messages add constraint messages_sender_kind_check check (sender_kin
 -- A staff reply pauses the AI on the thread (assistant.staff_pause_hours, 12 by default).
 alter table message_threads
   add column ai_paused_until timestamptz,
-  add column ai_paused_by uuid references employees(id) on delete set null;
+  -- who paused it (null: an automatic pause, e.g. a handoff); never without the time it ends
+  add column ai_paused_by uuid references employees(id) on delete set null,
+  add constraint message_threads_ai_pause_check check (ai_paused_by is null or ai_paused_until is not null);
 
 alter table appointments drop constraint appointments_source_check;
 alter table appointments add constraint appointments_source_check check (

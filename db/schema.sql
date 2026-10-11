@@ -38,6 +38,21 @@ end
 $$;
 
 --
+-- Name: catalog_default_category(text, text[]); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.catalog_default_category(p_kind text, p_tags text[]) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  select case
+    when p_kind = 'addon' then 'addons'
+    when p_tags && array['tint'] then 'tint'
+    when p_tags && array['detail', 'ceramic', 'exotic', 'executive'] then 'detail'
+    else 'wash'
+  end
+$$;
+
+--
 -- Name: credit_allocations_guard(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -205,6 +220,31 @@ begin
     on conflict (id) do update set purged_through = greatest(realtime_state.purged_through, excluded.purged_through);
   end if;
   return v_count;
+end
+$$;
+
+--
+-- Name: services_default_category(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.services_default_category() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  if new.category is null then
+    new.category := catalog_default_category(new.kind, new.tags);
+    insert into catalog_categories (location_id, key, label, colour, sort)
+    select new.location_id, c.key, c.label, c.colour, c.sort
+    from (values
+      ('wash', 'Wash', '#1FB6FF', 10),
+      ('addons', 'Add-ons', '#7FD6FF', 20),
+      ('tint', 'Tint', '#2EE59D', 30),
+      ('detail', 'Detail', '#FFB547', 40)
+    ) as c(key, label, colour, sort)
+    where c.key = new.category
+    on conflict do nothing;
+  end if;
+  return new;
 end
 $$;
 
@@ -476,6 +516,7 @@ CREATE TABLE public.assistant_pending_actions (
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     resolved_at timestamp with time zone,
     CONSTRAINT assistant_pending_actions_attempts_check CHECK ((attempts >= 0)),
+    CONSTRAINT assistant_pending_actions_attempts_max_check CHECK ((attempts <= max_attempts)),
     CONSTRAINT assistant_pending_actions_check CHECK (((state = 'pending'::text) = (resolved_at IS NULL))),
     CONSTRAINT assistant_pending_actions_code_hash_check CHECK ((code_hash ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT assistant_pending_actions_error_check CHECK (((error IS NULL) OR (length(error) <= 2000))),
@@ -737,6 +778,7 @@ CREATE TABLE public.client_links (
     CONSTRAINT client_links_check1 CHECK (((revoked_at IS NULL) = (revoke_reason IS NULL))),
     CONSTRAINT client_links_customer_check CHECK (((customer_id IS NOT NULL) OR (kind = ANY (ARRAY['calendar'::text, 'book_again'::text])))),
     CONSTRAINT client_links_epoch_check CHECK ((epoch >= 1)),
+    CONSTRAINT client_links_expiry_check CHECK ((expires_at > created_at)),
     CONSTRAINT client_links_issued_by_check CHECK ((issued_by = ANY (ARRAY['assistant'::text, 'staff'::text, 'system'::text]))),
     CONSTRAINT client_links_kind_check CHECK ((kind = ANY (ARRAY['calendar'::text, 'verify'::text, 'pin'::text, 'membership'::text, 'pay'::text, 'book_again'::text]))),
     CONSTRAINT client_links_max_uses_check CHECK ((max_uses >= 1)),
@@ -1508,6 +1550,7 @@ CREATE TABLE public.message_threads (
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     ai_paused_until timestamp with time zone,
     ai_paused_by uuid,
+    CONSTRAINT message_threads_ai_pause_check CHECK (((ai_paused_by IS NULL) OR (ai_paused_until IS NOT NULL))),
     CONSTRAINT message_threads_unread_count_check CHECK ((unread_count >= 0))
 );
 
@@ -1719,11 +1762,11 @@ CREATE TABLE public.phone_trust (
     revoke_reason text,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
-    CONSTRAINT phone_trust_check CHECK ((expires_at > verified_at)),
-    CONSTRAINT phone_trust_check1 CHECK (((revoked_at IS NULL) = (revoke_reason IS NULL))),
+    CONSTRAINT phone_trust_check CHECK (((revoked_at IS NULL) = (revoke_reason IS NULL))),
     CONSTRAINT phone_trust_phone_e164_check CHECK ((phone_e164 ~ '^\+[1-9][0-9]{6,14}$'::text)),
     CONSTRAINT phone_trust_revoke_reason_check CHECK (((revoke_reason IS NULL) OR (revoke_reason = ANY (ARRAY['phone_change'::text, 'pin_set'::text, 'pin_reset'::text, 'pin_cleared'::text, 'merge'::text, 'opt_out'::text, 'staff'::text, 'epoch'::text, 'superseded'::text])))),
-    CONSTRAINT phone_trust_verified_by_check CHECK ((verified_by = ANY (ARRAY['pin'::text, 'code'::text])))
+    CONSTRAINT phone_trust_verified_by_check CHECK ((verified_by = ANY (ARRAY['pin'::text, 'code'::text]))),
+    CONSTRAINT phone_trust_window_check CHECK (((expires_at > verified_at) AND (expires_at <= (verified_at + '30 days 01:00:00'::interval))))
 );
 
 --
@@ -1782,7 +1825,7 @@ CREATE TABLE public.public_otp_challenges (
     link_session_hash text,
     CONSTRAINT public_otp_challenges_attempts_check CHECK ((attempts >= 0)),
     CONSTRAINT public_otp_challenges_consumed_reason_check CHECK (((consumed_reason IS NULL) OR (consumed_reason = ANY (ARRAY['verified'::text, 'superseded'::text, 'locked'::text])))),
-    CONSTRAINT public_otp_challenges_link_purpose_check CHECK (((purpose = 'website'::text) OR (link_session_hash IS NOT NULL))),
+    CONSTRAINT public_otp_challenges_link_purpose_check CHECK (((purpose <> 'website'::text) OR (link_session_hash IS NULL))),
     CONSTRAINT public_otp_challenges_max_attempts_check CHECK ((max_attempts > 0)),
     CONSTRAINT public_otp_challenges_phone_e164_check CHECK ((phone_e164 ~ '^\+[1-9][0-9]{6,14}$'::text)),
     CONSTRAINT public_otp_challenges_purpose_check CHECK ((purpose = ANY (ARRAY['website'::text, 'link_verify'::text, 'pin_set'::text, 'pin_reset'::text])))
@@ -1938,7 +1981,7 @@ CREATE TABLE public.services (
     version integer DEFAULT 1 NOT NULL,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
-    category text,
+    category text NOT NULL,
     public_name text,
     description text,
     member_price_cents integer,
@@ -3618,6 +3661,13 @@ ALTER TABLE ONLY public.closures
     ADD CONSTRAINT uq_closures_federal UNIQUE (location_id, federal_key, federal_year);
 
 --
+-- Name: memberships uq_memberships_id_customer; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memberships
+    ADD CONSTRAINT uq_memberships_id_customer UNIQUE (id, customer_id);
+
+--
 -- Name: user_preferences user_preferences_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4659,6 +4709,12 @@ CREATE TRIGGER ledger_events_guard BEFORE DELETE OR UPDATE ON public.ledger_even
 CREATE TRIGGER realtime_events_notify AFTER INSERT ON public.realtime_events FOR EACH ROW EXECUTE FUNCTION public.realtime_events_notify();
 
 --
+-- Name: services services_default_category; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER services_default_category BEFORE INSERT ON public.services FOR EACH ROW EXECUTE FUNCTION public.services_default_category();
+
+--
 -- Name: activity_log activity_log_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4979,6 +5035,13 @@ ALTER TABLE ONLY public.client_links
 
 ALTER TABLE ONLY public.client_links
     ADD CONSTRAINT client_links_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: client_links client_links_plan_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.client_links
+    ADD CONSTRAINT client_links_plan_fkey FOREIGN KEY (location_id, plan_key) REFERENCES public.membership_plans(location_id, key) ON UPDATE CASCADE;
 
 --
 -- Name: closures closures_created_by_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -5401,11 +5464,25 @@ ALTER TABLE ONLY public.membership_checkouts
     ADD CONSTRAINT membership_checkouts_matched_order_id_fkey FOREIGN KEY (matched_order_id) REFERENCES public.sqsp_orders(id) ON DELETE SET NULL;
 
 --
+-- Name: membership_checkouts membership_checkouts_membership_customer_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_checkouts
+    ADD CONSTRAINT membership_checkouts_membership_customer_fkey FOREIGN KEY (membership_id, customer_id) REFERENCES public.memberships(id, customer_id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+--
 -- Name: membership_checkouts membership_checkouts_membership_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.membership_checkouts
     ADD CONSTRAINT membership_checkouts_membership_id_fkey FOREIGN KEY (membership_id) REFERENCES public.memberships(id) ON DELETE CASCADE;
+
+--
+-- Name: membership_checkouts membership_checkouts_plan_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_checkouts
+    ADD CONSTRAINT membership_checkouts_plan_fkey FOREIGN KEY (location_id, plan_key) REFERENCES public.membership_plans(location_id, key) ON UPDATE CASCADE;
 
 --
 -- Name: membership_credit_events membership_credit_events_actor_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -5692,7 +5769,7 @@ ALTER TABLE ONLY public.public_member_tokens
 --
 
 ALTER TABLE ONLY public.public_otp_challenges
-    ADD CONSTRAINT public_otp_challenges_link_session_hash_fkey FOREIGN KEY (link_session_hash) REFERENCES public.client_link_sessions(token_hash) ON DELETE CASCADE;
+    ADD CONSTRAINT public_otp_challenges_link_session_hash_fkey FOREIGN KEY (link_session_hash) REFERENCES public.client_link_sessions(token_hash) ON DELETE SET NULL;
 
 --
 -- Name: public_otp_challenges public_otp_challenges_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

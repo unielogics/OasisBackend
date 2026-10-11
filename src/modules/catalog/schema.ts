@@ -21,8 +21,11 @@ export interface ServicesTable {
   created_at: Generated<Date>
   updated_at: Generated<Date>
   // the website/AI fields (migration 20261011000000_catalog_categories.sql, ADR 0160)
-  /** catalog_categories.key of the same location; null = uncategorised. */
-  category: string | null
+  /**
+   * catalog_categories.key of the same location, never null: a row inserted without one gets the default rule (add-ons → addons,
+   * tint → tint, detail/ceramic/exotic/executive → detail, else wash; trigger services_default_category).
+   */
+  category: Generated<string>
   public_name: string | null
   description: string | null
   member_price_cents: number | null

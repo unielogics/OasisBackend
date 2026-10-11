@@ -38,6 +38,10 @@ create table client_links (
   created_at timestamptz not null default app_now(),
   check (uses <= max_uses),
   check ((revoked_at is null) = (revoke_reason is null)),
+  constraint client_links_expiry_check check (expires_at > created_at),
+  -- a membership link names a plan of its own location
+  constraint client_links_plan_fkey foreign key (location_id, plan_key)
+    references membership_plans (location_id, key) on update cascade,
   constraint client_links_customer_check check (customer_id is not null or kind in ('calendar', 'book_again')),
   constraint client_links_pay_invoice_check check (kind <> 'pay' or invoice_id is not null),
   constraint client_links_membership_plan_check check (kind <> 'membership' or plan_key is not null)
@@ -108,7 +112,8 @@ create table phone_trust (
   created_at timestamptz not null default app_now(),
   updated_at timestamptz not null default app_now(),
   primary key (location_id, phone_e164),
-  check (expires_at > verified_at),
+  -- at most 30 days (an hour of slack for the clock the caller read)
+  constraint phone_trust_window_check check (expires_at > verified_at and expires_at <= verified_at + interval '30 days 1 hour'),
   check ((revoked_at is null) = (revoke_reason is null))
 );
 create index phone_trust_customer_idx on phone_trust (customer_id);
@@ -128,6 +133,7 @@ create table assistant_pending_actions (
   code_hash text not null check (code_hash ~ '^[0-9a-f]{64}$'),
   attempts smallint not null default 0 check (attempts >= 0),
   max_attempts smallint not null default 3 check (max_attempts >= 1),
+  constraint assistant_pending_actions_attempts_max_check check (attempts <= max_attempts),
   -- created_at + 15 minutes
   expires_at timestamptz not null,
   state text not null default 'pending'
@@ -145,8 +151,9 @@ create index assistant_pending_actions_expiry_idx on assistant_pending_actions (
 create index assistant_pending_actions_conversation_idx on assistant_pending_actions (conversation_id);
 
 -- The website's one-time codes serve the link pages too: what the code is for, and the link session that asked (a code from a link
--- goes only to the link's phone).
+-- goes only to the link's phone). Deleting the session (or its link) keeps the code row with the session cleared: the hourly
+-- ceiling (PUBLIC_OTP_TEXTS_PER_HOUR) counts every code sent. A website code never names a session.
 alter table public_otp_challenges
   add column purpose text not null default 'website' check (purpose in ('website', 'link_verify', 'pin_set', 'pin_reset')),
-  add column link_session_hash text references client_link_sessions(token_hash) on delete cascade,
-  add constraint public_otp_challenges_link_purpose_check check (purpose = 'website' or link_session_hash is not null);
+  add column link_session_hash text references client_link_sessions(token_hash) on delete set null,
+  add constraint public_otp_challenges_link_purpose_check check (purpose <> 'website' or link_session_hash is null);

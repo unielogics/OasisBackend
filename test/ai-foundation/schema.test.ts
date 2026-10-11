@@ -25,7 +25,7 @@ const hex = (c: string): string => c.repeat(64)
 const PHONE = '+12015550142'
 const later = new Date('2026-06-13T15:00:00Z')
 
-async function link(f: Fixture, o: { token: string; kind?: string; customerId?: string | null; invoiceId?: string | null; planKey?: string | null }) {
+async function link(f: Fixture, o: { token: string; kind?: string; customerId?: string | null; invoiceId?: string | null; planKey?: string | null; expiresAt?: Date }) {
   return t.db
     .insertInto('client_links')
     .values({
@@ -39,10 +39,17 @@ async function link(f: Fixture, o: { token: string; kind?: string; customerId?: 
       plan_key: o.planKey ?? null,
       epoch: 1,
       issued_by: 'assistant',
-      expires_at: later,
+      expires_at: o.expiresAt ?? later,
       max_uses: 3,
     })
     .execute()
+}
+
+async function plan(f: Fixture, key: string): Promise<string> {
+  const id = f.newId()
+  await sql`insert into membership_plans (id, location_id, key, name, color, bg_color, tint)
+    values (${id}, ${f.locationId}, ${key}, ${key}, '#fff', '#000', '#111')`.execute(t.db)
+  return id
 }
 
 async function conversation(f: Fixture, customerId: string | null = null): Promise<string> {
@@ -98,8 +105,46 @@ describe('identity', () => {
     expect(constraintOf(await failure(link(f, { token: hex('b'), kind: 'pin' })))).toBe('client_links_customer_check')
     expect(constraintOf(await failure(link(f, { token: hex('c'), kind: 'pay', customerId: c })))).toBe('client_links_pay_invoice_check')
     expect(constraintOf(await failure(link(f, { token: hex('d'), kind: 'membership', customerId: c })))).toBe('client_links_membership_plan_check')
+    // the plan must exist at that location
+    expect(constraintOf(await failure(link(f, { token: hex('e'), kind: 'membership', customerId: c, planKey: 'premium' })))).toBe('client_links_plan_fkey')
+    await plan(f, 'premium')
     await link(f, { token: hex('e'), kind: 'membership', customerId: c, planKey: 'premium' })
     expect(constraintOf(await failure(link(f, { token: 'not-a-hash' })))).toBe('client_links_token_hash_check')
+  })
+
+  it('a link expires after it was made', async () => {
+    const f = await setupLocation(t)
+    expect(constraintOf(await failure(link(f, { token: hex('1'), expiresAt: t.clock.now() })))).toBe('client_links_expiry_check')
+    expect(constraintOf(await failure(link(f, { token: hex('2'), expiresAt: new Date(t.clock.now().getTime() - 1000) })))).toBe('client_links_expiry_check')
+    await link(f, { token: hex('3'), expiresAt: new Date(t.clock.now().getTime() + 1000) })
+  })
+
+  it('a pending action never counts more attempts than it allows', async () => {
+    const f = await setupLocation(t)
+    const c = await makeCustomer(t.db, f)
+    const conv = await conversation(f, c)
+    const id = f.newId()
+    await t.db
+      .insertInto('assistant_pending_actions')
+      .values({ id, location_id: f.locationId, conversation_id: conv, customer_id: c, phone_e164: PHONE, kind: 'cancel', payload: JSON.stringify({}), code_hash: hex('f'), expires_at: later, max_attempts: 3 })
+      .execute()
+    await t.db.updateTable('assistant_pending_actions').set({ attempts: 3 }).where('id', '=', id).execute()
+    expect(constraintOf(await failure(t.db.updateTable('assistant_pending_actions').set({ attempts: 4 }).where('id', '=', id).execute()))).toBe(
+      'assistant_pending_actions_attempts_max_check',
+    )
+  })
+
+  it('phone trust lasts at most 30 days from the verification', async () => {
+    const f = await setupLocation(t)
+    const c = await makeCustomer(t.db, f)
+    const at = t.clock.now()
+    const day = 86_400_000
+    const trust = (phone: string, expires: Date) =>
+      t.db.insertInto('phone_trust').values({ location_id: f.locationId, phone_e164: phone, customer_id: c, verified_at: at, verified_by: 'pin', expires_at: expires }).execute()
+    await trust('+12015550101', new Date(at.getTime() + 30 * day))
+    await trust('+12015550102', new Date(at.getTime() + 30 * day + 60_000)) // a minute of slack
+    expect(constraintOf(await failure(trust('+12015550103', new Date(at.getTime() + 31 * day))))).toBe('phone_trust_window_check')
+    expect(constraintOf(await failure(trust('+12015550104', at)))).toBe('phone_trust_window_check')
   })
 
   it('one pending in-chat action per phone; a settled one leaves room for the next', async () => {
@@ -132,15 +177,45 @@ describe('identity', () => {
     expect(cust).toEqual({ email_verified: false, phone_version: 0 })
   })
 
-  it('a code asked from a link page names its session', async () => {
+  it('a code asked from a link page names its session; deleting the session or the link keeps the code row (the hourly ceiling counts it)', async () => {
     const f = await setupLocation(t)
-    const otp = (purpose: string, session: string | null) =>
-      t.db
+    const c = await makeCustomer(t.db, f)
+    await link(f, { token: hex('7'), customerId: c })
+    const linkId = (await t.db.selectFrom('client_links').select('id').where('token_hash', '=', hex('7')).executeTakeFirstOrThrow()).id
+    const session = hex('8')
+    await t.db
+      .insertInto('client_link_sessions')
+      .values({ token_hash: session, link_id: linkId, customer_id: c, phone_e164: PHONE, idle_expires_at: later, expires_at: later })
+      .execute()
+    // one live code per phone: each earlier one is superseded (the rows stay, which is the point)
+    const otp = (purpose: string, s: string | null) => {
+      const id = f.newId()
+      return t.db
         .insertInto('public_otp_challenges')
-        .values({ id: f.newId(), location_id: f.locationId, phone_e164: PHONE, code_hash: hex('1'), expires_at: later, purpose: purpose as never, link_session_hash: session })
+        .values({ id, location_id: f.locationId, phone_e164: PHONE, code_hash: hex('1'), expires_at: later, purpose: purpose as never, link_session_hash: s, consumed_at: t.clock.now(), consumed_reason: 'superseded' })
         .execute()
-    expect(constraintOf(await failure(otp('link_verify', null)))).toBe('public_otp_challenges_link_purpose_check')
+        .then(() => id)
+    }
+    // a website code never names a link session
+    expect(constraintOf(await failure(otp('website', session)))).toBe('public_otp_challenges_link_purpose_check')
     await otp('website', null)
+    const fromLink = await otp('link_verify', session)
+    const pinSet = await otp('pin_set', session)
+    await t.db.deleteFrom('client_link_sessions').where('token_hash', '=', session).execute()
+    const kept = await t.db.selectFrom('public_otp_challenges').select(['id', 'purpose', 'link_session_hash']).where('id', 'in', [fromLink, pinSet]).orderBy('id').execute()
+    expect(kept).toEqual([
+      { id: fromLink, purpose: 'link_verify', link_session_hash: null },
+      { id: pinSet, purpose: 'pin_set', link_session_hash: null },
+    ])
+    // and through the link's own cascade to its sessions
+    await t.db
+      .insertInto('client_link_sessions')
+      .values({ token_hash: hex('9'), link_id: linkId, customer_id: c, phone_e164: PHONE, idle_expires_at: later, expires_at: later })
+      .execute()
+    const third = await otp('pin_reset', hex('9'))
+    await t.db.deleteFrom('client_links').where('id', '=', linkId).execute()
+    expect((await t.db.selectFrom('public_otp_challenges').select('link_session_hash').where('id', '=', third).executeTakeFirstOrThrow()).link_session_hash).toBeNull()
+    expect(Number((await t.db.selectFrom('public_otp_challenges').select((eb) => eb.fn.countAll().as('n')).where('phone_e164', '=', PHONE).executeTakeFirstOrThrow()).n)).toBe(4)
   })
 })
 
@@ -183,5 +258,110 @@ describe('assistant, leads, status texts, consent', () => {
     expect(constraintOf(await failure(t.db.updateTable('pending_checkin_texts').set({ state: 'dropped', settled_at: later }).where('appointment_id', '=', a).execute()))).toBe(
       'pending_checkin_texts_check1',
     )
+  })
+})
+
+describe('memberships started through a link', () => {
+  async function membership(f: Fixture, customerId: string, planId: string): Promise<string> {
+    const id = f.newId()
+    await sql`insert into memberships (id, location_id, customer_id, plan_id, plan_label, status, source, started_at)
+      values (${id}, ${f.locationId}, ${customerId}, ${planId}, 'Gold', 'pending', 'manual', ${t.clock.now()})`.execute(t.db)
+    return id
+  }
+  const checkout = (f: Fixture, o: { membershipId: string; customerId: string; planKey: string }) =>
+    t.db
+      .insertInto('membership_checkouts')
+      .values({
+        id: f.newId(),
+        location_id: f.locationId,
+        membership_id: o.membershipId,
+        customer_id: o.customerId,
+        plan_key: o.planKey,
+        checkout_url: 'https://oasis.squarespace.com/checkout/subscribe?productId=1',
+        started_at: t.clock.now(),
+        expires_at: later,
+      })
+      .execute()
+
+  it('a checkout names an existing plan and the membership\'s own client, and follows the membership to a merged client', async () => {
+    const f = await setupLocation(t)
+    const maria = await makeCustomer(t.db, f)
+    const david = await makeCustomer(t.db, f, { name: 'David Okafor' })
+    const gold = await plan(f, 'premium')
+    const m = await membership(f, maria, gold)
+    expect(constraintOf(await failure(checkout(f, { membershipId: m, customerId: maria, planKey: 'platinum' })))).toBe('membership_checkouts_plan_fkey')
+    expect(constraintOf(await failure(checkout(f, { membershipId: m, customerId: david, planKey: 'premium' })))).toBe('membership_checkouts_membership_customer_fkey')
+    await checkout(f, { membershipId: m, customerId: maria, planKey: 'premium' })
+    // a merge moves the membership: its checkouts move with it
+    await t.db.updateTable('memberships').set({ customer_id: david }).where('id', '=', m).execute()
+    expect((await t.db.selectFrom('membership_checkouts').select('customer_id').where('membership_id', '=', m).executeTakeFirstOrThrow()).customer_id).toBe(david)
+    // renaming a plan key carries the links and checkouts along
+    await t.db.updateTable('membership_plans').set({ key: 'executive' }).where('id', '=', gold).execute()
+    expect((await t.db.selectFrom('membership_checkouts').select('plan_key').where('membership_id', '=', m).executeTakeFirstOrThrow()).plan_key).toBe('executive')
+  })
+})
+
+describe('the AI pause on a thread', () => {
+  it('names who paused it only together with until when', async () => {
+    const f = await setupLocation(t)
+    const c = await makeCustomer(t.db, f)
+    const thread = f.newId()
+    await t.db.insertInto('message_threads').values({ id: thread, location_id: f.locationId, customer_id: c }).execute()
+    const emp = f.newId()
+    await sql`insert into employees (id, first) values (${emp}, 'Gerald')`.execute(t.db)
+    expect(constraintOf(await failure(t.db.updateTable('message_threads').set({ ai_paused_by: emp }).where('id', '=', thread).execute()))).toBe('message_threads_ai_pause_check')
+    await t.db.updateTable('message_threads').set({ ai_paused_by: emp, ai_paused_until: later }).where('id', '=', thread).execute()
+    // an automatic pause (no employee) is fine
+    await t.db.updateTable('message_threads').set({ ai_paused_by: null }).where('id', '=', thread).execute()
+  })
+})
+
+describe('every service has a category', () => {
+  it('new rows get one by the default rule: add-ons, tint, detail (executive, exotic, ceramic, detail), else wash', async () => {
+    const f = await setupLocation(t)
+    const svc = async (kind: 'package' | 'addon', name: string, tags: string[]): Promise<string | null> => {
+      const id = f.newId()
+      await t.db
+        .insertInto('services')
+        .values({ id, location_id: f.locationId, kind, name, short_name: null, price_cents: 1000, duration_min: kind === 'addon' ? 0 : 60, tags, sqsp_sku: null })
+        .execute()
+      return (await t.db.selectFrom('services').select('category').where('id', '=', id).executeTakeFirstOrThrow()).category
+    }
+    expect(await svc('addon', 'Wax', ['ceramic'])).toBe('addons')
+    expect(await svc('package', 'Executive Detail', ['executive'])).toBe('detail')
+    expect(await svc('package', 'Executive Detail + Ceramic', ['executive', 'ceramic'])).toBe('detail')
+    expect(await svc('package', 'Exotic Detail Package', ['exotic'])).toBe('detail')
+    expect(await svc('package', 'Full Detail', ['detail'])).toBe('detail')
+    expect(await svc('package', 'Express Hand Wash', ['express', 'handwash'])).toBe('wash')
+    expect(await svc('package', 'Mystery', [])).toBe('wash')
+    expect(await svc('package', 'Ceramic Tint', ['tint'])).toBe('tint')
+    // an explicit category wins (the catalog API sets it)
+    const id = f.newId()
+    await t.db
+      .insertInto('services')
+      .values({ id, location_id: f.locationId, kind: 'package', name: 'Quote me', short_name: null, price_cents: 0, duration_min: 30, sqsp_sku: null, category: 'quote' })
+      .execute()
+    expect((await t.db.selectFrom('services').select('category').where('id', '=', id).executeTakeFirstOrThrow()).category).toBe('quote')
+    expect(constraintOf(await failure(t.db.updateTable('services').set({ category: null as never }).where('id', '=', id).execute()))).toBeUndefined()
+    expect(String(await failure(t.db.updateTable('services').set({ category: null as never }).where('id', '=', id).execute()))).toMatch(/null value in column "category"/)
+  })
+
+  it('a location without the default categories gets the one a new service needs', async () => {
+    const loc = '00000000-0000-7000-8000-0000000000d1'
+    await sql`insert into locations (id, name, slug) values (${loc}, 'Second', 'second')`.execute(t.db)
+    await t.db
+      .insertInto('services')
+      .values({ id: '00000000-0000-7000-8000-0000000000d2', location_id: loc, kind: 'addon', name: 'Wax', short_name: null, price_cents: 1000, duration_min: 0, sqsp_sku: null })
+      .execute()
+    const cats = await t.db.selectFrom('catalog_categories').select(['key', 'label', 'colour', 'sort']).where('location_id', '=', loc).execute()
+    expect(cats).toEqual([{ key: 'addons', label: 'Add-ons', colour: '#7FD6FF', sort: 20 }])
+    // the trigger's copy of the defaults matches DEFAULT_CATEGORIES
+    for (const [i, kind, tags] of [[3, 'package', []], [4, 'package', ['tint']], [5, 'package', ['detail']]] as const)
+      await t.db
+        .insertInto('services')
+        .values({ id: `00000000-0000-7000-8000-0000000000d${i}`, location_id: loc, kind, name: `S${i}`, short_name: null, price_cents: 1000, duration_min: 30, tags: [...tags], sqsp_sku: null })
+        .execute()
+    const all = await t.db.selectFrom('catalog_categories').select(['key', 'label', 'colour', 'sort']).where('location_id', '=', loc).orderBy('sort').execute()
+    expect(all).toEqual(DEFAULT_CATEGORIES.filter((c) => c.key !== 'quote').map(({ key, label, colour, sort }) => ({ key, label, colour, sort })))
   })
 })
