@@ -34,6 +34,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261011000300_leads.sql`             | leads and their single automatic follow-up (ADR 0160)                                                                                                     |
 | `20261011000400_status_texts.sql`      | the delayed "checked in" text queue and the running-late texts (ADR 0160)                                                                                |
 | `20261011000500_membership_checkouts.sql` | the checkout intents of memberships started through a personal link (ADR 0160)                                                                         |
+| `20261011040000_sms_usage_class.sql` | the class of each send in `sms_usage` (`klass`), so the AI classes' sub-cap is counted in the dispatcher (ADR 0160, W2d)                               |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
