@@ -6,6 +6,7 @@ import { sql } from 'kysely'
 import { transaction, type Tx } from '../../platform/db.js'
 import { SmsProviderError } from '../../integrations/sms/errors.js'
 import { SmsWebhookError } from '../../integrations/sms/errors.js'
+import { normalizeE164 } from '../../integrations/sms/phone.js'
 import type { SmsEvent, SmsProvider } from '../../integrations/ports/sms.js'
 import type { SimDelivery } from '../../integrations/smsgate/sim-device.js'
 import { verifyAndParse, type ParsedWebhook } from '../../integrations/smsgate/webhook.js'
@@ -21,7 +22,7 @@ import { Dispatcher } from './dispatch/dispatcher.js'
 import { SmsEventIngestor, type IngestResult } from './dispatch/ingest.js'
 import { createInboundEffects } from './inbound-effects.js'
 import { InboundService, type InboundOutcome } from './inbound/service.js'
-import { CODE_MASK } from './inbound/keywords.js'
+import { CODE_MASK, parseReplyCode } from './inbound/keywords.js'
 import { noteAppStarted } from './device-notices.js'
 import { notifyManagers } from './notify.js'
 import type { MessagingRuntime } from './runtime.js'
@@ -95,6 +96,44 @@ export function redactInboundText(raw: string): string {
   if (!p || typeof p !== 'object') return raw
   for (const k of ['message', 'body'] as const) if (typeof p[k] === 'string') p[k] = CODE_MASK
   return JSON.stringify(env)
+}
+
+/**
+ * Whether a stored delivery's text is a digits-only reply code (4-8 digits, parseReplyCode). Used for the rows that are final
+ * without ever being routed (an unknown device, an envelope the sweep gives up on): nothing decided whether the digits were a
+ * code, so they are masked (ADR 0160: a reply number or a link-page code is never kept readable).
+ */
+function holdsCode(raw: string | null): boolean {
+  if (raw === null) return false
+  let env: unknown
+  try {
+    env = JSON.parse(raw)
+  } catch {
+    return false
+  }
+  const p = (env as { payload?: Record<string, unknown> } | null)?.payload
+  if (!p || typeof p !== 'object') return false
+  return (['message', 'body'] as const).some((k) => typeof p[k] === 'string' && parseReplyCode(p[k]) !== null)
+}
+
+/**
+ * The number a received text was sent to, for the assistant gate's own-number check. The parser's `recipient` falls back to
+ * `phoneNumber`, which on sms:received is the SENDER: a delivery without `recipient` (absent, null, the older phoneNumber-only
+ * payload) would hand the sender over as the number it texted, and the gate would hold every texter back as "our own number".
+ * So a recipient equal to the sender counts only when the payload really says `recipient` (the device texting itself, a loop);
+ * the stored body is read again only in that rare case.
+ */
+export function textedNumber(event: SmsEvent, recipient: string | undefined, rawBody: string): string | undefined {
+  if (!recipient || event.kind !== 'received') return undefined
+  const same = (a: string, b: string): boolean => (normalizeE164(a) ?? a.trim()) === (normalizeE164(b) ?? b.trim())
+  if (!same(recipient, event.from)) return recipient
+  let stated: unknown
+  try {
+    stated = (JSON.parse(rawBody) as { payload?: Record<string, unknown> } | null)?.payload?.recipient
+  } catch {
+    return undefined
+  }
+  return typeof stated === 'string' && same(stated, event.from) ? recipient : undefined
 }
 
 const FOREVER = Number.MAX_SAFE_INTEGER
@@ -238,7 +277,7 @@ export class WebhookService {
       if (!device) {
         await tx
           .updateTable('webhook_log')
-          .set({ status: 'failed', processed_at: this.rt.clock.now(), error: 'unknown device', ...stripped(row.body) })
+          .set({ status: 'failed', processed_at: this.rt.clock.now(), error: 'unknown device', ...stripped(row.body, { redactText: holdsCode(row.body) }) })
           .where('id', '=', logId)
           .execute()
         return 'ignored' as const
@@ -250,7 +289,7 @@ export class WebhookService {
       })
       const event = this.withDeviceId(parsed.event, device.id)
       let inbound: InboundOutcome | null = null
-      const result = await this.apply(tx, device, event, parsed, (o) => void (inbound = o))
+      const result = await this.apply(tx, device, event, parsed, row.body, (o) => void (inbound = o))
       const routed = inbound as InboundOutcome | null
       if (result.outcome === 'handled' && result.health?.appStarted) {
         appStartedFor = device
@@ -265,7 +304,8 @@ export class WebhookService {
           processed_at: this.rt.clock.now(),
           error: null,
           // the pictures are saved; 90 days of webhook_log need not hold megabytes of base64 per MMS; a code is never kept readable
-          ...stripped(row.body, { redactText: routed?.duplicate === false && routed.decision.redacted === true }),
+          // (a repeat of a delivery filed as a code is masked too: the same text came in a second envelope)
+          ...stripped(row.body, { redactText: routed !== null && (routed.duplicate ? routed.redacted === true : routed.decision.redacted === true) }),
         })
         .where('id', '=', logId)
         .execute()
@@ -292,7 +332,7 @@ export class WebhookService {
     return 'deviceId' in e ? { ...e, deviceId } : e
   }
 
-  private async apply(tx: Tx, device: DeviceRow, event: SmsEvent, parsed: ParsedWebhook, onInbound: (o: InboundOutcome) => void): Promise<IngestResult> {
+  private async apply(tx: Tx, device: DeviceRow, event: SmsEvent, parsed: ParsedWebhook, rawBody: string, onInbound: (o: InboundOutcome) => void): Promise<IngestResult> {
     const rt = this.rt
     const assistant = rt.assistant()
     const cfg = rt.config.dispatch({ id: device.id, simSlotDefault: device.sim_slot_default, minIntervalMs: device.min_interval_ms, maxPerWindow: device.max_per_window, windowMinutes: device.window_minutes })
@@ -332,7 +372,7 @@ export class WebhookService {
         },
       },
     )
-    const to = parsed.extras.recipient
+    const to = textedNumber(event, parsed.extras.recipient, rawBody)
     const ingestor = new SmsEventIngestor(new PgProcessedEvents(tx), dispatcher, rt.clock, async (e) => {
       onInbound(await inbound.handleReceived(e, to ? { to } : {}))
     })
@@ -361,7 +401,7 @@ export class WebhookService {
       if (!row) continue
       const r = await this.rt.db
         .updateTable('webhook_log')
-        .set({ status: 'failed', processed_at: now, error: 'not applied within 24 hours', ...stripped(row.body) })
+        .set({ status: 'failed', processed_at: now, error: 'not applied within 24 hours', ...stripped(row.body, { redactText: holdsCode(row.body) }) })
         .where('id', '=', id)
         .where('status', '=', 'received')
         .executeTakeFirst()

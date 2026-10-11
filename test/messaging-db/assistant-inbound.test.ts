@@ -416,3 +416,119 @@ describe('loop breakers', () => {
     expect((await lastInbox()).decision).toBe('message')
   })
 })
+
+// Verifier findings on W2d (F1-F3): the sender is never taken for the number it texted, a code survives in no webhook_log row,
+// and repeating AGENT does not page every manager again while the handoff is open.
+describe('the number texted (F1)', () => {
+  async function raw(payload: Record<string, unknown>) {
+    n += 1
+    const ev = w.signed('sms:received', { messageId: `ai-raw-${n}`, simNumber: 1, receivedAt: w.clock.now().toISOString(), ...payload })
+    await w.rt.webhooks.receive(SIM_DEVICE_KEY, ev.headers, ev.body)
+    await w.settle()
+  }
+
+  it('a delivery without recipient (phoneNumber is the sender there) still goes to the assistant', async () => {
+    await assistantOn()
+    await raw({ sender: maria(), phoneNumber: maria(), message: 'hours today?' })
+    expect((await lastInbox()).decision).toBe('assistant')
+  })
+
+  it('recipient null, and the older phoneNumber-only payload, go to the assistant too', async () => {
+    await assistantOn()
+    await raw({ sender: maria(), phoneNumber: maria(), recipient: null, message: 'hi there' })
+    expect((await lastInbox()).decision).toBe('assistant')
+    w.clock.advance(60_000)
+    await raw({ phoneNumber: w.customer('Liam Chen').phone, message: 'open sunday?' })
+    expect((await lastInbox()).decision).toBe('assistant')
+  })
+
+  it('a text from the number it was sent to (the device texting itself) is still held back by BUSINESS_PHONE', async () => {
+    await assistantOn()
+    await raw({ sender: '+12015986304', recipient: '+12015986304', message: 'loop?' })
+    expect((await lastInbox()).decision).not.toBe('assistant')
+    expect(kicked).toEqual([])
+  })
+})
+
+describe('codes in webhook_log (F2)', () => {
+  it('the same code delivered again in a second envelope is masked in both rows', async () => {
+    await assistantOn()
+    const ids: string[] = []
+    for (let i = 0; i < 2; i++) {
+      const ev = w.signed('sms:received', { messageId: 'dup-code', sender: maria(), recipient: '+18623885827', simNumber: 1, message: '7391', receivedAt: w.clock.now().toISOString() })
+      ids.push(ev.id)
+      await w.rt.webhooks.receive(SIM_DEVICE_KEY, ev.headers, ev.body)
+      await w.settle()
+    }
+    const rows = await w.t.db.selectFrom('webhook_log').select(['external_id', 'status', 'body']).where('external_id', 'in', ids).execute()
+    expect(rows).toHaveLength(2)
+    for (const r of rows) expect(r.body).not.toContain('7391')
+    expect(await lastInbox()).toMatchObject({ body: CODE_MASK })
+  })
+
+  it('a repeat of an ordinary digits text (the assistant off) stays readable, as before', async () => {
+    const ids: string[] = []
+    for (let i = 0; i < 2; i++) {
+      const ev = w.signed('sms:received', { messageId: 'dup-plain', sender: maria(), recipient: '+18623885827', simNumber: 1, message: '7391', receivedAt: w.clock.now().toISOString() })
+      ids.push(ev.id)
+      await w.rt.webhooks.receive(SIM_DEVICE_KEY, ev.headers, ev.body)
+      await w.settle()
+    }
+    const rows = await w.t.db.selectFrom('webhook_log').select('body').where('external_id', 'in', ids).execute()
+    expect(rows.map((r) => r.body!.includes('7391'))).toEqual([true, true])
+  })
+
+  it('an envelope the sweep gives up on keeps no digits-only code readable', async () => {
+    const ev = w.signed('sms:received', { messageId: 'lost-code', sender: maria(), recipient: '+18623885827', simNumber: 1, message: '48-21', receivedAt: w.clock.now().toISOString() })
+    await sql`insert into webhook_log (id, provider, external_id, headers, body, signature_valid, received_at, status)
+      values (${w.newId()}, 'smsgate', ${ev.id}, ${JSON.stringify({ ...ev.headers, 'x-device-key': SIM_DEVICE_KEY })}::jsonb, ${ev.body}, true, ${new Date(w.clock.now().getTime() - 25 * 3600_000)}, 'received')`.execute(w.t.db)
+    const other = w.signed('sms:received', { messageId: 'lost-text', sender: maria(), recipient: '+18623885827', simNumber: 1, message: 'Hello?', receivedAt: w.clock.now().toISOString() })
+    await sql`insert into webhook_log (id, provider, external_id, headers, body, signature_valid, received_at, status)
+      values (${w.newId()}, 'smsgate', ${other.id}, ${JSON.stringify({ ...other.headers, 'x-device-key': SIM_DEVICE_KEY })}::jsonb, ${other.body}, true, ${new Date(w.clock.now().getTime() - 25 * 3600_000)}, 'received')`.execute(w.t.db)
+    expect(await w.rt.webhooks.sweep()).toEqual({ processed: 0, abandoned: 2 })
+    const code = await w.t.db.selectFrom('webhook_log').select(['status', 'body']).where('external_id', '=', ev.id).executeTakeFirstOrThrow()
+    expect(code.status).toBe('failed')
+    expect(code.body).not.toContain('48-21')
+    expect(JSON.parse(code.body!).payload.message).toBe(CODE_MASK)
+    const text = await w.t.db.selectFrom('webhook_log').select('body').where('external_id', '=', other.id).executeTakeFirstOrThrow()
+    expect(JSON.parse(text.body!).payload.message).toBe('Hello?')
+  })
+})
+
+describe('AGENT repeated (F3)', () => {
+  const handoffAlerts = async () => (await notifications()).filter((x) => x.kind === 'assistant.handoff')
+
+  it('pages the managers once per open handoff; a new handoff after staff resolved it pages again', async () => {
+    await assistantOn()
+    await inbound(maria(), 'AGENT')
+    const once = (await handoffAlerts()).length
+    expect(once).toBeGreaterThan(0)
+    for (let i = 0; i < 3; i++) {
+      w.clock.advance(5000)
+      await inbound(maria(), 'agent')
+    }
+    expect((await handoffAlerts()).length).toBe(once)
+    expect((await lastInbox()).decision).toBe('handoff')
+
+    await w.tx(async (tx) => {
+      const t = (await w.rt.queue.target(tx, w.locationId, w.customer('Maria Delgado').id))!
+      await w.rt.queue.enqueueFor(tx, { locationId: w.locationId, customerId: w.customer('Maria Delgado').id, recipient: t.recipient, appointmentId: null, text: 'On it', klass: 'staff_message', purpose: 'staff', senderKind: 'staff' })
+    })
+    w.clock.advance(7 * 24 * 3600_000)
+    await inbound(maria(), 'AGENT')
+    expect((await handoffAlerts()).length).toBe(2 * once)
+  })
+
+  it('a stranger repeating AGENT pages the managers once', async () => {
+    await assistantOn()
+    await inbound(STRANGER, 'AGENT')
+    const once = (await handoffAlerts()).length
+    expect(once).toBeGreaterThan(0)
+    for (let i = 0; i < 4; i++) {
+      w.clock.advance(5000)
+      await inbound(STRANGER, 'AGENT')
+    }
+    expect((await handoffAlerts()).length).toBe(once)
+    expect(new Set((await handoffAlerts()).map((a) => a.source_ref)).size).toBe(1)
+  })
+})

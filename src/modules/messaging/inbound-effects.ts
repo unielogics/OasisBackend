@@ -78,6 +78,8 @@ export function createInboundEffects(
   const replyKey = (template: string): string => `inbound-reply:${o.event.deviceId}:${o.event.providerMessageId}:${template}`
   // the conversation a handoff of this text opened: its alert is found again by it when staff take the thread over
   let handoffConversation: string | null = null
+  // AGENT on a handoff that is already open: the managers were paged when it opened; a repeat (or a stranger repeating it) does not page them again
+  let handoffAlreadyOpen = false
 
   return {
     async sendReply(to, template, vars, ctx) {
@@ -277,6 +279,7 @@ export function createInboundEffects(
       if (!inbox) throw new Error('inbound: no assistant conversation store is wired')
       const r = await inbox.openHandoff(tx, { locationId: o.locationId, phone: cmd.phone, customerId: cmd.customerId, inboxId: cmd.inboxId, reason: cmd.reason, at: e.clock.now() })
       handoffConversation = r.conversationId
+      handoffAlreadyOpen = r.alreadyOpen
     },
 
     async actionCode(cmd) {
@@ -287,6 +290,7 @@ export function createInboundEffects(
 
     async staffAlert(a) {
       if (a.kind === 'ai_handoff') {
+        if (handoffAlreadyOpen) return
         const who = a.customerId
           ? ((await tx.selectFrom('customers').select('full_name').where('id', '=', a.customerId).executeTakeFirst())?.full_name ?? 'customer')
           : (() => {

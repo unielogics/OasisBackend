@@ -69,7 +69,8 @@ export interface InboundServiceOptions {
 }
 
 export type InboundOutcome =
-  | { duplicate: true }
+  /** `redacted`: the first delivery was filed as a code, so this repeat's stored envelope must not keep it readable either. */
+  | { duplicate: true; redacted?: boolean }
   | {
       duplicate: false
       decision: InboundDecision
@@ -114,10 +115,11 @@ export class InboundService {
     const completeId = msg.kind === 'mms' ? completeIdOf(msg.providerMessageId) : null
     if (completeId !== null) {
       await this.inbox.lock?.(msg.deviceId, completeId)
-      if (msg.incomplete && (await this.inbox.find(msg.deviceId, completeId))) return { duplicate: true }
+      const complete = msg.incomplete ? await this.inbox.find(msg.deviceId, completeId) : null
+      if (complete) return complete.body === CODE_MASK ? { duplicate: true, redacted: true } : { duplicate: true }
     }
     const { inserted, row } = await this.inbox.insertIfNew(msg, now)
-    if (!inserted) return { duplicate: true }
+    if (!inserted) return row.body === CODE_MASK ? { duplicate: true, redacted: true } : { duplicate: true }
     if (completeId !== null && !msg.incomplete) {
       const stale = await this.inbox.find(msg.deviceId, `${completeId}${MMS_INCOMPLETE_SUFFIX}`)
       if (stale && stale.supersededBy === null && (await this.inbox.markSuperseded(stale.id, row.id, now))) await this.effects.supersede?.(stale, row)
