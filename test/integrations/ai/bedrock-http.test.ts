@@ -84,7 +84,6 @@ describe('on the wire', () => {
                   additionalProperties: false,
                 },
               },
-              strict: true,
             },
           },
           { cachePoint: { type: 'default' } },

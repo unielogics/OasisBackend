@@ -51,7 +51,12 @@ export interface BedrockProviderOptions {
   effortMode?: BedrockEffortMode
   /** Used when a request names no effort (AI_EFFORT). */
   defaultEffort?: 'low' | 'medium' | 'high'
-  /** Tool specs go out with strict: true (the default; the schemas must be strict-compatible). */
+  /**
+   * Tool specs go out with strict: true only when this is true. Default off (W4 live eval, 2026-10-11): Bedrock compiles the strict
+   * tools into one grammar per request, and the assistant's fifteen tools came to 335 MB (over its 300 MB limit: every turn was
+   * refused with ValidationException) after about 17 s; half of them still took 51 s. Strict also refuses minimum/maximum. The
+   * tools' zod schemas validate every input on the server anyway (tool-runner refuses an input they reject and tells the model).
+   */
   strictTools?: boolean
   /** Monotonic milliseconds for the latency (tests); a duration, not a time of day, so not the Clock. */
   now?: () => number
@@ -123,7 +128,7 @@ export function toConverseInput(
         name: t.name,
         description: t.description,
         inputSchema: { json: doc(t.inputSchema) },
-        ...(o.strictTools === false ? {} : { strict: true }),
+        ...(o.strictTools === true ? { strict: true } : {}),
       },
     }))
     if (req.cacheTools) list.push({ cachePoint: CACHE_POINT })

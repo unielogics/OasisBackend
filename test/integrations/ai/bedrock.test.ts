@@ -98,7 +98,7 @@ const provider = (o: Partial<ConstructorParameters<typeof BedrockProvider>[0]> =
   })
 
 describe('request mapping', () => {
-  it('maps system blocks with cache points, messages, strict tools with a cache point and auto choice, and maxTokens', () => {
+  it('maps system blocks with cache points, messages, tools (not strict) with a cache point and auto choice, and maxTokens', () => {
     expect(toConverseInput(request(), { modelId: MODEL })).toEqual({
       modelId: MODEL,
       messages: [{ role: 'user', content: [{ text: 'How much is a wash?' }] }],
@@ -115,7 +115,6 @@ describe('request mapping', () => {
               name: 'list_services',
               description: 'The catalog from Settings',
               inputSchema: { json: SCHEMA },
-              strict: true,
             },
           },
           {
@@ -125,7 +124,6 @@ describe('request mapping', () => {
               inputSchema: {
                 json: { type: 'object', properties: {}, required: [], additionalProperties: false },
               },
-              strict: true,
             },
           },
           { cachePoint: { type: 'default' } },
@@ -337,9 +335,13 @@ describe('request mapping', () => {
         { modelId: MODEL },
       ),
     ).toThrow(/lists no tools/)
+    // strict tool use only on request: Bedrock compiles strict tools into a grammar that for the assistant's fifteen tools exceeded
+    // its 300 MB limit (every turn refused, W4 live eval) and refuses minimum/maximum; the tools' zod schemas validate on the server
+    expect(toConverseInput(request(), { modelId: MODEL }).toolConfig!.tools![0]!.toolSpec).not.toHaveProperty('strict')
     expect(
       toConverseInput(request(), { modelId: MODEL, strictTools: false }).toolConfig!.tools![0]!.toolSpec,
     ).not.toHaveProperty('strict')
+    expect(toConverseInput(request(), { modelId: MODEL, strictTools: true }).toolConfig!.tools![0]!.toolSpec).toMatchObject({ strict: true })
   })
 })
 
