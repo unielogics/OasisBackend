@@ -19,6 +19,13 @@ the builders. Where it says MUST, a test must prove it.
   asks the name (fills the placeholder via set_my_name) and steers to a booking (offers real open times for the wash they
   are interested in; verify link when trust is missing). A lead record is opened in the same step. Provisional clients
   that never give a name and never book are archived (soft-deleted, thread kept for retention) after 30 days.
+- Intake order for new texters (owner, 2026-10-11), one question per text, skipping anything already known:
+  (1) the NAME (answer their question first if they asked one); (2) their INTENT (book a wash, tint, detailing, or only
+  information) — when they want to book, move toward a time; (3) PRESENT THE MEMBERSHIPS (Gold/VIP prices and perks from
+  the Settings catalog, short, once, before the first booking; membership link if interested, else back to booking);
+  (4) LAST, the VEHICLE: type (sedan/coupe | SUV/crossover | truck/van — the tint price classes), brand, model.
+  Do NOT offer a human up front: the welcome is only "Oasis Auto Spa's automated assistant" + the mandatory STOP footer;
+  AGENT and handoff still work and are offered only when the client asks for a person, is upset, or the AI cannot help.
 - Status texts: checked in / wash started, running late, ready for pickup, picked up (thank-you + receipt).
 - Settings is the single source of services/prices/details for website, bookings and AI; initial content = the
   website's current lists (Signature/Exterior with member/guest prices, add-ons with VIP inclusion, tint matrix,
@@ -118,7 +125,8 @@ the builders. Where it says MUST, a test must prove it.
   [cachePoint], turn context; tools with cachePoint; toolChoice auto; ≤4 tool rounds then a "reply now" call; 20 s per
   call, 60 s per turn; append-only transcript incl. reasoning blocks) → output guard → enqueue `ai_reply` (first AI text
   of a conversation prefixed with the disclosure "Oasis automated assistant · reply AGENT for a person · STOP to opt
-  out.") → audit `assistant.reply` → re-kick if newer texts arrived.
+  out." — owner 2026-10-11: the first text carries only the automated-assistant line and the STOP footer, NOT the AGENT
+  offer) → audit `assistant.reply` → re-kick if newer texts arrived.
 - Output guard: strip markdown, GSM-7, ≤320 chars (one shorten call else cut at a sentence), no URLs except server
   `{link1}` placeholders, every $ amount must appear in this turn's tool outputs, refund/discount/free/guarantee/"ready
   by"/legal words → handoff, never asks for PIN/code/card numbers; a refusal/max-tokens/unknown stop → fallback.
@@ -138,6 +146,7 @@ the builders. Where it says MUST, a test must prove it.
 | list_my_appointments {} | caller | own upcoming/recent as refs |
 | get_balance {} | caller | own open invoices |
 | set_my_name {fullName} | caller, provisional client only | fills the placeholder name (never overwrites a real name) |
+| set_my_vehicle {type: sedan_coupe\|suv_crossover\|truck_van, make, model, year?, color?} | caller (own record; adds, never edits another's) | upsertVehicle for the client; type maps to the tint price class |
 | note_interest {categories[]} | caller | leads.interests |
 | propose_booking {serviceKey, addonKeys[], date, startMin, vehicle?} | trusted (30 d) | validates slot, creates assistant_pending_actions, server texts "… Reply NNNN to confirm"; on the correct reply: createAppointment(channel online, source sms_ai, categories) |
 | propose_reschedule {appointmentRef, date, startMin} | trusted | same two-step → rescheduleAppointment |
