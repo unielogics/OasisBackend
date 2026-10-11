@@ -100,7 +100,9 @@ async function customerRefs(
       and (c.email = any(${emails}::citext[])
         or c.phone_e164 = any(${phones}::text[])
         or c.id in (select l.customer_id from sqsp_customer_links l
-                    where l.location_id = ${locationId} and l.sqsp_customer_id = any(${sqsp}::text[])))`.execute(
+                    where l.location_id = ${locationId} and l.sqsp_customer_id = any(${sqsp}::text[]))
+        or c.id in (select m.customer_id from memberships m
+                    where m.location_id = ${locationId} and m.sqsp_customer_id = any(${sqsp}::text[])))`.execute(
     db,
   )
   if (rows.rows.length === 0) return []
@@ -114,8 +116,21 @@ async function customerRefs(
       rows.rows.map((r) => r.id),
     )
     .execute()
+  const held = await db
+    .selectFrom('memberships')
+    .select(['customer_id', 'sqsp_customer_id'])
+    .where('location_id', '=', locationId)
+    .where('sqsp_customer_id', 'is not', null)
+    .where(
+      'customer_id',
+      'in',
+      rows.rows.map((r) => r.id),
+    )
+    .execute()
   // Only a verified email links an order (ADR 0160): an unverified one is offered to staff instead, and a Squarespace contact
   // that was linked automatically BY that email (sqsp.contacts) is not a way around it. Phone and staff links count as before.
+  // What a client HOLDS is wider (F1): every link whatever its source and the Squarespace customer on their membership rows; and
+  // their email even unverified: another client's checkout intent never takes such an order (payments-sync/membership.ts).
   return rows.rows.map((r) => ({
     id: r.id,
     emails: r.email && r.email_verified ? [r.email] : [],
@@ -124,6 +139,12 @@ async function customerRefs(
     sqspCustomerIds: links
       .filter((l) => l.customer_id === r.id && (l.source !== 'email' || r.email_verified))
       .map((l) => l.sqsp_customer_id),
+    heldSqspCustomerIds: [
+      ...new Set([
+        ...links.filter((l) => l.customer_id === r.id).map((l) => l.sqsp_customer_id),
+        ...held.filter((m) => m.customer_id === r.id).map((m) => m.sqsp_customer_id!),
+      ]),
+    ],
   }))
 }
 

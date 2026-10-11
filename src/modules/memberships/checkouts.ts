@@ -53,12 +53,17 @@ interface Ctx {
 
 // ---- the matching's view of the rows ---------------------------------------------------------------------------------
 
-/** Open, matched and waiting rows of a location as the linking reads them (matched and waiting rows name their Squarespace order). */
+/**
+ * Open, matched and waiting rows of a location as the linking reads them (matched and waiting rows name their Squarespace order).
+ * A row an intent matched by itself (origin link) whose order's Squarespace customer another client holds (their
+ * sqsp_customer_links row of any source, or their membership row) is marked `orderHeldByAnother`: it binds nothing (F1). A row
+ * staff matched (origin sync) is their decision and is never second-guessed.
+ */
 export async function loadIntentRefs(db: Executor, locationId: string): Promise<CheckoutIntentRef[]> {
   const rows = await db
     .selectFrom('membership_checkouts as c')
     .leftJoin('sqsp_orders as o', 'o.id', 'c.matched_order_id')
-    .select([
+    .select((eb) => [
       'c.id',
       'c.customer_id',
       'c.membership_id',
@@ -70,6 +75,29 @@ export async function loadIntentRefs(db: Executor, locationId: string): Promise<
       'c.expires_at',
       'o.sqsp_order_id',
       'o.sqsp_customer_id as order_sqsp_customer_id',
+      eb
+        .and([
+          eb('c.origin', '=', 'link'),
+          eb.or([
+            eb.exists(
+              eb
+                .selectFrom('sqsp_customer_links as l')
+                .select(sql.lit(1).as('one'))
+                .whereRef('l.location_id', '=', 'c.location_id')
+                .whereRef('l.sqsp_customer_id', '=', 'o.sqsp_customer_id')
+                .whereRef('l.customer_id', '<>', 'c.customer_id'),
+            ),
+            eb.exists(
+              eb
+                .selectFrom('memberships as m')
+                .select(sql.lit(1).as('one'))
+                .whereRef('m.location_id', '=', 'c.location_id')
+                .whereRef('m.sqsp_customer_id', '=', 'o.sqsp_customer_id')
+                .whereRef('m.customer_id', '<>', 'c.customer_id'),
+            ),
+          ]),
+        ])
+        .as('order_held_by_another'),
     ])
     .where('c.location_id', '=', locationId)
     .where('c.state', 'in', ['open', 'matched', 'awaiting_match'])
@@ -86,6 +114,7 @@ export async function loadIntentRefs(db: Executor, locationId: string): Promise<
     expiresAt: r.expires_at,
     orderId: r.sqsp_order_id ?? undefined,
     orderSqspCustomerId: r.order_sqsp_customer_id ?? undefined,
+    ...(r.order_held_by_another === true ? { orderHeldByAnother: true } : {}),
   }))
 }
 

@@ -48,9 +48,14 @@ simulator. No route, job or behaviour beyond the policy gate and the masked mess
 - **Order matching** (`payments-sync/membership.ts`, `memberships/checkouts.ts`, migration `20261011050000`): the checkout-intent
   tier comes first (the bound order, an open intent's email + product + 72-hour window, then the renewals of a matched intent:
   the same Squarespace customer as its bound order, or the same email when that order names none); then the Squarespace id, a
-  **verified** email, the phone. An intent never outranks another client's identity: when the order's Squarespace id, verified
-  email or phone points at a different client the order is ambiguous for staff and the intent is not consumed (verifier F1: an
-  intent naming a member's email must not take their renewals). Residual for W3: an intent still names an email the client only
+  **verified** email, the phone. An intent never takes an order another client holds (verifier F1: an intent naming a member's
+  email must not take their renewals): another client's Squarespace link of ANY source, the Squarespace customer on another
+  client's membership row, another client's email on file even unverified (after the identity migration no email is verified
+  and legacy members' contacts were linked by email, so verified-only checks protected nobody), their phone, or their checkout
+  row for the same Squarespace customer. Such an intent is ignored and the order links as if it did not exist (its owner, or
+  `awaiting_match` / needs-customer for staff); a matched intent never binds a Squarespace customer another client's link or
+  membership row holds (`loadIntentRefs` `orderHeldByAnother`, rows staff matched excepted). The cost: a client whose typed email
+  is also on another client's record (a family address, a duplicate record) is decided by staff instead of the intent. Residual for W3: an intent still names an email the client only
   typed, so an order from a payer who is not an Oasis client at all goes to the intent's client; `POST membership/start` should
   ask for a fresh step-up (it does) and the page should say the email must be the one they pay with. An unverified email never links, and a
   Squarespace contact the contacts job linked by such an email does not either. A paid order that matches one client only through an

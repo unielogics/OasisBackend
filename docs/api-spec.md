@@ -1035,10 +1035,17 @@ Who a Squarespace membership order belongs to (`payments-sync/membership.ts link
    (`matched_order_id`, audit `membership.checkout.matched`); else the renewals of a `matched` intent: an order of the same
    Squarespace customer as the bound order (any email: Squarespace renews with the customer's current email) and product, or,
    when the bound order names no Squarespace customer, the same email and product. Two clients' intents for one order link
-   nobody (ambiguous). An intent (open or a renewal) never outranks another client's identity: when the order's Squarespace
-   customer id, verified email or phone points at a different client, the order is ambiguous (review flag `ambiguous_customer`
-   naming the order, a `membership_needs_customer` alert that says why), the intent is not consumed, and once it expires the
-   other tiers link the order again. An intent only names an email the client typed, so it can never take a member's renewals.
+   nobody (ambiguous). An intent (open or a renewal) never takes an order another client holds: a `sqsp_customer_links` row of
+   another client for the order's Squarespace customer (whatever its `source`, one the contacts job made by an unverified email
+   included), that Squarespace customer on another client's `memberships` row, another client's email on file (verified **or
+   not**: after the identity migration no member's email is verified), another client's phone, or another client's checkout row
+   (matched or `awaiting_match`) for the same Squarespace customer or this order. Such an intent is ignored (not consumed, never
+   making the order ambiguous): the order links through tiers 2-4 exactly as without it (its owner, `awaiting_match` for staff,
+   or nobody: then review flag `ambiguous_customer` naming the order and a `membership_needs_customer` alert that says why). A
+   matched intent never binds a Squarespace customer another client holds either: `loadIntentRefs` marks a row an intent matched
+   by itself (origin `link`) whose order's Squarespace customer is on another client's link or membership row
+   (`orderHeldByAnother`), and that row binds neither its order nor renewals; a row staff matched is never second-guessed. An
+   intent only names an email the client typed, so it can never take a member's renewals.
 2. The Squarespace customer id (`sqsp_customer_links`; a link the contacts job made **by email** counts only while that client's
    email is verified).
 3. An email the client **verified** (`customers.email_verified`; trigger `customers_email_unverify` drops the flag whenever the
@@ -1079,7 +1086,8 @@ membership, or one staff put on pending by hand, is never closed), with no paid 
 (`started_at` and every checkout row's `started_at` are 7 days old: a client who restarts the checkout gets the full window
 again), with no intent still open and no order waiting for staff, is canceled (`cancel_reason` `checkout_abandoned`, `manual_status_at` set so a later paid order still reactivates it), its
 open or expired intents `abandoned`, audit `membership.canceled` (actor "Membership checkouts"). It changes nothing when there are
-none. Tests: `test/payments-sync/membership-intents.test.ts` (pure), `test/memberships/checkouts.test.ts` (over the simulator),
+none. Tests: `test/payments-sync/membership-intents.test.ts` (pure), `test/memberships/checkouts.test.ts` (over the simulator: the legacy
+member, the member known only by their membership row and the honest new client of F1),
 `test/jobs/matrix-sqsp.test.ts`.
 
 ### 23.3 Realtime and alerts
