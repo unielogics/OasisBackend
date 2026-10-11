@@ -8,6 +8,7 @@ import { formatPhoneDisplay, normalizePhone } from '../../platform/phone.js'
 import './schema.js'
 import '../settings/schema.js'
 import type { CustomerSource, SmsOptInSource } from './schema.js'
+import { revokeForPhoneChange } from '../identity/revoke.js'
 
 registerProblems({
   CUSTOMER_PHONE_IN_USE: {
@@ -359,16 +360,24 @@ export async function updateCustomer(
     set.needs_details = name === 'Walk-in guest' || phone === null
   }
   if (Object.keys(set).length === 0) return toCustomer(row)
+  // a new number is a new identity (ADR 0160): the phone version moves on and the links, sessions and trust of the old one end
+  const phoneChanged = 'phone_e164' in set && set.phone_e164 !== row.phone_e164
   try {
     await tx
       .updateTable('customers')
-      .set((eb) => ({ ...set, version: eb('version', '+', 1), updated_at: eb.fn('app_now', []) }))
+      .set((eb) => ({
+        ...set,
+        ...(phoneChanged ? { phone_version: eb('phone_version', '+', 1) } : {}),
+        version: eb('version', '+', 1),
+        updated_at: eb.fn('app_now', []),
+      }))
       .where('id', '=', row.id)
       .execute()
   } catch (e) {
     if (isUniqueViolation(e)) throw new AppError('CUSTOMER_PHONE_IN_USE')
     throw e
   }
+  if (phoneChanged) await revokeForPhoneChange(tx, { customerId: row.id, oldPhone: row.phone_e164 })
   return requireCustomer(tx, row.id)
 }
 
