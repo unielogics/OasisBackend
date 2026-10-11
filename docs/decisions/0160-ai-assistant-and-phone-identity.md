@@ -273,7 +273,8 @@ action switches), the follow-up job does nothing while they or `leads.follow_up_
 - **Leads**: a booking closes the lead: the handler calls `markBooked`, and the follow-up job first closes every open lead whose
   client has a booking since the first contact (staff and website bookings included) instead of a hook in the booking code. A lead
   closed without a booking opens again on a new contact; the follow-up is still once per lead.
-- **Follow-up**: "never after STOP" = any opt-out of the number since the lead began, lifted or not, or an opt-out on the client;
+- **Follow-up**: only to numbers inside the rollout stage (`assistant.stage`: the allowlist, then clients, then everyone), so the
+  staged rollout (W5) holds for it too; "never after STOP" = any opt-out of the number since the lead began, lifted or not, or an opt-out on the client;
   business hours = the shop's hours, closures and emergency (it waits for the next opening inside the window, else it is dropped);
   the link is `issuedBy system` (not counted in the assistant's three a day); sender "Oasis AI". `lead_follow_up` joined
   `SENSITIVE_CLASSES` with the new `MASK_ONLY_CLASSES`: the link is masked in the message row and the outbox body wiped once final,

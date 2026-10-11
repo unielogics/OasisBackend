@@ -23,9 +23,9 @@ export interface JobCatalogEntry {
 
 export const jobCatalog: Record<string, JobCatalogEntry> = {
   'leads.follow_up': {
-    owner: 'leads',
+    owner: 'assistant (leads)',
     purpose:
-      'The one automatic follow-up text of a lead who did not book (ADR 0160, plan J): template lead_follow_up with a personal calendar link when PUBLIC_LINKS_ENABLED, after leads.follow_up_delay_min since their last text, inside business hours when leads.business_hours_only, within leads.within_hours of their last text, never after a STOP since the lead began, never to an opted-out number; a lead whose client booked since the first contact is closed as booked first. Nothing while AI_ENABLED, assistant.enabled or leads.follow_up_enabled is off.',
+      'The one automatic follow-up text of a lead who did not book (ADR 0160, plan J): template lead_follow_up with a personal calendar link when PUBLIC_LINKS_ENABLED, after leads.follow_up_delay_min since their last text, inside business hours when leads.business_hours_only, within leads.within_hours of their last text, never after a STOP since the lead began, never to an opted-out number, only to numbers inside the rollout stage (assistant.stage / assistant.allowlist); a lead whose client booked since the first contact is closed as booked first. Nothing while AI_ENABLED, assistant.enabled or leads.follow_up_enabled is off.',
     idempotency:
       'One follow-up per lead: the lead row is locked, the text carries the idempotency key lead-follow-up:<lead>, and the lead moves to followed_up with follow_up_message_id; a follow-up that can no longer go clears follow_up_at.',
     clock: 'Injected clock against the last text (lead and sms_inbox), the delay, the window and the business hours of the business tz.',
@@ -33,7 +33,7 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
     status: 'built',
   },
   'leads.provisional_archive': {
-    owner: 'leads',
+    owner: 'assistant (leads)',
     purpose:
       'Archives the welcome flow’s provisional clients ("New texter ••NNNN", source inbound_sms, needs_details) that never gave a name and never booked, 30 days after their last text: soft delete with archived_at (reversible: a new text from the number restores the record), the open lead closed, the thread kept for retention, an audit row (ADR 0160). Only rows the assistant created match.',
     idempotency: 'Archives only live provisional rows; an archived row is no longer live, so a repeat finds nothing.',

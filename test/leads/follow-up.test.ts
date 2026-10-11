@@ -142,6 +142,15 @@ describe('leads.follow_up', () => {
     expect(await w.t.db.selectFrom('client_links').select('id').execute()).toEqual([])
   })
 
+  it('keeps to the rollout stage: an allowlist stage follows up only listed numbers', async () => {
+    await strangerLead()
+    await w.setting('assistant.stage', 'allowlist')
+    await w.setting('assistant.allowlist', ['+12015550100'])
+    w.clock.advance(181 * MIN)
+    expect(await runLeadFollowUps(w.deps)).toMatchObject({ sent: 0, dropped: { not_in_stage: 1 } })
+    expect(await followUps()).toEqual([])
+  })
+
   it('names the interests in plain words', () => {
     const labels = new Map([['ppf', 'Paint protection']])
     expect(interestPhrase(['tint'], labels)).toBe('window tint')

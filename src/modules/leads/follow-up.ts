@@ -6,7 +6,8 @@
 //   - within leads.within_hours of their last text (the class refuses anything older than 24 hours anyway);
 //   - inside business hours when leads.business_hours_only (otherwise it waits for the next opening, still inside the window);
 //   - never after a STOP since the lead began (lifted by START or not), never to an opted-out number or client;
-//   - never once they booked (any booking since the first contact closes the lead first).
+//   - never once they booked (any booking since the first contact closes the lead first);
+//   - only to a number inside the assistant's rollout stage (assistant.stage / assistant.allowlist).
 // A follow-up that cannot go any more is dropped (follow_up_at cleared); a new text from the number plans it again.
 import { sql } from 'kysely'
 import type { Env } from '../../config/env.js'
@@ -226,6 +227,16 @@ async function followUpOne(
         .executeTakeFirst()
     : undefined
   const live = customer && customer.deleted_at === null && customer.merged_into === null && customer.phone_e164 === lead.phone_e164 ? customer : undefined
+  // the rollout stage the assistant answers in (W5: owner and staff numbers first, then clients, then everyone) holds for its
+  // follow-up too: a number the assistant would not answer now gets none
+  const stage = (await getSetting(tx, o.locationId, 'assistant.stage')).value
+  if (
+    (stage === 'allowlist' && !(await getSetting(tx, o.locationId, 'assistant.allowlist')).value.includes(lead.phone_e164)) ||
+    (stage === 'customers' && !live)
+  ) {
+    await setPlan(null)
+    return 'not_in_stage'
+  }
   const labels = new Map((await listCategories(tx, o.locationId)).map((c) => [c.key, c.label]))
   const interest = interestPhrase(lead.interests, labels)
   const first = live && !live.needs_details ? (live.full_name.trim().split(/\s+/)[0] ?? null) : null
