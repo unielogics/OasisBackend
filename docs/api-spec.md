@@ -1073,19 +1073,22 @@ closed (23.4a), and `ai.respond` / `ai.sweep` return at once while `AI_ENABLED=f
   hours, closures of the next 30 days, today, booking rules, guest fee, cancellation, VIP, arrival, automatic texts, the catalog with
   member/guest STARTING prices, tint "from" prices and quote-only items, the plans, the FAQ), cached per location by a hash of the
   source rows, the business date and the env values; byte-stable; Settings free text flattened to one line.
-- **Output guard** (`guard.ts`): markdown stripped, GSM-7, at most 320 characters (one shorten call, else cut at a sentence), at most one
-  question (one rewrite, else cut after the first), no web address but the shop website as text and the turn's `{linkN}`
-  placeholders (any top-level domain counts as a web address), never asking for a PIN, code, password, card number or card digits by
-  text (typing one in on the secure link page is fine); every `$` amount ("$45" or "45$") must be a starting price, a plan price or the
-  guest fee of the current facts (or a balance a tool declared), a service price introduced by "starts at" / "starting at" / "from"
-  right before it, a plan price or the fee only in a sentence naming its plan or the fee, never in a total or a combination; one
-  rewrite call, else the fallback. Refund, discount, free, guarantee, "ready by", damage and legal words hand off (only the owner's
-  own offer wording, plan perks and service descriptions, with the same content-word neighbour excepted). A refusal, a cut answer, an unknown stop, a provider error
-  or a timeout hand off too.
+- **Output guard** (`guard.ts`, allow-lists, never excusals): markdown stripped, GSM-7, at most 320 characters (one shorten call, else
+  cut at a sentence), at most one question (one rewrite, else cut after the first). Blocked wherever they appear, each with one
+  rewrite call and then the fallback: (A) any mention of a PIN, passcode, password, code, card number or digits, CVV or a 4-8 digit
+  code (a year and the shop's address digits excepted), except the server's exact safety lines; (B) promise words (free, discount,
+  refund, coupon, deal, guarantee, comp, waive, "on the house", "ready by", legal, insurance and damage words; only "feel free" and
+  "spot-free"-type phrases pass); (C) a `$` amount ("$45" or "45$") that is not a catalog starting price after "starts at" /
+  "starting at" / "from" in a clause naming its item or category, a plan price with "a month" next to its plan's label, the guest fee
+  next to "fee", or a balance a tool declared, and any total or combination; (D) a web address (any host-shaped label.label, "www",
+  "http", "://", a spelled-out dot) but the turn's `{linkN}` placeholders and the shop's own host as text; (E) a phone number other
+  than the shop's own. A rewrite that still trips a rule hands off (`policy_words` for promise words, else `guard`). A refusal, a cut
+  answer, an unknown stop, a provider error or a timeout hand off too. A reply with a `verify`, `pin`, `membership` or `pay` link gets
+  the server's line "For your security, enter codes and your PIN only on the secure page, never by text." after it.
 - **Reply**: free text through `enqueueFor` with `senderKind: 'ai'`, rendered from the `ai_reply` template (the first AI text of a
   conversation: "Oasis Auto Spa’s automated assistant here." + the STOP footer, never the AGENT offer; `disclosed_at`), class
   `ai_reply`, or `personal_link` with the links as `secretVars` (the thread shows `[private link]`); a registered link the reply
-  left out is appended.
+  left out is appended, then the safety line when one is due.
 - **Fallback and handoff** (`handoff.ts`): `ai_fallback` ("Thanks — a team member will text you back shortly.", at most one per
   conversation every 2 hours), `AssistantInbox.openHandoff` (no AI until staff answer), notification `assistant.handoff` once per
   open handoff, the thread unread, `alerts.changed`. A shop-wide cap or the budget also notifies the managers once a day

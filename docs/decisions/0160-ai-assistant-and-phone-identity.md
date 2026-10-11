@@ -274,27 +274,46 @@ the jobs `ai.respond` / `ai.sweep`, and the wiring (`wireAssistant` in `src/serv
 No migration: the W1 tables carry it. Contract: docs/api-spec.md section 23.4b. Everything is inert with the defaults (the gate marks
 nothing; both jobs return at once while `AI_ENABLED=false`). Notes and deviations:
 
-- **Pricing rule** follows design section 3b (newer than section 3's "every $ must appear in this turn's tool outputs"): an amount must be a
-  starting price, a plan price or the guest fee of the CURRENT shop facts, or an amount a tool of the turn declared (`amountsCents`: the
-  client's own balance); a service price needs "starts at" / "starting at" / "from" right before it (or opens a short list of starting
-  prices: "starts at $45 for members, $54 otherwise"), so "From Monday the wash is $45" is blocked; a plan price or the fee passes only
-  in a sentence that names its plan, "month", "membership", "plan" or "fee" (so "The Signature Hand Wash is $99" is blocked); "54$" is
-  read as an amount; totals and combinations ("total", "for both", "plus $", "together", tax, ...) are blocked. One rewrite call, then
-  the fallback.
-- **The shop website as text** is allowed in a reply (the contract's facts state it "as text"); every other web address is blocked (any
-  top-level domain: "oasis-pay.dev/x", "oasisautospanj.ai" too; "done.Thanks" is read as a missing space), and only the turn's
-  registered `{linkN}` placeholders pass.
-- **Secrets**: a sentence that asks the client to text, send, reply with, share or tell a PIN, a code, a password, card numbers or the
-  last 4 digits of a card is blocked whatever link or page it mentions; typing one in is fine only on the secure link page ("enter your
-  PIN on the secure page"); "we'll text you a code" and "never by text" are not asks.
-- **Phone numbers** are masked in the context and the stored transcript in every common form ("(201) 555-0123", "201.555.0123",
-  "+44 20 7946 0958"): one shared pattern (`transcript.ts` `NANP_PHONE` / `INTL_PHONE`).
-- **Handoff words**: "free" is not one in "feel free", "a free slot", "spot-free" and the like (each benign phrase excuses only its own
-  "free": "Your first wash is free, feel free to stop by" hands off); a word the owner wrote as an offer (`facts.ts` `ownerWording`:
-  plan perks, service descriptions, VIP notes) with the same content-word neighbour (the VIP perk "Priority booking and same-day
-  guarantee") may be repeated. Never the server's own lines of the facts ("never offer a discount") and never an FAQ answer (answers
-  deny as often as they offer), and never by a function-word neighbour ("a discount"). The facts phrase the cancellation policy
-  without "refund".
+- **The output guard works by ALLOW-LISTS and REWRITE-FIRST** (owner-level redesign, 2026-10-11, after two review rounds showed that
+  regex excusals kept opening holes: the "warning" excuse let "Don't forget to text me your PIN." through, the benign-"free" list let
+  "free spot cleaning" through, owner wording excused "paint damage"). A forbidden thing is blocked wherever it appears; only an exact,
+  server-owned phrase lets it through; nothing is excused because a "link", a "warning", the owner's facts or a capitalised word sits
+  nearby. Every hit costs one rewrite call; a reply that still trips a rule after it becomes the fallback and a handoff (`policy_words`
+  when promise words remain, else `guard`).
+  - **(A) PINs, codes, passwords, card numbers** (`secret`): a reply never mentions them: "PIN" (also "P.I.N.", "pincode"),
+    passcode, password, any "code" (only "zip/postal/area/dress/paint/color/QR/bar code" are allowed phrases), OTP, card number /
+    details / digits, CVV, the last 4 digits, and any 4-8 digit run (a year 19xx/20xx and the digit runs of the shop's own address
+    excepted). The only exception is one of `guard.ts` `SAFETY_LINES`, written exactly as a whole sentence: the server's
+    `SAFETY_LINE` "For your security, enter codes and your PIN only on the secure page, never by text." and the `code_on_link_page`
+    template's line. When a `verify`, `pin`, `membership` or `pay` link goes out, the SERVER appends `SAFETY_LINE` after the reply and
+    its link (`composeReply`, the reply's limit shrinks by its length); the prompt tells the model to write nothing about PINs or codes.
+  - **(B) Promise words** (`promise_words`): free, discount, refund, money back, coupon, promo, deal, guarantee, warranty, comp,
+    complimentary, compensation, waive, "on the house", "it's on us", "no charge", "no cost", "% off", "$10 off", "save $", "ready
+    by/at/in", "done by", legal, lawyer, liable, insurance, damage. Only the whole phrases "feel free" and "spot-free" /
+    "streak-free" / "scratch-free" / "swirl-free" / "touch-free" / "toll-free" / "hands-free" / "stress-free" / "worry-free" /
+    "hassle-free" pass ("free to" is not one: "The wash is free to all members" is blocked). No owner-wording or facts excusal: when
+    the owner's perk says "same-day guarantee", the prompt tells the model to say it another way. The prompt says "open times /
+    openings", never "free times". A rewrite that drops the word goes out with no handoff (a false positive costs one call); the
+    prompt still sends refund, damage and legal questions to `handoff_to_staff`.
+  - **(C) Pricing** (design section 3b, newer than section 3's "every $ must appear in this turn's tool outputs"): a dollar amount
+    ("$45", "45$", "45 dollars") is allowed only as (1) a catalog starting price with "starts at" / "starting at" / "from" right
+    before it, in a clause that names that item, a distinctive word of its name or its category (`facts.ts` `itemNames`: "Signature
+    Hand Wash", "Signature", "Wash"; tint prices by "tint" or the film), and not followed by "a month"; a short list it opens may
+    continue ("starts at $45 for members, $54 otherwise"; "Tint starts at $229 for a sedan or $275 for an SUV"); (2) a plan's monthly
+    price with "a month" / "/month" / "per month" right after it and the plan's label right before it (at most four words between,
+    no comma) or "for Gold" after it; (3) the guest booking fee next to the word "fee" ("the booking fee is $25", "a $25 booking
+    fee"); (4) an amount a tool of the turn declared (`amountsCents`: the client's own balance). Totals and combinations ("total",
+    "for both", "plus $", "together", tax, ...) are always blocked. So "The Signature Hand Wash is $99", "With Gold, the Signature
+    Hand Wash is $99", "Our Gold membership is $99" (no "a month") and "From Monday the wash is $45" are blocked.
+  - **(D) Web addresses** (`url`): "http", "://", "www", a spelled-out dot ("dot com", "(dot)") and anything shaped like a host name
+    (label.label with a last label of 2+ letters, any case, any TLD) are blocked; only the turn's registered `{linkN}` placeholders
+    and the shop's own host exactly, as text with no path or port (the facts state it, and the shop's email uses it), pass. "See
+    you soon.Thanks!" is blocked too: the rewrite adds the space (its hint says so), so an ordinary sentence still goes out after one
+    call, while "oasis-deals.Shop" never does.
+  - **(E) Phone numbers** are masked for the model and in the stored transcript in every form: "(201) 555-0123", "201.555.0123",
+    "201-555-0123", "+1 201 555 0123", "2015550123", "+44 20 7946 0958" and the 7-digit "555-0123" (`transcript.ts` `NANP_PHONE`,
+    `INTL_PHONE`, `LOCAL_PHONE`, shared by `maskForModel` and `redactText`). A reply may write only the shop's own numbers
+    (`phone`).
 - **One question per text** (the owner's intake rule) is enforced by the guard: one rewrite, else the text is cut after its first question.
   Too long: one shorten call, else a cut at a sentence.
 - **Disclosure**: the first AI text of a conversation is the template `ai_reply` with its disclosure block, "Oasis Auto Spa’s automated
