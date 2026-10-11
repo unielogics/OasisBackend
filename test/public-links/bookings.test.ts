@@ -127,6 +127,36 @@ describe('POST bookings', () => {
     })
   })
 
+  it('fills an empty email but never replaces the email on file, so a PIN reset’s notice still reaches the real owner', async () => {
+    // a page trusted by the number alone (no PIN typed) books with someone else's email
+    const id = await h.customer({ email: 'real.owner@example.test' })
+    await sql`update customers set email_verified = true where id = ${id}`.execute(h.db)
+    const a = await h.page({ customerId: id })
+    await h.verifyByCode(a.session)
+    expect((await h.call('POST', 'pin', { session: a.session, body: { pin: '4826' } })).statusCode).toBe(200)
+    await h.trust(id)
+    const { session } = await h.page({ customerId: id })
+    const r = await book(session, wash({ email: 'attacker@evil.example' }))
+    expect(r.statusCode, r.body).toBe(201)
+    const owner = () => h.db.selectFrom('customers').select(['email', 'email_verified']).where('id', '=', id).executeTakeFirstOrThrow()
+    expect(await owner()).toEqual({ email: 'real.owner@example.test', email_verified: true })
+    // a reset by code on the number: the notice goes to the email on file, never to the address typed on the page
+    const b = await h.page({ customerId: id, kind: 'book_again' })
+    expect((await h.verifyByCode(b.session, 'pin_reset')).statusCode).toBe(200)
+    expect((await h.call('POST', 'pin/reset', { session: b.session, body: { pin: '5917' } })).statusCode).toBe(200)
+    const notices = await h.db.selectFrom('outbox_emails').select(['to_email', 'template']).where('template', '=', 'pin_reset_notice').execute()
+    expect(notices).toEqual([{ to_email: 'real.owner@example.test', template: 'pin_reset_notice' }])
+    // a client with no email on file: the page may fill it (unverified, so it never links an order by itself)
+    const liam = await h.customer({ name: 'Liam Ortiz', phone: PHONES.liam })
+    await h.trust(liam, PHONES.liam)
+    const p = await h.page({ customerId: liam })
+    expect((await book(p.session, wash({ email: 'liam@example.test', startMin: 14 * 60 }))).statusCode).toBe(201)
+    expect(await h.db.selectFrom('customers').select(['email', 'email_verified']).where('id', '=', liam).executeTakeFirstOrThrow()).toEqual({
+      email: 'liam@example.test',
+      email_verified: false,
+    })
+  })
+
   it('refuses in the website’s words: past, off the grid, an unknown service; other kinds of links cannot book', async () => {
     const { id, session } = await trustedPage()
     expect(json(await book(session, wash({ startMin: 9 * 60 })))).toMatchObject({ status: 409, code: 'PUBLIC_SLOT_PAST' })

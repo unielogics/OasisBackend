@@ -244,7 +244,9 @@ default: every route answers the unknown-route 404 while `PUBLIC_LINKS_ENABLED` 
   too (`IDENTITY_LINK_INVALID` / `IDENTITY_SESSION_INVALID`).
 - **The gate and the Origin**: the 404 comes before validation, limits, the session and any record; only the platform's own Origin
   check of every public POST (src/http/hooks.ts) runs before it, so a POST from a disallowed Origin is 403 even while the routes are
-  closed. The allowlist is also applied to the GETs (`me`, `availability`) when an Origin is sent.
+  closed. The allowlist is also applied to the GETs (`me`, `availability`) when an Origin is sent. The closed answer also drops the
+  `X-API-Version` header the platform sets on matched `/api/` routes, so its headers equal an unknown route's (tested header by
+  header apart from date, request id, length and the shared address counter).
 - **CSP-safe JSON**: besides the API's `default-src 'none'` CSP and nosniff, the link routes send `<`, `>` and `&` inside JSON as
   `<`, `>`, `&`, so a client's name can never be read as markup by a page or a sniffer.
 - **What a page may show** (the design names only first name and last two digits): the visits (`appointments`) only once the page is
@@ -259,7 +261,9 @@ default: every route answers the unknown-route 404 while `PUBLIC_LINKS_ENABLED` 
   source `link` (new value), the website's grid, confirmation text and slot wording. Member privileges (no fee, VIP rules) only for
   the link's own client, never during a reset hold. On a stranger's link (no client yet: a lead) the page must be verified by code
   and `name` is required; the client is created then (source online, consent as given). A name typed on a client's link only fills a
-  placeholder name. The replay of an Idempotency-Key is the platform's for anonymous callers (key + client address): a retry from
+  placeholder name, and an email only fills an empty one: the email on file (and its `email_verified`) is never replaced from a
+  link page. Otherwise a page verified by the number's trust alone (a SIM swap or recycled number) could move the address a PIN
+  reset's email notice goes to, then reset the PIN by code without the owner hearing of it; staff change a client's email. The replay of an Idempotency-Key is the platform's for anonymous callers (key + client address): a retry from
   another address books again only if the slot and the link's uses still allow it.
 - **Reschedules** check the online rules with the page's privileges first, then call the dashboard's `rescheduleAppointment`, whose
   own (desk) check reads VIP status from the staff's VIP list only. Consequence: an active member of the VIP plan who is not on that

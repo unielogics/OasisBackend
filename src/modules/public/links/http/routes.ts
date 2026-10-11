@@ -134,8 +134,12 @@ export function registerLinkRoutes(d: LinkRoutesDeps): void {
 
   const guard = {
     onRequest: async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
-      // closed: exactly the answer of an unknown route (no header of ours, nothing validated, limited or written)
-      if (!app.env.PUBLIC_LINKS_ENABLED) throw new AppError('ROUTE_NOT_FOUND', { meta: { method: req.method, path: req.url.split('?')[0] ?? '' } })
+      // closed: exactly the answer of an unknown route (no header of ours, nothing validated, limited or written); the API version
+      // header the app hook sets on matched /api/ routes goes too, so a prober cannot tell which paths exist
+      if (!app.env.PUBLIC_LINKS_ENABLED) {
+        void reply.removeHeader('X-API-Version')
+        throw new AppError('ROUTE_NOT_FOUND', { meta: { method: req.method, path: req.url.split('?')[0] ?? '' } })
+      }
       void reply.header('Cache-Control', 'no-store')
       const origin = req.headers.origin
       if (origin !== undefined && (origin === 'null' || !origins.has(origin))) throw new AppError('ORIGIN_NOT_ALLOWED')
@@ -381,7 +385,7 @@ export function registerLinkRoutes(d: LinkRoutesDeps): void {
         summary: 'Book a visit from a calendar or book-again link (verified page)',
         description:
           `${bearerNote} Idempotency-Key required. 403 \`IDENTITY_STEP_UP_REQUIRED\` until the page is verified (a PIN or code here, or the number’s live 30-day trust); 401 \`LINK_WRONG_PURPOSE\` on another kind of link; 409 \`IDENTITY_LINK_USED\` once the link’s bookings are spent (calendar 3, book-again 1). ` +
-          'Books through the dashboard’s createAppointment with channel `online` (lead time, windows, paused days, no overrides) and source `link`, on the board’s grid (422 otherwise), the categories of the package and add-ons, the invoice and the `booking_confirmed_web` text. The fee and the VIP rules follow the page’s own client (an active member: no fee; VIP client or VIP-plan member: the VIP rules), never during a PIN reset’s 72-hour hold. On a stranger’s link `name` is required and creates the client (source online, `smsConsent` their consent); on a client’s link `name` only fills a placeholder name and `email` corrects theirs. ' +
+          'Books through the dashboard’s createAppointment with channel `online` (lead time, windows, paused days, no overrides) and source `link`, on the board’s grid (422 otherwise), the categories of the package and add-ons, the invoice and the `booking_confirmed_web` text. The fee and the VIP rules follow the page’s own client (an active member: no fee; VIP client or VIP-plan member: the VIP rules), never during a PIN reset’s 72-hour hold. On a stranger’s link `name` is required and creates the client (source online, `smsConsent` their consent); on a client’s link `name` only fills a placeholder name and `email` only fills an empty one (never replaces the email on file, so a PIN reset’s notice still reaches the owner). ' +
           'Slot refusals in the website’s words (409 `PUBLIC_SLOT_TAKEN`, `PUBLIC_SLOT_VIP`, `PUBLIC_SLOT_PAST`, `PUBLIC_SLOT_CLOSED`, `PUBLIC_SLOT_TOO_FAR`). Limits: 10 an hour per address, 5 per link and 5 per number.',
         body: BookingBody,
         response: { 201: BookingResult },

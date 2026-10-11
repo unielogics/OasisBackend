@@ -22,6 +22,10 @@ const ROUTES: ['GET' | 'POST', string, unknown][] = [
   ['POST', 'pay/start', { extra: 1 }],
 ]
 
+// the date, request id, body length (the problem names the path) and the shared address counter differ per request
+const PER_REQUEST = /^(date|x-request-id|content-length|x-ratelimit-.*|retry-after)$/
+const headersOf = (r: { headers: Record<string, unknown> }) => Object.fromEntries(Object.entries(r.headers).filter(([k]) => !PER_REQUEST.test(k)))
+
 describe('personal links closed', () => {
   it('answers every route like an unknown route: 404 ROUTE_NOT_FOUND, no no-store header, nothing validated, limited or written', async () => {
     const unknown = await h.call('POST', 'no-such-route', { body: {} })
@@ -32,6 +36,8 @@ describe('personal links closed', () => {
       expect(json(r)).toMatchObject({ code: 'ROUTE_NOT_FOUND', status: 404, title: json(unknown).title, detail: json(unknown).detail })
       expect(r.headers['cache-control'], path).toBeUndefined()
       expect(r.headers['content-type']).toBe(unknown.headers['content-type'])
+      // the same headers as an unknown route (no X-API-Version that would tell a prober the path exists), apart from per-request ones
+      expect(headersOf(r), `${method} ${path}`).toEqual(headersOf(unknown))
     }
     const counts = await sql<{ limits: number; sessions: number; keys: number }>`select
       (select count(*)::int from public_rate_limits) as limits,

@@ -404,10 +404,11 @@ export async function bookOnLink(tx: Tx, d: LinkDeps, s: SessionView, r: LinkReq
     const c = await getCustomer(tx, s.customerId)
     if (!c || c.deletedAt || c.mergedInto) throw new AppError('IDENTITY_SESSION_INVALID')
     customerId = c.id
-    // the verified owner of the number may fill a placeholder name and correct their email (never replace a real name)
+    // the page may fill a placeholder name and an empty email, never replace a real name or the email on file: a page verified
+    // by the number alone must not move the address a PIN reset's notice goes to (nor drop a verified email); staff change it
     const patch: { fullName?: string; email?: string | null } = {}
     if (name && name !== c.fullName && isPlaceholderName(c)) patch.fullName = name
-    if (email && email.toLowerCase() !== (c.email ?? '').toLowerCase()) patch.email = email
+    if (email && !c.email) patch.email = email
     if (Object.keys(patch).length) await updateCustomer(tx, { id: c.id, patch })
   } else {
     if (!name) throw bad('name', 'Enter your name.')
