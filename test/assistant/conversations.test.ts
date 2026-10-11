@@ -557,6 +557,20 @@ describe('the turn', () => {
     expect(a.enqueued).toEqual([{ name: 'ai.respond', data: { conversationId: c.id }, opts: { singletonKey: c.id } }])
   })
 
+  it('a staff text while the model was thinking stands: the AI reply is not sent', async () => {
+    const a = assistant([simText('We open at 8 AM.', { delayMs: 300 })])
+    await inbound(maria(), 'when do you open?')
+    const running = a.turn(maria())
+    await new Promise((r) => setTimeout(r, 50))
+    await w.tx(async (tx) => {
+      const t = (await w.rt.queue.target(tx, w.locationId, w.customer('Maria Delgado').id))!
+      await w.rt.queue.enqueueFor(tx, { locationId: w.locationId, customerId: w.customer('Maria Delgado').id, recipient: t.recipient, appointmentId: null, text: 'We open at 8, Maria!', klass: 'staff_message', purpose: 'staff', senderKind: 'staff' })
+    })
+    expect(await running).toMatchObject({ status: 'skipped', reason: 'superseded' })
+    expect((await aiTexts(maria())).map((m) => m.sender_kind)).toEqual(['staff'])
+    expect(await conversationOf(maria())).toMatchObject({ pending_since: null, running_since: null })
+  })
+
   it('records the turn: usage, cost, trust, the redacted transcript with no phone number, the audit row', async () => {
     const a = assistant([simText('We are open until 6 PM.', { usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 50 } })])
     await inbound(maria(), `my number is ${maria()} and my email is maria@example.com`)

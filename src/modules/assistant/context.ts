@@ -136,7 +136,7 @@ const STATUS_WORDS: Record<string, string> = {
 export function maskForModel(text: string): string {
   return text
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '[id]')
-    .replace(/(?:\+?\d[\s().-]?){10,}/g, (m) => (/\d{2}/.test(m) ? '[number]' : m))
+    .replace(/\+?\d(?:[\s().-]?\d){9,}/g, '[number]')
     .replace(/\b(?:oa_|tok_)[A-Za-z0-9_-]{8,}\b/g, '[token]')
 }
 
