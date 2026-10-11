@@ -8,6 +8,7 @@
 // It never changes anything, never prints a credential, and contacts instance metadata only with --instance-profile.
 import { applySecretEnvironment } from '../../src/config/secrets-source.js'
 import { aiEnvFragment } from '../../src/integrations/ai/env.js'
+import { CLAUDE_BEDROCK_MODELS, TARGET_ASSISTANT_MODEL, findClaudeModel } from '../../src/integrations/ai/models.js'
 import {
   BedrockProvider,
   MODEL_ACCESS_RE,
@@ -31,7 +32,7 @@ const DOC = 'docs/aws-setup.md, The AI assistant: Claude on Amazon Bedrock'
 export const AI_ITEMS: readonly ItemDef[] = [
   {
     id: 'AI-01',
-    title: 'Settings: AI_BEDROCK_MODEL_ID names a Claude inference profile, AI_BEDROCK_REGION a region',
+    title: 'Settings: AI_BEDROCK_MODEL_ID names a Claude inference profile the IAM grant covers, AI_BEDROCK_REGION a region',
     source: `${DOC}, settings`,
   },
   {
@@ -48,7 +49,7 @@ export const AI_ITEMS: readonly ItemDef[] = [
 
 export const AI_OPTIONS = {
   flags: ['instance-profile', 'probe-effort'],
-  options: ['sim-port', 'sim-scenario', 'max-tokens'],
+  options: ['sim-port', 'sim-scenario', 'max-tokens', 'model'],
 } as const
 
 const SCENARIOS: readonly BedrockSimScenario[] = [
@@ -72,16 +73,28 @@ const ping = (maxTokens: number): AiConverseRequest => ({
   maxTokens,
 })
 
+const LISTED = CLAUDE_BEDROCK_MODELS.map((m) => m.profileId).join(', ')
+
+/** The Claude model of an AI_BEDROCK_MODEL_ID in words, and its foundation model id (for the console and the CLI). */
+function describeModel(model: string): { label: string; foundation: string } {
+  const m = findClaudeModel(model)
+  return {
+    label: m?.label ?? model,
+    foundation: (m?.foundationModel ?? model.replace(/^(us|eu|apac|global)\./, '')).replace(/\*$/, ''),
+  }
+}
+
 /** What an AiProviderError from the ping means for the operator, and what to do. */
 export function explain(
   e: AiProviderError,
   ctx: { model: string; region: string },
 ): { detail: string; fix: string } {
   const m = e.message
+  const d = describeModel(ctx.model)
   if (e.kind === 'access_denied' && /quota:/.test(m))
     return {
       detail: `QUOTA: the account's quota for ${ctx.model} is 0 ("not available for this account"): ${m}`,
-      fix: `Open a free AWS Support case (Account and billing) asking to apply the default Bedrock quota "On-demand model inference tokens per minute" (and requests per minute) for Anthropic Claude Sonnet 5.5, cross-region, in ${ctx.region}; the Service Quotas API refuses an increase to a value at or below the default. Text and steps: ${DOC}, step 2.`,
+      fix: `Open a free AWS Support case (Account and billing) asking to apply the default Bedrock quota "On-demand model inference tokens per minute" (and requests per minute) for Anthropic ${d.label}, cross-region, in ${ctx.region}; the Service Quotas API refuses an increase to a value at or below the default. Until then run on a model the account has quota for (AI_BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-4-6). Text and steps: ${DOC}, step 2.`,
     }
   if (e.kind === 'access_denied' && BAD_CREDENTIALS.test(m))
     return {
@@ -91,7 +104,7 @@ export function explain(
   if (e.kind === 'access_denied' && MODEL_ACCESS_RE.test(m))
     return {
       detail: `MODEL ACCESS: the account may not use ${ctx.model} yet: ${m}`,
-      fix: `Bedrock console, Model access: the Anthropic use-case form and the model agreement (Marketplace offer) must be complete for anthropic.claude-sonnet-5-5; check with aws bedrock get-foundation-model-availability --model-id anthropic.claude-sonnet-5-5 --region ${ctx.region}. ${DOC}, step 1.`,
+      fix: `Bedrock console, Model access: the Anthropic use-case form and the model agreement (Marketplace offer) must be complete for ${d.foundation}; check with aws bedrock get-foundation-model-availability --model-id ${d.foundation} --region ${ctx.region}. ${DOC}, step 1.`,
     }
   if (e.kind === 'access_denied')
     return {
@@ -101,7 +114,7 @@ export function explain(
   if (e.kind === 'invalid_request')
     return {
       detail: `the request was rejected: ${m}`,
-      fix: `AI_BEDROCK_MODEL_ID must be the inference profile id (us.anthropic.claude-sonnet-5-5) and AI_BEDROCK_REGION a region of that profile (us-east-1); a rejected effort field means AI_BEDROCK_EFFORT_MODE must stay off.`,
+      fix: `AI_BEDROCK_MODEL_ID must be an inference profile id (one of ${LISTED}) and AI_BEDROCK_REGION a region of that profile (us-east-1); a rejected effort field means AI_BEDROCK_EFFORT_MODE must stay off.`,
     }
   if (e.kind === 'throttled')
     return {
@@ -119,6 +132,9 @@ export function explain(
   }
 }
 
+/** The defaults of the two settings this check always names. */
+const s0 = () => aiEnvFragment.pick({ AI_BEDROCK_REGION: true, AI_BEDROCK_MODEL_ID: true }).parse({})
+
 export async function runAi(ctx: RunContext): Promise<RunResult> {
   try {
     return await runInner(ctx)
@@ -129,7 +145,11 @@ export async function runAi(ctx: RunContext): Promise<RunResult> {
 }
 
 async function runInner(ctx: RunContext): Promise<RunResult> {
-  const { args, env } = ctx
+  const { args } = ctx
+  // --model: try another listed model before switching AI_BEDROCK_MODEL_ID (the env files win over a variable on the command line)
+  const modelArg = args.value('model')
+  if (modelArg !== undefined && !modelArg.trim()) throw new UsageError('--model needs an inference profile id')
+  const env = modelArg ? { ...ctx.env, AI_BEDROCK_MODEL_ID: modelArg.trim() } : ctx.env
   const sim = args.flag('sim')
   const scenario = args.value('sim-scenario') as BedrockSimScenario | undefined
   if (scenario !== undefined && !sim) throw new UsageError('--sim-scenario is for --sim')
@@ -170,7 +190,7 @@ async function runInner(ctx: RunContext): Promise<RunResult> {
           },
         ],
         [
-          'Optional: AI_BEDROCK_REGION (us-east-1), AI_BEDROCK_MODEL_ID (us.anthropic.claude-sonnet-5-5), AI_BEDROCK_EFFORT_MODE, AI_EFFORT.',
+          `Optional: AI_BEDROCK_REGION (us-east-1), AI_BEDROCK_MODEL_ID (default ${s0().AI_BEDROCK_MODEL_ID}; ${TARGET_ASSISTANT_MODEL} once its quota is raised), AI_BEDROCK_EFFORT_MODE, AI_EFFORT.`,
           `Steps: ${DOC}.`,
         ],
       )
@@ -184,9 +204,7 @@ async function runInner(ctx: RunContext): Promise<RunResult> {
       }
   }
 
-  const s = parsed.success
-    ? parsed.data
-    : aiEnvFragment.pick({ AI_BEDROCK_REGION: true, AI_BEDROCK_MODEL_ID: true }).parse({})
+  const s = parsed.success ? parsed.data : s0()
   const region = s.AI_BEDROCK_REGION
   const model = s.AI_BEDROCK_MODEL_ID
   const report = new Report(
@@ -221,12 +239,18 @@ async function runInner(ctx: RunContext): Promise<RunResult> {
       r.fail(
         'AI-01',
         `AI_BEDROCK_MODEL_ID=${model}, AI_BEDROCK_REGION=${region}`,
-        'The app calls Claude through a cross-region inference profile: AI_BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-5-5 with AI_BEDROCK_REGION=us-east-1.',
+        `The app calls Claude through a cross-region inference profile: AI_BEDROCK_MODEL_ID one of ${LISTED}, with AI_BEDROCK_REGION=us-east-1.`,
+      )
+    else if (!findClaudeModel(model))
+      r.fail(
+        'AI-01',
+        `AI_BEDROCK_MODEL_ID=${model} is not one of the models the app role may call (${LISTED})`,
+        'Use one of those, or add the model to src/integrations/ai/models.ts (its prices too) and re-run pnpm aws:provision --bedrock --apply so the IAM grant covers it.',
       )
     else
       r.pass(
         'AI-01',
-        `${model} in ${region}; effort ${p.AI_EFFORT} sent as ${p.AI_BEDROCK_EFFORT_MODE}; the app runs AI_PROVIDER=${p.AI_PROVIDER}, AI_ENABLED=${p.AI_ENABLED}`,
+        `${model} (${describeModel(model).label}) in ${region}; effort ${p.AI_EFFORT} sent as ${p.AI_BEDROCK_EFFORT_MODE}; the app runs AI_PROVIDER=${p.AI_PROVIDER}, AI_ENABLED=${p.AI_ENABLED}`,
       )
     if (p.AI_PROVIDER !== 'bedrock')
       r.note(
@@ -317,6 +341,8 @@ With OASIS_SECRET_ID set, the settings are read from that secret first, like the
 
   --instance-profile    use the IAM role of this EC2 host (the only way instance metadata is contacted)
   --probe-effort        also try the two effort fields (up to two more one-token calls) and say which one the model accepts
+  --model ID            call this inference profile instead of AI_BEDROCK_MODEL_ID (e.g. us.anthropic.claude-sonnet-5-5 before
+                        switching to it; it must be one the app role is granted)
   --max-tokens N        output tokens of the ping (default 1)
   --sim                 run against the built-in Bedrock stand-in (--sim-port, --sim-scenario ${SCENARIOS.join('|')})
   --out-dir DIR         where reports go (default docs/live-verification)

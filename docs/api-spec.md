@@ -1107,14 +1107,17 @@ when none ever ran. With `JOBS_ENABLED=false` the answer is `{enabled: false, jo
 Besides `email`, `storage`, `sms` and `squarespace` (ADR 0112) the answer has a fifth row, `key: 'ai'`: `provider` is
 `AI_PROVIDER` (`sim` | `bedrock`), `live` is `bedrock`, `missing` is `AI_PROVIDER=bedrock` while simulated (and the AWS
 credentials when live and none is available), `warnings` say why the assistant answers nothing (`AI_ENABLED=false`, Settings,
-Assistant off), the rollout stage when it is not `everyone`, the simulator answering while enabled, and a reached daily
+Assistant off), the rollout stage when it is not `everyone`, the simulator answering while enabled, a live
+`AI_BEDROCK_MODEL_ID` outside the models the app role is granted (`src/integrations/ai/models.ts`), and a reached daily
 budget. `lastSuccessAt` is the last `replied` turn, `lastErrorAt` / `lastError` the last `failed` turn (error masked, 300
 characters). `details`:
 
 ```
-{ model ('sim' or AI_BEDROCK_MODEL_ID), region (null while simulated), enabled (AI_ENABLED and assistant.enabled),
+{ model ('sim' or AI_BEDROCK_MODEL_ID), modelLabel ('Claude Sonnet 4.6' ..., null while simulated or for an unlisted model),
+  region (null while simulated), enabled (AI_ENABLED and assistant.enabled),
   envEnabled, settingEnabled, stage, actionsEnabled, effortMode (AI_BEDROCK_EFFORT_MODE),
-  turnsToday, spendTodayUsd (sum of cost_micros since the location's midnight), dailyBudgetUsd, credentials }
+  turnsToday, spendTodayUsd (sum of cost_micros since the location's midnight), dailyBudgetUsd,
+  priceSource ('env' | 'model' | 'mixed' | 'highest': where the AI_PRICE_* of cost_micros come from), credentials }
 ```
 
 

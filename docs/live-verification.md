@@ -260,11 +260,12 @@ What to prepare and why each step is needed: [aws-setup.md](aws-setup.md), "The 
 ```bash
 sudo $D/verify.sh ai --instance-profile                  # one Converse call of one output token (far below a cent)
 sudo $D/verify.sh ai --instance-profile --probe-effort   # + up to two more: which effort field the model takes
+sudo $D/verify.sh ai --instance-profile --model us.anthropic.claude-sonnet-5-5   # before switching models: the new one answers
 ```
 
 | # | What it checks |
 |---|---|
-| AI-01 | `AI_BEDROCK_MODEL_ID` is a Claude inference profile (`us.anthropic.claude-sonnet-5-5`) and `AI_BEDROCK_REGION` a region; notes `AI_PROVIDER` and `AI_ENABLED` |
+| AI-01 | `AI_BEDROCK_MODEL_ID` is one of the Claude inference profiles the app role is granted (`us.anthropic.claude-sonnet-4-6`, the interim default; `us.anthropic.claude-opus-4-6-v1`, `us.anthropic.claude-sonnet-5-5`, `us.anthropic.claude-opus-5-5`) and `AI_BEDROCK_REGION` a region; notes `AI_PROVIDER` and `AI_ENABLED` |
 | AI-02 | the ping through the app's own `BedrockProvider`, sent exactly as the app would (its `AI_BEDROCK_EFFORT_MODE` included). A FAIL says which: **IAM** (`pnpm aws:provision --bedrock`), **MODEL ACCESS** (the Anthropic use-case form and agreement), **QUOTA** (the account's tokens-per-minute quota for the model is 0, AWS says "not available for this account": a support case), throttling, an outage, or a rejected request |
 | AI-03 | with `--probe-effort`: whether `outputConfig.effort` and the Anthropic `output_config` field are accepted, so `AI_BEDROCK_EFFORT_MODE` can be switched from `off` |
 

@@ -18,7 +18,7 @@ describe('verify:ai --sim', () => {
     const r = await run(['--sim'])
     expect(r.code, r.out).toBe(0)
     expect(r.out).toMatch(
-      /PASS AI-01 .*us\.anthropic\.claude-sonnet-5-5 in us-east-1; effort low sent as off; the app runs AI_PROVIDER=sim, AI_ENABLED=false/,
+      /PASS AI-01 .*us\.anthropic\.claude-sonnet-4-6 \(Claude Sonnet 4\.6\) in us-east-1; effort low sent as off; the app runs AI_PROVIDER=sim, AI_ENABLED=false/,
     )
     expect(r.out).toMatch(/PASS AI-02 .*answered in \d+ ms \(stop max_tokens, 12 tokens in, 1 out\)/)
     expect(r.out).toMatch(/SKIP AI-03 .*pass --probe-effort/)
@@ -36,20 +36,20 @@ describe('verify:ai --sim', () => {
       ],
       [
         'model_access',
-        /FAIL AI-02 .*MODEL ACCESS: the account may not use us\.anthropic\.claude-sonnet-5-5 yet/,
-        /fix: Bedrock console, Model access: the Anthropic use-case form and the model agreement/,
+        /FAIL AI-02 .*MODEL ACCESS: the account may not use us\.anthropic\.claude-sonnet-4-6 yet/,
+        /fix: Bedrock console, Model access: the Anthropic use-case form and the model agreement .*for anthropic\.claude-sonnet-4-6; check with aws bedrock get-foundation-model-availability --model-id anthropic\.claude-sonnet-4-6 /,
       ],
       [
         'quota',
-        /FAIL AI-02 .*QUOTA: the account's quota for us\.anthropic\.claude-sonnet-5-5 is 0 \("not available for this account"\)/,
-        /fix: Open a free AWS Support case \(Account and billing\)/,
+        /FAIL AI-02 .*QUOTA: the account's quota for us\.anthropic\.claude-sonnet-4-6 is 0 \("not available for this account"\)/,
+        /fix: Open a free AWS Support case \(Account and billing\) .*for Anthropic Claude Sonnet 4\.6, cross-region/,
       ],
       ['throttled', /FAIL AI-02 .*throttled: /, /fix: Run again in a minute/],
       ['unavailable', /FAIL AI-02 .*Bedrock did not answer \(unavailable\)/, /fix: A transient outage/],
       [
         'invalid_model',
         /FAIL AI-02 .*the request was rejected: .*model identifier is invalid/,
-        /fix: AI_BEDROCK_MODEL_ID must be the inference profile id/,
+        /fix: AI_BEDROCK_MODEL_ID must be an inference profile id \(one of us\.anthropic\.claude-sonnet-5-5, /,
       ],
       ['refusal', /FAIL AI-02 .*stopped with refusal/, /fix: A refusal of a one-word ping/],
     ]
@@ -58,6 +58,24 @@ describe('verify:ai --sim', () => {
       expect(r.code, scenario).toBe(1)
       expect(r.out, scenario).toMatch(detail)
       expect(r.out, scenario).toMatch(fix)
+    }
+  })
+
+  it('names the configured model: Sonnet 5.5 with the quota of 0 says so and points back to the interim Sonnet 4.6', async () => {
+    const r = await run(['--sim', '--sim-scenario', 'quota'], { ...BASE, AI_BEDROCK_MODEL_ID: 'us.anthropic.claude-sonnet-5-5' })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/PASS AI-01 .*us\.anthropic\.claude-sonnet-5-5 \(Claude Sonnet 5\.5\)/)
+    expect(r.out).toMatch(/QUOTA: the account's quota for us\.anthropic\.claude-sonnet-5-5 is 0 .*The model anthropic\.claude-sonnet-5-5 is not available for this account/)
+    expect(r.out).toMatch(/for Anthropic Claude Sonnet 5\.5, cross-region, in us-east-1; .*Until then run on a model the account has quota for \(AI_BEDROCK_MODEL_ID=us\.anthropic\.claude-sonnet-4-6\)/)
+    // --model tries another model without touching the env files (they win over the command line on the host)
+    const next = await run(['--sim', '--model', 'us.anthropic.claude-sonnet-5-5'], { ...BASE, AI_BEDROCK_MODEL_ID: 'us.anthropic.claude-sonnet-4-6' })
+    expect(next.code, next.out).toBe(0)
+    expect(next.out).toMatch(/PASS AI-01 .*us\.anthropic\.claude-sonnet-5-5 \(Claude Sonnet 5\.5\) in us-east-1/)
+    expect((await run(['--sim', '--model', ' '])).out).toMatch(/--model needs an inference profile id/)
+    // every listed model is a valid setting (the judge models included)
+    for (const model of ['us.anthropic.claude-opus-5-5', 'us.anthropic.claude-sonnet-4-6', 'us.anthropic.claude-opus-4-6-v1']) {
+      const ok = await run(['--sim'], { ...BASE, AI_BEDROCK_MODEL_ID: model })
+      expect(ok.code, ok.out).toBe(0)
     }
   })
 
@@ -85,6 +103,12 @@ describe('verify:ai --sim', () => {
     const plain = await run(['--sim'], { ...BASE, AI_BEDROCK_MODEL_ID: 'anthropic.claude-sonnet-5-5' })
     expect(plain.code).toBe(1)
     expect(plain.out).toMatch(/FAIL AI-01 .*AI_BEDROCK_MODEL_ID=anthropic\.claude-sonnet-5-5/)
+    expect(plain.out).toMatch(/fix: The app calls Claude through a cross-region inference profile: AI_BEDROCK_MODEL_ID one of us\.anthropic\.claude-sonnet-5-5, us\.anthropic\.claude-opus-5-5, us\.anthropic\.claude-sonnet-4-6, us\.anthropic\.claude-opus-4-6-v1/)
+    // a Claude profile the IAM grant does not cover
+    const unlisted = await run(['--sim'], { ...BASE, AI_BEDROCK_MODEL_ID: 'us.anthropic.claude-haiku-4-5' })
+    expect(unlisted.code).toBe(1)
+    expect(unlisted.out).toMatch(/FAIL AI-01 .*AI_BEDROCK_MODEL_ID=us\.anthropic\.claude-haiku-4-5 is not one of the models the app role may call/)
+    expect(unlisted.out).toMatch(/fix: Use one of those, or add the model to src\/integrations\/ai\/models\.ts/)
     const bad = await run(['--sim'], { ...BASE, AI_BEDROCK_EFFORT_MODE: 'sometimes' })
     expect(bad.code).toBe(1)
     expect(bad.out).toMatch(/FAIL AI-01 .*invalid AI settings: AI_BEDROCK_EFFORT_MODE/)

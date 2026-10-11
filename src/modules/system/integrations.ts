@@ -7,6 +7,8 @@ import type { Env } from '../../config/env.js'
 import { access } from '../../http/access.js'
 import type { AppInstance } from '../../http/types.js'
 import { z } from '../../http/zod.js'
+import { resolveAiPrices } from '../../integrations/ai/cost.js'
+import { CLAUDE_BEDROCK_MODELS, findClaudeModel } from '../../integrations/ai/models.js'
 import { sesTopicArns } from '../../integrations/email/env.js'
 import type { Executor } from '../../platform/db.js'
 import { maskText } from '../../platform/logging.js'
@@ -326,6 +328,12 @@ async function aiStatus(db: Executor, env: Env, now: Date, locationId: string | 
   else if (!settingEnabled) warnings.push('Settings, Assistant is off: the assistant answers no text')
   if (enabled && stage !== 'everyone') warnings.push(`stage ${stage}: the assistant answers ${stage === 'allowlist' ? 'only the allowlisted numbers' : 'only known clients'}`)
   if (enabled && !live) warnings.push('AI_PROVIDER=sim: the assistant answers with the test simulator')
+  const listed = findClaudeModel(env.AI_BEDROCK_MODEL_ID)
+  const pricing = resolveAiPrices(env)
+  if (live && !listed)
+    warnings.push(
+      `AI_BEDROCK_MODEL_ID=${env.AI_BEDROCK_MODEL_ID} is not one of the models the app role may call (${CLAUDE_BEDROCK_MODELS.map((m) => m.profileId).join(', ')}): Bedrock refuses it${pricing.source === 'highest' ? '; spend is counted at the highest listed prices' : ''}`,
+    )
   if (spendUsd >= env.AI_DAILY_BUDGET_USD)
     warnings.push(`today's spend reached AI_DAILY_BUDGET_USD (${env.AI_DAILY_BUDGET_USD}): every text goes to the staff until tomorrow`)
   return {
@@ -341,6 +349,7 @@ async function aiStatus(db: Executor, env: Env, now: Date, locationId: string | 
     lastError: safeError(bad?.error),
     details: {
       model: live ? env.AI_BEDROCK_MODEL_ID : 'sim',
+      modelLabel: live ? (listed?.label ?? null) : null,
       region: live ? env.AI_BEDROCK_REGION : null,
       enabled,
       envEnabled: env.AI_ENABLED,
@@ -351,6 +360,8 @@ async function aiStatus(db: Executor, env: Env, now: Date, locationId: string | 
       turnsToday: today?.n ?? 0,
       spendTodayUsd: Math.round(spendUsd * 10_000) / 10_000,
       dailyBudgetUsd: env.AI_DAILY_BUDGET_USD,
+      /** env (every AI_PRICE_* set), model (the model's list prices), mixed, or highest (an unlisted model). */
+      priceSource: pricing.source,
       credentials,
     },
   }

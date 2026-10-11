@@ -15,7 +15,9 @@ are binding.
 
 ## Decisions
 
-- **Model**: Claude Sonnet 5.5 on Amazon Bedrock (Converse API, `us.anthropic.claude-sonnet-5-5`, instance-role credentials) behind
+- **Model**: Claude on Amazon Bedrock (Converse API, instance-role credentials): Claude Sonnet 5.5 (`us.anthropic.claude-sonnet-5-5`)
+  as decided, and **for now Claude Sonnet 4.6** (`us.anthropic.claude-sonnet-4-6`, the default of `AI_BEDROCK_MODEL_ID`; judge Opus
+  4.6) because the account's Claude 5.x quota is 0 (owner, 2026-10-11); the switch is that one setting. Behind
   a provider-neutral port (`src/integrations/ports/ai.ts`); `AI_PROVIDER=sim` (default) replays scripted answers, so nothing in
   development or tests reaches AWS.
 - **Kill switches**: `AI_ENABLED`, `AI_ACTIONS_ENABLED` (environment), `assistant.enabled` / `assistant.stage` (settings),
@@ -50,10 +52,15 @@ simulator. No route, job or behaviour beyond the policy gate and the masked mess
   `toolChoice: auto`) followed by a `cachePoint` with `cacheTools`, `inferenceConfig.maxTokens`, reasoning blocks passed back
   unchanged (text + signature, or the redacted bytes as base64 in the port), at most four cache points. The mapping is pure and
   key-ordered, so the same request is the same bytes (tested over HTTP). `AI_PROVIDER=bedrock` builds it; building contacts nothing.
-- **Effort**: the SDK has Converse's own `outputConfig.effort`; whether Sonnet 5.5 on Bedrock takes it (or the Anthropic
+- **Models (owner change, 2026-10-11)**: one list, `src/integrations/ai/models.ts` (profile id, foundation model, list prices): Sonnet
+  4.6 (`us.anthropic.claude-sonnet-4-6`, the interim assistant and the default), Opus 4.6 (`us.anthropic.claude-opus-4-6-v1`, judge),
+  Sonnet 5.5 and Opus 5.5. The IAM grant, the default prices and the status row read it. The request mapping is the same for every
+  model (tested: only `modelId` differs; no thinking, reasoning or other version-specific field), so moving to Sonnet 5.5 is
+  `AI_BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-5-5` after `verify:ai --model us.anthropic.claude-sonnet-5-5 --probe-effort`.
+- **Effort**: the SDK has Converse's own `outputConfig.effort`; whether a model on Bedrock takes it (or the Anthropic
   `output_config` through `additionalModelRequestFields`) is not known yet, so `AI_BEDROCK_EFFORT_MODE` (`off` | `output_config` |
-  `additional_fields`) defaults to **off** and `pnpm verify:ai --probe-effort` decides. While off the model runs at its default
-  effort (`high` for Sonnet 5.5).
+  `additional_fields`) defaults to **off** and `pnpm verify:ai --probe-effort` decides, per model. While off the model runs at its
+  default effort (`high` for Sonnet 4.6 and 5.5).
 - **toolChoice `none`** does not exist in Converse: without tool blocks in the conversation the tools are left out; with them
   Bedrock requires the tool configuration, so it goes out unchanged (auto) and the assistant must treat a tool call on its final
   "reply now" call as a fallback (and say "reply now without tools" in that call's text).
@@ -65,7 +72,12 @@ simulator. No route, job or behaviour beyond the policy gate and the masked mess
   (malformed output, context window exceeded, a new value) → `other`, raw value kept. A content block the port cannot carry is an
   error rather than a shortened transcript.
 - **Cost**: `aiCostMicros(usage, aiPricesFromEnv(env))`: tokens × USD per MTok = micro-dollars; Bedrock's input count excludes the
-  cache reads and writes.
-- **IAM / ops**: `pnpm aws:provision --bedrock` (statements `InvokeClaude` on the inference profile, `InvokeClaudeRouted` on the
-  foundation model in the three routed regions only through it); `pnpm verify:ai` (one-token ping; IAM, model access, quota named);
-  `GET /system/integrations` row `ai`. docs/aws-setup.md has the quota support case, the Budgets alarm and invocation logging off.
+  cache reads and writes. `AI_PRICE_*` have no default any more: each unset one is the configured model's list price (Sonnet 4.6:
+  3 / 15 / 0.30 / 3.75), a model outside the list gets the highest listed rates; `resolveAiPrices` also says the source (`env`,
+  `model`, `mixed`, `highest`), shown as `priceSource` in the status row.
+- **IAM / ops**: `pnpm aws:provision --bedrock` (statements `InvokeClaude` on the four inference profiles, `InvokeClaudeRouted` on
+  their foundation models in the three routed regions only through those profiles; the only wildcard is `anthropic.claude-opus-4-6-v1*`;
+  no `--bedrock-model`: the list is code); `pnpm verify:ai` (one-token ping; IAM, model access, quota named for the configured model;
+  a model outside the list fails AI-01; `--model` tries another one); `GET /system/integrations` row `ai` (`modelLabel`, `priceSource`,
+  a warning for an unlisted model). The design's eval judge runs under the operator profile, but the owner's change puts both judges
+  in the app role's list too (one list, nothing broader than the four). docs/aws-setup.md has the quota support case, the Budgets alarm and invocation logging off.

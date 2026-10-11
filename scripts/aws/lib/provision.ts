@@ -85,7 +85,9 @@ import {
 } from '@aws-sdk/client-ec2'
 import { CreateSecretCommand, DescribeSecretCommand, type SecretsManagerClient } from '@aws-sdk/client-secrets-manager'
 import type { STSClient } from '@aws-sdk/client-sts'
+import { INTERIM_ASSISTANT_MODEL } from '../../../src/integrations/ai/models.js'
 import {
+  BEDROCK_MODELS,
   PUBLIC_ACCESS_BLOCK,
   ROLE_TRUST_POLICY,
   SES_EVENT_TYPES,
@@ -1049,7 +1051,8 @@ export function envLines(spec: ProvisionSpec): string[] {
     ...(spec.bedrock
       ? [
           `AI_BEDROCK_REGION=${spec.region}`,
-          `AI_BEDROCK_MODEL_ID=us.${spec.bedrock.model}`,
+          `AI_BEDROCK_MODEL_ID=${INTERIM_ASSISTANT_MODEL}`,
+          `# the grant also covers ${BEDROCK_MODELS.filter((m) => m.profileId !== INTERIM_ASSISTANT_MODEL).map((m) => m.profileId).join(', ')}: switching is this one line`,
           '# AI_PROVIDER=bedrock and AI_ENABLED=true are switched on in the staged rollout only (ADR 0160), after pnpm verify:ai passes',
         ]
       : []),

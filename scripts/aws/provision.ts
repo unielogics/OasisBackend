@@ -17,7 +17,7 @@ import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager'
 import { SESv2Client } from '@aws-sdk/client-sesv2'
 import { SNSClient } from '@aws-sdk/client-sns'
 import { GetCallerIdentityCommand, STSClient } from '@aws-sdk/client-sts'
-import { DEFAULT_BEDROCK_MODEL, type ProvisionSpec, type Runtime, type Sender } from './lib/documents.js'
+import type { ProvisionSpec, Runtime, Sender } from './lib/documents.js'
 import { ProvisionError, applyPlan, buildPlan, envLines, renderPlan, type Clients, type PlanOptions } from './lib/provision.js'
 
 export const HELP = `pnpm aws:provision [options]
@@ -50,9 +50,9 @@ Options:
   --backup-retention-days N      backups lifecycle expiry (default 400: 12 monthly dumps plus margin)
   --sandbox-recipient ADDRESS    verify this address while SES is in the sandbox (repeatable; joins the send policy; with --sender)
   --bedrock                      let the app call Claude on Amazon Bedrock (ADR 0160): bedrock:InvokeModel on the us. inference
-                                 profile of the model and, routed through it only, the model in us-east-1/us-east-2/us-west-2.
-                                 Keep passing it on every later run: a run without it removes the grant (the plan says so)
-  --bedrock-model ID             the foundation model (default anthropic.claude-sonnet-5-5; the app calls us.<ID>)
+                                 profiles of Claude Sonnet 4.6, Opus 4.6, Sonnet 5.5 and Opus 5.5 and, routed through them only,
+                                 those models in us-east-1/us-east-2/us-west-2 (src/integrations/ai/models.ts). Keep passing it
+                                 on every later run: a run without it removes the grant (the plan says so)
   --new-access-key               runtime=user: create a second key for rotation although one exists
   --request-ses-production       submit the SES production-access request (needs --website-url and --use-case)
   --website-url URL, --use-case TEXT, --contact-email ADDRESS (repeatable)
@@ -154,7 +154,6 @@ export async function main(argv: string[], deps: MainDeps): Promise<number> {
         'private-ip': { type: 'string' },
         'replace-instance-profile': { type: 'boolean' },
         bedrock: { type: 'boolean' },
-        'bedrock-model': { type: 'string' },
       },
     })
   } catch (e) {
@@ -192,10 +191,6 @@ export async function main(argv: string[], deps: MainDeps): Promise<number> {
     if (a['replace-instance-profile'] && !a['instance-id'] && !a['private-ip']) throw new UsageError('--replace-instance-profile needs --instance-id or --private-ip')
     if (!a.sender && (a['hooks-url'] || a['sandbox-recipient']?.length || a['request-ses-production']))
       throw new UsageError('--hooks-url, --sandbox-recipient and --request-ses-production need --sender (email comes last: leave them out for now)')
-    if (a['bedrock-model'] && !a.bedrock) throw new UsageError('--bedrock-model needs --bedrock')
-    const bedrockModel = a['bedrock-model'] ?? DEFAULT_BEDROCK_MODEL
-    if (!/^anthropic\.claude-[a-z0-9-]+(:\d+)?$/.test(bedrockModel))
-      throw new UsageError(`--bedrock-model ${bedrockModel} is not an Anthropic Claude model id (anthropic.claude-...)`)
     const prefix = a['name-prefix'] ?? 'oasis'
     if (!/^[a-z0-9][a-z0-9-]{1,19}$/.test(prefix)) throw new UsageError('--name-prefix: 2 to 20 lowercase letters, digits or hyphens')
     const keyPrefix = a['key-prefix'] ?? 'prod/'
@@ -246,7 +241,7 @@ export async function main(argv: string[], deps: MainDeps): Promise<number> {
       photoRetentionDays,
       backupRetentionDays,
       sandboxRecipients,
-      ...(a.bedrock ? { bedrock: { model: bedrockModel } } : {}),
+      ...(a.bedrock ? { bedrock: true } : {}),
     }
     const opts: PlanOptions = {
       ...(a.out ? { out: a.out } : {}),

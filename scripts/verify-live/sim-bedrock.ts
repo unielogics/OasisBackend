@@ -41,16 +41,24 @@ export interface BedrockSimRequest {
   json: Record<string, unknown>
 }
 
-export const SIM_MESSAGES = {
-  access_denied:
-    'User: arn:aws:sts::123456789012:assumed-role/oasis-app-role/i-0 is not authorized to perform: bedrock:InvokeModel on resource: arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-sonnet-5-5 because no identity-based policy allows the bedrock:InvokeModel action',
-  model_access: "You don't have access to the model with the specified model ID.",
-  quota:
-    'The model anthropic.claude-sonnet-5-5 is not available for this account. Request a quota increase to use it.',
-  throttled: 'Too many requests, please wait before trying again.',
-  unavailable: 'Bedrock is unable to process your request.',
-  invalid_model: 'The provided model identifier is invalid.',
-} as const
+/** The AWS messages of the error scenarios, for the model the request named (the profile id, or its foundation model). */
+export function simMessage(scenario: keyof typeof ERRORS, modelId: string): string {
+  const foundation = modelId.replace(/^(us|eu|apac|global)\./, '')
+  switch (scenario) {
+    case 'access_denied':
+      return `User: arn:aws:sts::123456789012:assumed-role/oasis-app-role/i-0 is not authorized to perform: bedrock:InvokeModel on resource: arn:aws:bedrock:us-east-1:123456789012:inference-profile/${modelId} because no identity-based policy allows the bedrock:InvokeModel action`
+    case 'model_access':
+      return "You don't have access to the model with the specified model ID."
+    case 'quota':
+      return `The model ${foundation} is not available for this account. Request a quota increase to use it.`
+    case 'throttled':
+      return 'Too many requests, please wait before trying again.'
+    case 'unavailable':
+      return 'Bedrock is unable to process your request.'
+    case 'invalid_model':
+      return 'The provided model identifier is invalid.'
+  }
+}
 
 const ERRORS: Record<
   Exclude<BedrockSimScenario, 'ok' | 'refusal' | 'no_effort'>,
@@ -100,7 +108,7 @@ export class BedrockSim {
     const scenario = this.opts.scenario ?? 'ok'
     if (scenario !== 'ok' && scenario !== 'refusal' && scenario !== 'no_effort') {
       const e = ERRORS[scenario]
-      return this.error(res, e.status, e.type, SIM_MESSAGES[scenario])
+      return this.error(res, e.status, e.type, simMessage(scenario, modelId))
     }
     const effort =
       (json.outputConfig as { effort?: unknown } | undefined)?.effort ?? json.additionalModelRequestFields

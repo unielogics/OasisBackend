@@ -120,8 +120,8 @@ describe('GET /system/integrations', () => {
     expect(ai).toMatchObject({ provider: 'sim', live: false, configured: false, missing: ['AI_PROVIDER=bedrock'], lastSuccessAt: null, lastErrorAt: null, lastError: null })
     expect(ai.warnings).toEqual(['AI_ENABLED=false: the assistant answers no text'])
     expect(ai.details).toEqual({
-      model: 'sim', region: null, enabled: false, envEnabled: false, settingEnabled: false, stage: 'allowlist', actionsEnabled: false,
-      effortMode: 'off', turnsToday: 0, spendTodayUsd: 0, dailyBudgetUsd: 10, credentials: 'instance-role',
+      model: 'sim', modelLabel: null, region: null, enabled: false, envEnabled: false, settingEnabled: false, stage: 'allowlist', actionsEnabled: false,
+      effortMode: 'off', turnsToday: 0, spendTodayUsd: 0, dailyBudgetUsd: 10, priceSource: 'model', credentials: 'instance-role',
     })
   })
 
@@ -141,7 +141,7 @@ describe('GET /system/integrations', () => {
     const conv = app.app.newId()
     await t.db.insertInto('assistant_conversations').values({ id: conv, location_id: loc, phone_e164: '+12015550142' } as never).execute()
     const turn = (status: string, startedAt: Date, cost: number, error: string | null = null) => ({
-      id: app!.app.newId(), conversation_id: conv, status, trust: 'known', provider: 'bedrock', model: 'us.anthropic.claude-sonnet-5-5',
+      id: app!.app.newId(), conversation_id: conv, status, trust: 'known', provider: 'bedrock', model: 'us.anthropic.claude-sonnet-4-6',
       cost_micros: cost, error, started_at: startedAt, finished_at: new Date(startedAt.getTime() + 4000),
     })
     // start of today in the shop's time zone, so the test does not depend on the clock's hour
@@ -159,8 +159,8 @@ describe('GET /system/integrations', () => {
     const ai = by((await app.app.inject({ method: 'GET', url: '/api/v1/system/integrations' })).json(), 'ai')
     expect(ai).toMatchObject({ provider: 'bedrock', live: true, configured: true, missing: [] })
     expect(ai.details).toMatchObject({
-      model: 'us.anthropic.claude-sonnet-5-5', region: 'us-east-1', enabled: true, envEnabled: true, settingEnabled: true, stage: 'allowlist',
-      turnsToday: 2, spendTodayUsd: 0.004, dailyBudgetUsd: 0.01, credentials: 'environment',
+      model: 'us.anthropic.claude-sonnet-4-6', modelLabel: 'Claude Sonnet 4.6', region: 'us-east-1', enabled: true, envEnabled: true, settingEnabled: true, stage: 'allowlist',
+      turnsToday: 2, spendTodayUsd: 0.004, dailyBudgetUsd: 0.01, priceSource: 'model', credentials: 'environment',
     })
     expect(ai.lastSuccessAt).toBe(new Date(today.getTime() + 4000).toISOString())
     expect(ai.lastErrorAt).toBe(new Date(today.getTime() + 5000).toISOString())
@@ -170,6 +170,22 @@ describe('GET /system/integrations', () => {
     await t.db.updateTable('assistant_turns').set({ cost_micros: 20_000 }).where('started_at', '=', today).execute()
     const over = by((await app.app.inject({ method: 'GET', url: '/api/v1/system/integrations' })).json(), 'ai')
     expect(over.warnings).toContain("today's spend reached AI_DAILY_BUDGET_USD (0.01): every text goes to the staff until tomorrow")
+  })
+
+  it('the AI row names a model outside the IAM grant list, and where the prices come from', async () => {
+    app = await createTestApp({
+      testDb: t,
+      modules: [systemModule],
+      env: {
+        AI_PROVIDER: 'bedrock', AI_BEDROCK_MODEL_ID: 'us.anthropic.claude-haiku-4-5', AI_PRICE_OUTPUT_PER_MTOK: '30',
+        AWS_ACCESS_KEY_ID: KEY_ID, AWS_SECRET_ACCESS_KEY: SECRET, AWS_EC2_METADATA_DISABLED: 'true',
+      },
+    })
+    const ai = by((await app.app.inject({ method: 'GET', url: '/api/v1/system/integrations' })).json(), 'ai')
+    expect(ai.details).toMatchObject({ model: 'us.anthropic.claude-haiku-4-5', modelLabel: null, priceSource: 'mixed' })
+    expect(ai.warnings).toContain(
+      'AI_BEDROCK_MODEL_ID=us.anthropic.claude-haiku-4-5 is not one of the models the app role may call (us.anthropic.claude-sonnet-5-5, us.anthropic.claude-opus-5-5, us.anthropic.claude-sonnet-4-6, us.anthropic.claude-opus-4-6-v1): Bedrock refuses it',
+    )
   })
 
   it('requires set.billing', async () => {
