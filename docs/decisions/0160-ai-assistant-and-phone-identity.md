@@ -67,6 +67,12 @@ inert while `AI_ENABLED=false` or `assistant.enabled=false`. Contract: docs/api-
   the first text is filed read in that client's thread at once. If wave 3 prefers to create the client at the turn's claim instead,
   the stranger's texts are found by `sms_inbox.assistant_conversation_id` and filed then. A stranger's AGENT stays in the quarantine
   list with the handoff alert (no adoption: the person asked for staff, not the welcome flow).
+- **Verifier fixes (W2d)**: (F1) the number a text was sent to is only the payload's `recipient`; the SMS Gate parser falls back to
+  `phoneNumber`, which on `sms:received` is the sender, and taking it would have held every texter back as "our own number" on a
+  device that omits `recipient`. (F2) `webhook_log` keeps no code readable in a second envelope of the same device message (masked
+  when the inbox row was) nor in a row never routed (unknown device, given up by the sweep: digits-only 4-8 is masked, since nothing
+  decided it was not a code). (F3) AGENT pages the managers when the handoff opens, not again while it is open, so repeating it (a
+  stranger included, once the stage is `everyone`) cannot flood their notifications.
 - **Staff takeover** is recorded on every staff text, the AI on or off, so turning the AI on never answers a thread staff just
   answered. The "AI paused" line in the dashboard should show only while the assistant is enabled.
 - **Sub-cap**: the window accounting (`sms_usage`) records the class of each send (migration `20261011040000_sms_usage_class`); the

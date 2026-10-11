@@ -904,7 +904,9 @@ as described above (the existing inbound suites run unchanged).
 
 - **Gate** (`src/modules/assistant/ports.ts` `AssistantGate`; Postgres implementation `src/modules/messaging/assistant/gate.ts`),
   consulted by the inbound service before routing. `active` needs, in order: `AI_ENABLED`, `assistant.enabled`, a real sender that is
-  not ours (no alphanumeric id or short code, not `BUSINESS_PHONE`, not the number the device reports the text was sent to), a US/CA
+  not ours (no alphanumeric id or short code, not `BUSINESS_PHONE`, not the number the device reports the text was sent to: the payload's `recipient`; the parser's
+  `phoneNumber` fallback is the sender on `sms:received` and is never taken for it, so a delivery without `recipient` is judged on
+  `BUSINESS_PHONE` alone, while a stated `recipient` equal to the sender is a device texting itself and is held back), a US/CA
   mobile number (`normalizeTextableNanp`), the stage (`allowlist`: in `assistant.allowlist`; `customers`: a client; `everyone`), no
   opt-out (the number's or the client's). `allow` needs `active` plus: the thread not paused by staff
   (`message_threads.ai_paused_until`), no open handoff on the number's conversation, and the loop breakers
@@ -912,7 +914,8 @@ as described above (the existing inbound suites run unchanged).
 - **Routing** (`inbound/router.ts`): keywords keep priority (STOP, START/UNSTOP/YES-opt-in, HELP, C/CONFIRM, CANCEL). New keyword
   **AGENT** (whole message, any case): while `active`, a handoff (decision `handoff`): the number's conversation gets
   `handoff_state='open'` (`handoff_reason='agent_keyword'`, its pending marker cleared), the text is filed unread (a stranger's stays in
-  the quarantine list), managers get a notification `assistant.handoff` (`source_ref` `assistant_handoff:<conversation>`) and the
+  the quarantine list), managers get a notification `assistant.handoff` (`source_ref` `assistant_handoff:<conversation>`; only when
+  the handoff opens: AGENT again on a handoff that is still open, from a client or a stranger, pages nobody again) and the
   Needs-attention list an `ai_handoff` alert (it replaces that client's `new_reply` alert). When `allow`: plain texts (SMS and an MMS's
   text, never a picture placeholder) go to the assistant (decision `assistant`): a client's is filed **read** (no new-reply alert), a
   stranger's stays in `sms_inbox` unquarantined (non-E.164 senders are still quarantined); a picture message routes as before.
@@ -925,7 +928,9 @@ as described above (the existing inbound suites run unchanged).
   for its reply number from that phone (`assistant_pending_actions` pending and unexpired) is decision `action_code`: the digits go only
   to the `ActionCodeHandler` port (wave 3), never to the model. With no action waiting and `allow`: a canned `code_on_link_page` reply
   (class `ai_reply`, at most one per number per 30 min). Either way the text is stored as `[code]` in `sms_inbox`, the thread, the
-  event stream and `webhook_log` (the payload's `message`/`body` fields are masked once the row is final).
+  event stream and `webhook_log` (the payload's `message`/`body` fields are masked once the row is final; a repeat of the same
+  device message in another envelope is masked when the first delivery was, and a row that is final without being routed, an unknown
+  device or an envelope the sweep gives up on after 24 h, is masked whenever its text is digits-only 4-8).
 - **Durable marker** (`AssistantInbox.markPending`, in the webhook transaction): `assistant_conversations` upserted on
   `(location, phone)` with `pending_since` (the oldest unanswered text of a burst), `last_inbound_at`, `customer_id`;
   `sms_inbox.assistant_conversation_id` linked. After the transaction commits the webhook calls `AssistantKick.kick(conversationIds)`
