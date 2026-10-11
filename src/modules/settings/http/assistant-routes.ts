@@ -1,7 +1,10 @@
 // Settings → Assistant (ADR 0160, design section 8, plan G): GET/PUT /settings/assistant over the assistant.* settings, one version
 // token for the section (the sum of its six setting versions), validation, audit and settings.changed per changed key, set.hours to
-// save (the permission of the shop's other business settings: hours, rules, location, cancellation policy, reminders).
+// save (the permission of the shop's other business settings: hours, rules, location, cancellation policy, reminders). The allowlist
+// holds the owner's and staff's own mobile numbers, so a reader without set.hours sees them masked to the last four digits (review F2).
 import { access } from '../../../http/access.js'
+import { hasPermission } from '../../../http/authorizer.js'
+import { maskPhone } from '../../../platform/phone.js'
 import { z } from '../../../http/zod.js'
 import {
   loadAssistantSettings,
@@ -26,7 +29,10 @@ const Fields = z.object({
     .describe('Who it answers: only the allowlisted numbers, then also known clients, then everyone'),
   allowlist: z
     .array(z.string())
-    .describe('The numbers of the first stage (the owner and staff), E.164 (+12015550142; "(201) 555-0142" is read too), US/Canada, at most 50, each once'),
+    .describe(
+      'The numbers of the first stage (the owner and staff), E.164 (+12015550142; "(201) 555-0142" is read too), textable US/Canadian numbers, at most 50, each once. ' +
+        'GET shows them masked to the last four digits ("+1******0142") to a reader without set.hours',
+    ),
   staffPauseHours: z.number().int().describe('A staff reply pauses the assistant on that thread this many hours, 1 to 72'),
   faq: z.array(FaqPair).describe('Questions and answers the assistant answers from, at most 40 pairs, plain text, each question once'),
 })
@@ -47,8 +53,9 @@ const Patch = Fields.partial().strict()
 export function registerAssistantRoutes(rt: SettingsRuntime): void {
   const { app } = rt
 
-  const view = (s: AssistantSettings): z.infer<typeof AssistantView> => ({
+  const view = (s: AssistantSettings, fullNumbers = true): z.infer<typeof AssistantView> => ({
     ...s.values,
+    allowlist: fullNumbers ? s.values.allowlist : s.values.allowlist.map(maskPhone),
     server: { aiEnabled: app.env.AI_ENABLED, actionsEnabled: app.env.AI_ACTIONS_ENABLED },
     active: app.env.AI_ENABLED && s.values.enabled,
     version: s.version,
@@ -62,6 +69,7 @@ export function registerAssistantRoutes(rt: SettingsRuntime): void {
         tags: ['settings'],
         operationId: 'getSettingsAssistant',
         summary: 'The AI text assistant: on/off, in-chat actions, stage, allowlist, staff pause and FAQ (ETag = version)',
+        description: 'Any signed-in user may read it; without set.hours the allowlist numbers come masked to their last four digits.',
         response: { 200: AssistantView },
       },
     },
@@ -69,7 +77,7 @@ export function registerAssistantRoutes(rt: SettingsRuntime): void {
       const c = requestContext(req)
       const s = await loadAssistantSettings(app.db, c.locationId)
       etag(reply, s.version)
-      return view(s)
+      return view(s, hasPermission(req.auth!, 'set.hours'))
     },
   )
 
@@ -83,7 +91,7 @@ export function registerAssistantRoutes(rt: SettingsRuntime): void {
         summary: 'Save the Assistant section (the dirty-tracked save)',
         description:
           'Partial: any field; the rest stays (`allowlist` and `faq` are replaced as a whole). `version` (or If-Match) is required and must be the section’s current version: 412 VERSION_CONFLICT otherwise, 428 without one. ' +
-          'Validated against the settings registry plus the section’s rules (allowlist: E.164 US/Canadian numbers, each once, at most 50; FAQ: at most 40 pairs of plain text, 500 characters each, no hidden characters or HTML, each question once). ' +
+          'Validated against the settings registry plus the section’s rules (allowlist: E.164 textable US/Canadian numbers, each once, at most 50; FAQ: at most 40 pairs of plain text, 500 characters each, no hidden, invisible or control characters (a tab or line break is fine) or HTML, each question once). ' +
           'Each changed setting is audited (settings.update) and published as `settings.changed` (section assistant). The server switches (`server`) are read-only.',
         body: Patch.extend({
           version: z.number().int().min(0).optional(),

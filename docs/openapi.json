@@ -58672,6 +58672,7 @@
     },
     "/api/v1/settings/assistant": {
       "get": {
+        "description": "Any signed-in user may read it; without set.hours the allowlist numbers come masked to their last four digits.",
         "operationId": "getSettingsAssistant",
         "responses": {
           "200": {
@@ -58689,7 +58690,7 @@
                       "type": "boolean"
                     },
                     "allowlist": {
-                      "description": "The numbers of the first stage (the owner and staff), E.164 (+12015550142; \"(201) 555-0142\" is read too), US/Canada, at most 50, each once",
+                      "description": "The numbers of the first stage (the owner and staff), E.164 (+12015550142; \"(201) 555-0142\" is read too), textable US/Canadian numbers, at most 50, each once. GET shows them masked to the last four digits (\"+1******0142\") to a reader without set.hours",
                       "items": {
                         "type": "string"
                       },
@@ -58787,7 +58788,7 @@
         "x-oasis-access": "authenticated"
       },
       "put": {
-        "description": "Partial: any field; the rest stays (`allowlist` and `faq` are replaced as a whole). `version` (or If-Match) is required and must be the section’s current version: 412 VERSION_CONFLICT otherwise, 428 without one. Validated against the settings registry plus the section’s rules (allowlist: E.164 US/Canadian numbers, each once, at most 50; FAQ: at most 40 pairs of plain text, 500 characters each, no hidden characters or HTML, each question once). Each changed setting is audited (settings.update) and published as `settings.changed` (section assistant). The server switches (`server`) are read-only.",
+        "description": "Partial: any field; the rest stays (`allowlist` and `faq` are replaced as a whole). `version` (or If-Match) is required and must be the section’s current version: 412 VERSION_CONFLICT otherwise, 428 without one. Validated against the settings registry plus the section’s rules (allowlist: E.164 textable US/Canadian numbers, each once, at most 50; FAQ: at most 40 pairs of plain text, 500 characters each, no hidden, invisible or control characters (a tab or line break is fine) or HTML, each question once). Each changed setting is audited (settings.update) and published as `settings.changed` (section assistant). The server switches (`server`) are read-only.",
         "operationId": "putSettingsAssistant",
         "requestBody": {
           "content": {
@@ -58801,7 +58802,7 @@
                   },
                   "active": {},
                   "allowlist": {
-                    "description": "The numbers of the first stage (the owner and staff), E.164 (+12015550142; \"(201) 555-0142\" is read too), US/Canada, at most 50, each once",
+                    "description": "The numbers of the first stage (the owner and staff), E.164 (+12015550142; \"(201) 555-0142\" is read too), textable US/Canadian numbers, at most 50, each once. GET shows them masked to the last four digits (\"+1******0142\") to a reader without set.hours",
                     "items": {
                       "type": "string"
                     },
@@ -58876,7 +58877,7 @@
                       "type": "boolean"
                     },
                     "allowlist": {
-                      "description": "The numbers of the first stage (the owner and staff), E.164 (+12015550142; \"(201) 555-0142\" is read too), US/Canada, at most 50, each once",
+                      "description": "The numbers of the first stage (the owner and staff), E.164 (+12015550142; \"(201) 555-0142\" is read too), textable US/Canadian numbers, at most 50, each once. GET shows them masked to the last four digits (\"+1******0142\") to a reader without set.hours",
                       "items": {
                         "type": "string"
                       },

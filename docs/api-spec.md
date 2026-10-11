@@ -697,14 +697,19 @@ The values are the registry settings `assistant.enabled`, `assistant.actions_ena
 `assistant.staff_pause_hours` and `assistant.faq` (all off / empty by default: `enabled` and `actionsEnabled` false, stage
 `allowlist`, 12 hours); `version` is the sum of their versions, which any write to any of them raises. `server` are the environment
 switches `AI_ENABLED` and `AI_ACTIONS_ENABLED`, which this section cannot change: with `AI_ENABLED=false` the assistant answers nobody
-whatever the section says. `active` = `AI_ENABLED` and `enabled`.
+whatever the section says. `active` = `AI_ENABLED` and `enabled`. The allowlist holds the owner's and staff's own mobile numbers,
+so a reader without `set.hours` gets them masked to the last four digits (`+1******0142`); `set.hours` sees them in full.
 
 `PUT /settings/assistant` (`set.hours`, the permission of the shop's other business settings): any field (strict; `allowlist` and
 `faq` replace the whole list), `version` or `If-Match` required (428 without, 412 `VERSION_CONFLICT {currentVersion}` when stale;
 saves take a per-location advisory lock). Each value is validated by its registry schema, then the section's rules: allowlist numbers
-are read as E.164 (`(201) 555-0142` becomes `+12015550142`), must be US/Canadian (`+1`, `The assistant texts US and Canadian numbers
-only.`), each listed once, at most 50; the FAQ holds at most 40 pairs of 1..500 characters each (trimmed), plain text (no control
-character but a tab or line break, no zero-width or direction mark, no HTML tag), each question once (case and spaces ignored). 422
+are read as E.164 (`(201) 555-0142` becomes `+12015550142`), must be textable US/Canadian numbers, the check the assistant's gate
+uses (`normalizeTextableNanp`: no area code 000, no toll-free, premium or other +1 country; `The assistant texts US and Canadian
+mobile numbers only.`), each listed once, at most 50; the FAQ holds at most 40 pairs of 1..500 characters each (trimmed), plain text
+(no HTML tag and no character a reader cannot see: control characters but a tab or line break, format characters such as zero-width,
+direction marks, the soft hyphen and the Unicode tag block, line/paragraph separators, private-use, unassigned and default-ignorable
+code points such as variation selectors and Hangul fillers; only the emoji presentation selector after an emoji and the zero-width
+joiner between two emoji pass), each question once (case and spaces ignored). 422
 names every field (`allowlist.1`, `faq.0.a`, `staffPauseHours`; a stage outside the enum is the request schema's `body.stage`), and
 nothing is written. Only changed keys are written, each audited (`settings.update`, before/after) and published as
 `settings.changed {section: assistant, key, version}`. The answer is the view plus `changed`. A loaded view may be sent back as it

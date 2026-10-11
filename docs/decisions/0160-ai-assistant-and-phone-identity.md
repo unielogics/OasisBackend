@@ -238,10 +238,16 @@ Read and write models only; no migration, no job, nothing that switches anything
   `assistant.*` settings as one section with one version (the sum of theirs) under a per-location advisory lock, exactly like
   Reminders; `set.hours` to save (the permission of the shop's business settings: hours, rules, location, cancellation policy,
   reminders; the plan names no other, and adding a permission key would touch every role). Allowlist numbers are normalised to E.164
-  and must be `+1` (the gate answers US/CA mobiles only, so a foreign number there would never be answered); the FAQ is plain text
-  (no control character but tab/line break, no zero-width or bidi mark: they hide text from staff while the model reads it; no
-  HTML), each question once. The view adds the read-only `server {aiEnabled, actionsEnabled}` (environment) and `active`, so the
-  screen can say that the server keeps the AI off whatever the switch says.
+  and must pass `normalizeTextableNanp`, the gate's own check (the gate answers textable US/CA numbers only, so any other entry
+  would never be answered); the FAQ is plain text (no HTML, and no character a reader cannot see: a `u`-flag class of control,
+  format, private-use, unassigned, surrogate, line/paragraph-separator and default-ignorable code points, which covers the Unicode
+  tag block, zero-width and bidi marks, the soft hyphen, variation selectors and Hangul fillers: they hide text from staff while
+  the model reads it; a tab or line break passes, and so do the emoji presentation selector after an emoji and the zero-width
+  joiner between two emoji, which a phone keyboard types and which cannot carry text), each question once. The view adds the
+  read-only `server {aiEnabled, actionsEnabled}` (environment) and `active`, so the screen can say that the server keeps the AI
+  off whatever the switch says. Reading stays open to any session like the other Settings sections, but the allowlist (the
+  owner's and staff's own mobiles) comes masked to the last four digits without `set.hours`, as staff numbers elsewhere need
+  `team.view` and client numbers are masked. Review fixes F1-F3 (2026-10-11).
 - **Categories on every appointment DTO**: `AppointmentRecord` carries `appointments.categories`, so board cards, the list, the
   calendar day, the appointment file and its history, the command core and the add-on change all answer `categories` and
   `category` (`visitCategory()`). The per-category KPI counts are NOT computable from the board on the client (the board follows
