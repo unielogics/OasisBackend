@@ -676,10 +676,12 @@ accepted and ignored).
 `POST /settings/reminders/preview` (any session; changes nothing): `{draft?: <the PUT shape without version>, sample?: {firstName?,
 date?, startMin?, categories?}}` → `{sample{firstName, startsAt, date, time, categories}, texts[{id, group, label, timing,
 templateKey, klass, enabled, text, segments, encoding}]}`: per offset a booked and a confirmed reminder, the review request, the
-status texts (checked in = `welcome`, wash started = `in_progress`, running late = `job_delay`, ready, picked up) and the lead
-follow-up, rendered through the template registry exactly as sent (GSM-7, the STOP line of automated classes, the segment count; a
-link is a placeholder as long as a real personal link). The sample visit is tomorrow 10:00 AM with the categories that have a
-preparation line (else wash), in catalog order. A draft is validated like a save (422).
+status texts (checked in = `welcome` without the bay, wash started = `in_progress`, running late = `job_delay`, ready, picked up =
+`picked_up`, or `picked_up_link` in class `personal_link` when `bookAgainLink` is on) and the lead follow-up, rendered through the
+template registry exactly as sent (GSM-7, the STOP line of automated classes, the segment count; a link is a placeholder as long as a
+real personal link). The status texts come from the status-texts module's own composition (`src/modules/status-texts/compose.ts`,
+section 23.4b); the picked-up sample is a $45.00 visit paid in full ("Paid in full: $45.00."). The sample visit is tomorrow 10:00 AM
+with the categories that have a preparation line (else wash), in catalog order. A draft is validated like a save (422).
 
 The reminders job reads these settings: with `reminders.confirm_request` off a booked visit gets the plain `reminder` instead of the
 "Reply C to confirm" request; the preparation lines of the appointment's `categories` (in their order, each text once) are appended
@@ -1044,6 +1046,28 @@ as described above (the existing inbound suites run unchanged).
 - **Dispatcher sub-cap**: `ai_reply`, `ai_fallback`, `personal_link` and `action_confirm` together never spend more than
   `AI_SMS_SEGMENTS_PER_30MIN` (default 12) of a device's 30-minute window (`sms_usage.klass` records the class of each send); they are
   lane 1, so they never touch lane 0's reserve. An AI text over the cap waits (`TickReport.aiCapped`) and expires with its TTL.
+
+### 23.4b Status texts as the car moves (ADR 0160, design section 6, wave W3d)
+
+`src/modules/status-texts/**` implements the scheduling `StatusTextsPort`, which `lifecycle.finish()` calls inside every transition's
+transaction (wired in `src/http/modules.ts` and `src/composition.ts schedulingPortsFor`; absent = `noStatusTexts`). The texts read
+Settings → Reminders (`status_texts.*`, section 15.6a). **Checked in, running late and picked up are off by default** (nothing
+switches on by itself in production); ready for pickup was sent before and stays on.
+
+| Text | When | Template / class | Dedupe key |
+|---|---|---|---|
+| Checked in | a **manual** arrival queues a `pending_checkin_texts` row due `checked_in_delay_min` (3) later; job `appointments.checkin_texts` (every minute) sends it. Dropped (`drop_reason`) when the wash starts first (`cleaning_started`: the existing "wash started" text goes instead), the visit is canceled / a no-show (`canceled`), the setting is off at send time (`disabled`), or the text cannot go or is over 15 minutes late (`not_sendable`). A geofence arrival already got its welcome text (with the bay): no row. | `welcome` without the bay ("Welcome to Oasis! You’re checked in.") / `welcome` | `status:checked_in:<appointment>` |
+| Wash started | unchanged (`in_progress` at start / assign-bay) | `in_progress` | none |
+| Running late | job `appointments.late_texts` (every 2 minutes): a visit still `cleaning` past its promised end (the booked end, or cleaning start + duration when the wash began later) + `late_grace_min` (10); the next one only past the estimate it gave + the grace; at most `late_max` (2; 0 = none); never more than 30 minutes after its moment (a visit left "cleaning" after the car went home gets no stale text). New estimate = now + 15 minutes rounded up to 5 ("New estimate: 11:05 AM."). An attempt that could not go (opted out) still uses its `seq`. | `job_delay` / `job_delay` (lane 1, TTL 20 min) | `status:running_late:<appointment>:<seq>` + `appointment_late_texts (appointment, seq)` |
+| Ready for pickup | unchanged at completion, but only while `status_texts.ready` is on (default on); off: no text, `ready_notified_at` stays null, activity "Ready-for-pickup text is off in Settings", toast "Moved to pickup". The staff's own "notify ready" button always sends. | `ready` | none (as before) |
+| Picked up | pickup `collected`, at once: "Thanks for visiting Oasis Auto Spa, Maria!" + "Paid in full: $54.00." when the visit's invoice owes nothing, was not free and no `receipt` text went to the client in the last 2 hours; a placeholder name (`needs_details`) is never used. With `book_again_link` on, the link pages on (`PUBLIC_LINKS_ENABLED`) and **marketing-grade consent** (`hasMarketingConsent`: opted in from `web_form` / `inbound_reply`, not opted out) a `book_again` personal link (issued by `system`, 14 days, one booking) is added: then the text is `picked_up_link` in class `personal_link` (the message row shows `[private link]`, only the outbox carries the URL, the link row exists only if the text was queued). A reopened and re-collected pickup sends nothing more. | `picked_up` / `picked_up` (lane 1), or `picked_up_link` / `personal_link` | `status:picked_up:<appointment>` |
+
+Every text goes through `DbMessageQueue.enqueueFor` under its class policy: normal consent (opted in; STOP refuses it at enqueue), and
+all of them are transactional, so quiet hours never hold them. A text that cannot go leaves an activity line ("Checked-in text not sent
+(customer opted out of SMS)"); a sent one "Checked-in text sent", "Running-late text sent · new estimate 11:05 AM", "Picked-up text
+sent" (actor `automation`). The port's work runs in a savepoint: an unexpected error is rolled back to it and logged, and the staff's
+transition still commits. Tests: `test/status-texts/*` (compose, the port and jobs on Postgres with the real queue, the worker, the
+production HTTP composition), `test/settings-http/reminders.test.ts` (the preview).
 
 ### 23.5 Webhook and listeners
 
