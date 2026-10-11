@@ -25,6 +25,7 @@
 // days by date (a day that already has generated appointments is left alone). Meant for a fresh schema (`pnpm seed --
 // --profile design,demo`); run again the same day it changes nothing, run on a later day it adds that day's board.
 // Every phone number is synthetic (555-01xx).
+import { refreshAllAppointmentCategories } from '../../src/modules/catalog/appointment-categories.js'
 import { sql } from 'kysely'
 import { calcInvoice, type CalcEvent } from '../../src/modules/payments/calc.js'
 import { nextInvoiceNo } from '../../src/modules/payments/gateway.js'
@@ -438,6 +439,8 @@ export async function seedDemo(ctx: SeedContext): Promise<void> {
   const made = await seedDesignDay(ctx, refs, awaitingToday)
   const linked = await linkHistoryAppointments(ctx, refs, seededHistory)
   const generated = await seedProceduralDays(ctx, refs)
+  // the categories every booking path keeps (ADR 0160): these rows bypass createAppointment
+  await refreshAllAppointmentCategories(tx, location.id)
   ctx.log(
     `demo: ${made} design appointments for ${today}, ${seededHistory.length} history invoices (${linked} with their appointments), ${generated} procedural appointments`,
   )

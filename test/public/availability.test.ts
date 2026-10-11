@@ -164,7 +164,7 @@ describe('labels, keys and windows', () => {
     expect(slugOf('Premium Hand Wash + Interior')).toBe('premium-hand-wash-plus-interior')
     expect(slugOf('Wax & Seal / Gloss')).toBe('wax-and-seal-gloss')
     const svc = (id: string, name: string): CatalogService =>
-      ({ id, name, kind: 'package', locationId: 'l', shortNameOverride: null, shortName: name, priceCents: 1, durationMin: 1, tags: [], bookableDesk: true, sort: 0, active: true, sqspSku: null, version: 1, tasks: [] }) as CatalogService
+      ({ id, name, kind: 'package', locationId: 'l', shortNameOverride: null, shortName: name, priceCents: 1, durationMin: 1, tags: [], bookableDesk: true, sort: 0, active: true, sqspSku: null, version: 1, tasks: [], category: 'wash', publicName: null, description: null, memberPriceCents: null, guestPriceCents: null, vipInclusion: 'none', vipNote: null, quoteOnly: false, visibleOnline: true }) as CatalogService
     const keyed = keyServices([svc('0190abcd-0000-7000-8000-000000000001', 'Wax'), svc('0190ef01-0000-7000-8000-000000000002', 'Wax')])
     expect(keyed.map((k) => k.key)).toEqual(['wax', 'wax-0190ef'])
   })

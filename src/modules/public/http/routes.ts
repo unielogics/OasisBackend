@@ -105,16 +105,16 @@ export function registerPublicRoutes(d: PublicDeps): void {
     '/public/catalog',
     {
       config: {
-        access: access.public('The website’s catalog: services, add-ons and the two plans with keys, durations and prices'),
+        access: access.public('The website’s and the assistant’s catalog from Settings: categories, services, add-ons, quote-only items, tint prices and the two plans'),
         rateLimit: { max: 60, timeWindow: '1 minute' },
       },
       preValidation: canonicalQuery({}),
       schema: {
         tags: TAGS,
         operationId: 'getPublicCatalog',
-        summary: 'Services, add-ons and plans for the website, with the keys the booking and join calls take',
+        summary: 'The catalog from Settings for the website and the assistant, with the keys the availability and booking calls take',
         description:
-          'No session. Live packages and add-ons from the real catalog (prices in cents, durations in minutes), keyed by the slug of their name; the plans are the website’s two tiers over the dashboard’s plans (no price: the site shows its own). ' +
+          'No session. The active categories with their colours; the packages (`services`) and `addons` listed online (active, `visibleOnline`, category active, not quote-only) with member and guest prices in cents (guest = member + `guestMarkupPct`, rounded to whole dollars, unless set), what VIP members get and durations in minutes; the quote-only items (`quotes`, no price); the tint price matrix (`tint`; a tint package names its film in `tintFilm` and shows the film’s lowest prices); the guest booking fee; the website’s two plans (`gold` = premium, `vip` = executive) with their public name, monthly price (`priceCents`, null until set) and perks. Keys are the slug of the service name over every active package (or add-on). No ids, versions, checklists or checkout URLs. ' +
           `\`Cache-Control: public, max-age=${PUBLIC_MAX_AGE}\`; 60 requests a minute per address.`,
         querystring: NoQuery,
         response: { 200: CatalogView },

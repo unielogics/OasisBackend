@@ -21,6 +21,7 @@ import {
   requestContext,
   type SettingsRuntime,
 } from '../../settings/http/runtime.js'
+import { registerCatalogSettingsRoutes } from '../../settings/http/catalog-routes.js'
 
 const TaskView = z.object({ id: z.string(), label: z.string(), position: z.number().int() })
 
@@ -37,6 +38,7 @@ export const ServiceView = z.object({
   sort: z.number().int(),
   tags: z.array(z.string()),
   sqspSku: z.string().nullable(),
+  category: z.string().describe('catalog_categories.key; the website fields are edited through PUT /catalog/services/{id}'),
   version: z.number().int(),
   taskCount: z.number().int(),
   tasks: z.array(TaskView),
@@ -57,6 +59,7 @@ export const serviceView = (s: CatalogService): z.infer<typeof ServiceView> => (
   sort: s.sort,
   tags: s.tags,
   sqspSku: s.sqspSku,
+  category: s.category,
   version: s.version,
   taskCount: s.tasks.length,
   tasks: s.tasks.map((t) => ({ id: t.id, label: t.label, position: t.position })),
@@ -76,6 +79,8 @@ const Tags = z.array(z.string().max(32)).max(20)
 
 export function registerCatalogRoutes(rt: SettingsRuntime): void {
   const { app } = rt
+  // Settings → Catalog (ADR 0160): website fields, categories, tint matrix, guest markup, plans' public fields
+  registerCatalogSettingsRoutes(rt)
 
   app.get(
     '/services',
@@ -186,7 +191,7 @@ export function registerCatalogRoutes(rt: SettingsRuntime): void {
         operationId: 'createService',
         summary: 'Add a package or add-on',
         description:
-          'Price in cents. Packages need `durationMin` (1 to 720); add-ons have no duration. Names are unique per kind, case-insensitively (422 otherwise). No Settings UI uses this yet.',
+          'Price in cents. Packages need `durationMin` (1 to 720); add-ons have no duration. Names are unique per kind, case-insensitively (422 otherwise). `category` names an active catalog category (422 otherwise); without it the default rule applies (add-ons → addons, tag tint → tint, detail/ceramic/exotic/executive → detail, else wash). The website fields start empty (PUT /catalog/services/{id}).',
         body: z
           .object({
             kind: z.enum(['package', 'addon']),
@@ -199,6 +204,7 @@ export function registerCatalogRoutes(rt: SettingsRuntime): void {
             sort: z.number().int().optional(),
             active: z.boolean().optional(),
             sqspSku: z.string().max(100).nullable().optional(),
+            category: z.string().max(32).optional(),
             tasks: z.array(z.string().max(300)).max(200).optional(),
           })
           .strict(),
@@ -218,6 +224,7 @@ export function registerCatalogRoutes(rt: SettingsRuntime): void {
         sort?: number
         active?: boolean
         sqspSku?: string | null
+        category?: string
         tasks?: string[]
       }
       if (b.kind === 'addon' && b.durationMin !== undefined && b.durationMin !== 0)

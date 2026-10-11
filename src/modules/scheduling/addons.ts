@@ -3,6 +3,7 @@
 // refused by the invoice gateway (409 ADDON_REMOVE_OVERPAID) and rolls the whole change back.
 import type { Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
+import { refreshAppointmentCategories } from '../catalog/appointment-categories.js'
 import { requireService } from '../catalog/service.js'
 import '../customers/schema.js'
 import { invalidTransition, lockAppointment, logActivity, publishOps } from './appointments.js'
@@ -57,6 +58,7 @@ export async function addAddon(
       })
       .execute()
     await addAddonChecklist(tx, c, a.id, rowId, svc)
+    await refreshAppointmentCategories(tx, a.id)
     changed = true
   }
   const invoice = await syncInvoiceItems(tx, c, a)
@@ -118,6 +120,7 @@ export async function removeAddon(
     .where('id', '=', live.id)
     .execute()
   await hideAddonChecklist(tx, c, live.id)
+  await refreshAppointmentCategories(tx, a.id)
   const invoice = await syncInvoiceItems(tx, c, a)
   await tx
     .updateTable('appointments')

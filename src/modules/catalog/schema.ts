@@ -59,7 +59,7 @@ export interface ChecklistTasksTable {
   created_at: Generated<Date>
 }
 
-// Each appointment keeps the categories of its package and live add-ons, in category order (maintained from wave 2 on).
+// Each appointment keeps the categories of its package and live add-ons, in category order (appointment-categories.ts keeps them).
 declare module '../customers/schema.js' {
   interface AppointmentsTable {
     categories: Generated<string[]>

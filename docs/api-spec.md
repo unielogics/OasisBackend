@@ -303,6 +303,19 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | PATCH | `/api/v1/bays/:id` | sched.override |  |
 | GET | `/api/v1/calendar/day` | sched.view |  |
 | GET | `/api/v1/calendar/summary` | sched.view |  |
+| GET | `/api/v1/catalog` | authenticated |  |
+| GET | `/api/v1/catalog/categories` | authenticated |  |
+| POST | `/api/v1/catalog/categories` | set.services | optional |
+| DELETE | `/api/v1/catalog/categories/:key` | set.services |  |
+| PATCH | `/api/v1/catalog/categories/:key` | set.services |  |
+| GET | `/api/v1/catalog/guest-markup` | authenticated |  |
+| PUT | `/api/v1/catalog/guest-markup` | set.services |  |
+| GET | `/api/v1/catalog/plans` | authenticated |  |
+| PUT | `/api/v1/catalog/plans/:key` | set.services |  |
+| GET | `/api/v1/catalog/services/:id` | authenticated |  |
+| PUT | `/api/v1/catalog/services/:id` | set.services |  |
+| GET | `/api/v1/catalog/tint-matrix` | authenticated |  |
+| PUT | `/api/v1/catalog/tint-matrix` | set.services |  |
 | GET | `/api/v1/clients/:id/credit` | pay.reports |  |
 | GET | `/api/v1/closures` | authenticated |  |
 | POST | `/api/v1/closures` | set.hours | optional |
@@ -614,9 +627,9 @@ Notification fan-out is behind ports (`ClosureNotifier`, `EmergencyNotifier`, `E
 | `POST /vip/holds`, `DELETE /vip/holds/{id}` | `{weekday, time | timeMin}`; 201 `{hold, toast: "Sat 11:00 AM held for VIPs"}`; duplicate 409 `VIP_HOLD_EXISTS` with title and detail "That slot is already held". |
 | `GET/POST/DELETE /vip/clients` | By `customerId`, or by `name`: exactly one exact case-insensitive match is added (201, toast "{name} is now VIP"); several matches or only partial ones answer 409 `VIP_CLIENT_AMBIGUOUS` with `meta.candidates` (id, name, vehicles, `alreadyVip`, last-four phone hint only with `cli.contact`); no match is 404 `VIP_CLIENT_NOT_FOUND`; already VIP is 200 `added: false`. |
 | `GET/PUT /arrival-settings` | `{on, radius, prepAt, autoArrive, welcome, crew, vipFirst, version}`; `PUT` partial (`cli.member`). |
-| `GET /services` | Packages and add-ons with `tasks[{id, label, position}]`, `version`, `taskCount`. |
+| `GET /services` | Packages and add-ons with `tasks[{id, label, position}]`, `version`, `taskCount`, `category` (the website fields are section 15.8's). |
 | `PUT /services/{id}/checklist` | `{tasks: [{id?, label} | string], version?}`: the whole ordered list, trimmed, blanks dropped; ids are stable (rename and reorder keep them; see ADR 0021 for the tie-break); removed tasks are retired. Calls the `ChecklistSync` port (default no-op). |
-| `POST /services`, `PATCH /services/{id}` | Name, price (cents), duration (packages only), `bookableDesk`, `active`, tags, sort. Appointments keep their own snapshot. |
+| `POST /services`, `PATCH /services/{id}` | Name, price (cents), duration (packages only), `bookableDesk`, `active`, tags, sort; `POST` also takes `category` (an active category; without it the default rule: add-ons → `addons`, tag tint → `tint`, detail/ceramic/exotic/executive → `detail`, else `wash`). Appointments keep their own snapshot. |
 | `GET /settings/bundle` | `{hours, rules, federalAuto, closures {upcoming, past}, emergency, vip, arrival, services, counts {employees}, omitted[]}`: the Settings screen in one call. Parts that need more than a session are left out and named in `omitted`: `emergency.history` (`set.emergency`), `vip.clients` (`cli.member`), `counts.employees` (`team.view`). |
 
 ### 15.5 Jobs
@@ -651,6 +664,54 @@ uses the same `dayInfo()` as the dashboard, so the website never disagrees with 
 | No PII or operations data | No names of people, appointment or vehicle counts, message text, ids or history. Closure `name` is the closure's own name, the one customers are told. Tests walk every key. |
 | Caching and limits | `Cache-Control: public, max-age=60`; 60 requests a minute per address (429 `RATE_LIMITED` with `Retry-After`); no cookie is read or set. |
 | Tests | `test/settings/public-hours.test.ts` (pure: open, before and after hours, Sunday closed, week boundary, planned closed and reduced days, emergency variants, forbidden keys), `test/settings-http/public-hours.test.ts` (no session, bogus cookie, cache header, forbidden keys before and after an emergency, state flips with close and reopen, Settings changes, 429), the settings contract and the authz matrix. |
+
+### 15.8 Catalog: one source for the website, the bookings and the AI (ADR 0160, plan A and K)
+
+Settings → Catalog. Code: `src/modules/settings/http/catalog-routes.ts` (registered by `registerCatalogRoutes`) over
+`src/modules/catalog/{website,categories,plans,pricing,appointment-categories}.ts`; the seed is `db/seeds/website-catalog.ts`.
+Reads: any signed-in user (`includeInactive=true` on `GET /catalog` needs `set.services`). Writes: `set.services`, one transaction,
+an `audit_log` row, `settings.changed`. The `PUT`s are whole-object saves and **require** the version they edited (body `version` or
+`If-Match`; 428 `PRECONDITION_REQUIRED` without, 412 `VERSION_CONFLICT` with `meta.currentVersion` when stale); `PATCH` and
+`DELETE` enforce it when sent. Every GET of one object sets `ETag: "<version>"`.
+
+| Endpoint | Behaviour |
+|---|---|
+| `GET /catalog` | The screen in one call: `{categories[], packages[], addons[], tintMatrix {vehicleTypes, films, prices, version}, guestMarkup {pct, version}, guestBookingFeeCents, plans[]}`; services are the website view below. |
+| `GET/PUT /catalog/services/{id}` | A package's or add-on's website fields `{category, publicName, description, memberPriceCents, guestPriceCents, vipInclusion included\|allowance\|none, vipNote, quoteOnly, visibleOnline, sort}` plus read-only `{id, kind, name, active, priceCents, durationMin, tags, effective {memberPriceCents, guestPriceCents, tintFilm}, version}`. `PUT` replaces all ten fields (texts trimmed, blank = none; the service's version, shared with checklist and catalog edits) and answers `changed` and `appointmentsUpdated`. 422: unknown or turned-off category (a service may keep a category turned off later), a price outside 0..$100,000, a guest price without a member price or below it, `allowance` without `vipNote`, texts over 80/1000/200. For an item priced on the website (a member price, or a tint film; not quote-only) the same save sets `priceCents` (what a booking charges) to the guest price, audited with the fields. A category change re-derives `categories` on the visits not yet finished that hold the service; publishes `{section: "services", key: id}`. |
+| `GET /catalog/categories`, `POST`, `PATCH /{key}`, `DELETE /{key}` | `{key, label, colour #RRGGBB, sort, active, builtin, version}` in display order. `key` (lowercase letter, then letters, digits, underscore; up to 32; `mixed` is reserved, 422, being the word `visitCategory` returns) is set at creation and never changes (services, appointments and leads refer to it). 409 `CATEGORY_KEY_TAKEN`; 422 `CATEGORY_LIMIT` past 20. A turned-off category leaves the public catalog with its services and takes no new service. `DELETE`: 409 `CATEGORY_BUILTIN` for the five defaults (turn them off), 409 `CATEGORY_IN_USE` while any service (active or retired) names it. Publishes `{section: "catalog", key: "categories"}`. |
+| `GET/PUT /catalog/tint-matrix` | The `catalog.tint_matrix` setting: `vehicleTypes[{key, label}]`, `films[{key, label, vlt[1..100]}]`, `prices[{vehicle, film, memberMinCents, memberMaxCents, guestMinCents, guestMaxCents}]`; each pair once, known keys, ranges not ending below their start (422 with body paths, e.g. `prices.0.vehicle`). A save moves what each tint package charges at booking to its film's lowest guest price (`catalog.price.sync` audit rows). |
+| `GET/PUT /catalog/guest-markup` | `{pct}` 0..200, the `catalog.guest_markup_pct` setting. A save moves what every item priced by the markup (a member price, no guest price) charges at booking to its new guest price (`catalog.price.sync` audit rows). |
+| `GET /catalog/plans`, `PUT /catalog/plans/{key}` | The plans' public fields `{publicLabel, monthlyPriceCents, perks[], checkoutUrl}` with read-only `{key, name, active, websiteTier gold\|vip\|null, version}`. Perks: up to 12, 120 characters each, trimmed, blanks dropped, no duplicates (also what the Membership tab lists). `checkoutUrl`: https on `squarespace.com` or a subdomain, lowercase host, no user, password or port, up to 2048 (422 otherwise; blank = none); it never appears in the public catalog. Publishes `{section: "catalog", key: "plans"}`. |
+
+**Prices (one rule, `src/modules/catalog/pricing.ts`).** Member price = `member_price_cents`, else the plain price (`price_cents`,
+what a booking charges). Guest price = `guest_price_cents` (only next to a member price, never below it), else member × (100 +
+markup) / 100 rounded half up to whole dollars (the website's `Math.round(m * 1.2)`: $45 → $54, $39 → $47). A tint package (category
+`tint`, a tag naming a matrix film) shows the film's lowest member and guest prices ("from") and `tintFilm`. These member and guest
+prices are the **starting prices** (design §3b): the only service prices the website and the assistant state. For an item priced on
+the website (a member price, or a tint film; not quote-only) `price_cents` is kept equal to the guest price (`bookingPriceOf`): by the
+website-fields save, the markup save and the tint matrix save, so a booking never charges other than the guest price shown; an item
+without website prices keeps its plain price, which is then also its member price. Charging members their price at booking is a
+later wave's.
+
+**Appointment categories.** `appointments.categories` holds the category keys of the package and the live add-ons in category
+order. `createAppointment` (every booking path: dashboard, website, standing, assistant), add-on add and remove, and a service's
+category change (visits booked, confirmed, arrived or cleaning) keep it; seeds that write appointments directly call
+`refreshAllAppointmentCategories`. `visitCategory(categories)` is the one word for a chip or KPI: the category ignoring add-ons,
+`mixed` for two or more others (a wash with a tint), `addons` for add-ons alone.
+
+**Seed `website-catalog`.** `pnpm seed -- --profile website-catalog` (production: after `catalog`) makes the website's services the
+catalog: Signature Hand Wash ($45 member / $54 guest, 45 min) and Exterior Hand Wash ($32 / $38, 30 min); Carbon and Ceramic window
+tint (priced by the matrix, 180 min); Interior detail ($149 / $179, 150 min) and Full detail ($249 / $299, 240 min); the quote-only
+Windshield replacement, Rim powder coating, Chrome delete, Car key copies (price 0, 120 / 480 / 300 / 30 min); the nine add-ons with
+their VIP inclusion (Hand wax and Engine bay wash included, Leather conditioning 2× / mo, Stain removal 1× / mo); the tint matrix,
+markup 20, Gold (premium, $99/mo) and VIP (executive, $169/mo) with the website's perks. It adopts a same-named row (or the design's
+Wax, Engine bay cleaning, Rain repellent), deactivates every other active service (never deletes), re-derives the open visits'
+categories, audits under "Seed (website-catalog)" and is idempotent; a re-run resets edited fields to the website's content.
+Members' credits redeem on service tags and the seed keeps what each plan redeemed: Signature carries `premium` (it replaces the
+Premium Hand Wash + Interior), Exterior `express` (it replaces the Express Hand Wash), both `handwash`. It does not change the credit
+rules (the memberships module's): the website's perks ("4 hand washes a month") differ from the rules' counts and the executive
+"Executive detail" credit covers no website service, so every run logs `WARNING website-catalog: credit rule "<plan>: <label>"
+covers no active package`. **Do not run it in production until the owner has decided the Gold/VIP credit rules** (ADR 0160 W2a).
 
 ## 20. Operations: appointments, availability, board, calendar
 
@@ -1148,7 +1209,7 @@ or use a member's or a VIP's privileges; without it the shop's existing customer
 |---|---|
 | `GET /public/hours` | section 15.7; takes no query (422). |
 | `GET /public/availability?days=5&service=<key>&addons=a,b` | The query has exactly one spelling (`src/http/canonical-query.ts` before the strict schema): `days` 1..14 without a leading zero, `service` a catalog key, `addons` up to 12 keys separated by `,` (or `%2C`, as the site encodes it); an unknown or repeated parameter, a percent-encoded name or value, `014` or `1.0` is 422, so nothing can make the 60-second cache miss.  `{tz, generatedAt, serviceKey, durationMin, now {open, baysFree, baysTotal}, days[]}`; each day `{date, label "Today" \| "Tomorrow" \| "Sat", dateLabel "Saturday, Jun 13", weekday, closed, reason, openCount, slots[{startMin, start "8:30 AM", state open \| last \| vip \| booked, bays}]}`. The slot engine's answer (`computeSlots`, channel online, not VIP) on the shop's 30-minute grid from opening to the last start the cutoff allows, reduced to the board's four states: `available` with 2+ free bays is `open`, with one `last`; `vip_held` is `vip` (inside a hold's release window); `blocked` is `booked` (`bays` 0); today's starts before now + the online lead time (30 min) are not listed, nor are cutoff or closed starts. Closed days (a regular day off, a closure, an emergency, "pause online booking") have no slots and carry the `reason` the customer may be told. `now` is the "N of 3 bays open now" pill: active bays minus the jobs occupying one at this instant, `open: false` outside the hours. `days` default 5; `service` defaults to the first package; `addons` is accepted and ignored (add-ons never change the duration). 422 for an unknown service key. |
-| `GET /public/catalog` | Takes no query (422). `{generatedAt, services[{key, name, shortName, durationMin, priceCents, tags}], addons[{key, name, priceCents, tags}], plans[{key gold \| vip, name, planKey, planName, perks, priceCents: null}]}` from the live catalog in cents. **Keys** are the slug of the service name (`express-hand-wash`, `premium-hand-wash-plus-interior`); a second live service with the same slug carries six characters of its id. The two plans are the website's tiers over the dashboard's plans (`gold` = `premium`, `vip` = `executive`, `src/modules/public/tiers.ts`); the site shows its own prices. |
+| `GET /public/catalog` | Takes no query (422). The one catalog the website and the assistant read, from Settings (section 15.8, ADR 0160): `{generatedAt, currency "USD", guestMarkupPct, guestBookingFeeCents, categories[{key, label, colour, sort}] (active), services[{key, name, shortName, category, description, durationMin, priceCents, memberPriceCents, guestPriceCents, vipInclusion, vipNote, tags, tintFilm}], addons[{key, name, category, description, priceCents, memberPriceCents, guestPriceCents, vipInclusion, vipNote, tags}], quotes[{key, name, kind, category, description}], tint {vehicleTypes, films, prices}, plans[{key gold \| vip, name, planKey, planName, perks, priceCents}]}` in cents. Listed: active, `visibleOnline`, category active; quote-only items go to `quotes` (no price). `name` is the public name (else the name); `memberPriceCents`/`guestPriceCents` (section 15.8 rule) and a tint row's `memberMinCents`/`guestMinCents` are the **starting prices** (design §3b) the website and the assistant state; `priceCents` is what a booking charges (kept for the booking flow: the guest price for an item priced on the website), never a price to state; a plan's `name` is its public label and `priceCents` its monthly price (null until set). **Keys** are the slug of the service name over every active package (or add-on), as availability and bookings key them (`signature-hand-wash`, `tire-shine-and-dressing`); a second live service with the same slug carries six characters of its id. The two plans are the website's tiers over the dashboard's plans (`gold` = `premium`, `vip` = `executive`, `src/modules/public/tiers.ts`). No ids, versions, checklists, SKUs, desk flags or checkout URLs (tests walk every key). |
 
 ### 26.2 Member identification: `POST /public/otp`, `POST /public/otp/verify`
 
