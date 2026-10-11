@@ -519,6 +519,35 @@ describe('the policy judge in a turn (design 3c, layer 3)', () => {
     expect(judged).toBe(2000 * 5 + 50 * 25 + 400 * 0.5)
   })
 
+  it("the client's own vehicle names are never trusted: their digits still block and the judge reads them untrusted (v4 re-check fix 1)", async () => {
+    // free text a client can set on the public booking form (make, model): the first two vehicles of the turn context
+    const ids = [w.newId(), w.newId()]
+    const customerId = w.customer('Maria Delgado').id
+    await w.t.db
+      .insertInto('vehicles')
+      .values([
+        { id: ids[0]!, customer_id: customerId, make: 'Free Wash', model: '2015550123', created_at: new Date('2000-01-01T00:00:00Z') },
+        { id: ids[1]!, customer_id: customerId, make: 'Free Wash', model: 'Club', created_at: new Date('2000-01-01T00:00:01Z') },
+      ])
+      .execute()
+    try {
+      const a = assistant([simText('Your Free Wash 2015550123 is booked.'), simText('Your Free Wash Club is booked.')])
+      await inbound(maria(), 'Is my car booked?')
+      expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
+      // the phone number inside the vehicle name was refused (one rewrite with the digits hint)
+      expect(a.provider.requests).toHaveLength(2)
+      expect(JSON.stringify(a.provider.requests[1]!.messages.at(-1))).toContain('Never write a digit code or a phone number')
+      // the rewritten reply passed the word lists ("Free" is the vehicle's own name), and the judge read it all as untrusted
+      expect(a.judge.requests).toHaveLength(1)
+      const message = JSON.stringify(a.judge.requests[0]!.messages)
+      expect(message).toContain('Your Free Wash Club is booked.')
+      expect(message).not.toContain(TRUSTED_OPEN)
+      expect((await aiTexts(maria()))[0]!.body).toContain('Your Free Wash Club is booked.')
+    } finally {
+      await w.t.db.deleteFrom('vehicles').where('id', 'in', ids).execute()
+    }
+  })
+
   it('AI_GUARD_JUDGE=false: no judge call (the deterministic layers only)', async () => {
     const a = assistant([simText('We open at 8 AM.')], { judge: { ...assistantConfig(w.env).judge, enabled: false } }, [fail('other')])
     await inbound(maria(), 'When do you open?')

@@ -33,8 +33,8 @@ export interface EvalRow {
   text: string
   /** {balance} is allowed in this row (get_balance ran in the turn). */
   balance?: boolean
-  /** Extra server-owned literals for this row (a vehicle on file). */
-  literals?: string[]
+  /** The client's own vehicles on file for this row (client-entered: skipped by the secret and promise word lists only). */
+  names?: string[]
   /** The phone number of an M row (also checked against maskForModel and redactText). */
   phone?: string
   /** The v3 form of a converted ordinary row. */
@@ -48,7 +48,12 @@ export interface EvalContext {
   balance: string
   website: string
   shopNumbers: string[]
+  /** The shop's address (trusted by the judge; the digit rules skip it, punctuation and the state name normalised). */
+  address: string
+  /** Server-owned literals: catalog and plan names with digits (never client-entered text). */
   literals: string[]
+  /** The client's first name and vehicles on file: skipped by the secret and promise word lists only. */
+  names: string[]
 }
 
 export interface EvalFixture {
@@ -67,7 +72,15 @@ export function deterministicVerdict(row: EvalRow, ctx: EvalContext): GuardVerdi
   const values = new Map(Object.entries(ctx.values))
   if (row.balance) values.set('{balance}', ctx.balance)
   const run = (text: string): GuardVerdict =>
-    guardReply({ text, values, website: ctx.website, shopNumbers: ctx.shopNumbers, literals: [...ctx.literals, ...(row.literals ?? [])] })
+    guardReply({
+      text,
+      values,
+      website: ctx.website,
+      shopNumbers: ctx.shopNumbers,
+      address: ctx.address,
+      literals: ctx.literals,
+      names: [...ctx.names, ...(row.names ?? [])],
+    })
   const v = run(row.text)
   if (v.kind === 'fix' && v.problems.every((p) => p === 'questions')) return run(cutAfterFirstQuestion(v.text))
   return v

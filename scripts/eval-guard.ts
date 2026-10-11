@@ -6,7 +6,7 @@
 // AI_PROVIDER=sim (the default) never reaches AWS: the simulator passes every reply, so the numbers are the deterministic layer's.
 // W4 runs it against Bedrock with the operator's profile, for example:
 //   AWS_PROFILE=<operator> AI_PROVIDER=bedrock AI_BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-4-6 pnpm eval:guard --concurrency 4
-// (about 275 judge calls, one per row the deterministic layers pass, of ~750 input and ~40 output tokens each: about one US
+// (about 285 judge calls, one per row the deterministic layers pass, of ~750 input and ~40 output tokens each: about one US
 // dollar on Sonnet 4.6 list prices).
 //
 // Options: --fixture <path> (default test/assistant/fixtures/guard-eval.json), --concurrency <n> (default 4), --cat A,B,...,

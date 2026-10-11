@@ -1082,23 +1082,28 @@ closed (23.4a), and `ai.respond` / `ai.sweep` return at once while `AI_ENABLED=f
   dash or a line break, and ends the text or is followed by `. ! ? ; : ,` or a spaced dash (`placement`). (2) A small deterministic
   layer on the RAW text: an unknown placeholder (`unknown_placeholder`); a currency sign or money word (dollar(s), dólar(es),
   cent(s), centavo(s), peso(s), USD, buck(s) but not the name "Buck") (`money`); a code or phone number: 5+ digits in a row, 7+
-  digits in one group split by spaces, dashes, dots, slashes or underscores, 3+ numeric tokens holding 7+ digits (clock-time and
-  duration disguises), 5+ spelled digits, an extension, a vanity number, look-alike letters for digits (`digits`; the shop's own
-  numbers, address and the client's vehicles excepted); anything host-shaped incl. "period com", "punto com", "-dot-", ";com",
+  digits in one group split by spaces, dashes, dots, slashes or underscores, 3+ numeric tokens holding 7+ digits, every digit
+  counted (clock-time and duration disguises; only an ascending list of appointment times inside the opening window passes:
+  "Openings: 9:10, 9:40, 10:20"), 5+ spelled digits, an extension, a vanity number, look-alike letters for digits (`digits`; the
+  shop's own numbers, address, catalog and plan names excepted, punctuation and the state name normalised; client-entered text such
+  as a vehicle never is); anything host-shaped incl. "period com", "punto com", "-dot-", ";com",
   "<word> com slash", an IP, "http", "hxxp", "www", "://" but `{linkN}` and the shop's own host as plain text (`url`); unambiguous
-  secret words (pin, passcode, password, OTP, code, digits, CVV, card number, código, contraseña, clave, ...) (`secret`) and
+  secret words (pin, passcode, password, OTP, CVV, card number, código, contraseña, clave, ...; English "code"/"digits" only in a
+  secret sense: "the code we sent", "your code", "a verification code", "6-digit number", "digits on your card", not "promo/ZIP/
+  dress/area code") (`secret`) and
   promise words (free, discount, refund, coupon, guarantee, warranty, complimentary, on the house, % off, gratis, gratuito,
   descuento, reembolso, garantía, ...) (`promise_words`), on the plain text and a skeleton; the client's own first name and
-  vehicles are never checked against the word lists. Ordinary numbers pass ("2 to 3 days", "open 8 to 6", "bay 2", "October 12,
+  vehicles are skipped by these two word lists only (the money, digit and host rules read them; the judge never trusts them). Ordinary numbers pass ("2 to 3 days", "open 8 to 6", "bay 2", "October 12,
   2026"). Each problem gets one rewrite call, then the fallback (`policy_words` for promise words, else `guard`). (3) The POLICY
   JUDGE: every reply that passed is read once more, rendered, by one extra model call (`AI_GUARD_MODEL_ID`, default
   `AI_BEDROCK_MODEL_ID`; temperature 0, at most 120 tokens, 8 s) with a fixed, cached rubric; the server's segments (rendered
-  placeholders, links as "[link]", the safety line, the shop's phone numbers, address and website) are marked trusted; it never
+  placeholders, links as "[link]", the safety line, the shop's phone numbers, address and website; never client-entered text) are
+  marked trusted; it never
   sees the client's phone, an id, a token or a URL. It answers strict JSON `{ok, category: none|price|promise|secret|
   link_or_phone|other, reason}`. A fail gets one rewrite with the category's hint, then the guard and the judge again, then the
   fallback (`policy_judge`); a judge error, timeout or an answer that is not the JSON fails closed (fallback, `judge_error`). Each
   judgement is an `assistant_tool_calls` row (tool `policy_judge`, redacted) and its cost is in the turn's `cost_micros` (the
-  daily budget). `AI_GUARD_JUDGE` (default: on whenever `AI_ENABLED`). Markdown stripped, GSM-7, at most 320 characters after
+  daily budget). `AI_GUARD_JUDGE` (default: on whenever `AI_ENABLED`; false is refused in production while `AI_ENABLED=true`). Markdown stripped, GSM-7, at most 320 characters after
   rendering (one shorten call, else cut at a sentence), at most one question (one rewrite, else cut after the first). A refusal,
   a cut answer, an unknown stop, a provider error or a timeout hand off too. A reply with a `verify`, `pin`, `membership` or
   `pay` link gets the server's line "For your security, enter codes and your PIN only on the secure page, never by text." after

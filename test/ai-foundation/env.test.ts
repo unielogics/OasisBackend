@@ -82,6 +82,16 @@ describe('AI environment', () => {
     expect(FORBIDDEN_SECRET_KEYS.PIN_PEPPER).toBeUndefined()
   })
 
+  it('production: the policy judge cannot be turned off while the AI answers (AI_GUARD_JUDGE=false with AI_ENABLED=true)', () => {
+    const live = { ...prod, AI_ENABLED: 'true', AI_PROVIDER: 'bedrock' }
+    expect(() => loadEnv({ ...live, AI_GUARD_JUDGE: 'false' })).toThrow(/AI_GUARD_JUDGE: must not be false in production when AI_ENABLED=true/)
+    expect(loadEnv({ ...live, AI_GUARD_JUDGE: 'true' }).AI_GUARD_JUDGE).toBe(true)
+    expect(loadEnv(live).AI_GUARD_JUDGE).toBeUndefined() // unset = on (judgeConfig)
+    // with the AI off it may stay false in production; outside production it may be turned off for local runs
+    expect(loadEnv({ ...prod, AI_GUARD_JUDGE: 'false' }).AI_GUARD_JUDGE).toBe(false)
+    expect(loadEnv({ ...base, AI_ENABLED: 'true', AI_GUARD_JUDGE: 'false' }).AI_GUARD_JUDGE).toBe(false)
+  })
+
   it('production: personal links need PIN_PEPPER; the AI may only answer through Bedrock', () => {
     expect(loadEnv(prod).PUBLIC_LINKS_ENABLED).toBe(false)
     expect(() => loadEnv({ ...prod, PUBLIC_LINKS_ENABLED: 'true' })).toThrow(/PIN_PEPPER: required in production when PUBLIC_LINKS_ENABLED/)

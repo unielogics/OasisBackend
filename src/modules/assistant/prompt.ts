@@ -96,7 +96,7 @@ export interface TurnContextData {
   /** "Gold, active, 2 washes left this cycle" or null. */
   membership: string | null
   vehicles: string[]
-  /** The vehicles' exact names with digits, for the output guard (context.ts vehicleLiterals); not rendered. */
+  /** The vehicles' exact names with digits, for the output guard's word lists only (context.ts vehicleLiterals); not rendered. */
   vehicleNames?: string[]
   appointments: { ref: string; label: string }[]
   intake: IntakeStep

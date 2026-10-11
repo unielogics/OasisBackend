@@ -5,7 +5,7 @@ import { sql } from 'kysely'
 import { runSeed } from '../../db/seeds/index.js'
 import { loadEnv, type Env } from '../../src/config/env.js'
 import { FixedClock, PARITY_NOW } from '../../src/platform/clock.js'
-import { buildShopFacts, factLiterals, oneLine, placeholderValues, renderShopFacts, usd, vehiclePhrase } from '../../src/modules/assistant/facts.js'
+import { buildShopFacts, factLiterals, oneLine, openingWindow, placeholderValues, renderShopFacts, usd, vehiclePhrase } from '../../src/modules/assistant/facts.js'
 import { guardReply } from '../../src/modules/assistant/guard.js'
 import { createTestDb, truncateAll, type TestDb } from '../helpers/db.js'
 import { testDatabaseUrl } from '../helpers/env.js'
@@ -111,6 +111,12 @@ describe('the shop facts document', () => {
     ])
     const withAddress = { ...f, business: { ...f.business, address: '468 River Drive, Garfield NJ 07026' } }
     expect(factLiterals(withAddress)).toEqual(expect.arrayContaining(['468 River Drive, Garfield NJ 07026', '468 River Drive', 'Garfield NJ 07026']))
+  })
+
+  it('openingWindow: the earliest opening and the latest closing of the week, for the guard\'s time lists (v4 re-check fix 2)', () => {
+    const day = (weekday: number, from: string | null, to: string | null) => ({ weekday, day: 'x', open: from !== null, from, to })
+    expect(openingWindow({ hours: [day(0, null, null), day(1, '8:00 AM', '6:00 PM'), day(6, '9:00 AM', '7:30 PM')] })).toEqual({ fromMin: 480, toMin: 1170 })
+    expect(openingWindow({ hours: [day(0, null, null)] })).toBeNull()
   })
 
   it('the guard reads the real facts: nothing in them excuses a promise word (F1, N4); their prices pass as the rule writes them', async () => {

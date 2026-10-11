@@ -295,27 +295,40 @@ nothing; both jobs return at once while `AI_ENABLED=false`). Notes and deviation
     in a row; 7 or more digits in one group split by spaces, dashes, dots, slashes, underscores or en/em dashes (counted before any
     date or time allowance: "10/12/2026" is refused, "October 12, 2026" passes); 3 or more numeric tokens in a row (with clock
     times, unit words such as "min" and punctuation between them) that hold 7 or more digits ("2:01 5:55 01:23", "201 min, 555 min,
-    012 min, 3 min"), where a clock time on the quarter hour without a leading zero ("10:30") counts no digits; 5 or more spelled
-    digits in a row (English and Spanish); an extension ("ext 4821"); a toll-free vanity number ("1 800 FLOWERS"); the same rules
-    over a digit skeleton where look-alike letters read as digits ("2O1 5S5 O1Z3", "ZOI-SSS-OIZE"). The shop's own numbers, its
-    address and the server-owned literals (catalog/plan names, the client's vehicles on file) are taken out first. `url`: v3's
+    012 min, 3 min"), EVERY digit counted, clock times included; such a run passes only as a list of appointment times: every token
+    a clock time on a 5-minute step or a bare hour, strictly ascending (turning to the afternoon at most once, where the written
+    clock goes down: "11:30, 12:00, 1:30"), each inside the shop's opening window (`facts.ts openingWindow`: the week's earliest
+    opening to its latest closing; 6 AM to 10 PM when unknown). So "Openings today: 9:10, 9:40, 10:20." and "Openings: 08:00, 08:30,
+    09:00." pass, and "Call 20:15, 5:50, 1:23." and "7:30 2:15 5:55 01" are refused. 5 or more spelled digits in a row (English and
+    Spanish); an extension ("ext 4821"); a toll-free vanity number ("1 800 FLOWERS"); the same rules over a digit skeleton where
+    look-alike letters read as digits ("2O1 5S5 O1Z3", "ZOI-SSS-OIZE"). The shop's own numbers and the server-owned literals (its
+    address, catalog and plan names) are taken out first, punctuation, spacing and the state name normalised ("468 River Drive,
+    Garfield, New Jersey 07026" for "468 River Drive, Garfield NJ 07026"; any other 5-digit run still blocks). Client-entered text,
+    such as a vehicle on file, is never a literal. `url`: v3's
     host skeleton plus "period com", "point com", "punto com", "-dot-", ";com", " : com" and "<word> com slash"; the shop's own
     host passes only as plain text with no path (also not after a space: "oasisautospanj.com /pay" is refused). `secret` and
     `promise_words`: ONLY unambiguous words, in English and Spanish, on the plain text and the v3 skeleton. Spaced-out letters may
     now be joined by stars, slashes, pluses and bare commas too ("P*I*N", "P,I,N"), and "¡" reads as i. The secret words are pin,
-    pincode, passcode, password, pass word, passphrase, passkey, pwd, OTP, code(s), digit(s), one-time number/password, personal
-    identification, secret/verification/security/access number, security key, CVV, CVC, card number/digits/details, código,
-    contraseña, clave and número de (tu|su) tarjeta. The promise words are free (not "feel free" and not a non-money "-free"
+    pincode, passcode, password, pass word, passphrase, passkey, pwd, OTP, one-time number/password, personal identification,
+    secret/verification/security/access number, security key, CVV, CVC, card number/digits/details, código, contraseña, clave and
+    número de (tu|su) tarjeta. English "code(s)" and "digit(s)" count only in their secret senses: "the/your/a/that/this/what code",
+    the code someone sent, texted or received, a verification/security/confirmation/one-time/reply/access/login code, "enter/type/
+    send/text/share codes", codes in a sentence about the secure page or "by text", "a 6-digit code/number/PIN", "the digits we
+    texted", "the digits on your card". So "promo code", "ZIP code", "dress code", "area code" and "the last digits of your plate"
+    pass this layer, and the judge reads them. The promise words are free (not "feel free" and not a non-money "-free"
     compound such as "spot-free" or "cash-free"), freebie, gratis, complimentary, on the house, discount, percent/per cent/half off,
     half price, "% off", rebate, refund, money back, coupon, waive, guarantee, warranty, gratuito, descuento, reembolso and
     garantía/garantizado. DROPPED from v3 because they blocked ordinary replies: the numbers rule (ranges "2 to 3 days", "8 to 6",
     "1-2 hours", "bay 2", "2-door", "3-step", counts and number words, years in dates), deal, on us, one-time, sue, login, legal,
     insurance, damage and the time-promise phrases; the judge reads those meanings. The client's own first name and vehicles are
-    never checked against the word lists ("Hi Buck", "Thanks, Sue").
+    skipped by the secret and promise word lists ONLY ("Hi Buck", "Thanks, Sue", "your Ford Focus"): they are client-entered (a
+    vehicle can be set on the public booking form), so the money, digit and host rules read them ("Your Free Wash 2015550123 is
+    booked." is refused) and the judge reads them as untrusted.
   - **(3) The policy judge** (`judge.ts`): every reply that passed (1) and (2) is read once more, RENDERED, by one extra
     `AiProvider` call. Its system prompt is the fixed rubric `JUDGE_RUBRIC` (byte-stable, with a cache point). Its user message is the
     reply between `<message>` tags, with the server's segments wrapped in `⟦trusted⟧…⟦/trusted⟧`: the rendered placeholders,
-    links (as "[link]"), the safety line, and the shop's own phone numbers, address and website. The markers are not GSM-7, so the
+    links (as "[link]"), the safety line, and the shop's own phone numbers, address (normalised as above) and website. Nothing else
+    is trusted: not a catalog name the model copied, and never client-entered text such as a vehicle or a name. The markers are not GSM-7, so the
     model's text can never contain them, and its "<"/">" are neutralised. The judge never sees the client's phone number, an id, a
     token or a URL. It must answer strict JSON `{ok, category: none|price|promise|secret|link_or_phone|other, reason ≤ 120}`, at
     temperature 0 with at most 120 output tokens. The rubric is language-agnostic. It FAILS a reply whose own text (a) states or
@@ -330,7 +343,8 @@ nothing; both jobs return at once while `AI_ENABLED=false`). Notes and deviation
     `policy_judge`; input = the model plus the judge's message, redacted; output = the verdict; outcome ok / denied / error. It is
     no progress for the loop breaker. A transcript entry `judge` is also written. The judge's tokens are added to the turn's tokens.
     Its cost, at the judge model's prices, is added to `cost_micros`, so it counts against the daily budget. Env:
-    `AI_GUARD_JUDGE` (unset = on whenever `AI_ENABLED`; false turns it off) and `AI_GUARD_MODEL_ID` (unset = `AI_BEDROCK_MODEL_ID`;
+    `AI_GUARD_JUDGE` (unset = on whenever `AI_ENABLED`; false turns it off, which env validation refuses in production while
+    `AI_ENABLED=true`, like a non-Bedrock `AI_PROVIDER`) and `AI_GUARD_MODEL_ID` (unset = `AI_BEDROCK_MODEL_ID`;
     it must be one of models.ts, which env validation enforces; when it names a different model, that model's list prices apply,
     because `AI_PRICE_*` are the assistant model's). `AI_PROVIDER=sim` builds a simulator whose default answer to a judge request
     (the system prompt starts with `POLICY_JUDGE_HEADER`) is a passing verdict.
@@ -345,7 +359,10 @@ nothing; both jobs return at once while `AI_ENABLED=false`). Notes and deviation
     ordinary probe rows wrote a placeholder after a name, so they stand in their v4 form, and their v3 form is a placement row. A
     `layer` label says which layer must stop each adversarial row. The eval runs the whole guard, with the REAL judge through
     `createAiProvider`, and prints recall per category, the false-block rate, judge errors, tokens, cost and p50/p95 latency. With
-    the simulator, 0 of 149 ordinary replies are blocked and every row labelled deterministic is blocked. W4 runs it against
+    the simulator, 0 of 160 ordinary replies are blocked and every row labelled deterministic is blocked (338). The fourth re-check
+    (w3-core-recheck4) added its rows: the clock-time phones and client-entered vehicle names as deterministic rows, and "promo/ZIP/
+    dress/area code", "the last digits of your plate", the address with a comma or "New Jersey", ascending time lists and a vehicle
+    named "Free Spirit" as ordinary rows; "Text us your zip code" moved to the judge's layer. W4 runs it against
     Bedrock with the operator's profile before any rollout.
   - **(7) Masking** for the model and in the stored transcript share ONE pattern set (`transcript.ts PHONE_PATTERNS` through
     `maskPhones`, used by `context.ts maskForModel` and `transcript.ts redactText`): `INTL_PHONE`, `NANP_PHONE`, `SPLIT_PHONE`,

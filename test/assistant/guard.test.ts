@@ -11,11 +11,13 @@ import { describe, expect, it } from 'vitest'
 import {
   cutAfterFirstQuestion,
   cutAtSentence,
+  DEFAULT_OPEN_WINDOW,
   digitSkeleton,
   digitWords,
   guardReply,
   HARD_PROBLEMS,
   hostSkeleton,
+  isTimeList,
   MAX_REPLY_CHARS,
   misplacedPlaceholders,
   moneyWords,
@@ -36,11 +38,11 @@ import { redactText } from '../../src/modules/assistant/transcript.js'
 const fixture = loadEvalFixture(path.join(import.meta.dirname, 'fixtures', 'guard-eval.json'))
 const ctx = fixture.context
 const values = new Map(Object.entries(ctx.values))
-const { website, shopNumbers, literals } = ctx
-const g = (text: string, o: { balance?: boolean; names?: string[] } = {}) => {
+const { website, shopNumbers, literals, address } = ctx
+const g = (text: string, o: { balance?: boolean; names?: string[]; literals?: string[] } = {}) => {
   const v = new Map(values)
   if (o.balance) v.set('{balance}', ctx.balance)
-  return guardReply({ text, values: v, website, shopNumbers, literals, ...(o.names ? { names: o.names } : {}) })
+  return guardReply({ text, values: v, website, shopNumbers, address, literals: o.literals ?? literals, ...(o.names ? { names: o.names } : {}) })
 }
 const blocked = (text: string): boolean => {
   const v = g(text)
@@ -229,7 +231,7 @@ describe('(2) codes and phone numbers', () => {
     expect(digitSkeleton('Call 2O1 5S5 O1Z3 or ZOI-SSS-OIZE, the 1st and 21st')).toBe('Call 201 555 0123 or 201-555-0123, the 1st and 21st')
   })
 
-  it('ordinary numbers pass: ranges, hours, a year in a date, quarter-hour times, counts, the shop numbers, the address, vehicles', () => {
+  it('ordinary numbers pass: ranges, hours, a year in a date, ascending time lists, counts, the shop numbers, the address, vehicles', () => {
     for (const ok of [
       'We are open 8 to 6.',
       'Ceramic coating lasts up to 2 years.',
@@ -247,6 +249,64 @@ describe('(2) codes and phone numbers', () => {
     ])
       expect(g(ok), ok).toMatchObject({ kind: 'ok' })
     expect(digitWords('Saturday at 10 and 11:30, Oct 12, 2026, the 1st, bay 2, 3-step, 1-2 hours')).toEqual([])
+  })
+})
+
+describe('(2) v4 re-check fix 2: a phone number written as clock times', () => {
+  it('every digit counts, clock times included: a run that is not an ascending list of opening times blocks', () => {
+    for (const bad of ['Call 20:15, 5:50, 1:23.', '20:15 5:50 1:23', 'Times: 20:15 55:01 23', 'Text 20:15, 55:01, 2:30', '7:30 2:15 5:55 01', 'Call us at 9:30 5:55 0123.', 'Call 12:30, 11:30, 10:30.'])
+      expect(g(bad), bad).toMatchObject({ kind: 'fix', problems: expect.arrayContaining(['digits']) })
+  })
+
+  it('an ascending list of appointment times inside the opening window passes (the rule chosen: 5-minute steps, strictly ascending)', () => {
+    for (const ok of [
+      'Openings today: 9:10, 9:40, 10:20.',
+      'Openings: 08:00, 08:30, 09:00.',
+      'We have openings at 9:00, 10:30, 11:30.',
+      'We have openings at 11:30, 12:00, 1:30 and 3.',
+      'Times: 9 AM, 10:30 AM, 1:30 PM.',
+    ])
+      expect(g(ok), ok).toMatchObject({ kind: 'ok' })
+    expect(isTimeList(['9:10', '9:40', '10:20'])).toBe(true)
+    expect(isTimeList(['9:10', '9:40', '9:40'])).toBe(false) // not strictly ascending
+    expect(isTimeList(['9:10', '9:41', '10:20'])).toBe(false) // not on a 5-minute step
+    expect(isTimeList(['20:15', '5:50', '1:25'])).toBe(false)
+    expect(isTimeList(['7:30', '2:15', '5:55', '01'])).toBe(false) // "01" is no time
+    // outside the shop's opening window (the turn passes facts.ts openingWindow)
+    const eightToSix = { fromMin: 8 * 60, toMin: 18 * 60 }
+    expect(isTimeList(['7:00', '7:30', '7:45'], eightToSix)).toBe(false)
+    expect(isTimeList(['5:00', '5:30', '6:30'], eightToSix)).toBe(false) // 5 PM, 5:30 PM, 6:30 PM: the last after closing
+    expect(isTimeList(['8:00', '8:30', '9:00'], eightToSix)).toBe(true)
+    expect(isTimeList(['5:00', '5:30', '5:45'], eightToSix)).toBe(true) // the whole list in the afternoon
+    expect(isTimeList(['11:30', '12:00', '1:30'], eightToSix)).toBe(true) // turns to the afternoon where the clock goes down
+    expect(DEFAULT_OPEN_WINDOW).toEqual({ fromMin: 360, toMin: 1320 })
+    expect(guardReply({ text: 'Openings: 7:00, 7:30, 7:45.', website, openWindow: eightToSix })).toMatchObject({ kind: 'fix', problems: ['digits'] })
+    expect(guardReply({ text: 'Openings: 8:00, 8:30, 9:45.', website, openWindow: eightToSix })).toMatchObject({ kind: 'ok' })
+  })
+})
+
+describe('(2) v4 re-check fix 4: the shop address, punctuation and the state name normalised', () => {
+  it('passes with commas, extra spaces, NJ / N.J. / New Jersey; any other 5-digit run still blocks', () => {
+    for (const ok of [
+      'We are at 468 River Drive, Garfield NJ 07026.',
+      'We are at 468 River Drive, Garfield, NJ 07026.',
+      'We are at 468 River Drive,  Garfield ,NJ 07026.',
+      'We are at 468 River Drive, Garfield, New Jersey 07026.',
+      'We are at 468 River Drive, Garfield, N.J. 07026.',
+      'We are at 468 river drive garfield nj 07026.',
+    ])
+      expect(g(ok), ok).toMatchObject({ kind: 'ok' })
+    for (const bad of ['We are at 468 River Drive, Garfield, NJ 07027.', 'We are at 468 River Drive, Garfield, NY 07026.', 'Garfield, NJ 07026 12345.'])
+      expect(g(bad), bad).toMatchObject({ kind: 'fix', problems: ['digits'] })
+  })
+
+  it('the judge reads the normalised address as trusted', () => {
+    const v = g('We are at 468 River Drive, Garfield, New Jersey 07026.')
+    expect(v.kind === 'ok' && v.segments).toEqual([
+      { text: 'We are at ', trusted: false },
+      { text: '468 River Drive, Garfield, New Jersey 07026', trusted: true },
+      { text: '.', trusted: false },
+    ])
   })
 })
 
@@ -283,6 +343,40 @@ describe('(2) unambiguous secret and promise words, English and Spanish; the cli
     expect(secretWords('Spin by, pinstripes, barcode, decode, login, one-time wash, a numbers game')).toEqual([])
   })
 
+  it('v4 re-check fix 3: English "digit(s)" and "code(s)" only in their secret senses', () => {
+    // ordinary senses pass the deterministic layer (the judge still reads them)
+    for (const ok of [
+      'What are the last digits of your plate?',
+      'Any promo code is applied at the shop.',
+      'Use promo code SPRING at the shop.',
+      'What ZIP code are you in?',
+      'There is no dress code, come as you are.',
+      'Our texting number has an 862 area code.',
+      'Your plate has 7 digits.',
+    ])
+      expect(g(ok), ok).toMatchObject({ kind: 'ok' })
+    // the secret senses still block, on the plain text and the skeleton
+    for (const bad of [
+      'Reply with the code we sent.',
+      'What code did you get?',
+      'Send me your code.',
+      "We'll text you a code; reply with it here.",
+      'Enter the verification code.',
+      'What is your one-time code?',
+      'Codes are typed only on the secure page, never by text.',
+      'For your security, enter codes only on the secure page.',
+      'What is the 6-digit code?',
+      'What is the 4-digit number we sent?',
+      'Reply with the 6 digits we just texted you.',
+      'Read me the digits on the back of your card.',
+      'What are the last 4 digits of your card?',
+      'Text me the c o d e.',
+      'Your verification c0de please.',
+      'Envíame tu código.',
+    ])
+      expect(g(bad), bad).toMatchObject({ kind: 'fix', problems: expect.arrayContaining(['secret']) })
+  })
+
   it('promise words on the plain text and the skeleton; "feel free" and non-money "-free" compounds pass', () => {
     for (const bad of ['FREE wash for you!', 'Fr33 wash!', 'Your wash is fr­ee.', 'Your next wash is money-free.', 'A cost-free upgrade.', 'We can refund that.', 'Ask about our discount.', 'Here is a coupon.', 'We guarantee it.', 'Our warranty covers it.', 'It is complimentary.', 'It is on the house.', 'I can give you 10% off.', 'Es gratis.', 'Es gratuito para miembros.', 'Tiene un descuento.', 'Le damos un reembolso.', 'Tiene garantía.'])
       expect(g(bad), bad).toMatchObject({ kind: 'fix', problems: expect.arrayContaining(['promise_words']) })
@@ -296,12 +390,33 @@ describe('(2) unambiguous secret and promise words, English and Spanish; the cli
       expect(g(t), t).toMatchObject({ kind: 'ok' })
   })
 
-  it("the client's own first name and vehicles are never checked against the lists", () => {
+  it("the client's own first name and vehicles are never checked against the secret and promise lists", () => {
     expect(blocked('Thanks, Clave! See you Saturday.')).toBe(true)
     expect(g('Thanks, Clave! See you Saturday.', { names: ['Clave'] })).toMatchObject({ kind: 'ok' })
     expect(g('Hi Freedom, see you soon.', { names: ['Freedom'] })).toMatchObject({ kind: 'ok' })
     // a name is no excuse for anything else in the text
     expect(g('Thanks, Clave! Send me your PIN.', { names: ['Clave'] })).toMatchObject({ kind: 'fix', problems: ['secret'] })
+  })
+})
+
+describe('v4 re-check fix 1: client-entered text is never trusted', () => {
+  it('a vehicle name is skipped by the secret and promise word lists only: its digits and money words still block', () => {
+    expect(g('Your Free Wash 2015550123 is booked.', { names: ['Free Wash 2015550123'] })).toMatchObject({ kind: 'fix', problems: ['digits'] })
+    const v = g('Your 50 bucks off refund 555 0123 is booked.', { names: ['50 bucks off refund 555 0123'] })
+    expect(v).toMatchObject({ kind: 'fix', problems: expect.arrayContaining(['money', 'digits']) })
+    expect(v.kind === 'fix' && v.problems).not.toContain('promise_words')
+    // the names never reach the digit rules as literals either, nor a host
+    expect(g('Your Model 2015550123 is booked.', { names: ['Model 2015550123'], literals: [] })).toMatchObject({ kind: 'fix', problems: ['digits'] })
+    expect(g('Your evil.io is booked.', { names: ['evil.io'] })).toMatchObject({ kind: 'fix', problems: ['url'] })
+  })
+
+  it('the judge reads a vehicle name (and any catalog name the model copied) as the model text: untrusted', () => {
+    const v = g('Your Free Spirit is booked for Monday.', { names: ['Free Spirit'] })
+    expect(v).toMatchObject({ kind: 'ok', segments: [{ text: 'Your Free Spirit is booked for Monday.', trusted: false }] })
+    const c = g('The Wash 360 Deluxe is popular.', { literals: ['Wash 360 Deluxe'] })
+    expect(c).toMatchObject({ kind: 'ok', segments: [{ text: 'The Wash 360 Deluxe is popular.', trusted: false }] })
+    // and a vehicle that happens to read like the address is still not trusted unless it IS the shop's address
+    expect(replySegments('Your Free Wash 2015550123 is booked.', { values, website, shopNumbers, address })).toEqual([{ text: 'Your Free Wash 2015550123 is booked.', trusted: false }])
   })
 })
 

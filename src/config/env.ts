@@ -262,6 +262,12 @@ export const envSchema = z
       'AI_PROVIDER',
       'must be bedrock in production when AI_ENABLED=true',
     )
+    // the policy judge (design 3c) is the layer that reads meaning: no live assistant answers clients without it
+    need(
+      e.NODE_ENV === 'production' && e.AI_ENABLED && e.AI_GUARD_JUDGE === false,
+      'AI_GUARD_JUDGE',
+      'must not be false in production when AI_ENABLED=true',
+    )
     // the judge's model must be one the app role may call (models.ts, the IAM grant of pnpm aws:provision --bedrock)
     need(
       !!e.AI_GUARD_MODEL_ID && !findClaudeModel(e.AI_GUARD_MODEL_ID),

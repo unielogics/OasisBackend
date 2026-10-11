@@ -41,7 +41,7 @@ import type { Actor, SchedulingCtx } from '../scheduling/context.js'
 import { AI_ACTOR_NAME, type AssistantLog, type AssistantQueue, type HandoffRequest, type ShopFactsSource, type ToolContext, type ToolRegistry, type TurnIdentity } from './contract.js'
 import type { AssistantConfig } from './config.js'
 import { appointmentRefs, loadAppointmentRefs, loadConversation, loadTurnContext, resolveIdentity } from './context.js'
-import { factLiterals, placeholderValues, renderShopFacts } from './facts.js'
+import { factLiterals, openingWindow, placeholderValues, renderShopFacts } from './facts.js'
 import { cutAfterFirstQuestion, cutAtSentence, guardReply, HARD_PROBLEMS, MAX_REPLY_CHARS, SAFETY_LINE, SAFETY_LINK_KINDS, type GuardProblem, type ReplySegment } from './guard.js'
 import { JUDGE_HINTS, runJudge } from './judge.js'
 import { HANDOFF_SUMMARIES, markUnanswered, openTurnHandoff, recipientOf, sendFallback, type ConversationRef, type HandoffDeps } from './handoff.js'
@@ -463,8 +463,10 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     // what the placeholders render to (the current facts; {balance} only after get_balance; the links stay for composeReply)
     const values = placeholderValues(facts, { balanceCents })
     for (const p of links.keys()) values.set(p, p)
-    const literals = [...factLiterals(facts), ...(turnContext.vehicleNames ?? [])]
-    // the client's own first name and vehicles are never checked against the word lists ("Hi Buck")
+    // server-owned literals only (the address, catalog and plan names): the digit rules skip them. Client-entered text (a vehicle on
+    // file, the name) is NEVER a literal and never trusted by the judge (fix 1 of the v4 re-check: a vehicle "Free Wash 2015550123")
+    const literals = factLiterals(facts)
+    // the client's own first name and vehicles are skipped by the secret and promise word lists only ("Hi Buck", "your Ford Focus")
     const names = [turnContext.firstName, ...turnContext.vehicles.map((v) => v.split(',')[0]), ...(turnContext.vehicleNames ?? [])]
     // a verify / PIN / membership / payment link: the server appends the safety line, so the reply leaves room for it
     const safety = [...linkKinds].some((k) => SAFETY_LINK_KINDS.has(k))
@@ -517,6 +519,8 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
           values,
           literals,
           names,
+          address: facts.business.address,
+          openWindow: openingWindow(facts),
           website: facts.business.website,
           shopNumbers: [facts.contact.textingNumber, facts.contact.callingNumber],
           maxChars,

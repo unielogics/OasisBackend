@@ -19,7 +19,7 @@ import { sql } from 'kysely'
 import type { Executor } from '../../platform/db.js'
 import { formatPhoneDisplay } from '../../platform/phone.js'
 import { getSetting } from '../../platform/settings.js'
-import { addDays, fmtT, toBizDate } from '../../platform/time.js'
+import { addDays, fmtT, toBizDate, tryParseT } from '../../platform/time.js'
 import { normalizeE164 } from '../../integrations/sms/phone.js'
 import { DEFAULT_SITE_URL } from '../identity/links.js'
 import { loadPublicCatalog } from '../public/catalog.js'
@@ -524,8 +524,23 @@ export function placeholderValues(f: ShopFacts, o: { balanceCents?: number | nul
 }
 
 /**
- * Server-owned phrases that may carry digits in a reply (the numbers rule skips them where they stand exactly): the shop's address
- * (whole, and each comma part), the catalog's item, category and plan names.
+ * The shop's opening window for the output guard (fix 2 of the v4 re-check): the earliest opening and the latest closing time of the
+ * regular week, in minutes after midnight (a reduced day lies inside it). A run of clock times in a reply passes the digit rule only
+ * as an ascending list inside this window. Null when no day is open (the guard then uses its default window).
+ */
+export function openingWindow(f: Pick<ShopFacts, 'hours'>): { fromMin: number; toMin: number } | null {
+  const from = f.hours.map((d) => (d.open && d.from ? tryParseT(d.from) : null)).filter((x): x is number => x !== null)
+  const to = f.hours.map((d) => (d.open && d.to ? tryParseT(d.to) : null)).filter((x): x is number => x !== null)
+  if (from.length === 0 || to.length === 0) return null
+  const fromMin = Math.min(...from)
+  const toMin = Math.max(...to)
+  return toMin > fromMin ? { fromMin, toMin } : null
+}
+
+/**
+ * Server-owned phrases that may carry digits in a reply (the numbers rule skips them where they stand, punctuation, spacing and the
+ * state name normalised): the shop's address (whole, and each comma part), the catalog's item, category and plan names. Never
+ * client-entered text (a vehicle on file is not one: guard.ts).
  */
 export function factLiterals(f: ShopFacts): string[] {
   const out: string[] = []

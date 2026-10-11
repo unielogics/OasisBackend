@@ -19,22 +19,31 @@
 //         as an amount word (a capitalised "Buck" is a name);
 //       - `digits`: a code or a phone number: 5+ digits in a row; 7+ digits in one group split by spaces, dashes, dots, slashes,
 //         underscores or en/em dashes; 3+ numeric tokens in a row (clock times and durations included: "2:01 5:55 01:23", "201 min,
-//         555 min, ...") holding 7+ digits, where a clock time on the quarter hour ("10:30") counts no digits; 5+ spelled digits in a
-//         row; an extension ("ext 4821"); a toll-free vanity number ("1 800 FLOWERS"); and the same rules over a digit skeleton
-//         where look-alike letters inside a token with digits, or all-capital look-alike groups, read as digits ("2O1 5S5", "ZOI-SSS");
-//         the shop's own numbers, its address and the server-owned literals are out first;
+//         555 min, ...") holding 7+ digits, EVERY digit counted (clock times too); such a run passes only as a list of appointment
+//         times: every token a clock time on a 5-minute step or a bare hour, strictly ascending (it may turn to the afternoon once,
+//         where the written clock goes down: "11:30, 12:00, 1:30"), each inside the shop's opening window ("Openings: 9:10, 9:40, 10:20" passes, "Call
+//         20:15, 5:50, 1:23" and "7:30 2:15 5:55 01" do not); 5+ spelled digits in a row; an extension ("ext 4821"); a toll-free
+//         vanity number ("1 800 FLOWERS"); and the same rules over a digit skeleton where look-alike letters inside a token with
+//         digits, or all-capital look-alike groups, read as digits ("2O1 5S5", "ZOI-SSS"); the shop's own numbers and the
+//         server-owned literals (its address, catalog and plan names; punctuation, spacing and the state name normalised: "468 River
+//         Drive, Garfield, New Jersey 07026") are out first. Client-entered text (a vehicle, a name) is never out;
 //       - `url`: anything host-shaped (v3's host skeleton: "[.]", " dot ", spaced letters, "name,com"; now also "period com",
 //         "point com", "punto com", "-dot-", ";com", " : com", "<word> com slash"), an IP, http/hxxp/www/"://"; only {linkN} and the
 //         shop's own host as plain text (no path, not even after a space) pass;
-//       - `secret` and `promise_words`: short lists of UNAMBIGUOUS words in English and Spanish (pin, passcode, password, OTP, code,
-//         digits, CVV, card number...; free (not "feel free" or a non-money "-free" compound), discount, refund, coupon, guarantee,
-//         warranty, complimentary, on the house, % off; código, contraseña, clave, gratis, gratuito, descuento, reembolso, garantía;
-//         no phrase that ordinary replies use: no deal, on us, one-time, sue, legal or time words), matched on the plain text and
-//         a skeleton (accents stripped, look-alikes mapped, spaced-out letters joined). The client's own first name and vehicles are
-//         never checked against the lists ("Hi Buck", "Thanks, Sue").
+//       - `secret` and `promise_words`: short lists of UNAMBIGUOUS words in English and Spanish (pin, passcode, password, OTP, CVV,
+//         card number...; English "code" only in its secret senses: "the/your/a/that/this/what code", "the code we sent", "a
+//         verification/security/confirmation/one-time/reply code", "enter codes", codes next to "secure page" or "by text"; English
+//         "digit(s)" only as "6-digit code/number", "the digits we texted", "digits on your card"; so "promo code", "ZIP code",
+//         "dress code", "area code" and "the last digits of your plate" pass here and the judge reads them; free (not "feel free" or
+//         a non-money "-free" compound), discount, refund, coupon, guarantee, warranty, complimentary, on the house, % off; código,
+//         contraseña, clave, gratis, gratuito, descuento, reembolso, garantía; no phrase that ordinary replies use: no deal, on us,
+//         one-time, sue, legal or time words), matched on the plain text and a skeleton (accents stripped, look-alikes mapped,
+//         spaced-out letters joined). The client's own first name and vehicles are skipped by THESE TWO LISTS ONLY ("Hi Buck",
+//         "Thanks, Sue", "your Ford Focus"): never by the money, digit or host rules, and never trusted by the judge.
 //       Numbers in general are allowed ("2 to 3 days", "8 to 6", "bay 2", "a 2-door", "October 12, 2026").
 //   (3) The policy judge (judge.ts) reads every reply that passed (1) and (2), rendered, with the server's segments marked trusted
-//       (guardReply returns them as `segments`).
+//       (guardReply returns them as `segments`): rendered placeholders, links, the shop's own phone numbers, address and host (the
+//       turn adds the safety line). Nothing a client entered is ever trusted.
 // Kept: markdown stripped (a line break ends a clause), GSM-7, at most MAX_REPLY_CHARS after rendering, at most one question.
 import { isGsm7Char, normalizeForSms } from '../../integrations/sms/gsm.js'
 
@@ -61,7 +70,10 @@ export type GuardProblem =
 /** Problems only a rewrite can fix; a reply that still has one after the rewrite becomes the fallback. */
 export const HARD_PROBLEMS: ReadonlySet<GuardProblem> = new Set(['empty', 'unknown_placeholder', 'placement', 'money', 'digits', 'secret', 'promise_words', 'url'])
 
-/** A piece of the rendered reply as the judge reads it: `trusted` = written by the server (rendered placeholders, links, own facts). */
+/**
+ * A piece of the rendered reply as the judge reads it: `trusted` = inserted by the server (rendered placeholders, links, the shop's
+ * own phone numbers, address and host); never client-entered text.
+ */
 export interface ReplySegment {
   text: string
   trusted: boolean
@@ -70,6 +82,15 @@ export interface ReplySegment {
 export type GuardVerdict =
   | { kind: 'ok'; text: string; rendered: string; segments: ReplySegment[] }
   | { kind: 'fix'; text: string; rendered: string; problems: GuardProblem[]; words: string[] }
+
+/** Minutes after midnight: the earliest opening and the latest closing time of the week. */
+export interface OpenWindow {
+  fromMin: number
+  toMin: number
+}
+
+/** The window a run of clock times must fall in when the turn passes none (6 AM to 10 PM). */
+export const DEFAULT_OPEN_WINDOW: OpenWindow = { fromMin: 6 * 60, toMin: 22 * 60 }
 
 export interface GuardInput {
   text: string
@@ -83,12 +104,24 @@ export interface GuardInput {
   /** The shop's own phone numbers (any form): the only phone numbers a reply may write. */
   shopNumbers?: readonly (string | null | undefined)[]
   /**
-   * Server-owned phrases that may carry digits (facts.ts factLiterals: the address, catalog and plan names; the client's own vehicles
-   * on file, "2021 Tesla Model 3"): the digit rules skip them where they stand exactly, and the judge reads them as trusted.
+   * Server-owned phrases that may carry digits (facts.ts factLiterals: the shop's address, catalog and plan names; NEVER client-
+   * entered text such as a vehicle): the digit rules skip them where they stand, punctuation, spacing and the state name
+   * normalised ("468 River Drive, Garfield, New Jersey 07026" for "468 River Drive, Garfield NJ 07026"). The judge reads them as
+   * the model's text (untrusted), all but the address.
    */
   literals?: readonly (string | null | undefined)[]
-  /** The client's own first name and vehicles on file: never checked against the word lists ("Hi Buck", "Thanks, Sue"). */
+  /** The shop's own address (facts.business.address): whole or any comma part, normalised as above, the judge reads it as trusted. */
+  address?: string | null
+  /**
+   * The client's own first name and vehicles on file (client-entered): skipped by the secret and promise word lists only ("Hi Buck",
+   * "your Free Spirit"); the money, digit and host rules read them, and the judge reads them as untrusted.
+   */
   names?: readonly (string | null | undefined)[]
+  /**
+   * The shop's opening window in minutes after midnight (facts.ts openingWindow: the earliest opening, the latest closing of the
+   * week): a run of clock times passes only as an ascending list inside it. Unset: DEFAULT_OPEN_WINDOW.
+   */
+  openWindow?: OpenWindow | null
   maxChars?: number
 }
 
@@ -291,8 +324,6 @@ const SECRET_WORDS = wordList([
   'passkey~s?',
   'pwd',
   'otp~s?',
-  'code~s?',
-  'digit~s?',
   'one time number~s?',
   'one time password~s?',
   'personal identification',
@@ -315,9 +346,32 @@ const SECRET_WORDS = wordList([
   'numero de su tarjeta',
 ])
 
+/** A spelled or written count before "digit" ("6-digit", "six digit"). */
+const DIGIT_COUNT = '(?:\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)'
+/**
+ * English "code(s)" and "digit(s)" in their SECRET senses only (fix 3 of the v4 re-check: the bare words blocked "promo code", "ZIP
+ * code", "dress code", "area code" and "the last digits of your plate"; the judge reads those): a determiner right before "code"
+ * ("the/your/a/that/this/what/which code"), the code someone sent or got, a verification/security/confirmation/one-time/reply/
+ * access/login code, "enter/type/send/text/share/give/read/tell (me) codes", codes in a sentence about the secure page or "by
+ * text" (a security notice of the model's own), "a 6-digit code/number/PIN", "the digits we texted", "the digits on your card".
+ */
+const SECRET_SENSE_PHRASES = [
+  '(?:the|your|ur|a|that|this|what|which|any|those|these)\\s+codes?',
+  'codes?\\s+(?:(?:we|you|i|they)\\s+(?:just\\s+)?(?:sent|texted|send|text|received|receive|got|get|gave)|(?:did|do)\\s+you\\s+(?:get|receive|see)|sent|texted)',
+  '(?:verification|verify|security|confirmation|confirm|one[\\s-]*time|reply|access|login|log[\\s-]*in|auth|authentication|2fa|sms|text|secret)\\s+codes?',
+  '(?:enter|type|send|text|share|give|read|tell)(?:s|ed|ing)?\\s+(?:(?:me|us)\\s+)?codes?',
+  'codes?\\b[^.!?]{0,60}?(?:secure|link)\\s+page',
+  'codes?\\b[^.!?]{0,60}?by\\s+text',
+  `${DIGIT_COUNT}[\\s-]*digits?\\s+(?:codes?|numbers?|pins?)`,
+  'digits?\\s+(?:(?:we|i|they)\\s+(?:just\\s+)?(?:sent|texted|send|text)|you\\s+(?:just\\s+)?(?:got|received|get|receive))',
+  'digits?\\s+(?:on|of|from)\\s+(?:the\\s+(?:back|front)\\s+of\\s+)?(?:your|the|ur)\\s+(?:card|credit\\s+card|debit\\s+card)',
+]
+const SECRET_SENSES = new RegExp(`(?<![\\p{L}\\p{N}])(?:${SECRET_SENSE_PHRASES.join('|')})(?![\\p{L}\\p{N}])`, 'gu')
+
 /** What the text says about PINs, codes, passwords or cards, as found, on the plain text and the skeleton. */
 export function secretWords(text: string): string[] {
-  return hits(SECRET_WORDS, [plainFold(text), skeleton(text)])
+  const texts = [plainFold(text), skeleton(text)]
+  return [...new Set([...hits(SECRET_WORDS, texts), ...hits(SECRET_SENSES, texts)])]
 }
 
 // ---- (2) promise words ----------------------------------------------------------------------------------------------------------
@@ -411,25 +465,64 @@ const VANITY = /(?<![\p{L}\p{N}])(?:1[\s.-]?)?8(?:00|33|44|55|66|77|88)[\s.-]?[A
 const UNIT_WORDS = new Set(['min', 'mins', 'minute', 'minutes', 'm', 'hr', 'hrs', 'hour', 'hours', 'h', 'sec', 'secs', 'second', 'seconds', 's', 'am', 'pm', 'a.m.', 'p.m.', 'a.m', 'p.m', 'oclock'])
 /** Characters that keep a run of numeric tokens going. */
 const RUN_SEPARATORS = new Set([',', ';', ':', '.', '/', '-', '–', '—', '_', '*', '+', '(', ')', '#', "'", '"'])
-/** A clock time on the quarter hour without a leading zero ("9:00", "10:30", "16:45"): counts no digits in a run. */
-const GRID_TIME = /^(?:[1-9]|1\d|2[0-3]):(?:00|15|30|45)$/
+/** A clock time ("9:10", "08:30", "16:45") or a bare hour without a leading zero ("9", "10"): hours and minutes. */
+function clockOf(tok: string): { h: number; m: number } | null {
+  const t = /^(\d{1,2}):(\d{2})$/.exec(tok)
+  if (t) {
+    const h = Number(t[1])
+    const m = Number(t[2])
+    return h <= 23 && m <= 59 && m % 5 === 0 ? { h, m } : null
+  }
+  return /^(?:[1-9]|1\d|2[0-3])$/.test(tok) ? { h: Number(tok), m: 0 } : null
+}
+
+/**
+ * A run of numeric tokens that reads as a list of appointment times (fix 2 of the v4 re-check; the digits are counted first, clock
+ * times included): every token a clock time on a 5-minute step or a bare hour, strictly ascending, each inside the opening window.
+ * A 1-to-11 o'clock time may read as the afternoon from one point on, where the written clock goes down ("11:30, 12:00, 1:30"), or
+ * for the whole list ("5:00, 5:30, 5:45" when the shop opens at 8). So "Openings today: 9:10, 9:40, 10:20." and "Openings: 08:00,
+ * 08:30, 09:00." pass, and a phone number written as times ("Call 20:15, 5:50, 1:23.", "7:30 2:15 5:55 01") does not.
+ */
+export function isTimeList(tokens: readonly string[], window: OpenWindow = DEFAULT_OPEN_WINDOW): boolean {
+  const clocks = tokens.map(clockOf)
+  if (clocks.length === 0 || clocks.some((c) => c === null)) return false
+  const written = clocks.map((c) => c!.h * 60 + c!.m)
+  // the tokens from index `pm` on read as the afternoon (pm = length: none does)
+  const reads = (pm: number): boolean => {
+    if (pm > 0 && pm < written.length && !(written[pm]! < written[pm - 1]!)) return false
+    let prev = -1
+    for (let i = 0; i < clocks.length; i++) {
+      const { h } = clocks[i]!
+      const v = written[i]! + (i >= pm && h >= 1 && h <= 11 ? 720 : 0)
+      if (v <= prev || v < window.fromMin || v > window.toMin) return false
+      prev = v
+    }
+    return true
+  }
+  for (let pm = 0; pm <= clocks.length; pm++) if (reads(pm)) return true
+  return false
+}
+
 /** Spelled digits, English and Spanish. */
 const DIGIT_WORD = '(?:zero|oh|o|one|two|three|four|five|six|seven|eight|nine|cero|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve)'
 /** Five or more spelled digits in a row ("two oh one five five five"). */
 const SPELLED_RUN = new RegExp(`(?<![\\p{L}])${DIGIT_WORD}(?:[\\s,.-]+${DIGIT_WORD}){4,}(?![\\p{L}])`, 'gu')
 
-/** Runs of 3+ numeric tokens (clock times, units and punctuation between them) that hold 7+ digits. */
-function phoneLikeRuns(text: string): string[] {
+/**
+ * Runs of 3+ numeric tokens (clock times, units and punctuation between them) that hold 7+ digits, every digit counted (clock times
+ * too), unless the run is a list of appointment times (isTimeList).
+ */
+function phoneLikeRuns(text: string, window: OpenWindow): string[] {
   const out: string[] = []
   const tokens = text.matchAll(/(\d{1,2}:\d{2}(?!\d)|\d+)|([\p{L}][\p{L}.']*)|(\S)/gu)
   let start = -1
   let end = -1
-  let count = 0
+  let nums: string[] = []
   let digits = 0
   const close = (): void => {
-    if (count >= 3 && digits >= 7) out.push(text.slice(start, end))
+    if (nums.length >= 3 && digits >= 7 && !isTimeList(nums, window)) out.push(text.slice(start, end))
     start = -1
-    count = 0
+    nums = []
     digits = 0
   }
   for (const m of tokens) {
@@ -437,10 +530,10 @@ function phoneLikeRuns(text: string): string[] {
     if (num !== undefined) {
       if (start < 0) start = m.index
       end = m.index + tok.length
-      count += 1
-      digits += GRID_TIME.test(num) ? 0 : num.replace(/\D/g, '').length
+      nums.push(num)
+      digits += num.replace(/\D/g, '').length
     } else if (word !== undefined) {
-      if (!(count > 0 && UNIT_WORDS.has(word.toLowerCase().replace(/'/g, '')))) close()
+      if (!(nums.length > 0 && UNIT_WORDS.has(word.toLowerCase().replace(/'/g, '')))) close()
     } else if (!RUN_SEPARATORS.has(tok)) close()
   }
   close()
@@ -461,12 +554,12 @@ export function digitSkeleton(text: string): string {
 }
 
 /** The codes and phone numbers of a text (already without the shop's own numbers and the server-owned literals), as found. */
-export function digitWords(text: string): string[] {
+export function digitWords(text: string, window: OpenWindow = DEFAULT_OPEN_WINDOW): string[] {
   const out: string[] = []
   for (const t of new Set([text, digitSkeleton(text)])) {
     for (const m of t.matchAll(RUN5)) out.push(m[0])
     for (const m of t.matchAll(GROUP)) if (m[0].replace(/\D/g, '').length >= 7) out.push(m[0])
-    out.push(...phoneLikeRuns(t))
+    out.push(...phoneLikeRuns(t, window))
   }
   for (const m of text.matchAll(EXTENSION)) out.push(m[0])
   for (const m of text.matchAll(VANITY)) out.push(m[0])
@@ -486,9 +579,52 @@ function shopNumberPatterns(shopNumbers: readonly (string | null | undefined)[])
   return out
 }
 
+/** US states and DC: the code and the name, either may stand for the other in a server-owned literal ("NJ" / "New Jersey"). */
+const US_STATES: Record<string, string> = {
+  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California', CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware',
+  DC: 'District of Columbia', FL: 'Florida', GA: 'Georgia', HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa',
+  KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland', MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota',
+  MS: 'Mississippi', MO: 'Missouri', MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey',
+  NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio', OK: 'Oklahoma', OR: 'Oregon',
+  PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina', SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah',
+  VT: 'Vermont', VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
+}
+/** Commas and spaces between the words of a literal: any mix of them, at least one. */
+const LITERAL_SEP = '[\\s,]+'
+
+/**
+ * A server-owned literal as a pattern, punctuation and spacing normalised (fix 4 of the v4 re-check): its words in order, any run
+ * of spaces and commas between them, the full stop of an abbreviation optional ("Dr."), a US state as its code, its name or "N.J." ("468
+ * River Drive, Garfield NJ 07026" matches "468 River Drive, Garfield, New Jersey 07026"). Whole words only.
+ */
+function literalPattern(literal: string): RegExp {
+  let text = literal.trim()
+  for (const [code, name] of Object.entries(US_STATES)) text = text.replace(new RegExp(`(?<![\\p{L}])${name.replace(/ /g, '\\s+')}(?![\\p{L}])`, 'giu'), code)
+  const words = text.split(/[\s,]+/).filter((w) => w !== '')
+  const parts = words.map((w) => {
+    const name = /^[A-Z]{2}$/.test(w) ? US_STATES[w] : undefined
+    if (name) return `(?:${w}|${w[0]}\\.\\s?${w[1]}\\.?|${name.replace(/ /g, '\\s+')})`
+    // an abbreviation written with its full stop in the literal ("Dr.") may be written without it
+    return w.endsWith('.') ? `${escapeRe(w.slice(0, -1))}\\.?` : escapeRe(w)
+  })
+  return new RegExp(`(?<![\\p{L}\\p{N}])${parts.join(LITERAL_SEP)}(?![\\p{L}\\p{N}])`, 'giu')
+}
+
+/** The patterns of server-owned literals, longest first (a whole address before its parts). */
+function literalPatterns(literals: readonly (string | null | undefined)[], minLength = 2): RegExp[] {
+  return [...new Set(literals.map((x) => x?.trim() ?? '').filter((x) => x.length >= minLength))].sort((a, b) => b.length - a.length).map(literalPattern)
+}
+
+/** The shop's address as literals: whole, and each comma part. */
+export function addressLiterals(address: string | null | undefined): string[] {
+  const a = address?.trim() ?? ''
+  return a ? [...new Set([a, ...a.split(',').map((x) => x.trim()).filter((x) => x !== '')])] : []
+}
+
 /** The text without the server-owned literals and the shop's own phone numbers. */
 function withoutLiterals(text: string, literals: readonly (string | null | undefined)[], shopNumbers: readonly (string | null | undefined)[]): string {
-  let out = withoutPhrases(text, literals)
+  let out = text
+  for (const re of literalPatterns(literals)) out = out.replace(re, '~')
   for (const re of shopNumberPatterns(shopNumbers)) out = out.replace(re, '~')
   return out
 }
@@ -498,8 +634,9 @@ function withoutLiterals(text: string, literals: readonly (string | null | undef
 /**
  * The rendered reply as segments for the judge: the model's own text (untrusted) and what the server wrote (trusted): rendered
  * placeholders, links (as "[link]": the judge never sees a URL or a token), the shop's own phone numbers, address and website.
+ * Nothing else is trusted: not the catalog names the model copied, and never client-entered text (a vehicle, a name).
  */
-export function replySegments(text: string, o: { values: ReadonlyMap<string, string>; website: string; shopNumbers?: readonly (string | null | undefined)[]; ownFacts?: readonly (string | null | undefined)[] }): ReplySegment[] {
+export function replySegments(text: string, o: { values: ReadonlyMap<string, string>; website: string; shopNumbers?: readonly (string | null | undefined)[]; address?: string | null }): ReplySegment[] {
   const out: ReplySegment[] = []
   const push = (s: ReplySegment): void => {
     if (s.text === '') return
@@ -507,12 +644,11 @@ export function replySegments(text: string, o: { values: ReadonlyMap<string, str
     if (last && last.trusted === s.trusted) last.text += s.text
     else out.push({ ...s })
   }
-  // the own facts inside the model's text: phone numbers, the address (whole and its parts), the website as text
+  // the own facts inside the model's text: phone numbers, the address (whole and its parts, normalised), the website as text
   const own: RegExp[] = [...shopNumberPatterns(o.shopNumbers ?? [])]
   const host = ownHostPattern(o.website)
   if (host) own.push(host)
-  for (const p of [...new Set((o.ownFacts ?? []).map((x) => x?.trim() ?? '').filter((x) => x.length >= 3))].sort((a, b) => b.length - a.length))
-    own.push(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(p).replace(/\s+/g, '\\s+')}(?![\\p{L}\\p{N}])`, 'giu'))
+  own.push(...literalPatterns(addressLiterals(o.address), 3))
   const plain = (s: string): void => {
     let pieces: ReplySegment[] = [{ text: s, trusted: false }]
     for (const re of own)
@@ -566,21 +702,24 @@ export function guardReply(i: GuardInput): GuardVerdict {
   if (LONE_BRACE.test(raw)) unknown.push(raw.match(LONE_BRACE)![0])
   flag('unknown_placeholder', unknown)
   flag('placement', misplacedPlaceholders(text, values))
-  // (2) the word lists never read the client's own name or vehicles; a currency sign GSM-7 would drop ("45¢") still counts
+  // (2) the secret and promise word lists never read the client's own name or vehicles ("Hi Buck", "your Free Spirit"); every other
+  // rule reads them (client-entered text is never trusted: a vehicle "Free Wash 2015550123" is still a phone number). A currency
+  // sign GSM-7 would drop ("45¢") still counts.
   const worded = withoutPhrases(raw, i.names ?? [])
   const dropped = [...foldInput(i.text).replace(BRACED, '~').matchAll(CURRENCY)].map((m) => m[0])
-  flag('money', [...new Set([...dropped, ...moneyWords(worded)])])
+  flag('money', [...new Set([...dropped, ...moneyWords(raw)])])
   flag('secret', secretWords(worded))
   flag('promise_words', promiseWords(worded))
   flag('url', urlWords(raw, i.website))
-  flag('digits', digitWords(withoutOwnHost(withoutLiterals(raw, i.literals ?? [], i.shopNumbers ?? []), i.website)))
+  const literals = [...addressLiterals(i.address), ...(i.literals ?? [])]
+  flag('digits', digitWords(withoutOwnHost(withoutLiterals(raw, literals, i.shopNumbers ?? []), i.website), i.openWindow ?? DEFAULT_OPEN_WINDOW))
   // the form: one question, the length after rendering
   const rendered = toGsm7(renderPlaceholders(text, values))
   if ((rendered.match(/\?/g) ?? []).length > 1) problems.push('questions')
   if (rendered.length > max) problems.push('too_long')
   const unique = [...new Set(problems)]
   if (unique.length > 0) return { kind: 'fix', text, rendered, problems: unique, words: [...new Set(words)] }
-  const segments = replySegments(text, { values, website: i.website, shopNumbers: i.shopNumbers ?? [], ownFacts: i.literals ?? [] })
+  const segments = replySegments(text, { values, website: i.website, shopNumbers: i.shopNumbers ?? [], address: i.address ?? null })
   return { kind: 'ok', text, rendered, segments }
 }
 
