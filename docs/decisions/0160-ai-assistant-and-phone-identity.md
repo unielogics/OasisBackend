@@ -276,13 +276,25 @@ nothing; both jobs return at once while `AI_ENABLED=false`). Notes and deviation
 
 - **Pricing rule** follows design section 3b (newer than section 3's "every $ must appear in this turn's tool outputs"): an amount must be a
   starting price, a plan price or the guest fee of the CURRENT shop facts, or an amount a tool of the turn declared (`amountsCents`: the
-  client's own balance); a service price needs "starts at" / "starting at" / "from" in its sentence before it; totals and combinations
-  ("total", "for both", "plus $", "together", tax, ...) are blocked. One rewrite call, then the fallback.
-- **The shop website as text** is allowed in a reply (the contract's facts state it "as text"); every other web address is blocked, and
-  only the turn's registered `{linkN}` placeholders pass.
-- **Handoff words**: "free" is not one in "feel free", "a free slot", "spot-free" and the like; a word the owner's own facts use with the
-  same neighbour (the VIP perk "Priority booking and same-day guarantee", an FAQ answer) may be repeated. The facts phrase the
-  cancellation policy without "refund" for that reason.
+  client's own balance); a service price needs "starts at" / "starting at" / "from" right before it (or opens a short list of starting
+  prices: "starts at $45 for members, $54 otherwise"), so "From Monday the wash is $45" is blocked; a plan price or the fee passes only
+  in a sentence that names its plan, "month", "membership", "plan" or "fee" (so "The Signature Hand Wash is $99" is blocked); "54$" is
+  read as an amount; totals and combinations ("total", "for both", "plus $", "together", tax, ...) are blocked. One rewrite call, then
+  the fallback.
+- **The shop website as text** is allowed in a reply (the contract's facts state it "as text"); every other web address is blocked (any
+  top-level domain: "oasis-pay.dev/x", "oasisautospanj.ai" too; "done.Thanks" is read as a missing space), and only the turn's
+  registered `{linkN}` placeholders pass.
+- **Secrets**: a sentence that asks the client to text, send, reply with, share or tell a PIN, a code, a password, card numbers or the
+  last 4 digits of a card is blocked whatever link or page it mentions; typing one in is fine only on the secure link page ("enter your
+  PIN on the secure page"); "we'll text you a code" and "never by text" are not asks.
+- **Phone numbers** are masked in the context and the stored transcript in every common form ("(201) 555-0123", "201.555.0123",
+  "+44 20 7946 0958"): one shared pattern (`transcript.ts` `NANP_PHONE` / `INTL_PHONE`).
+- **Handoff words**: "free" is not one in "feel free", "a free slot", "spot-free" and the like (each benign phrase excuses only its own
+  "free": "Your first wash is free, feel free to stop by" hands off); a word the owner wrote as an offer (`facts.ts` `ownerWording`:
+  plan perks, service descriptions, VIP notes) with the same content-word neighbour (the VIP perk "Priority booking and same-day
+  guarantee") may be repeated. Never the server's own lines of the facts ("never offer a discount") and never an FAQ answer (answers
+  deny as often as they offer), and never by a function-word neighbour ("a discount"). The facts phrase the cancellation policy
+  without "refund".
 - **One question per text** (the owner's intake rule) is enforced by the guard: one rewrite, else the text is cut after its first question.
   Too long: one shorten call, else a cut at a sentence.
 - **Disclosure**: the first AI text of a conversation is the template `ai_reply` with its disclosure block, "Oasis Auto Spa’s automated

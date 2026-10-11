@@ -301,7 +301,7 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
       'Stately per conversation (singletonKey); the turn claims the conversation under a row lock and a 3-minute lease, answers only while its marker (pending_since) is set and clears it, and queues the reply with a per-turn dedupe key.',
     clock: 'Injected clock for the debounce, the lease, the caps and the reply window; monotonic time only for latencies.',
     enqueuedBy: 'the webhook after commit (assistant kick, singleton key = the conversation, 8 s later), the turn itself (deferral, newer texts) and ai.sweep',
-    tests: 'test/assistant/turn.test.ts, test/assistant/jobs.test.ts, test/assistant/conversations.test.ts, test/jobs/registry.test.ts',
+    tests: 'test/assistant/jobs.test.ts, test/assistant/conversations.test.ts, test/assistant/guard.test.ts, test/assistant/prompt.test.ts, test/jobs/registry.test.ts',
     status: 'built',
   },
   'ai.sweep': {

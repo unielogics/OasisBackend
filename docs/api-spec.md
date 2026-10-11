@@ -1075,10 +1075,12 @@ closed (23.4a), and `ai.respond` / `ai.sweep` return at once while `AI_ENABLED=f
   source rows, the business date and the env values; byte-stable; Settings free text flattened to one line.
 - **Output guard** (`guard.ts`): markdown stripped, GSM-7, at most 320 characters (one shorten call, else cut at a sentence), at most one
   question (one rewrite, else cut after the first), no web address but the shop website as text and the turn's `{linkN}`
-  placeholders, never asking for a PIN, code, password or card number; every `$` amount must be a starting price, a plan price or the
-  guest fee of the current facts (or a balance a tool declared), a service price introduced by "starts at" / "starting at" / "from",
-  never in a total or a combination; one rewrite call, else the fallback. Refund, discount, free, guarantee, "ready by", damage and
-  legal words hand off (the owner's own wording in the facts excepted). A refusal, a cut answer, an unknown stop, a provider error
+  placeholders (any top-level domain counts as a web address), never asking for a PIN, code, password, card number or card digits by
+  text (typing one in on the secure link page is fine); every `$` amount ("$45" or "45$") must be a starting price, a plan price or the
+  guest fee of the current facts (or a balance a tool declared), a service price introduced by "starts at" / "starting at" / "from"
+  right before it, a plan price or the fee only in a sentence naming its plan or the fee, never in a total or a combination; one
+  rewrite call, else the fallback. Refund, discount, free, guarantee, "ready by", damage and legal words hand off (only the owner's
+  own offer wording, plan perks and service descriptions, with the same content-word neighbour excepted). A refusal, a cut answer, an unknown stop, a provider error
   or a timeout hand off too.
 - **Reply**: free text through `enqueueFor` with `senderKind: 'ai'`, rendered from the `ai_reply` template (the first AI text of a
   conversation: "Oasis Auto Spa’s automated assistant here." + the STOP footer, never the AGENT offer; `disclosed_at`), class

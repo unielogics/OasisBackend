@@ -250,7 +250,7 @@ export const TEMPLATES = {
   }),
   // The assistant's own reply (ADR 0160, design section 3; owner 2026-10-11): the model's text, after the output guard. The first AI
   // text of a conversation carries the automated-assistant line and the STOP footer (NOT the AGENT offer). Queued as free text (the
-  // reply may hold a {linkN} placeholder sent as a secretVar), rendered from this body by src/modules/assistant/reply.ts.
+  // reply may hold a {linkN} placeholder sent as a secretVar), rendered from this body by composeReply in src/modules/assistant/turn.ts.
   ai_reply: t({
     key: 'ai_reply',
     label: 'Assistant reply',
