@@ -61,6 +61,8 @@ export interface AssistantRuntimeOptions {
   /** The pg-boss enqueue of this process (re-kicks and deferrals); without it they are left to ai.sweep. */
   enqueue?: Enqueue
   provider?: AiProvider
+  /** The output guard's judge (default: createAiProvider for AI_GUARD_MODEL_ID; the simulator passes every reply). */
+  judgeProvider?: AiProvider
   registry?: ToolRegistry
   facts?: ShopFactsSource
   gate?: AssistantGate
@@ -100,6 +102,7 @@ export class AssistantRuntime {
       env,
       cfg: this.cfg,
       provider: o.provider ?? createAiProvider(env),
+      judge: o.judgeProvider ?? createAiProvider({ ...env, AI_BEDROCK_MODEL_ID: this.cfg.judge.modelId }),
       get registry() {
         return registry()
       },

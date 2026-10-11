@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { aiEnvShape } from '../integrations/ai/env.js'
+import { CLAUDE_BEDROCK_MODELS, findClaudeModel } from '../integrations/ai/models.js'
 import { emailEnvShape } from '../integrations/email/env.js'
 import { squarespaceEnvSchema } from '../integrations/squarespace/config.js'
 import { storageEnvShape } from '../integrations/storage/env.js'
@@ -260,6 +261,12 @@ export const envSchema = z
       e.NODE_ENV === 'production' && e.AI_ENABLED && e.AI_PROVIDER !== 'bedrock',
       'AI_PROVIDER',
       'must be bedrock in production when AI_ENABLED=true',
+    )
+    // the judge's model must be one the app role may call (models.ts, the IAM grant of pnpm aws:provision --bedrock)
+    need(
+      !!e.AI_GUARD_MODEL_ID && !findClaudeModel(e.AI_GUARD_MODEL_ID),
+      'AI_GUARD_MODEL_ID',
+      `must be one of the listed models (${CLAUDE_BEDROCK_MODELS.map((m) => m.profileId).join(', ')})`,
     )
     need(
       !!e.AWS_ACCESS_KEY_ID !== !!e.AWS_SECRET_ACCESS_KEY,

@@ -17,6 +17,7 @@ const TSX = path.join(REPO, 'node_modules/.bin/tsx')
 const EXEMPT: Record<string, string> = {
   'scripts/aws/provision.ts': 'operator tool: acts with the operator profile and must never pick up the runtime environment',
   'scripts/secrets-push.ts': 'operator tool: writes the secret with the operator profile',
+  'scripts/eval-guard.ts': 'operator tool (W4): runs the output guard judge with the operator profile; reads only the AI_* settings',
   'scripts/openapi.ts': 'builds the document from a fixed test environment',
   'scripts/data-model.ts': 'reads only the migrations',
   'scripts/db-schema.ts': 'development: regenerates docs from a local database (DATABASE_URL from .env)',

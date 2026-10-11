@@ -11,17 +11,19 @@ const E164 = /\+\d{8,15}\b/g
  * Phone numbers as people write them: ONE pattern set (PHONE_PATTERNS, in this order) shared by maskForModel (context.ts: what the
  * model reads) and redactText (what is stored), so both always mask the same things:
  *   INTL_PHONE   any "+" number with spaces, dots, dashes or brackets ("+44 20 7946 0958", "+1 (201) 555-0123")
- *   NANP_PHONE   "(201) 555-0123", "201.555.0123", "201-555-0123", "201 555 0123", "201/555-0123", "2015550123", "1-201-555-0123"
+ *   NANP_PHONE   "(201) 555-0123", "201.555.0123", "201-555-0123", "201 555 0123", "201/555-0123", "2015550123", "1-201-555-0123",
+ *                "201–555–0123" (en dashes and the other Unicode dashes), "201_555_0123"
  *   SPLIT_PHONE  10 to 15 digits split any other way ("2 0 1 5 5 5 0 1 2 3", "201 555 01 23", "201-5550-123")
  *   LOCAL_PHONE  the 7-digit local form "555-0123" / "555.0123" / "555 0123"
  *   LONG_DIGITS  any other run of 7 or more digits (a code, an account number)
  * Not numbers: dates ("2026-06-13", "2026-06-13 10:30"), times ("10:30"), prices ("$1,299"), a ZIP+4 ("07026-1234"), an invoice
- * number ("INV-2026-0042"). The output guard does not use these: its numbers rule refuses every digit group of 4 or more digits.
+ * number ("INV-2026-0042"). The output guard does not use these: its digit rules (guard.ts digitWords) refuse codes and phone
+ * numbers in the model's text on their own.
  */
-export const INTL_PHONE = /\+\d(?:[\s().-]{0,2}\d){7,14}(?!\d)/g
-export const NANP_PHONE = /(?<![\w+])(?:1[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s./-]?\d{3}[\s.-]?\d{4}(?!\d)/g
-export const SPLIT_PHONE = /(?<![\w+$:.,/-])(?:\d[\s()./-]{0,3}){9,14}\d(?![\d:])/g
-export const LOCAL_PHONE = /(?<![\w$+.,:/*-])\d{3}[-. ]\d{4}(?![\w-]|[.,:]\d)/g
+export const INTL_PHONE = /\+\d(?:[\s()._\u2010-\u2015-]{0,2}\d){7,14}(?!\d)/g
+export const NANP_PHONE = /(?<![\w+])(?:1[\s._\u2010-\u2015-]?)?(?:\(\d{3}\)|\d{3})[\s./_\u2010-\u2015-]?\d{3}[\s._\u2010-\u2015-]?\d{4}(?!\d)/g
+export const SPLIT_PHONE = /(?<![\w+$:.,/-])(?:\d[\s()./_\u2010-\u2015-]{0,3}){9,14}\d(?![\d:])/g
+export const LOCAL_PHONE = /(?<![\w$+.,:/*-])\d{3}[-. _\u2010-\u2015]\d{4}(?![\w-]|[.,:]\d)/g
 export const LONG_DIGITS = /\b\d{7,}\b/g
 export const PHONE_PATTERNS: readonly RegExp[] = [INTL_PHONE, NANP_PHONE, SPLIT_PHONE, LOCAL_PHONE, LONG_DIGITS]
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g
@@ -56,6 +58,7 @@ export type TranscriptEntry =
   | { kind: 'message'; message: AiMessage; stopReason?: string; usage?: Record<string, number> }
   | { kind: 'tools'; round: number; calls: { tool: string; outcome: string; error?: string }[] }
   | { kind: 'guard'; verdict: string; problems?: string[]; words?: string[] }
+  | { kind: 'judge'; verdict: 'pass' | 'fail' | 'error'; category?: string; reason?: string; error?: string; model: string | null; latencyMs: number }
   | { kind: 'error'; error: string }
   | { kind: 'reply'; text: string; klass: string }
   | { kind: 'handoff'; reason: string }

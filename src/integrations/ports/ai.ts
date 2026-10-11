@@ -48,6 +48,8 @@ export interface AiConverseRequest {
   /** 'auto' lets the model choose; 'none' forbids tools (the final "reply now" call). Forcing a tool is not offered. */
   toolChoice?: 'auto' | 'none'
   maxTokens: number
+  /** Sampling temperature, 0 to 1 (unset: the model's default). The output guard's judge uses 0. */
+  temperature?: number
   effort?: 'low' | 'medium' | 'high'
 }
 

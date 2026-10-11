@@ -2,6 +2,8 @@
 // turn or the day lives here so the tests can shorten the clocks.
 import type { Env } from '../../config/env.js'
 import { aiPricesFromEnv, type AiPrices } from '../../integrations/ai/cost.js'
+import { findClaudeModel, highestListPrices } from '../../integrations/ai/models.js'
+import { JUDGE_MAX_TOKENS, JUDGE_TIMEOUT_MS } from './judge.js'
 
 export interface AssistantCaps {
   perNumberHour: number
@@ -12,6 +14,19 @@ export interface AssistantCaps {
   globalDay: number
   /** AI_DAILY_BUDGET_USD in micro-dollars: today's (business day) spend at which the AI stops answering. */
   dailyBudgetMicros: number
+}
+
+/** The output guard's policy judge (design section 3c, judge.ts). */
+export interface JudgeConfig {
+  /** AI_GUARD_JUDGE, unset = AI_ENABLED. */
+  enabled: boolean
+  /** AI_GUARD_MODEL_ID, unset = AI_BEDROCK_MODEL_ID. */
+  modelId: string
+  /** One judge call (8 s); a timeout fails closed. */
+  timeoutMs: number
+  maxTokens: number
+  /** The judge model's prices: the assistant's (AI_PRICE_* included) when it is the same model, else its list prices. */
+  prices: AiPrices
 }
 
 export interface AssistantConfig {
@@ -44,9 +59,24 @@ export interface AssistantConfig {
   historyWindowMs: number
   caps: AssistantCaps
   prices: AiPrices
+  judge: JudgeConfig
+}
+
+/** The judge's settings from the environment. */
+export function judgeConfig(env: Pick<Env, 'AI_ENABLED' | 'AI_GUARD_JUDGE' | 'AI_GUARD_MODEL_ID' | 'AI_BEDROCK_MODEL_ID'>, assistantPrices: AiPrices): JudgeConfig {
+  const modelId = env.AI_GUARD_MODEL_ID ?? env.AI_BEDROCK_MODEL_ID
+  const same = modelId === env.AI_BEDROCK_MODEL_ID
+  return {
+    enabled: env.AI_GUARD_JUDGE ?? env.AI_ENABLED,
+    modelId,
+    timeoutMs: JUDGE_TIMEOUT_MS,
+    maxTokens: JUDGE_MAX_TOKENS,
+    prices: same ? assistantPrices : (findClaudeModel(modelId)?.prices ?? highestListPrices()),
+  }
 }
 
 export function assistantConfig(env: Env): AssistantConfig {
+  const prices = aiPricesFromEnv(env)
   return {
     aiEnabled: env.AI_ENABLED,
     actionsEnabled: env.AI_ACTIONS_ENABLED,
@@ -72,6 +102,7 @@ export function assistantConfig(env: Env): AssistantConfig {
       globalDay: env.AI_GLOBAL_TURNS_DAY,
       dailyBudgetMicros: Math.round(env.AI_DAILY_BUDGET_USD * 1_000_000),
     },
-    prices: aiPricesFromEnv(env),
+    prices,
+    judge: judgeConfig(env, prices),
   }
 }

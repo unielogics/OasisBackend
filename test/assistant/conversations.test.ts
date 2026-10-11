@@ -11,7 +11,10 @@ import { SimAiProvider, simText, simToolUse, type SimResponder, type SimStep } f
 import type { AiConverseRequest } from '../../src/integrations/ports/ai.js'
 import type { AnyAssistantTool, ToolRegistry } from '../../src/modules/assistant/contract.js'
 import type { AssistantConfig } from '../../src/modules/assistant/config.js'
+import { aiCostMicros } from '../../src/integrations/ai/cost.js'
+import { assistantConfig } from '../../src/modules/assistant/config.js'
 import { SAFETY_LINE } from '../../src/modules/assistant/guard.js'
+import { JUDGE_HINTS, JUDGE_RUBRIC, TRUSTED_CLOSE, TRUSTED_OPEN } from '../../src/modules/assistant/judge.js'
 import { INTAKE_LINES } from '../../src/modules/assistant/prompt.js'
 import { AssistantRuntime } from '../../src/modules/assistant/runtime.js'
 import { toBizDate } from '../../src/platform/time.js'
@@ -201,8 +204,13 @@ const tools: AnyAssistantTool[] = [
 ]
 const registry: ToolRegistry = { tools, get: (name) => tools.find((t) => t.name === name) }
 
-function assistant(script: SimStep[] | SimResponder, cfg: Partial<AssistantConfig> = {}) {
+const pass = (usage = {}) => simText('{"ok":true,"category":"none","reason":""}', { usage })
+const fail = (category: string, reason = 'not allowed') => simText(JSON.stringify({ ok: false, category, reason }))
+
+function assistant(script: SimStep[] | SimResponder, cfg: Partial<AssistantConfig> = {}, judgeScript?: SimStep[] | SimResponder) {
   const provider = new SimAiProvider(script)
+  // the policy judge: the default simulator passes every reply (AI_PROVIDER=sim); a script judges for a test
+  const judge = judgeScript ? new SimAiProvider(judgeScript) : new SimAiProvider()
   const enqueued: Array<{ name: string; data: object; opts: unknown }> = []
   const rt = new AssistantRuntime({
     db: w.t.db,
@@ -211,6 +219,7 @@ function assistant(script: SimStep[] | SimResponder, cfg: Partial<AssistantConfi
     env: w.env,
     messaging: w.rt,
     provider,
+    judgeProvider: judge,
     registry,
     enqueue: async (name, data, opts) => {
       enqueued.push({ name, data, opts })
@@ -223,19 +232,19 @@ function assistant(script: SimStep[] | SimResponder, cfg: Partial<AssistantConfi
     if (!c) return { status: 'none' as const }
     return runTurn(rt.turnDeps, c.id)
   }
-  return { rt, provider, enqueued, turn }
+  return { rt, provider, judge, enqueued, turn }
 }
 
 describe('the welcome flow (owner 2026-10-11): name, then intent, then memberships, then the vehicle, one question per text', () => {
   it('walks a new texter through the intake in order; the first text discloses the assistant with the STOP footer only', async () => {
     const steps: SimStep[] = [
-      simText('Hi there! Our Signature Hand Wash {price:signature-hand-wash}. What’s your first name?'),
+      simText('Hi there! {price:signature-hand-wash}. What’s your first name?'),
       simToolUse('set_my_name', { fullName: 'Ana Lopez' }),
       simText('Nice to meet you, Ana! Are you after a wash, window tint, detailing, or just info?'),
       simToolUse('note_interest', { categories: ['wash'] }),
       simText('Great choice. Do you want to book a wash this week?'),
       simToolUse('get_membership_info', {}),
-      simText('Before you book: Gold {plan:gold} and VIP {plan:vip}, with member prices on everything. Want to hear more?'),
+      simText('Before you book: {plan:gold}. {plan:vip}. Both come with member prices on everything. Want to hear more?'),
       simToolUse('set_my_vehicle', { type: 'suv_crossover', make: 'Honda', model: 'CR-V', year: null, color: null }),
       simText('Got it, a Honda CR-V. Which day works for you?'),
       simText('Here you go.'),
@@ -249,7 +258,7 @@ describe('the welcome flow (owner 2026-10-11): name, then intent, then membershi
     const [first] = await aiTexts(NEWCOMER)
     expect(first).toMatchObject({ sender_kind: 'ai', klass: 'ai_reply' })
     expect(first!.body).toBe(
-      "Oasis Auto Spa's automated assistant here. Hi there! Our Signature Hand Wash starts at $45 for members, $54 otherwise. What's your first name? Reply STOP to opt out.",
+      "Oasis Auto Spa's automated assistant here. Hi there! Signature Hand Wash starts at $45 for members, $54 otherwise. What's your first name? Reply STOP to opt out.",
     )
     expect(first!.body).not.toMatch(/AGENT/)
 
@@ -277,15 +286,17 @@ describe('the welcome flow (owner 2026-10-11): name, then intent, then membershi
     expect(texts).toHaveLength(6)
     // the disclosure only once, one question per text
     expect(texts.filter((t) => t.body.includes('automated assistant'))).toHaveLength(1)
-    expect(texts.some((t) => t.body.includes('Before you book: Gold is $99 a month and VIP is $169 a month, with member prices on everything.'))).toBe(true)
+    expect(texts.some((t) => t.body.includes('Before you book: Gold is $99 a month. VIP is $169 a month. Both come with member prices on everything.'))).toBe(true)
+    // every reply was judged once, rendered, and passed
+    expect(a.judge.requests).toHaveLength(6)
     for (const t of texts) expect((t.body.match(/\?/g) ?? []).length, t.body).toBeLessThanOrEqual(1)
     expect((await w.t.db.selectFrom('customers').select(['full_name', 'needs_details']).where('id', '=', id).executeTakeFirstOrThrow())).toEqual({ full_name: 'Ana Lopez', needs_details: false })
   })
 })
 
 describe('the pricing rule in a turn (design sections 3b and 3c: amounts are server-rendered)', () => {
-  it('renders {price:<key>} with the exact facts wording, with no extra call', async () => {
-    const a = assistant([simText('Signature Hand Wash {price:signature-hand-wash}.')])
+  it('renders {price:<key>} with the exact facts wording and its own subject, with no extra call', async () => {
+    const a = assistant([simText('{price:signature-hand-wash}.')])
     await inbound(maria(), 'How much is a wash?')
     expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
     expect(a.provider.requests).toHaveLength(1)
@@ -297,14 +308,22 @@ describe('the pricing rule in a turn (design sections 3b and 3c: amounts are ser
 
   it('renders {plan:..} and {fee} from the current facts', async () => {
     await setting('booking.guest_fee', { cents: 3000, collect: 'counter' })
-    const a = assistant([simText('Gold {plan:gold}. Without it, there is {fee}.')])
+    const a = assistant([simText('{plan:gold}. Without it: {fee}.')])
     await inbound(maria(), 'Is Gold worth it?')
     expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
-    expect((await aiTexts(maria()))[0]!.body).toContain('Gold is $99 a month. Without it, there is a $30 booking fee for guests.')
+    expect((await aiTexts(maria()))[0]!.body).toContain('Gold is $99 a month. Without it: Guests pay a $30 booking fee.')
+  })
+
+  it('a placeholder attached to another noun gets one rewrite; then the fallback (design 3c, layer 1)', async () => {
+    const a = assistant([simText('Window tint {price:signature-hand-wash}.'), simText('Your total {price:interior-detail}.')])
+    await inbound(maria(), 'How much is tint?')
+    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'guard' })
+    expect(JSON.stringify(a.provider.requests[1]!.messages.at(-1))).toContain('Write each price placeholder as its own sentence')
+    expect((await aiTexts(maria())).map((t) => t.klass)).toEqual(['ai_fallback'])
   })
 
   it('a model-written amount (even the right one) gets one rewrite; the placeholder version goes out', async () => {
-    const a = assistant([simText('Signature Hand Wash starts at $45 for members, $54 otherwise.'), simText('Signature Hand Wash {price:signature-hand-wash}.')])
+    const a = assistant([simText('Signature Hand Wash starts at $45 for members, $54 otherwise.'), simText('{price:signature-hand-wash}.')])
     await inbound(maria(), 'What would a wash cost me?')
     expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
     expect(a.provider.requests).toHaveLength(2)
@@ -316,10 +335,14 @@ describe('the pricing rule in a turn (design sections 3b and 3c: amounts are ser
     expect(texts[0]!.body).toContain('Signature Hand Wash starts at $45 for members, $54 otherwise.')
   })
 
-  it('a model-written amount twice: the fallback goes out and the conversation is handed to staff', async () => {
-    const a = assistant([simText('A Signature wash is $54 total.'), simText('OK: 54 for the wash.')])
+  it('a model-written amount twice, the second without a sign: the judge refuses it, the fallback goes out, staff take over', async () => {
+    const a = assistant([simText('A Signature wash is $54 total.'), simText('OK: 54 for the wash.'), simText('OK, 54 for the wash then.')], {}, [
+      fail('price', 'states an amount'),
+      fail('price', 'states an amount'),
+    ])
     await inbound(maria(), 'Price for a wash?')
-    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'guard' })
+    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'policy_judge' })
+    expect(a.judge.requests).toHaveLength(2)
     const texts = await aiTexts(maria())
     expect(texts.map((t) => t.klass)).toEqual(['ai_fallback'])
     expect(texts[0]!.body).not.toMatch(/54/)
@@ -354,7 +377,7 @@ describe('the pricing rule in a turn (design sections 3b and 3c: amounts are ser
   })
 
   it('{balance} renders the balance get_balance returned this turn; refund words get one rewrite, then the fallback and a person (B)', async () => {
-    const a = assistant([simToolUse('get_balance', {}), simText('Your open balance is {balance}.'), simText('We can refund that for you.'), simText('Sure, a refund is fine.')])
+    const a = assistant([simToolUse('get_balance', {}), simText('{balance}.'), simText('We can refund that for you.'), simText('Sure, a refund is fine.')])
     await inbound(maria(), 'What do I owe?')
     expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
     expect((await aiTexts(maria()))[0]!.body).toContain('Your open balance is $12.50.')
@@ -362,7 +385,7 @@ describe('the pricing rule in a turn (design sections 3b and 3c: amounts are ser
     await inbound(maria(), 'Can I get my money back?')
     expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'policy_words' })
     const instruction = JSON.stringify(a.provider.requests.at(-1)!.messages.at(-1))
-    expect(instruction).toContain('Rephrase without promising anything free, sales, discounts, refunds, guarantees, promises or times')
+    expect(instruction).toContain('Rephrase without promising anything free, discounts, refunds, coupons or guarantees')
     expect(instruction).toContain('Remove these from the text: \\"refund\\"')
     expect((await aiTexts(maria())).map((t) => t.klass)).toEqual(['ai_reply', 'ai_fallback'])
   })
@@ -395,6 +418,112 @@ describe('the pricing rule in a turn (design sections 3b and 3c: amounts are ser
     expect(JSON.stringify(a.provider.requests[1]!.messages.at(-1))).toContain('Write nothing about PINs, codes')
     const texts = await aiTexts(maria())
     expect(texts.map((t) => t.klass)).toEqual(['ai_fallback'])
+  })
+})
+
+describe('the policy judge in a turn (design 3c, layer 3)', () => {
+  it('a judge fail gets one rewrite with the category as the hint; the rewritten reply is judged again and goes out', async () => {
+    const a = assistant(
+      [simText('OK: 54 for the wash.'), simText('{price:signature-hand-wash}. The team confirms the exact price at the shop.')],
+      {},
+      [fail('price', 'states an amount outside the trusted parts'), pass()],
+    )
+    await inbound(maria(), 'Price for a wash?')
+    expect(await a.turn(maria())).toMatchObject({ status: 'replied', handoff: false })
+    expect((await aiTexts(maria()))[0]!.body).toContain('Signature Hand Wash starts at $45 for members, $54 otherwise. The team confirms the exact price at the shop.')
+    // the rewrite call carries the category's hint, never the judge's own words
+    const instruction = JSON.stringify(a.provider.requests[1]!.messages.at(-1))
+    expect(instruction).toContain(JUDGE_HINTS.price.slice(0, 60))
+    expect(instruction).not.toContain('states an amount outside')
+    // the judge read the rendered reply both times, the server's segments marked trusted
+    expect(a.judge.requests).toHaveLength(2)
+    expect(JSON.stringify(a.judge.requests[0]!.messages)).toContain('OK: 54 for the wash.')
+    expect(JSON.stringify(a.judge.requests[1]!.messages)).toContain(`${TRUSTED_OPEN}Signature Hand Wash starts at $45 for members, $54 otherwise${TRUSTED_CLOSE}`)
+    // both verdicts are stored for review, as tool calls that are no progress
+    const rows = await w.t.db.selectFrom('assistant_tool_calls').select(['tool', 'outcome', 'error', 'output', 'input']).where('tool', '=', 'policy_judge').orderBy('seq').execute()
+    expect(rows.map((r) => [r.outcome, r.error])).toEqual([
+      ['denied', 'price'],
+      ['ok', null],
+    ])
+    expect(rows[0]!.output).toEqual({ ok: false, category: 'price', reason: 'states an amount outside the trusted parts' })
+    expect(JSON.stringify(rows[0]!.input)).toContain('OK: 54 for the wash.')
+    const t = await w.t.db.selectFrom('assistant_turns').select('transcript').executeTakeFirstOrThrow()
+    const judged = (t.transcript as unknown as Array<{ kind: string; verdict?: string; category?: string }>).filter((e) => e.kind === 'judge')
+    expect(judged.map((e) => [e.verdict, e.category])).toEqual([
+      ['fail', 'price'],
+      ['pass', 'none'],
+    ])
+  })
+
+  it('a judge fail twice: the fallback and a handoff (policy_judge)', async () => {
+    const a = assistant([simText('This one is on the shop.'), simText('It is our treat this time.')], {}, [fail('promise'), fail('promise')])
+    await inbound(maria(), 'Can I get a wash on you?')
+    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'policy_judge' })
+    expect(a.provider.requests).toHaveLength(2)
+    expect(JSON.stringify(a.provider.requests[1]!.messages.at(-1))).toContain(JUDGE_HINTS.promise.slice(0, 60))
+    const texts = await aiTexts(maria())
+    expect(texts.map((t) => t.klass)).toEqual(['ai_fallback'])
+    expect(texts[0]!.body).not.toContain('treat')
+    expect(await conversationOf(maria())).toMatchObject({ handoff_state: 'open', handoff_reason: 'policy_judge' })
+    expect((await w.t.db.selectFrom('assistant_turns').select(['status', 'error']).executeTakeFirstOrThrow())).toEqual({ status: 'handed_off', error: 'judge:promise' })
+  })
+
+  const closed: Array<[string, SimStep, string]> = [
+    ['a timeout (8 s in production)', pass({}), 'judge:timeout'],
+    ['a provider error', { error: 'unavailable' }, 'judge:ai:unavailable'],
+    ['an answer that is not the JSON', simText('Looks fine to me.'), 'judge:unparseable'],
+    ['a cut answer', simText('{"ok":tr', { stopReason: 'max_tokens' }), 'judge:stop:max_tokens'],
+  ]
+  for (const [what, step, error] of closed) {
+    it(`the judge fails closed on ${what}: no reply, the fallback and a handoff`, async () => {
+      const slow = what.startsWith('a timeout') ? { ...step, delayMs: 2000 } : step
+      const a = assistant([simText('We open at 8 AM.')], { judge: { ...assistantConfig(w.env).judge, timeoutMs: 100 } }, [slow])
+      await inbound(maria(), 'When do you open?')
+      expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'judge_error' })
+      expect((await aiTexts(maria())).map((t) => t.klass)).toEqual(['ai_fallback'])
+      expect((await w.t.db.selectFrom('assistant_turns').select('error').executeTakeFirstOrThrow()).error).toBe(error)
+      expect(await conversationOf(maria())).toMatchObject({ handoff_state: 'open', handoff_reason: 'judge_error' })
+    })
+  }
+
+  it("the judge reads the rubric and the rendered reply only: never the client's phone, an id, a token or a URL", async () => {
+    const a = assistant([simToolUse('send_link', { kind: 'pin', appointmentRef: null, tier: null }), simText('Hi Maria! {price:signature-hand-wash}. Your page: {link1}')])
+    await inbound(maria(), `my number is ${maria()}, send me my pin page`)
+    expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
+    expect(a.judge.requests).toHaveLength(1)
+    const req = a.judge.requests[0]!
+    expect(req.system).toEqual([{ text: JUDGE_RUBRIC, cache: true }])
+    expect(req).toMatchObject({ maxTokens: 120, temperature: 0, toolChoice: 'none' })
+    const message = JSON.stringify(req.messages)
+    expect(message).toContain(`Hi Maria! ${TRUSTED_OPEN}Signature Hand Wash`)
+    expect(message).toContain(`${TRUSTED_OPEN}[link]${TRUSTED_CLOSE} ${TRUSTED_OPEN}${SAFETY_LINE}${TRUSTED_CLOSE}`)
+    const conv = (await conversationOf(maria()))!
+    const turn = await w.t.db.selectFrom('assistant_turns').select('id').executeTakeFirstOrThrow()
+    const everything = JSON.stringify(a.judge.requests)
+    for (const secret of [maria().slice(2), conv.id, turn.id, w.customer('Maria Delgado').id, 'SECRET-TOKEN', '/#/c/', 'https://'])
+      expect(everything, secret).not.toContain(secret)
+  })
+
+  it("the judge's tokens are in the turn's tokens and its cost (its own model's prices) in cost_micros and the daily budget", async () => {
+    const judgePrices = { inputPerMTok: 5, outputPerMTok: 25, cacheReadPerMTok: 0.5, cacheWritePerMTok: 6.25 }
+    const a = assistant([simText('We are open until 6 PM.', { usage: { inputTokens: 1000, outputTokens: 100 } })], { judge: { ...assistantConfig(w.env).judge, prices: judgePrices } }, [
+      pass({ inputTokens: 2000, outputTokens: 50, cacheReadTokens: 400 }),
+    ])
+    await inbound(maria(), 'Open today?')
+    expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
+    const t = await w.t.db.selectFrom('assistant_turns').select(['tokens_in', 'tokens_out', 'tokens_cache_read', 'cost_micros']).executeTakeFirstOrThrow()
+    expect(t).toMatchObject({ tokens_in: 3000, tokens_out: 150, tokens_cache_read: 400 })
+    const main = aiCostMicros({ inputTokens: 1000, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 }, assistantConfig(w.env).prices)
+    const judged = aiCostMicros({ inputTokens: 2000, outputTokens: 50, cacheReadTokens: 400, cacheWriteTokens: 0 }, judgePrices)
+    expect(Number(t.cost_micros)).toBe(main + judged)
+    expect(judged).toBe(2000 * 5 + 50 * 25 + 400 * 0.5)
+  })
+
+  it('AI_GUARD_JUDGE=false: no judge call (the deterministic layers only)', async () => {
+    const a = assistant([simText('We open at 8 AM.')], { judge: { ...assistantConfig(w.env).judge, enabled: false } }, [fail('other')])
+    await inbound(maria(), 'When do you open?')
+    expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
+    expect(a.judge.requests).toHaveLength(0)
   })
 })
 
@@ -484,6 +613,7 @@ describe('injection cannot reach another record (design section 10)', () => {
       ['list_my_appointments', 'error', 'invalid_input'],
       ['list_my_appointments', 'ok', null],
       ['opt_out', 'error', 'exception:Error'],
+      ['policy_judge', 'ok', null],
     ])
     expect(calls[1]!.output).toEqual({ ok: true, appointments: [{ ref: 'A1' }] })
     const everything = JSON.stringify(a.provider.requests)
@@ -503,7 +633,7 @@ describe('injection cannot reach another record (design section 10)', () => {
     await inbound(maria(), 'book me tomorrow 10am')
     await a.turn(maria())
     expect(a.provider.requests[0]!.tools!.map((t) => t.name)).not.toContain('propose_booking')
-    const [call] = await w.t.db.selectFrom('assistant_tool_calls').select(['tool', 'outcome', 'error']).execute()
+    const [call] = await w.t.db.selectFrom('assistant_tool_calls').select(['tool', 'outcome', 'error']).where('tool', '!=', 'policy_judge').execute()
     expect(call).toEqual({ tool: 'propose_booking', outcome: 'denied', error: 'actions_disabled' })
   })
 })
@@ -645,7 +775,7 @@ describe('switches and the stop rules (design section 10)', () => {
 
 describe('the turn', () => {
   it('a settings change appears in the next turn (the shop facts are rebuilt)', async () => {
-    const a = assistant(() => simText('Yes, there is {fee}.'))
+    const a = assistant(() => simText('Yes. {fee}.'))
     await setting('assistant.faq', [{ q: 'Do you take walk-ins?', a: 'Yes, when a bay is free.' }])
     await inbound(maria(), 'walk-ins?')
     await a.turn(maria())
@@ -659,9 +789,9 @@ describe('the turn', () => {
     expect(second).toContain('A: "Only on weekdays."')
     expect(second).not.toContain('Yes, when a bay is free.')
     // the facts name the placeholder; the reply renders the new fee
-    expect(second).toContain('There is {fee}.')
+    expect(second).toContain('"{fee}."')
     expect(second).not.toContain('$30')
-    expect((await aiTexts(maria())).at(-1)!.body).toContain('Yes, there is a $30 booking fee for guests.')
+    expect((await aiTexts(maria())).at(-1)!.body).toContain('Yes. Guests pay a $30 booking fee.')
     // the cached prefix: rules + facts with a cache point, the tools with one, the turn context after it
     expect(a.provider.requests[1]!.system.map((b) => b.cache ?? false)).toEqual([false, true, false])
     expect(a.provider.requests[1]!.cacheTools).toBe(true)

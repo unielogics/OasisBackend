@@ -4,9 +4,10 @@
 //   -> claim (conversation lock, lease running_since, the turn row) -> context (shop facts, the turn context, the last texts)
 //   -> Converse loop (system: rules + SHOP FACTS [cache point], turn context; tools [cache point]; at most 4 tool rounds, then one
 //      "reply now without tools" call; AI_TIMEOUT_MS per call, AI_TURN_DEADLINE_MS per turn)
-//   -> output guard v3 on the model's RAW text (one rewrite call, one shorten call, else a sentence cut or the fallback), then the
-//      server renders the placeholders ({price:..}, {plan:..}, {fee}, {balance}) from the current facts: the only way a $ amount
-//      reaches a client
+//   -> output guard v4 (design 3c): the deterministic layer on the model's RAW text (one rewrite call, one shorten call, else a
+//      sentence cut or the fallback), the server renders the placeholders ({price:..}, {plan:..}, {fee}, {balance}: self-contained
+//      phrases, each its own clause) from the current facts, the only way a $ amount reaches a client; then the POLICY JUDGE reads
+//      the rendered reply (judge.ts: fail -> one rewrite -> the guard and the judge again -> fallback; an error fails closed)
 //   -> the reply (ai_reply, or personal_link with the links as secretVars; the first AI text discloses the assistant; a verify, PIN,
 //      membership or payment link gets the server's safety line)
 //   -> audit assistant.reply -> the marker cleared, or kept and kicked again when newer texts arrived meanwhile.
@@ -41,12 +42,13 @@ import { AI_ACTOR_NAME, type AssistantLog, type AssistantQueue, type HandoffRequ
 import type { AssistantConfig } from './config.js'
 import { appointmentRefs, loadAppointmentRefs, loadConversation, loadTurnContext, resolveIdentity } from './context.js'
 import { factLiterals, placeholderValues, renderShopFacts } from './facts.js'
-import { cutAfterFirstQuestion, cutAtSentence, guardReply, HARD_PROBLEMS, MAX_REPLY_CHARS, SAFETY_LINE, SAFETY_LINK_KINDS, type GuardProblem } from './guard.js'
+import { cutAfterFirstQuestion, cutAtSentence, guardReply, HARD_PROBLEMS, MAX_REPLY_CHARS, SAFETY_LINE, SAFETY_LINK_KINDS, type GuardProblem, type ReplySegment } from './guard.js'
+import { JUDGE_HINTS, runJudge } from './judge.js'
 import { HANDOFF_SUMMARIES, markUnanswered, openTurnHandoff, recipientOf, sendFallback, type ConversationRef, type HandoffDeps } from './handoff.js'
 import type { AssistantGate, AssistantInbox } from './ports.js'
-import { PROMPT_VERSION, REPLY_NOW_TEXT, STATIC_RULES, renderConversation, renderTurnContext, rewriteInstruction } from './prompt.js'
+import { judgeRewriteInstruction, PROMPT_VERSION, REPLY_NOW_TEXT, STATIC_RULES, renderConversation, renderTurnContext, rewriteInstruction } from './prompt.js'
 import { NON_PROGRESS_TOOLS, offeredTools, runToolRound, toolSpecs } from './tool-runner.js'
-import { Transcript } from './transcript.js'
+import { redactText, Transcript } from './transcript.js'
 import './schema.js'
 import '../messaging/schema.js'
 
@@ -57,6 +59,8 @@ export interface TurnDeps {
   env: Env
   cfg: AssistantConfig
   provider: AiProvider
+  /** The output guard's policy judge (judge.ts); called only while cfg.judge.enabled. */
+  judge: AiProvider
   registry: ToolRegistry
   facts: ShopFactsSource
   queue: AssistantQueue
@@ -248,6 +252,13 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
   const transcript = new Transcript()
   const state = { identity: identity0, threadCustomerId: resolved.threadCustomerId }
   const began = nowMs()
+  // the judge's calls: their own model and prices, counted in the turn's tokens and cost_micros (the daily budget sums them)
+  let judgeUsage = ZERO_USAGE
+  const costOf = (usage: AiUsage): number => aiCostMicros(usage, d.cfg.prices) + aiCostMicros(judgeUsage, d.cfg.judge.prices)
+  const tokensOf = (usage: AiUsage) => {
+    const all = addUsage(usage, judgeUsage)
+    return { tokens_in: all.inputTokens, tokens_out: all.outputTokens, tokens_cache_read: all.cacheReadTokens, tokens_cache_write: all.cacheWriteTokens }
+  }
 
   const finishHandoff = async (o: { reason: string; status: 'handed_off' | 'failed'; fallback: boolean; error?: string; summary?: string; usage?: AiUsage; model?: string | null; rounds?: number; stop?: string | null }): Promise<TurnResult> => {
     transcript.add({ kind: 'handoff', reason: o.reason })
@@ -264,11 +275,8 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
           error: (o.error ?? o.reason).slice(0, 2000),
           model: o.model ?? null,
           rounds: o.rounds ?? 0,
-          tokens_in: usage.inputTokens,
-          tokens_out: usage.outputTokens,
-          tokens_cache_read: usage.cacheReadTokens,
-          tokens_cache_write: usage.cacheWriteTokens,
-          cost_micros: aiCostMicros(usage, d.cfg.prices),
+          ...tokensOf(usage),
+          cost_micros: costOf(usage),
           stop_reason: o.stop ?? null,
           latency_ms: Math.max(0, Math.round(nowMs() - began)),
           reply_message_id: msg,
@@ -456,35 +464,84 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     const values = placeholderValues(facts, { balanceCents })
     for (const p of links.keys()) values.set(p, p)
     const literals = [...factLiterals(facts), ...(turnContext.vehicleNames ?? [])]
+    // the client's own first name and vehicles are never checked against the word lists ("Hi Buck")
+    const names = [turnContext.firstName, ...turnContext.vehicles.map((v) => v.split(',')[0]), ...(turnContext.vehicleNames ?? [])]
     // a verify / PIN / membership / payment link: the server appends the safety line, so the reply leaves room for it
     const safety = [...linkKinds].some((k) => SAFETY_LINK_KINDS.has(k))
     const maxChars = safety ? MAX_REPLY_CHARS - SAFETY_LINE.length - 1 : MAX_REPLY_CHARS
     let rewriteUsed = false
     let shortenUsed = false
-    const fix = async (draft: string, problems: readonly GuardProblem[], words: readonly string[] = []): Promise<string> => {
-      messages.push({ role: 'user', content: [{ type: 'text', text: rewriteInstruction(draft, problems, words) }] })
+    let judgeRewriteUsed = false
+    const fix = async (draft: string, problems: readonly GuardProblem[], words: readonly string[] = [], instruction?: string): Promise<string> => {
+      messages.push({ role: 'user', content: [{ type: 'text', text: instruction ?? rewriteInstruction(draft, problems, words) }] })
       transcript.add({ kind: 'message', message: messages[messages.length - 1]! })
       const res = await call(request(true))
       messages.push(res.message)
       if (res.stopReason !== 'end_turn') throw new TurnAbort(`stop:${res.stopReason}`)
       return textOf(res.message)
     }
+    // (3) the policy judge: the rendered reply, the server's segments trusted (the safety line too); never throws (an error fails closed)
+    const judge = async (segments: readonly ReplySegment[]) => {
+      const all = safety ? [...segments, { text: ' ', trusted: false }, { text: SAFETY_LINE, trusted: true }] : segments
+      const r = await runJudge(d.judge, all, { timeoutMs: d.cfg.judge.timeoutMs, maxTokens: d.cfg.judge.maxTokens, signal: deadline.signal, nowMs })
+      judgeUsage = addUsage(judgeUsage, r.usage)
+      const o = r.outcome
+      const entry = { verdict: o.kind, model: r.model, latencyMs: r.latencyMs, ...(o.kind === 'error' ? { error: o.error } : { category: o.verdict.category, reason: o.verdict.reason }) }
+      transcript.add({ kind: 'judge', ...entry })
+      // stored for review like a tool call (redacted; the judge's message holds no phone number, id or token in the first place)
+      seq += 1
+      await d.db
+        .insertInto('assistant_tool_calls')
+        .values({
+          id: d.newId(),
+          turn_id: turnId,
+          seq,
+          round: rounds,
+          tool: 'policy_judge',
+          tool_use_id: null,
+          input: JSON.stringify({ model: r.model ?? d.cfg.judge.modelId, message: redactText(r.message) }) as never,
+          output: o.kind === 'error' ? null : (JSON.stringify(o.verdict) as never),
+          outcome: o.kind === 'pass' ? 'ok' : o.kind === 'fail' ? 'denied' : 'error',
+          error: o.kind === 'error' ? o.error.slice(0, 2000) : o.kind === 'fail' ? o.verdict.category : null,
+          latency_ms: r.latencyMs,
+        })
+        .execute()
+      return o
+    }
     let draft = text
     let reply: string | null = null
     try {
-      for (let i = 0; i < 8 && reply === null; i++) {
+      for (let i = 0; i < 10 && reply === null; i++) {
         const v = guardReply({
           text: draft,
           values,
           literals,
+          names,
           website: facts.business.website,
           shopNumbers: [facts.contact.textingNumber, facts.contact.callingNumber],
           maxChars,
         })
         transcript.add({ kind: 'guard', verdict: v.kind, ...(v.kind === 'fix' ? { problems: v.problems, ...(v.words.length > 0 ? { words: v.words } : {}) } : {}) })
         if (v.kind === 'ok') {
-          reply = v.rendered
-          break
+          if (!d.cfg.judge.enabled) {
+            reply = v.rendered
+            break
+          }
+          const j = await judge(v.segments)
+          if (j.kind === 'pass') {
+            reply = v.rendered
+            break
+          }
+          // fail closed: no verdict, no reply (the turn deadline is the turn's own timeout)
+          if (j.kind === 'error') {
+            if (deadline.signal.aborted) throw new TurnAbort('deadline')
+            return await finishHandoff({ reason: 'judge_error', status: 'handed_off', fallback: true, usage, model, rounds, stop, error: `judge:${j.error}` })
+          }
+          if (judgeRewriteUsed)
+            return await finishHandoff({ reason: 'policy_judge', status: 'handed_off', fallback: true, usage, model, rounds, stop, error: `judge:${j.verdict.category}` })
+          judgeRewriteUsed = true
+          draft = await fix(v.text, [], [], judgeRewriteInstruction(v.text, JUDGE_HINTS[j.verdict.category]))
+          continue
         }
         const hard = v.problems.filter((p) => HARD_PROBLEMS.has(p))
         if (hard.length > 0 || (v.problems.includes('questions') && !rewriteUsed)) {
@@ -573,11 +630,8 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
           error,
           model,
           rounds,
-          tokens_in: usage.inputTokens,
-          tokens_out: usage.outputTokens,
-          tokens_cache_read: usage.cacheReadTokens,
-          tokens_cache_write: usage.cacheWriteTokens,
-          cost_micros: aiCostMicros(usage, d.cfg.prices),
+          ...tokensOf(usage),
+          cost_micros: costOf(usage),
           stop_reason: stop,
           latency_ms: Math.max(0, Math.round(nowMs() - began)),
           reply_message_id: messageId,

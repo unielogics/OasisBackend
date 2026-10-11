@@ -9,10 +9,11 @@
 // next turn reads the new facts; an unchanged source gives the same object and renderShopFacts the same bytes (the prompt cache).
 // Free text from Settings (names, descriptions, FAQ) is flattened to one line, so it can never fake a section of the document.
 //
-// GUARD v3 (design section 3c): the document gives the model KEYS, never dollar figures. A price is the placeholder {price:<key>}
+// GUARD v4 (design section 3c): the document gives the model KEYS, never dollar figures. A price is the placeholder {price:<key>}
 // (tint rows {price:tint:<vehicle>:<film>}), a plan's monthly price {plan:<key>}, the guest booking fee {fee}; placeholderValues
-// renders them from the CURRENT facts after the output guard checked the model's raw text, so rendering is the only way a $ amount
-// reaches a client.
+// renders each from the CURRENT facts as a SELF-CONTAINED phrase that names its own subject ("Signature Hand Wash starts at $45 for
+// members, $54 otherwise"), after the output guard checked the model's raw text and that every placeholder stands as its own
+// clause; rendering is the only way a $ amount reaches a client.
 import { createHash } from 'node:crypto'
 import { sql } from 'kysely'
 import type { Executor } from '../../platform/db.js'
@@ -42,7 +43,7 @@ import type {
 } from './contract.js'
 
 /** Bumped whenever the document's shape or wording changes, so a cached version never outlives a deploy. */
-export const FACTS_FORMAT = 'facts-v2'
+export const FACTS_FORMAT = 'facts-v3'
 
 /** How far ahead the facts list closures (design section 3b). */
 export const FACTS_CLOSURE_DAYS = 30
@@ -206,7 +207,7 @@ export async function loadShopFacts(db: Executor, deps: Pick<ShopFactsDeps, 'env
   const feeLines: FactLine[] =
     fee.value.cents > 0
       ? [
-          `Guests (not members) pay a booking fee, ${fee.value.collect === 'counter' ? 'paid at the shop' : 'paid through a payment link the team texts after the booking'}; write it as "There is {fee}." (the server fills in the amount).`,
+          `Guests (not members) pay a booking fee, ${fee.value.collect === 'counter' ? 'paid at the shop' : 'paid through a payment link the team texts after the booking'}; write it as its own sentence, "{fee}." (the server writes "Guests pay a ... booking fee.").`,
           'Members pay no booking fee.',
           'Nothing is charged online.',
         ]
@@ -313,11 +314,11 @@ export async function loadShopFacts(db: Executor, deps: Pick<ShopFactsDeps, 'env
     guestFromCents: p.guestMinCents,
   }))
   const catalogLines: FactLine[] = [
-    'Never write an amount: write the item\'s price placeholder right after its name ("Signature Hand Wash {price:signature-hand-wash}.") and the server fills in its STARTING price. The team confirms the exact price at the shop.',
+    'Never write an amount: write the item\'s price placeholder as its own sentence ("{price:signature-hand-wash}.") and the server writes "Signature Hand Wash starts at ..." with its STARTING price. The team confirms the exact price at the shop.',
     'Never add prices up, never price a combination, never offer a discount.',
   ]
-  if (items.some((x) => x.quoteOnly)) catalogLines.push('Quote-only services have no price: their placeholder reads "is priced by quote - text us a photo".')
-  if (tint.length > 0) catalogLines.push('Window tint is priced by vehicle type and film: {price:tint:<vehicle key>:<film key>}.')
+  if (items.some((x) => x.quoteOnly)) catalogLines.push('Quote-only services have no price: their placeholder reads "<name> is priced by quote - text us a photo".')
+  if (tint.length > 0) catalogLines.push('Window tint is priced by vehicle type and film: "{price:tint:<vehicle key>:<film key>}." reads "<film> tint for a <vehicle> starts at ...".')
 
   return {
     version: o.version,
@@ -472,7 +473,7 @@ export const renderShopFacts: RenderShopFacts = (f) => {
       out.push(`- ${r.vehicleLabel}, ${r.filmLabel}${r.vlt.length > 0 ? ` (shades ${r.vlt.join('/')}%)` : ''}: ${tintPlaceholder(r.vehicle, r.film)}.`)
   }
   section(
-    'Memberships (write the plan name, then its placeholder: "Gold {plan:gold}.")',
+    'Memberships (write the plan\'s placeholder as its own sentence: "{plan:gold}." reads "Gold is ... a month.")',
     f.plans.map((p) => `${p.label} (key ${p.key}): ${planPlaceholder(p.key)}.${p.perks.length > 0 ? ` Perks: ${p.perks.join('; ')}.` : ''}`),
   )
   section(
@@ -482,24 +483,43 @@ export const renderShopFacts: RenderShopFacts = (f) => {
   return out.join('\n')
 }
 
+/** A vehicle type label as it reads in a sentence: "a sedan/coupe", "an SUV/crossover" (acronyms keep their capitals). */
+export function vehiclePhrase(label: string): string {
+  const words = label
+    .replace(/\s*\/\s*/g, '/')
+    .split(/(\s+|\/)/)
+    .map((w) => (/^[A-Z0-9]{2,}$/.test(w) ? w : w.toLowerCase()))
+    .join('')
+  const an = /^[aeiou]/i.test(words) || /^[AEFHILMNORSX][A-Z0-9]/.test(words)
+  return `${an ? 'an' : 'a'} ${words}`
+}
+
 /**
- * Every placeholder a reply may use this turn and what the server writes for it, from the CURRENT facts (design section 3c):
- *   {price:<itemKey>}              "starts at $45 for members, $54 otherwise" / "starts at $45"; quote-only "is priced by quote -
- *                                  text us a photo"; no price "is priced at the shop"
- *   {price:tint:<vehicle>:<film>}  the tint row's "starts at ..." wording
- *   {plan:<key>}                   "is $99 a month" ("Gold {plan:gold}." reads "Gold is $99 a month.")
- *   {fee}                          "a $25 booking fee for guests" (no fee: "no booking fee")
- *   {balance}                      the client's own open balance ("$12.50"), only when get_balance ran this turn
- * The {linkN} placeholders are the turn's own (turn.ts). Every value is GSM-7 text with no Settings free text in it.
+ * Every placeholder a reply may use this turn and what the server writes for it, from the CURRENT facts (design section 3c). Each
+ * is a SELF-CONTAINED phrase with its own subject, so it cannot be attached to the wrong noun; the model writes it as its own
+ * sentence ("{price:signature-hand-wash}.") and the guard refuses it anywhere else:
+ *   {price:<itemKey>}              "Signature Hand Wash starts at $45 for members, $54 otherwise" / "Interior Detail starts at
+ *                                  $149"; quote-only "Ceramic Coating is priced by quote - text us a photo"; no price "<name> is
+ *                                  priced at the shop"
+ *   {price:tint:<vehicle>:<film>}  "Carbon tint for a sedan/coupe starts at $229 for members, $279 otherwise"
+ *   {plan:<key>}                   "Gold is $99 a month"
+ *   {fee}                          "Guests pay a $25 booking fee" (no fee: "There is no booking fee")
+ *   {balance}                      "Your open balance is $12.50", only when get_balance ran this turn
+ * The {linkN} placeholders are the turn's own (turn.ts). The names are the shop's own public names (Settings, one line each).
  */
 export function placeholderValues(f: ShopFacts, o: { balanceCents?: number | null } = {}): Map<string, string> {
   const out = new Map<string, string>()
   for (const it of f.catalog.items)
-    out.set(pricePlaceholder(it.key), it.quoteOnly ? 'is priced by quote - text us a photo' : (priceWords(it.memberFromCents, it.guestFromCents) ?? 'is priced at the shop'))
-  for (const r of f.catalog.tint) out.set(tintPlaceholder(r.vehicle, r.film), priceWords(r.memberFromCents, r.guestFromCents) ?? 'is priced at the shop')
-  for (const p of f.plans) out.set(planPlaceholder(p.key), p.monthlyPriceCents === null ? 'has a monthly price the team confirms' : `is ${usd(p.monthlyPriceCents)} a month`)
-  out.set(FEE_PLACEHOLDER, f.fee.guestBookingFeeCents > 0 ? `a ${usd(f.fee.guestBookingFeeCents)} booking fee for guests` : 'no booking fee')
-  if (o.balanceCents !== undefined && o.balanceCents !== null && Number.isInteger(o.balanceCents) && o.balanceCents >= 0) out.set(BALANCE_PLACEHOLDER, usd(o.balanceCents))
+    out.set(
+      pricePlaceholder(it.key),
+      `${it.name} ${it.quoteOnly ? 'is priced by quote - text us a photo' : (priceWords(it.memberFromCents, it.guestFromCents) ?? 'is priced at the shop')}`,
+    )
+  for (const r of f.catalog.tint)
+    out.set(tintPlaceholder(r.vehicle, r.film), `${r.filmLabel} tint for ${vehiclePhrase(r.vehicleLabel)} ${priceWords(r.memberFromCents, r.guestFromCents) ?? 'is priced at the shop'}`)
+  for (const p of f.plans) out.set(planPlaceholder(p.key), `${p.label} ${p.monthlyPriceCents === null ? 'has a monthly price the team confirms' : `is ${usd(p.monthlyPriceCents)} a month`}`)
+  out.set(FEE_PLACEHOLDER, f.fee.guestBookingFeeCents > 0 ? `Guests pay a ${usd(f.fee.guestBookingFeeCents)} booking fee` : 'There is no booking fee')
+  if (o.balanceCents !== undefined && o.balanceCents !== null && Number.isInteger(o.balanceCents) && o.balanceCents >= 0)
+    out.set(BALANCE_PLACEHOLDER, `Your open balance is ${usd(o.balanceCents)}`)
   return out
 }
 

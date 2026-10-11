@@ -31,7 +31,7 @@ export function toolSpecs(tools: readonly AnyAssistantTool[]): AiToolSpec[] {
 }
 
 /** The tools whose success counts as progress for the "6 turns without progress" breaker. */
-export const NON_PROGRESS_TOOLS: ReadonlySet<string> = new Set(['handoff_to_staff', 'opt_out'])
+export const NON_PROGRESS_TOOLS: ReadonlySet<string> = new Set(['handoff_to_staff', 'opt_out', 'policy_judge'])
 
 export interface ToolRoundResult {
   /** One toolResult block per toolUse, in order. */

@@ -3,7 +3,9 @@
 import { describe, expect, it } from 'vitest'
 import { DEV_PIN_PEPPER, ENV_KEYS, loadEnv } from '../../src/config/env.js'
 import { FORBIDDEN_SECRET_KEYS, SECRET_KEYS } from '../../src/config/secrets-source.js'
+import { aiPricesFromEnv } from '../../src/integrations/ai/cost.js'
 import { aiEnvShape } from '../../src/integrations/ai/env.js'
+import { judgeConfig } from '../../src/modules/assistant/config.js'
 
 const base = { DATABASE_URL: 'postgres://oasis:x@127.0.0.1:5432/oasis' }
 const prod = {
@@ -44,6 +46,23 @@ describe('AI environment', () => {
     // unset: cost_micros uses the configured model's list prices (test/integrations/ai/cost.test.ts)
     for (const k of ['AI_PRICE_INPUT_PER_MTOK', 'AI_PRICE_OUTPUT_PER_MTOK', 'AI_PRICE_CACHE_READ_PER_MTOK', 'AI_PRICE_CACHE_WRITE_PER_MTOK'] as const)
       expect(e[k]).toBeUndefined()
+  })
+
+  it('the output guard judge (design 3c): on whenever AI_ENABLED unless AI_GUARD_JUDGE=false; its model one of the listed ones', () => {
+    const off = loadEnv(base)
+    expect(off.AI_GUARD_JUDGE).toBeUndefined()
+    expect(off.AI_GUARD_MODEL_ID).toBeUndefined()
+    const prices = aiPricesFromEnv(off)
+    expect(judgeConfig(off, prices)).toEqual({ enabled: false, modelId: 'us.anthropic.claude-sonnet-4-6', timeoutMs: 8000, maxTokens: 120, prices })
+    const on = loadEnv({ ...base, AI_ENABLED: 'true' })
+    expect(judgeConfig(on, prices).enabled).toBe(true)
+    expect(judgeConfig(loadEnv({ ...base, AI_ENABLED: 'true', AI_GUARD_JUDGE: 'false' }), prices).enabled).toBe(false)
+    // another listed model: its own list prices (AI_PRICE_* are the assistant model's)
+    const opus = loadEnv({ ...base, AI_GUARD_MODEL_ID: 'us.anthropic.claude-opus-4-6-v1' })
+    expect(judgeConfig(opus, prices)).toMatchObject({ modelId: 'us.anthropic.claude-opus-4-6-v1', prices: { inputPerMTok: 5, outputPerMTok: 25 } })
+    expect(loadEnv({ ...base, AI_GUARD_MODEL_ID: '' }).AI_GUARD_MODEL_ID).toBeUndefined()
+    expect(() => loadEnv({ ...base, AI_GUARD_MODEL_ID: 'gpt-4o' })).toThrow(/AI_GUARD_MODEL_ID: must be one of the listed models/)
+    expect(() => loadEnv({ ...base, AI_GUARD_JUDGE: 'maybe' })).toThrow(/AI_GUARD_JUDGE/)
   })
 
   it('declares every AI variable in the environment contract', () => {
