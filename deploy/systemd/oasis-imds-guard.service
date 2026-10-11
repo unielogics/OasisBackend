@@ -5,7 +5,8 @@ Documentation=file:///opt/oasis/current/backend/docs/deployment.md
 # An iptables chain OASIS-IMDS, jumped to from OUTPUT for that address, lets through root (amazon-ec2-net-utils rebuilds the
 # secondary private IP that carries the website from the metadata at boot and on refresh: it MUST keep working; also cloud-init, the
 # SSM agent, tailscaled), the oasis user (the services read the environment secret and S3 with the role) and ec2-instance-connect
-# (the console's Connect button), and rejects everyone else (ec2-user tools, the review stack, build agents). Users that sudo are root.
+# (the console's Connect button), and rejects everyone else (ec2-user tools, the review stack, build agents, and oasis-site, which
+# builds the public website: its dependencies get no role credentials). Users that sudo are root.
 # Emergency removal: sudo systemctl disable --now oasis-imds-guard   (or by hand: iptables -D OUTPUT -d 169.254.169.254/32 -j
 # OASIS-IMDS; iptables -F OASIS-IMDS; iptables -X OASIS-IMDS). docs/deployment.md, "Instance metadata guard"; ADR 0141.
 DefaultDependencies=no
