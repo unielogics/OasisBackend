@@ -5,7 +5,8 @@
 //   -> Converse loop (system: rules + SHOP FACTS [cache point], turn context; tools [cache point]; at most 4 tool rounds, then one
 //      "reply now without tools" call; AI_TIMEOUT_MS per call, AI_TURN_DEADLINE_MS per turn)
 //   -> output guard (one rewrite call, one shorten call, else a sentence cut or the fallback)
-//   -> the reply (ai_reply, or personal_link with the links as secretVars; the first AI text discloses the assistant)
+//   -> the reply (ai_reply, or personal_link with the links as secretVars; the first AI text discloses the assistant; a verify, PIN,
+//      membership or payment link gets the server's safety line)
 //   -> audit assistant.reply -> the marker cleared, or kept and kicked again when newer texts arrived meanwhile.
 // Every failure (the model's error, refusal, cut answer or unknown stop, the guard, a cap, the loop breaker) sends the fixed
 // fallback (at most one per 2 hours) and hands the conversation to staff. Nothing runs while AI_ENABLED=false or the settings
@@ -37,8 +38,8 @@ import type { Actor, SchedulingCtx } from '../scheduling/context.js'
 import { AI_ACTOR_NAME, type AssistantLog, type AssistantQueue, type HandoffRequest, type ShopFactsSource, type ToolContext, type ToolRegistry, type TurnIdentity } from './contract.js'
 import type { AssistantConfig } from './config.js'
 import { appointmentRefs, loadAppointmentRefs, loadConversation, loadTurnContext, resolveIdentity } from './context.js'
-import { factAmounts, ownerWording, renderShopFacts } from './facts.js'
-import { cutAfterFirstQuestion, cutAtSentence, guardReply, HARD_PROBLEMS, type GuardProblem } from './guard.js'
+import { factAmounts, renderShopFacts } from './facts.js'
+import { cutAfterFirstQuestion, cutAtSentence, guardReply, HARD_PROBLEMS, MAX_REPLY_CHARS, SAFETY_LINE, SAFETY_LINK_KINDS, type GuardProblem } from './guard.js'
 import { HANDOFF_SUMMARIES, markUnanswered, openTurnHandoff, recipientOf, sendFallback, type ConversationRef, type HandoffDeps } from './handoff.js'
 import type { AssistantGate, AssistantInbox } from './ports.js'
 import { PROMPT_VERSION, REPLY_NOW_TEXT, STATIC_RULES, renderConversation, renderTurnContext, rewriteInstruction } from './prompt.js'
@@ -138,8 +139,11 @@ export async function noProgress(db: Db | Tx, o: { conversationId: string; now: 
   return progress === undefined
 }
 
-/** The reply as queued: the ai_reply template (the disclosure on the first AI text), links as secretVars (class personal_link). */
-export function composeReply(o: { text: string; disclose: boolean; links: ReadonlyMap<string, string> }): {
+/**
+ * The reply as queued: the ai_reply template (the disclosure on the first AI text), links as secretVars (class personal_link), and
+ * with `safety` (a verify, PIN, membership or payment link) the server's SAFETY_LINE after the reply: the model never writes it.
+ */
+export function composeReply(o: { text: string; disclose: boolean; links: ReadonlyMap<string, string>; safety?: boolean }): {
   text: string
   klass: 'ai_reply' | 'personal_link'
   secretVars?: Record<string, string>
@@ -147,6 +151,7 @@ export function composeReply(o: { text: string; disclose: boolean; links: Readon
   let reply = o.text
   // a registered link the reply left out is appended (the contract: the model may forget the placeholder)
   for (const p of o.links.keys()) if (!reply.includes(p)) reply = `${reply} ${p}`
+  if (o.safety && !reply.includes(SAFETY_LINE)) reply = `${reply} ${SAFETY_LINE}`
   const text = renderTemplate('ai_reply', { reply, ...(o.disclose ? { disclosure: 'yes' } : {}) }).text
   const used = [...o.links.entries()].filter(([p]) => text.includes(p))
   if (used.length === 0) return { text, klass: 'ai_reply' }
@@ -327,6 +332,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
   const timer = setTimeout(() => deadline.abort(new TurnAbort('deadline')), d.cfg.turnDeadlineMs)
   timer.unref?.()
   const links = new Map<string, string>()
+  const linkKinds = new Set<string>()
   let toolHandoff: HandoffRequest | null = null
   const amounts: number[] = []
   const ctx: ToolContext = {
@@ -348,9 +354,10 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     queue: d.queue,
     log: d.log,
     signal: deadline.signal,
-    addLink(url) {
+    addLink(url, link) {
       const p = `{link${links.size + 1}}`
       links.set(p, url)
+      linkKinds.add(link.kind)
       return p
     },
     handoff(reason, summary) {
@@ -445,11 +452,13 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
 
     // ---- the output guard
     const factsAmounts = factAmounts(facts)
-    const owner = ownerWording(facts)
+    // a verify / PIN / membership / payment link: the server appends the safety line, so the reply leaves room for it
+    const safety = [...linkKinds].some((k) => SAFETY_LINK_KINDS.has(k))
+    const maxChars = safety ? MAX_REPLY_CHARS - SAFETY_LINE.length - 1 : MAX_REPLY_CHARS
     let rewriteUsed = false
     let shortenUsed = false
-    const fix = async (draft: string, problems: readonly GuardProblem[]): Promise<string> => {
-      messages.push({ role: 'user', content: [{ type: 'text', text: rewriteInstruction(draft, problems) }] })
+    const fix = async (draft: string, problems: readonly GuardProblem[], words: readonly string[] = []): Promise<string> => {
+      messages.push({ role: 'user', content: [{ type: 'text', text: rewriteInstruction(draft, problems, words) }] })
       transcript.add({ kind: 'message', message: messages[messages.length - 1]! })
       const res = await call(request(true))
       messages.push(res.message)
@@ -460,18 +469,31 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     let reply: string | null = null
     try {
       for (let i = 0; i < 8 && reply === null; i++) {
-        const v = guardReply({ text: draft, amounts: factsAmounts, extraAmounts: amounts, placeholders: links.keys(), website: facts.business.website, ownerWording: owner })
-        transcript.add({ kind: 'guard', verdict: v.kind, ...(v.kind === 'fix' ? { problems: v.problems } : {}), ...(v.kind === 'handoff' ? { words: v.words } : {}) })
+        const v = guardReply({
+          text: draft,
+          amounts: factsAmounts,
+          extraAmounts: amounts,
+          placeholders: links.keys(),
+          website: facts.business.website,
+          shopNumbers: [facts.contact.textingNumber, facts.contact.callingNumber],
+          shopAddress: facts.business.address,
+          maxChars,
+        })
+        transcript.add({ kind: 'guard', verdict: v.kind, ...(v.kind === 'fix' ? { problems: v.problems, ...(v.words.length > 0 ? { words: v.words } : {}) } : {}) })
         if (v.kind === 'ok') {
           reply = v.text
           break
         }
-        if (v.kind === 'handoff') return await finishHandoff({ reason: 'policy_words', status: 'handed_off', fallback: true, usage, model, rounds, stop, error: `policy_words:${v.words.join(',')}` })
         const hard = v.problems.filter((p) => HARD_PROBLEMS.has(p))
         if (hard.length > 0 || (v.problems.includes('questions') && !rewriteUsed)) {
-          if (rewriteUsed) return await finishHandoff({ reason: 'guard', status: 'handed_off', fallback: true, usage, model, rounds, stop, error: `guard:${hard.join(',')}` })
+          // the rewrite still trips a rule: the fallback and a person (promise words: "policy_words", anything else: "guard")
+          if (rewriteUsed) {
+            if (v.problems.includes('promise_words'))
+              return await finishHandoff({ reason: 'policy_words', status: 'handed_off', fallback: true, usage, model, rounds, stop, error: `policy_words:${v.words.join(',')}` })
+            return await finishHandoff({ reason: 'guard', status: 'handed_off', fallback: true, usage, model, rounds, stop, error: `guard:${hard.join(',')}` })
+          }
           rewriteUsed = true
-          draft = await fix(v.text, v.problems)
+          draft = await fix(v.text, v.problems, v.words)
           continue
         }
         if (v.problems.includes('questions')) {
@@ -484,7 +506,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
           draft = await fix(v.text, ['too_long'])
           continue
         }
-        draft = cutAtSentence(v.text)
+        draft = cutAtSentence(v.text, maxChars)
       }
     } catch (e) {
       const reason = e instanceof TurnAbort ? e.reason : failureOf(e)
@@ -508,7 +530,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
             .executeTakeFirst()
         : undefined
       const superseded = c.handoff_state === 'open' || paused !== undefined
-      const composed = composeReply({ text: reply, disclose: c.disclosed_at === null, links })
+      const composed = composeReply({ text: reply, disclose: c.disclosed_at === null, links, safety })
       const queued = superseded
         ? null
         : await d.queue.enqueueFor(tx, {

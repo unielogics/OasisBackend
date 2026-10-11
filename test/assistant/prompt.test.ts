@@ -8,6 +8,7 @@ import { INTAKE_LINES, PROMPT_VERSION, STATIC_RULES, nextIntakeStep, renderConve
 import { inputSchemaOf, offeredTools, trustAtLeast } from '../../src/modules/assistant/tool-runner.js'
 import { redactJson } from '../../src/modules/assistant/transcript.js'
 import { composeReply } from '../../src/modules/assistant/turn.js'
+import { SAFETY_LINE } from '../../src/modules/assistant/guard.js'
 import { TEMPLATES } from '../../src/modules/messaging/templates/registry.js'
 
 const base: TurnContextData = {
@@ -58,7 +59,18 @@ describe('the turn context', () => {
 
   it('the rules carry the owner decisions and a version', () => {
     expect(PROMPT_VERSION).toMatch(/^w3a-/)
-    for (const rule of ['starts at', 'Never add prices up', 'send_link', 'ONLY on the secure link page', 'one question per text', 'Do not offer a person up front'])
+    for (const rule of [
+      'starts at',
+      'Never add prices up',
+      'send_link',
+      'Never write anything about PINs, codes, passwords or card numbers',
+      'the server adds the security line itself',
+      '"open times" or "openings"',
+      'Never write: free, discount, refund',
+      'Never write a phone number other than',
+      'one question per text',
+      'Do not offer a person up front',
+    ])
       expect(STATIC_RULES).toContain(rule)
   })
 })
@@ -120,6 +132,14 @@ describe('the reply as queued', () => {
       secretVars: { link1: 'https://oasisautospanj.com/#/c/TOKEN' },
     })
     expect(composeReply({ text: 'Here is your link.', disclose: false, links }).text).toBe('Here is your link. {link1}')
+  })
+
+  it("a verify, PIN, membership or payment link gets the server's safety line after the reply and the link, once (A)", () => {
+    const links = new Map([['{link1}', 'https://oasisautospanj.com/#/c/TOKEN']])
+    expect(composeReply({ text: 'Here is your secure link: {link1}', disclose: false, links, safety: true }).text).toBe(`Here is your secure link: {link1} ${SAFETY_LINE}`)
+    expect(composeReply({ text: 'Here you go.', disclose: false, links, safety: true }).text).toBe(`Here you go. {link1} ${SAFETY_LINE}`)
+    expect(composeReply({ text: `Here: {link1} ${SAFETY_LINE}`, disclose: false, links, safety: true }).text).toBe(`Here: {link1} ${SAFETY_LINE}`)
+    expect(composeReply({ text: 'Pick a time: {link1}', disclose: false, links }).text).not.toContain(SAFETY_LINE)
   })
 })
 

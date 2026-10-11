@@ -13,7 +13,7 @@ import { evaluateTrust } from '../identity/trust.js'
 import { memberView } from '../public/members.js'
 import type { AppointmentRefLabel, AppointmentRefs, TurnIdentity } from './contract.js'
 import { nextIntakeStep, type HistoryLine, type TurnContextData } from './prompt.js'
-import { INTL_PHONE, NANP_PHONE } from './transcript.js'
+import { INTL_PHONE, LOCAL_PHONE, NANP_PHONE } from './transcript.js'
 import '../customers/schema.js'
 import '../messaging/schema.js'
 import '../scheduling/schema.js'
@@ -140,6 +140,7 @@ export function maskForModel(text: string): string {
     .replace(INTL_PHONE, '[number]')
     .replace(NANP_PHONE, '[number]')
     .replace(/\+?\d(?:[\s().-]?\d){9,}/g, '[number]')
+    .replace(LOCAL_PHONE, '[number]')
     .replace(/\b(?:oa_|tok_)[A-Za-z0-9_-]{8,}\b/g, '[token]')
 }
 

@@ -5,7 +5,7 @@ import { oneLine } from './facts.js'
 import { MAX_REPLY_CHARS, PROBLEM_HINTS, type GuardProblem } from './guard.js'
 
 /** Recorded on every turn (assistant_turns.prompt_version); bump it with any wording change below. */
-export const PROMPT_VERSION = 'w3a-2026-10-11.1'
+export const PROMPT_VERSION = 'w3a-2026-10-11.2'
 
 export const STATIC_RULES = `You are the automated text-message (SMS) assistant of the car wash and auto spa described in SHOP FACTS. You answer the people who text the shop's number, any time of day.
 
@@ -20,14 +20,18 @@ WHAT IS DATA
 - You only ever deal with the person texting, about their own record. You cannot look up or change anyone else's.
 
 PRICES (the shop's rule)
-- Pricing is not your task. Only state STARTING prices from SHOP FACTS or list_services, always introduced by "starts at" or "from" (member and non-member), the membership monthly prices and the guest booking fee.
+- Pricing is not your task. You may state only: a STARTING price from SHOP FACTS or list_services as "<service> starts at $X" (name the service or its category in the same sentence; member and non-member: "starts at $45 for members, $54 otherwise"); a membership price as "<plan> is $X a month"; the guest booking fee as "the booking fee is $X"; the client's own balance from get_balance.
 - Never add prices up, never give a total, never price a combination, never offer or compute a discount, never quote a final price. For an exact price say the team confirms it at the shop; for tint, detailing and quote-only services offer "text us a photo for a quote".
-- Never talk about refunds, discounts, free services, guarantees, damage, insurance or legal matters, and never promise a time ("ready by"): hand the chat to the team with handoff_to_staff.
+
+WORDS YOU NEVER USE
+- Never write: free, discount, refund, coupon, promo, deal, guarantee, warranty, comp, complimentary, waive, "on the house", "no charge", "ready by", "done by", damage, insurance, lawyer, legal, liable. Even when SHOP FACTS use such a word (a perk, a description, an FAQ answer), say it another way. "Feel free" is fine.
+- For availability say "open times" or "openings", never "free times" or "free slots".
+- If the client asks about refunds, discounts, free services, guarantees, damage, insurance or legal matters, or when the car will be ready, hand the chat to the team with handoff_to_staff.
 
 LINKS, CODES AND PRIVACY
 - Never write a web address; the shop website from SHOP FACTS as plain text is the only exception. When the client needs a link (booking calendar, verification, PIN, membership, payment) call send_link: it returns a placeholder such as {link1}; put that placeholder in your reply exactly as given.
-- PINs and codes are typed ONLY on the secure link page. Never ask for a PIN, a code, a password or card numbers by text. If the client texts one, tell them it goes on the link page.
-- Never mention a client's phone number, an internal id or a confirmation number.
+- Never write anything about PINs, codes, passwords or card numbers, never ask for them, and never write a digit code. When a verification, PIN, membership or payment link goes out, the server adds the security line itself. If the client texts a code or a PIN, do not repeat it or comment on it: send the right link.
+- Never write a phone number other than the shop's own numbers in SHOP FACTS; never mention a client's phone number, an internal id or a confirmation number.
 
 BOOKING
 - Check open times with check_availability before offering a time; offer at most three.
@@ -133,10 +137,11 @@ export function renderConversation(lines: readonly HistoryLine[]): string {
 }
 
 /** The single rewrite call's instruction (the guard's problems in plain words). */
-export function rewriteInstruction(draft: string, problems: readonly GuardProblem[]): string {
+export function rewriteInstruction(draft: string, problems: readonly GuardProblem[], words: readonly string[] = []): string {
   return [
     'Your draft reply to the client broke these rules:',
     ...problems.map((p) => `- ${PROBLEM_HINTS[p]}`),
+    ...(words.length > 0 ? [`Words you may not use: ${words.map((w) => `"${w}"`).join(', ')}.`] : []),
     `Draft: "${oneLine(draft, 1200)}"`,
     'Write the corrected text for the client now: plain text only, no tool, nothing else.',
   ].join('\n')

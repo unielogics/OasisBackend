@@ -472,45 +472,53 @@ export const renderShopFacts: RenderShopFacts = (f) => {
   return out.join('\n')
 }
 
-/** Every dollar amount the facts allow in a reply (design section 3b), by what it is. */
+/** Every dollar amount the facts allow in a reply (design section 3b), by what it is, with the words that name it (lower case). */
 export interface FactAmounts {
-  /** Service and tint starting prices: a reply must introduce them with "starts at" / "starting at" / "from". */
-  starting: Set<number>
-  /** Membership monthly prices and the guest booking fee: stated as they are, in a sentence that names what they are. */
-  plain: Set<number>
-  /** Per plain amount, the words that name it (the plan's label, "month", "membership", "plan"; "fee"), lower case. */
-  plainWords?: Map<number, string[]>
+  /**
+   * Catalog starting prices (services, add-ons, tint "from" prices): per amount, the names that name an item priced from it (its
+   * name, the distinctive words of its name, its category). A reply states one only after "starts at" / "starting at" / "from",
+   * in a clause that names it.
+   */
+  starting: Map<number, string[]>
+  /** Membership monthly prices: per amount, the labels of the plans at that price ("gold"). Stated as "<plan> is $99 a month". */
+  plans: Map<number, string[]>
+  /** The guest booking fee (null: none). Stated next to the word "fee". */
+  fee: number | null
+}
+
+/** Words of an item's name too common to name it on their own ("Hand", "Wash"): its category names it instead. */
+const GENERIC_NAME_WORDS = new Set(['wash', 'washes', 'hand', 'window', 'windows', 'tint', 'detail', 'full', 'basic', 'package', 'service', 'with', 'and', 'the', 'plus'])
+
+/** The names that name a catalog item: the whole name, its distinctive words (4+ letters), its category label (and singular). */
+export function itemNames(name: string, categoryLabel: string | null): string[] {
+  const out = [name.toLowerCase()]
+  for (const w of name.toLowerCase().split(/[^\p{L}\p{N}]+/u)) if (w.length >= 4 && !GENERIC_NAME_WORDS.has(w)) out.push(w)
+  if (categoryLabel) {
+    const c = categoryLabel.toLowerCase()
+    out.push(c, c.replace(/s$/, ''))
+  }
+  return out
 }
 
 export function factAmounts(f: ShopFacts): FactAmounts {
-  const starting = new Set<number>()
+  const starting = new Map<number, string[]>()
+  const add = (map: Map<number, string[]>, cents: number | null, names: readonly string[]): void => {
+    if (cents === null) return
+    map.set(cents, [...new Set([...(map.get(cents) ?? []), ...names])])
+  }
+  const labelOf = (key: string): string | null => f.catalog.categories.find((c) => c.key === key)?.label ?? null
   for (const it of f.catalog.items) {
-    if (it.memberFromCents !== null) starting.add(it.memberFromCents)
-    if (it.guestFromCents !== null) starting.add(it.guestFromCents)
+    const names = itemNames(it.name, labelOf(it.category))
+    add(starting, it.memberFromCents, names)
+    add(starting, it.guestFromCents, names)
   }
+  const tintCategory = labelOf('tint')
   for (const r of f.catalog.tint) {
-    starting.add(r.memberFromCents)
-    starting.add(r.guestFromCents)
+    const names = ['tint', 'window tint', r.filmLabel.toLowerCase(), ...(tintCategory ? [tintCategory.toLowerCase()] : [])]
+    add(starting, r.memberFromCents, names)
+    add(starting, r.guestFromCents, names)
   }
-  const plain = new Set<number>()
-  const plainWords = new Map<number, string[]>()
-  const name = (cents: number, words: string[]): void => {
-    plain.add(cents)
-    plainWords.set(cents, [...new Set([...(plainWords.get(cents) ?? []), ...words])])
-  }
-  for (const p of f.plans) if (p.monthlyPriceCents !== null) name(p.monthlyPriceCents, [p.label.toLowerCase(), 'month', 'monthly', 'membership', 'plan'])
-  if (f.fee.guestBookingFeeCents > 0) name(f.fee.guestBookingFeeCents, ['fee'])
-  return { starting, plain, plainWords }
-}
-
-/**
- * What the owner wrote as an offer: plan perks, service descriptions and VIP notes. The guard lets a handoff word through only
- * in this wording ("same-day guarantee"), never in the server's own lines of the facts ("never offer a discount") and never in
- * an FAQ answer (answers deny as often as they offer: "no refunds on memberships").
- */
-export function ownerWording(f: ShopFacts): string[] {
-  return [
-    ...f.plans.flatMap((p) => p.perks),
-    ...f.catalog.items.flatMap((it) => [it.description, it.vipNote]),
-  ].filter((x): x is string => typeof x === 'string' && x.length > 0)
+  const plans = new Map<number, string[]>()
+  for (const p of f.plans) add(plans, p.monthlyPriceCents, [p.label.toLowerCase()])
+  return { starting, plans, fee: f.fee.guestBookingFeeCents > 0 ? f.fee.guestBookingFeeCents : null }
 }
