@@ -623,3 +623,47 @@ and the judge. What it found, fixed in the owning files:
   then the fallback and a handoff alert for a number that had just opted out. The turn now ends after that tool round (`skipped`,
   `opted_out`): no reply, no judge, no handoff.
 - **The booked text's fee** is written like the `{fee}` placeholder ("$25", not "$25.00"), so one conversation states it one way.
+
+## W4c: adversarial security review of W1–W3
+
+An outside attacker and a malicious client against the link API, the identity services, the assistant (tools, actions, guard and
+judge, caps, the welcome flow), messaging, leads, status texts and the dashboard APIs. Each confirmed finding has a failing test first.
+
+Fixed:
+- **Reply numbers across proposals** (identity/pending-actions.ts): the 3 tries were per action, and a new or superseding proposal
+  brought 3 fresh ones, so a sender spoofing a trusted number could have the assistant propose again and again (about 75 guesses a
+  day under the turn caps, roughly 20 % over a 30-day trust) and cancel or move the client's visit. Wrong replies now count per number
+  over 24 hours across every action (`PENDING_ACTION_WRONG_PER_DAY` = 5, `wrongRepliesToday`): the fifth locks the pending action and
+  no action is proposed until the day has passed (`IDENTITY_TOO_MANY_TRIES`; the tool hands the chat to staff). Right replies never
+  count.
+- **Idempotency of link bookings** (http/idempotent.ts `actor` option): the key's owner was `anon:<address>` and the request hash
+  covers the body, which on a link names no client (the bearer session does): a second page behind the same address sending the same
+  key and body got the first page's stored booking and booked nothing. The owner is now `link:<sha256 of the session token>`.
+- **A PIN outranks a code on a stranger's link too** (identity/codes.ts `pinOwnerOf`): a stranger's link (no client when issued: the
+  assistant sends one for a stale record, so does the lead follow-up) checked no PIN, but its booking lands on the record of whoever
+  owns the number now. A code to a recycled number booked onto a PIN holder's record and un-hid it. The page's PIN rules are now those
+  of the number's current client: a code is refused (409 `IDENTITY_PIN_REQUIRED`), the PIN verifies (and counts) as on their own
+  page and trusts the number for them, and a page verified by code before a PIN was set does not book for them.
+
+Proposed (owner or orchestrator decision; not changed):
+- **The stale-record rule ends with any texted code** (Medium, design): without a PIN, the new holder of a recycled number verifies
+  by code (the code goes to the number they hold) on the stranger's calendar link the assistant offers for a stale record, books, and
+  the booking lands on the previous holder's record (`upsertCustomerByPhone`); the record is then active again and the next turns
+  greet the new holder by the old client's first name, list their vehicles, membership, last visit and balance. Possession of the
+  number cannot tell the two people apart. Proposal: a stranger's page whose number belongs to a stale record books a NEW client and
+  takes the number off the stale record (phone change: its links and trust end; staff notice "this number may have changed hands"),
+  unless the PIN is entered; or ask a second factor the old record holds (last name / email on file) before re-binding.
+- **Handoffs other than handoff_to_staff leave the pending action** (Low): AGENT, the fallback, guard and cap handoffs open a handoff
+  but a reply number already texted still runs its action. Proposal: `openHandoff` cancels the number's pending action, as the tool
+  and a staff takeover do.
+- **Spoofed first texts** (Low; stage everyone only): every first text from a number creates a provisional client and a lead before
+  any cap, and the lead's follow-up (class lead_follow_up, outside the AI sub-cap) goes out 3 hours later even when the turn was a
+  cap handoff; after a global cap every new number also gets the fallback text and a manager notification. Proposal: a ceiling on new
+  provisional clients per hour (beyond it strangers are quarantined as before, one staff notice), lead_follow_up inside the AI sub-cap,
+  and no per-conversation handoff notice or fallback to unknown numbers while a global cap holds (the cap notice already tells staff).
+- **Checkout-intent email squatting** (Low; before Squarespace goes live): an open intent names any email its client typed; an order
+  from someone Oasis does not know at all (no client holds its email, phone or Squarespace id) placed with that email within 72 hours
+  activates the intent's membership. Proposal: an intent-only match whose order carries a phone or name that is not the intent
+  client's goes to awaiting_match for staff.
+- **Per-address limits and IPv6** (hardening): the durable per-address limits key on the full address; behind IPv6 one /64 is
+  billions of addresses. Proposal: key IPv6 addresses by their /64 (or confirm the hosts have no AAAA record / IPv6 listener).
