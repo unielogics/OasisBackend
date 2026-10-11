@@ -8,8 +8,9 @@
 //     intent matched when its order arrives; a paid order whose email matches a client only through an email nobody verified opens
 //     an 'awaiting_match' row (origin 'sync') on that client's membership (a pending one is created when they have none) and asks
 //     staff, who confirm it (matched: the next pass links the order) or reject it (the order goes back to "needs a customer").
-//   - the checkouts job: open intents expire after their window; a pending web or link membership that never got a paid order is
-//     closed after 7 days (canceled, cancel_reason checkout_abandoned, its intents abandoned). Nothing to do: nothing happens.
+//   - the checkouts job: open intents expire after their window; a pending web or link membership that never got a paid order and
+//     that staff never touched (manual_status_at null) is closed 7 days after its last checkout attempt (canceled, cancel_reason
+//     checkout_abandoned, its intents abandoned). Nothing to do: nothing happens.
 import { sql } from 'kysely'
 import type { Clock } from '../../platform/clock.js'
 import { transaction, type Db, type Executor, type Tx } from '../../platform/db.js'
@@ -68,6 +69,7 @@ export async function loadIntentRefs(db: Executor, locationId: string): Promise<
       'c.started_at',
       'c.expires_at',
       'o.sqsp_order_id',
+      'o.sqsp_customer_id as order_sqsp_customer_id',
     ])
     .where('c.location_id', '=', locationId)
     .where('c.state', 'in', ['open', 'matched', 'awaiting_match'])
@@ -83,6 +85,7 @@ export async function loadIntentRefs(db: Executor, locationId: string): Promise<
     startedAt: r.started_at,
     expiresAt: r.expires_at,
     orderId: r.sqsp_order_id ?? undefined,
+    orderSqspCustomerId: r.order_sqsp_customer_id ?? undefined,
   }))
 }
 
@@ -509,7 +512,10 @@ export interface CheckoutSweepReport {
   abandoned: number
 }
 
-/** Open intents past their window expire; pending web and link memberships with no paid order after 7 days are closed. */
+/**
+ * Open intents past their window expire; pending web and link memberships with no paid order are closed 7 days after the last
+ * checkout attempt (the membership's start, or its newest checkout row when a client restarted the checkout).
+ */
 export async function sweepCheckouts(db: Db, d: Ctx): Promise<CheckoutSweepReport> {
   const now = d.clock.now()
   const expired = await db
@@ -519,24 +525,34 @@ export async function sweepCheckouts(db: Db, d: Ctx): Promise<CheckoutSweepRepor
     .where('state', '=', 'open')
     .where('expires_at', '<=', now)
     .executeTakeFirst()
-  // a pending membership the website or a personal link created (source manual: staff-made memberships are active from the
-  // start) that never saw a paid order; one with an order waiting for staff is staff's to decide, never closed here
+  // A pending membership the website or a personal link created (source manual, never touched by staff: a staff-made membership
+  // and any staff edit set manual_status_at, so a membership staff put on pending by hand stays theirs) that never saw a paid
+  // order, 7 days after the last checkout attempt: a client who restarted the checkout gets their full window again. One with an
+  // order waiting for staff, or an intent still open, is never closed here.
+  const cutoff = new Date(now.getTime() - PENDING_ABANDON_MS)
   const stale = await db
     .selectFrom('memberships as m')
     .select(['m.id'])
     .where('m.location_id', '=', d.locationId)
     .where('m.status', '=', 'pending')
     .where('m.source', '=', 'manual')
+    .where('m.manual_status_at', 'is', null)
     .where('m.paid_order_count', '=', 0)
     .where('m.last_paid_at', 'is', null)
-    .where('m.started_at', '<=', new Date(now.getTime() - PENDING_ABANDON_MS))
+    .where('m.started_at', '<=', cutoff)
     .where(({ not, exists, selectFrom }) =>
       not(
         exists(
           selectFrom('membership_checkouts as c')
             .select('c.id')
             .whereRef('c.membership_id', '=', 'm.id')
-            .where('c.state', '=', 'awaiting_match'),
+            .where((c) =>
+              c.or([
+                c('c.state', '=', 'awaiting_match'),
+                c.and([c('c.state', '=', 'open'), c('c.expires_at', '>', now)]),
+                c('c.started_at', '>', cutoff),
+              ]),
+            ),
         ),
       ),
     )
@@ -546,11 +562,25 @@ export async function sweepCheckouts(db: Db, d: Ctx): Promise<CheckoutSweepRepor
     const closed = await transaction(db, async (tx) => {
       const m = await tx
         .selectFrom('memberships')
-        .select(['id', 'status', 'paid_order_count'])
+        .select(['id', 'status', 'paid_order_count', 'manual_status_at'])
         .where('id', '=', s.id)
         .forUpdate()
         .executeTakeFirst()
-      if (!m || m.status !== 'pending' || m.paid_order_count > 0) return false
+      if (!m || m.status !== 'pending' || m.paid_order_count > 0 || m.manual_status_at !== null) return false
+      // a checkout restarted between the read and the lock: not stale any more
+      const fresh = await tx
+        .selectFrom('membership_checkouts')
+        .select('id')
+        .where('membership_id', '=', m.id)
+        .where((eb) =>
+          eb.or([
+            eb('state', '=', 'awaiting_match'),
+            eb.and([eb('state', '=', 'open'), eb('expires_at', '>', now)]),
+            eb('started_at', '>', cutoff),
+          ]),
+        )
+        .executeTakeFirst()
+      if (fresh) return false
       const intents = await tx
         .updateTable('membership_checkouts')
         .set((eb) => ({ state: 'abandoned', updated_at: now, version: eb('version', '+', 1) }))

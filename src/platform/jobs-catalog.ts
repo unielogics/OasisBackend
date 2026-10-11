@@ -257,7 +257,7 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
   'membership.checkouts': {
     owner: 'memberships',
     purpose:
-      'Expires open membership checkout intents after their 72-hour window and closes pending website or personal-link memberships that saw no paid Squarespace order in 7 days (canceled, cancel_reason checkout_abandoned, intents abandoned; ADR 0160). Changes nothing when there are none.',
+      'Expires open membership checkout intents after their 72-hour window and closes pending website or personal-link memberships staff never edited that saw no paid Squarespace order in the 7 days after their last checkout attempt (canceled, cancel_reason checkout_abandoned, intents abandoned; ADR 0160). Changes nothing when there are none.',
     idempotency:
       'Only open intents past their window and pending memberships with no paid order move, each under a row lock re-checked inside its transaction; a second run finds nothing left to move.',
     clock: 'Injected clock for the window and the 7-day cutoff.',

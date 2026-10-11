@@ -46,19 +46,28 @@ simulator. No route, job or behaviour beyond the policy gate and the masked mess
 ## Wave W2e: membership matching, the Reminders settings, review leftovers
 
 - **Order matching** (`payments-sync/membership.ts`, `memberships/checkouts.ts`, migration `20261011050000`): the checkout-intent
-  tier comes first (the bound order, an open intent's email + product + 72-hour window, then that email's renewals of the product
-  once an intent matched); then the Squarespace id, a **verified** email, the phone. An unverified email never links, and a
+  tier comes first (the bound order, an open intent's email + product + 72-hour window, then the renewals of a matched intent:
+  the same Squarespace customer as its bound order, or the same email when that order names none); then the Squarespace id, a
+  **verified** email, the phone. An intent never outranks another client's identity: when the order's Squarespace id, verified
+  email or phone points at a different client the order is ambiguous for staff and the intent is not consumed (verifier F1: an
+  intent naming a member's email must not take their renewals). Residual for W3: an intent still names an email the client only
+  typed, so an order from a payer who is not an Oasis client at all goes to the intent's client; `POST membership/start` should
+  ask for a fresh step-up (it does) and the page should say the email must be the one they pay with. An unverified email never links, and a
   Squarespace contact the contacts job linked by such an email does not either. A paid order that matches one client only through an
   unverified email opens an `awaiting_match` row (origin `sync`) on that client's membership (a pending one is created when they have
   none), one manager notice and an alert; staff match or reject it (`/api/v1/membership-checkouts/:id/match|reject`). A second paid
   order of the same plan inside the paid period is flagged `duplicate_payment` (alert once per order) and never moves the period; a
-  newer payment still releases a hand-set status. `customers.email_verified` drops whenever the email changes unless the same update
-  sets it (trigger), so a stale flag can never make a new address claim orders.
+  newer payment still releases a hand-set status. `customers.email_verified` drops whenever the email changes, even when the same
+  statement sets it (trigger `customers_email_unverify`: a statement cannot show it verified the new address when the flag was
+  already true), so a stale flag can never make a new address claim orders. W3 stores a verified email only through
+  `memberships/verified-email.ts setVerifiedEmail(tx, customerId, email)`, which names the address in the transaction-local
+  setting `oasis.verified_email` for that one statement.
 - **Deviations from the design text**: `membership_checkouts` gains `origin` (link | sync), a nullable `checkout_url` (sync rows have
   none) and the state `rejected` (a staff "not this client" must be remembered so the sync does not ask again); "abandoned after 7
   days" closes the pending membership as `canceled` with `cancel_reason` `checkout_abandoned` (no sixth membership status), for
-  website joins as well as link checkouts, and sets `manual_status_at` so a late paid order still reactivates it. Rows waiting for
-  staff are never closed by the job.
+  website joins as well as link checkouts, and sets `manual_status_at` so a late paid order still reactivates it. The 7 days run
+  from the last checkout attempt (a restarted checkout gets its full window), and a membership staff made or edited
+  (`manual_status_at` set) is never closed. Rows waiting for staff and intents still open keep the membership.
 - **Reminders settings** (`/api/v1/settings/reminders`, `set.hours` to save): one version for the 16 settings of the section (the sum
   of their versions) under a per-location advisory lock; per-key audit and `settings.changed`; a preview of the exact texts. The
   reminders job reads `reminders.confirm_request` and appends `reminders.category_prep` for the appointment's categories (template

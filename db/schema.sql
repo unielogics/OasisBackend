@@ -71,7 +71,10 @@ CREATE FUNCTION public.customers_email_unverify() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 begin
-  if new.email is distinct from old.email and new.email_verified is not distinct from old.email_verified then
+  if new.email is distinct from old.email
+     and not (new.email_verified
+              and new.email is not null
+              and lower(coalesce(current_setting('oasis.verified_email', true), '')) = lower(new.email::text)) then
     new.email_verified := false;
   end if;
   return new;

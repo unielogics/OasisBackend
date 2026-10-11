@@ -9,10 +9,13 @@ import { createPermissiveAuthorizer } from '../../src/http/authorizer.js'
 import { apiModules } from '../../src/http/modules.js'
 import {
   CHECKOUT_ABANDONED,
+  loadIntentRefs,
   openCheckoutIntent,
   sweepCheckouts,
 } from '../../src/modules/memberships/checkouts.js'
 import { runMembershipPass } from '../../src/modules/memberships/jobs.js'
+import { createManualMembership, patchMembership } from '../../src/modules/memberships/service.js'
+import { setVerifiedEmail } from '../../src/modules/memberships/verified-email.js'
 import { ensurePlans } from '../../src/modules/memberships/plans.js'
 import { replaceProductRows } from '../../src/modules/payments-sync/db/product-map.js'
 import { ensureDefaultRoles } from '../../src/modules/rbac/repository.js'
@@ -99,6 +102,14 @@ describe('membership checkouts', () => {
     expect(rows[1]).toMatchObject({ state: 'matched' })
     expect(rows[1]!.matched_order_id).not.toBeNull()
     expect(await openAlerts(r)).toEqual([])
+    // the matched intent carries its order's Squarespace customer: its renewals must come from that customer (F1)
+    const bought = await r.db.selectFrom('sqsp_orders').select('sqsp_customer_id').where('sqsp_order_id', '=', o.orderId).executeTakeFirstOrThrow()
+    expect(bought.sqsp_customer_id).not.toBeNull()
+    expect((await loadIntentRefs(r.db, r.locationId)).find((i) => i.id === rows[1]!.id)).toMatchObject({
+      state: 'matched',
+      orderId: o.orderId,
+      orderSqspCustomerId: bought.sqsp_customer_id,
+    })
     // the renewal a month later (same email and product) follows the matched intent
     r.advance(31 * D)
     r.store.createOrder({ email: 'ana.ruiz@example.com', name: 'Ana R', lineItems: [item('MEM-GOLD', 'Gold')] })
@@ -279,20 +290,96 @@ describe('membership checkouts', () => {
     expect(await sweepCheckouts(r.db, dctx(r))).toEqual({ expired: 0, abandoned: 0 })
   })
 
-  it('an email that changes drops email_verified, unless the same update sets it', async () => {
+  it('the sweep never closes a membership staff made or edited, even one staff put on pending by hand (F2)', async () => {
+    const r = rig()
+    const { env } = await setup(r)
+    const staff = { userId: 'test', name: 'Gerald', audit: { actor: { name: 'Gerald' } } }
+    const sam = await makeCustomer(r.db, env, { name: 'Sam Staffmade' })
+    const made = await transaction(r.db, (tx) => createManualMembership(tx, dctx(r), { customerId: sam, planKey: 'premium' }, staff))
+    r.advance(10 * D)
+    await transaction(r.db, (tx) => patchMembership(tx, dctx(r), made.id, { status: 'pending' }, staff))
+    // a website join staff touched (any hand edit) is staff's too
+    const web = await makeCustomer(r.db, env, { name: 'Web Joiner' })
+    const webId = r.newId()
+    await r.db
+      .insertInto('memberships')
+      .values({
+        id: webId,
+        location_id: r.locationId,
+        customer_id: web,
+        plan_id: (await r.db.selectFrom('membership_plans').select('id').where('key', '=', 'premium').executeTakeFirstOrThrow()).id,
+        plan_label: 'Gold',
+        status: 'pending',
+        source: 'manual',
+        started_at: r.clock.now(),
+      })
+      .execute()
+    await transaction(r.db, (tx) => patchMembership(tx, dctx(r), webId, { autoApply: false }, staff))
+    r.advance(8 * D)
+    expect(await sweepCheckouts(r.db, dctx(r))).toEqual({ expired: 0, abandoned: 0 })
+    expect(await memberOf(r, sam)).toMatchObject({ status: 'pending', cancel_reason: null })
+    expect(await memberOf(r, web)).toMatchObject({ status: 'pending', cancel_reason: null })
+  })
+
+  it('a restarted checkout gets its full window: the 7 days run from the newest checkout attempt, never from the membership start (F3)', async () => {
+    const r = rig()
+    const { env } = await setup(r)
+    const ana = await makeCustomer(r.db, env, { name: 'Ana Ruiz' })
+    const open = () =>
+      transaction(r.db, (tx) => openCheckoutIntent(tx, dctx(r), { customerId: ana, planKey: 'premium', email: 'ana@example.com' }, SYSTEM))
+    const first = await open()
+    r.advance(6 * D + 23 * H)
+    const second = await open()
+    expect(second.membershipId).toBe(first.membershipId)
+    r.advance(2 * H)
+    expect(await sweepCheckouts(r.db, dctx(r))).toEqual({ expired: 0, abandoned: 0 })
+    expect(await memberOf(r, ana)).toMatchObject({ status: 'pending' })
+    expect((await checkouts(r)).find((c) => c.id === second.checkoutId)!.state).toBe('open')
+    // the new intent expires after its own 72 hours; the membership is still inside its 7 days
+    r.advance(70 * H)
+    expect(await sweepCheckouts(r.db, dctx(r))).toEqual({ expired: 1, abandoned: 0 })
+    // 7 days after the second attempt: closed
+    r.advance(4 * D - 1 * H)
+    expect(await sweepCheckouts(r.db, dctx(r))).toEqual({ expired: 0, abandoned: 0 })
+    r.advance(1 * H)
+    expect(await sweepCheckouts(r.db, dctx(r))).toEqual({ expired: 0, abandoned: 1 })
+    expect(await memberOf(r, ana)).toMatchObject({ status: 'canceled', cancel_reason: CHECKOUT_ABANDONED })
+    expect((await checkouts(r)).find((c) => c.id === second.checkoutId)!.state).toBe('abandoned')
+  })
+
+  it('an email that changes always drops email_verified; only setVerifiedEmail sets a new verified email, even over a verified one (F4)', async () => {
     const r = rig()
     const { env } = await setup(r)
     const c = await makeCustomer(r.db, env, { name: 'Eve Email', email: 'eve@example.com' })
     const flag = async () =>
-      (await r.db.selectFrom('customers').select('email_verified').where('id', '=', c).executeTakeFirstOrThrow()).email_verified
+      (await r.db.selectFrom('customers').select(['email', 'email_verified']).where('id', '=', c).executeTakeFirstOrThrow())
     await sql`update customers set email_verified = true where id = ${c}`.execute(r.db)
+    // the same address in another letter case is the same email (citext): the flag stays
     await sql`update customers set email = 'EVE@example.com' where id = ${c}`.execute(r.db)
-    expect(await flag()).toBe(true)
+    expect((await flag()).email_verified).toBe(true)
     await sql`update customers set full_name = 'Eve E.', email = email where id = ${c}`.execute(r.db)
-    expect(await flag()).toBe(true)
-    await sql`update customers set email = 'eve.new@example.com' where id = ${c}`.execute(r.db)
-    expect(await flag()).toBe(false)
-    await sql`update customers set email = 'eve.page@example.com', email_verified = true where id = ${c}`.execute(r.db)
-    expect(await flag()).toBe(true)
+    expect((await flag()).email_verified).toBe(true)
+    // a verified client changing to a new address and claiming it verified in the same statement: dropped (no signal)
+    await sql`update customers set email = 'eve.claim@example.com', email_verified = true where id = ${c}`.execute(r.db)
+    expect((await flag()).email_verified).toBe(false)
+    // from unverified too
+    await sql`update customers set email = 'eve.claim2@example.com', email_verified = true where id = ${c}`.execute(r.db)
+    expect((await flag()).email_verified).toBe(false)
+    // the one way: setVerifiedEmail, from unverified ...
+    expect(await transaction(r.db, (tx) => setVerifiedEmail(tx, c, ' Eve.Page@Example.com '))).toBe(true)
+    expect(await flag()).toEqual({ email: 'eve.page@example.com', email_verified: true })
+    // ... and over an already-verified email (the case a single statement cannot express)
+    expect(await transaction(r.db, (tx) => setVerifiedEmail(tx, c, 'eve.next@example.com'))).toBe(true)
+    expect(await flag()).toEqual({ email: 'eve.next@example.com', email_verified: true })
+    // the signal does not outlive the call: a later change in the same transaction still drops the flag
+    await transaction(r.db, async (tx) => {
+      await setVerifiedEmail(tx, c, 'eve.again@example.com')
+      await sql`update customers set email = 'eve.again@example.com', email_verified = true where id = ${c}`.execute(tx)
+      await sql`update customers set email = 'eve.other@example.com', email_verified = true where id = ${c}`.execute(tx)
+    })
+    expect((await flag()).email_verified).toBe(false)
+    // an invalid address or an unknown client changes nothing
+    await expect(transaction(r.db, (tx) => setVerifiedEmail(tx, c, 'not an email'))).rejects.toThrow()
+    expect(await transaction(r.db, (tx) => setVerifiedEmail(tx, r.newId(), 'x@example.com'))).toBe(false)
   })
 })

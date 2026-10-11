@@ -21,13 +21,18 @@ create index membership_checkouts_order_idx on membership_checkouts (matched_ord
 -- one row per client and waiting order: a second pass never opens a second one
 create unique index uq_membership_checkouts_sync_order on membership_checkouts (customer_id, matched_order_id) where origin = 'sync';
 
--- An email that changes is no longer the one that was verified: the flag drops with it, unless the same statement sets it (the
--- membership page confirming the new email). customers.email_verified feeds the order sync's email tier, so a stale true would
--- let anyone who knows the new address claim the client's Squarespace orders.
+-- An email that changes is no longer the one that was verified: the flag always drops with it. customers.email_verified feeds the
+-- order sync's email tier, so a stale true would let anyone who knows the new address claim the client's Squarespace orders. A
+-- statement cannot show that it verified the new address (when the flag was already true, "set email_verified = true" and "left
+-- it alone" look the same), so the only way to keep it is memberships/verified-email.ts setVerifiedEmail: it names the address in
+-- the transaction-local setting oasis.verified_email for that one statement. Changing only the letter case (citext) is no change.
 create function customers_email_unverify() returns trigger
 language plpgsql as $$
 begin
-  if new.email is distinct from old.email and new.email_verified is not distinct from old.email_verified then
+  if new.email is distinct from old.email
+     and not (new.email_verified
+              and new.email is not null
+              and lower(coalesce(current_setting('oasis.verified_email', true), '')) = lower(new.email::text)) then
     new.email_verified := false;
   end if;
   return new;

@@ -1032,12 +1032,19 @@ Who a Squarespace membership order belongs to (`payments-sync/membership.ts link
 1. **Checkout intent** (`membership_checkouts`): the row a matched order is bound to; else an `open` intent whose `expected_email`
    and product (`product_key`, the product id or SKU, any letter case; any product of the plan when null) match the order and whose
    window (`started_at` .. `expires_at`, 72 hours) contains the order's time, which the sync then marks `matched`
-   (`matched_order_id`, audit `membership.checkout.matched`); else a `matched` intent with the same email and product (the
-   renewals: Squarespace renews with the email of the checkout). Two clients' intents for one order link nobody (ambiguous).
+   (`matched_order_id`, audit `membership.checkout.matched`); else the renewals of a `matched` intent: an order of the same
+   Squarespace customer as the bound order (any email: Squarespace renews with the customer's current email) and product, or,
+   when the bound order names no Squarespace customer, the same email and product. Two clients' intents for one order link
+   nobody (ambiguous). An intent (open or a renewal) never outranks another client's identity: when the order's Squarespace
+   customer id, verified email or phone points at a different client, the order is ambiguous (review flag `ambiguous_customer`
+   naming the order, a `membership_needs_customer` alert that says why), the intent is not consumed, and once it expires the
+   other tiers link the order again. An intent only names an email the client typed, so it can never take a member's renewals.
 2. The Squarespace customer id (`sqsp_customer_links`; a link the contacts job made **by email** counts only while that client's
    email is verified).
-3. An email the client **verified** (`customers.email_verified`; the flag drops whenever the email changes, unless the same update
-   sets it: trigger `customers_email_unverify`).
+3. An email the client **verified** (`customers.email_verified`; trigger `customers_email_unverify` drops the flag whenever the
+   email changes, letter case aside, even when the statement also sets it; the only way to store a new verified email is
+   `setVerifiedEmail(tx, customerId, email)` in `src/modules/memberships/verified-email.ts`, which names the address in the
+   transaction-local setting `oasis.verified_email` for that one statement).
 4. The phone.
 
 An email nobody verified never links. A **paid** order whose email matches exactly one client only that way waits for staff: the
@@ -1067,8 +1074,10 @@ new one for 72 hours with the normalised email and the plan's product key, audit
 `{membershipId, checkoutId, checkoutUrl, expiresAt, membershipCreated}` for the redirect.
 
 Job `membership.checkouts` (every 15 minutes): open intents past `expires_at` become `expired`; a pending membership of source
-`manual` (a website join or a personal-link checkout) with no paid order whose `started_at` is 7 days old, and no order waiting for
-staff, is canceled (`cancel_reason` `checkout_abandoned`, `manual_status_at` set so a later paid order still reactivates it), its
+`manual` (a website join or a personal-link checkout) that staff never made or edited (`manual_status_at` null: a staff-made
+membership, or one staff put on pending by hand, is never closed), with no paid order, 7 days after its last checkout attempt
+(`started_at` and every checkout row's `started_at` are 7 days old: a client who restarts the checkout gets the full window
+again), with no intent still open and no order waiting for staff, is canceled (`cancel_reason` `checkout_abandoned`, `manual_status_at` set so a later paid order still reactivates it), its
 open or expired intents `abandoned`, audit `membership.canceled` (actor "Membership checkouts"). It changes nothing when there are
 none. Tests: `test/payments-sync/membership-intents.test.ts` (pure), `test/memberships/checkouts.test.ts` (over the simulator),
 `test/jobs/matrix-sqsp.test.ts`.

@@ -17,8 +17,9 @@ import type { ProductMap, ResolvedProduct, Tier } from './product-map.js'
  *
  * Who an order belongs to (ADR 0160, design section 5): a checkout intent first (the client verified their phone on a personal
  * link, confirmed an email and was sent to the plan's checkout: an order with that email and product inside the intent's window
- * is theirs, and so are that email's later renewals of the product once one matched), then the Squarespace customer id, then an
- * email the client VERIFIED (customers.email_verified), then the phone. An email nobody verified never links: an order that
+ * is theirs, and so are the later renewals of the same Squarespace customer once one matched), unless the order's Squarespace id,
+ * verified email or phone points at another client (then staff decide); then the Squarespace customer id, then an email the
+ * client VERIFIED (customers.email_verified), then the phone. An email nobody verified never links: an order that
  * matches a client only that way waits for staff ('unverified_email', the awaiting_match state). A second paid order of the same
  * plan while the first period still runs is a duplicate: flagged, and never moves the period.
  */
@@ -62,6 +63,8 @@ export interface CheckoutIntentRef {
   expiresAt: Date
   /** The Squarespace order id the row is bound to (matched) or waits for (awaiting_match). */
   orderId?: string
+  /** The Squarespace customer id of that order: a matched intent's renewals must come from the same Squarespace customer. */
+  orderSqspCustomerId?: string
 }
 
 export type LinkedBy =
@@ -192,6 +195,8 @@ export interface CustomerLink {
   intent?: { id: string; fresh: boolean }
   /** by 'unverified_email': the client staff are asked about. */
   candidateCustomerId?: string
+  /** by 'ambiguous': the intent that named this order while another client's Squarespace id, verified email or phone points at it. */
+  intentConflict?: string
 }
 
 /** What an order says about who paid and for what, as the linking reads it. */
@@ -226,32 +231,59 @@ function oneClient(hits: readonly CheckoutIntentRef[]): CheckoutIntentRef | 'amb
   return [...hits].sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())[0]
 }
 
-/** The checkout-intent tier: the order a row is bound to, an open intent's order, then the renewals of a matched intent. */
-function intentFor(who: OrderIdentity, intents: readonly CheckoutIntentRef[]): CustomerLink | undefined {
+/**
+ * The checkout-intent tier: the order a row is bound to (`bound`: a decision already taken, by an earlier pass or by staff), an
+ * open intent's order, then the renewals of a matched intent.
+ */
+function intentFor(who: OrderIdentity, intents: readonly CheckoutIntentRef[]): { link: CustomerLink; bound: boolean } | undefined {
   if (who.orderId) {
     const bound = intents.filter((i) => i.state === 'matched' && i.orderId === who.orderId)
     const hit = oneClient(bound)
-    if (hit === 'ambiguous') return { by: 'ambiguous' }
-    if (hit) return { customerId: hit.customerId, by: 'checkout_intent', intent: { id: hit.id, fresh: false } }
+    if (hit === 'ambiguous') return { link: { by: 'ambiguous' }, bound: true }
+    if (hit) return { link: { customerId: hit.customerId, by: 'checkout_intent', intent: { id: hit.id, fresh: false } }, bound: true }
   }
   const email = normalizeEmail(who.email)
   const product = who.product
   const at = who.createdOn?.getTime()
-  if (!email || !product || at === undefined) return undefined
-  const fits = (i: CheckoutIntentRef): boolean => normalizeEmail(i.expectedEmail) === email && productFits(i, product)
+  if (!product || at === undefined) return undefined
+  const fits = (i: CheckoutIntentRef): boolean => email !== undefined && normalizeEmail(i.expectedEmail) === email && productFits(i, product)
   const open = oneClient(intents.filter((i) => i.state === 'open' && fits(i) && i.startedAt.getTime() <= at && at <= i.expiresAt.getTime()))
-  if (open === 'ambiguous') return { by: 'ambiguous' }
-  if (open) return { customerId: open.customerId, by: 'checkout_intent', intent: { id: open.id, fresh: true } }
-  // a renewal: the same email and product after a checkout of this client matched (Squarespace renews with the current email)
-  const renewal = oneClient(intents.filter((i) => i.state === 'matched' && fits(i) && i.startedAt.getTime() <= at))
-  if (renewal === 'ambiguous') return { by: 'ambiguous' }
-  if (renewal) return { customerId: renewal.customerId, by: 'checkout_intent', intent: { id: renewal.id, fresh: false } }
+  if (open === 'ambiguous') return { link: { by: 'ambiguous' }, bound: false }
+  if (open) return { link: { customerId: open.customerId, by: 'checkout_intent', intent: { id: open.id, fresh: true } }, bound: false }
+  // A renewal after a checkout of this client matched. When the bound order names its Squarespace customer, a renewal is an order of
+  // that same Squarespace customer (Squarespace renews with the customer's current email, which may differ); only when it names none
+  // do the email and product decide. Another payer using the intent's email is never a renewal of it.
+  const renews = (i: CheckoutIntentRef): boolean => {
+    if (i.state !== 'matched' || i.startedAt.getTime() > at) return false
+    if (i.orderSqspCustomerId) return who.sqspCustomerId === i.orderSqspCustomerId && productFits(i, product)
+    return fits(i)
+  }
+  const renewal = oneClient(intents.filter(renews))
+  if (renewal === 'ambiguous') return { link: { by: 'ambiguous' }, bound: false }
+  if (renewal) return { link: { customerId: renewal.customerId, by: 'checkout_intent', intent: { id: renewal.id, fresh: false } }, bound: false }
   return undefined
+}
+
+/** Another client than `clientId` whom the order's Squarespace id, verified email or phone points at. */
+function claimedByAnother(who: OrderIdentity, customers: readonly CustomerRef[], clientId: string): boolean {
+  const e = normalizeEmail(who.email)
+  const p = normalizePhone(who.phone)
+  return customers.some(
+    (c) =>
+      c.id !== clientId &&
+      ((who.sqspCustomerId !== undefined && c.sqspCustomerIds?.includes(who.sqspCustomerId) === true) ||
+        (e !== undefined && c.emails.some((x) => normalizeEmail(x) === e)) ||
+        (p !== undefined && c.phones.some((x) => normalizePhone(x) === p))),
+  )
 }
 
 /**
  * Link a Squarespace identity to an Oasis customer: a checkout intent, then the Squarespace customer id, then a verified email,
  * then the phone. An email nobody verified never links; an order it alone points at names the client as a candidate for staff.
+ *
+ * An intent only names the email the client typed, so it never outranks another client's established identity: when the order's
+ * Squarespace id, verified email or phone points at a different client, the order is ambiguous (staff decide; once the intent
+ * expires the other tiers link it again). Otherwise anyone could open an intent naming a member's email and take their renewals.
  */
 export function linkCustomer(
   who: OrderIdentity,
@@ -259,7 +291,12 @@ export function linkCustomer(
   intents: readonly CheckoutIntentRef[] = [],
 ): CustomerLink {
   const byIntent = intentFor(who, intents)
-  if (byIntent) return byIntent
+  if (byIntent) {
+    const { link, bound } = byIntent
+    if (!bound && link.customerId !== undefined && link.intent && claimedByAnother(who, customers, link.customerId))
+      return { by: 'ambiguous', intentConflict: link.intent.id }
+    return link
+  }
   const tiers: [LinkedBy, (c: CustomerRef) => boolean][] = []
   if (who.sqspCustomerId)
     tiers.push(['sqsp_customer_id', (c) => c.sqspCustomerIds?.includes(who.sqspCustomerId!) === true])
@@ -369,10 +406,14 @@ export function inferMemberships(
       )
         flags.push(x.flag)
     }
-    if (link.by === 'ambiguous')
+    const conflict = list.find((c) => c.link.intentConflict !== undefined)
+    if (link.by === 'ambiguous' || conflict)
       flags.push({
         code: 'ambiguous_customer',
-        note: 'more than one Oasis customer matches this email or phone',
+        orderId: conflict?.order.id,
+        note: conflict
+          ? `order ${conflict.order.orderNumber} carries the email of a checkout another client started, but its Squarespace id, verified email or phone belongs to a different client: confirm whose it is`
+          : 'more than one Oasis customer matches this email or phone',
       })
     for (const x of duplicates)
       flags.push({

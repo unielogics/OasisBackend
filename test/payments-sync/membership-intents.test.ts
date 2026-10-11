@@ -73,9 +73,42 @@ describe('linkCustomer: the checkout-intent tier', () => {
       by: 'checkout_intent',
       intent: { id: 'i1', fresh: true },
     })
-    // even when the Squarespace customer id is linked to somebody else
+    // the intent's own client matching by another tier too (her phone, her Squarespace id) is no conflict
+    const anaLinked: CustomerRef = { ...ana, sqspCustomerIds: ['sq-ana'] }
+    expect(
+      linkCustomer(who('2026-10-12T09:00:00Z', { phone: '(201) 555-0188', sqspCustomerId: 'sq-ana' }), [anaLinked, bob], [intent()]),
+    ).toMatchObject({ customerId: 'c-ana', by: 'checkout_intent' })
+  })
+
+  it('an intent never takes an order that another client’s Squarespace id, verified email or phone points at: staff decide (F1)', () => {
+    const conflict = { by: 'ambiguous', intentConflict: 'i1' }
+    // the Squarespace customer id is linked to somebody else
     const linked: CustomerRef = { ...bob, sqspCustomerIds: ['sq-1'] }
-    expect(linkCustomer(who('2026-10-12T09:00:00Z', { sqspCustomerId: 'sq-1' }), [ana, linked], [intent()]).customerId).toBe('c-ana')
+    expect(linkCustomer(who('2026-10-12T09:00:00Z', { sqspCustomerId: 'sq-1' }), [ana, linked], [intent()])).toEqual(conflict)
+    // the intent names an email another client verified
+    const eve = intent({ customerId: 'c-eve', membershipId: 'm-eve', expectedEmail: 'bob@example.com' })
+    expect(linkCustomer(who('2026-10-12T09:00:00Z', { email: 'bob@example.com' }), [ana, bob], [eve])).toEqual(conflict)
+    // the order's phone is another client's
+    expect(linkCustomer(who('2026-10-12T09:00:00Z', { phone: '+12015550199' }), [ana, bob], [intent()])).toEqual(conflict)
+    // a renewal of a matched intent is held to the same rule
+    const matched = intent({ state: 'matched', orderId: 'o-first' })
+    expect(linkCustomer(who('2026-11-12T09:00:00Z', { orderId: 'o-renewal', sqspCustomerId: 'sq-1' }), [linked], [matched])).toEqual(conflict)
+    // an email somebody else has on file but never verified is no conflict: the intent is how such an email gets its owner
+    const twin: CustomerRef = { id: 'c-twin', emails: [], unverifiedEmails: ['ana@example.com'], phones: [] }
+    expect(linkCustomer(who('2026-10-12T09:00:00Z'), [ana, twin], [intent()]).customerId).toBe('c-ana')
+  })
+
+  it('a matched intent’s renewals follow the Squarespace customer of its bound order, never another payer with the same email (F1)', () => {
+    const matched = intent({ state: 'matched', orderId: 'o-first', orderSqspCustomerId: 'sq-ana' })
+    // the same Squarespace customer renews with a changed email: still the intent's client
+    expect(
+      linkCustomer(who('2026-11-12T09:00:00Z', { orderId: 'o-2', sqspCustomerId: 'sq-ana', email: 'ana.new@example.com' }), [], [matched]),
+    ).toMatchObject({ customerId: 'c-ana', by: 'checkout_intent', intent: { id: 'i1', fresh: false } })
+    // another Squarespace customer (or none) paying with the intent's email is no renewal of it
+    expect(linkCustomer(who('2026-11-12T09:00:00Z', { orderId: 'o-3', sqspCustomerId: 'sq-other' }), [], [matched]).by).toBe('none')
+    expect(linkCustomer(who('2026-11-12T09:00:00Z', { orderId: 'o-4' }), [], [matched]).by).toBe('none')
+    // the bound order itself stays bound
+    expect(linkCustomer(who('2026-10-12T09:00:00Z', { orderId: 'o-first', sqspCustomerId: 'sq-ana' }), [], [matched]).customerId).toBe('c-ana')
   })
 
   it('outside the window, with another email, or another product the intent does not link', () => {
@@ -126,6 +159,33 @@ describe('inferMemberships with intents, unverified emails and duplicates', () =
     // once matched, the same order no longer reports a fresh match
     const [again] = inferMemberships([o], map, [ana], new Date('2026-10-13T00:00:00Z'), {}, [intent({ state: 'matched', orderId: o.id })])
     expect(again).toMatchObject({ customerId: 'c-ana', checkoutMatches: [] })
+  })
+
+  it('another client’s open intent naming a member’s email never takes the member’s renewals (F1, adversarial)', () => {
+    // Bob verified bob@example.com and his Squarespace id is linked; Eve opens an intent naming his email on Oct 8
+    const bobLinked: CustomerRef = { ...bob, sqspCustomerIds: ['sq-bob'] }
+    const bobOrder = (at: string) => order({ at, customerEmail: 'bob@example.com', customerId: 'sq-bob', customerName: 'Bob' })
+    const o1 = bobOrder('2026-09-10T15:00:00Z')
+    const o2 = bobOrder('2026-10-10T15:00:00Z')
+    const eve = intent({
+      id: 'i-eve',
+      customerId: 'c-eve',
+      membershipId: 'm-eve',
+      expectedEmail: 'bob@example.com',
+      startedAt: new Date('2026-10-08T12:00:00Z'),
+      expiresAt: new Date('2026-10-11T12:00:00Z'),
+    })
+    const during = inferMemberships([o1, o2], map, [bobLinked], new Date('2026-10-10T16:00:00Z'), {}, [eve])
+    // the renewal is not Eve's and the intent is not consumed; it waits for staff while the intent is open
+    expect(during.some((m) => m.customerId === 'c-eve')).toBe(false)
+    expect(during.flatMap((m) => m.checkoutMatches)).toEqual([])
+    const held = during.find((m) => m.lastOrderId === o2.id)!
+    expect(held).toMatchObject({ linkedBy: 'ambiguous', customerId: undefined })
+    expect(held.flags.map((f) => f.code)).toContain('ambiguous_customer')
+    // once the intent expired (no longer loaded), the renewal is Bob's again, and so are his later ones
+    const o3 = bobOrder('2026-11-10T15:00:00Z')
+    const after = inferMemberships([o1, o2, o3], map, [bobLinked], new Date('2026-11-11T00:00:00Z'), {}, [])
+    expect(after).toEqual([expect.objectContaining({ customerId: 'c-bob', status: 'active', paidOrderCount: 3, lastOrderId: o3.id })])
   })
 
   it('an order matching only an unverified email is unlinked with its candidate', () => {

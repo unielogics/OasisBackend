@@ -205,10 +205,12 @@ export async function syncMemberships(db: Db, d: MembershipSyncDeps): Promise<Me
     }
     if (action.action === 'needs_customer') {
       report.needsCustomer++
+      // an order a checkout intent named while another client's identity points at it says why (payments-sync/membership.ts)
+      const conflict = inf.flags.find((f) => f.code === 'ambiguous_customer' && f.orderId !== undefined)
       await raiseAlert(db, d, {
         code: 'membership_needs_customer',
         subject: inf.personKey,
-        message: `${action.reason}. Paid for ${labelFor(inf, plan)} on order ${inf.lastOrderId}.`,
+        message: `${conflict ? conflict.note : action.reason}. Paid for ${labelFor(inf, plan)} on order ${inf.lastOrderId}.`,
       })
       continue
     }
