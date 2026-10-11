@@ -9,6 +9,8 @@ export const OPT_OUT_KEYWORDS = ['STOP', 'STOPALL', 'UNSUBSCRIBE', 'END', 'QUIT'
 const OPT_OUT_PHRASES: ReadonlySet<string> = new Set(['OPTOUT', 'STOPALL'])
 export const OPT_IN_KEYWORDS = ['START', 'UNSTOP'] as const
 export const CONFIRM_KEYWORDS = ['C', 'CONFIRM'] as const
+/** "A person, please" (ADR 0160): a handoff to staff with no AI, honoured only while the assistant serves the number. */
+export const AGENT_KEYWORD = 'AGENT'
 
 export type ParsedKeyword =
   | { kind: 'opt_out'; keyword: string }
@@ -19,6 +21,8 @@ export type ParsedKeyword =
   | { kind: 'confirm'; keyword: string }
   /** CANCEL is not an opt-out. It means "cancel my appointment" and goes to staff. */
   | { kind: 'cancel' }
+  /** AGENT: the texter wants a person. A handoff while the assistant serves the number; otherwise a plain message as before. */
+  | { kind: 'agent' }
   | { kind: 'none' }
 
 /** Upper-cased message with whitespace, invisible characters and edge punctuation removed; null if it has inner spaces. */
@@ -58,5 +62,27 @@ export function parseKeyword(body: string): ParsedKeyword {
   if (token === 'HELP') return { kind: 'help' }
   if ((CONFIRM_KEYWORDS as readonly string[]).includes(token)) return { kind: 'confirm', keyword: token }
   if (token === 'CANCEL') return { kind: 'cancel' }
+  if (token === AGENT_KEYWORD) return { kind: 'agent' }
   return { kind: 'none' }
+}
+
+/** Shortest and longest digits-only reply treated as a code (an in-chat reply number is 4 digits; link-page codes are 4-8). */
+export const REPLY_CODE_MIN = 4
+export const REPLY_CODE_MAX = 8
+/** What a code is stored and shown as: never the digits (design section 3). */
+export const CODE_MASK = '[code]'
+
+/**
+ * The digits of a text that is only a code ("4821", " 4821. ", "48 21", "4821-09"), or null. Whitespace and dashes between
+ * the digits and punctuation around them are ignored; any letter makes it a message. 4 to 8 digits.
+ */
+export function parseReplyCode(body: string): string | null {
+  const cleaned = body
+    .normalize('NFKC')
+    .replace(/\p{Cf}/gu, '')
+    .trim()
+    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')
+    .replace(/[\s-]+/g, '')
+  if (!/^\d+$/.test(cleaned)) return null
+  return cleaned.length >= REPLY_CODE_MIN && cleaned.length <= REPLY_CODE_MAX ? cleaned : null
 }

@@ -29,6 +29,8 @@ export const DEFAULT_BUDGET: BudgetConfig = {
 export interface UsagePoint {
   at: Date
   segments: number
+  /** The class that spent the segments, when known (the AI sub-cap counts its own). */
+  klass?: string | null
 }
 
 /** Segments spent inside the window that ends at `now` (exclusive of entries older than the window). */
@@ -67,6 +69,35 @@ export function nextFit(usage: readonly UsagePoint[], from: Date, cost: number, 
     t = new Date(first)
   }
   return null
+}
+
+// The AI's sub-cap (ADR 0160, design section 2): the texts the assistant sends (its answers, its fallback, personal links and
+// reply numbers) together never spend more than AI_SMS_SEGMENTS_PER_30MIN segments of a device's 30-minute window. They are lane 1,
+// so they never touch lane 0's reserve either: a flood of texts to the AI cannot delay a ready-for-pickup text.
+
+/** The classes the AI sub-cap counts. */
+export const AI_CAPPED_CLASSES: ReadonlySet<string> = new Set(['ai_reply', 'ai_fallback', 'personal_link', 'action_confirm'])
+
+export interface AiCapConfig {
+  /** Segments the AI classes may spend inside `windowMs` (AI_SMS_SEGMENTS_PER_30MIN). */
+  segments: number
+  windowMs: number
+}
+
+export const AI_CAP_WINDOW_MS = 30 * 60_000
+
+/** Segments the AI classes spent inside the window that ends at `now`. */
+export function aiUsedInWindow(usage: readonly UsagePoint[], now: Date, windowMs: number): number {
+  const since = now.getTime() - windowMs
+  let n = 0
+  for (const u of usage) if (u.klass && AI_CAPPED_CLASSES.has(u.klass) && u.at.getTime() > since) n += u.segments
+  return n
+}
+
+/** True when a text of `klass` costing `cost` segments may go now as far as the AI sub-cap is concerned. */
+export function aiCapAllows(klass: string, usage: readonly UsagePoint[], now: Date, cost: number, cap: AiCapConfig | null): boolean {
+  if (!cap || !AI_CAPPED_CLASSES.has(klass)) return true
+  return aiUsedInWindow(usage, now, cap.windowMs) + cost <= cap.segments
 }
 
 export interface BudgetSnapshot {

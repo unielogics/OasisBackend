@@ -149,6 +149,8 @@ export interface SmsUsageTable {
   segments: number
   accepted_at: Date
   sent_at: Date | null
+  /** The class of the text that spent the segments (the AI sub-cap counts its classes); null on rows older than the column. */
+  klass: string | null
 }
 
 export interface SmsProcessedEventsTable {

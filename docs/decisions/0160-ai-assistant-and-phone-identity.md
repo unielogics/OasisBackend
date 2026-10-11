@@ -113,3 +113,38 @@ trust, pending in-chat actions, the stale-record rule, revocations), the staff r
 - **Merge**: there is no merge operation in the code yet; `revokeForMerge` is ready for it. A phone change through `updateCustomer`
   bumps `customers.phone_version` and revokes.
 - **Email**: the reset notice is the new SES template `pin_reset_notice` through `queueEmail` (no PIN or code in it).
+
+## Wave W2d (messaging plumbing)
+
+The inbound path and the dispatcher are ready for the assistant; nothing answers yet (no turn, no kick consumer) and everything is
+inert while `AI_ENABLED=false` or `assistant.enabled=false`. Contract: docs/api-spec.md section 23.4a.
+
+- **Ports** (`src/modules/assistant/ports.ts`): `AssistantGate` (active/allow/reason), `AssistantInbox` (the durable marker and the
+  AGENT handoff, in the webhook transaction), `AssistantKick` (after commit), `ActionCodeHandler` (reply numbers), `NewTexters` (the
+  welcome flow's provisional client, in the webhook transaction). Defaults are off;
+  the messaging runtime supplies the Postgres gate and conversation store and looks pending actions up itself, and wave 3 plugs its
+  kick, reply-number handler and welcome flow in with `MessagingRuntime.useAssistant()`.
+- **Gate**: `active` = AI_ENABLED, assistant.enabled, a real sender that is not ours, a US/CA mobile number, the stage, no opt-out;
+  `allow` = active and no staff pause, no open handoff, no loop breaker (3 identical texts within 30 min, more than 5 a minute).
+  The turn-level breaker (6 turns without progress) and the caps belong to the turn (wave 3).
+- **AGENT** is a keyword only while the assistant serves the number (`active`), so with the assistant off it stays an ordinary message
+  and nothing changes for today's texters. It opens a handoff even when the thread is paused or already handed off.
+- **Codes**: decided before routing reaches the model. A reply number is recognised whenever an in-chat action is pending for the
+  phone, even with the gate closed (a pending action only exists while the AI runs; the handler re-checks the kill switches), so the
+  digits are never filed readable. Without a pending action they are masked only while the assistant answers the number: with it off
+  "2015" or a ZIP code from a client stays an ordinary message, as before.
+- **Strangers** routed to the assistant are not quarantined. The welcome flow (owner, 2026-10-11: the provisional client exists from
+  the first text) plugs in through `NewTexters.adopt`, called in the webhook transaction before the marker: when it returns a client
+  the first text is filed read in that client's thread at once. If wave 3 prefers to create the client at the turn's claim instead,
+  the stranger's texts are found by `sms_inbox.assistant_conversation_id` and filed then. A stranger's AGENT stays in the quarantine
+  list with the handoff alert (no adoption: the person asked for staff, not the welcome flow).
+- **Verifier fixes (W2d)**: (F1) the number a text was sent to is only the payload's `recipient`; the SMS Gate parser falls back to
+  `phoneNumber`, which on `sms:received` is the sender, and taking it would have held every texter back as "our own number" on a
+  device that omits `recipient`. (F2) `webhook_log` keeps no code readable in a second envelope of the same device message (masked
+  when the inbox row was) nor in a row never routed (unknown device, given up by the sweep: digits-only 4-8 is masked, since nothing
+  decided it was not a code). (F3) AGENT pages the managers when the handoff opens, not again while it is open, so repeating it (a
+  stranger included, once the stage is `everyone`) cannot flood their notifications.
+- **Staff takeover** is recorded on every staff text, the AI on or off, so turning the AI on never answers a thread staff just
+  answered. The "AI paused" line in the dashboard should show only while the assistant is enabled.
+- **Sub-cap**: the window accounting (`sms_usage`) records the class of each send (migration `20261011040000_sms_usage_class`); the
+  AI classes are counted together against `AI_SMS_SEGMENTS_PER_30MIN` on a fixed 30-minute window, independent of the device window.

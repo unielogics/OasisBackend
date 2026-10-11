@@ -2223,6 +2223,8 @@ CREATE TABLE public.sms_usage (
     segments smallint NOT NULL,
     accepted_at timestamp with time zone NOT NULL,
     sent_at timestamp with time zone,
+    klass text,
+    CONSTRAINT sms_usage_klass_check CHECK (((klass IS NULL) OR (klass ~ '^[a-z][a-z0-9_]{0,63}$'::text))),
     CONSTRAINT sms_usage_segments_check CHECK ((segments >= 1))
 );
 

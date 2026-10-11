@@ -79,9 +79,9 @@ export class InMemoryOutboxRepository implements OutboxRepository {
     for (const u of this.usage) if (u.providerMessageId === providerMessageId) u.sentAt = sentAt
   }
 
-  async listUsage(since: Date): Promise<Array<{ at: Date; segments: number }>> {
+  async listUsage(since: Date): Promise<Array<{ at: Date; segments: number; klass?: string | null }>> {
     return this.usage
-      .map((u) => ({ at: u.sentAt ?? u.acceptedAt, segments: u.segments }))
+      .map((u) => ({ at: u.sentAt ?? u.acceptedAt, segments: u.segments, klass: u.klass ?? null }))
       .filter((u) => u.at >= since)
       .sort((a, b) => a.at.getTime() - b.at.getTime())
   }

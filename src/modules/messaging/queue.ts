@@ -8,6 +8,7 @@ import type { NewId } from '../../platform/ids.js'
 import type { Clock } from '../../platform/clock.js'
 import type { MessageQueue, OutboundMessage, QueuedResult } from '../scheduling/ports.js'
 import { findCustomerByPhone } from '../customers/service.js'
+import { noteStaffTakeover } from './assistant/inbox.js'
 import type { MessagingConfig } from './config.js'
 import { hasActiveOptOut, lastInboundAt, loadCustomerTarget, type CustomerTarget } from './db/recipients.js'
 import { PgOutboxRepository, rowValues } from './db/outbox-repo.js'
@@ -197,6 +198,9 @@ export class DbMessageQueue implements MessageQueue {
     }
     await tx.insertInto('sms_outbox').values(rowValues(item) as never).execute()
     if (threadId) await touchThread(tx, threadId, now)
+    // A staff text on a thread takes it over from the AI (ADR 0160): paused for assistant.staff_pause_hours, an open handoff resolved.
+    if (threadId && a.customerId && a.senderKind === 'staff')
+      await noteStaffTakeover(tx, { locationId: a.locationId, threadId, customerId: a.customerId, phone: item.toE164, employeeId: a.senderEmployeeId ?? null, now })
     const loaded = await loadMessageDto(tx, id)
     if (loaded && publishable) await publishMessage(tx, a.locationId, 'message.out', loaded.dto)
     return { queued: true, messageId: id, held: plan.holdUntil !== null, holdUntil: plan.holdUntil, segments: item.segments, body: item.body, duplicate: false }

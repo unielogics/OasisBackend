@@ -246,6 +246,18 @@ export const TEMPLATES = {
     editable: false,
     source: 'new: AI assistant failure or handoff (owner decision 2026-10-10)',
   }),
+  // A digits-only text with no in-chat action waiting for it, while the assistant serves the number: the digits are filed as
+  // "[code]" (never readable, never shown to the model) and this line answers (design section 3). An answer, so ai_reply's rules.
+  code_on_link_page: t({
+    key: 'code_on_link_page',
+    label: 'Codes go on the link page',
+    klass: 'ai_reply',
+    body: 'For your security, codes are only entered on your secure link page, never by text. Reply here if you need a new link.',
+    required: [],
+    optional: [],
+    editable: false,
+    source: 'new: digits-only inbound text while the assistant answers (ADR 0160)',
+  }),
   action_confirm: t({
     key: 'action_confirm',
     label: 'In-chat action confirmation',

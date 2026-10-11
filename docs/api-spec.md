@@ -959,6 +959,52 @@ Inbound keywords (`src/modules/messaging/inbound/keywords.ts`; the whole message
 STOP, STOPALL / STOP ALL, UNSUBSCRIBE, END, QUIT, REVOKE, OPTOUT / OPT OUT (two-word forms also with a hyphen, underscore or dot);
 opt-in START, UNSTOP, YES when opted out; HELP; confirm C, CONFIRM, YES with a booking waiting. CANCEL is a cancel request to
 staff, not an opt-out, and Spanish words are not keywords: both are open decisions for the owner (ADR 0124).
+AGENT asks for a person while the AI assistant serves the number (23.4a); otherwise it is an ordinary message.
+
+### 23.4a The AI assistant's inbound and dispatch plumbing (ADR 0160, wave W2d)
+
+All of it is inert while `AI_ENABLED=false` (default) or settings `assistant.enabled=false` (default): every text then routes exactly
+as described above (the existing inbound suites run unchanged).
+
+- **Gate** (`src/modules/assistant/ports.ts` `AssistantGate`; Postgres implementation `src/modules/messaging/assistant/gate.ts`),
+  consulted by the inbound service before routing. `active` needs, in order: `AI_ENABLED`, `assistant.enabled`, a real sender that is
+  not ours (no alphanumeric id or short code, not `BUSINESS_PHONE`, not the number the device reports the text was sent to: the payload's `recipient`; the parser's
+  `phoneNumber` fallback is the sender on `sms:received` and is never taken for it, so a delivery without `recipient` is judged on
+  `BUSINESS_PHONE` alone, while a stated `recipient` equal to the sender is a device texting itself and is held back), a US/CA
+  mobile number (`normalizeTextableNanp`), the stage (`allowlist`: in `assistant.allowlist`; `customers`: a client; `everyone`), no
+  opt-out (the number's or the client's). `allow` needs `active` plus: the thread not paused by staff
+  (`message_threads.ai_paused_until`), no open handoff on the number's conversation, and the loop breakers
+  (`src/modules/messaging/assistant/loop-breakers.ts`: the 3rd identical text within 30 min, more than 5 texts within 1 min).
+- **Routing** (`inbound/router.ts`): keywords keep priority (STOP, START/UNSTOP/YES-opt-in, HELP, C/CONFIRM, CANCEL). New keyword
+  **AGENT** (whole message, any case): while `active`, a handoff (decision `handoff`): the number's conversation gets
+  `handoff_state='open'` (`handoff_reason='agent_keyword'`, its pending marker cleared), the text is filed unread (a stranger's stays in
+  the quarantine list), managers get a notification `assistant.handoff` (`source_ref` `assistant_handoff:<conversation>`; only when
+  the handoff opens: AGENT again on a handoff that is still open, from a client or a stranger, pages nobody again) and the
+  Needs-attention list an `ai_handoff` alert (it replaces that client's `new_reply` alert). When `allow`: plain texts (SMS and an MMS's
+  text, never a picture placeholder) go to the assistant (decision `assistant`): a client's is filed **read** (no new-reply alert), a
+  stranger's stays in `sms_inbox` unquarantined (non-E.164 senders are still quarantined); a picture message routes as before.
+- **Welcome flow** (owner 2026-10-11; port `NewTexters.adopt`, default: no client): a stranger's plain text that the gate admits is
+  offered to the port inside the webhook transaction, before the marker. When wave 3 returns a client (the provisional "New texter
+  ••NNNN", source `inbound_sms`, consent `inbound_text`, `needs_details`, plus its lead), the text is filed **read** in that client's
+  thread (`sms_inbox.customer_id`/`message_id` set) and the conversation carries the client; the next text comes from a client. Codes,
+  AGENT, picture-only texts and a closed gate never adopt.
+- **Codes**: a digits-only text (4-8 digits, spaces and dashes between them ignored, `parseReplyCode`) while an in-chat action waits
+  for its reply number from that phone (`assistant_pending_actions` pending and unexpired) is decision `action_code`: the digits go only
+  to the `ActionCodeHandler` port (wave 3), never to the model. With no action waiting and `allow`: a canned `code_on_link_page` reply
+  (class `ai_reply`, at most one per number per 30 min). Either way the text is stored as `[code]` in `sms_inbox`, the thread, the
+  event stream and `webhook_log` (the payload's `message`/`body` fields are masked once the row is final; a repeat of the same
+  device message in another envelope is masked when the first delivery was, and a row that is final without being routed, an unknown
+  device or an envelope the sweep gives up on after 24 h, is masked whenever its text is digits-only 4-8).
+- **Durable marker** (`AssistantInbox.markPending`, in the webhook transaction): `assistant_conversations` upserted on
+  `(location, phone)` with `pending_since` (the oldest unanswered text of a burst), `last_inbound_at`, `customer_id`;
+  `sms_inbox.assistant_conversation_id` linked. After the transaction commits the webhook calls `AssistantKick.kick(conversationIds)`
+  (default: nothing; wave 3 sends `ai.respond`). A failed kick is logged and left to wave 3's sweep.
+- **Staff takeover** (`DbMessageQueue.enqueueFor` with `senderKind: 'staff'` on a client's thread): `ai_paused_until = now +
+  assistant.staff_pause_hours` (never earlier than it was), `ai_paused_by` the employee, open handoffs of the client's conversations
+  resolved, their pending markers cleared and their `assistant.handoff` notifications marked read. Recorded even while the AI is off.
+- **Dispatcher sub-cap**: `ai_reply`, `ai_fallback`, `personal_link` and `action_confirm` together never spend more than
+  `AI_SMS_SEGMENTS_PER_30MIN` (default 12) of a device's 30-minute window (`sms_usage.klass` records the class of each send); they are
+  lane 1, so they never touch lane 0's reserve. An AI text over the cap waits (`TickReport.aiCapped`) and expires with its TTL.
 
 ### 23.5 Webhook and listeners
 

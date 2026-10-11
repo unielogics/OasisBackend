@@ -14,9 +14,12 @@ import type { SmsProvider } from '../../integrations/ports/sms.js'
 import { SimulatorProvider } from '../../integrations/sms/simulator.js'
 import { createStorageProvider } from '../../integrations/storage/config.js'
 import type { ObjectStorage } from '../../integrations/storage/types.js'
+import { ASSISTANT_OFF, type AssistantPorts } from '../assistant/ports.js'
 import type { SchedulingCtx } from '../scheduling/context.js'
 import { locationTimezone } from '../scheduling/context.js'
 import type { SchedulingPorts } from '../scheduling/ports.js'
+import { createAssistantGate } from './assistant/gate.js'
+import { createPgAssistantInbox, hasPendingAction } from './assistant/inbox.js'
 import { messagingConfig, type MessagingConfig } from './config.js'
 import { createSecretBox, type SecretBox } from './crypto.js'
 import { DeviceStore, type DeviceRow } from './db/devices.js'
@@ -59,6 +62,8 @@ export interface RuntimeDeps {
   fetch?: (input: string, init?: RequestInit) => Promise<Response>
   /** Replaces the photos store MMS pictures are saved in (tests). */
   storage?: ObjectStorage
+  /** Replaces parts of the assistant's ports (tests; wave 3 wires the kick and the reply-number handler with useAssistant). */
+  assistant?: Partial<AssistantPorts>
 }
 
 export interface DeviceTick {
@@ -77,6 +82,7 @@ export class MessagingRuntime {
   readonly log: LoggerLike
   private email: EmailProvider | undefined
   private photos: ObjectStorage | undefined
+  private assistantParts: Partial<AssistantPorts>
 
   constructor(readonly deps: RuntimeDeps) {
     this.config = messagingConfig(deps.env)
@@ -100,6 +106,31 @@ export class MessagingRuntime {
       warn: (msg, detail) => this.log.warn(detail, msg),
     })
     this.emailSender = new EmailSender(deps.db, deps.clock, () => this.emailProvider())
+    this.assistantParts = { ...deps.assistant }
+  }
+
+  /**
+   * The assistant's ports the inbound path calls (ADR 0160). By default: the real gate (closed while AI_ENABLED=false or settings
+   * assistant.enabled=false), the Postgres conversation store, no kick, no reply-number handler and no welcome flow (wave 3
+   * supplies them with useAssistant). A pending action is still looked up, so a reply number is never filed readable.
+   */
+  assistant(): AssistantPorts {
+    const env = this.deps.env
+    return {
+      gate: this.assistantParts.gate ?? createAssistantGate({ aiEnabled: env.AI_ENABLED, ownNumbers: env.BUSINESS_PHONE ? [env.BUSINESS_PHONE] : [] }),
+      inbox: this.assistantParts.inbox === undefined ? createPgAssistantInbox({ newId: this.newId }) : this.assistantParts.inbox,
+      kick: this.assistantParts.kick ?? ASSISTANT_OFF.kick,
+      newTexters: this.assistantParts.newTexters ?? ASSISTANT_OFF.newTexters,
+      actionCodes: this.assistantParts.actionCodes ?? {
+        hasPending: hasPendingAction,
+        handle: async () => this.log.warn({}, 'a reply number arrived but no assistant handler is wired; the action waits and expires'),
+      },
+    }
+  }
+
+  /** Wave 3 (the assistant module) plugs its kick, reply-number handler and welcome flow in here; later calls override earlier ones. */
+  useAssistant(parts: Partial<AssistantPorts>): void {
+    this.assistantParts = { ...this.assistantParts, ...parts }
   }
 
   get db(): Db {

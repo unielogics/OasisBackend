@@ -10,6 +10,7 @@ import { maskPhone } from '../../platform/phone.js'
 import { normalizeE164 } from '../../integrations/sms/phone.js'
 import type { ObjectStorage } from '../../integrations/storage/types.js'
 import * as realtime from '../../platform/realtime.js'
+import type { ActionCodeHandler, AssistantInbox, NewTexters } from '../assistant/ports.js'
 import { confirmAppointment } from '../scheduling/lifecycle.js'
 import type { Actor, SchedulingCtx } from '../scheduling/context.js'
 import type { MessageQueue } from '../scheduling/ports.js'
@@ -18,6 +19,8 @@ import type { PgInboxRepository } from './db/inbox-repo.js'
 import { ensureThread, insertMessage, loadMessageDto, publishMessage, touchThread } from './db/messages.js'
 import type { InboundEffects } from './inbound/service.js'
 import { MMS_SUPERSEDED_NOTE, planAttachments } from './inbound/mms.js'
+import { handoffSourceRef } from './assistant/inbox.js'
+import { CODE_REPLY_TEMPLATE } from './inbound/router.js'
 import { publishToManagers } from './notify.js'
 import type { DbMessageQueue } from './queue.js'
 
@@ -31,6 +34,8 @@ export interface EffectsEnv {
   warn?: (msg: string, detail: Record<string, unknown>) => void
   /** The photos store MMS pictures are saved in (created on first use). */
   storage?: () => ObjectStorage
+  /** The assistant's conversation store and reply-number handler (ADR 0160); absent: the router never asks for them. */
+  assistant?: { inbox: AssistantInbox | null; actionCodes: ActionCodeHandler; newTexters?: NewTexters }
 }
 
 export interface ManagerNotice {
@@ -54,6 +59,8 @@ const REPLY_ACTOR_NAME = 'Customer reply'
 const REPLY_WINDOW_MS = 30 * 60_000
 const REPLIES_PER_NUMBER = 3
 const REPLY_CLASSES = ['opt_out_confirm', 'opt_in_confirm', 'help_reply', 'confirm_ack', 'confirm_none']
+// The link-page line answering a texted code goes at most once per number per REPLY_WINDOW_MS: a burst of codes gets one answer.
+const CODE_REPLIES_PER_NUMBER = 1
 
 function replyActor(locationId: string): Actor {
   return {
@@ -69,9 +76,24 @@ export function createInboundEffects(
 ): InboundEffects {
   // One reply per template per received text, however many code paths ask for it.
   const replyKey = (template: string): string => `inbound-reply:${o.event.deviceId}:${o.event.providerMessageId}:${template}`
+  // the conversation a handoff of this text opened: its alert is found again by it when staff take the thread over
+  let handoffConversation: string | null = null
+  // AGENT on a handoff that is already open: the managers were paged when it opened; a repeat (or a stranger repeating it) does not page them again
+  let handoffAlreadyOpen = false
 
   return {
     async sendReply(to, template, vars, ctx) {
+      if (template === CODE_REPLY_TEMPLATE) {
+        const sent = await tx
+          .selectFrom('messages')
+          .select(sql<number>`count(*)::int`.as('n'))
+          .where('location_id', '=', o.locationId)
+          .where('peer_e164', '=', to)
+          .where('template_key', '=', CODE_REPLY_TEMPLATE)
+          .where('queued_at', '>', new Date(e.clock.now().getTime() - REPLY_WINDOW_MS))
+          .executeTakeFirstOrThrow()
+        if (sent.n >= CODE_REPLIES_PER_NUMBER) return
+      }
       const recent = await tx
         .selectFrom('sms_outbox')
         .select(sql<number>`count(*)::int`.as('n'))
@@ -93,7 +115,8 @@ export function createInboundEffects(
         templateKey: template,
         vars,
         purpose: 'inbound-reply',
-        senderKind: 'system',
+        // the link-page line answers for the assistant (it carries the "Oasis AI" label in the thread)
+        senderKind: template === CODE_REPLY_TEMPLATE ? 'ai' : 'system',
         dedupeKey: replyKey(template),
       })
     },
@@ -239,8 +262,51 @@ export function createInboundEffects(
       }
     },
 
+    async assistant(cmd) {
+      const inbox = e.assistant?.inbox
+      if (!inbox) throw new Error('inbound: no assistant conversation store is wired')
+      return inbox.markPending(tx, { locationId: o.locationId, phone: cmd.phone, customerId: cmd.customerId, inboxId: cmd.inboxId, receivedAt: cmd.receivedAt })
+    },
+
+    async adoptNewTexter(cmd) {
+      const port = e.assistant?.newTexters
+      if (!port) return null
+      return port.adopt(tx, { locationId: o.locationId, phone: cmd.phone, inboxId: cmd.inboxId, receivedAt: cmd.receivedAt })
+    },
+
+    async handoff(cmd) {
+      const inbox = e.assistant?.inbox
+      if (!inbox) throw new Error('inbound: no assistant conversation store is wired')
+      const r = await inbox.openHandoff(tx, { locationId: o.locationId, phone: cmd.phone, customerId: cmd.customerId, inboxId: cmd.inboxId, reason: cmd.reason, at: e.clock.now() })
+      handoffConversation = r.conversationId
+      handoffAlreadyOpen = r.alreadyOpen
+    },
+
+    async actionCode(cmd) {
+      const handler = e.assistant?.actionCodes
+      if (!handler) return
+      await handler.handle(tx, { locationId: o.locationId, phone: cmd.phone, customerId: cmd.customerId, code: cmd.code, inboxId: cmd.inboxId, at: e.clock.now() })
+    },
+
     async staffAlert(a) {
-      if (a.kind === 'picture_message') {
+      if (a.kind === 'ai_handoff') {
+        if (handoffAlreadyOpen) return
+        const who = a.customerId
+          ? ((await tx.selectFrom('customers').select('full_name').where('id', '=', a.customerId).executeTakeFirst())?.full_name ?? 'customer')
+          : (() => {
+              const phone = normalizeE164(a.sender)
+              return phone ? maskPhone(phone) : 'an unknown sender'
+            })()
+        await e.notifyManagers(tx, {
+          locationId: o.locationId,
+          kind: 'assistant.handoff',
+          title: `${who} asked for a person (AGENT) — reply in Messages`,
+          body: a.excerpt,
+          entityType: a.appointmentId ? 'appointment' : a.customerId ? 'customer' : null,
+          entityId: a.appointmentId ?? a.customerId,
+          ...(handoffConversation ? { sourceRef: handoffSourceRef(handoffConversation) } : {}),
+        })
+      } else if (a.kind === 'picture_message') {
         const who = a.customerId
           ? ((await tx.selectFrom('customers').select('full_name').where('id', '=', a.customerId).executeTakeFirst())?.full_name ?? 'customer')
           : (() => {

@@ -258,6 +258,7 @@ export class PgOutboxRepository implements OutboxRepository {
         segments: entry.segments,
         accepted_at: entry.acceptedAt,
         sent_at: entry.sentAt ?? null,
+        klass: entry.klass ?? null,
       })
       .execute()
   }
@@ -266,12 +267,12 @@ export class PgOutboxRepository implements OutboxRepository {
     await this.exec.updateTable('sms_usage').set({ sent_at: sentAt }).where('provider_message_id', '=', providerMessageId).execute()
   }
 
-  async listUsage(since: Date): Promise<Array<{ at: Date; segments: number }>> {
-    const r = await sql<{ at: Date; segments: number }>`
-      select coalesce(sent_at, accepted_at) as at, segments from sms_usage
+  async listUsage(since: Date): Promise<Array<{ at: Date; segments: number; klass: string | null }>> {
+    const r = await sql<{ at: Date; segments: number; klass: string | null }>`
+      select coalesce(sent_at, accepted_at) as at, segments, klass from sms_usage
       where coalesce(sent_at, accepted_at) >= ${since}
         and (${this.o.deviceId}::uuid is null or device_id = ${this.o.deviceId}::uuid)
       order by 1`.execute(this.exec)
-    return r.rows.map((x) => ({ at: x.at, segments: x.segments }))
+    return r.rows.map((x) => ({ at: x.at, segments: x.segments, klass: x.klass }))
   }
 }

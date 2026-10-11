@@ -45,6 +45,8 @@ export interface UsageEntry {
   acceptedAt: Date
   /** When the device reported it sent (preferred for the rate window). */
   sentAt?: Date
+  /** The class of the text: the AI sub-cap counts the segments of its classes. */
+  klass?: SmsClass
 }
 
 export interface OutboxRepository {
@@ -78,7 +80,7 @@ export interface OutboxRepository {
   recordUsage(entry: UsageEntry): Promise<void>
   markUsageSent(providerMessageId: string, sentAt: Date): Promise<void>
   /** Window accounting rows with their effective time at or after `since`. */
-  listUsage(since: Date): Promise<Array<{ at: Date; segments: number }>>
+  listUsage(since: Date): Promise<Array<{ at: Date; segments: number; klass?: string | null }>>
 }
 
 export type DeviceState = 'unknown' | 'online' | 'degraded' | 'offline'

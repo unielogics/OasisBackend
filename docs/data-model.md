@@ -35,6 +35,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261011000400_status_texts.sql`      | the delayed "checked in" text queue and the running-late texts (ADR 0160)                                                                                |
 | `20261011000500_membership_checkouts.sql` | the checkout intents of memberships started through a personal link (ADR 0160)                                                                         |
 | `20261011020000_identity_core.sql`     | the identity core (wave W2b): `phone_trust.epoch` (a links-epoch bump voids the trust) and the wrong-PIN rows of the rolling limits (ADR 0160) |
+| `20261011040000_sms_usage_class.sql` | the class of each send in `sms_usage` (`klass`), so the AI classes' sub-cap is counted in the dispatcher (ADR 0160, W2d)                               |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -1934,8 +1935,9 @@ Primary key `(event_id)`.
 | `segments` | smallint | no |  |
 | `accepted_at` | timestamp with time zone | no |  |
 | `sent_at` | timestamp with time zone | yes |  |
+| `klass` | text | yes |  |
 
-Primary key `(id)`. `(device_id)` references `sms_devices(id)` on delete cascade. 1 check constraint. Index `sms_usage_provider_idx` `(provider_message_id)`. Index `sms_usage_window_idx` `(device_id, COALESCE(sent_at, accepted_at))`.
+Primary key `(id)`. `(device_id)` references `sms_devices(id)` on delete cascade. 2 check constraints. Index `sms_usage_provider_idx` `(provider_message_id)`. Index `sms_usage_window_idx` `(device_id, COALESCE(sent_at, accepted_at))`.
 
 #### `sqsp_alerts`
 
