@@ -483,6 +483,8 @@ const dedicated: Record<string, string> = {
   'sqsp.reconcile': 'test/jobs/matrix-sqsp.test.ts',
   'sqsp.webhook.process': 'test/jobs/matrix-sqsp.test.ts',
   'membership.cycle': 'test/jobs/matrix-sqsp.test.ts',
+  'ai.respond': 'test/assistant/jobs.test.ts',
+  'ai.sweep': 'test/assistant/jobs.test.ts',
 }
 
 describe('every registered job runs twice through the real worker', () => {

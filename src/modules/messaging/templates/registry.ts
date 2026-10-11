@@ -246,6 +246,19 @@ export const TEMPLATES = {
     editable: false,
     source: 'new: AI assistant failure or handoff (owner decision 2026-10-10)',
   }),
+  // The assistant's own reply (ADR 0160, design section 3; owner 2026-10-11): the model's text, after the output guard. The first AI
+  // text of a conversation carries the automated-assistant line and the STOP footer (NOT the AGENT offer). Queued as free text (the
+  // reply may hold a {linkN} placeholder sent as a secretVar), rendered from this body by src/modules/assistant/reply.ts.
+  ai_reply: t({
+    key: 'ai_reply',
+    label: 'Assistant reply',
+    klass: 'ai_reply',
+    body: '{#disclosure}Oasis Auto Spa’s automated assistant here. {/disclosure}{reply}{#disclosure} Reply STOP to opt out.{/disclosure}',
+    required: ['reply'],
+    optional: ['disclosure'],
+    editable: false,
+    source: 'new: the AI assistant reply; the first one discloses the assistant (owner decision 2026-10-11)',
+  }),
   // A digits-only text with no in-chat action waiting for it, while the assistant serves the number: the digits are filed as
   // "[code]" (never readable, never shown to the model) and this line answers (design section 3). An answer, so ai_reply's rules.
   code_on_link_page: t({

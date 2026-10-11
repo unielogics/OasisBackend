@@ -284,7 +284,8 @@ export interface ShopFacts {
 export interface ShopFactsDeps {
   db: Db
   clock: Clock
-  env: Pick<Env, 'BUSINESS_TZ' | 'BUSINESS_PHONE' | 'PUBLIC_SITE_URL'>
+  /** BUSINESS_PHONE is the number to call; BUSINESS_TEXT_NUMBER the texting line; BUSINESS_EMAIL the public email (W3a addition). */
+  env: Pick<Env, 'BUSINESS_TZ' | 'BUSINESS_PHONE' | 'BUSINESS_TEXT_NUMBER' | 'BUSINESS_EMAIL' | 'PUBLIC_SITE_URL'>
 }
 
 /** The facts of a location, rebuilt only when a source version or the business date changed. */

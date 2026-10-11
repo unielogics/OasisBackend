@@ -153,6 +153,8 @@ export const envSchema = z
     SMSGATE_HEARTBEAT_STALE_SECONDS: z.coerce.number().int().min(60).default(600),
     SMSGATE_ONLINE_WITHIN_SECONDS: z.coerce.number().int().min(30).default(180),
     BUSINESS_PHONE: z.string().optional(), // shown in the HELP reply
+    BUSINESS_TEXT_NUMBER: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()), // the texting line (the front-desk tablet), in the assistant's shop facts (ADR 0160)
+    BUSINESS_EMAIL: z.preprocess((v) => (v === '' ? undefined : v), z.string().email().optional()), // the public email, in the assistant's shop facts (ADR 0160)
     HOOKS_HOST: z.string().default('127.0.0.1'), // the tailnet-facing hooks listener (src/server.ts)
     HOOKS_PORT: z.coerce.number().int().min(0).default(3002), // 0 disables the second listener
 

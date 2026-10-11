@@ -31,9 +31,9 @@ describe('W3 contract stubs', () => {
     expect(createLeadJobs(deps)).toEqual([])
   })
 
-  it('leave the shop facts and leads unbuilt', async () => {
-    expect(() => buildShopFacts({} as Parameters<typeof buildShopFacts>[0])).toThrow('not built')
-    expect(() => renderShopFacts({} as Parameters<typeof renderShopFacts>[0])).toThrow('not built')
+  it('leave the leads unbuilt; the shop facts are built by W3a (test/assistant/facts.test.ts)', async () => {
+    expect(typeof buildShopFacts).toBe('function')
+    expect(typeof renderShopFacts).toBe('function')
     await expect(createLeads(deps).noteInterest({} as never, {} as never)).resolves.toBeUndefined()
   })
 
