@@ -43,6 +43,7 @@
     "test:unit": "vitest run test/unit test/platform.test.ts",
     "typecheck": "tsc --noEmit",
     "user:create": "tsx src/modules/auth/cli.ts",
+    "verify:ai": "tsx scripts/verify-live/ai.ts",
     "verify:all": "tsx scripts/verify-live/all.ts",
     "verify:aws": "tsx scripts/verify-live/aws.ts",
     "verify:smsgate": "tsx scripts/verify-live/smsgate.ts",

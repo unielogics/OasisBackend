@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { main } from '../../scripts/aws/provision.js'
 import {
   backupsLifecycle,
+  bedrockArns,
+  BEDROCK_ROUTED_REGIONS,
   names,
   photosCors,
   photosLifecycle,
@@ -677,6 +679,98 @@ describe('the runtime policy, evaluated', () => {
     // photos keep what the app needs
     expect(can('s3:DeleteObject', `arn:aws:s3:::${PHOTOS}/prod/loc/x.jpg`)).toBe(true)
     expect(can('s3:DeleteObjectVersion', `arn:aws:s3:::${PHOTOS}/prod/loc/x.jpg`)).toBe(false) // old versions survive a deletion
+  })
+})
+
+const PROFILE = `arn:aws:bedrock:us-east-1:${ACCOUNT}:inference-profile/us.anthropic.claude-sonnet-5-5`
+const FM = (region: string, model = 'anthropic.claude-sonnet-5-5') => `arn:aws:bedrock:${region}::foundation-model/${model}`
+
+describe('--bedrock: the app may call Claude through the us. inference profile (ADR 0160)', () => {
+  const role = ['--profile', 'oasis-setup', '--dashboard-origin', 'https://oasis.example.com']
+
+  it('the exact statements: the inference profile, and the routed foundation models only through that profile', () => {
+    expect(bedrockArns({ region: 'us-east-1', account: ACCOUNT }, 'anthropic.claude-sonnet-5-5')).toEqual({
+      profile: PROFILE,
+      models: [FM('us-east-1'), FM('us-east-2'), FM('us-west-2')],
+    })
+    expect(BEDROCK_ROUTED_REGIONS).toEqual(['us-east-1', 'us-east-2', 'us-west-2'])
+    const doc = runtimePolicy(spec({ bedrock: { model: 'anthropic.claude-sonnet-5-5' } }), SECRET_ARN) as { Statement: object[] }
+    expect(doc.Statement.slice(-2)).toEqual([
+      { Sid: 'InvokeClaude', Effect: 'Allow', Action: 'bedrock:InvokeModel', Resource: PROFILE },
+      {
+        Sid: 'InvokeClaudeRouted',
+        Effect: 'Allow',
+        Action: 'bedrock:InvokeModel',
+        Resource: [FM('us-east-1'), FM('us-east-2'), FM('us-west-2')],
+        Condition: { ArnLike: { 'bedrock:InferenceProfileArn': PROFILE } },
+      },
+    ])
+    // everything before it is the policy without --bedrock, unchanged
+    expect(doc.Statement.slice(0, -2)).toEqual((runtimePolicy(spec(), SECRET_ARN) as { Statement: object[] }).Statement)
+    expect(JSON.stringify(runtimePolicy(spec(), SECRET_ARN))).not.toContain('bedrock')
+  })
+
+  it('evaluated: Converse through the profile only; not the model directly, not another profile or model, not streaming', () => {
+    const NOW = new Date('2026-10-11T12:00:00Z')
+    const statements = (runtimePolicy(spec({ bedrock: { model: 'anthropic.claude-sonnet-5-5' } }), SECRET_ARN) as { Statement: PolicyStatement[] }).Statement
+    const can = (action: string, resource: string, context?: Record<string, string>) => allowedBy(statements, { action, resource, context }, NOW)
+    const via = { 'bedrock:InferenceProfileArn': PROFILE }
+    expect(can('bedrock:InvokeModel', PROFILE)).toBe(true)
+    for (const r of BEDROCK_ROUTED_REGIONS) expect(can('bedrock:InvokeModel', FM(r), via), r).toBe(true)
+    // the model directly (no profile), through another profile, in another region, another model, other actions
+    expect(can('bedrock:InvokeModel', FM('us-east-1'))).toBe(false)
+    expect(can('bedrock:InvokeModel', FM('us-east-1'), { 'bedrock:InferenceProfileArn': `arn:aws:bedrock:us-east-1:${ACCOUNT}:inference-profile/us.anthropic.claude-opus-5-5` })).toBe(false)
+    expect(can('bedrock:InvokeModel', FM('eu-west-1'), via)).toBe(false)
+    expect(can('bedrock:InvokeModel', FM('us-east-1', 'anthropic.claude-opus-5-5'), via)).toBe(false)
+    expect(can('bedrock:InvokeModel', `arn:aws:bedrock:us-east-1:${ACCOUNT}:inference-profile/us.anthropic.claude-opus-5-5`)).toBe(false)
+    expect(can('bedrock:InvokeModel', `arn:aws:bedrock:us-east-1:999999999999:inference-profile/us.anthropic.claude-sonnet-5-5`)).toBe(false)
+    expect(can('bedrock:InvokeModelWithResponseStream', PROFILE)).toBe(false)
+    for (const a of ['bedrock:PutModelInvocationLoggingConfiguration', 'bedrock:CreateModelInvocationJob', 'bedrock:ListFoundationModels', 'bedrock:InvokeAgent'])
+      expect(can(a, '*'), a).toBe(false)
+    // the policy without --bedrock grants no Bedrock call at all
+    const without = (runtimePolicy(spec(), SECRET_ARN) as { Statement: PolicyStatement[] }).Statement
+    expect(allowedBy(without, { action: 'bedrock:InvokeModel', resource: PROFILE }, NOW)).toBe(false)
+  })
+
+  it('adds the grant as a new policy version, prints the AI_BEDROCK_* lines without switching the AI on, and a re-run keeps it', async () => {
+    expect((await run([...role, '--apply'])).code).toBe(0)
+    fake.sent.length = 0
+    const plan = await run([...role, '--bedrock'])
+    expect(plan.code, plan.out).toBe(0)
+    expect(plan.out).toContain('  ~ IAM policy oasis-app-runtime: add a new default version with the document below')
+    expect(plan.out).toContain('"Sid": "InvokeClaude"')
+    expect(plan.out).toContain('  AI_BEDROCK_REGION=us-east-1')
+    expect(plan.out).toContain('  AI_BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-5-5')
+    expect(plan.out).toContain('  # AI_PROVIDER=bedrock and AI_ENABLED=true are switched on in the staged rollout only (ADR 0160), after pnpm verify:ai passes')
+    expect(plan.out).not.toMatch(/^\s*AI_PROVIDER=|^\s*AI_ENABLED=/m)
+    expect(fake.mutations()).toEqual([])
+    const r = await run([...role, '--bedrock', '--apply'])
+    expect(r.code, r.out).toBe(0)
+    expect(fake.mutations().map((m) => m.command)).toEqual(['CreatePolicyVersionCommand'])
+    const versions = fake.policies.get(POLICY_ARN)!
+    const def = JSON.parse(decodeURIComponent(versions.find((v) => v.IsDefaultVersion)!.Document)) as { Statement: Array<{ Sid: string }> }
+    expect(def.Statement.map((x) => x.Sid).slice(-2)).toEqual(['InvokeClaude', 'InvokeClaudeRouted'])
+    expect((await run([...role, '--bedrock'])).out).toContain('Nothing to change.')
+    // a later run that forgets --bedrock says it would remove the grant
+    const forgot = await run(role)
+    expect(forgot.out).toContain('note: the current oasis-app-runtime lets the app call Claude on Bedrock (InvokeClaude); this run has no --bedrock and REMOVES that grant: add --bedrock to keep it')
+  })
+
+  it('--bedrock-model picks another Claude model; bad ids, --bedrock-model alone and a non-US region are refused', async () => {
+    const r = await run([...role, '--bedrock', '--bedrock-model', 'anthropic.claude-opus-5-5'])
+    expect(r.code, r.out).toBe(0)
+    expect(r.out).toContain(`arn:aws:bedrock:us-east-1:${ACCOUNT}:inference-profile/us.anthropic.claude-opus-5-5`)
+    expect(r.out).toContain('  AI_BEDROCK_MODEL_ID=us.anthropic.claude-opus-5-5')
+    for (const [args, msg] of [
+      [['--bedrock-model', 'anthropic.claude-sonnet-5-5'], /--bedrock-model needs --bedrock/],
+      [['--bedrock', '--bedrock-model', 'amazon.nova-micro-v1:0'], /not an Anthropic Claude model id/],
+      [['--bedrock', '--bedrock-model', 'us.anthropic.claude-sonnet-5-5'], /not an Anthropic Claude model id/],
+      [['--bedrock', '--region', 'eu-west-1'], /lives in a US region \(not eu-west-1\)/],
+    ] as const) {
+      const bad = await run([...role, ...args])
+      expect(bad.code, args.join(' ')).toBe(2)
+      expect(bad.out).toMatch(msg)
+    }
   })
 })
 

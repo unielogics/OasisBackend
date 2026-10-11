@@ -18,6 +18,8 @@ export type BedrockSimScenario =
   | 'unavailable'
   | 'invalid_model'
   | 'refusal'
+  /** answers like 'ok' but rejects a request carrying an effort field */
+  | 'no_effort'
 
 export interface BedrockSimOptions {
   scenario?: BedrockSimScenario
@@ -50,7 +52,10 @@ export const SIM_MESSAGES = {
   invalid_model: 'The provided model identifier is invalid.',
 } as const
 
-const ERRORS: Record<Exclude<BedrockSimScenario, 'ok' | 'refusal'>, { status: number; type: string }> = {
+const ERRORS: Record<
+  Exclude<BedrockSimScenario, 'ok' | 'refusal' | 'no_effort'>,
+  { status: number; type: string }
+> = {
   access_denied: { status: 403, type: 'AccessDeniedException' },
   model_access: { status: 403, type: 'AccessDeniedException' },
   quota: { status: 429, type: 'ThrottlingException' },
@@ -93,13 +98,13 @@ export class BedrockSim {
     const modelId = decodeURIComponent(m[1]!)
     this.requests.push({ modelId, body, json })
     const scenario = this.opts.scenario ?? 'ok'
-    if (scenario !== 'ok' && scenario !== 'refusal') {
+    if (scenario !== 'ok' && scenario !== 'refusal' && scenario !== 'no_effort') {
       const e = ERRORS[scenario]
       return this.error(res, e.status, e.type, SIM_MESSAGES[scenario])
     }
     const effort =
       (json.outputConfig as { effort?: unknown } | undefined)?.effort ?? json.additionalModelRequestFields
-    if (this.opts.rejectEffort && effort !== undefined)
+    if ((this.opts.rejectEffort || scenario === 'no_effort') && effort !== undefined)
       return this.error(
         res,
         400,

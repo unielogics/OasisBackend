@@ -25,6 +25,24 @@ export interface ProvisionSpec {
   backupRetentionDays: number
   /** Addresses to verify while the account is in the SES sandbox (they also join the send policy). */
   sandboxRecipients: string[]
+  /**
+   * --bedrock: the app may call this Claude model (Converse = bedrock:InvokeModel) through the account's us. cross-region inference
+   * profile; without it the runtime policy has no Bedrock statement (ADR 0160).
+   */
+  bedrock?: { model: string }
+}
+
+/** Claude Sonnet 5.5, the assistant's model (owner decision 2026-10-10); the app calls it as us.<model>. */
+export const DEFAULT_BEDROCK_MODEL = 'anthropic.claude-sonnet-5-5'
+/** The regions the us. cross-region inference profile routes to (design section 9). */
+export const BEDROCK_ROUTED_REGIONS = ['us-east-1', 'us-east-2', 'us-west-2'] as const
+
+/** The inference profile the app invokes and the foundation models a call through it may land on. */
+export function bedrockArns(s: Pick<ProvisionSpec, 'region' | 'account'>, model: string): { profile: string; models: string[] } {
+  return {
+    profile: `arn:aws:bedrock:${s.region}:${s.account}:inference-profile/us.${model}`,
+    models: BEDROCK_ROUTED_REGIONS.map((r) => `arn:aws:bedrock:${r}::foundation-model/${model}`),
+  }
 }
 
 export const names = (s: Pick<ProvisionSpec, 'prefix' | 'account' | 'region'>) => ({
@@ -58,7 +76,7 @@ export const secretArnPattern = (s: Pick<ProvisionSpec, 'region' | 'account' | '
 /**
  * Least privilege for the running app (the instance role oasis-app-role, or the oasis-app user): read the environment secret (its
  * current version only), photos under the prefix, write backups (never read, list or delete them: restoring is the operator's job),
- * and, once a sender exists, sending as it. No KMS statement: a secret under the AWS-managed key aws/secretsmanager is decrypted
+ * once a sender exists, sending as it, and with --bedrock, calling Claude through the inference profile. No KMS statement: a secret under the AWS-managed key aws/secretsmanager is decrypted
  * through Secrets Manager for any principal of the account it lets read the secret.
  *
  * The two Deny statements keep older versions of the secret out of reach (AWSPREVIOUS can still hold values that were removed,
@@ -113,8 +131,28 @@ export function runtimePolicy(s: ProvisionSpec, secretArn: string = secretArnPat
             },
           ]
         : []),
+      ...(s.bedrock ? bedrockStatements(s, s.bedrock.model) : []),
     ],
   }
+}
+
+/**
+ * Converse (and InvokeModel) on Claude through the us. inference profile only: the profile itself, and the foundation model in
+ * the three regions the profile routes to, the latter only when the call came through that profile (bedrock:InferenceProfileArn),
+ * so the model cannot be called directly or through another profile. No streaming action: the app does not stream.
+ */
+export function bedrockStatements(s: Pick<ProvisionSpec, 'region' | 'account'>, model: string): object[] {
+  const arns = bedrockArns(s, model)
+  return [
+    { Sid: 'InvokeClaude', Effect: 'Allow', Action: 'bedrock:InvokeModel', Resource: arns.profile },
+    {
+      Sid: 'InvokeClaudeRouted',
+      Effect: 'Allow',
+      Action: 'bedrock:InvokeModel',
+      Resource: arns.models,
+      Condition: { ArnLike: { 'bedrock:InferenceProfileArn': arns.profile } },
+    },
+  ]
 }
 
 /** Only EC2 may assume the app role (it becomes the instance's credentials through the instance profile). */

@@ -635,6 +635,9 @@ async function policyStep(c: Clients, spec: ProvisionSpec, plan: Plan): Promise<
   const v = await c.iam.send(new GetPolicyVersionCommand({ PolicyArn: n.policyArn, VersionId: policy.Policy.DefaultVersionId }))
   const current = JSON.parse(decodeURIComponent(v.PolicyVersion?.Document ?? '%7B%7D')) as unknown
   const same = sameDocument(current, desired)
+  const grantsBedrock = ((current as { Statement?: Array<{ Sid?: string }> }).Statement ?? []).some((x) => x.Sid?.startsWith('InvokeClaude'))
+  if (grantsBedrock && !spec.bedrock)
+    plan.notes.push(`the current ${n.policy} lets the app call Claude on Bedrock (InvokeClaude); this run has no --bedrock and REMOVES that grant: add --bedrock to keep it`)
   return {
     id: 'iam.policy',
     title: `IAM policy ${n.policy}`,
@@ -1043,5 +1046,12 @@ export function envLines(spec: ProvisionSpec): string[] {
           `SES_SNS_TOPIC_ARNS=${n.topicArn}`,
         ]
       : ['# email: EMAIL_PROVIDER stays sim until a sender exists (re-run with --sender, then set the SES_* lines it prints)']),
+    ...(spec.bedrock
+      ? [
+          `AI_BEDROCK_REGION=${spec.region}`,
+          `AI_BEDROCK_MODEL_ID=us.${spec.bedrock.model}`,
+          '# AI_PROVIDER=bedrock and AI_ENABLED=true are switched on in the staged rollout only (ADR 0160), after pnpm verify:ai passes',
+        ]
+      : []),
   ]
 }
