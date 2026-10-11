@@ -408,7 +408,7 @@ describe('realtime hub resilience', () => {
     try {
       const killed = await sql<{
         n: number
-      }>`select count(*)::int as n from (select pg_terminate_backend(pid) from pg_stat_activity where application_name = 'oasis-test-listen' and pid <> pg_backend_pid()) x`.execute(
+      }>`select count(*)::int as n from (select pg_terminate_backend(pid) from pg_stat_activity where application_name = 'oasis-test-listen' and datname = current_database() and pid <> pg_backend_pid()) x`.execute(
         admin,
       )
       expect(killed.rows[0]!.n).toBeGreaterThanOrEqual(1)
