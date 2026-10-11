@@ -39,6 +39,7 @@ import {
   type AiMessage,
 } from '../../../src/integrations/ports/ai.js'
 import { loadEnv } from '../../../src/config/env.js'
+import { createLogger } from '../../../src/platform/logging.js'
 
 const MODEL = 'us.anthropic.claude-sonnet-5-5'
 // mockClient stubs the class prototype for every instance: restore it, or later test files in the same fork get the stub
@@ -531,7 +532,14 @@ describe('the provider', () => {
         .catch((x: unknown) => x)) as AiProviderError
       expect(e, `${err.name}: ${err.message}`).toBeInstanceOf(AiProviderError)
       expect({ kind: e.kind, retryable: e.retryable }, err.name).toEqual({ kind, retryable })
-      expect(e.cause).toBe(err)
+      // the cause keeps only safe metadata: never the SDK error itself (a logger appends the cause chain to the line)
+      expect(e.cause).not.toBe(err)
+      expect(e.cause).toBeInstanceOf(Error)
+      expect((e.cause as Error).name).toBe(err.name)
+      expect((e.cause as Error).message).toBe(safeAwsMessage(err.message))
+      expect(Object.keys(e.cause as object).sort()).toEqual(
+        ['code', 'httpStatusCode', 'requestId'].filter((k) => (e.cause as Record<string, unknown>)[k] !== undefined),
+      )
     }
     const quota = classifyBedrockError(
       new ThrottlingException({
@@ -562,6 +570,44 @@ describe('the provider', () => {
     expect(e.message).not.toContain('5550142')
     expect(safeAwsMessage('x'.repeat(500))).toHaveLength(200)
     expect(safeAwsMessage(undefined)).toBe('')
+  })
+
+  it('a logged provider error carries no prompt text: neither its message nor its cause chain echoes the AWS message raw', async () => {
+    const prompt = 'Hello I am Maria and my address is Elm Street'
+    const awsText = `Malformed input request: '${prompt}' contains ${prompt} ${'and more '.repeat(40)}TAIL_BEYOND_200`
+    const raw = new ValidationException({
+      message: awsText,
+      $metadata: { httpStatusCode: 400, requestId: 'req-123' },
+    })
+    mock.on(ConverseCommand).rejects(raw)
+    const e = (await provider()
+      .converse(request())
+      .catch((x: unknown) => x)) as AiProviderError
+    expect(e.cause).toMatchObject({
+      name: 'ValidationException',
+      httpStatusCode: 400,
+      requestId: 'req-123',
+    })
+    expect((e.cause as Error).message).toBe(safeAwsMessage(awsText))
+    expect((e.cause as Error).stack ?? '').not.toContain(`'${prompt}'`)
+    expect((e.cause as Error).stack ?? '').not.toContain('TAIL_BEYOND_200')
+    // the app's logger appends the cause chain to err.message and err.stack: nothing beyond the safe text may reach the line
+    const lines: string[] = []
+    const log = createLogger({ level: 'info' }, { write: (l: string) => void lines.push(l) })
+    log.error({ err: e }, 'assistant turn failed')
+    const line = lines.join('')
+    expect(line).toContain('caused by: ValidationException: Malformed input request: \\"…\\" contains')
+    expect(line).not.toContain(`'${prompt}'`)
+    expect(line).not.toContain('TAIL_BEYOND_200')
+    // the timeout and abort paths keep no raw cause either
+    const t = classifyBedrockError(Object.assign(new Error(`aborted while sending ${prompt}`), { name: 'AbortError' }), {
+      timedOut: true,
+    })
+    expect(t.kind).toBe('timeout')
+    expect((t.cause as Error).message).not.toContain('Maria')
+    const a = classifyBedrockError(Object.assign(new Error(`aborted '${prompt}'`), { name: 'AbortError' }))
+    expect(a.kind).toBe('aborted')
+    expect((a.cause as Error).message).not.toContain('Maria')
   })
 
   it('the factory builds the Bedrock provider for AI_PROVIDER=bedrock with the env settings, without contacting AWS', async () => {

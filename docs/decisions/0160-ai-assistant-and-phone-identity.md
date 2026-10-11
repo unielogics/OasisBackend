@@ -67,7 +67,10 @@ simulator. No route, job or behaviour beyond the policy gate and the masked mess
 - **Errors**: one SDK retry (`maxAttempts: 2`) for throttling and outages, a per-call `AbortSignal` (`AI_TIMEOUT_MS`, combined with
   the caller's turn deadline). Kinds: `throttled` / `unavailable` retryable; `access_denied`, `invalid_request`, `timeout`, `aborted`,
   `unknown` not. "Not available for this account" (the account quota of 0) is `access_denied` whatever exception carries it. Messages
-  carry the exception name and the AWS text masked, without quoted parts, cut at 200 characters (never the prompt).
+  carry the exception name and the AWS text masked, without quoted parts, cut at 200 characters (never the prompt). The error's
+  `cause` is not the SDK error but a `BedrockErrorCause` with the same safe text (none for a timeout or an abort), the exception
+  name, HTTP status, request id, network code and stack frames: the logger appends the cause chain to a logged error, so the raw
+  AWS text never reaches the logs either.
 - **Stop reasons**: `refusal` → `refused`, `content_filtered` / `guardrail_intervened` → `content_filtered`, anything else unknown
   (malformed output, context window exceeded, a new value) → `other`, raw value kept. A content block the port cannot carry is an
   error rather than a shortened transcript.

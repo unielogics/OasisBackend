@@ -8,7 +8,8 @@
 // next. Reasoning blocks (text + signature, or redacted bytes) come back as port blocks and go out again unchanged, because the
 // model rejects or ignores an edited transcript. A refusal, a guardrail or an unknown stop reason is reported as its own stop
 // reason (never as an answer); every failure is an AiProviderError whose kind says whether a retry can help. Error messages carry
-// the AWS exception name and a masked, quote-free, truncated AWS message: never the prompt.
+// the AWS exception name and a masked, quote-free, truncated AWS message: never the prompt; its cause is a BedrockErrorCause with
+// the same safe text, never the raw SDK error (a logger appends the cause chain).
 import {
   BedrockRuntimeClient,
   ConverseCommand,
@@ -294,6 +295,37 @@ export function safeAwsMessage(message: string | undefined): string {
   return maskText(unquoted).slice(0, 200)
 }
 
+/**
+ * What an AiProviderError keeps of the SDK error as its `cause`: the exception name, the safe AWS message (or none), the HTTP
+ * status, the request id, the network code, and the stack frames. Never the SDK error itself: the app's logger appends the
+ * cause chain to a logged error's message and stack, and the raw AWS text may echo the prompt.
+ */
+export class BedrockErrorCause extends Error {
+  // declared, not initialised: a field appears only when the SDK error had it
+  declare readonly httpStatusCode?: number
+  declare readonly requestId?: string
+  declare readonly code?: string
+  constructor(err: unknown, keepMessage: boolean) {
+    const e = (err ?? {}) as {
+      name?: unknown
+      message?: unknown
+      code?: unknown
+      stack?: unknown
+      $metadata?: { httpStatusCode?: unknown; requestId?: unknown }
+    }
+    super(keepMessage && typeof e.message === 'string' ? safeAwsMessage(e.message) : '')
+    const name = typeof e.name === 'string' && /^[\w.:-]{1,80}$/.test(e.name) ? e.name : 'Error'
+    Object.defineProperty(this, 'name', { value: name, enumerable: false, configurable: true, writable: true })
+    const self = this as { httpStatusCode?: number; requestId?: string; code?: string }
+    if (typeof e.$metadata?.httpStatusCode === 'number') self.httpStatusCode = e.$metadata.httpStatusCode
+    if (typeof e.$metadata?.requestId === 'string') self.requestId = e.$metadata.requestId.slice(0, 100)
+    if (typeof e.code === 'string' && /^[A-Z0-9_]{1,40}$/.test(e.code)) self.code = e.code
+    // the frames only: the first line of the original stack repeats the raw message
+    const frames = typeof e.stack === 'string' ? e.stack.split('\n').filter((l) => /^\s+at /.test(l)) : []
+    this.stack = [`${name}${this.message ? `: ${this.message}` : ''}`, ...frames].join('\n')
+  }
+}
+
 export interface ErrorContext {
   /** The per-call timeout fired. */
   timedOut?: boolean
@@ -317,14 +349,16 @@ export function classifyBedrockError(err: unknown, ctx: ErrorContext = {}): AiPr
   const say = (what: string): string =>
     `Bedrock Converse ${what} (${name}${status ? ` ${status}` : ''}${aws ? `: ${aws}` : ''})`
   const make = (kind: AiErrorKind, what: string): AiProviderError =>
-    new AiProviderError(kind, say(what), { cause: err })
+    new AiProviderError(kind, say(what), { cause: new BedrockErrorCause(err, true) })
 
   if (ctx.timedOut)
     return new AiProviderError('timeout', 'Bedrock Converse did not answer within the per-call timeout', {
-      cause: err,
+      cause: new BedrockErrorCause(err, false),
     })
   if (ctx.callerAborted || name === 'AbortError')
-    return new AiProviderError('aborted', 'the Bedrock call was aborted', { cause: err })
+    return new AiProviderError('aborted', 'the Bedrock call was aborted', {
+      cause: new BedrockErrorCause(err, false),
+    })
   if (QUOTA_RE.test(e.message ?? ''))
     return make('access_denied', 'refused: quota: the model is not available for this account')
   // the exception name first (ModelNotReadyException answers 429 but is an outage), then the HTTP status
