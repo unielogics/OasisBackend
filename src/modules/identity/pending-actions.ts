@@ -2,7 +2,9 @@
 // book, reschedule or cancel by text, but each action runs only after the client replies with a 4-digit number the server texted
 // ("Signature Wash, Sat 10:00 AM. Reply 4821 to confirm"; class action_confirm, the number as a secretVar). The model never sees the
 // number; only its salted SHA-256 is stored. One pending action per number (a new proposal supersedes the old one); 15 minutes;
-// 3 wrong replies lock it. The confirmation re-checks the trust, then hands the stored payload back for the caller to execute.
+// 3 wrong replies lock it, and a number gets at most PENDING_ACTION_WRONG_PER_DAY wrong replies across all its actions in 24 hours
+// (a new or superseding proposal never brings fresh guesses: W4c review). The confirmation re-checks the trust, then hands the
+// stored payload back for the caller to execute.
 import { randomInt } from 'node:crypto'
 import { sql } from 'kysely'
 import type { Executor, Tx } from '../../platform/db.js'
@@ -19,6 +21,25 @@ import './schema.js'
 export const REPLY_CODE_LENGTH = 4
 export const PENDING_ACTION_TTL_MS = 15 * 60_000
 export const PENDING_ACTION_MAX_ATTEMPTS = 3
+/**
+ * Wrong reply numbers one number may send in 24 hours, across every action proposed to it (W4c review). Without it a sender spoofing
+ * a trusted number could have the assistant propose again and again (each proposal supersedes the last and brings 3 fresh tries) and
+ * walk the 10,000 reply numbers; with it a number gets this many guesses a day, then no proposal until the day has passed.
+ */
+export const PENDING_ACTION_WRONG_PER_DAY = 5
+const DAY_MS = 86_400_000
+
+/** Wrong reply numbers the number sent in the last 24 hours (a confirmed action's attempts include its one right reply). */
+export async function wrongRepliesToday(db: Executor, o: { locationId: string; phone: string; now: Date }): Promise<number> {
+  const r = await db
+    .selectFrom('assistant_pending_actions')
+    .select(sql<number>`coalesce(sum(attempts - case when state in ('executed', 'failed') then 1 else 0 end), 0)::int`.as('n'))
+    .where('location_id', '=', o.locationId)
+    .where('phone_e164', '=', o.phone)
+    .where('created_at', '>', new Date(o.now.getTime() - DAY_MS))
+    .executeTakeFirstOrThrow()
+  return Number(r.n)
+}
 
 export const newReplyCode = (): string => String(randomInt(0, 10 ** REPLY_CODE_LENGTH)).padStart(REPLY_CODE_LENGTH, '0')
 
@@ -48,6 +69,9 @@ export async function createPendingAction(
   const { now } = deps
   const trust = await evaluateTrust(tx, { locationId: o.locationId, phone: o.phone, customerId: o.customerId, now })
   if (!trust.trusted) throw new AppError('IDENTITY_NOT_TRUSTED', { meta: { reason: trust.reason } })
+  // the number used up its wrong replies for the day: no new reply number to guess (the assistant hands over to staff)
+  if ((await wrongRepliesToday(tx, { locationId: o.locationId, phone: o.phone, now })) >= PENDING_ACTION_WRONG_PER_DAY)
+    throw new AppError('IDENTITY_TOO_MANY_TRIES', { params: { minutes: 24 * 60 }, meta: { limit: 'reply_numbers_day' } })
   await tx
     .updateTable('assistant_pending_actions')
     .set({ state: 'superseded', resolved_at: now })
@@ -149,7 +173,9 @@ export async function confirmPendingAction(tx: Tx, o: { locationId: string; phon
   const code = o.code.replace(/\D/g, '')
   if (code.length !== REPLY_CODE_LENGTH || !safeEqual(hashCode(row.id, code), row.code_hash)) {
     const attempts = row.attempts + 1
-    const locked = attempts >= row.max_attempts
+    // this wrong reply is the number's last one of the day: the action locks whatever tries it had left
+    const dayUsed = (await wrongRepliesToday(tx, { locationId: o.locationId, phone: o.phone, now: o.now })) + 1 >= PENDING_ACTION_WRONG_PER_DAY
+    const locked = attempts >= row.max_attempts || dayUsed
     await tx
       .updateTable('assistant_pending_actions')
       .set({ attempts, ...(locked ? { state: 'locked' as const, resolved_at: o.now } : {}) })

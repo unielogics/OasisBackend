@@ -76,6 +76,16 @@ async function propose(
         )
       } catch (e) {
         if (e instanceof AppError && e.code === 'IDENTITY_NOT_TRUSTED') throw new Refused(fail('needs_verification', NEEDS_VERIFY))
+        // too many wrong reply numbers from this number today (W4c): no new number to guess, a person takes over
+        if (e instanceof AppError && e.code === 'IDENTITY_TOO_MANY_TRIES')
+          throw new Refused(
+            withHandoff(
+              ctx,
+              fail('rate_limited', 'Too many wrong confirmation numbers from this number today. Tell the client a team member will text them shortly.'),
+              'cannot_help',
+              'Several wrong confirmation numbers came from this number today, so the assistant stopped proposing bookings or changes by text.',
+            ),
+          )
         throw e
       }
       const target = await loadCustomerTarget(tx, ctx.identity.locationId, customerId)

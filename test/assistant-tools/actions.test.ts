@@ -214,6 +214,24 @@ describe('the reply number (ActionCodeHandler)', () => {
     expect((await pending()).at(-1)).toMatchObject({ state: 'expired' })
   })
 
+  it('a sender guessing reply numbers gets five wrong ones a day: then no new proposal, a person takes over (W4c review)', async () => {
+    const probe = await trustedMaria()
+    for (let round = 0; round < 2; round++) {
+      await run('propose_booking', probe, BOOK)
+      const code = await lastCode(maria().phone)
+      const wrong = String((Number(code) + 5) % 10_000).padStart(4, '0')
+      for (let i = 0; i < 3; i++) await reply(maria().phone, wrong, maria().id)
+    }
+    expect((await pending()).map((p) => p.state)).toEqual(['locked', 'locked'])
+    const confirms = (await aiTexts(maria().id)).filter((m) => m.klass === 'action_confirm').length
+    const r = await run('propose_booking', probe, BOOK)
+    expect(r).toMatchObject({ ok: false, error: 'rate_limited', handoff: { reason: 'cannot_help' } })
+    expect(probe.handoffs).toEqual([expect.objectContaining({ reason: 'cannot_help' })])
+    expect(await pending()).toHaveLength(2)
+    expect((await aiTexts(maria().id)).filter((m) => m.klass === 'action_confirm')).toHaveLength(confirms)
+    expect(await appointmentsOf(maria().id)).toEqual([])
+  })
+
   it('kill switches: actions off cancels and says a team member will text; the assistant off cancels silently', async () => {
     const probe = await trustedMaria()
     await run('propose_booking', probe, BOOK)

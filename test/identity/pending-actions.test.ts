@@ -12,6 +12,8 @@ import {
   failPendingAction,
   findPendingAction,
   PENDING_ACTION_TTL_MS,
+  PENDING_ACTION_WRONG_PER_DAY,
+  wrongRepliesToday,
 } from '../../src/modules/identity/pending-actions.js'
 import { revokeForOptOut } from '../../src/modules/identity/revoke.js'
 import { grantTrust, revokeTrust } from '../../src/modules/identity/trust.js'
@@ -129,5 +131,66 @@ describe('confirmPendingAction', () => {
     expect((await w.t.db.selectFrom('assistant_pending_actions').select(['state', 'error']).executeTakeFirstOrThrow())).toEqual({ state: 'failed', error: 'slot taken' })
     await propose(o)
     expect(await w.tx((tx) => cancelPendingActions(tx, { customerId: o.maria, now: w.clock.now(), error: 'handoff' }))).toBe(1)
+  })
+})
+
+describe('wrong reply numbers per number and day (W4c review)', () => {
+  it('a new or superseding proposal never brings fresh guesses: 5 wrong replies a day per number, then no proposal', async () => {
+    const o = await trusted()
+    let guesses = 0
+    for (let i = 0; i < 10; i++) {
+      let p
+      try {
+        p = await propose(o)
+      } catch (e) {
+        expect(e).toMatchObject({ code: 'IDENTITY_TOO_MANY_TRIES', status: 429 })
+        break
+      }
+      // two wrong numbers, then ask for a new proposal (supersede), then a third run that locks
+      for (let k = 0; k < (i % 2 === 0 ? 2 : 3); k++) {
+        const r = await reply(wrongOf(p.code))
+        if (r.status === 'wrong' || r.status === 'locked') guesses += 1
+      }
+    }
+    expect(guesses).toBe(PENDING_ACTION_WRONG_PER_DAY)
+    expect(await wrongRepliesToday(w.t.db, { locationId: w.locationId, phone: PHONES.maria, now: w.clock.now() })).toBe(PENDING_ACTION_WRONG_PER_DAY)
+    await expect(propose(o)).rejects.toMatchObject({ code: 'IDENTITY_TOO_MANY_TRIES', meta: { limit: 'reply_numbers_day' } })
+    // the day passes: the number may be proposed to again
+    w.advance(24 * 60 * MIN + MIN)
+    const p = await propose(o)
+    expect(await reply(p.code)).toMatchObject({ status: 'confirmed' })
+  })
+
+  it('the wrong reply that reaches the day’s limit locks the pending action at once (its own tries left do not matter)', async () => {
+    const o = await trusted()
+    const a = await propose(o)
+    for (let k = 0; k < 2; k++) expect(await reply(wrongOf(a.code))).toMatchObject({ status: 'wrong' })
+    const b = await propose(o) // supersedes a: 2 wrong so far
+    for (let k = 0; k < 2; k++) expect(await reply(wrongOf(b.code))).toMatchObject({ status: 'wrong' })
+    const c = await propose(o) // 4 wrong so far: the next wrong one is the fifth
+    expect(await reply(wrongOf(c.code))).toEqual({ status: 'locked' })
+    expect(await reply(c.code)).toEqual({ status: 'none' })
+    expect((await w.t.db.selectFrom('assistant_pending_actions').select('state').where('id', '=', c.id).executeTakeFirstOrThrow()).state).toBe('locked')
+  })
+
+  it('right replies do not count: a client who confirms every day is never limited', async () => {
+    const o = await trusted()
+    for (let i = 0; i < 8; i++) {
+      const p = await propose(o)
+      expect(await reply(p.code)).toMatchObject({ status: 'confirmed' })
+    }
+    expect(await wrongRepliesToday(w.t.db, { locationId: w.locationId, phone: PHONES.maria, now: w.clock.now() })).toBe(0)
+  })
+
+  it('another number’s wrong replies never count against this one', async () => {
+    const o = await trusted()
+    const liam = await w.customer({ name: 'Liam Chen', phone: PHONES.liam })
+    await w.tx((tx) => grantTrust(tx, { locationId: w.locationId, phone: PHONES.liam, customerId: liam, verifiedBy: 'pin', now: w.clock.now() }))
+    const lp = await w.tx((tx) =>
+      createPendingAction(tx, { newId: w.newId, now: w.clock.now() }, { locationId: w.locationId, conversationId: o.conversationId, customerId: liam, phone: PHONES.liam, kind: 'book', payload: { x: 1 } }),
+    )
+    for (let k = 0; k < 3; k++) await reply(wrongOf(lp.code), PHONES.liam)
+    const p = await propose(o)
+    expect(await reply(p.code)).toMatchObject({ status: 'confirmed' })
   })
 })
