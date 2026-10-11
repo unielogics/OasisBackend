@@ -87,6 +87,10 @@ export class PgInboxRepository implements InboxRepository {
     await this.exec.updateTable('sms_inbox').set({ processed_at: at, decision, quarantined }).where('id', '=', id).execute()
   }
 
+  async redact(id: string, body: string): Promise<void> {
+    await this.exec.updateTable('sms_inbox').set({ body }).where('id', '=', id).execute()
+  }
+
   async find(deviceId: string, providerMessageId: string): Promise<InboxRow | null> {
     const r = await this.exec.selectFrom('sms_inbox').selectAll().where('device_id', '=', deviceId).where('provider_message_id', '=', providerMessageId).executeTakeFirst()
     return r ? rowOf(r) : null

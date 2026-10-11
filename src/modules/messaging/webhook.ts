@@ -20,7 +20,8 @@ import { DeviceHealthMonitor } from './dispatch/health.js'
 import { Dispatcher } from './dispatch/dispatcher.js'
 import { SmsEventIngestor, type IngestResult } from './dispatch/ingest.js'
 import { createInboundEffects } from './inbound-effects.js'
-import { InboundService } from './inbound/service.js'
+import { InboundService, type InboundOutcome } from './inbound/service.js'
+import { CODE_MASK } from './inbound/keywords.js'
 import { noteAppStarted } from './device-notices.js'
 import { notifyManagers } from './notify.js'
 import type { MessagingRuntime } from './runtime.js'
@@ -72,10 +73,28 @@ export function stripAttachmentData(raw: string): string {
 }
 
 /** The body column update that strips attachment bytes from a final row, or nothing when there is nothing to strip. */
-const stripped = (body: string | null): { body?: string } => {
+const stripped = (body: string | null, o: { redactText?: boolean } = {}): { body?: string } => {
   if (body === null) return {}
-  const out = stripAttachmentData(body)
+  const out = o.redactText ? redactInboundText(stripAttachmentData(body)) : stripAttachmentData(body)
   return out === body ? {} : { body: out }
+}
+
+/**
+ * A stored delivery whose text was a code (ADR 0160: a reply number or a link-page code is never kept readable): the text fields of
+ * the payload (`message`, `body`) become CODE_MASK. A body that is not readable JSON is replaced by a note: a code must not survive
+ * in webhook_log. The signature no longer verifies, which no longer matters once the delivery is final.
+ */
+export function redactInboundText(raw: string): string {
+  let env: unknown
+  try {
+    env = JSON.parse(raw)
+  } catch {
+    return JSON.stringify({ redacted: true })
+  }
+  const p = (env as { payload?: Record<string, unknown> } | null)?.payload
+  if (!p || typeof p !== 'object') return raw
+  for (const k of ['message', 'body'] as const) if (typeof p[k] === 'string') p[k] = CODE_MASK
+  return JSON.stringify(env)
 }
 
 const FOREVER = Number.MAX_SAFE_INTEGER
@@ -209,6 +228,8 @@ export class WebhookService {
   /** Applies one stored envelope in a single transaction. Idempotent: a row that is not `received` is left alone. */
   async process(logId: string): Promise<'processed' | 'ignored' | 'skipped'> {
     let appStartedFor: DeviceRow | null = null
+    // the conversations this event handed to the assistant: their turns start once the transaction committed
+    let kicks: string[] = []
     const outcome = await transaction(this.rt.db, async (tx) => {
       const row = await tx.selectFrom('webhook_log').selectAll().where('id', '=', logId).where('status', '=', 'received').forUpdate().skipLocked().executeTakeFirst()
       if (!row || row.body === null) return 'skipped' as const
@@ -228,7 +249,9 @@ export class WebhookService {
         clock: this.rt.clock,
       })
       const event = this.withDeviceId(parsed.event, device.id)
-      const result = await this.apply(tx, device, event, parsed)
+      let inbound: InboundOutcome | null = null
+      const result = await this.apply(tx, device, event, parsed, (o) => void (inbound = o))
+      const routed = inbound as InboundOutcome | null
       if (result.outcome === 'handled' && result.health?.appStarted) {
         appStartedFor = device
         // `device` was read before this event touched it: a restart moments after the last signal was not a reboot
@@ -241,11 +264,12 @@ export class WebhookService {
           status: ignored ? 'ignored' : 'processed',
           processed_at: this.rt.clock.now(),
           error: null,
-          // the pictures are saved; 90 days of webhook_log need not hold megabytes of base64 per MMS
-          ...stripped(row.body),
+          // the pictures are saved; 90 days of webhook_log need not hold megabytes of base64 per MMS; a code is never kept readable
+          ...stripped(row.body, { redactText: routed?.duplicate === false && routed.decision.redacted === true }),
         })
         .where('id', '=', logId)
         .execute()
+      if (routed && !routed.duplicate) kicks = routed.assistantConversations
       return ignored ? ('ignored' as const) : ('processed' as const)
     }).catch(async (err: unknown) => {
       await sql`update webhook_log set error = ${(err as Error).message.slice(0, 500)} where id = ${logId}`.execute(this.rt.db).catch(() => undefined)
@@ -253,6 +277,14 @@ export class WebhookService {
     })
     // The app restarted (reboot, update, crash): its webhook registrations may be gone.
     if (appStartedFor) await this.rt.registerWebhooks(appStartedFor)
+    // The assistant's turn starts only after the marker is committed (ADR 0160); a failed kick is left to the sweep (wave 3).
+    if (kicks.length > 0) {
+      try {
+        await this.rt.assistant().kick.kick(kicks)
+      } catch (err) {
+        this.rt.log.warn({ err: (err as Error).message.slice(0, 200), conversations: kicks.length }, 'assistant kick failed; the sweep will start the turn')
+      }
+    }
     return outcome
   }
 
@@ -260,8 +292,9 @@ export class WebhookService {
     return 'deviceId' in e ? { ...e, deviceId } : e
   }
 
-  private async apply(tx: Tx, device: DeviceRow, event: SmsEvent, parsed: ParsedWebhook): Promise<IngestResult> {
+  private async apply(tx: Tx, device: DeviceRow, event: SmsEvent, parsed: ParsedWebhook, onInbound: (o: InboundOutcome) => void): Promise<IngestResult> {
     const rt = this.rt
+    const assistant = rt.assistant()
     const cfg = rt.config.dispatch({ id: device.id, simSlotDefault: device.sim_slot_default, minIntervalMs: device.min_interval_ms, maxPerWindow: device.max_per_window, windowMinutes: device.window_minutes })
     const monitor = new DeviceHealthMonitor(new PgDeviceRepository(tx, rt.onTransition), rt.clock, cfg.health)
     const dispatcher = new Dispatcher(unusedProvider, new PgOutboxRepository(tx, { deviceId: device.id }), monitor, rt.clock, cfg.dispatcher)
@@ -276,6 +309,7 @@ export class WebhookService {
         notifyManagers: async (t, n) => void (await notifyManagers(t, n, rt.deps)),
         warn: (msg, detail) => rt.log.warn(detail, msg),
         storage: () => rt.storage(),
+        assistant: { inbox: assistant.inbox, actionCodes: assistant.actionCodes },
       },
       {
         locationId: device.location_id,
@@ -289,10 +323,18 @@ export class WebhookService {
       new PgCustomerDirectory(tx, device.location_id),
       effects,
       rt.clock,
-      { timeZone: rt.config.tz, ...(rt.config.businessPhone ? { businessPhone: rt.config.businessPhone } : {}) },
+      {
+        timeZone: rt.config.tz,
+        ...(rt.config.businessPhone ? { businessPhone: rt.config.businessPhone } : {}),
+        assistant: {
+          gate: (input) => assistant.gate.evaluate(tx, { ...input, locationId: device.location_id, now: rt.clock.now() }),
+          hasPendingAction: (phone) => assistant.actionCodes.hasPending(tx, { locationId: device.location_id, phone, now: rt.clock.now() }),
+        },
+      },
     )
+    const to = parsed.extras.recipient
     const ingestor = new SmsEventIngestor(new PgProcessedEvents(tx), dispatcher, rt.clock, async (e) => {
-      await inbound.handleReceived(e)
+      onInbound(await inbound.handleReceived(e, to ? { to } : {}))
     })
     await rt.store.noteRemoteId(device.id, parsed.deviceId)
     const result = await ingestor.ingest(event, parsed.extras.health ? { health: parsed.extras.health } : {})

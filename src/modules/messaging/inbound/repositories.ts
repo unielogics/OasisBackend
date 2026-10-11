@@ -28,6 +28,8 @@ export interface InboxRepository {
   markSuperseded(id: string, byId: string, at: Date): Promise<boolean>
   /** Serialises the handling of one device message (its incomplete and complete deliveries) until the transaction ends. */
   lock?(deviceId: string, key: string): Promise<void>
+  /** Replaces the stored text (a code is never kept readable, ADR 0160). */
+  redact?(id: string, body: string): Promise<void>
 }
 
 export interface CustomerDirectory {
@@ -69,6 +71,11 @@ export class InMemoryInboxRepository implements InboxRepository {
     if (!row || row.supersededBy !== null) return false
     row.supersededBy = byId
     return true
+  }
+
+  async redact(id: string, body: string): Promise<void> {
+    const row = this.rows.find((r) => r.id === id)
+    if (row) row.body = body
   }
 
   async markProcessed(id: string, decision: InboundDecision['kind'], quarantined: boolean, at: Date): Promise<void> {

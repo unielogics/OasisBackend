@@ -1,8 +1,10 @@
 import type { Clock } from '../../../platform/clock.js'
 import { MMS_INCOMPLETE_SUFFIX, type MmsPart, type SmsEvent } from '../../../integrations/ports/sms.js'
 import { normalizeE164 } from '../../../integrations/sms/phone.js'
+import { GATE_OFF, type AssistantGateInput, type AssistantGateVerdict } from '../../assistant/ports.js'
 import type { OptOutRepository } from '../policy/optouts.js'
 import type { CustomerDirectory, InboxRepository, InboxRow } from './repositories.js'
+import { CODE_MASK, parseReplyCode } from './keywords.js'
 import { mmsText, type MmsAttachmentRecord } from './mms.js'
 import { routeInbound, type InboundCommand, type InboundDecision, type InboundText } from './router.js'
 
@@ -35,14 +37,40 @@ export interface InboundEffects {
    * placeholder out of the thread and resolve its alert, so the message is not shown twice.
    */
   supersede?(stale: InboxRow, by: InboxRow): Promise<void>
+  /**
+   * The assistant takes the text (ADR 0160): the durable marker on the number's conversation, linked to the inbox row, in the same
+   * transaction. Returns the conversation the post-commit kick starts a turn for.
+   */
+  assistant?(cmd: { phone: string; customerId: string | null; inboxId: string; receivedAt: Date }): Promise<{ conversationId: string }>
+  /** AGENT: a handoff on the number's conversation (no AI until staff resolve it). */
+  handoff?(cmd: { phone: string; customerId: string | null; inboxId: string; reason: string }): Promise<void>
+  /** A reply number for a pending in-chat action (the code itself never leaves this call). */
+  actionCode?(cmd: { phone: string; customerId: string | null; inboxId: string; code: string }): Promise<void>
+}
+
+/**
+ * The assistant's side of routing, bound to the webhook's transaction: the gate's verdict and whether an in-chat action waits for
+ * a reply number. Absent: the assistant is off and every text is routed as before.
+ */
+export interface InboundAssistant {
+  gate(input: Omit<AssistantGateInput, 'now' | 'locationId'>): Promise<AssistantGateVerdict>
+  hasPendingAction(phone: string): Promise<boolean>
 }
 
 export interface InboundServiceOptions {
   timeZone: string
   businessPhone?: string
+  assistant?: InboundAssistant
 }
 
-export type InboundOutcome = { duplicate: true } | { duplicate: false; decision: InboundDecision }
+export type InboundOutcome =
+  | { duplicate: true }
+  | {
+      duplicate: false
+      decision: InboundDecision
+      /** Conversations marked pending for the assistant: the caller kicks their turns once the transaction committed. */
+      assistantConversations: string[]
+    }
 
 /**
  * Glue around the pure router: record the text in the inbox (deduped), load the context, route, then apply the commands.
@@ -59,8 +87,15 @@ export class InboundService {
   ) {}
 
   /** Convenience for SmsEventIngestor: accepts the port's received event. */
-  async handleReceived(event: ReceivedEvent): Promise<InboundOutcome> {
-    const base = { eventId: event.eventId, deviceId: event.deviceId, providerMessageId: event.providerMessageId, from: event.from, receivedAt: event.at }
+  async handleReceived(event: ReceivedEvent, extra: { to?: string } = {}): Promise<InboundOutcome> {
+    const base = {
+      eventId: event.eventId,
+      deviceId: event.deviceId,
+      providerMessageId: event.providerMessageId,
+      from: event.from,
+      receivedAt: event.at,
+      ...(extra.to ? { to: extra.to } : {}),
+    }
     if (!event.mms) return this.process({ ...base, body: event.body })
     // An MMS is routed like an SMS. With no text it is filed under a placeholder, never dropped (ADR 0151).
     const { text, placeholder } = mmsText(event.body, event.mms.parts)
@@ -93,6 +128,14 @@ export class InboundService {
     const appointments = customer ? await this.directory.listAppointments(customer.id) : []
     const optedOut = phone ? (await this.optouts.findActive(phone)) !== null : false
 
+    // The assistant gate (off unless the host wired one and every switch is on) and, for a digits-only text, whether an in-chat
+    // action waits for its reply number. With neither the routing is exactly what it was before the assistant.
+    const assistant = this.opts.assistant
+    const verdict: AssistantGateVerdict = assistant
+      ? await assistant.gate({ from: msg.from, phone, customerId: customer?.id ?? null, optedOut, body: msg.body, ...(msg.to ? { to: msg.to } : {}) })
+      : GATE_OFF
+    const pendingAction = assistant && phone && !msg.placeholder && parseReplyCode(msg.body) !== null ? await assistant.hasPendingAction(phone) : false
+
     const decision = routeInbound(msg, {
       now,
       customer,
@@ -100,7 +143,12 @@ export class InboundService {
       appointments,
       timeZone: this.opts.timeZone,
       businessPhone: this.opts.businessPhone,
+      ...(assistant ? { assistant: verdict, pendingAction } : {}),
     })
+    // a code is never filed readable: the inbox row, the thread and the event stream get the mask
+    const body = decision.redacted ? CODE_MASK : msg.body
+    if (decision.redacted) await this.inbox.redact?.(row.id, CODE_MASK)
+    const assistantConversations: string[] = []
 
     let quarantined = false
     for (const cmd of decision.commands) {
@@ -121,7 +169,7 @@ export class InboundService {
           await this.effects.storeMessage({
             customerId: cmd.customerId,
             appointmentId: cmd.appointmentId,
-            body: msg.body,
+            body,
             unread: cmd.unread,
             providerMessageId: msg.providerMessageId,
             receivedAt: msg.receivedAt,
@@ -135,9 +183,21 @@ export class InboundService {
         case 'quarantine':
           quarantined = true
           break
+        case 'assistant': {
+          if (!this.effects.assistant) throw new Error('inbound: the assistant gate allowed a text but no assistant effect is wired')
+          const { conversationId } = await this.effects.assistant({ phone: cmd.phone, customerId: cmd.customerId, inboxId: row.id, receivedAt: now })
+          assistantConversations.push(conversationId)
+          break
+        }
+        case 'handoff':
+          await this.effects.handoff?.({ phone: cmd.phone, customerId: cmd.customerId, inboxId: row.id, reason: cmd.reason })
+          break
+        case 'action_code':
+          await this.effects.actionCode?.({ phone: cmd.phone, customerId: cmd.customerId, inboxId: row.id, code: cmd.code })
+          break
       }
     }
     await this.inbox.markProcessed(row.id, decision.kind, quarantined, now)
-    return { duplicate: false, decision }
+    return { duplicate: false, decision, assistantConversations }
   }
 }
