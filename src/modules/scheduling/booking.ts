@@ -4,6 +4,7 @@ import type { Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
 import { isUuid } from '../../platform/ids.js'
 import { fmtT, minutesOfDay, toBizDate, wallToInstant } from '../../platform/time.js'
+import { refreshAppointmentCategories } from '../catalog/appointment-categories.js'
 import { requireService } from '../catalog/service.js'
 import '../customers/schema.js'
 import type { AppointmentSource, SmsOptInSource } from '../customers/schema.js'
@@ -271,6 +272,8 @@ export async function createAppointment(
     const row = rows.find((r) => r.service_id === a.id)!
     await addAddonChecklist(tx, c, id, row.id, a)
   }
+  // the categories of the package and add-ons (ADR 0160): the board's chips, the filter and the KPIs read them
+  await refreshAppointmentCategories(tx, id)
   await recordOverrides(tx, c, actor, id, decision)
 
   const appt: AppointmentRecord = await requireAppointment(tx, c.locationId, id)

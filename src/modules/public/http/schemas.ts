@@ -67,30 +67,8 @@ export const BoardView = z.object({
   days: z.array(BoardDay),
 })
 
-export const CatalogView = z.object({
-  generatedAt: z.iso.datetime(),
-  services: z.array(
-    z.object({
-      key: z.string(),
-      name: z.string(),
-      shortName: z.string(),
-      durationMin: z.number().int(),
-      priceCents: z.number().int(),
-      tags: z.array(z.string()),
-    }),
-  ),
-  addons: z.array(z.object({ key: z.string(), name: z.string(), priceCents: z.number().int(), tags: z.array(z.string()) })),
-  plans: z.array(
-    z.object({
-      key: z.enum(['gold', 'vip']),
-      name: z.string(),
-      planKey: z.string(),
-      planName: z.string().nullable(),
-      perks: z.array(z.string()),
-      priceCents: z.null(),
-    }),
-  ),
-})
+/** The public catalog's answer (defined beside its loader, src/modules/public/catalog.ts). */
+export { PublicCatalogView as CatalogView } from '../catalog.js'
 
 export const OtpBody = z.object({ phone: Phone }).strict()
 export const OtpRequested = z.object({ challengeId: z.string(), expiresInSec: z.number().int() })

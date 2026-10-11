@@ -8,7 +8,8 @@ import * as realtime from '../../platform/realtime.js'
 import type { NewId } from '../../platform/ids.js'
 import { isUuid } from '../../platform/ids.js'
 import './schema.js'
-import type { ServiceKind } from './schema.js'
+import { requireCategory } from './categories.js'
+import type { ServiceKind, VipInclusion } from './schema.js'
 import {
   ChecklistDiffError,
   diffChecklist,
@@ -41,6 +42,19 @@ export interface CatalogService {
   sqspSku: string | null
   version: number
   tasks: CatalogTask[]
+  // the website/AI fields (ADR 0160): edited through PUT /catalog/services/{id}
+  /** catalog_categories.key */
+  category: string
+  publicName: string | null
+  description: string | null
+  /** null: the plain price (priceCents) */
+  memberPriceCents: number | null
+  /** null: the member price plus the catalog.guest_markup_pct markup */
+  guestPriceCents: number | null
+  vipInclusion: VipInclusion
+  vipNote: string | null
+  quoteOnly: boolean
+  visibleOnline: boolean
 }
 
 export interface Catalog {
@@ -74,6 +88,15 @@ interface ServiceRow {
   active: boolean
   sqsp_sku: string | null
   version: number
+  category: string
+  public_name: string | null
+  description: string | null
+  member_price_cents: number | null
+  guest_price_cents: number | null
+  vip_inclusion: VipInclusion
+  vip_note: string | null
+  quote_only: boolean
+  visible_online: boolean
 }
 
 const SERVICE_COLUMNS = [
@@ -90,6 +113,15 @@ const SERVICE_COLUMNS = [
   'active',
   'sqsp_sku',
   'version',
+  'category',
+  'public_name',
+  'description',
+  'member_price_cents',
+  'guest_price_cents',
+  'vip_inclusion',
+  'vip_note',
+  'quote_only',
+  'visible_online',
 ] as const
 
 function toService(r: ServiceRow, tasks: CatalogTask[]): CatalogService {
@@ -109,6 +141,15 @@ function toService(r: ServiceRow, tasks: CatalogTask[]): CatalogService {
     sqspSku: r.sqsp_sku,
     version: r.version,
     tasks,
+    category: r.category,
+    publicName: r.public_name,
+    description: r.description,
+    memberPriceCents: r.member_price_cents,
+    guestPriceCents: r.guest_price_cents,
+    vipInclusion: r.vip_inclusion,
+    vipNote: r.vip_note,
+    quoteOnly: r.quote_only,
+    visibleOnline: r.visible_online,
   }
 }
 
@@ -248,6 +289,8 @@ export interface CreateServiceInput {
   sort?: number
   active?: boolean
   sqspSku?: string | null
+  /** A catalog_categories.key of the location (active); absent: the default rule (add-ons, tint, detail, else wash). */
+  category?: string
   /** Initial ordered checklist labels. */
   tasks?: string[]
   newId: NewId
@@ -262,6 +305,7 @@ export async function createService(tx: Tx, input: CreateServiceInput): Promise<
     throw validationError('durationMin', 'Enter a duration from 1 to 720 minutes.')
   const existing = await findServiceByName(tx, input.locationId, input.kind, name)
   if (existing) throw duplicateName(input.kind)
+  if (input.category !== undefined) await requireCategory(tx, input.locationId, input.category, { active: true, path: 'category' })
   const id = input.newId()
   try {
     await tx
@@ -279,6 +323,7 @@ export async function createService(tx: Tx, input: CreateServiceInput): Promise<
         sort: input.sort ?? 0,
         active: input.active ?? true,
         sqsp_sku: input.sqspSku ?? null,
+        ...(input.category !== undefined ? { category: input.category } : {}),
       })
       .execute()
   } catch (e) {
@@ -309,7 +354,7 @@ export async function createService(tx: Tx, input: CreateServiceInput): Promise<
     after: serviceAudit(created),
     ctx: input.audit,
   })
-  await publishChange(tx, input.locationId, id)
+  await publishServiceChange(tx, input.locationId, id)
   return created
 }
 
@@ -333,8 +378,9 @@ export interface UpdateServiceInput {
   audit?: audit.AuditContext
 }
 
-const serviceAudit = (s: CatalogService) => ({
+export const serviceAudit = (s: CatalogService) => ({
   kind: s.kind,
+  category: s.category,
   name: s.name,
   shortName: s.shortNameOverride,
   priceCents: s.priceCents,
@@ -345,7 +391,7 @@ const serviceAudit = (s: CatalogService) => ({
   active: s.active,
 })
 
-async function lockService(tx: Tx, locationId: string, serviceId: string, expectedVersion?: number) {
+export async function lockService(tx: Tx, locationId: string, serviceId: string, expectedVersion?: number) {
   const row = isUuid(serviceId)
     ? await tx
         .selectFrom('services')
@@ -361,7 +407,7 @@ async function lockService(tx: Tx, locationId: string, serviceId: string, expect
   return row
 }
 
-async function publishChange(tx: Tx, locationId: string, serviceId: string): Promise<void> {
+export async function publishServiceChange(tx: Tx, locationId: string, serviceId: string): Promise<void> {
   await realtime.publish(tx, {
     locationId,
     channel: 'settings',
@@ -416,7 +462,7 @@ export async function updateService(tx: Tx, input: UpdateServiceInput): Promise<
     after: serviceAudit(after),
     ctx: input.audit,
   })
-  await publishChange(tx, input.locationId, row.id)
+  await publishServiceChange(tx, input.locationId, row.id)
   return after
 }
 
@@ -527,7 +573,7 @@ export async function putChecklist(tx: Tx, input: PutChecklistInput): Promise<Pu
     after: service.tasks.map((t) => t.label),
     ctx: input.audit,
   })
-  await publishChange(tx, input.locationId, row.id)
+  await publishServiceChange(tx, input.locationId, row.id)
   return {
     service,
     changed: true,

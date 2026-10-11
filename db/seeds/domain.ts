@@ -1,4 +1,5 @@
 // Seed profiles for the domain core and the Settings data, from the Settings and Operations designs.
+//   website-catalog the website's services, prices, tint matrix and plans as the catalog (db/seeds/website-catalog.ts, ADR 0160).
 //   domain         the location's reference data: two bays, hours, rules, the seven design closures (the 2026 federal run
 //                  pre-marked), emergency history, VIP settings and holds, arrival settings, the 9 packages and 10 add-ons
 //                  with their checklists (the /inspection/i tasks dropped here, at seed time).
@@ -17,6 +18,7 @@ import '../../src/modules/catalog/schema.js'
 import '../../src/modules/customers/schema.js'
 import '../../src/modules/settings/schema.js'
 import type { SeedContext, SeedProfile } from './index.js'
+import { websiteCatalogProfile } from './website-catalog.js'
 
 // Catalog ---------------------------------------------------------------------------------------------------------
 
@@ -724,6 +726,8 @@ export const domainSeedProfiles: Record<string, SeedProfile> = {
       'Production reference data: default settings, the two bays, the packages and add-ons with their checklists; no closures, history, holds or customers',
     run: seedCatalogReference,
   },
+  // the website's services, prices and plans as the catalog (ADR 0160); run after `catalog` in production
+  'website-catalog': websiteCatalogProfile,
   base: {
     description:
       'Reference data every environment needs: roles and employees (people) plus the domain reference data',

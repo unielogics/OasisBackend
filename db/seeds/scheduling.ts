@@ -13,6 +13,7 @@
 // Invoices, tips, deposits and memberships belong to the Payments and Memberships verticals: PARITY_OPS_MONEY and
 // PARITY_OPS_MEMBERS describe what the design shows, for the tests and for those seeds to consume. Idempotent: a second
 // run inserts nothing (appointments are keyed by customer, start and package).
+import { refreshAllAppointmentCategories } from '../../src/modules/catalog/appointment-categories.js'
 import { sql } from 'kysely'
 import { PARITY_NOW } from '../../src/platform/clock.js'
 import { formatPhoneDisplay } from '../../src/platform/phone.js'
@@ -697,6 +698,8 @@ export async function seedParityOps(ctx: SeedContext): Promise<void> {
       .insertInto('appointments')
       .values(batch.slice(i, i + 200) as never)
       .execute()
+  // the categories every booking path keeps (ADR 0160): these rows bypass createAppointment
+  await refreshAllAppointmentCategories(tx, ctx.location.id)
   ctx.log(`parity-ops: ${made} design appointments, ${generated} procedural calendar appointments`)
   // Invoices and members of the design day (imported late: both files import this one for the design constants).
   const { seedParityOpsMoney } = await import('./scheduling-money.js')
