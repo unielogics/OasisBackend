@@ -19,7 +19,8 @@ const EXPECTED: [string, string, 'required' | undefined][] = [
 
 describe('the public website API contract', () => {
   it('declares exactly the expected public routes, each with a reason, and the idempotency the writes need', () => {
-    const registered = h.t.app.routeRegistry.filter((r) => r.url.startsWith('/api/v1/public/'))
+    // the personal-link routes (/api/v1/public/links/*, ADR 0160) have their own contract: test/public-links/contract.test.ts
+    const registered = h.t.app.routeRegistry.filter((r) => r.url.startsWith('/api/v1/public/') && !r.url.startsWith('/api/v1/public/links/'))
     expect(new Set(registered.map((r) => `${r.method} ${r.url}`))).toEqual(new Set(EXPECTED.map(([m, u]) => `${m} ${u}`)))
     for (const [method, url, idem] of EXPECTED) {
       const r = registered.find((x) => x.method === method && x.url === url)!

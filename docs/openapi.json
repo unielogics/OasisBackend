@@ -55942,6 +55942,3144 @@
         "x-oasis-access": "public"
       }
     },
+    "/api/v1/public/links/appointments/{ref}/reschedule": {
+      "post": {
+        "description": "Bearer session (`Authorization: Bearer <session>` from the exchange); no cookie. `ref` is a booking reference from `me.appointments` (`OAS-00042`): only the page’s own client’s visits (a calendar link sent for one visit: only that one), 404 `LINK_APPOINTMENT_NOT_FOUND` otherwise. A visit that started, ended or was canceled: 409 `LINK_CANT_RESCHEDULE`. The online rules apply (as for a booking, the page’s VIP privileges included) and the start is on the board’s grid; the client is texted the new time as for a desk reschedule. 403 `IDENTITY_STEP_UP_REQUIRED` until verified; 401 `LINK_WRONG_PURPOSE` on another kind of link. Limits: 10 an hour per address, 5 per number.",
+        "operationId": "rescheduleClientLinkAppointment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "pattern": "^OAS-\\d{1,9}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "date": {
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                    "type": "string"
+                  },
+                  "startMin": {
+                    "maximum": 1440,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "date",
+                  "startMin"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "bookingRef": {
+                      "type": "string"
+                    },
+                    "end": {
+                      "type": "string"
+                    },
+                    "start": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "when": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "bookingRef",
+                    "status",
+                    "start",
+                    "end",
+                    "when"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Move one of the client’s own upcoming visits (verified calendar page)",
+        "tags": [
+          "public-links"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
+    "/api/v1/public/links/availability": {
+      "get": {
+        "description": "Bearer session (`Authorization: Bearer <session>` from the exchange); no cookie. The website’s board (section 26.1, the same query) evaluated for this client: the VIP rules (VIP-held times, the VIP window) only when the page is verified and its client is a VIP client or an active member of the VIP plan, never during the 72 hours after a PIN reset (`vip` says which). `Cache-Control: no-store`. 401 `LINK_WRONG_PURPOSE` on another kind of link.",
+        "operationId": "getClientLinkAvailability",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "pattern": "^(?:[1-9]|1[0-4])$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "service",
+            "required": false,
+            "schema": {
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "addons",
+            "required": false,
+            "schema": {
+              "maxLength": 400,
+              "pattern": "^(?:[a-z0-9-]{1,80}(?:,[a-z0-9-]{1,80}){0,11})?$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "days": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "closed": {
+                            "type": "boolean"
+                          },
+                          "date": {
+                            "type": "string"
+                          },
+                          "dateLabel": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "openCount": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "reason": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "slots": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "bays": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "start": {
+                                  "type": "string"
+                                },
+                                "startMin": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "state": {
+                                  "enum": [
+                                    "open",
+                                    "last",
+                                    "vip",
+                                    "booked"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "startMin",
+                                "start",
+                                "state",
+                                "bays"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "weekday": {
+                            "maximum": 6,
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "date",
+                          "label",
+                          "dateLabel",
+                          "weekday",
+                          "closed",
+                          "reason",
+                          "openCount",
+                          "slots"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "durationMin": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "generatedAt": {
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+                      "type": "string"
+                    },
+                    "now": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "baysFree": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "baysTotal": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "open": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "open",
+                        "baysFree",
+                        "baysTotal"
+                      ],
+                      "type": "object"
+                    },
+                    "serviceKey": {
+                      "type": "string"
+                    },
+                    "tz": {
+                      "type": "string"
+                    },
+                    "vip": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "tz",
+                    "generatedAt",
+                    "serviceKey",
+                    "durationMin",
+                    "now",
+                    "days",
+                    "vip"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Open times for the page’s client (calendar and book-again links)",
+        "tags": [
+          "public-links"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
+    "/api/v1/public/links/bookings": {
+      "post": {
+        "description": "Bearer session (`Authorization: Bearer <session>` from the exchange); no cookie. Idempotency-Key required. 403 `IDENTITY_STEP_UP_REQUIRED` until the page is verified (a PIN or code here, or the number’s live 30-day trust); 401 `LINK_WRONG_PURPOSE` on another kind of link; 409 `IDENTITY_LINK_USED` once the link’s bookings are spent (calendar 3, book-again 1). Books through the dashboard’s createAppointment with channel `online` (lead time, windows, paused days, no overrides) and source `link`, on the board’s grid (422 otherwise), the categories of the package and add-ons, the invoice and the `booking_confirmed_web` text. The fee and the VIP rules follow the page’s own client (an active member: no fee; VIP client or VIP-plan member: the VIP rules), never during a PIN reset’s 72-hour hold. On a stranger’s link `name` is required and creates the client (source online, `smsConsent` their consent); on a client’s link `name` only fills a placeholder name and `email` only fills an empty one (never replaces the email on file, so a PIN reset’s notice still reaches the owner). Slot refusals in the website’s words (409 `PUBLIC_SLOT_TAKEN`, `PUBLIC_SLOT_VIP`, `PUBLIC_SLOT_PAST`, `PUBLIC_SLOT_CLOSED`, `PUBLIC_SLOT_TOO_FAR`). Limits: 10 an hour per address, 5 per link and 5 per number.",
+        "operationId": "createClientLinkBooking",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "addonKeys": {
+                    "default": [],
+                    "items": {
+                      "maxLength": 80,
+                      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                      "type": "string"
+                    },
+                    "maxItems": 12,
+                    "type": "array"
+                  },
+                  "date": {
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                    "type": "string"
+                  },
+                  "email": {
+                    "format": "email",
+                    "maxLength": 254,
+                    "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "Required on a stranger’s link; fills a name the shop does not have yet",
+                    "maxLength": 80,
+                    "type": "string"
+                  },
+                  "serviceKey": {
+                    "maxLength": 80,
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                    "type": "string"
+                  },
+                  "smsConsent": {
+                    "description": "A stranger’s consent to the texts about this booking",
+                    "type": "boolean"
+                  },
+                  "startMin": {
+                    "maximum": 1440,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "vehicle": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "color": {
+                        "maxLength": 30,
+                        "type": "string"
+                      },
+                      "label": {
+                        "maxLength": 80,
+                        "type": "string"
+                      },
+                      "make": {
+                        "maxLength": 40,
+                        "type": "string"
+                      },
+                      "model": {
+                        "maxLength": 60,
+                        "type": "string"
+                      },
+                      "plate": {
+                        "maxLength": 15,
+                        "type": "string"
+                      },
+                      "year": {
+                        "maximum": 2100,
+                        "minimum": 1900,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "serviceKey",
+                  "date",
+                  "startMin"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "addons": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "name"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "bayCount": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "bookingRef": {
+                      "type": "string"
+                    },
+                    "confirmationBy": {
+                      "enum": [
+                        "sms",
+                        "none"
+                      ],
+                      "type": "string"
+                    },
+                    "deposit": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "dueCents": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "how": {
+                          "enum": [
+                            "counter",
+                            "link"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "dueCents",
+                        "how"
+                      ],
+                      "type": "object"
+                    },
+                    "end": {
+                      "type": "string"
+                    },
+                    "member": {
+                      "type": "boolean"
+                    },
+                    "service": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "name"
+                      ],
+                      "type": "object"
+                    },
+                    "start": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "booked"
+                      ],
+                      "type": "string"
+                    },
+                    "when": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "bookingRef",
+                    "status",
+                    "start",
+                    "end",
+                    "deposit",
+                    "confirmationBy",
+                    "service",
+                    "addons",
+                    "when",
+                    "member",
+                    "bayCount"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Book a visit from a calendar or book-again link (verified page)",
+        "tags": [
+          "public-links"
+        ],
+        "x-oasis-access": "public",
+        "x-oasis-idempotency": "required"
+      }
+    },
+    "/api/v1/public/links/exchange": {
+      "post": {
+        "description": "The token is the 43-character value after `#/c/`, `#/m/`, `#/p/`, `#/pin/` or `#/v/`; it is sent only in this body and never logged. Opening uses nothing of the link. 401 `IDENTITY_LINK_INVALID` (`meta.reason` `not_found` | `expired` | `used` | `revoked`) for a token that is unknown, of another shape, expired, used up, superseded, revoked (STOP, a PIN or phone change, a links-epoch bump, staff) or past its exchanges. 30 exchanges per address every 10 minutes.",
+        "operationId": "exchangeClientLink",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "token": {
+                    "description": "The token from the link’s fragment (#/c/<token>): sent only here, never in a URL",
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "token"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "appointments": {
+                      "anyOf": [
+                        {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "addons": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "canReschedule": {
+                                "type": "boolean"
+                              },
+                              "end": {
+                                "type": "string"
+                              },
+                              "ref": {
+                                "type": "string"
+                              },
+                              "service": {
+                                "type": "string"
+                              },
+                              "start": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string"
+                              },
+                              "when": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "ref",
+                              "start",
+                              "end",
+                              "when",
+                              "service",
+                              "addons",
+                              "status",
+                              "canReschedule"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The client’s upcoming visits; null until the page is verified"
+                    },
+                    "client": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "firstName": {
+                          "description": "Empty for a stranger’s link, a name the shop does not have yet, or a record the stale-record rule hides",
+                          "type": "string"
+                        },
+                        "last2": {
+                          "description": "The last two digits of the number the link was texted to",
+                          "type": "string"
+                        },
+                        "tier": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "gold",
+                                "vip"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "firstName",
+                        "last2",
+                        "tier"
+                      ],
+                      "type": "object"
+                    },
+                    "expiresAt": {
+                      "description": "The session’s hard end (one hour after the exchange)",
+                      "type": "string"
+                    },
+                    "idleExpiresAt": {
+                      "description": "The session’s idle end (15 minutes after the last request)",
+                      "type": "string"
+                    },
+                    "invoice": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "balanceCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "date": {
+                              "type": "string"
+                            },
+                            "items": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "priceCents": {
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "priceCents"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "number": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "paidCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "subtotalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "tipCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "number",
+                            "date",
+                            "items",
+                            "subtotalCents",
+                            "taxCents",
+                            "tipCents",
+                            "totalCents",
+                            "paidCents",
+                            "balanceCents"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "kind": {
+                      "enum": [
+                        "calendar",
+                        "verify",
+                        "pin",
+                        "membership",
+                        "pay",
+                        "book_again"
+                      ],
+                      "type": "string"
+                    },
+                    "link": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "expiresAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "expiresAt"
+                      ],
+                      "type": "object"
+                    },
+                    "plan": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "monthlyPriceCents": {
+                              "anyOf": [
+                                {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "perks": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "planKey": {
+                              "type": "string"
+                            },
+                            "tier": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "gold",
+                                    "vip"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "tier",
+                            "planKey",
+                            "name",
+                            "monthlyPriceCents",
+                            "perks"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "session": {
+                      "description": "The bearer token of the page: keep it in memory and send it as Authorization: Bearer <session>",
+                      "type": "string"
+                    },
+                    "stepUp": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "canSetPinUntil": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "A code confirmed here lets the page choose a PIN (or a new one after a reset code) until then"
+                        },
+                        "freshUntil": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Memberships and payments need a PIN or code entered here; until then the last one counts"
+                        },
+                        "method": {
+                          "description": "pin: the client has a PIN (enter it, or reset it with a code); code: a texted code",
+                          "enum": [
+                            "pin",
+                            "code"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "method",
+                        "freshUntil",
+                        "canSetPinUntil"
+                      ],
+                      "type": "object"
+                    },
+                    "trust": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "by": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "pin",
+                                "code"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "until": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The end of the number’s 30-day trust, when it has one"
+                        },
+                        "verified": {
+                          "description": "This page is verified: by a PIN or code entered here, or by the number’s live 30-day trust",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "verified",
+                        "by",
+                        "until"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "expiresAt",
+                    "idleExpiresAt",
+                    "link",
+                    "client",
+                    "trust",
+                    "stepUp",
+                    "appointments",
+                    "invoice",
+                    "plan",
+                    "session"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Open a personal link: the token for a bearer session and what the page may show",
+        "tags": [
+          "public-links"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
+    "/api/v1/public/links/me": {
+      "get": {
+        "description": "Bearer session (`Authorization: Bearer <session>` from the exchange); no cookie. 401 `IDENTITY_SESSION_INVALID` for a session that is unknown, idle, past its hour, locked after five wrong entries, or whose link died.",
+        "operationId": "getClientLinkState",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "appointments": {
+                      "anyOf": [
+                        {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "addons": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "canReschedule": {
+                                "type": "boolean"
+                              },
+                              "end": {
+                                "type": "string"
+                              },
+                              "ref": {
+                                "type": "string"
+                              },
+                              "service": {
+                                "type": "string"
+                              },
+                              "start": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string"
+                              },
+                              "when": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "ref",
+                              "start",
+                              "end",
+                              "when",
+                              "service",
+                              "addons",
+                              "status",
+                              "canReschedule"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The client’s upcoming visits; null until the page is verified"
+                    },
+                    "client": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "firstName": {
+                          "description": "Empty for a stranger’s link, a name the shop does not have yet, or a record the stale-record rule hides",
+                          "type": "string"
+                        },
+                        "last2": {
+                          "description": "The last two digits of the number the link was texted to",
+                          "type": "string"
+                        },
+                        "tier": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "gold",
+                                "vip"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "firstName",
+                        "last2",
+                        "tier"
+                      ],
+                      "type": "object"
+                    },
+                    "expiresAt": {
+                      "description": "The session’s hard end (one hour after the exchange)",
+                      "type": "string"
+                    },
+                    "idleExpiresAt": {
+                      "description": "The session’s idle end (15 minutes after the last request)",
+                      "type": "string"
+                    },
+                    "invoice": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "balanceCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "date": {
+                              "type": "string"
+                            },
+                            "items": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "priceCents": {
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "priceCents"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "number": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "paidCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "subtotalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "tipCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "number",
+                            "date",
+                            "items",
+                            "subtotalCents",
+                            "taxCents",
+                            "tipCents",
+                            "totalCents",
+                            "paidCents",
+                            "balanceCents"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "kind": {
+                      "enum": [
+                        "calendar",
+                        "verify",
+                        "pin",
+                        "membership",
+                        "pay",
+                        "book_again"
+                      ],
+                      "type": "string"
+                    },
+                    "link": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "expiresAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "expiresAt"
+                      ],
+                      "type": "object"
+                    },
+                    "plan": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "monthlyPriceCents": {
+                              "anyOf": [
+                                {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "perks": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "planKey": {
+                              "type": "string"
+                            },
+                            "tier": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "gold",
+                                    "vip"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "tier",
+                            "planKey",
+                            "name",
+                            "monthlyPriceCents",
+                            "perks"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "stepUp": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "canSetPinUntil": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "A code confirmed here lets the page choose a PIN (or a new one after a reset code) until then"
+                        },
+                        "freshUntil": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Memberships and payments need a PIN or code entered here; until then the last one counts"
+                        },
+                        "method": {
+                          "description": "pin: the client has a PIN (enter it, or reset it with a code); code: a texted code",
+                          "enum": [
+                            "pin",
+                            "code"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "method",
+                        "freshUntil",
+                        "canSetPinUntil"
+                      ],
+                      "type": "object"
+                    },
+                    "trust": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "by": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "pin",
+                                "code"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "until": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The end of the number’s 30-day trust, when it has one"
+                        },
+                        "verified": {
+                          "description": "This page is verified: by a PIN or code entered here, or by the number’s live 30-day trust",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "verified",
+                        "by",
+                        "until"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "expiresAt",
+                    "idleExpiresAt",
+                    "link",
+                    "client",
+                    "trust",
+                    "stepUp",
+                    "appointments",
+                    "invoice",
+                    "plan"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "The page’s state (slides the 15-minute idle window)",
+        "tags": [
+          "public-links"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
+    "/api/v1/public/links/membership/start": {
+      "post": {
+        "description": "Bearer session (`Authorization: Bearer <session>` from the exchange); no cookie. Needs a PIN or code entered on this page in the last 5 minutes (403 `IDENTITY_STEP_UP_REQUIRED`, `meta.need` `fresh`); 403 `LINK_PRIVILEGES_HELD` within 72 hours of a PIN reset; 401 `LINK_WRONG_PURPOSE` on another kind of link. A pending membership of the link’s plan (reused when one is pending) and a checkout intent: the typed `email` (the one they will pay with), the plan’s Squarespace product, 72 hours. The email is never stored as the client’s verified email (an unverified email never links an order by itself). `vehicles` are added to the client. 409 `LINK_ALREADY_MEMBER` for a live membership, 409 `LINK_CHECKOUT_UNAVAILABLE` when the plan has no checkout link. `redirectUrl` is the plan’s checkout (https, squarespace.com only). One completion of the link (3). Limits: 10 an hour per address, 5 a day per number.",
+        "operationId": "startClientLinkMembership",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "email": {
+                    "description": "The email the client will pay with at Squarespace",
+                    "format": "email",
+                    "maxLength": 254,
+                    "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+                    "type": "string"
+                  },
+                  "vehicles": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "car": {
+                          "maxLength": 80,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "plate": {
+                          "maxLength": 15,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "car"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 5,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "email"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "checkoutExpiresAt": {
+                      "type": "string"
+                    },
+                    "membershipRef": {
+                      "type": "string"
+                    },
+                    "redirectUrl": {
+                      "description": "The plan’s Squarespace checkout (https, squarespace.com only)",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "redirectUrl",
+                    "membershipRef",
+                    "checkoutExpiresAt"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Start the plan’s Squarespace checkout (membership link, fresh PIN or code)",
+        "tags": [
+          "public-links"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
+    "/api/v1/public/links/pay/start": {
+      "post": {
+        "description": "Bearer session (`Authorization: Bearer <session>` from the exchange); no cookie. Needs a PIN or code entered on this page in the last 5 minutes (403 `IDENTITY_STEP_UP_REQUIRED`); 403 `LINK_PRIVILEGES_HELD` within 72 hours of a PIN reset; 401 `LINK_WRONG_PURPOSE` on another kind of link; a paid or voided invoice has ended the page already (401 `IDENTITY_SESSION_INVALID`). `{status: \"redirect\", redirectUrl}`: the payment URL staff attached to the invoice, only https on a `PAYMENT_LINK_HOSTS` host (default squarespace.com); one completion of the link (3). `{status: \"link_pending\", redirectUrl: null}`: the invoice has no allowed URL; the managers get one `payments.link_requested` notice (until they read it) to text the client a payment link. Limits: 20 an hour per address, 10 per number.",
+        "operationId": "startClientLinkPayment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "redirectUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The invoice’s payment URL (https on an allowed host only); null when link_pending"
+                    },
+                    "status": {
+                      "description": "redirect: go to redirectUrl; link_pending: the shop will text a payment link",
+                      "enum": [
+                        "redirect",
+                        "link_pending"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "redirectUrl"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Pay the invoice (payment link, fresh PIN or code)",
+        "tags": [
+          "public-links"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
+    "/api/v1/public/links/pin": {
+      "post": {
+        "description": "Bearer session (`Authorization: Bearer <session>` from the exchange); no cookie. 4 to 6 digits; refused (422 `IDENTITY_PIN_REJECTED` with the reason): one digit repeated, a run like 1234, a common PIN, a year 1940-2015, the end of the client’s own number. 403 `IDENTITY_CODE_REQUIRED` without a code confirmed on this page in the last 10 minutes, 409 `IDENTITY_PIN_EXISTS` when a PIN is set, 409 `IDENTITY_UNKNOWN_CLIENT` on a stranger’s link. Every other link and page of the client stops working (this one is kept). A PIN link is used up by it.",
+        "operationId": "setClientLinkPin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "pin": {
+                    "maxLength": 12,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "pin"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "appointments": {
+                      "anyOf": [
+                        {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "addons": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "canReschedule": {
+                                "type": "boolean"
+                              },
+                              "end": {
+                                "type": "string"
+                              },
+                              "ref": {
+                                "type": "string"
+                              },
+                              "service": {
+                                "type": "string"
+                              },
+                              "start": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string"
+                              },
+                              "when": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "ref",
+                              "start",
+                              "end",
+                              "when",
+                              "service",
+                              "addons",
+                              "status",
+                              "canReschedule"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The client’s upcoming visits; null until the page is verified"
+                    },
+                    "client": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "firstName": {
+                          "description": "Empty for a stranger’s link, a name the shop does not have yet, or a record the stale-record rule hides",
+                          "type": "string"
+                        },
+                        "last2": {
+                          "description": "The last two digits of the number the link was texted to",
+                          "type": "string"
+                        },
+                        "tier": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "gold",
+                                "vip"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "firstName",
+                        "last2",
+                        "tier"
+                      ],
+                      "type": "object"
+                    },
+                    "expiresAt": {
+                      "description": "The session’s hard end (one hour after the exchange)",
+                      "type": "string"
+                    },
+                    "idleExpiresAt": {
+                      "description": "The session’s idle end (15 minutes after the last request)",
+                      "type": "string"
+                    },
+                    "invoice": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "balanceCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "date": {
+                              "type": "string"
+                            },
+                            "items": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "priceCents": {
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "priceCents"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "number": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "paidCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "subtotalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "tipCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "number",
+                            "date",
+                            "items",
+                            "subtotalCents",
+                            "taxCents",
+                            "tipCents",
+                            "totalCents",
+                            "paidCents",
+                            "balanceCents"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "kind": {
+                      "enum": [
+                        "calendar",
+                        "verify",
+                        "pin",
+                        "membership",
+                        "pay",
+                        "book_again"
+                      ],
+                      "type": "string"
+                    },
+                    "link": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "expiresAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "expiresAt"
+                      ],
+                      "type": "object"
+                    },
+                    "plan": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "monthlyPriceCents": {
+                              "anyOf": [
+                                {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "perks": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "planKey": {
+                              "type": "string"
+                            },
+                            "tier": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "gold",
+                                    "vip"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "tier",
+                            "planKey",
+                            "name",
+                            "monthlyPriceCents",
+                            "perks"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "stepUp": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "canSetPinUntil": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "A code confirmed here lets the page choose a PIN (or a new one after a reset code) until then"
+                        },
+                        "freshUntil": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Memberships and payments need a PIN or code entered here; until then the last one counts"
+                        },
+                        "method": {
+                          "description": "pin: the client has a PIN (enter it, or reset it with a code); code: a texted code",
+                          "enum": [
+                            "pin",
+                            "code"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "method",
+                        "freshUntil",
+                        "canSetPinUntil"
+                      ],
+                      "type": "object"
+                    },
+                    "trust": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "by": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "pin",
+                                "code"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "until": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The end of the number’s 30-day trust, when it has one"
+                        },
+                        "verified": {
+                          "description": "This page is verified: by a PIN or code entered here, or by the number’s live 30-day trust",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "verified",
+                        "by",
+                        "until"
+                      ],
+                      "type": "object"
+                    },
+                    "verified": {
+                      "description": "This step verified the page (a pin_reset code verifies nothing by itself)",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "expiresAt",
+                    "idleExpiresAt",
+                    "link",
+                    "client",
+                    "trust",
+                    "stepUp",
+                    "appointments",
+                    "invoice",
+                    "plan",
+                    "verified"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Choose a first PIN (after a code confirmed here within 10 minutes)",
+        "tags": [
+          "public-links"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
+    "/api/v1/public/links/pin/reset": {
+      "post": {
+        "description": "Bearer session (`Authorization: Bearer <session>` from the exchange); no cookie. The same PIN rules as above. 403 `IDENTITY_CODE_REQUIRED` without a `pin_reset` code confirmed on this page in the last 10 minutes, 409 `IDENTITY_PIN_NOT_SET` without a PIN. Every other link, page and the number’s trust end; this page is verified by the code and the number trusted again; memberships and payments through links wait 72 hours (403 `LINK_PRIVILEGES_HELD`), the client is emailed (when an address is on file) and the managers notified.",
+        "operationId": "resetClientLinkPin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "pin": {
+                    "maxLength": 12,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "pin"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "appointments": {
+                      "anyOf": [
+                        {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "addons": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "canReschedule": {
+                                "type": "boolean"
+                              },
+                              "end": {
+                                "type": "string"
+                              },
+                              "ref": {
+                                "type": "string"
+                              },
+                              "service": {
+                                "type": "string"
+                              },
+                              "start": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string"
+                              },
+                              "when": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "ref",
+                              "start",
+                              "end",
+                              "when",
+                              "service",
+                              "addons",
+                              "status",
+                              "canReschedule"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The client’s upcoming visits; null until the page is verified"
+                    },
+                    "client": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "firstName": {
+                          "description": "Empty for a stranger’s link, a name the shop does not have yet, or a record the stale-record rule hides",
+                          "type": "string"
+                        },
+                        "last2": {
+                          "description": "The last two digits of the number the link was texted to",
+                          "type": "string"
+                        },
+                        "tier": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "gold",
+                                "vip"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "firstName",
+                        "last2",
+                        "tier"
+                      ],
+                      "type": "object"
+                    },
+                    "expiresAt": {
+                      "description": "The session’s hard end (one hour after the exchange)",
+                      "type": "string"
+                    },
+                    "idleExpiresAt": {
+                      "description": "The session’s idle end (15 minutes after the last request)",
+                      "type": "string"
+                    },
+                    "invoice": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "balanceCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "date": {
+                              "type": "string"
+                            },
+                            "items": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "priceCents": {
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "priceCents"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "number": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "paidCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "subtotalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "tipCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "number",
+                            "date",
+                            "items",
+                            "subtotalCents",
+                            "taxCents",
+                            "tipCents",
+                            "totalCents",
+                            "paidCents",
+                            "balanceCents"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "kind": {
+                      "enum": [
+                        "calendar",
+                        "verify",
+                        "pin",
+                        "membership",
+                        "pay",
+                        "book_again"
+                      ],
+                      "type": "string"
+                    },
+                    "link": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "expiresAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "expiresAt"
+                      ],
+                      "type": "object"
+                    },
+                    "plan": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "monthlyPriceCents": {
+                              "anyOf": [
+                                {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "perks": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "planKey": {
+                              "type": "string"
+                            },
+                            "tier": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "gold",
+                                    "vip"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "tier",
+                            "planKey",
+                            "name",
+                            "monthlyPriceCents",
+                            "perks"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "stepUp": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "canSetPinUntil": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "A code confirmed here lets the page choose a PIN (or a new one after a reset code) until then"
+                        },
+                        "freshUntil": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Memberships and payments need a PIN or code entered here; until then the last one counts"
+                        },
+                        "method": {
+                          "description": "pin: the client has a PIN (enter it, or reset it with a code); code: a texted code",
+                          "enum": [
+                            "pin",
+                            "code"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "method",
+                        "freshUntil",
+                        "canSetPinUntil"
+                      ],
+                      "type": "object"
+                    },
+                    "trust": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "by": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "pin",
+                                "code"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "until": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The end of the number’s 30-day trust, when it has one"
+                        },
+                        "verified": {
+                          "description": "This page is verified: by a PIN or code entered here, or by the number’s live 30-day trust",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "verified",
+                        "by",
+                        "until"
+                      ],
+                      "type": "object"
+                    },
+                    "verified": {
+                      "description": "This step verified the page (a pin_reset code verifies nothing by itself)",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "expiresAt",
+                    "idleExpiresAt",
+                    "link",
+                    "client",
+                    "trust",
+                    "stepUp",
+                    "appointments",
+                    "invoice",
+                    "plan",
+                    "verified"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Choose a new PIN (after a pin_reset code confirmed here within 10 minutes)",
+        "tags": [
+          "public-links"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
+    "/api/v1/public/links/verify/code": {
+      "post": {
+        "description": "Bearer session (`Authorization: Bearer <session>` from the exchange); no cookie. The six-digit code (10 minutes, 3 tries) goes to the number the link was texted to and nowhere else: the body takes no number, and a `phone` sent with it is ignored. `verify` is refused once the client has a PIN (409 `IDENTITY_PIN_REQUIRED`: a PIN outranks a code); `pin_set` needs no PIN yet (409 `IDENTITY_PIN_EXISTS`), `pin_reset` a PIN (409 `IDENTITY_PIN_NOT_SET`); a PIN purpose on a stranger’s link 409 `IDENTITY_UNKNOWN_CLIENT`. Limits: 10 per address, 3 per page and 5 per number every 10 minutes (429 `PUBLIC_RATE_LIMITED`), and the website’s shared `PUBLIC_OTP_TEXTS_PER_HOUR` ceiling (429 `PUBLIC_CODES_PAUSED`).",
+        "operationId": "requestClientLinkCode",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "purpose": {
+                    "default": "verify",
+                    "description": "verify: confirm the page (refused once a PIN exists); pin_set: confirm, then choose a first PIN; pin_reset: replace a forgotten PIN",
+                    "enum": [
+                      "verify",
+                      "pin_set",
+                      "pin_reset"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "challengeId": {
+                      "type": "string"
+                    },
+                    "expiresInSec": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "purpose": {
+                      "enum": [
+                        "verify",
+                        "pin_set",
+                        "pin_reset"
+                      ],
+                      "type": "string"
+                    },
+                    "to": {
+                      "description": "The last two digits of the number the code was texted to",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "challengeId",
+                    "expiresInSec",
+                    "purpose",
+                    "to"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Text a code to the link’s own number",
+        "tags": [
+          "public-links"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
+    "/api/v1/public/links/verify/code/confirm": {
+      "post": {
+        "description": "Bearer session (`Authorization: Bearer <session>` from the exchange); no cookie. A `verify` or `pin_set` code verifies the page by code and trusts the number 30 days (a client’s link), and opens 10 minutes to choose a PIN; a `pin_reset` code only opens the 10 minutes to choose a new PIN (`verified` false). A verify link is used up by the step that verified it. 401 `PUBLIC_OTP_INVALID` (`meta.attemptsLeft`), 429 `PUBLIC_OTP_LOCKED` after the code’s third wrong try, 429 `IDENTITY_SESSION_LOCKED` after the page’s fifth wrong PIN or code, 410 `PUBLIC_OTP_EXPIRED` for an expired, used or another page’s code, 409 `IDENTITY_PIN_REQUIRED` when a PIN was set meanwhile. 30 per address every 10 minutes.",
+        "operationId": "confirmClientLinkCode",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "challengeId": {
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+                    "type": "string"
+                  },
+                  "code": {
+                    "maxLength": 12,
+                    "minLength": 4,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "challengeId",
+                  "code"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "appointments": {
+                      "anyOf": [
+                        {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "addons": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "canReschedule": {
+                                "type": "boolean"
+                              },
+                              "end": {
+                                "type": "string"
+                              },
+                              "ref": {
+                                "type": "string"
+                              },
+                              "service": {
+                                "type": "string"
+                              },
+                              "start": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string"
+                              },
+                              "when": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "ref",
+                              "start",
+                              "end",
+                              "when",
+                              "service",
+                              "addons",
+                              "status",
+                              "canReschedule"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The client’s upcoming visits; null until the page is verified"
+                    },
+                    "client": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "firstName": {
+                          "description": "Empty for a stranger’s link, a name the shop does not have yet, or a record the stale-record rule hides",
+                          "type": "string"
+                        },
+                        "last2": {
+                          "description": "The last two digits of the number the link was texted to",
+                          "type": "string"
+                        },
+                        "tier": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "gold",
+                                "vip"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "firstName",
+                        "last2",
+                        "tier"
+                      ],
+                      "type": "object"
+                    },
+                    "expiresAt": {
+                      "description": "The session’s hard end (one hour after the exchange)",
+                      "type": "string"
+                    },
+                    "idleExpiresAt": {
+                      "description": "The session’s idle end (15 minutes after the last request)",
+                      "type": "string"
+                    },
+                    "invoice": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "balanceCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "date": {
+                              "type": "string"
+                            },
+                            "items": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "priceCents": {
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "priceCents"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "number": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "paidCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "subtotalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "tipCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "number",
+                            "date",
+                            "items",
+                            "subtotalCents",
+                            "taxCents",
+                            "tipCents",
+                            "totalCents",
+                            "paidCents",
+                            "balanceCents"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "kind": {
+                      "enum": [
+                        "calendar",
+                        "verify",
+                        "pin",
+                        "membership",
+                        "pay",
+                        "book_again"
+                      ],
+                      "type": "string"
+                    },
+                    "link": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "expiresAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "expiresAt"
+                      ],
+                      "type": "object"
+                    },
+                    "plan": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "monthlyPriceCents": {
+                              "anyOf": [
+                                {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "perks": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "planKey": {
+                              "type": "string"
+                            },
+                            "tier": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "gold",
+                                    "vip"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "tier",
+                            "planKey",
+                            "name",
+                            "monthlyPriceCents",
+                            "perks"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "stepUp": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "canSetPinUntil": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "A code confirmed here lets the page choose a PIN (or a new one after a reset code) until then"
+                        },
+                        "freshUntil": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Memberships and payments need a PIN or code entered here; until then the last one counts"
+                        },
+                        "method": {
+                          "description": "pin: the client has a PIN (enter it, or reset it with a code); code: a texted code",
+                          "enum": [
+                            "pin",
+                            "code"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "method",
+                        "freshUntil",
+                        "canSetPinUntil"
+                      ],
+                      "type": "object"
+                    },
+                    "trust": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "by": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "pin",
+                                "code"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "until": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The end of the number’s 30-day trust, when it has one"
+                        },
+                        "verified": {
+                          "description": "This page is verified: by a PIN or code entered here, or by the number’s live 30-day trust",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "verified",
+                        "by",
+                        "until"
+                      ],
+                      "type": "object"
+                    },
+                    "verified": {
+                      "description": "This step verified the page (a pin_reset code verifies nothing by itself)",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "expiresAt",
+                    "idleExpiresAt",
+                    "link",
+                    "client",
+                    "trust",
+                    "stepUp",
+                    "appointments",
+                    "invoice",
+                    "plan",
+                    "verified"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Confirm the texted code",
+        "tags": [
+          "public-links"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
+    "/api/v1/public/links/verify/pin": {
+      "post": {
+        "description": "Bearer session (`Authorization: Bearer <session>` from the exchange); no cookie. A right PIN verifies the page by PIN (a fresh step-up for memberships and payments) and trusts the number 30 days. A wrong PIN and a PIN where none exists answer alike: 401 `IDENTITY_PIN_INVALID` (`meta.attemptsLeft` of the page), after the same work. 429 `IDENTITY_SESSION_LOCKED` (the page’s fifth wrong entry), 429 `IDENTITY_PIN_LOCKED` with Retry-After (5 wrong: 15 minutes, 3 more: 1 hour; 10 wrong in 24 hours), 423 `IDENTITY_PIN_DISABLED` (3 more: until a reset; staff are told), 429 `IDENTITY_TOO_MANY_TRIES` (20 wrong an hour from one address). 30 per address every 10 minutes.",
+        "operationId": "verifyClientLinkPin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "pin": {
+                    "maxLength": 12,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "pin"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "appointments": {
+                      "anyOf": [
+                        {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "addons": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "canReschedule": {
+                                "type": "boolean"
+                              },
+                              "end": {
+                                "type": "string"
+                              },
+                              "ref": {
+                                "type": "string"
+                              },
+                              "service": {
+                                "type": "string"
+                              },
+                              "start": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string"
+                              },
+                              "when": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "ref",
+                              "start",
+                              "end",
+                              "when",
+                              "service",
+                              "addons",
+                              "status",
+                              "canReschedule"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The client’s upcoming visits; null until the page is verified"
+                    },
+                    "client": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "firstName": {
+                          "description": "Empty for a stranger’s link, a name the shop does not have yet, or a record the stale-record rule hides",
+                          "type": "string"
+                        },
+                        "last2": {
+                          "description": "The last two digits of the number the link was texted to",
+                          "type": "string"
+                        },
+                        "tier": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "gold",
+                                "vip"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "firstName",
+                        "last2",
+                        "tier"
+                      ],
+                      "type": "object"
+                    },
+                    "expiresAt": {
+                      "description": "The session’s hard end (one hour after the exchange)",
+                      "type": "string"
+                    },
+                    "idleExpiresAt": {
+                      "description": "The session’s idle end (15 minutes after the last request)",
+                      "type": "string"
+                    },
+                    "invoice": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "balanceCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "date": {
+                              "type": "string"
+                            },
+                            "items": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "priceCents": {
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "priceCents"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "number": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "paidCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "subtotalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "tipCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "totalCents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "number",
+                            "date",
+                            "items",
+                            "subtotalCents",
+                            "taxCents",
+                            "tipCents",
+                            "totalCents",
+                            "paidCents",
+                            "balanceCents"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "kind": {
+                      "enum": [
+                        "calendar",
+                        "verify",
+                        "pin",
+                        "membership",
+                        "pay",
+                        "book_again"
+                      ],
+                      "type": "string"
+                    },
+                    "link": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "expiresAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "expiresAt"
+                      ],
+                      "type": "object"
+                    },
+                    "plan": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "monthlyPriceCents": {
+                              "anyOf": [
+                                {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "perks": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "planKey": {
+                              "type": "string"
+                            },
+                            "tier": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "gold",
+                                    "vip"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "tier",
+                            "planKey",
+                            "name",
+                            "monthlyPriceCents",
+                            "perks"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "stepUp": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "canSetPinUntil": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "A code confirmed here lets the page choose a PIN (or a new one after a reset code) until then"
+                        },
+                        "freshUntil": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Memberships and payments need a PIN or code entered here; until then the last one counts"
+                        },
+                        "method": {
+                          "description": "pin: the client has a PIN (enter it, or reset it with a code); code: a texted code",
+                          "enum": [
+                            "pin",
+                            "code"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "method",
+                        "freshUntil",
+                        "canSetPinUntil"
+                      ],
+                      "type": "object"
+                    },
+                    "trust": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "by": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "pin",
+                                "code"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "until": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The end of the number’s 30-day trust, when it has one"
+                        },
+                        "verified": {
+                          "description": "This page is verified: by a PIN or code entered here, or by the number’s live 30-day trust",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "verified",
+                        "by",
+                        "until"
+                      ],
+                      "type": "object"
+                    },
+                    "verified": {
+                      "description": "This step verified the page (a pin_reset code verifies nothing by itself)",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "expiresAt",
+                    "idleExpiresAt",
+                    "link",
+                    "client",
+                    "trust",
+                    "stepUp",
+                    "appointments",
+                    "invoice",
+                    "plan",
+                    "verified"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Enter the PIN",
+        "tags": [
+          "public-links"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
     "/api/v1/public/memberships": {
       "post": {
         "description": "No session; Idempotency-Key required. A new number: the customer, their vehicles and a membership in the pending state tied to the tier’s Squarespace product (when the product map has none the membership still waits and an alert is raised); staff get a notification asking them to text the checkout link; the person gets a welcome text saying so. The membership activates when the Squarespace sync sees the paid order. The number of a customer the shop already has, without a member token issued for that customer: the same 201, nothing written to the record and no text; staff get the request to confirm with the customer. With the token: the full path, and 409 PUBLIC_ALREADY_MEMBER for a live membership. 422 on validation; 429 over 10 an hour per address, 2 a day per number from one address or 3 a day per number.",

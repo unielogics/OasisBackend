@@ -212,6 +212,22 @@ describe('install.sh --site-domain: the rendered website', () => {
       expect(find(l.body, 'proxy_hide_header').map((h) => h.args[0]), uri).toContain('Set-Cookie')
       expect(find(l.body, 'proxy_ignore_headers')[0]!.args, uri).toEqual(['Set-Cookie'])
     }
+    // the personal-link pages' API (ADR 0160): its own location and zone, never cached, no-store on every answer, no cookies, the
+    // page's bearer session (Authorization) passed through untouched
+    for (const uri of ['/api/v1/public/links/exchange', '/api/v1/public/links/me', '/api/v1/public/links/pay/start']) {
+      const l = at(uri)
+      expect(`${l.modifier} ${l.pattern}`, uri).toBe('^~ /api/v1/public/links/')
+      expect(proxied(uri), uri).toBe('http://oasis_api')
+      expect(find(l.body, 'proxy_cache').map((d) => d.args), uri).toEqual([['off']])
+      expect(find(l.body, 'limit_req')[0]!.args, uri).toEqual(['zone=oasis_public_links', 'burst=20', 'nodelay'])
+      expect(find(l.body, 'client_max_body_size')[0]!.args, uri).toEqual(['4k'])
+      expect(cache(uri), uri).toBe('no-store')
+      expect(find(l.body, 'proxy_hide_header').map((h) => h.args[0]), uri).toEqual(expect.arrayContaining(['Set-Cookie', 'Cache-Control']))
+      expect(find(l.body, 'proxy_set_header').map((h) => h.args.join(' ')), uri).toContain('Cookie ')
+      expect(find(l.body, 'proxy_set_header').map((h) => h.args[0]), uri).not.toContain('Authorization')
+    }
+    const links = locationsOf(apex()).find((x) => x.pattern === '/api/v1/public/links/' && x.modifier === '^~')!
+    expect(find(links.body, 'include').map((i) => i.args[0])).toEqual(['/etc/nginx/oasis/proxy.conf'])
     const post = locationsOf(apex()).find((x) => x.pattern === '/api/v1/public/' && x.modifier === '^~')!
     expect(find(post.body, 'include').map((i) => i.args[0])).toEqual(['/etc/nginx/oasis/proxy.conf'])
 
@@ -270,7 +286,7 @@ describe('install.sh --site-domain: the rendered website', () => {
         apexLocs().flatMap((l) => l.body),
         'proxy_pass',
       ).map((p) => p.args[0]),
-    ).toEqual(['http://oasis_api', 'http://oasis_api', 'http://oasis_api', 'http://oasis_api'])
+    ).toEqual(['http://oasis_api', 'http://oasis_api', 'http://oasis_api', 'http://oasis_api', 'http://oasis_api'])
   })
 
   it('shares the TLS file with the dashboard, defines the cache and zones it uses, and every include exists', () => {
@@ -702,6 +718,7 @@ describe.skipIf(!NGINX)('the website in a real nginx', () => {
           const idem = req.headers['idempotency-key']
           hits.push(
             `${req.method} ${req.url} cookie=${req.headers.cookie ?? 'none'}` +
+              (req.url?.startsWith('/api/v1/public/links/') ? ` auth=${req.headers.authorization ?? 'none'}` : '') +
               (req.method === 'POST' ? ` idem=${typeof idem === 'string' ? idem : 'none'} body=${body}` : ''),
           )
         })
@@ -879,6 +896,30 @@ describe.skipIf(!NGINX)('the website in a real nginx', () => {
       expect((await get(`${site}${uri}`, args)).status, uri).toBe(200)
       expect(hits[0], uri).toMatch(new RegExp(`^POST ${uri.replace(/\//g, '\\/')} cookie=none`))
     }
+
+    // the personal-link API: passed through every time with the bearer header, never cached, one no-store, no cookie either way
+    hits.length = 0
+    const linkArgs = ['-X', 'POST', '-H', 'Content-Type: application/json', '-H', 'Cookie: oasis_sid=visitor-cookie', '-d', '{"token":"t0k3n"}']
+    for (let i = 0; i < 2; i++) {
+      const ex = await get(`${site}/api/v1/public/links/exchange`, linkArgs)
+      expect(ex.status).toBe(200)
+      expect(ex.header('cache-control')).toEqual(['no-store'])
+      expect(ex.header('x-cache-status')).toEqual([])
+      expect(ex.header('set-cookie')).toEqual([])
+      once(ex, 'POST links/exchange')
+    }
+    const me = await get(`${site}/api/v1/public/links/me`, ['-H', 'Authorization: Bearer page-session'])
+    expect(me.status).toBe(200)
+    expect(me.header('cache-control')).toEqual(['no-store'])
+    expect(hits).toEqual([
+      'POST /api/v1/public/links/exchange cookie=none auth=none idem=none body={"token":"t0k3n"}',
+      'POST /api/v1/public/links/exchange cookie=none auth=none idem=none body={"token":"t0k3n"}',
+      'GET /api/v1/public/links/me cookie=none auth=Bearer page-session',
+    ])
+    const big = await get(`${site}/api/v1/public/links/exchange`, ['-X', 'POST', '-H', 'Content-Type: application/json', '-d', `{"token":"${'x'.repeat(5000)}"}`])
+    expect(big.status).toBe(413)
+    expect(big.header('cache-control')).toEqual(['no-store'])
+    once(big, '413 links')
 
     hits.length = 0
     for (const uri of [

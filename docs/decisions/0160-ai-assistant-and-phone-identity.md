@@ -325,3 +325,59 @@ action switches), the follow-up job does nothing while they or `leads.follow_up_
   while a follow-up without a link (links off) stays readable instead of "[link sent privately]".
 - **Jobs registered here**: `leads.follow_up` (every 5 minutes) and `leads.provisional_archive` are in `job-registry.ts` (built from the
   job context like the messaging jobs); W3a must not register `createLeadJobs(deps)` a second time.
+
+## Wave W3c: the personal-link API
+
+`/api/v1/public/links/*` (api-spec section 28, the contract the website builds against), in `src/modules/public/links/**` on the
+identity core of W2b and the checkout intents of W2e, registered in `src/http/modules.ts` with the website's wiring. Migration
+`20261012030000_link_bookings.sql` (appointment source `link`). nginx: `location ^~ /api/v1/public/links/` on both hosts, zone
+`oasis_public_links` (60 a minute per address, a burst of 20), 4k bodies, nothing cached, `Cache-Control: no-store` on every answer
+(nginx replaces the upstream's), no cookie either way, the bearer header passed through (the access log has no header field). Off by
+default: every route answers the unknown-route 404 while `PUBLIC_LINKS_ENABLED` is false, and the identity services (and so
+`PIN_PEPPER`) are only built on the first call once it is true. Notes on the design:
+
+- **Wrong purpose is 401** (design section 10): a page asking for another kind of link's action is 401 `LINK_WRONG_PURPOSE`, like a
+  dead link, so a page never shows a half-working form. A session token used as a link token, or a link token as a session, is 401
+  too (`IDENTITY_LINK_INVALID` / `IDENTITY_SESSION_INVALID`).
+- **The gate and the Origin**: the 404 comes before validation, limits, the session and any record; only the platform's own Origin
+  check of every public POST (src/http/hooks.ts) runs before it, so a POST from a disallowed Origin is 403 even while the routes are
+  closed. The allowlist is also applied to the GETs (`me`, `availability`) when an Origin is sent. The closed answer also drops the
+  `X-API-Version` header the platform sets on matched `/api/` routes, so its headers equal an unknown route's (tested header by
+  header apart from date, request id, length and the shared address counter).
+- **CSP-safe JSON**: besides the API's `default-src 'none'` CSP and nosniff, the link routes send `<`, `>` and `&` inside JSON as
+  `<`, `>`, `&`, so a client's name can never be read as markup by a page or a sniffer.
+- **What a page may show** (the design names only first name and last two digits): the visits (`appointments`) only once the page is
+  verified; nothing personal (name, tier, invoice) of a record the stale-record rule hides until the page is verified; no tier
+  during a PIN reset's 72-hour hold. The answers add `idleExpiresAt`, `link.expiresAt` and `stepUp {method, freshUntil,
+  canSetPinUntil}` so the page can pick the PIN or the code block without probing.
+- **Completions**: a booking consumes one use (calendar 3, book-again 1), refused before anything is written; a membership start and a
+  payment redirect one use each; the step that verifies a verify link uses it up, and choosing or resetting the PIN uses up a PIN
+  link. A reschedule uses nothing (its own per-number limit bounds it). Availability and bookings answer calendar and book-again
+  pages only; reschedules calendar pages only (and only the bound visit when the link names one).
+- **Bookings**: verified pages only (the number's live trust counts, so a trusted number books without a step-up), channel online,
+  source `link` (new value), the website's grid, confirmation text and slot wording. Member privileges (no fee, VIP rules) only for
+  the link's own client, never during a reset hold. On a stranger's link (no client yet: a lead) the page must be verified by code
+  and `name` is required; the client is created then (source online, consent as given). A name typed on a client's link only fills a
+  placeholder name, and an email only fills an empty one: the email on file (and its `email_verified`) is never replaced from a
+  link page. Otherwise a page verified by the number's trust alone (a SIM swap or recycled number) could move the address a PIN
+  reset's email notice goes to, then reset the PIN by code without the owner hearing of it; staff change a client's email. The replay of an Idempotency-Key is the platform's for anonymous callers (key + client address): a retry from
+  another address books again only if the slot and the link's uses still allow it.
+- **Reschedules** check the online rules with the page's privileges first, then call the dashboard's `rescheduleAppointment`, whose
+  own (desk) check reads VIP status from the staff's VIP list only. Consequence: an active member of the VIP plan who is not on that
+  list cannot move a visit into a VIP-held time from a link (409 `PUBLIC_SLOT_VIP`); booking such a time works. Left for a later
+  wave (it needs `rescheduleAppointment` to take the channel and VIP decision, a scheduling change outside this package).
+- **Memberships**: the typed email is only the checkout intent's `expected_email`; the client's `email` and `email_verified` are not
+  touched (tested: the sync's view of the client has no verified email, and after the intent's window the same email links nothing).
+  The redirect is the plan's checkout URL re-checked with `checkCheckoutUrl` (https, squarespace.com). The staff-facing
+  `MEMBERSHIP_EXISTS` / `MEMBERSHIP_CHECKOUT_UNAVAILABLE` become the client-facing `LINK_ALREADY_MEMBER` /
+  `LINK_CHECKOUT_UNAVAILABLE`.
+- **Payments**: `{status: redirect | link_pending, redirectUrl}` (the design's two answers as one shape). The redirect needs https on a
+  `PAYMENT_LINK_HOSTS` host with no user, password or port. The "handoff" when the invoice has no allowed URL is a manager
+  notification `payments.link_requested` ("Text Maria a payment link", one while unread, `source_ref pay_link_request:<invoice>`) and
+  an audit row, not an assistant-conversation handoff: there is no inbound text to hang that on.
+- **Limits** (api-spec 28.1): the identity core's code limits and the shared `PUBLIC_OTP_TEXTS_PER_HOUR` ceiling, plus durable
+  counters per address for the exchange, code confirms and PINs, per page for choosing a PIN, per address / link / number for bookings,
+  per address / number for reschedules, membership and pay starts.
+- **Files of other packages touched** (minimal): `src/http/modules.ts` (the module and its wiring), `src/modules/customers/schema.ts`
+  (`AppointmentSource` gains `link`), the authz matrix's `PUBLIC_ROUTES`, the website contract test's filter (the link routes have their
+  own contract test), the ops-kit nginx tests (both hosts, static and in a real nginx).

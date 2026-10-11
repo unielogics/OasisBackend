@@ -410,6 +410,18 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/public/bookings` | public | required |
 | GET | `/api/v1/public/catalog` | public |  |
 | GET | `/api/v1/public/hours` | public |  |
+| POST | `/api/v1/public/links/appointments/:ref/reschedule` | public |  |
+| GET | `/api/v1/public/links/availability` | public |  |
+| POST | `/api/v1/public/links/bookings` | public | required |
+| POST | `/api/v1/public/links/exchange` | public |  |
+| GET | `/api/v1/public/links/me` | public |  |
+| POST | `/api/v1/public/links/membership/start` | public |  |
+| POST | `/api/v1/public/links/pay/start` | public |  |
+| POST | `/api/v1/public/links/pin` | public |  |
+| POST | `/api/v1/public/links/pin/reset` | public |  |
+| POST | `/api/v1/public/links/verify/code` | public |  |
+| POST | `/api/v1/public/links/verify/code/confirm` | public |  |
+| POST | `/api/v1/public/links/verify/pin` | public |  |
 | POST | `/api/v1/public/memberships` | public | required |
 | POST | `/api/v1/public/otp` | public |  |
 | POST | `/api/v1/public/otp/verify` | public |  |
@@ -1346,7 +1358,7 @@ membership port and messaging queue the dashboard's modules use, so a web bookin
 Every route is `access.public(reason)` and listed in the authz matrix's `PUBLIC_ROUTES`; both nginx hosts (the website's and the
 dashboard's) proxy the whole `/api/v1/public/` prefix under the same rules: cookies stripped both ways, GETs cached 60 s under a fixed
 key, POSTs never cached, in the `oasis_public_post` zone with a 16k body limit (`deploy/nginx/oasis-site.conf.template`,
-`oasis.conf.template`). Problem copy is the design's where it has one (`src/modules/public/problems.ts`); nothing in an answer names a
+`oasis.conf.template`); the personal-link routes under `/api/v1/public/links/` have their own location and zone (section 28). Problem copy is the design's where it has one (`src/modules/public/problems.ts`); nothing in an answer names a
 person, an id or a job, and nothing in an answer to a caller who has not verified the number differs by what the shop knows about that
 number (the public-surface review of 2026-10-10, ADR 0150).
 
@@ -1450,8 +1462,8 @@ ends at the cutoff; plans carry no price; the OTP text is suppressed off the all
 ## 27. Phone identity core (ADR 0160, wave W2b)
 
 The services behind personal links, PINs and the 30-day phone trust (`src/modules/identity/**`; design
-`docs/design/ai-assistant-and-phone-identity.md` sections 1 and 5). No public route exists yet: the link API
-(`/api/v1/public/links/*`, behind `PUBLIC_LINKS_ENABLED`) is wave W3 and calls these services; nothing here runs on its own.
+`docs/design/ai-assistant-and-phone-identity.md` sections 1 and 5). The link pages reach them through the link API
+(`/api/v1/public/links/*`, section 28, behind `PUBLIC_LINKS_ENABLED`); nothing here runs on its own.
 
 ### 27.1 Staff routes (`/api/v1`)
 
@@ -1478,6 +1490,103 @@ The services behind personal links, PINs and the 30-day phone trust (`src/module
 | `revokeIdentity`, `revokeForPhoneChange` (called by `updateCustomer`), `revokeForMerge`, `revokeForOptOut` | End links, link sessions, trust and a pending action with the reason. A phone change also bumps `customers.phone_version`. STOP and the epoch are enforced on read as well. |
 
 Retention: `maintenance.retention` task `identity` (see `docs/jobs.md`). Tests: `test/identity/*.test.ts`, the authz matrix.
+
+## 28. Personal-link API: `/api/v1/public/links/*` (ADR 0160, wave W3c)
+
+The website's personal link pages (`https://oasisautospanj.com/#/c|m|p|pin|v/<token>`, design section 5 and 7) talk to these twelve
+routes. Code: `src/modules/public/links/**` (routes and schemas in `http/`, the services in `service.ts`, the per-client board in
+`board.ts`), registered in `src/http/modules.ts` with the website's wiring (the same invoice gateway, membership port and messaging
+queue), on the identity core of section 27. Every route is `access.public(reason)` with the tag `public-links`, listed in the authz
+matrix's `PUBLIC_ROUTES`; tests in `test/public-links/*.test.ts`.
+
+### 28.1 Rules every route follows
+
+| Rule | What it means for the page |
+|---|---|
+| **Closed by default** | While `PUBLIC_LINKS_ENABLED` is false (the default everywhere) every route answers exactly what an unknown route answers: 404 `ROUTE_NOT_FOUND`, before validation, any limit, session lookup or record, with the same headers (no `X-API-Version`, no `Cache-Control` header below), so a prober cannot tell which paths exist. (An `Origin` outside the allowlist is refused 403 by the platform first, as on every public POST.) With it true the API needs `PIN_PEPPER` (the Secrets Manager secret in production). |
+| **The token** | Only the exchange takes the link's token, in its JSON body. The page reads it from the URL fragment (never sent to a server, never in a Referer) and scrubs it from the address bar before anything else runs. It is never logged (the request log has the path only; `test/public-links/exchange.test.ts` scans the logs, the message, outbox, audit, idempotency and session rows for it). Only its SHA-256 is stored. |
+| **The session** | The exchange returns `session`, a 43-character bearer token: keep it in memory only (no cookie, no storage) and send `Authorization: Bearer <session>` on every other call. 15 minutes idle (every call slides it), 1 hour at most; re-open the link for a new one while the link lives. Any other header, scheme or shape is 401 `IDENTITY_SESSION_INVALID`. |
+| **No cache** | Every answer carries `Cache-Control: no-store` (nginx also replaces whatever the API sends with `no-store`, its own errors included, and caches nothing under the prefix). |
+| **JSON only** | A POST needs `Content-Type: application/json` (415 `UNSUPPORTED_MEDIA_TYPE` otherwise) and a JSON body (`{}` when there is nothing to send). Answers are `application/json` (problems `application/problem+json`) with `X-Content-Type-Options: nosniff` and the API's `Content-Security-Policy: default-src 'none'`; `<`, `>` and `&` inside strings are sent as `<`, `>`, `&` (still the same JSON once parsed), so no answer can be read as markup. |
+| **Origin** | When an `Origin` header is present it must be an allowed origin (`PUBLIC_SITE_URL`, the dashboard's, `ALLOWED_ORIGINS`), on GETs as well as POSTs: 403 `ORIGIN_NOT_ALLOWED` otherwise. No `Origin` (a server-side caller) is allowed. No cookie is read or set. |
+| **Limits** | In memory per address per minute: exchange 20, me / availability 60, code confirm and PIN 20, code request, PIN set/reset, bookings, reschedule, membership and pay 10 (429 `RATE_LIMITED`). Durable (`public_rate_limits`, shared by every API process; 429 `PUBLIC_RATE_LIMITED` "Too many requests from this number or device. Try again in N min." with `Retry-After`): exchange 30 / 10 min per address; code requests 10 per address, 3 per page and 5 per number every 10 minutes; code confirms 30 / 10 min per address; PIN entries 30 / 10 min per address and choosing a PIN 10 per page (plus the PIN rules of section 27.2); bookings 10 an hour per address, 5 per link, 5 per number; reschedules 10 an hour per address, 5 per number; membership starts 10 an hour per address, 5 a day per number; pay starts 20 an hour per address, 10 per number. nginx: zone `oasis_public_links`, 60 a minute per address with a burst of 20, bodies up to 4k. |
+| **Dead links and pages** | 401 `IDENTITY_LINK_INVALID` (exchange; `meta.reason` `not_found` \| `expired` \| `used` \| `revoked`) "This link no longer works" and 401 `IDENTITY_SESSION_INVALID` (every other route) "Open the link from our text again." A link or page dies when it expires, is used up, superseded by a newer link of its kind, the number texts STOP (START does not bring it back), the client's PIN or number changes, staff clear the PIN or revoke the trust, the links epoch is bumped (`links.epoch`, the incident switch), or (a payment link) its invoice is paid or voided. Five wrong PINs or codes on a page end it (429 `IDENTITY_SESSION_LOCKED`). |
+| **Wrong purpose** | A page asking for another kind of link's action (a calendar page paying, a payment page booking) is 401 `LINK_WRONG_PURPOSE` "This link is for something else. Text us and we’ll send you the right one." |
+
+**Kinds and what each page may do.** `calendar` (`#/c`, 72 h): availability, bookings (3), reschedule. `book_again` (`#/c`, 14 days):
+availability, bookings (1). `verify` (`#/v`, 15 min, single use): verification only (the step that verifies the page uses it up).
+`pin` (`#/pin`, 15 min): verification and choosing / resetting the PIN (the PIN step uses it up). `membership` (`#/m`, 24 h, the plan
+it was sent for): `membership/start` (3). `pay` (`#/p`, until paid or void, at most 7 days, the invoice it was sent for):
+`pay/start` (3). Opening a link uses nothing; the numbers in brackets are its completions.
+
+**Verified and fresh.** A page is **verified** when its session started inside the number's live 30-day trust, or once a PIN or a
+texted code was entered on it. Bookings and reschedules need verified. Memberships and payments need **fresh**: a PIN or code entered
+on this page in the last 5 minutes (the trust alone is not enough). Both refusals are 403 `IDENTITY_STEP_UP_REQUIRED` "Enter your PIN
+or a texted code to continue." with `meta.need` `verified` or `fresh`. A PIN outranks a code: once the client has a PIN, a code only
+resets it. Within 72 hours of a PIN reset the client's member privileges wait: no member fee waiver or VIP rules on bookings,
+and 403 `LINK_PRIVILEGES_HELD` (`meta.until`) on membership and pay starts.
+
+### 28.2 The page state (`LinkState`)
+
+The exchange (with `session` added), `GET me` and every verification step answer the page's state:
+
+```
+{
+  kind: calendar | verify | pin | membership | pay | book_again,
+  expiresAt,            // the session's hard end (1 hour after the exchange)
+  idleExpiresAt,        // the session's idle end (15 minutes after the last call)
+  link: { expiresAt },
+  client: { firstName, last2, tier: gold | vip | null },
+  trust: { verified, by: pin | code | null, until },      // until: the number's 30-day trust, when there is one
+  stepUp: { method: pin | code, freshUntil, canSetPinUntil },
+  appointments: [ { ref, start, end, when, service, addons[], status, canReschedule } ] | null,
+  invoice: { number, date, items[{name, priceCents}], subtotalCents, taxCents, tipCents, totalCents, paidCents, balanceCents } | null,
+  plan: { tier, planKey, name, monthlyPriceCents, perks[] } | null
+}
+```
+
+* `client.firstName` is the first word of the name on file ("BOOKING FOR MARIA ••21": `last2` is the last two digits of the number the
+  link was texted to). It is empty for a stranger's link, a name the shop does not have yet (a placeholder, the assistant's "New
+  texter ••1234"), and a record the stale-record rule hides (no activity for 180 days, or the last text bounced as an invalid number:
+  the number may have a new owner) until the page is verified. `tier` is the website tier of an active membership (null during a reset
+  hold).
+* `stepUp.method`: `pin` when the client has a PIN (show the PIN entry, with "forgot? reset with a code"), else `code`. `freshUntil`:
+  until when the last PIN or code entered here counts as fresh (null when none). `canSetPinUntil`: a code confirmed here opens 10
+  minutes to choose a PIN (a reset code: a new PIN).
+* `appointments` (null until verified): the client's visits that can still happen, soonest first, at most 5 (a calendar link sent
+  for one visit lists only that one); `ref` is the booking reference (`OAS-00042`), `when` "Sat, Jun 20 · 1:00 PM" in shop time,
+  `canReschedule` for a booked or confirmed visit that has not started.
+* `invoice`: a payment link's invoice (amounts in cents; hidden while the stale rule hides the client). `plan`: a membership link's plan
+  from the Settings catalog (public label, monthly price, perks).
+* All instants are ISO-8601 UTC strings.
+
+### 28.3 Routes
+
+| Route | Body / query | Answer and errors |
+|---|---|---|
+| `POST /public/links/exchange` | `{token}` (strict) | 200 `{session, ...LinkState}`. 401 `IDENTITY_LINK_INVALID` with `meta.reason`; the exchanges of a link are limited (verify and pin 5, membership 20, others 30: `used`). |
+| `GET /public/links/me` | none | 200 `LinkState` (slides the idle window). |
+| `GET /public/links/availability?days=5&service=<key>` | the website's query (section 26.1: `days` 1..14, `service` a catalog key, `addons` accepted and ignored; unknown or malformed 422) | 200 the website's board `{tz, generatedAt, serviceKey, durationMin, now, days[]}` plus `vip`: `true` when the VIP rules were applied (verified page whose client is a VIP client or an active member of the VIP plan, no reset hold): VIP-held times are then open. Calendar and book-again pages only. Never cached. |
+| `POST /public/links/verify/code` | `{purpose?: verify \| pin_set \| pin_reset}` (default `verify`; unknown fields such as `phone` are ignored) | 202 `{challengeId, expiresInSec: 600, purpose, to}` (`to`: the last two digits of the link's number). The six-digit code goes to the link's number only. 409 `IDENTITY_PIN_REQUIRED` ("Enter your PIN to continue, or reset it with a texted code.") for `verify` once a PIN exists, `IDENTITY_PIN_EXISTS` for `pin_set`, `IDENTITY_PIN_NOT_SET` for `pin_reset`, `IDENTITY_UNKNOWN_CLIENT` for a PIN purpose on a stranger's link; 429 `PUBLIC_RATE_LIMITED`, 429 `PUBLIC_CODES_PAUSED` "We can’t text a code right now. Try again in N min, or text us." (the hourly ceiling `PUBLIC_OTP_TEXTS_PER_HOUR` is shared with the website's codes). |
+| `POST /public/links/verify/code/confirm` | `{challengeId, code}` (strict) | 200 `{verified, ...LinkState}`: `verify` / `pin_set` verify the page by code (fresh now), trust the number 30 days (a client's link) and use up a verify link; `pin_reset` verifies nothing (`verified: false`) and opens 10 minutes for `pin/reset`. 401 `PUBLIC_OTP_INVALID` "That code didn’t match. 2 more tries before you need a new one." (`meta.attemptsLeft`), 429 `PUBLIC_OTP_LOCKED` after the code's third wrong try, 429 `IDENTITY_SESSION_LOCKED` after the page's fifth wrong PIN or code, 410 `PUBLIC_OTP_EXPIRED` (expired, used, or another page's code), 409 `IDENTITY_PIN_REQUIRED` when a PIN was set meanwhile. |
+| `POST /public/links/verify/pin` | `{pin}` (strict) | 200 `{verified: true, ...LinkState}` (verified by PIN, fresh now, the number trusted 30 days). 401 `IDENTITY_PIN_INVALID` "That PIN didn’t match. 4 more tries on this page." (`meta.attemptsLeft`; the same answer and the same work when the client has no PIN), 429 `IDENTITY_SESSION_LOCKED`, 429 `IDENTITY_PIN_LOCKED` "Too many wrong PINs. Try again in N min, or reset your PIN with a texted code." (Retry-After), 423 `IDENTITY_PIN_DISABLED` "Your PIN is locked after too many wrong tries. Reset it with a texted code.", 429 `IDENTITY_TOO_MANY_TRIES` (this address). |
+| `POST /public/links/pin` | `{pin}` (strict) | Choose a first PIN, after a `verify` or `pin_set` code confirmed on this page in the last 10 minutes. 200 `{verified: true, ...LinkState}`; every other link and page of the client stops working (this one goes on). 403 `IDENTITY_CODE_REQUIRED`, 409 `IDENTITY_PIN_EXISTS`, 409 `IDENTITY_UNKNOWN_CLIENT`, 422 `IDENTITY_PIN_REJECTED` with the reason in `detail`: "Use 4 to 6 digits." / "Don’t use one digit over and over." / "Don’t use digits in a row like 1234." / "That PIN is too common. Choose another." / "Don’t use a year. Choose another PIN." / "Don’t use the end of your phone number.". |
+| `POST /public/links/pin/reset` | `{pin}` (strict) | A new PIN after a `pin_reset` code confirmed on this page in the last 10 minutes: 200 `{verified: true, ...LinkState}`; every other link, page and the old trust end, the number is trusted again, the client is emailed (when an address is on file) and the managers notified; memberships and payments wait 72 hours. 403 `IDENTITY_CODE_REQUIRED`, 409 `IDENTITY_PIN_NOT_SET`, 422 `IDENTITY_PIN_REJECTED`. |
+| `POST /public/links/bookings` (Idempotency-Key required) | `{serviceKey, addonKeys[] (≤12), date "YYYY-MM-DD", startMin, vehicle? {year?, make?, model?, color?, label?, plate?}, name?, email?, smsConsent?}` (strict) | 201 `{bookingRef, status: "booked", start, end, deposit {dueCents, how counter \| link}, confirmationBy sms \| none, service {key, name}, addons[{key, name}], when "Today · 1:00 PM", member, bayCount}`. Verified calendar or book-again pages. Books through the dashboard's `createAppointment` with channel `online` (lead time, windows, paused days, no overrides), source **`link`**, on the board's grid (422 `body.startMin` "Pick one of the times on the board."), the categories of the package and add-ons, the invoice, the `booking_confirmed_web` text ("Booked: Express Hand Wash, today at 1:00 PM. $25 booking fee due at the shop. Reply here to change it.") and the activity line "Booked on a personal link · …". The fee and VIP rules follow the page's own client (active member: no fee, `member: true`; VIP client or VIP-plan member: VIP rules), never during a reset hold. On a client's link `name` only fills a placeholder name (a real name is never replaced) and `email` only fills an empty one (never as a verified email; the email on file is never replaced from a link page, so a page trusted by the number alone cannot move the address a PIN reset's notice goes to — staff change it); on a stranger's link `name` is required (422 `body.name` "Enter your name.") and creates the client (source online; `smsConsent` their consent to the texts about the booking). Same key from the same address: the stored answer with `Idempotent-Replayed: true`. 409 `IDENTITY_LINK_USED` once the link's bookings are spent; slot refusals in the website's words (409 `PUBLIC_SLOT_TAKEN`, `PUBLIC_SLOT_VIP`, `PUBLIC_SLOT_PAST`, `PUBLIC_SLOT_CLOSED`, `PUBLIC_SLOT_TOO_FAR`); 422 for an unknown service or add-on key. |
+| `POST /public/links/appointments/:ref/reschedule` | `:ref` `OAS-00042`; `{date, startMin}` (strict) | 200 `{bookingRef, status, start, end, when}`. Verified calendar pages; only the page's own client's visits (a calendar link sent for one visit: only that one), 404 `LINK_APPOINTMENT_NOT_FOUND` "We can’t find that visit. Text us and we’ll help." otherwise; a visit that started, ended or was canceled: 409 `LINK_CANT_RESCHEDULE` "This visit can’t be moved online. Text us and we’ll help.". The online rules (the page's VIP privileges included) and the grid as for a booking, then the dashboard's reschedule (the client is texted the new time). Uses nothing of the link. |
+| `POST /public/links/membership/start` | `{email, vehicles? [{car, plate?}] (≤5)}` (strict) | 200 `{redirectUrl, membershipRef "OAS-M-1A2B3C4D", checkoutExpiresAt}`: send the browser to `redirectUrl`, the plan's Squarespace checkout (https on squarespace.com only, checked again on the way out). Membership pages with a **fresh** step-up. A pending membership of the link's plan (reused when one is pending) and a checkout intent (W2e `openCheckoutIntent`): the typed email, the plan's product, 72 hours; the membership activates when the Squarespace sync matches the paid order to the intent. The page should say the email must be the one they pay with: it is stored only on the intent, never as the client's email or a verified email, so an email alone never links an order (design section 10). `vehicles` are added to the client (`car` like "2021 Tesla Model 3"). One completion of the link. 409 `LINK_ALREADY_MEMBER` "You already have a membership. Text us to change your plan.", 409 `LINK_CHECKOUT_UNAVAILABLE` "Joining online isn’t open right now. Text us and we’ll help you join." (no checkout link in Settings yet), 403 `LINK_PRIVILEGES_HELD`, 422 `body.email` "Enter a valid email.". |
+| `POST /public/links/pay/start` | `{}` | 200 `{status: "redirect", redirectUrl}`: the payment URL staff attached to the invoice, only https on a `PAYMENT_LINK_HOSTS` host (default squarespace.com) with no user, password or port; one completion of the link. 200 `{status: "link_pending", redirectUrl: null}`: the invoice has no allowed URL; tell the client the shop will text a payment link (the managers get one `payments.link_requested` notice "Text Maria a payment link", not repeated while unread). Payment pages with a **fresh** step-up; 403 `LINK_PRIVILEGES_HELD`. A paid or voided invoice has already ended the page (401 `IDENTITY_SESSION_INVALID`). |
+
+### 28.4 Flows the website builds
+
+1. **Open**: capture and scrub the fragment, `POST exchange {token}`; on 401 show the dead-link state for `meta.reason`.
+2. **Step-up** when `trust.verified` is false (or `stepUp.freshUntil` is null for a membership or payment): `stepUp.method` `pin` →
+   PIN entry (`verify/pin`), with "forgot your PIN?" → `verify/code {purpose: pin_reset}` → `verify/code/confirm` → `pin/reset`;
+   `code` → `verify/code` → `verify/code/confirm`, then optionally "create a PIN" (`pin`, while `canSetPinUntil` is ahead).
+3. **Calendar / book again**: `availability` → `bookings` (one Idempotency-Key per attempt) → the confirmation; `me.appointments` →
+   `appointments/:ref/reschedule`.
+4. **Membership**: plan (from `plan`) → vehicles → step-up → email → `membership/start` → redirect.
+5. **Payment**: invoice review (from `invoice`) → step-up → `pay/start` → redirect or "we’ll text you a payment link".
 
 ## 29. The assistant's tools, in-chat actions, welcome flow and leads (ADR 0160, wave W3b)
 

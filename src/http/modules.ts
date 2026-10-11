@@ -14,6 +14,7 @@ import { membershipsModule } from '../modules/memberships/module.js'
 import { dbMembershipPort } from '../modules/memberships/port.js'
 import { squarespaceHookModule, squarespaceModule } from '../modules/payments-sync/http/module.js'
 import { createPublicModule } from '../modules/public/module.js'
+import { createPublicLinksModule, type PublicLinksWiring } from '../modules/public/links/module.js'
 import { createSchedulingModule } from '../modules/scheduling/module.js'
 import { settingsModule } from '../modules/settings/http/module.js'
 import { systemModule } from '../modules/system/index.js'
@@ -57,6 +58,21 @@ const publicModule: ApiModule = createPublicModule((deps) => ({
   },
 }))
 
+/**
+ * The personal-link API (ADR 0160, /api/v1/public/links/*, 404 while PUBLIC_LINKS_ENABLED is false): the website's wiring, so a link
+ * booking is a dashboard booking made by "Personal link" and its codes go through the same queue.
+ */
+export const publicLinksWiring = (deps: AppDeps): PublicLinksWiring => ({
+  queue: runtimeOf(deps).queue,
+  scheduling: {
+    invoices: createGatewayFor(deps),
+    revenue: ledgerRevenueSource,
+    memberships: dbMembershipPort,
+    externalAlerts: productionExternalAlerts,
+  },
+})
+export const publicLinksModule: ApiModule = createPublicLinksModule(publicLinksWiring)
+
 export const apiModules: ApiModule[] = [
   authModule,
   peopleModule,
@@ -70,6 +86,7 @@ export const apiModules: ApiModule[] = [
   squarespaceModule,
   membershipsModule,
   publicModule,
+  publicLinksModule,
   systemModule,
 ]
 export const hookModules: ApiModule[] = [squarespaceHookModule, sesHookModule]

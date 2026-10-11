@@ -38,6 +38,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261011040000_sms_usage_class.sql` | the class of each send in `sms_usage` (`klass`), so the AI classes' sub-cap is counted in the dispatcher (ADR 0160, W2d)                               |
 | `20261011050000_membership_matching.sql` | membership matching (ADR 0160 W2e): checkout row origin (link or sync), state rejected, nullable checkout_url, email_verified drops on an email change  |
 | `20261012020000_assistant_tools.sql` | `vehicles.vehicle_type` (the tint price class `set_my_vehicle` records) and `customers.archived_at` (the welcome flow's 30-day archive of nameless, never-booked provisional clients) (ADR 0160, W3b) |
+| `20261012030000_link_bookings.sql` | appointment `source` `link`: a visit booked on a personal link page (ADR 0160, W3c link API)                                                       |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -302,7 +303,7 @@ Columns added to existing tables:
 | `services.public_name`, `.description`, `.member_price_cents`, `.guest_price_cents`             | the website/AI copy and prices (null prices: the plain `price_cents`)                                                         |
 | `services.vip_inclusion`, `.vip_note`, `.quote_only`, `.visible_online`                         | `included\|allowance\|none`; quote-only services show no price and are never booked online; `visible_online` defaults true    |
 | `appointments.categories`                                                                      | the category keys of the package and live add-ons, in category order (GIN index); backfilled                                |
-| `appointments.source`                                                                          | gains `sms_ai`                                                                                                                |
+| `appointments.source`                                                                          | gains `sms_ai`; `link` (a visit booked on a personal link page, migration `20261012030000`)                                   |
 | `membership_plans.monthly_price_cents`, `.checkout_url`, `.public_label`                        | the plan's price, Squarespace checkout (https, squarespace.com only) and website name (Gold, VIP)                             |
 | `customers.email_verified`, `.phone_version`                                                   | an email confirmed on a link page; bumped on every phone change (links carry the version)                                    |
 | `customers.sms_opt_in_source`                                                                  | gains `inbound_text` (a client the assistant created: transactional consent only)                                            |

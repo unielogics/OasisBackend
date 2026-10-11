@@ -9,10 +9,12 @@ server_tokens off;
 #   api          everything else under /api
 #   hooks        the public webhook endpoints
 #   public_post  the website's writes (codes, bookings, joins) on both hosts: 20 a minute per address, a burst of 10 (ADR 0150)
+#   public_links the personal-link pages' API on both hosts: 60 a minute per address, a burst of 20 (ADR 0160)
 limit_req_zone $binary_remote_addr zone=oasis_login:10m rate=30r/m;
 limit_req_zone $binary_remote_addr zone=oasis_api:10m rate=30r/s;
 limit_req_zone $binary_remote_addr zone=oasis_hooks:10m rate=20r/s;
 limit_req_zone $binary_remote_addr zone=oasis_public_post:10m rate=20r/m;
+limit_req_zone $binary_remote_addr zone=oasis_public_links:10m rate=60r/m;
 limit_conn_zone $binary_remote_addr zone=oasis_conn:10m;
 limit_req_status 429;
 limit_conn_status 429;
