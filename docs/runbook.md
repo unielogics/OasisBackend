@@ -465,7 +465,8 @@ health check runs, exit 3 when it fails. Nothing is rebuilt and nginx is not rel
 * `curl -sI https://oasisautospanj.com/` is not 200: `sudo nginx -t`; `ls -l /var/www/site/current` (a dangling link? `--rollback`);
   `tail /var/log/nginx/oasis-site.error.log`.
 * The hours are stale or missing on the site: `curl -si https://oasisautospanj.com/api/v1/public/hours` (`X-Cache-Status` says whether
-  nginx answered from its cache; a 502 means the API is down, section 9) and `curl -s http://127.0.0.1:4000/api/v1/public/hours`
+  nginx answered from its cache; a 502 means the API is down, section 9: the hours and the open times are never served from an old copy
+  while it is down, only while one request refreshes them) and `curl -s http://127.0.0.1:4000/api/v1/public/hours`
   on the host. The site shows its built-in fallback hours when the endpoint fails; the next deploy bakes a fresh snapshot.
 * The health check timer complains about `website:` (journalctl -u oasis-healthcheck): the page lost the marker text or `www` stopped
   redirecting; `site-deploy.sh --list` and `--rollback`.

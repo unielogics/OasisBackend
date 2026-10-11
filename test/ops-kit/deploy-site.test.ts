@@ -184,9 +184,13 @@ describe('install.sh --site-domain: the rendered website', () => {
         name === 'availability' ? '$scheme$host$uri?days=$arg_days&service=$arg_service' : '$scheme$host$uri',
       ])
       expect(find(l.body, 'proxy_cache_lock')[0]!.args, uri).toEqual(['on'])
-      expect(find(l.body, 'proxy_cache_use_stale')[0]!.args, uri).toEqual(
-        expect.arrayContaining(['error', 'timeout', 'updating', 'http_502', 'http_503']),
-      )
+      // the hours and the open times are stale only while one request refreshes them, never because the API is down (W2 review
+      // leftover: an outage must not freeze yesterday's hours or a board of taken times); the catalog may outlive an outage
+      if (name === 'catalog')
+        expect(find(l.body, 'proxy_cache_use_stale')[0]!.args, uri).toEqual(
+          expect.arrayContaining(['error', 'timeout', 'updating', 'http_502', 'http_503']),
+        )
+      else expect(find(l.body, 'proxy_cache_use_stale').map((d) => d.args), uri).toEqual([['updating']])
       expect(find(l.body, 'proxy_set_header').map((h) => h.args.join(' ')), uri).toContain('Cookie ')
       expect(find(l.body, 'proxy_hide_header').map((h) => h.args[0]), uri).toContain('Set-Cookie')
       expect(find(l.body, 'proxy_ignore_headers')[0]!.args, uri).toEqual(['Set-Cookie'])
