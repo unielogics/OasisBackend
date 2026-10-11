@@ -307,6 +307,9 @@ describe('verify.sh', () => {
       `pnpm -s verify:smsgate -- --send --to +13055550100 --watch | cwd=current/backend | out=${path.join(stage.root, 'var/lib/oasis/live-verification')} | db=set | port=4000`,
     )
     expect(statSync(path.join(stage.root, 'var/lib/oasis/live-verification')).isDirectory()).toBe(true)
+    writeFileSync(log, '')
+    expect((await sh(script('verify.sh'), ['ai', '--instance-profile'], env)).code).toBe(0)
+    expect(readFileSync(log, 'utf8')).toMatch(/^pnpm -s verify:ai -- --instance-profile \| cwd=current\/backend/)
     expect((await sh(script('verify.sh'), ['bogus'], env)).out).toMatch(/unknown check bogus/)
     expect((await sh(script('verify.sh'), [], env)).code).toBe(2)
   })

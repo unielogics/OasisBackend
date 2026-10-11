@@ -1,22 +1,27 @@
-// GET /api/v1/system/integrations: for each outside service (email, photo storage, SMS, Squarespace) which provider the process
+// GET /api/v1/system/integrations: for each outside service (email, photo storage, SMS, Squarespace, the AI model) which provider the process
 // runs, whether it is configured for live use, exactly which settings are missing, and the last success and last error the
 // database knows about. Nothing secret leaves: credentials are reported by source only, error text is masked and truncated.
 import { sql } from 'kysely'
+import { DateTime } from 'luxon'
 import type { Env } from '../../config/env.js'
 import { access } from '../../http/access.js'
 import type { AppInstance } from '../../http/types.js'
 import { z } from '../../http/zod.js'
+import { resolveAiPrices } from '../../integrations/ai/cost.js'
+import { CLAUDE_BEDROCK_MODELS, findClaudeModel } from '../../integrations/ai/models.js'
 import { sesTopicArns } from '../../integrations/email/env.js'
 import type { Executor } from '../../platform/db.js'
 import { maskText } from '../../platform/logging.js'
+import { getSetting } from '../../platform/settings.js'
 import '../messaging/schema.js'
 import '../payments-sync/db/schema.js'
 import '../../platform/jobs-schema.js'
+import '../assistant/schema.js'
 
 const iso = z.iso.datetime({ offset: true })
 
 export const IntegrationStatus = z.object({
-  key: z.enum(['email', 'storage', 'sms', 'squarespace']),
+  key: z.enum(['email', 'storage', 'sms', 'squarespace', 'ai']),
   label: z.string(),
   provider: z.string(),
   /** The provider talks to the real service (not a simulator). */
@@ -274,7 +279,95 @@ async function squarespaceStatus(db: Executor, env: Env): Promise<IntegrationSta
   }
 }
 
-export async function integrationsStatus(db: Executor, env: Env, now: Date) {
+/**
+ * The AI model (ADR 0160): which provider and model the assistant would use, whether it answers at all (AI_ENABLED and the
+ * Settings switch), the rollout stage, the last replied and the last failed turn, and today's turns and spend (the location's
+ * day) against AI_DAILY_BUDGET_USD.
+ */
+async function aiStatus(db: Executor, env: Env, now: Date, locationId: string | undefined): Promise<IntegrationStatus> {
+  const live = env.AI_PROVIDER === 'bedrock'
+  const missing: string[] = []
+  const warnings: string[] = []
+  if (!live) missing.push('AI_PROVIDER=bedrock')
+  const credentials = live ? awsCredentials(env, missing, warnings) : awsCredentialSource(env)
+  const location = await db
+    .selectFrom('locations')
+    .select(['id', 'timezone'])
+    .$if(!!locationId, (q) => q.where('id', '=', locationId!))
+    .orderBy('created_at')
+    .limit(1)
+    .executeTakeFirst()
+  const settingEnabled = location ? (await getSetting(db, location.id, 'assistant.enabled')).value : false
+  const stage = location ? (await getSetting(db, location.id, 'assistant.stage')).value : 'allowlist'
+  const enabled = env.AI_ENABLED && settingEnabled
+  const dayStart = DateTime.fromJSDate(now)
+    .setZone(location?.timezone ?? env.BUSINESS_TZ)
+    .startOf('day')
+    .toJSDate()
+  const turns = db
+    .selectFrom('assistant_turns')
+    .innerJoin('assistant_conversations as c', 'c.id', 'assistant_turns.conversation_id')
+    .$if(!!location, (q) => q.where('c.location_id', '=', location!.id))
+  const today = await turns
+    .select([sql<number>`count(*)::int`.as('n'), sql<string>`coalesce(sum(assistant_turns.cost_micros), 0)::text`.as('micros')])
+    .where('assistant_turns.started_at', '>=', dayStart)
+    .executeTakeFirst()
+  const ok = await turns
+    .select(sql<Date | null>`max(assistant_turns.finished_at)`.as('t'))
+    .where('assistant_turns.status', '=', 'replied')
+    .executeTakeFirst()
+  const bad = await turns
+    .select(['assistant_turns.finished_at', 'assistant_turns.error'])
+    .where('assistant_turns.status', '=', 'failed')
+    .where('assistant_turns.finished_at', 'is not', null)
+    .orderBy('assistant_turns.finished_at', 'desc')
+    .limit(1)
+    .executeTakeFirst()
+  const spendUsd = Number(today?.micros ?? 0) / 1e6
+  if (!env.AI_ENABLED) warnings.push('AI_ENABLED=false: the assistant answers no text')
+  else if (!settingEnabled) warnings.push('Settings, Assistant is off: the assistant answers no text')
+  if (enabled && stage !== 'everyone') warnings.push(`stage ${stage}: the assistant answers ${stage === 'allowlist' ? 'only the allowlisted numbers' : 'only known clients'}`)
+  if (enabled && !live) warnings.push('AI_PROVIDER=sim: the assistant answers with the test simulator')
+  const listed = findClaudeModel(env.AI_BEDROCK_MODEL_ID)
+  const pricing = resolveAiPrices(env)
+  if (live && !listed)
+    warnings.push(
+      `AI_BEDROCK_MODEL_ID=${env.AI_BEDROCK_MODEL_ID} is not one of the models the app role may call (${CLAUDE_BEDROCK_MODELS.map((m) => m.profileId).join(', ')}): Bedrock refuses it${pricing.source === 'highest' ? '; spend is counted at the highest listed prices' : ''}`,
+    )
+  if (spendUsd >= env.AI_DAILY_BUDGET_USD)
+    warnings.push(`today's spend reached AI_DAILY_BUDGET_USD (${env.AI_DAILY_BUDGET_USD}): every text goes to the staff until tomorrow`)
+  return {
+    key: 'ai',
+    label: 'AI assistant (Claude on Amazon Bedrock)',
+    provider: env.AI_PROVIDER,
+    live,
+    configured: live && missing.length === 0,
+    missing,
+    warnings,
+    lastSuccessAt: at(ok?.t),
+    lastErrorAt: at(bad?.finished_at),
+    lastError: safeError(bad?.error),
+    details: {
+      model: live ? env.AI_BEDROCK_MODEL_ID : 'sim',
+      modelLabel: live ? (listed?.label ?? null) : null,
+      region: live ? env.AI_BEDROCK_REGION : null,
+      enabled,
+      envEnabled: env.AI_ENABLED,
+      settingEnabled,
+      stage,
+      actionsEnabled: env.AI_ACTIONS_ENABLED,
+      effortMode: env.AI_BEDROCK_EFFORT_MODE,
+      turnsToday: today?.n ?? 0,
+      spendTodayUsd: Math.round(spendUsd * 10_000) / 10_000,
+      dailyBudgetUsd: env.AI_DAILY_BUDGET_USD,
+      /** env (every AI_PRICE_* set), model (the model's list prices), mixed, or highest (an unlisted model). */
+      priceSource: pricing.source,
+      credentials,
+    },
+  }
+}
+
+export async function integrationsStatus(db: Executor, env: Env, now: Date, locationId?: string) {
   return {
     generatedAt: now.toISOString(),
     integrations: [
@@ -282,6 +375,7 @@ export async function integrationsStatus(db: Executor, env: Env, now: Date) {
       await storageStatus(db, env),
       await smsStatus(db, env),
       await squarespaceStatus(db, env),
+      await aiStatus(db, env, now, locationId),
     ],
   }
 }
@@ -295,10 +389,10 @@ export function registerIntegrationRoutes(app: AppInstance): void {
         tags: ['system'],
         summary: 'Outside services: provider, configured or not, missing settings, last success and last error',
         description:
-          'One row per integration (email, storage, sms, squarespace). `missing` names exactly what must be set (environment variables, or a step such as registering a tablet) before the integration works live; `warnings` are recommended settings and conditions. Secrets are never returned: AWS credentials appear only as their source (`environment`, `profile`, `shared-credentials-file`, `instance-role`, `none`) and error texts are masked.',
+          'One row per integration (email, storage, sms, squarespace, ai). `missing` names exactly what must be set (environment variables, or a step such as registering a tablet) before the integration works live; `warnings` are recommended settings and conditions. Secrets are never returned: AWS credentials appear only as their source (`environment`, `profile`, `shared-credentials-file`, `instance-role`, `none`) and error texts are masked.',
         response: { 200: IntegrationsResponse },
       },
     },
-    async () => integrationsStatus(app.db, app.env, app.clock.now()),
+    async (req) => integrationsStatus(app.db, app.env, app.clock.now(), req.auth?.locationId),
   )
 }

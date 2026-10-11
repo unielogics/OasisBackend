@@ -1,5 +1,6 @@
 // GET /api/v1/system/integrations: provider, configured or not, exactly which settings are missing, last success and last error,
 // and never a secret.
+import { DateTime } from 'luxon'
 import { afterEach, describe, expect, it } from 'vitest'
 import { systemModule } from '../../src/modules/system/index.js'
 import { awsCredentialSource, safeError } from '../../src/modules/system/integrations.js'
@@ -32,7 +33,7 @@ describe('GET /system/integrations', () => {
     const res = await status({})
     expect(res.statusCode).toBe(200)
     const body = res.json()
-    expect(body.integrations.map((r: Row) => r.key)).toEqual(['email', 'storage', 'sms', 'squarespace'])
+    expect(body.integrations.map((r: Row) => r.key)).toEqual(['email', 'storage', 'sms', 'squarespace', 'ai'])
     expect(by(body, 'email')).toMatchObject({ provider: 'sim', live: false, configured: false, missing: ['EMAIL_PROVIDER=ses', 'SES_FROM_ADDRESS'] })
     expect(by(body, 'storage')).toMatchObject({ provider: 'fs', live: false, configured: false, missing: ['STORAGE_PROVIDER=s3', 'S3_BUCKET'] })
     expect(by(body, 'sms').missing).toEqual([
@@ -112,6 +113,79 @@ describe('GET /system/integrations', () => {
     expect(email.lastSuccessAt).toBe(earlier.toISOString())
     expect(email.lastErrorAt).toBe(now.toISOString())
     expect(email.lastError).toBe('SES SendEmail failed (MessageRejected: Email address is not verified: j***@example.test, key AKIA[redacted])')
+  })
+
+  it('the AI row: simulated and off by default, nothing reached', async () => {
+    const ai = by((await status({})).json(), 'ai')
+    expect(ai).toMatchObject({ provider: 'sim', live: false, configured: false, missing: ['AI_PROVIDER=bedrock'], lastSuccessAt: null, lastErrorAt: null, lastError: null })
+    expect(ai.warnings).toEqual(['AI_ENABLED=false: the assistant answers no text'])
+    expect(ai.details).toEqual({
+      model: 'sim', modelLabel: null, region: null, enabled: false, envEnabled: false, settingEnabled: false, stage: 'allowlist', actionsEnabled: false,
+      effortMode: 'off', turnsToday: 0, spendTodayUsd: 0, dailyBudgetUsd: 10, priceSource: 'model', credentials: 'instance-role',
+    })
+  })
+
+  it('the AI row on Bedrock: model, stage, enabled, the last replied and failed turn (masked), today\'s turns and spend', async () => {
+    app = await createTestApp({
+      testDb: t,
+      modules: [systemModule],
+      env: { AI_PROVIDER: 'bedrock', AI_ENABLED: 'true', AI_DAILY_BUDGET_USD: '0.01', AWS_ACCESS_KEY_ID: KEY_ID, AWS_SECRET_ACCESS_KEY: SECRET, AWS_EC2_METADATA_DISABLED: 'true' },
+    })
+    const loc = app.location.id
+    await t.db
+      .insertInto('settings')
+      .values({ location_id: loc, key: 'assistant.enabled', value: JSON.stringify(true) as never, version: 2 })
+      .onConflict((oc) => oc.columns(['location_id', 'key']).doUpdateSet({ value: JSON.stringify(true) as never }))
+      .execute()
+    const now = t.clock.now()
+    const conv = app.app.newId()
+    await t.db.insertInto('assistant_conversations').values({ id: conv, location_id: loc, phone_e164: '+12015550142' } as never).execute()
+    const turn = (status: string, startedAt: Date, cost: number, error: string | null = null) => ({
+      id: app!.app.newId(), conversation_id: conv, status, trust: 'known', provider: 'bedrock', model: 'us.anthropic.claude-sonnet-4-6',
+      cost_micros: cost, error, started_at: startedAt, finished_at: new Date(startedAt.getTime() + 4000),
+    })
+    // start of today in the shop's time zone, so the test does not depend on the clock's hour
+    const dayStart = DateTime.fromJSDate(now).setZone('America/New_York').startOf('day').toJSDate()
+    const beforeToday = new Date(dayStart.getTime() - 3600_000)
+    const today = new Date(Math.max(dayStart.getTime() + 60_000, now.getTime() - 3600_000))
+    await t.db
+      .insertInto('assistant_turns')
+      .values([
+        turn('replied', beforeToday, 900_000),
+        turn('replied', today, 2_600),
+        turn('failed', new Date(today.getTime() + 1000), 1_400, 'Bedrock Converse refused access (AccessDeniedException 403: client +12015550142 key ASIAABCDEFGHIJKLMNOP)'),
+      ] as never)
+      .execute()
+    const ai = by((await app.app.inject({ method: 'GET', url: '/api/v1/system/integrations' })).json(), 'ai')
+    expect(ai).toMatchObject({ provider: 'bedrock', live: true, configured: true, missing: [] })
+    expect(ai.details).toMatchObject({
+      model: 'us.anthropic.claude-sonnet-4-6', modelLabel: 'Claude Sonnet 4.6', region: 'us-east-1', enabled: true, envEnabled: true, settingEnabled: true, stage: 'allowlist',
+      turnsToday: 2, spendTodayUsd: 0.004, dailyBudgetUsd: 0.01, priceSource: 'model', credentials: 'environment',
+    })
+    expect(ai.lastSuccessAt).toBe(new Date(today.getTime() + 4000).toISOString())
+    expect(ai.lastErrorAt).toBe(new Date(today.getTime() + 5000).toISOString())
+    expect(ai.lastError).toBe('Bedrock Converse refused access (AccessDeniedException 403: client +1******0142 key ASIA[redacted])')
+    expect(ai.warnings).toEqual(['stage allowlist: the assistant answers only the allowlisted numbers'])
+    // over the budget: said so
+    await t.db.updateTable('assistant_turns').set({ cost_micros: 20_000 }).where('started_at', '=', today).execute()
+    const over = by((await app.app.inject({ method: 'GET', url: '/api/v1/system/integrations' })).json(), 'ai')
+    expect(over.warnings).toContain("today's spend reached AI_DAILY_BUDGET_USD (0.01): every text goes to the staff until tomorrow")
+  })
+
+  it('the AI row names a model outside the IAM grant list, and where the prices come from', async () => {
+    app = await createTestApp({
+      testDb: t,
+      modules: [systemModule],
+      env: {
+        AI_PROVIDER: 'bedrock', AI_BEDROCK_MODEL_ID: 'us.anthropic.claude-haiku-4-5', AI_PRICE_OUTPUT_PER_MTOK: '30',
+        AWS_ACCESS_KEY_ID: KEY_ID, AWS_SECRET_ACCESS_KEY: SECRET, AWS_EC2_METADATA_DISABLED: 'true',
+      },
+    })
+    const ai = by((await app.app.inject({ method: 'GET', url: '/api/v1/system/integrations' })).json(), 'ai')
+    expect(ai.details).toMatchObject({ model: 'us.anthropic.claude-haiku-4-5', modelLabel: null, priceSource: 'mixed' })
+    expect(ai.warnings).toContain(
+      'AI_BEDROCK_MODEL_ID=us.anthropic.claude-haiku-4-5 is not one of the models the app role may call (us.anthropic.claude-sonnet-5-5, us.anthropic.claude-opus-5-5, us.anthropic.claude-sonnet-4-6, us.anthropic.claude-opus-4-6-v1): Bedrock refuses it',
+    )
   })
 
   it('requires set.billing', async () => {

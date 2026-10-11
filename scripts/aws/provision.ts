@@ -3,6 +3,7 @@
 //   pnpm aws:provision --profile oasis-admin --dashboard-origin https://oasis.example.com \
 //     --runtime role --private-ip 172.31.5.10          # prints the plan; add --apply to make the changes
 //   later, once there is a sender and a public host: the same command plus --sender oasisautospa.com --hooks-url https://.../hooks/ses
+//   the AI assistant (ADR 0160): the same command plus --bedrock (and from then on always with it)
 //
 // Refuses to run without --profile <name> or AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY in the environment, and never asks the EC2
 // instance metadata service for anything (AWS_EC2_METADATA_DISABLED=true is set before any client exists; the instance is found by
@@ -23,7 +24,8 @@ export const HELP = `pnpm aws:provision [options]
 
 Creates or checks the Oasis AWS resources: the photos and backups buckets, the Secrets Manager secret holding the app's environment,
 the least-privilege policy <prefix>-app-runtime and the identity the app runs as (the instance role, or an IAM user with a key), and,
-once --sender is given, the SES identity, configuration set and SNS feedback topic (with the HTTPS subscription to /hooks/ses).
+once --sender is given, the SES identity, configuration set and SNS feedback topic (with the HTTPS subscription to /hooks/ses), and
+with --bedrock the grant to call Claude on Amazon Bedrock.
 Prints the plan; changes nothing without --apply. Exit code 0 = done (or nothing to do), 1 = AWS refused or a conflict, 2 = usage.
 
 Credentials (one of, required):
@@ -47,6 +49,10 @@ Options:
   --photo-retention-days N       photos lifecycle expiry (default 760: the 24-month retention job decides first)
   --backup-retention-days N      backups lifecycle expiry (default 400: 12 monthly dumps plus margin)
   --sandbox-recipient ADDRESS    verify this address while SES is in the sandbox (repeatable; joins the send policy; with --sender)
+  --bedrock                      let the app call Claude on Amazon Bedrock (ADR 0160): bedrock:InvokeModel on the us. inference
+                                 profiles of Claude Sonnet 4.6, Opus 4.6, Sonnet 5.5 and Opus 5.5 and, routed through them only,
+                                 those models in us-east-1/us-east-2/us-west-2 (src/integrations/ai/models.ts). Keep passing it
+                                 on every later run: a run without it removes the grant (the plan says so)
   --new-access-key               runtime=user: create a second key for rotation although one exists
   --request-ses-production       submit the SES production-access request (needs --website-url and --use-case)
   --website-url URL, --use-case TEXT, --contact-email ADDRESS (repeatable)
@@ -147,6 +153,7 @@ export async function main(argv: string[], deps: MainDeps): Promise<number> {
         'instance-id': { type: 'string' },
         'private-ip': { type: 'string' },
         'replace-instance-profile': { type: 'boolean' },
+        bedrock: { type: 'boolean' },
       },
     })
   } catch (e) {
@@ -191,6 +198,8 @@ export async function main(argv: string[], deps: MainDeps): Promise<number> {
       throw new UsageError('--key-prefix must be empty or like prod/ (ending in /)')
     const region = a.region ?? 'us-east-1'
     if (!/^[a-z]{2}(-[a-z]+)+-\d$/.test(region)) throw new UsageError(`--region "${region}" is not an AWS region`)
+    if (a.bedrock && !region.startsWith('us-'))
+      throw new UsageError(`--bedrock grants the us. inference profile, which lives in a US region (not ${region})`)
     let hooksUrl: string | undefined
     if (a['hooks-url']) {
       const u = new URL(a['hooks-url'])
@@ -232,6 +241,7 @@ export async function main(argv: string[], deps: MainDeps): Promise<number> {
       photoRetentionDays,
       backupRetentionDays,
       sandboxRecipients,
+      ...(a.bedrock ? { bedrock: true } : {}),
     }
     const opts: PlanOptions = {
       ...(a.out ? { out: a.out } : {}),

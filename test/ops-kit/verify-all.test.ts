@@ -33,7 +33,7 @@ const run = async (argv: string[], env: Record<string, string | undefined> = {})
 const today = new Date().toISOString().slice(0, 10)
 
 describe('verify:all', () => {
-  it('runs the three integrations against the simulators, writes a report for each plus a summary, and exits 0', async () => {
+  it('runs the four integrations against the simulators, writes a report for each plus a summary, and exits 0', async () => {
     const r = await run([
       '--sim',
       '--days',
@@ -49,6 +49,8 @@ describe('verify:all', () => {
     expect(r.code).toBe(0)
     expect(readdirSync(r.outDir).sort()).toEqual(
       [
+        `${today}-ai.json`,
+        `${today}-ai.md`,
         `${today}-all.md`,
         `${today}-aws.json`,
         `${today}-aws.md`,
@@ -62,6 +64,7 @@ describe('verify:all', () => {
     expect(r.out).toMatch(/smsgate\s+exit 0/)
     expect(r.out).toMatch(/squarespace\s+exit 0/)
     expect(r.out).toMatch(/aws\s+exit 0/)
+    expect(r.out).toMatch(/ai\s+exit 0/)
     const summary = readFileSync(path.join(r.outDir, `${today}-all.md`), 'utf8')
     expect(summary).toContain('| smsgate | 0 |')
     expect(r.json('aws').items.find((i) => i.id === 'AWS-06')!.status).toBe('PASS')
@@ -117,7 +120,7 @@ describe('verify:all', () => {
   it('--help and a bad option', async () => {
     const h = await run(['--help'])
     expect(h.code).toBe(0)
-    expect(h.out).toContain('verify:smsgate, verify:squarespace and verify:aws')
+    expect(h.out).toContain('verify:smsgate, verify:squarespace, verify:aws and verify:ai')
     const bad = await run(['--sim', '--frobnicate'])
     expect(bad.code).toBe(2)
     expect(existsSync(path.join(bad.outDir, `${today}-all.md`))).toBe(false)

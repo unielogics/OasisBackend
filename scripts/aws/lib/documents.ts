@@ -1,5 +1,6 @@
 // Every resource name and JSON document pnpm aws:provision creates, as pure functions of its inputs, so the plan prints exactly
 // what apply sends and the tests pin each document.
+import { CLAUDE_BEDROCK_MODELS } from '../../../src/integrations/ai/models.js'
 
 export type Sender = { kind: 'address'; identity: string; domain: string } | { kind: 'domain'; identity: string; domain: string }
 
@@ -25,6 +26,27 @@ export interface ProvisionSpec {
   backupRetentionDays: number
   /** Addresses to verify while the account is in the SES sandbox (they also join the send policy). */
   sandboxRecipients: string[]
+  /**
+   * --bedrock: the app may call the listed Claude models (Converse = bedrock:InvokeModel) through the account's us. cross-region
+   * inference profiles; without it the runtime policy has no Bedrock statement (ADR 0160).
+   */
+  bedrock?: boolean
+}
+
+/**
+ * The models the grant covers (src/integrations/ai/models.ts, owner 2026-10-11): Claude Sonnet 4.6 (the interim assistant), Opus
+ * 4.6 (its judge), Sonnet 5.5 and Opus 5.5 (once their quota is raised), so switching AI_BEDROCK_MODEL_ID needs no IAM change.
+ */
+export const BEDROCK_MODELS = CLAUDE_BEDROCK_MODELS.map((m) => ({ profileId: m.profileId, foundationModel: m.foundationModel }))
+/** The regions the us. cross-region inference profiles route to (design section 9). */
+export const BEDROCK_ROUTED_REGIONS = ['us-east-1', 'us-east-2', 'us-west-2'] as const
+
+/** The inference profiles the app invokes and the foundation models a call through them may land on, nothing broader. */
+export function bedrockArns(s: Pick<ProvisionSpec, 'region' | 'account'>): { profiles: string[]; models: string[] } {
+  return {
+    profiles: BEDROCK_MODELS.map((m) => `arn:aws:bedrock:${s.region}:${s.account}:inference-profile/${m.profileId}`),
+    models: BEDROCK_MODELS.flatMap((m) => BEDROCK_ROUTED_REGIONS.map((r) => `arn:aws:bedrock:${r}::foundation-model/${m.foundationModel}`)),
+  }
 }
 
 export const names = (s: Pick<ProvisionSpec, 'prefix' | 'account' | 'region'>) => ({
@@ -58,7 +80,7 @@ export const secretArnPattern = (s: Pick<ProvisionSpec, 'region' | 'account' | '
 /**
  * Least privilege for the running app (the instance role oasis-app-role, or the oasis-app user): read the environment secret (its
  * current version only), photos under the prefix, write backups (never read, list or delete them: restoring is the operator's job),
- * and, once a sender exists, sending as it. No KMS statement: a secret under the AWS-managed key aws/secretsmanager is decrypted
+ * once a sender exists, sending as it, and with --bedrock, calling Claude through the inference profile. No KMS statement: a secret under the AWS-managed key aws/secretsmanager is decrypted
  * through Secrets Manager for any principal of the account it lets read the secret.
  *
  * The two Deny statements keep older versions of the secret out of reach (AWSPREVIOUS can still hold values that were removed,
@@ -113,8 +135,29 @@ export function runtimePolicy(s: ProvisionSpec, secretArn: string = secretArnPat
             },
           ]
         : []),
+      ...(s.bedrock ? bedrockStatements(s) : []),
     ],
   }
+}
+
+/**
+ * Converse (and InvokeModel) on the listed Claude models through their us. inference profiles only: the profiles themselves, and
+ * the foundation models in the three regions the profiles route to, the latter only when the call came through one of those
+ * profiles (bedrock:InferenceProfileArn), so no model can be called directly or through another profile. No streaming action: the
+ * app does not stream.
+ */
+export function bedrockStatements(s: Pick<ProvisionSpec, 'region' | 'account'>): object[] {
+  const arns = bedrockArns(s)
+  return [
+    { Sid: 'InvokeClaude', Effect: 'Allow', Action: 'bedrock:InvokeModel', Resource: arns.profiles },
+    {
+      Sid: 'InvokeClaudeRouted',
+      Effect: 'Allow',
+      Action: 'bedrock:InvokeModel',
+      Resource: arns.models,
+      Condition: { ArnLike: { 'bedrock:InferenceProfileArn': arns.profiles } },
+    },
+  ]
 }
 
 /** Only EC2 may assume the app role (it becomes the instance's credentials through the instance profile). */
