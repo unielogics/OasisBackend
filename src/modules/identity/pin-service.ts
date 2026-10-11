@@ -19,7 +19,7 @@ import { maskPhone } from '../../platform/phone.js'
 import type { Clock } from '../../platform/clock.js'
 import { queueEmail } from '../messaging/email/service.js'
 import { notifyManagers } from '../messaging/notify.js'
-import { PIN_AFTER_CODE_MS, pinStateOf } from './codes.js'
+import { PIN_AFTER_CODE_MS, pinOwnerOf, pinStateOf } from './codes.js'
 import { liveCustomer } from './common.js'
 import type { IdentityDeps } from './deps.js'
 import { pinProblem } from './pin.js'
@@ -87,8 +87,10 @@ export async function verifySessionPin(
         return { ok: false, error: new AppError('IDENTITY_TOO_MANY_TRIES', { params: { minutes: minutesUntil(until, now) }, headers: retryHeaders(until, now) }) }
       }
     }
-    const row = s.customerId
-      ? await tx.selectFrom('customer_pins').selectAll().where('customer_id', '=', s.customerId).forUpdate().executeTakeFirst()
+    // a stranger's link whose number a client owns now checks that client's PIN (W4c review): the page then books for them
+    const pinOwner = await pinOwnerOf(tx, s)
+    const row = pinOwner
+      ? await tx.selectFrom('customer_pins').selectAll().where('customer_id', '=', pinOwner).forUpdate().executeTakeFirst()
       : undefined
     const hasPin = !!row?.pin_hash
     if (row && hasPin) {
@@ -107,13 +109,13 @@ export async function verifySessionPin(
       }
     }
     // the same HMAC + scrypt work whether or not there is a PIN to compare against
-    const owner = s.customerId ?? s.link.id
+    const owner = pinOwner ?? s.link.id
     const right = row?.pin_hash ? await d.pins.verify(owner, o.pin, row.pin_hash) : await d.pins.verifyNone(owner, o.pin)
 
     if (!right) {
       await tx
         .insertInto('identity_pin_failures')
-        .values({ id: d.newId(), location_id: locationId, customer_id: hasPin ? s.customerId : null, phone_e164: s.phone, ip: o.ip, at: now })
+        .values({ id: d.newId(), location_id: locationId, customer_id: hasPin ? row!.customer_id : null, phone_e164: s.phone, ip: o.ip, at: now })
         .execute()
       if (row && hasPin) {
         const failures = row.failed_attempts + 1

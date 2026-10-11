@@ -14,6 +14,7 @@ import { enforceLimits, type LimitRule } from '../public/limits.js'
 import { codesSentWithin, hashCode, newCode, OTP_CODE_LENGTH, OTP_TTL_SEC, tellManagersCodesPaused } from '../public/otp.js'
 import type { IdentityDeps } from './deps.js'
 import type { OtpPurpose } from './schema.js'
+import { ownerOf } from './common.js'
 import { countSessionFailure, markSessionVerified, resolveSession, type SessionView } from './sessions.js'
 import { grantTrust } from './trust.js'
 import './problems.js'
@@ -42,6 +43,15 @@ export interface PinState {
   lockedUntil: Date | null
   setAt: Date | null
   resetHoldUntil: Date | null
+}
+
+/**
+ * Whose PIN rules a page: its link's client, or, on a stranger's link (no client when it was issued), the live client who owns the
+ * number now. A booking from a stranger's page lands on that client's record (upsertCustomerByPhone), so their PIN must outrank a
+ * texted code there too, or a code to a recycled number would book onto (and un-hide) a PIN holder's record (W4c review).
+ */
+export async function pinOwnerOf(db: Executor, s: Pick<SessionView, 'customerId' | 'phone'>): Promise<string | null> {
+  return s.customerId ?? (await ownerOf(db, s.phone)) ?? null
 }
 
 export async function pinStateOf(db: Executor, customerId: string | null): Promise<PinState> {
@@ -73,7 +83,8 @@ export async function requestStepUpCode(
 ): Promise<CodeRequested> {
   const now = d.clock.now()
   const s = await resolveSession(d.db, o.session, now)
-  const pin = await pinStateOf(d.db, s.customerId)
+  // a stranger's link (no client) whose number a client now owns: that client's PIN outranks a code as on their own link (W4c)
+  const pin = await pinStateOf(d.db, await pinOwnerOf(d.db, s))
   if (o.purpose !== 'link_verify' && !s.customerId) throw new AppError('IDENTITY_UNKNOWN_CLIENT')
   if (o.purpose === 'link_verify' && pin.set) throw new AppError('IDENTITY_PIN_REQUIRED')
   if (o.purpose === 'pin_set' && pin.set) throw new AppError('IDENTITY_PIN_EXISTS')
@@ -220,7 +231,7 @@ export async function confirmStepUpCode(
     let verified = false
     if (purpose !== 'pin_reset') {
       // a PIN outranks a code: one set since the code was asked for leaves the page unverified
-      if ((await pinStateOf(tx, s.customerId)).set) return { ok: false, error: new AppError('IDENTITY_PIN_REQUIRED') }
+      if ((await pinStateOf(tx, await pinOwnerOf(tx, s))).set) return { ok: false, error: new AppError('IDENTITY_PIN_REQUIRED') }
       await markSessionVerified(tx, s.tokenHash, 'code', now)
       if (s.customerId) await grantTrust(tx, { locationId: s.link.locationId, phone: s.phone, customerId: s.customerId, verifiedBy: 'code', now })
       verified = true

@@ -74,6 +74,71 @@ describe('texted codes', () => {
   })
 })
 
+describe('a stranger’s link whose number a client with a PIN owns (W4c review)', () => {
+  /** Maria (created long ago: a stale record) sets her PIN on her own page; the trust it leaves is dropped. */
+  async function mariaWithPin(pin = '4826'): Promise<string> {
+    const id = await h.customer({ createdAt: new Date(h.clock.now().getTime() - 200 * DAY) })
+    const own = await h.page({ customerId: id })
+    expect((await h.verifyByCode(own.session)).statusCode).toBe(200)
+    expect((await h.call('POST', 'pin', { session: own.session, body: { pin } })).statusCode).toBe(200)
+    await sql`delete from phone_trust`.execute(h.db)
+    h.advance(200 * DAY) // quiet for 200 days: the record is stale again
+    return id
+  }
+
+  it('a texted code is refused (a PIN outranks a code), the page asks for the PIN, and only the right PIN books for her', async () => {
+    const maria = await mariaWithPin()
+    const { session, body } = await h.page({ customerId: null, phone: PHONES.maria })
+    expect(body.stepUp.method).toBe('pin')
+    expect(body.client.firstName).toBe('')
+    const code = await h.call('POST', 'verify/code', { session, body: { purpose: 'verify' } })
+    expect(code.statusCode).toBe(409)
+    expect(json(code).code).toBe('IDENTITY_PIN_REQUIRED')
+    const wrong = await h.call('POST', 'verify/pin', { session, body: { pin: '9137' } })
+    expect(wrong.statusCode).toBe(401)
+    // the wrong PIN counts against her PIN, as on her own page
+    expect((await h.db.selectFrom('customer_pins').select('failed_attempts').where('customer_id', '=', maria).executeTakeFirstOrThrow()).failed_attempts).toBe(1)
+    const right = await h.call('POST', 'verify/pin', { session, body: { pin: '4826' } })
+    expect(right.statusCode, right.body).toBe(200)
+    expect((await h.db.selectFrom('phone_trust').select('customer_id').executeTakeFirstOrThrow()).customer_id).toBe(maria)
+    const b = await h.call('POST', 'bookings', {
+      session,
+      key: h.nextKey(),
+      body: { serviceKey: h.key('Express Hand Wash'), addonKeys: [], date: '2026-12-31', startMin: 13 * 60, name: 'Maria Delgado' },
+    })
+    expect([201, 409, 422]).toContain(b.statusCode) // the date's rules aside, never a PIN refusal
+    expect(json(b).code).not.toBe('IDENTITY_PIN_REQUIRED')
+  })
+
+  it('a page verified by code before she set her PIN does not book onto her record', async () => {
+    const id = await h.customer({ createdAt: new Date(h.clock.now().getTime() - 200 * DAY) })
+    const { session } = await h.page({ customerId: null, phone: PHONES.maria })
+    expect((await h.verifyByCode(session)).statusCode).toBe(200)
+    // meanwhile Maria sets a PIN on her own page (a verify link: a calendar one would supersede the stranger's calendar link)
+    const own = await h.page({ customerId: id, kind: 'verify' })
+    expect((await h.verifyByCode(own.session)).statusCode).toBe(200)
+    expect((await h.call('POST', 'pin', { session: own.session, body: { pin: '4826' } })).statusCode).toBe(200)
+    const b = await h.call('POST', 'bookings', {
+      session,
+      key: h.nextKey(),
+      body: { serviceKey: h.key('Express Hand Wash'), addonKeys: [], date: '2026-06-13', startMin: 13 * 60, name: 'Somebody Else' },
+    })
+    expect(b.statusCode).toBe(409)
+    expect(json(b).code).toBe('IDENTITY_PIN_REQUIRED')
+    expect(await h.db.selectFrom('appointments').select('id').execute()).toEqual([])
+    expect((await h.db.selectFrom('customers').select('full_name').where('id', '=', id).executeTakeFirstOrThrow()).full_name).toBe('Maria Delgado')
+  })
+
+  it('a number with no client, or a client with no PIN, still verifies by code as before', async () => {
+    const { session } = await h.page({ customerId: null, phone: PHONES.stranger })
+    expect((await h.verifyByCode(session)).statusCode).toBe(200)
+    await h.customer({ name: 'Liam Chen', phone: PHONES.liam })
+    const liam = await h.page({ customerId: null, phone: PHONES.liam })
+    expect(liam.body.stepUp.method).toBe('code')
+    expect((await h.verifyByCode(liam.session)).statusCode).toBe(200)
+  })
+})
+
 describe('the website PIN', () => {
   it('is chosen after a code, then outranks codes: the next page enters it (and a wrong one counts)', async () => {
     const id = await h.customer()

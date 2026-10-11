@@ -28,7 +28,7 @@ import type { AuthContext } from '../../../http/authorizer.js'
 import { checkCheckoutUrl, listPlanPublic } from '../../catalog/plans.js'
 import { getCustomer, isVipCustomer, updateCustomer, upsertCustomerByPhone, upsertVehicleByPlate } from '../../customers/service.js'
 import { evaluateTrust } from '../../identity/trust.js'
-import { pinStateOf } from '../../identity/codes.js'
+import { pinOwnerOf, pinStateOf } from '../../identity/codes.js'
 import { consumeLink } from '../../identity/links.js'
 import { memberPrivilegesHeldUntil } from '../../identity/pin-service.js'
 import { STEP_UP_MAX_AGE_MS, hasFreshStepUp, type SessionView } from '../../identity/sessions.js'
@@ -185,7 +185,8 @@ export async function linkState(db: Executor, s: SessionView, now: Date): Promis
     }
   }
   const trust = customer ? await evaluateTrust(db, { locationId: loc.id, phone: s.phone, customerId: customer.id, now }) : null
-  const pin = await pinStateOf(db, s.customerId)
+  // a stranger's link whose number a client owns now: that client's PIN is the step-up (W4c review)
+  const pin = await pinStateOf(db, await pinOwnerOf(db, s))
   const fresh = hasFreshStepUp(s, now) && s.stepUpAt ? new Date(s.stepUpAt.getTime() + STEP_UP_MAX_AGE_MS) : null
   return {
     kind: s.link.kind,
@@ -412,6 +413,9 @@ export async function bookOnLink(tx: Tx, d: LinkDeps, s: SessionView, r: LinkReq
     if (Object.keys(patch).length) await updateCustomer(tx, { id: c.id, patch })
   } else {
     if (!name) throw bad('name', 'Enter your name.')
+    // the number's client (the booking lands on their record) has a PIN: a page verified by a texted code does not book for them
+    // (a PIN set after this page's code, or a page verified before this rule): only their PIN does (W4c review)
+    if (s.verifiedBy !== 'pin' && (await pinStateOf(tx, await pinOwnerOf(tx, s))).set) throw new AppError('IDENTITY_PIN_REQUIRED')
     const created = await upsertCustomerByPhone(tx, {
       newId: d.app.newId,
       now,
