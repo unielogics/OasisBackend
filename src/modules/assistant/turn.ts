@@ -570,7 +570,8 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
       await tx
         .updateTable('assistant_conversations')
         .set({
-          pending_since: superseded ? null : nextPending,
+          // a handoff the model asked for gives the newer texts to staff as well
+          pending_since: superseded || (messageId && toolHandoff) ? null : nextPending,
           running_since: null,
           ...(messageId && c.disclosed_at === null ? { disclosed_at: d.clock.now() } : {}),
           updated_at: d.clock.now(),
@@ -590,7 +591,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
       } else if (status === 'failed') {
         await openTurnHandoff(tx, hd, target, { reason: 'fallback', summary: HANDOFF_SUMMARIES.fallback! })
       }
-      return { messageId, status, error, composed, kickAgain: !superseded && nextPending !== null }
+      return { messageId, status, error, composed, kickAgain: !superseded && !(messageId && toolHandoff) && nextPending !== null }
     })
     if (out.kickAgain) await d.kick([conv.id]).catch((e: Error) => d.log.warn({ err: e.message.slice(0, 200) }, 'assistant re-kick failed; the sweep will start it'))
     if (out.status === 'replied') return { status: 'replied', turnId, messageId: out.messageId!, text: out.composed.text, handoff: toolHandoff !== null }

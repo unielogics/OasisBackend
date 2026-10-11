@@ -544,7 +544,7 @@ describe('the turn', () => {
   })
 
   it('newer texts that arrive during a turn keep the marker and kick the next turn', async () => {
-    const a = assistant([simText('We open at 8 AM.', { delayMs: 300 })])
+    const a = assistant([simText('We open at 8 AM.', { delayMs: 1500 })])
     await inbound(maria(), 'when do you open?')
     const running = a.turn(maria())
     await new Promise((r) => setTimeout(r, 50))
@@ -558,7 +558,7 @@ describe('the turn', () => {
   })
 
   it('a staff text while the model was thinking stands: the AI reply is not sent', async () => {
-    const a = assistant([simText('We open at 8 AM.', { delayMs: 300 })])
+    const a = assistant([simText('We open at 8 AM.', { delayMs: 1500 })])
     await inbound(maria(), 'when do you open?')
     const running = a.turn(maria())
     await new Promise((r) => setTimeout(r, 50))
