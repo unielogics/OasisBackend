@@ -13,12 +13,21 @@ export interface InboxRow {
   processedAt: Date | null
   decision: InboundDecision['kind'] | null
   quarantined: boolean
+  /** The thread message the text was filed as, when it was. */
+  messageId: string | null
+  /** Set on an incomplete-MMS placeholder once the complete delivery of the same message arrived (ADR 0151). */
+  supersededBy: string | null
 }
 
 export interface InboxRepository {
   /** Inserts the received text, unique on (deviceId, providerMessageId). `inserted` is false for a repeat. */
   insertIfNew(msg: InboundText, receivedAt: Date): Promise<{ inserted: boolean; row: InboxRow }>
   markProcessed(id: string, decision: InboundDecision['kind'], quarantined: boolean, at: Date): Promise<void>
+  find(deviceId: string, providerMessageId: string): Promise<InboxRow | null>
+  /** Marks a placeholder as replaced by `byId`; false when it already was. */
+  markSuperseded(id: string, byId: string, at: Date): Promise<boolean>
+  /** Serialises the handling of one device message (its incomplete and complete deliveries) until the transaction ends. */
+  lock?(deviceId: string, key: string): Promise<void>
 }
 
 export interface CustomerDirectory {
@@ -44,9 +53,22 @@ export class InMemoryInboxRepository implements InboxRepository {
       processedAt: null,
       decision: null,
       quarantined: false,
+      messageId: null,
+      supersededBy: null,
     }
     this.rows.push(row)
     return { inserted: true, row }
+  }
+
+  async find(deviceId: string, providerMessageId: string): Promise<InboxRow | null> {
+    return this.rows.find((r) => r.deviceId === deviceId && r.providerMessageId === providerMessageId) ?? null
+  }
+
+  async markSuperseded(id: string, byId: string): Promise<boolean> {
+    const row = this.rows.find((r) => r.id === id)
+    if (!row || row.supersededBy !== null) return false
+    row.supersededBy = byId
+    return true
   }
 
   async markProcessed(id: string, decision: InboundDecision['kind'], quarantined: boolean, at: Date): Promise<void> {

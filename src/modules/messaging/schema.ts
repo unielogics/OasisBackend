@@ -1,6 +1,7 @@
 // Kysely types for the messaging tables (migration 20261006200000_messaging.sql), registered by module augmentation.
 import type { Generated } from 'kysely'
 import type { JsonColumn, JsonValue } from '../../platform/schema.js'
+import type { MmsAttachmentRecord } from './inbound/mms.js'
 
 export type SmsDeviceStatus = 'unknown' | 'online' | 'degraded' | 'offline'
 export type SmsDeviceProviderKind = 'sim' | 'smsgate'
@@ -95,6 +96,10 @@ export interface MessagesTable {
   received_at: Date | null
   read_at: Date | null
   created_at: Generated<Date>
+  /** 'mms' for an inbound text that arrived as MMS (migration 20261010130000). */
+  kind: Generated<'sms' | 'mms'>
+  /** The parts of an MMS (pictures saved, others listed); null for an SMS. */
+  attachments: JsonColumn<MmsAttachmentRecord[]> | null
 }
 
 export type OutboxStateColumn =
@@ -167,6 +172,11 @@ export interface SmsInboxTable {
   appointment_id: string | null
   message_id: string | null
   reviewed_at: Date | null
+  kind: Generated<'sms' | 'mms'>
+  attachments: JsonColumn<MmsAttachmentRecord[]> | null
+  /** The inbox row of the complete delivery that replaced this incomplete-MMS placeholder (ADR 0151). */
+  superseded_by: string | null
+  superseded_at: Date | null
 }
 
 export interface SmsOptOutsTable {

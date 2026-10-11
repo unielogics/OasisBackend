@@ -129,6 +129,11 @@ export class SimulatorProvider implements SmsProvider {
     return this.device.injectInbound(from, body, opts)
   }
 
+  /** An inbound MMS: mms:received then mms:downloaded, as the app sends them. */
+  injectMms(from: string, o?: Parameters<SimDevice['injectMms']>[1]): string {
+    return this.device.injectMms(from, o)
+  }
+
   markSent(id: string): boolean {
     return this.device.markSent(id)
   }

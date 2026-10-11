@@ -45,7 +45,8 @@ for the environment in AWS Secrets Manager and the app's AWS identity, and 0140 
 | `/etc/systemd/system/oasis*.{service,timer,target}` | the units |
 | `/etc/nginx/conf.d/oasis.conf`, `00-oasis-zones.conf`, `/etc/nginx/oasis/{proxy,security-headers,tls}.conf` | the dashboard site; `tls.conf` holds the TLS settings every HTTPS server shares |
 | `/etc/nginx/conf.d/oasis-site.conf`, `/etc/nginx/oasis/site-headers.conf` | the public website's servers and headers (`install.sh --site-domain`; a port-80 bootstrap until its certificate exists) |
-| `/var/www/site/releases/<id>`, `/var/www/site/current`, `previous` | the public website: one verified static build per release (`dist/` plus `REVISION`), `root:root`, read-only; nginx serves `current` (ADR 0145). `releases/bootstrap` is the placeholder page install.sh puts there first |
+| `/var/www/site/releases/<id>`, `/var/www/site/current`, `previous` | the public website: one verified static build per release (a root-made copy of the build's `dist/` plus `REVISION`), `root:root`, read-only; nginx serves `current` (ADR 0145). `releases/bootstrap` is the placeholder page install.sh puts there first. `<id>.partial` (a build in progress) is root's with only its `src/` handed to `oasis-site`, and `0700` once the build ended; `<id>.failed` is `root:root 0700` |
+| `/var/lib/oasis-site` | the home of the website build user `oasis-site` (`0700`): its pnpm store and caches, nothing else (`install.sh --site-domain`) |
 | `/opt/oasis/git/site.git` | the root-only bare mirror the website is built from (`site-deploy.sh` refuses any other owner or a group/other-writable file) |
 | `/etc/oasis/site.env` | the website's settings (`SITE_DOMAIN`, `SITE_URL`, `SITE_ROOT`, `SITE_MIRROR`, `SITE_BUILD_DIR`, `SITE_MARKER`, `SITE_KEEP`), `0644 root:root`, rendered from the `install.sh --site-*` options on every run; nothing secret |
 | `/var/cache/nginx/oasis_public` | nginx's 60-second cache of the website's read-only API answers (`/api/v1/public/hours`, `/availability`, `/catalog`, on both hosts) |
@@ -54,8 +55,10 @@ for the environment in AWS Secrets Manager and the app's AWS identity, and 0140 
 | `/var/log/oasis/{deploy.log,deploys.list,failures.log}` | deploy history and failed timers (the services themselves log to journald) |
 
 Users: `oasis` (system user, no shell) runs the services, the builds and the migrations, but owns neither the code it runs nor the
-kit root runs; only `deploy.sh`, `rollback.sh` and `install.sh` need root, and they drop to `oasis` for the work. See "Privilege
-separation" below.
+kit root runs; only `deploy.sh`, `rollback.sh` and `install.sh` need root, and they drop to `oasis` for the work. `oasis-site` (system
+user and group of its own, no shell, home `/var/lib/oasis-site`; created by `install.sh --site-domain`) only builds the public website:
+it is not in the group `oasis`, so it reads nothing of `/etc/oasis`, `/var/lib/oasis` or the backups, and the metadata guard rejects it.
+See "Privilege separation" below.
 
 ## Setting up a host: `install.sh`
 
@@ -211,7 +214,8 @@ that address, which lets through only:
 * **ec2-instance-connect**: the EC2 console's Connect button (its `AuthorizedKeysCommand` runs as that user); added only when the user
   exists.
 
-Everyone else is rejected: by design `ec2-user` tools (`ec2-metadata`, the AWS CLI or SDK falling back to the instance) get "connection
+Everyone else is rejected, the website build user `oasis-site` included (the site's dependencies run as that user during
+`site-deploy.sh`; they get no role credentials): by design `ec2-user` tools (`ec2-metadata`, the AWS CLI or SDK falling back to the instance) get "connection
 refused"; use an explicit profile with `AWS_EC2_METADATA_DISABLED=true`, or `sudo`. A process that can `sudo` is root, so this stops
 only what does not. `oasis-web` additionally has `IPAddressDeny=169.254.169.254/32` (it needs no AWS). chronyd's
 `169.254.169.123` and the DNS resolver's `169.254.169.253` are other addresses and unaffected; IPv6 metadata is off on this instance
@@ -254,13 +258,15 @@ The public website (`install.sh --site-domain <apex>`; `oasis-site.conf`, ADR 01
 | dotfiles (except `/.well-known`), `/REVISION` | nothing: 404 | |
 
 **The site build contract** (what `site-deploy.sh` expects of the site repository): `pnpm install --frozen-lockfile && pnpm build`
-runs as the oasis user with `HOME=/var/lib/oasis`, `CI=1`, `NODE_OPTIONS=--max-old-space-size=2048`, `SITE_URL=https://<apex>` and,
-when the API answered, `SITE_HOURS_JSON=<path of a snapshot of /api/v1/public/hours>` (unset otherwise: the build must have a fallback
-and the browser asks the live endpoint). It must write `dist/` (`SITE_BUILD_DIR` in `site.env`) with `index.html` (over 1 KB,
-containing the marker text `SITE_MARKER`, "Oasis Auto Spa" by default) and `404.html`, content-hashed files under `assets/`, no
-symbolic link, no file over 25 MB, 50 KB to 200 MB in all, no `localhost`/`127.0.0.1`/`0.0.0.0`/`:3000`/`:4000`/`:4321` URL in any
-html/js/css, and no inline `<script>` (the policy allows none; `<script type="application/ld+json">` data blocks are fine). A build
-that breaks the contract is kept as `releases/<id>.failed` and nothing is served.
+runs as the website build user `oasis-site` (not oasis) in `releases/<id>.partial/src`, with only this environment (`env -i`):
+`PATH`, `HOME=/var/lib/oasis-site`, `CI=1`, `NODE_OPTIONS=--max-old-space-size=2048`, `SITE_URL=https://<apex>`, the locale and proxy
+variables when set, and, when the API answered, `SITE_HOURS_JSON=<path of a snapshot of /api/v1/public/hours>` (unset otherwise: the
+build must have a fallback and the browser asks the live endpoint). It must write `dist/` (`SITE_BUILD_DIR` in `site.env`) with
+`index.html` (over 1 KB, containing the marker text `SITE_MARKER`, "Oasis Auto Spa" by default) and `404.html`, content-hashed files
+under `assets/`, only directories and regular files (no symbolic or hard link, no FIFO or socket), every one created by the build, no
+file over 25 MB, 50 KB to 200 MB in all, no `localhost`/`127.0.0.1`/`0.0.0.0`/`:3000`/`:4000`/`:4321` URL in any html/js/css, and no
+inline `<script>` (the policy allows none; `<script type="application/ld+json">` data blocks are fine). No process of the build may
+outlive it (they are killed). A build that breaks the contract is kept as `releases/<id>.failed` (root only) and nothing is served.
 
 **Real client address.** The API runs with `TRUST_PROXY=true`, which makes Fastify believe the first address in `X-Forwarded-For`.
 nginx therefore overwrites the header with `$remote_addr` (`proxy_set_header X-Forwarded-For $remote_addr`) and never appends to what a
@@ -335,6 +341,28 @@ install scripts, and the internet-facing services. So:
   `CacheDirectory=oasis-web` (`/var/cache/oasis-web`, emptied at each start), and `deploy.sh` replaces the build's
   `.next-live/cache` with a symlink to it. `next start` was run from a release copy with every file read-only: pages, static assets
   and the image optimizer (which writes `cache/images` through the link) all work.
+
+* **The public website is built by its own user, and root only touches its own copy of the output.** `site-deploy.sh` runs the site
+  repository's `pnpm install && pnpm build` as `oasis-site` (no shell, own group, home `/var/lib/oasis-site`), not as oasis: the
+  site's roughly 250 locked packages never run with access to `/etc/oasis` (the environment files and `backup.key`), the app's state,
+  the backups or, through the metadata guard, the instance role. Before building, as root on the host, it refuses to start when that
+  user is missing, is root or oasis, is in the group oasis, or can read any `/etc/oasis/*.env`, `*.key` or `aws-credentials` file or
+  enter `/var/lib/oasis` or `/var/backups/oasis` (the isolation check). `releases/<id>.partial` is root's; only its `src/` is handed
+  to `oasis-site`, and root writes the hours snapshot into the root-owned part. After the build every process of `oasis-site` is
+  killed (`pkill -KILL -U/-u oasis-site` until two passes in a row find none, so nothing it started outlives it) and `<id>.partial`
+  becomes `0700`, so nothing can reach the build tree any more. Work queued for later would outlive that, so `oasis` and
+  `oasis-site` cannot queue any: `install.sh` lists both in `/etc/at.deny` (and `/etc/cron.deny` where cron is installed; other
+  entries kept, `0600 root:root`), and `site-deploy.sh` refuses to build, and after the build refuses to copy, while `atq` shows a
+  job of `oasis-site`, `crontab -l -u oasis-site` shows anything or `oasis-site` lingers. Root then copies `dist/`
+  (`cp -R -P --preserve=mode,ownership,timestamps` into a fresh root-made directory, after refusing a hard link or a file not owned
+  by `oasis-site`). `-P` refuses a link only at the last component of each path `cp` opens: a directory swapped for a link while `cp`
+  walks the tree is followed, and the copy then holds someone else's files (verification 2026-10-10: a root `0600` private key landed
+  in the copy as a plain file). Because the copy keeps the owners, such a file shows as not `oasis-site`'s, and the whole copy is
+  rejected (kept as `<id>.failed`) when any entry is not a directory or regular file owned by `oasis-site`, **before** root writes
+  `REVISION`, chowns it or changes a mode. Only then does root verify **the copy**, chown it to root, write `REVISION`, set its modes
+  (directories `0755`, files `0644`) and rename it to `releases/<id>`; it never writes into, changes a mode in or renames a path the
+  build user controls (review 2026-10-10: a swap of `dist/` for a link after verification made root `chmod -R` and write through
+  it). The build tree is deleted.
 
 What it does not cover: a process left running by a build could still write through a file it opened before the `chown`; a
 release built before this change is still oasis-owned until it is pruned (a rollback to one works, but its cache directory is not

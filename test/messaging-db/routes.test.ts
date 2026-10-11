@@ -317,6 +317,22 @@ describe('quarantine inbox', () => {
     expect(json(await call('GET', '/messages/inbox')).items).toHaveLength(1)
     expect(await w.t.db.selectFrom('customers').select('id').where('phone_e164', '=', '+13055550199').execute()).toEqual([])
   })
+
+  it('does not list an MMS placeholder twice once its complete delivery arrived (superseded)', async () => {
+    const sim = rt.simulator((await rt.store.getByKey(SIM_DEVICE_KEY))!)!
+    const before = json(await call('GET', '/messages/inbox')).items.length
+    // first the device reports the MMS with no content (a part without bytes), then the same message in full
+    sim.injectMms('+13055550198', { messageId: 'q-late-1', attachments: [{ contentType: 'image/jpeg', data: null }] })
+    await rt.idle()
+    const placeholder = json(await call('GET', '/messages/inbox')).items
+    expect(placeholder).toHaveLength(before + 1)
+    expect(placeholder[0].text).toBe('[Picture message]')
+    sim.injectMms('+13055550198', { messageId: 'q-late-1', body: 'Is this the car wash?' })
+    await rt.idle()
+    const items = json(await call('GET', '/messages/inbox')).items
+    expect(items).toHaveLength(before + 1)
+    expect(items[0].text).toBe('Is this the car wash?')
+  })
 })
 
 describe('SMS consent', () => {

@@ -9,6 +9,10 @@ export const SMSGATE_WEBHOOK_EVENTS = [
   'sms:cancelled',
   'system:ping',
   'app:started',
+  // MMS (docs.sms-gate.app/features/mms): a reply sent as MMS (a group text, a long text, a picture, some phones' "OK")
+  // arrives only through these; without them it never reaches Oasis.
+  'mms:received',
+  'mms:downloaded',
 ] as const
 
 export type SmsGateWebhookEvent = (typeof SMSGATE_WEBHOOK_EVENTS)[number]

@@ -382,7 +382,9 @@ export class Dispatcher {
         const evaluation = await this.health.record(event.deviceId, { kind: 'app_started', at: event.at })
         return { handled: true, detail: 'health', health: evaluation }
       }
+      // mms_notified: an MMS announced but not downloaded yet (kept in webhook_log only; mms:downloaded carries the text)
       case 'received':
+      case 'mms_notified':
         return { handled: false, detail: 'not_applicable' }
       default:
         break

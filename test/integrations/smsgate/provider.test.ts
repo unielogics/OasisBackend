@@ -256,10 +256,11 @@ describe('registerWebhooks', () => {
     const { provider, calls } = make(steps)
     await provider.registerWebhooks(URL_, 'secret')
     const posts = calls.filter((c) => c.method === 'POST')
-    expect(posts).toHaveLength(7)
+    expect(posts).toHaveLength(9)
     expect(posts.map((c) => c.body)).toEqual(SMSGATE_WEBHOOK_EVENTS.map((e) => ({ id: idFor(e), url: URL_, event: e })))
     expect(posts.every((c) => (c.body as { id: string }).id.length <= 36)).toBe(true)
-    expect(SMSGATE_WEBHOOK_EVENTS).toEqual(['sms:received', 'sms:sent', 'sms:delivered', 'sms:failed', 'sms:cancelled', 'system:ping', 'app:started'])
+    expect(SMSGATE_WEBHOOK_EVENTS).toEqual(['sms:received', 'sms:sent', 'sms:delivered', 'sms:failed', 'sms:cancelled', 'system:ping', 'app:started', 'mms:received', 'mms:downloaded'])
+    expect(posts.map((c) => (c.body as { id: string }).id).slice(-2)).toEqual(['oasis-mms-received', 'oasis-mms-downloaded'])
   })
 
   it('is idempotent: when everything is already registered nothing is posted', async () => {
@@ -268,7 +269,7 @@ describe('registerWebhooks', () => {
     const report = await provider.syncWebhooks(URL_, 'secret')
     expect(calls).toHaveLength(1)
     expect(report).toMatchObject({ created: [], replaced: [], removed: [] })
-    expect(report.unchanged).toHaveLength(7)
+    expect(report.unchanged).toHaveLength(9)
   })
 
   it('re-posts (replaces) a registration whose URL changed and creates the missing ones', async () => {
@@ -276,12 +277,25 @@ describe('registerWebhooks', () => {
       { id: idFor('sms:received'), url: 'https://old.example.ts.net/hooks', event: 'sms:received' },
       { id: idFor('sms:sent'), url: URL_, event: 'sms:sent' },
     ]
-    const steps: Step[] = [() => json(200, existing), ...Array.from({ length: 6 }, () => (c: Call) => json(201, c.body))]
+    const steps: Step[] = [() => json(200, existing), ...Array.from({ length: 8 }, () => (c: Call) => json(201, c.body))]
     const { provider } = make(steps)
     const report = await provider.syncWebhooks(URL_, 'secret')
     expect(report.replaced).toEqual([idFor('sms:received')])
     expect(report.unchanged).toEqual([idFor('sms:sent')])
-    expect(report.created).toHaveLength(5)
+    expect(report.created).toHaveLength(7)
+  })
+
+  it('converges a tablet that holds the seven SMS-era webhooks to nine by adding only the two MMS ones', async () => {
+    const seven = ['sms:received', 'sms:sent', 'sms:delivered', 'sms:failed', 'sms:cancelled', 'system:ping', 'app:started']
+    const existing = seven.map((e) => ({ id: idFor(e), url: URL_, event: e, deviceId: null }))
+    const { provider, calls } = make([() => json(200, existing), (c: Call) => json(201, c.body), (c: Call) => json(201, c.body)])
+    const report = await provider.syncWebhooks(URL_, 'secret')
+    expect(report).toMatchObject({ created: ['oasis-mms-received', 'oasis-mms-downloaded'], replaced: [], removed: [] })
+    expect(report.unchanged).toHaveLength(7)
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.body)).toEqual([
+      { id: 'oasis-mms-received', url: URL_, event: 'mms:received' },
+      { id: 'oasis-mms-downloaded', url: URL_, event: 'mms:downloaded' },
+    ])
   })
 
   it('removes stale oasis- registrations and leaves foreign ones alone', async () => {

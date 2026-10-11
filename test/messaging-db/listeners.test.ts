@@ -114,7 +114,7 @@ describe('over real HTTP with the SMS Gate simulator server', () => {
     const device = await addDevice(sim.url, 'e2e-signing-key-1')
     const reg = await w.rt.registerWebhooks(device)
     expect(reg).toMatchObject({ registered: true, url: `${w.rt.config.webhookPublicUrl}/${device.device_key}` })
-    expect(sim.device.listWebhooks().map((h) => h.event).sort()).toEqual(['app:started', 'sms:cancelled', 'sms:delivered', 'sms:failed', 'sms:received', 'sms:sent', 'system:ping'])
+    expect(sim.device.listWebhooks().map((h) => h.event).sort()).toEqual(['app:started', 'mms:downloaded', 'mms:received', 'sms:cancelled', 'sms:delivered', 'sms:failed', 'sms:received', 'sms:sent', 'system:ping'])
     await w.rt.pollHealth(device)
     expect((await w.rt.store.get(device.id))!.status).toBe('online')
 

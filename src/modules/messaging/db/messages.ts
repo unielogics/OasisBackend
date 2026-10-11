@@ -8,6 +8,7 @@ import type { JsonValue } from '../../../platform/schema.js'
 import { formatClock } from '../templates/format.js'
 import type { OutboxState } from '../dispatch/types.js'
 import type { MessageStatus, MessagesTable } from '../schema.js'
+import type { MmsAttachmentRecord, MmsAttachmentStatus } from '../inbound/mms.js'
 import '../schema.js'
 
 /**
@@ -69,7 +70,22 @@ export interface MessageDto {
   customerId: string | null
   segments: number
   read: boolean
+  /** 'mms' for an inbound text that arrived as MMS. */
+  kind: 'sms' | 'mms'
+  /** The parts of an MMS: pictures saved in the photos store ('stored'), others listed; empty for an SMS. No storage key. */
+  attachments: MessageAttachmentDto[]
 }
+
+export interface MessageAttachmentDto {
+  index: number
+  name: string | null
+  contentType: string
+  size: number | null
+  status: MmsAttachmentStatus
+}
+
+const attachmentsDto = (a: MmsAttachmentRecord[] | null): MessageAttachmentDto[] =>
+  (a ?? []).map((x) => ({ index: x.index, name: x.name, contentType: x.contentType, size: x.size, status: x.status }))
 
 export type MessageRow = Pick<
   Selectable<MessagesTable>,
@@ -87,6 +103,8 @@ export type MessageRow = Pick<
   | 'queued_at'
   | 'received_at'
   | 'read_at'
+  | 'kind'
+  | 'attachments'
 > & { first: string | null; last: string | null }
 
 const staffName = (first: string | null, last: string | null): string | null => {
@@ -114,6 +132,8 @@ export function toMessageDto(r: MessageRow, tz: string): MessageDto {
     customerId: r.customer_id,
     segments: r.segments,
     read: r.direction === 'out' || r.read_at !== null,
+    kind: r.kind,
+    attachments: attachmentsDto(r.attachments),
   }
 }
 
@@ -132,6 +152,8 @@ const MESSAGE_COLUMNS = [
   'm.queued_at',
   'm.received_at',
   'm.read_at',
+  'm.kind',
+  'm.attachments',
   'e.first',
   'e.last',
 ] as const

@@ -22,7 +22,8 @@
 #                          write OASIS_SECRET_ID/AWS_REGION into common.env and remove those lines (docs/deployment.md)
 #   --secrets-in-files     the old layout without Secrets Manager: generate the secrets into common.env (hosts without AWS)
 #   --site-domain HOST     also host the public website at https://HOST (www.HOST redirects to it): the bare domain, different
-#                          from --domain. Writes /etc/oasis/site.env, the site's nginx servers, a placeholder release so the name
+#                          from --domain. Creates the website build user oasis-site (no shell, own group, home /var/lib/oasis-site,
+#                          never in the group oasis). Writes /etc/oasis/site.env, the site's nginx servers, a placeholder release so the name
 #                          never answers 404, and (certbot mode) asks for a certificate covering HOST and www.HOST, which needs
 #                          their DNS records to point here: before that it warns and leaves the port-80 bootstrap in place; re-run
 #                          with the same options once they do. Releases come from site-deploy.sh (docs/runbook.md, "The public website")
@@ -33,7 +34,8 @@
 #   --dry-run              print everything it would do, change nothing
 #   --no-system            write files only: no users, packages, chown, systemctl or nginx reload (for staging directories)
 #
-# What it does, in order: checks the host, installs packages, creates the oasis user and directories, copies this kit into the root-owned
+# What it does, in order: checks the host, installs packages, creates the oasis user and directories (and lists oasis and oasis-site in
+# /etc/at.deny, and /etc/cron.deny where cron is installed: neither may queue work for later), copies this kit into the root-owned
 # /usr/local/lib/oasis/deploy (run everything from there afterwards), writes /etc/oasis/*.env from the
 # templates (never overwriting an existing file; secret settings are not written there: a new install gets them generated into
 # /etc/oasis/secret-seed.env, mode 0600, to push into the secret with pnpm secrets:push and then shred), prepares the database,
@@ -246,14 +248,70 @@ step_user_dirs() {
   # nginx -t fails with "mkdir() ... No such file or directory" when it is missing (AL2023 ships no /var/cache/nginx)
   ensure_dir "$OASIS_ROOT_PREFIX/var/cache/nginx" 0755 "root:root"
   [[ -z "$SITE_DOMAIN" ]] || step_site_dirs
+  step_deny_scheduling
+}
+
+# --- 3c. no scheduled work for the service users ----------------------------------------------------------------------------------
+# oasis runs the application and oasis-site the website's build dependencies: neither has a reason to queue work for later, and a job
+# atd or crond starts after the build would run outside everything site-deploy.sh does to stop the build user (killing its processes
+# before root copies the output; ADR 0145). Both go into /etc/at.deny (at and batch) and, where cron is installed or a cron.deny
+# exists, /etc/cron.deny; the host's other entries stay, in their order (blank lines dropped), and the files become 0600 root:root
+# (at and crontab are setuid root). oasis-site is listed whether or not --site-domain is given: the name is harmless without the user.
+# An allow file (at.allow, cron.allow) replaces the deny file when it exists: one that lists either user is reported, not changed.
+deny_list_render() {
+  local file=$1 name
+  shift
+  {
+    [[ ! -f "$file" ]] || grep -v '^[[:space:]]*$' "$file" || true
+    for name in "$@"; do
+      [[ -f "$file" ]] && grep -qxF -- "$name" "$file" && continue
+      printf '%s\n' "$name"
+    done
+  }
+}
+step_deny_scheduling() {
+  local f allow users=("$OASIS_USER" "$OASIS_SITE_USER") u
+  for f in at cron; do
+    local deny="$OASIS_ROOT_PREFIX/etc/$f.deny"
+    if [[ "$f" == cron && ! -f "$deny" ]] && ! have crontab; then
+      continue
+    fi
+    deny_list_render "$deny" "${users[@]}" | install_content "$deny" 0600 root:root
+    if [[ -f "$deny" ]]; then
+      run chmod 0600 "$deny"
+      if [[ "$NO_SYSTEM" != 1 ]]; then run chown root:root "$deny"; fi
+    fi
+    allow="$OASIS_ROOT_PREFIX/etc/$f.allow"
+    for u in "${users[@]}"; do
+      if [[ -f "$allow" ]] && grep -qxF -- "$u" "$allow"; then
+        warn "$(real "$allow") exists and lists $u, so $(real "$deny") does not apply to it: remove $u from $(real "$allow") (site-deploy.sh refuses to build while oasis-site has jobs queued)"
+      fi
+    done
+  done
 }
 
 # --- 3a. the public website's directories ----------------------------------------------------------------------------------------
-# Root-owned throughout: site-deploy.sh builds as oasis in <id>.partial and root moves the verified output into place (ADR 0145).
-# Until the first deploy, a placeholder release answers at the apex (nginx would otherwise 404 the whole site), so the name is
-# never dead between the DNS change and the first build.
+# Root-owned throughout: site-deploy.sh builds as the website build user in <id>.partial/src, then root copies the output out and
+# verifies the copy (ADR 0145). Until the first deploy, a placeholder release answers at the apex (nginx would otherwise 404 the whole
+# site), so the name is never dead between the DNS change and the first build.
 SITE_ROOT="$OASIS_ROOT_PREFIX$SITE_ROOT_ARG"
 step_site_dirs() {
+  # the website build user: runs the site repository's dependencies, so it is not oasis and not in its group (no /etc/oasis, no
+  # state, no backups) and the metadata guard rejects it (no instance role). A system user with its own group, no shell, its home
+  # holding only the pnpm store and caches.
+  if [[ "$NO_SYSTEM" != 1 ]]; then
+    if id "$OASIS_SITE_USER" >/dev/null 2>&1; then
+      ok "user $OASIS_SITE_USER exists"
+      if [[ " $(id -nG "$OASIS_SITE_USER" 2>/dev/null) " == *" $OASIS_USER "* ]]; then
+        run gpasswd -d "$OASIS_SITE_USER" "$OASIS_USER"
+        changed "removed $OASIS_SITE_USER from the group $OASIS_USER (it must not read /etc/oasis)"
+      fi
+    else
+      run useradd --system --home-dir "$(real "$OASIS_SITE_STATE")" --shell /sbin/nologin --user-group "$OASIS_SITE_USER"
+      changed "created user $OASIS_SITE_USER (builds the public website; no access to /etc/oasis, the state or the instance role)"
+    fi
+  fi
+  ensure_dir "$OASIS_SITE_STATE" 0700 "$OASIS_SITE_USER:$OASIS_SITE_USER"
   ensure_dir "$SITE_ROOT" 0755 root:root
   ensure_dir "$SITE_ROOT/releases" 0755 root:root
   if [[ -n "$(readlink -e "$SITE_ROOT/current" 2>/dev/null || true)" ]]; then

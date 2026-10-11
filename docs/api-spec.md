@@ -16,7 +16,7 @@ by each vertical below the generated table.
 | Ids | UUIDv7 generated in the app (`createIdGenerator(clock)`); human refs (`INV-20611`, appointment seq) are separate fields. |
 | Request id | `X-Request-Id` is accepted (8-64 chars of `A-Za-z0-9._-`) or generated, echoed on every response, present on every log line and in every error body as `requestId`. |
 | Rate limit | 300 requests/minute per user (per IP when anonymous), in memory, `RATE_LIMIT_PER_MIN`, charged before the 401/403 decision so rejected floods are throttled too; ahead of the session lookup each address is also capped at 4 x `RATE_LIMIT_PER_MIN` (SEC-14, ADR 0120). Routes with their own limit (sign-in, password reset, `/events`, the arrival ping) keep only that limit. The IP is the socket peer unless `TRUST_PROXY` names the proxies in front (`true` = one hop: nginx on the same host, whose appended `X-Forwarded-For` entry is the client; a number = hops; or an address list); entries further left are client-supplied and ignored. 429 `RATE_LIMITED` with `Retry-After`. Probes and `/hooks/*` are exempt; `/events` allows 30 connects/minute. |
-| Body limits | JSON bodies up to 1 MB (413 `PAYLOAD_TOO_LARGE`); `/hooks/*` also 1 MB. Request schemas should be `.strict()`. |
+| Body limits | JSON bodies up to 1 MB (413 `PAYLOAD_TOO_LARGE`); `/hooks/*` also 1 MB, except `POST /hooks/smsgate/:deviceKey` on the hooks listener: 16 MB (an MMS carries its pictures base64-encoded), 413 above it (ADR 0151). Request schemas should be `.strict()`. |
 | Security headers | Helmet with `default-src 'none'; frame-ancestors 'none'`, `nosniff`, `Cross-Origin-Resource-Policy: same-origin`, HSTS when `COOKIE_SECURE=true`. |
 
 ## 2. Route metadata, access and the authz matrix
@@ -147,9 +147,9 @@ reconnect).
 |---|---|---|
 | `ops` | `sched.view` | `appointment.updated`, `bay.changed`, `kpi.dirty` |
 | `payments` | `pay.reports` | `invoice.updated`, `refund.pending` |
-| `messages` | `cli.view` | `message.in`, `message.status` |
+| `messages` | `cli.view` | `message.in`, `message.status`, `message.removed` |
 | `settings` | any user | `settings.changed`, `rbac.changed` |
-| `notifications` | self only (events carry `targetUserId`) | `notification.new` |
+| `notifications` | self only (events carry `targetUserId`) | `notification.new`, `notification.updated` |
 
 The Authorizer's `canSubscribe` overrides the table. Channels the caller may not read are dropped, not errors, and
 listed in `ready.denied`. Frames:
@@ -222,7 +222,7 @@ Mounted by `hookModules` under `/hooks`; exempt from Origin, CSRF, idempotency a
 `hmacSha256Hex` + `safeEqual` (constant time). De-duplicate through `webhook_log (provider, external_id)`.
 SMS Gate (verified against its docs): `X-Signature` is a hex HMAC-SHA256 over the raw body concatenated with the
 `X-Timestamp` value (Unix seconds); non-localhost endpoints must be HTTPS with a valid certificate. The SMS routes must
-only be reachable on the tailnet listener.
+only be reachable on the tailnet listener, whose SMS Gate route takes bodies up to 16 MB (section 23.5).
 
 ## 11. Persistence, migrations, seeds, jobs
 
@@ -822,6 +822,7 @@ scheduling / payments / settings / people          DbMessageQueue.enqueue(tx, ..
 dispatcher (job sms.dispatch or inline loop)       claim (FOR UPDATE SKIP LOCKED) -> SmsProvider.send(our message id)
         -> outbox accepted -> message sent                 sliding window 30 segments / 30 min, lane 0 may use the reserved 6
 device webhooks (hooks listener only)              sms:sent / delivered / failed / cancelled / received / system:ping / app:started
+                                                   / mms:received (recorded only) / mms:downloaded (routed like sms:received)
         -> webhook_log (persist) -> 2xx -> one transaction: outbox + message state, inbound router, device health
 ```
 
@@ -848,21 +849,31 @@ caller learns `skipped` (`opted_out`, `not_opted_in`, `no_valid_phone`, `synthet
 | `POST /integrations/sms/devices` | `set.billing` | `{label, provider: smsgate|sim, baseUrl, username, password, webhookSecret?, limits...}`. 201 `{device, webhookSecret}`: the signing secret (generated when omitted) is returned ONCE; credentials are stored AES-256-GCM encrypted with `SECRETS_KEY`. |
 | `PATCH /integrations/sms/devices/:id` | `set.billing` | Label, credentials (a sent secret replaces the stored one), `enabled`, `simSlotDefault`, `minIntervalMs`, `maxPerWindow`, `windowMinutes`. |
 | `POST /integrations/sms/devices/:id/test` | `set.billing` | Health poll plus a credentials probe; nothing is sent. `{reachable, credentials: ok/rejected/unknown, healthStatus, battery, error}`. |
-| `POST /integrations/sms/devices/:id/register-webhooks` | `set.billing` | Registers the seven `oasis-*` webhooks (idempotent; stale `oasis-*` ones removed). Needs `SMSGATE_WEBHOOK_PUBLIC_URL` (HTTPS) except for loopback and simulators. |
+| `POST /integrations/sms/devices/:id/register-webhooks` | `set.billing` | Registers the nine `oasis-*` webhooks: the seven SMS events plus `mms:received` and `mms:downloaded` (idempotent; stale `oasis-*` ones removed). Needs `SMSGATE_WEBHOOK_PUBLIC_URL` (HTTPS) except for loopback and simulators. |
 | `GET /integrations/sms/devices/:id/health?refresh=` | `set.billing` | Device state plus the dispatcher: `state` (idle, sending, rate_limited, quiet_hours, device_offline), the sliding-window budget, queue depth by lane with ETAs, quiet hours, failures in 24 h. |
 | `POST /dev/sms/inbound`, `GET /dev/mail` | `set.billing`, only with `ALLOW_DEV_ENDPOINTS=true` | Inject a text into the simulated device (handled by the same code path; returns once applied); read the console mailbox. |
 
-`Message` = `{id, direction in|out, from staff|system|customer, senderName, text, time "10:36 AM", at, channel, status, error, templateKey, appointmentId, customerId, segments, read}`.
+`Message` = `{id, direction in|out, from staff|system|customer, senderName, text, time "10:36 AM", at, channel, status, error, templateKey, appointmentId, customerId, segments, read, kind sms|mms, attachments}`.
+`kind` is `mms` for an inbound text that arrived as MMS (`channel` stays `sms`: same thread). `attachments` lists its parts
+(`[]` for an SMS): `{index, name, contentType, size, status stored|listed|unavailable|skipped}`; `stored` pictures are in the
+photos store (no URL or key is exposed yet). The text of an MMS is its body, else the text of its `text/plain` parts, else its
+subject. An MMS with no text reads `[Picture message]`, or `[Picture message — content unavailable]` when the device could not
+download it; when the complete delivery of such an incomplete MMS arrives later, it is filed normally and the placeholder message is
+removed (`message.removed`).
 `status` is `queued sending sent delivered failed received canceled expired`; the outbox states `accepted` and `sent` both read as `sent`.
 The dashboard's `MessagesPort.thread` is typed as a bare array today; the live wave must read `.items`.
 
 ### 23.3 Realtime
 
 Channel `messages` (needs `cli.view`), full payload (the message as above): `message.out` (queued), `message.in` (received),
-`message.status {id, status, error, customerId, appointmentId, threadId}` on every state change. Channel `notifications`
+`message.status {id, status, error, customerId, appointmentId, threadId}` on every state change, `message.removed {id, customerId,
+appointmentId, threadId, reason: "superseded"}` when an incomplete-MMS placeholder gives way to the complete message. Channel `notifications`
 (targeted at each manager's user): `notification.new {id, kind}` for `sms.device_offline`, `sms.device_recovered` (each at
 most once per device per 30 minutes, ADR 0122), `sms.app_restarted`, `sms.no_device`, `sms.cancel_request`,
-`sms.unattributed_reply`, and `sms.device.health {deviceId, label, from, to}` on every device state change.
+`sms.unattributed_reply`, `sms.picture_message` (an MMS with no text, from anyone: "Picture message from <name or masked number> —
+check the tablet / dashboard"; entity the appointment, else the customer, else none; once the complete delivery of an incomplete
+MMS arrives, its alert is marked read and reads "The full message arrived later and was filed in its place.", announced as
+`notification.updated {ids, reason: "superseded"}`), and `sms.device.health {deviceId, label, from, to}` on every device state change.
 Channel `ops`: `alerts.changed {source: 'sms'}` when a reply arrives or is read, a device changes state. Managers are active
 employees with a login who hold `set.billing` or `sched.override` (Super Admin, Management, Accounting, plus any per-person Allow).
 
@@ -891,7 +902,12 @@ staff, not an opt-out, and Spanish words are not keywords: both are open decisio
 `src/server.ts`; `HOOKS_PORT=0` disables it; an occupied port is logged as an error and the process keeps running). The public
 listener has no such route and answers 404. Verification is HMAC-SHA256 over the raw body plus `X-Timestamp` with the device's own
 secret (24 h tolerance, `SMSGATE_WEBHOOK_TOLERANCE_SECONDS`): 401 for a missing header, bad or stale signature, 400 for a signed body
-that is not an envelope, 404 for an unknown device key, 200 for everything accepted (a repeat, an event type Oasis ignores).
+that is not an envelope or a payload it cannot read, 404 for an unknown device key, 200 for everything accepted (a repeat, an event
+type Oasis ignores), 413 for a body over 16 MB. A signed delivery Oasis cannot use (the 400s and the ignored event types) is kept in
+`webhook_log` with status `unparsed` (attachment bytes stripped, then the body cut to its first 4 KB, event name in `headers.x-event`,
+purged after 7 days) and logged at warn by event name only. `mms:received` is recorded and applies nothing; `mms:downloaded` is routed
+exactly like `sms:received` (ADR 0151; field names in `docs/integrations/smsgate.md` section 1). Every final row (processed, ignored,
+failed: unknown device or given up after 24 hours, unparsed) keeps no attachment bytes.
 The envelope is persisted in `webhook_log` (unique `(provider, external_id)` = envelope id) before the answer; applying it
 (`sms_processed_events`, outbox, message, inbound routing, device health) happens in one transaction afterwards, and a sweep every
 30 s applies envelopes that were persisted but never applied (and abandons them after 24 h).

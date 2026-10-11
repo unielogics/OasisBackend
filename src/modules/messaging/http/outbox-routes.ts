@@ -207,6 +207,8 @@ export function registerOutboxRoutes(app: AppInstance, rt: MessagingRuntime): vo
         .where('d.location_id', '=', req.auth!.locationId)
         .where('i.quarantined', '=', true)
         .where('i.reviewed_at', 'is', null)
+        // an incomplete-MMS placeholder whose complete delivery arrived is shown once, as that delivery (ADR 0151)
+        .where('i.superseded_by', 'is', null)
         .orderBy('i.received_at', 'desc')
         .limit(req.query.limit)
         .execute()

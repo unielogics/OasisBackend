@@ -43,6 +43,8 @@ export interface NoticeSpec {
   entityId: string | null
   /** Extra SSE event published to each manager on the notifications channel (e.g. sms.device.health). */
   event?: { type: string; payload: Record<string, JsonValue> }
+  /** notifications.source_ref: lets the code that raised it find it again (never shown). */
+  sourceRef?: string
 }
 
 /** A notification row and a notification.new event per manager, in the caller's transaction. */
@@ -64,6 +66,7 @@ export async function notifyManagers(tx: Tx, n: NoticeSpec, o: { newId: NewId; c
         entity_id: n.entityId,
         created_at: o.clock.now(),
         read_at: null,
+        source_ref: n.sourceRef ?? null,
       })
       .execute()
     await realtime.publish(tx, { locationId: n.locationId, channel: 'notifications', type: 'notification.new', payload: { id, kind: n.kind }, targetUserId: m.userId })

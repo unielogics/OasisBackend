@@ -67,7 +67,7 @@ run proves the script, not your tablet or account, and the report says so at the
 
 ```bash
 D=/opt/oasis/current/backend/deploy/scripts
-sudo $D/verify.sh smsgate                                       # reads only: health, login, the seven webhooks, the mount from this host
+sudo $D/verify.sh smsgate                                       # reads only: health, login, the nine webhooks, the mount from this host
 sudo $D/verify.sh smsgate --send --to +13055550100 --watch      # also: two texts, and the receipts arriving live
 sudo $D/verify.sh smsgate --send --to +13055550100 --watch --replies --multipart
 ```
@@ -111,7 +111,7 @@ your own), `--sync-signing-key` (writes the signing key to the tablet).
 | SG-18 | the SIM slot mapping | `--sim-number` |
 | SG-19 | the tablet accepts the signing key by API | `--sync-signing-key` |
 | SG-20 | the server reaches the tablet over the tailnet | read |
-| SG-B1 to B6 | the first-run steps in `docs/integrations/smsgate.md` section 3 (health, login, the seven webhooks, one text out with receipts, the four replies, two minutes offline) | as above; B6 is by hand |
+| SG-B1 to B6 | the first-run steps in `docs/integrations/smsgate.md` section 3 (health, login, the nine webhooks, one text out with receipts, the four replies, two minutes offline) | as above; B6 is by hand |
 | SG-H1 | battery level, charging and health status | read |
 
 ### When a line fails

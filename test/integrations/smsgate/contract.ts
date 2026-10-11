@@ -60,11 +60,11 @@ export function describeSmsProviderContract(name: string, make: () => Promise<Co
       await h.close()
     })
 
-    it('registers webhooks for all seven events, and again without duplicating them', async () => {
+    it('registers webhooks for all nine events (the seven SMS ones, mms:received and mms:downloaded), and again without duplicating them', async () => {
       await h.provider.registerWebhooks(h.webhookUrl, h.secret)
-      expect(h.registeredWebhookCount()).toBe(7)
+      expect(h.registeredWebhookCount()).toBe(9)
       await h.provider.registerWebhooks(h.webhookUrl, h.secret)
-      expect(h.registeredWebhookCount()).toBe(7)
+      expect(h.registeredWebhookCount()).toBe(9)
     })
 
     it('reports a healthy device with a battery level', async () => {

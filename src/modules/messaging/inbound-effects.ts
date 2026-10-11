@@ -6,6 +6,9 @@ import type { Clock } from '../../platform/clock.js'
 import type { Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
 import { NIL_UUID, type NewId } from '../../platform/ids.js'
+import { maskPhone } from '../../platform/phone.js'
+import { normalizeE164 } from '../../integrations/sms/phone.js'
+import type { ObjectStorage } from '../../integrations/storage/types.js'
 import * as realtime from '../../platform/realtime.js'
 import { confirmAppointment } from '../scheduling/lifecycle.js'
 import type { Actor, SchedulingCtx } from '../scheduling/context.js'
@@ -14,6 +17,8 @@ import { loadCustomerTarget, strangerRecipient } from './db/recipients.js'
 import type { PgInboxRepository } from './db/inbox-repo.js'
 import { ensureThread, insertMessage, loadMessageDto, publishMessage, touchThread } from './db/messages.js'
 import type { InboundEffects } from './inbound/service.js'
+import { MMS_SUPERSEDED_NOTE, planAttachments } from './inbound/mms.js'
+import { publishToManagers } from './notify.js'
 import type { DbMessageQueue } from './queue.js'
 
 export interface EffectsEnv {
@@ -24,6 +29,8 @@ export interface EffectsEnv {
   schedulingCtx(locationId: string): Promise<SchedulingCtx>
   notifyManagers(tx: Tx, n: ManagerNotice): Promise<void>
   warn?: (msg: string, detail: Record<string, unknown>) => void
+  /** The photos store MMS pictures are saved in (created on first use). */
+  storage?: () => ObjectStorage
 }
 
 export interface ManagerNotice {
@@ -33,7 +40,12 @@ export interface ManagerNotice {
   body: string
   entityType: string | null
   entityId: string | null
+  /** notifications.source_ref (never shown): how the alert is found again, e.g. to resolve it. */
+  sourceRef?: string
 }
+
+/** The source_ref of the alerts raised for one received text (picture messages): the inbox row's natural key. */
+export const inboxSourceRef = (deviceId: string, providerMessageId: string): string => `sms_inbox:${deviceId}:${providerMessageId}`
 
 const REPLY_ACTOR_NAME = 'Customer reply'
 
@@ -135,6 +147,8 @@ export function createInboundEffects(
         direction: 'in',
         sender_kind: 'customer',
         channel: 'sms',
+        kind: m.kind ?? 'sms',
+        attachments: m.attachments ? JSON.stringify(m.attachments) : null,
         body: m.body,
         status: 'received',
         peer_e164: target?.recipient.phone ?? null,
@@ -152,7 +166,7 @@ export function createInboundEffects(
           .values({
             appointment_id: m.appointmentId,
             at: now,
-            text: 'Customer replied by SMS',
+            text: m.kind === 'mms' ? 'Customer replied by MMS' : 'Customer replied by SMS',
             channels: ['sms'],
             actor_type: 'customer',
             meta: JSON.stringify({ messageId: id }) as never,
@@ -162,8 +176,87 @@ export function createInboundEffects(
       if (loaded) await publishMessage(tx, o.locationId, 'message.in', loaded.dto)
     },
 
+    async recordAttachments(parts, ctx) {
+      const plan = planAttachments(o.locationId, o.event.deviceId, ctx.providerMessageId, parts)
+      const records = []
+      for (const item of plan) {
+        if (!item.save) {
+          records.push(item.record)
+          continue
+        }
+        try {
+          if (!e.storage) throw new Error('no photo storage configured')
+          await e.storage().put(item.save.key, item.save.body, item.save.contentType)
+          records.push(item.record)
+        } catch (err) {
+          // the text matters more than the picture: record it as unavailable and carry on (a STOP must never wait on S3)
+          e.warn?.('mms picture not saved', { index: item.record.index, err: (err as Error).message.slice(0, 200) })
+          records.push({ ...item.record, status: 'unavailable' as const, reason: 'storage_error' as const, key: null })
+        }
+      }
+      await o.inbox.setAttachments(ctx.inboxId, records)
+      return records
+    },
+
+    async supersede(stale) {
+      const now = e.clock.now()
+      // the placeholder leaves the thread: its message, its "Customer replied by MMS" line and its unread mark
+      const m = stale.messageId
+        ? await tx.selectFrom('messages').select(['id', 'thread_id', 'read_at', 'appointment_id', 'customer_id']).where('id', '=', stale.messageId).executeTakeFirst()
+        : undefined
+      if (m) {
+        if (m.appointment_id)
+          await tx
+            .deleteFrom('activity_log')
+            .where('appointment_id', '=', m.appointment_id)
+            .where(sql<string>`meta->>'messageId'`, '=', m.id)
+            .execute()
+        await tx.deleteFrom('messages').where('id', '=', m.id).execute()
+        if (m.thread_id && m.read_at === null)
+          await tx
+            .updateTable('message_threads')
+            .set({ unread_count: sql<number>`greatest(unread_count - 1, 0)` })
+            .where('id', '=', m.thread_id)
+            .execute()
+        await realtime.publish(tx, {
+          locationId: o.locationId,
+          channel: 'messages',
+          type: 'message.removed',
+          payload: { id: m.id, customerId: m.customer_id, appointmentId: m.appointment_id, threadId: m.thread_id, reason: 'superseded' },
+        })
+      }
+      // its alert is resolved: read, and saying the message arrived in full
+      const resolved = await tx
+        .updateTable('notifications')
+        .set({ read_at: sql<Date>`coalesce(read_at, ${now})`, body: MMS_SUPERSEDED_NOTE })
+        .where('location_id', '=', o.locationId)
+        .where('source_ref', '=', inboxSourceRef(stale.deviceId, stale.providerMessageId))
+        .returning('id')
+        .execute()
+      if (resolved.length > 0) {
+        await publishToManagers(tx, o.locationId, 'notification.updated', { ids: resolved.map((r) => r.id), reason: 'superseded' })
+        await realtime.publish(tx, { locationId: o.locationId, channel: 'ops', type: 'alerts.changed', payload: { source: 'sms', kind: 'picture_message' } })
+      }
+    },
+
     async staffAlert(a) {
-      if (a.kind === 'cancel_request' || a.kind === 'unattributed_inbound') {
+      if (a.kind === 'picture_message') {
+        const who = a.customerId
+          ? ((await tx.selectFrom('customers').select('full_name').where('id', '=', a.customerId).executeTakeFirst())?.full_name ?? 'customer')
+          : (() => {
+              const phone = normalizeE164(a.sender)
+              return phone ? maskPhone(phone) : 'an unknown sender'
+            })()
+        await e.notifyManagers(tx, {
+          locationId: o.locationId,
+          kind: 'sms.picture_message',
+          title: `Picture message from ${who} — check the tablet / dashboard`,
+          body: a.excerpt,
+          entityType: a.appointmentId ? 'appointment' : a.customerId ? 'customer' : null,
+          entityId: a.appointmentId ?? a.customerId,
+          sourceRef: inboxSourceRef(o.event.deviceId, o.event.providerMessageId),
+        })
+      } else if (a.kind === 'cancel_request' || a.kind === 'unattributed_inbound') {
         const who = await tx.selectFrom('customers').select('full_name').where('id', '=', a.customerId).executeTakeFirst()
         await e.notifyManagers(tx, {
           locationId: o.locationId,

@@ -75,4 +75,5 @@
 | [0144](0144-runtime-policy-secret-versions-backups-photos.md) | Runtime policy: current secret version only, write-only backups, versioned photos |
 | [0145](0145-public-website-on-the-same-host.md) | The public website on the same host: static releases behind the same nginx, one public API route, no CORS |
 | [0150](0150-public-website-booking-api.md) | The public website books for real: a small public API with abuse controls, no card capture, and SMS as the dependency |
+| [0151](0151-inbound-mms.md) | Inbound MMS is routed like SMS; pictures go to the photos store; signed deliveries Oasis cannot use are kept |
 | [0160](0160-ai-assistant-and-phone-identity.md) | An AI text assistant on the shop's number, the phone as the client's identity, personal links, status texts and one catalog |

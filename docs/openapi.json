@@ -8610,6 +8610,61 @@
                           "at": {
                             "type": "string"
                           },
+                          "attachments": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "contentType": {
+                                  "type": "string"
+                                },
+                                "index": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "name": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "size": {
+                                  "anyOf": [
+                                    {
+                                      "maximum": 9007199254740991,
+                                      "minimum": -9007199254740991,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "status": {
+                                  "enum": [
+                                    "stored",
+                                    "listed",
+                                    "unavailable",
+                                    "skipped"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "index",
+                                "name",
+                                "contentType",
+                                "size",
+                                "status"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
                           "author": {
                             "enum": [
                               "staff",
@@ -8663,6 +8718,13 @@
                             "type": "string"
                           },
                           "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "enum": [
+                              "sms",
+                              "mms"
+                            ],
                             "type": "string"
                           },
                           "read": {
@@ -8729,7 +8791,9 @@
                           "appointmentId",
                           "customerId",
                           "segments",
-                          "read"
+                          "read",
+                          "kind",
+                          "attachments"
                         ],
                         "type": "object"
                       },
@@ -8846,6 +8910,61 @@
                         "at": {
                           "type": "string"
                         },
+                        "attachments": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "contentType": {
+                                "type": "string"
+                              },
+                              "index": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "name": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "size": {
+                                "anyOf": [
+                                  {
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "status": {
+                                "enum": [
+                                  "stored",
+                                  "listed",
+                                  "unavailable",
+                                  "skipped"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "index",
+                              "name",
+                              "contentType",
+                              "size",
+                              "status"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
                         "author": {
                           "enum": [
                             "staff",
@@ -8899,6 +9018,13 @@
                           "type": "string"
                         },
                         "id": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "enum": [
+                            "sms",
+                            "mms"
+                          ],
                           "type": "string"
                         },
                         "read": {
@@ -8965,7 +9091,9 @@
                         "appointmentId",
                         "customerId",
                         "segments",
-                        "read"
+                        "read",
+                        "kind",
+                        "attachments"
                       ],
                       "type": "object"
                     },
@@ -17510,6 +17638,61 @@
                           "at": {
                             "type": "string"
                           },
+                          "attachments": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "contentType": {
+                                  "type": "string"
+                                },
+                                "index": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "name": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "size": {
+                                  "anyOf": [
+                                    {
+                                      "maximum": 9007199254740991,
+                                      "minimum": -9007199254740991,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "status": {
+                                  "enum": [
+                                    "stored",
+                                    "listed",
+                                    "unavailable",
+                                    "skipped"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "index",
+                                "name",
+                                "contentType",
+                                "size",
+                                "status"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
                           "author": {
                             "enum": [
                               "staff",
@@ -17563,6 +17746,13 @@
                             "type": "string"
                           },
                           "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "enum": [
+                              "sms",
+                              "mms"
+                            ],
                             "type": "string"
                           },
                           "read": {
@@ -17629,7 +17819,9 @@
                           "appointmentId",
                           "customerId",
                           "segments",
-                          "read"
+                          "read",
+                          "kind",
+                          "attachments"
                         ],
                         "type": "object"
                       },
@@ -23728,7 +23920,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Register the seven oasis-* webhooks on the device (idempotent; stale oasis-* ones are removed)",
+        "summary": "Register the nine oasis-* webhooks (the seven SMS events, mms:received and mms:downloaded) on the device (idempotent; stale oasis-* ones are removed)",
         "tags": [
           "integrations"
         ],

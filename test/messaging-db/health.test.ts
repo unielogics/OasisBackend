@@ -100,7 +100,7 @@ describe('health state machine', () => {
     const dev = await w.device()
     expect(dev.webhooks_registered_at).not.toBeNull()
     expect(dev.webhooks_url).toBe(`http://127.0.0.1:3002/hooks/smsgate/${SIM_DEVICE_KEY}`)
-    expect(sim.device.listWebhooks().map((h) => h.event).sort()).toEqual(['app:started', 'sms:cancelled', 'sms:delivered', 'sms:failed', 'sms:received', 'sms:sent', 'system:ping'])
+    expect(sim.device.listWebhooks().map((h) => h.event).sort()).toEqual(['app:started', 'mms:downloaded', 'mms:received', 'sms:cancelled', 'sms:delivered', 'sms:failed', 'sms:received', 'sms:sent', 'system:ping'])
   })
 
   it('a failing health poll never throws; the failure is recorded on the device', async () => {

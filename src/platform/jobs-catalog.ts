@@ -25,7 +25,7 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
   'maintenance.purge': {
     owner: 'platform',
     purpose:
-      'Drops expired idempotency keys, realtime events older than 10 minutes, webhook log rows older than 90 days, and the website’s one-time codes, member tokens and limit counters a day or two past their window (ADR 0150).',
+      'Drops expired idempotency keys, realtime events older than 10 minutes, webhook log rows older than 90 days (unparsed SMS Gate deliveries after 7 days, ADR 0151), and the website’s one-time codes, member tokens and limit counters a day or two past their window (ADR 0150).',
     idempotency: 'Deletes by cutoff; a second run finds nothing left to delete.',
     clock: 'Injected clock for every cutoff.',
     tests: 'test/integration/jobs.test.ts, test/jobs/registry.test.ts',
@@ -34,10 +34,11 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
   'maintenance.retention': {
     owner: 'platform',
     purpose:
-      'Daily retention: sessions (7 days past expiry), password resets, messages and SMS inbox and emails (24 months), SMS bookkeeping, VIP release markers. audit_log and the ledger are never purged.',
-    idempotency: 'Batched deletes by cutoff; a second run finds nothing left to delete.',
+      'Daily retention: sessions (7 days past expiry), password resets, messages and SMS inbox and emails (24 months, with the MMS pictures they saved in the photos store, ADR 0151), SMS bookkeeping, VIP release markers. audit_log and the ledger are never purged.',
+    idempotency:
+      'Batched deletes by cutoff, storage objects before their row; a row whose pictures cannot be deleted stays and the run fails after the other tasks (retried); a second run finds nothing left to delete.',
     clock: 'Injected clock; month cutoffs by calendar arithmetic.',
-    tests: 'test/jobs/scans.test.ts, test/jobs/registry.test.ts',
+    tests: 'test/jobs/scans.test.ts, test/jobs/registry.test.ts, test/messaging-db/mms.test.ts',
     status: 'built',
   },
   'federal_holidays.generate': {

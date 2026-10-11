@@ -230,7 +230,7 @@ $D/oasis-admin.sh --email you@example.com sms-add-device --label "Front desk tab
 ```bash
 $D/oasis-admin.sh ... sms-test <device id>              # reachable, credentials ok
 sudo $D/tailscale-serve.sh                              # once per host; prints SMSGATE_WEBHOOK_PUBLIC_URL for common.env
-$D/oasis-admin.sh ... sms-register-webhooks <device id> # seven oasis-* webhooks on the tablet
+$D/oasis-admin.sh ... sms-register-webhooks <device id> # nine oasis-* webhooks on the tablet (seven SMS events + mms:received, mms:downloaded)
 sudo $D/verify.sh smsgate --send --to +1YOURNUMBER --watch --replies   # one text out, receipts, then reply C, STOP, START, HELP
 ```
 Set `SMS_PROVIDER=smsgate` in `common.env` and restart the API and the worker. Nothing else goes in the environment: the tablet's URL,
@@ -348,6 +348,28 @@ and Squarespace credentials (rotate those at their source as well); a leaked tab
 5. While it is down nothing is lost: texts wait in the queue and expire per their class (a "ready for pickup" text lives 4 hours, a
    reminder 2). Staff phone customers whose "ready" or "late" text matters.
 
+### A reply shows on the tablet but not in Oasis (MMS)
+*Sign: the customer's reply (often a plain "OK", a group text, a long text or a picture) is on the tablet but not in the thread; the
+tablet's log says `messageType MMS`.*
+1. Phones send such replies as MMS, which arrive only through the `mms:received` / `mms:downloaded` webhooks (ADR 0151). `GET /webhooks`
+   on the tablet (or `sudo $D/verify.sh smsgate`, check SG-B3) must list **nine** `oasis-*` registrations. Fewer: `sms-register-webhooks
+   <id>` (the hourly `sms.webhooks.register` job and every app restart do the same).
+2. MMS download needs **mobile data** on the tablet (not only Wi-Fi). With it off, the tablet logs `MMS content incomplete` and Oasis gets
+   at most `[Picture message — content unavailable]` with a "Picture message" notification. If the tablet downloads it later and reports
+   it again, the full message (a STOP included) is filed normally and replaces the placeholder: the placeholder leaves the thread and
+   the quarantine list and its notification is marked read ("The full message arrived later ..."). Otherwise read it on the tablet.
+   `select provider_message_id, superseded_by from sms_inbox where provider_message_id like 'mms:%:incomplete'` lists the placeholders.
+   A STOP sent only in the MMS's text part (empty body) is read from there.
+3. A picture with no text shows as `[Picture message]` and raises "Picture message from <name or masked number> — check the tablet /
+   dashboard". The picture is in the photos store under `messaging/mms/` (no new bucket, never public); there is no viewer yet, so read it
+   on the tablet. It is deleted with its message after 24 months (`maintenance.retention`; a delete the store refuses keeps the row and
+   fails that run, so it is retried and shows in the jobs page).
+4. Deliveries the server could not use are kept for 7 days:
+   `select received_at, headers->>'x-event' as event, error, left(body, 300) from webhook_log where status = 'unparsed' order by received_at desc;`
+   An `mms:downloaded` there means its field names differ from what `docs/integrations/smsgate.md` section 1 assumes: send it to the
+   developer. Nothing in that table is lost text yet: the tablet still holds the message. No final `webhook_log` row keeps picture
+   bytes (they are stripped before the 4 KB cut of an `unparsed` row, and from a `failed` one).
+
 ### Squarespace sync stuck or dead-lettered
 *Sign: payments stay "Awaiting Squarespace", the sync status card shows lag or a dead letter, new orders do not appear.*
 1. `$D/oasis-admin.sh ... sqsp-status`: connection state, `lag`, `deadLetters`, `manualQueueOpen`, the last error.
@@ -412,6 +434,11 @@ names; the certificate needs DNS to point here):
    is 200, `curl -sI https://www.oasisautospanj.com/` is 301 to the apex, `curl -sI http://oasisautospanj.com/` is 301,
    `curl -s https://oasisautospanj.com/api/v1/public/hours` is the hours JSON, `curl -sI https://oasisautospanj.com/api/v1/customers` is 404.
 4. The mirror: `sudo git init --bare /opt/oasis/git/site.git && sudo chown -R root:root /opt/oasis/git && sudo chmod -R go-w /opt/oasis/git`.
+   The website is built by its own user `oasis-site` (no shell, not in the group oasis, home `/var/lib/oasis-site`), which
+   `install.sh --site-domain` creates; check `id oasis-site` (no `oasis` in its groups), `sudo -u oasis-site test -r
+   /etc/oasis/common.env || echo isolated`, and `sudo grep -x oasis-site /etc/at.deny` (install.sh denies `at`/`batch`, and cron
+   where it is installed, to `oasis` and `oasis-site`: the deploy kills the build user's processes before taking its output, and a
+   job queued for later would escape that).
    From then on `install.sh` is re-run with the same options whenever the kit's templates change (section 2), the `--site-*` ones included.
 
 **Publish and deploy** (as the operator, from the working copy in `~ec2-user/oasis/site`, like the application's mirrors):
@@ -419,14 +446,16 @@ names; the certificate needs DNS to point here):
 G="env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*"
 sudo $G git -C /opt/oasis/git/site.git fetch --quiet /home/ec2-user/oasis/site +main:main
 cd / && sudo $D/site-deploy.sh --dry-run      # the commit, the steps
-cd / && sudo $D/site-deploy.sh                # build as oasis, verify, switch, health-check (about a minute)
+cd / && sudo $D/site-deploy.sh                # build as oasis-site, copy and verify, switch, health-check (about a minute)
 ```
 It stops by itself when `current` already serves that commit (`--force` rebuilds; `--ref` names another branch, tag or commit of the
 mirror; `--skip-hours` builds without the hours snapshot). Watch for `verified dist/`, then `release <id> is live`. A build that fails
 or breaks the contract (missing 404.html, marker text absent, a localhost URL, an inline script ...) is kept in
 `/var/www/site/releases/<id>.failed` and nothing changes. A release that does not answer through nginx is switched back at once and
-kept as `.failed`; the reasons are in `/var/log/oasis/site-deploy.log` and `/var/log/nginx/oasis-site.error.log`. `--keep N` (default
-`SITE_KEEP=4`) releases plus current and previous stay; `--list` shows them.
+kept as `.failed` (`root:root 0700`: inspect with sudo); `previous` moves only when the new release is healthy, so after a failed
+deploy `--rollback` still goes to the release before. The reasons are in `/var/log/oasis/site-deploy.log` and
+`/var/log/nginx/oasis-site.error.log`. `--keep N` (default `SITE_KEEP=4`) releases plus current and previous stay; `--list` shows them
+(`<- current, previous` when both links name one release: use `--rollback --to <id>`).
 
 **Roll back:** `sudo $D/site-deploy.sh --rollback` (to `previous`; again to go forward) or `--rollback --to <release id>`; the same
 health check runs, exit 3 when it fails. Nothing is rebuilt and nginx is not reloaded: `current` is a symlink.
@@ -441,6 +470,23 @@ health check runs, exit 3 when it fails. Nothing is rebuilt and nginx is not rel
   redirecting; `site-deploy.sh --list` and `--rollback`.
 * `certbot renew --dry-run` covers both certificates (the dashboard's and the site's); the renewal hook reloads nginx.
 * "the mirror ... can be changed by users other than root": `sudo chown -R root:root /opt/oasis/git && sudo chmod -R go-w /opt/oasis/git`.
+* "there is no user oasis-site" or "the website build user oasis-site can read ...": re-run `install.sh` with the same options as last
+  time (it creates the user and its home and takes it out of the group oasis); `/etc/oasis` must stay `0750 root:oasis`.
+* "processes of oasis-site are still running after the build": `ps -u oasis-site`; the deploy stopped before taking the output
+  (nothing changed). `sudo pkill -KILL -u oasis-site` and run it again.
+* "hard link in the output" / "a file the build did not create": the build wrote something other than its own regular files into
+  `dist/`; fix the site repository (`releases/<id>.failed` shows what).
+* "oasis-site has work scheduled to run later, which no deploy may race": something running as `oasis-site` (a dependency of the
+  site) queued an `at`/`batch` job, a crontab or a lingering user manager. Each line names the command that removes it
+  (`sudo atq` then `sudo atrm <job>`; `sudo crontab -r -u oasis-site`; `sudo loginctl disable-linger oasis-site`). Then re-run
+  `install.sh` with the same options as last time (it keeps `oasis` and `oasis-site` in `/etc/at.deny` and `/etc/cron.deny`; check
+  `sudo cat /etc/at.deny`), find out which package of the site did it before deploying again, and deploy. Refused before the build,
+  nothing was built; after it, nothing was copied out (the build is in `releases/<id>.failed`).
+* "the copy of dist/ holds what the build user oasis-site did not make": an entry of the copy is another user's file, a link or a
+  special file: a path of the build was swapped while root copied it, or something outside the build wrote into it. Nothing went
+  live. Treat it as an attack: `releases/<id>.failed/release` shows the entries (owner and path in the message); find what is still
+  running or scheduled as `oasis-site` (`ps -u oasis-site`, `sudo atq`, `sudo crontab -l -u oasis-site`) and which dependency of
+  the site did it before deploying again.
 
 ### Online booking: opening the public writes, and what they send staff
 
