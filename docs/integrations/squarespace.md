@@ -211,7 +211,10 @@ subscription ref `sqsp:<email>:<productId|sku>` (B11); latest **paid** order set
 **active** until period end + `graceDays` (default **7**, configurable; the design's 3 misfires on Squarespace retries), then
 **past_due**; **canceled** only after `lapseCancelDays` more (default 60, `null` disables) and flagged as a lagged inference. A
 **full refund flags review and never cancels**; a partial refund stays paid and flags; pending/failed latest orders flag. Linking:
-Squarespace customer id, then email (case-insensitive), then phone (E.164, ambiguity links nobody and flags). `reconcileMembership`
+a membership checkout intent first (ADR 0160: expected email + product + 72-hour window, then that email's renewals), then the
+Squarespace customer id, then a **verified** email (case-insensitive; `customers.email_verified`), then phone (E.164, ambiguity links
+nobody and flags). An unverified email never links: a paid order matching a client only that way waits for staff (`awaiting_match`,
+api-spec 23.2a); a second paid order of the same plan inside the paid period is flagged `duplicate_payment`. `reconcileMembership`
 respects hand-set pause/cancel until a newer paid order arrives and returns `needs_customer` for unknown people.
 
 ## 5. Integrator guide

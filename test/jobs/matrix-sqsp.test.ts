@@ -1,9 +1,10 @@
-// sqsp.sync, sqsp.contacts, sqsp.reconcile, sqsp.webhook.process and membership.cycle through the real worker, twice each,
+// sqsp.sync, sqsp.contacts, sqsp.reconcile, sqsp.webhook.process, membership.cycle and membership.checkouts through the real worker,
+// twice each,
 // against the Squarespace simulator: the second run of every job leaves the database exactly as the first did.
 import { describe, expect, it } from 'vitest'
 import { sql } from 'kysely'
 import { ensurePlans } from '../../src/modules/memberships/plans.js'
-import { membershipCycleJob } from '../../src/modules/memberships/jobs.js'
+import { membershipCheckoutsJob, membershipCycleJob } from '../../src/modules/memberships/jobs.js'
 import { replaceProductRows } from '../../src/modules/payments-sync/db/product-map.js'
 import { sqspJobs } from '../../src/modules/payments-sync/jobs/index.js'
 import { transaction } from '../../src/platform/db.js'
@@ -58,7 +59,8 @@ async function arrange(): Promise<{ orderId: string }> {
   )
   await r.db
     .insertInto('customers')
-    .values({ id: r.newId(), full_name: 'Maria Alvarez', email: 'maria@example.com', source: 'import' })
+    // a verified email (ADR 0160: an unverified one would only wait for staff)
+    .values({ id: r.newId(), full_name: 'Maria Alvarez', email: 'maria@example.com', email_verified: true, source: 'import' })
     .execute()
   r.store.createOrder({
     email: 'maria@example.com',
@@ -159,5 +161,31 @@ describe('the Squarespace read side and the membership pass, twice each through 
     expect(await snapshot()).toEqual(first)
     expect(first).toMatchObject({ memberships: 1 })
     expect((first.credits as number) >= 0).toBe(true)
+  })
+
+  it('membership.checkouts: harmless with nothing to do; closes a stale pending web membership once (ADR 0160)', async () => {
+    const r = rig()
+    await ensurePlans(r.db, { locationId: r.locationId, clock: r.clock, newId: r.newId })
+    const w = await h.start({ definitions: [membershipCheckoutsJob] as never })
+    const states = async () =>
+      (await r.db.selectFrom('memberships').select(['status', 'cancel_reason']).orderBy('id').execute()).map((m) => `${m.status}:${m.cancel_reason}`)
+    await run(w, 'membership.checkouts')
+    expect(await states()).toEqual([])
+    const customer = r.newId()
+    await r.db.insertInto('customers').values({ id: customer, full_name: 'Web Joiner', source: 'online' }).execute()
+    const plan = await r.db.selectFrom('membership_plans').select('id').where('key', '=', 'premium').executeTakeFirstOrThrow()
+    await r.db
+      .insertInto('memberships')
+      .values({ id: r.newId(), location_id: r.locationId, customer_id: customer, plan_id: plan.id, plan_label: 'Gold', status: 'pending', source: 'manual', started_at: r.clock.now() })
+      .execute()
+    r.advance(8 * 86_400_000)
+    await run(w, 'membership.checkouts')
+    const first = await states()
+    expect(first).toEqual(['canceled:checkout_abandoned'])
+    const audits = async () => (await r.db.selectFrom('audit_log').select('id').execute()).length
+    const n = await audits()
+    await run(w, 'membership.checkouts')
+    expect(await states()).toEqual(first)
+    expect(await audits()).toBe(n)
   })
 })

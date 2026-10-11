@@ -8,6 +8,7 @@ import type { Clock } from '../../platform/clock.js'
 import type { Db } from '../../platform/db.js'
 import type { SquarespaceEnv } from '../../integrations/squarespace/config.js'
 import type { Env } from '../../config/env.js'
+import { sweepCheckouts } from './checkouts.js'
 import {
   runMembershipCycle,
   syncMemberships,
@@ -66,3 +67,27 @@ export const membershipCycleJob: JobDefinition = {
     }
   },
 }
+
+/**
+ * Every 15 minutes (ADR 0160): open checkout intents past their 72-hour window expire, and a pending membership the website or a
+ * personal link started, that staff never edited and that saw no paid order in the 7 days after its last checkout attempt, is
+ * closed (canceled, cancel_reason checkout_abandoned). With no checkouts and no pending web memberships it changes nothing.
+ */
+export const membershipCheckoutsJob: JobDefinition = {
+  name: 'membership.checkouts',
+  policy: 'short',
+  cron: '*/15 * * * *',
+  retryLimit: 2,
+  retryDelaySeconds: 60,
+  expireInSeconds: 10 * 60,
+  async handler(ctx) {
+    const newId = createIdGenerator(ctx.clock)
+    const locations = await ctx.db.selectFrom('locations').select('id').orderBy('created_at').execute()
+    for (const l of locations) {
+      const r = await sweepCheckouts(ctx.db, { locationId: l.id, clock: ctx.clock, newId })
+      if (r.expired + r.abandoned > 0) ctx.logger.info({ location: l.id, ...r }, 'membership.checkouts done')
+    }
+  },
+}
+
+export const membershipJobs: readonly JobDefinition[] = [membershipCycleJob, membershipCheckoutsJob]

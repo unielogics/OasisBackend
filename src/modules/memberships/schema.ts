@@ -91,9 +91,22 @@ export interface MembershipCreditEventsTable {
   created_at: Generated<Date>
 }
 
-export type MembershipCheckoutState = 'open' | 'matched' | 'awaiting_match' | 'expired' | 'superseded' | 'abandoned'
+export type MembershipCheckoutState =
+  | 'open'
+  | 'matched'
+  | 'awaiting_match'
+  | 'expired'
+  | 'superseded'
+  | 'abandoned'
+  | 'rejected'
 
-/** A membership started through a personal link: the checkout intent the order sync matches first (migration 20261011000500). */
+/** Who opened a checkout row: the membership page of a personal link, or the order sync (an order waiting for staff). */
+export type MembershipCheckoutOrigin = 'link' | 'sync'
+
+/**
+ * A membership started through a personal link: the checkout intent the order sync matches first (migrations 20261011000500 and
+ * 20261011050000); or a row the order sync opened for a paid order that matches the client only by an unverified email.
+ */
 export interface MembershipCheckoutsTable {
   id: string
   location_id: string
@@ -103,7 +116,9 @@ export interface MembershipCheckoutsTable {
   plan_key: string
   product_key: string | null
   expected_email: string | null
-  checkout_url: string
+  /** null only on a row the sync opened (origin 'sync'). */
+  checkout_url: string | null
+  origin: Generated<MembershipCheckoutOrigin>
   started_at: Date
   expires_at: Date
   state: Generated<MembershipCheckoutState>

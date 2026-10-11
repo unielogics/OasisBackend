@@ -1,6 +1,7 @@
 // Membership inference over real Postgres and the simulator: orders become members, status follows the paid period, grace and
-// the lagged cancellation, refunds flag instead of cancelling, people are linked by Squarespace id, email then phone, and a hand
-// edit holds until a newer paid order arrives.
+// the lagged cancellation, refunds flag instead of cancelling, people are linked by Squarespace id, (verified) email then phone,
+// and a hand edit holds until a newer paid order arrives. The emails here are verified (customers.email_verified): an unverified
+// one never links (test/memberships/checkouts.test.ts).
 import { describe, expect, it } from 'vitest'
 import { createPermissiveAuthorizer } from '../../src/http/authorizer.js'
 import { apiModules } from '../../src/http/modules.js'
@@ -55,6 +56,7 @@ describe('membership inference from subscription orders', () => {
       name: 'Priya Nair',
       email: 'priya@example.com',
       phone: '+13057783321',
+      emailVerified: true,
     })
     const t0 = r.clock.now()
     r.store.createOrder({
@@ -111,10 +113,10 @@ describe('membership inference from subscription orders', () => {
   it('a full refund flags the member for review and never cancels; a partial refund flags and stays paid; nothing paid creates nobody', async () => {
     const r = rig()
     const env = await setup(r)
-    const a = await makeCustomer(r.db, env, { name: 'Full Refund', email: 'full@example.com' })
-    const b = await makeCustomer(r.db, env, { name: 'Part Refund', email: 'part@example.com' })
-    const only = await makeCustomer(r.db, env, { name: 'Only Refunded', email: 'only@example.com' })
-    const never = await makeCustomer(r.db, env, { name: 'Never Paid', email: 'never@example.com' })
+    const a = await makeCustomer(r.db, env, { name: 'Full Refund', email: 'full@example.com', emailVerified: true })
+    const b = await makeCustomer(r.db, env, { name: 'Part Refund', email: 'part@example.com', emailVerified: true })
+    const only = await makeCustomer(r.db, env, { name: 'Only Refunded', email: 'only@example.com', emailVerified: true })
+    const never = await makeCustomer(r.db, env, { name: 'Never Paid', email: 'never@example.com', emailVerified: true })
     // refunded in full before the first sync ever saw it: there is nothing paid, so there is no member
     const n1 = r.store.createOrder({
       email: 'never@example.com',
@@ -174,16 +176,19 @@ describe('membership inference from subscription orders', () => {
       name: 'By Email',
       email: 'shared@example.com',
       phone: '+13055550001',
+      emailVerified: true,
     })
     const byLink = await makeCustomer(r.db, env, {
       name: 'By Link',
       email: 'other@example.com',
       phone: '+13055550002',
+      emailVerified: true,
     })
     const byPhone = await makeCustomer(r.db, env, {
       name: 'By Phone',
       email: 'nomatch@example.com',
       phone: '+13055550003',
+      emailVerified: true,
     })
     const o1 = r.store.createOrder({
       email: 'shared@example.com',
@@ -286,8 +291,8 @@ describe('membership inference from subscription orders', () => {
   it('an email shared by two customers links nobody and is flagged', async () => {
     const r = rig()
     const env = await setup(r)
-    await makeCustomer(r.db, env, { name: 'Twin One', email: 'twin@example.com', phone: '+13055550021' })
-    await makeCustomer(r.db, env, { name: 'Twin Two', email: 'twin@example.com', phone: '+13055550022' })
+    await makeCustomer(r.db, env, { name: 'Twin One', email: 'twin@example.com', phone: '+13055550021', emailVerified: true })
+    await makeCustomer(r.db, env, { name: 'Twin Two', email: 'twin@example.com', phone: '+13055550022', emailVerified: true })
     r.store.createOrder({
       email: 'twin@example.com',
       name: 'Twin',
@@ -303,7 +308,7 @@ describe('membership inference from subscription orders', () => {
     const r = rig()
     const env = await setup(r)
     const user = await makeUser(r.db, r.newId)
-    const c = await makeCustomer(r.db, env, { name: 'Held', email: 'held@example.com' })
+    const c = await makeCustomer(r.db, env, { name: 'Held', email: 'held@example.com', emailVerified: true })
     r.store.createOrder({
       email: 'held@example.com',
       name: 'Held',
@@ -344,7 +349,7 @@ describe('membership inference from subscription orders', () => {
   it('a tier change on a later order moves the member to the new plan, flags it and starts that plan’s credits', async () => {
     const r = rig()
     const env = await setup(r)
-    const c = await makeCustomer(r.db, env, { name: 'Upgrader', email: 'up@example.com' })
+    const c = await makeCustomer(r.db, env, { name: 'Upgrader', email: 'up@example.com', emailVerified: true })
     r.store.createOrder({
       email: 'up@example.com',
       name: 'Upgrader',

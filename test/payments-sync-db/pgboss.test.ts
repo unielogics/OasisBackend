@@ -112,7 +112,7 @@ describe('pg-boss jobs against the simulator', () => {
     )
     const cust = await r.db
       .insertInto('customers')
-      .values({ id: r.newId(), full_name: 'Maria Alvarez', email: 'maria@example.com', source: 'import' })
+      .values({ id: r.newId(), full_name: 'Maria Alvarez', email: 'maria@example.com', email_verified: true, source: 'import' })
       .returning('id')
       .executeTakeFirstOrThrow()
     r.store.createOrder({

@@ -2,7 +2,7 @@
 // both the API process (producer) and the worker (consumer, which also registers handlers and cron schedules).
 import type { JobDefinition } from './jobs.js'
 import { assistantJobs } from '../modules/assistant/jobs.js'
-import { membershipCycleJob } from '../modules/memberships/jobs.js'
+import { membershipJobs } from '../modules/memberships/jobs.js'
 import { messagingJobs } from '../modules/messaging/jobs/index.js'
 import { remindersJob, reviewRequestJob } from '../modules/messaging/jobs/reminders.js'
 import { sqspJobs } from '../modules/payments-sync/jobs/index.js'
@@ -33,7 +33,7 @@ export const jobDefinitions: readonly JobDefinition<never>[] = [
   reviewRequestJob,
   vipHoldReleaseJob,
   ...sqspJobs,
-  membershipCycleJob,
+  ...membershipJobs,
   ...standingJobs,
   ...assistantJobs,
 ]

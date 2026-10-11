@@ -83,7 +83,7 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
   'appointments.reminders': {
     owner: 'messaging',
     purpose:
-      'Queues the 24 h and 2 h reminders (settings reminders.offsets_min) for booked and confirmed appointments: a confirmation request with "Reply C" for booked ones, a reminder for confirmed ones.',
+      'Queues the 24 h and 2 h reminders (settings reminders.offsets_min) for booked and confirmed appointments: a confirmation request with "Reply C" for booked ones (unless reminders.confirm_request is off), a reminder for confirmed ones, each with the preparation line of the visit’s categories (reminders.category_prep, ADR 0160).',
     idempotency:
       'Message idempotency key reminder:<appointment>:<offset>:<start>; one row lock per appointment.',
     clock:
@@ -253,6 +253,16 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
     tests:
       'test/memberships/seed-cycle.test.ts, test/payments-sync-db/pgboss.test.ts, test/jobs/registry.test.ts',
     status: 'existing',
+  },
+  'membership.checkouts': {
+    owner: 'memberships',
+    purpose:
+      'Expires open membership checkout intents after their 72-hour window and closes pending website or personal-link memberships staff never edited that saw no paid Squarespace order in the 7 days after their last checkout attempt (canceled, cancel_reason checkout_abandoned, intents abandoned; ADR 0160). Changes nothing when there are none.',
+    idempotency:
+      'Only open intents past their window and pending memberships with no paid order move, each under a row lock re-checked inside its transaction; a second run finds nothing left to move.',
+    clock: 'Injected clock for the window and the 7-day cutoff.',
+    tests: 'test/memberships/checkouts.test.ts, test/jobs/matrix-sqsp.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
   },
   'standing.materialize': {
     owner: 'standing',

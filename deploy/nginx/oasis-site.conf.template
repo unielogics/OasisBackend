@@ -88,7 +88,8 @@ server {
     # --- the site's read-only API answers: the opening hours, the open-times board and the catalog ---
     # Same origin as the pages, so the site needs no CORS and the API grants none. No cookie travels to the API (a visitor of the
     # website is never a dashboard session) and none comes back; GET only; nginx caches each answer for 60 seconds and serves a stale
-    # copy while it refreshes it or when the API is down. The cache key is fixed (review 2026-10-10): the path alone for the hours and
+    # copy while it refreshes it, and the catalog also when the API is down (the hours and the open times never outlive the API:
+    # the site shows its own fallback instead, W2 review leftover). The cache key is fixed (review 2026-10-10): the path alone for the hours and
     # the catalog, the path with the two parameters that change the answer for the board, so a junk or cache-busting parameter is
     # the same entry (the API refuses such a query, 422, when it does reach it). The dashboard's host (oasis.conf) has the same
     # locations.
@@ -103,7 +104,9 @@ server {
         proxy_cache_key "$scheme$host$uri";
         proxy_cache_valid 200 60s;
         proxy_cache_lock on;
-        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        # stale only while one request refreshes the entry (bounded by the 60 s upstream timeouts), never because the API failed:
+        # hours and open times served from an old copy for as long as the API is down would mislead (review 2026-10-10)
+        proxy_cache_use_stale updating;
         add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header X-Cache-Status $upstream_cache_status always;
@@ -121,7 +124,9 @@ server {
         proxy_cache_key "$scheme$host$uri?days=$arg_days&service=$arg_service";
         proxy_cache_valid 200 60s;
         proxy_cache_lock on;
-        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        # stale only while one request refreshes the entry (bounded by the 60 s upstream timeouts), never because the API failed:
+        # hours and open times served from an old copy for as long as the API is down would mislead (review 2026-10-10)
+        proxy_cache_use_stale updating;
         add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header X-Cache-Status $upstream_cache_status always;

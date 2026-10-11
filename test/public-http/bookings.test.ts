@@ -143,7 +143,7 @@ describe('a guest booking', () => {
 })
 
 describe('a member booking', () => {
-  it('with a verified token owes nothing, gets the member sentence, and may correct their own name and email', async () => {
+  it('with a verified token owes nothing, gets the member sentence, and may correct their own email (the name on file stays)', async () => {
     const id = await member(PHONES.member)
     const memberToken = await tokenFor(PHONES.member)
     const r = await book(bookingBody(h, { phone: PHONES.member, name: 'Mia Membership', email: 'mia2@example.test', memberToken }))
@@ -152,11 +152,41 @@ describe('a member booking', () => {
     const texts = (await h.texts(PHONES.member)).filter((t) => t.klass === 'booking_confirmed_web')
     expect(texts[0]!.body).toMatch(/^Booked: Express Hand Wash, today at 1:00 PM\. Members never pay a booking fee\. Reply here to change it\./)
     const c = await h.db.selectFrom('customers').select(['full_name', 'email', 'sms_opted_in']).where('id', '=', id).executeTakeFirstOrThrow()
-    expect(c).toEqual({ full_name: 'Mia Membership', email: 'mia2@example.test', sms_opted_in: true })
+    // the typed name never replaces a real name on file (W2 review leftover): it is a note on the booking for staff
+    expect(c).toEqual({ full_name: 'Mia Member', email: 'mia2@example.test', sms_opted_in: true })
     // the verified owner's car goes on their record
     expect(await h.db.selectFrom('vehicles').select(['make', 'plate']).where('customer_id', '=', id).execute()).toEqual([{ make: 'Tesla', plate: 'NJ-NINA1' }])
-    const activity = await h.db.selectFrom('activity_log').select('text').orderBy('id').execute()
+    const activity = await h.db.selectFrom('activity_log').select(['text', 'channels']).orderBy('id').execute()
     expect(activity.at(-1)!.text).toBe('Booked on the website · member, no booking fee')
+    expect(activity).toContainEqual({
+      text: 'Booked on the website as "Mia Membership"; the name on file ("Mia Member") was kept. Update it in the client file if the client asks.',
+      channels: ['internal'],
+    })
+  })
+
+  it('a shorter typed name never overwrites the full name on file; a placeholder name is filled from the form', async () => {
+    const id = await member(PHONES.member, 'Maria Lopez', 'maria@example.test')
+    const memberToken = await tokenFor(PHONES.member)
+    const r = await book(bookingBody(h, { phone: PHONES.member, name: 'Maria', email: 'maria@example.test', memberToken }))
+    expect(r.statusCode, r.body).toBe(201)
+    const kept = await h.db.selectFrom('customers').select(['full_name', 'needs_details']).where('id', '=', id).executeTakeFirstOrThrow()
+    expect(kept).toEqual({ full_name: 'Maria Lopez', needs_details: false })
+    const notes = await h.db.selectFrom('activity_log').select('text').where('text', 'like', 'Booked on the website as%').execute()
+    expect(notes.map((n) => n.text)).toEqual([
+      'Booked on the website as "Maria"; the name on file ("Maria Lopez") was kept. Update it in the client file if the client asks.',
+    ])
+
+    // the assistant's provisional client ("New texter ••0142", needs_details): the verified owner's typed name fills it
+    const texter = await h.db.transaction().execute(async (tx) => {
+      const { customer } = await upsertCustomerByPhone(tx, { newId: h.newId, now: h.clock.now(), fullName: null, phone: PHONES.extra, source: 'dashboard' })
+      await sql`update customers set full_name = 'New texter ••0142', needs_details = true where id = ${customer.id}`.execute(tx)
+      return customer.id
+    })
+    const token2 = await tokenFor(PHONES.extra)
+    const r2 = await book(bookingBody(h, { phone: PHONES.extra, name: '  Theo   Texter ', memberToken: token2, startMin: 14 * 60 }))
+    expect(r2.statusCode, r2.body).toBe(201)
+    const filled = await h.db.selectFrom('customers').select(['full_name', 'needs_details']).where('id', '=', texter).executeTakeFirstOrThrow()
+    expect(filled).toEqual({ full_name: 'Theo Texter', needs_details: false })
   })
 
   it('without a token a member’s number books as a guest’s would: the fee is due and the answer is a guest’s (nothing reveals the membership)', async () => {

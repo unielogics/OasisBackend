@@ -36,6 +36,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261011000500_membership_checkouts.sql` | the checkout intents of memberships started through a personal link (ADR 0160)                                                                         |
 | `20261011020000_identity_core.sql`     | the identity core (wave W2b): `phone_trust.epoch` (a links-epoch bump voids the trust) and the wrong-PIN rows of the rolling limits (ADR 0160) |
 | `20261011040000_sms_usage_class.sql` | the class of each send in `sms_usage` (`klass`), so the AI classes' sub-cap is counted in the dispatcher (ADR 0160, W2d)                               |
+| `20261011050000_membership_matching.sql` | membership matching (ADR 0160 W2e): checkout row origin (link or sync), state rejected, nullable checkout_url, email_verified drops on an email change  |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -377,7 +378,7 @@ Operations design day re-anchored on **today** in the business time zone with th
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (106 tables, 1 view, 11 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (106 tables, 1 view, 12 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -865,7 +866,7 @@ Primary key `(customer_id)`. `(customer_id)` references `customers(id)` on delet
 | `email_verified` | boolean | no | `false` |
 | `phone_version` | integer | no | `0` |
 
-Primary key `(id)`. `(merged_into)` references `customers(id)`. 8 check constraints. Index `customers_email_trgm` `(((email)::text) public.gin_trgm_ops)`. Index `customers_full_name_trgm` `(full_name public.gin_trgm_ops)`. Index `customers_merged_into_idx` `(merged_into)` where `merged_into IS NOT NULL`. Index `customers_phone_trgm` `(phone_e164 public.gin_trgm_ops)`. Unique index `uq_customers_phone` `(phone_e164)` where `(phone_e164 IS NOT NULL) AND (merged_into IS NULL) AND (deleted_at IS NULL)`.
+Primary key `(id)`. `(merged_into)` references `customers(id)`. 8 check constraints. Index `customers_email_trgm` `(((email)::text) public.gin_trgm_ops)`. Index `customers_full_name_trgm` `(full_name public.gin_trgm_ops)`. Index `customers_merged_into_idx` `(merged_into)` where `merged_into IS NOT NULL`. Index `customers_phone_trgm` `(phone_e164 public.gin_trgm_ops)`. Unique index `uq_customers_phone` `(phone_e164)` where `(phone_e164 IS NOT NULL) AND (merged_into IS NULL) AND (deleted_at IS NULL)`. Trigger: `customers_email_unverify`.
 
 #### `email_suppressions`
 
@@ -1278,7 +1279,7 @@ Primary key `(id)`. Unique `(slug)`. 3 check constraints.
 | `plan_key` | text | no |  |
 | `product_key` | text | yes |  |
 | `expected_email` | citext | yes |  |
-| `checkout_url` | text | no |  |
+| `checkout_url` | text | yes |  |
 | `started_at` | timestamp with time zone | no |  |
 | `expires_at` | timestamp with time zone | no |  |
 | `state` | text | no | `'open'::text` |
@@ -1287,8 +1288,9 @@ Primary key `(id)`. Unique `(slug)`. 3 check constraints.
 | `version` | integer | no | `1` |
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `updated_at` | timestamp with time zone | no | `app_now()` |
+| `origin` | text | no | `'link'::text` |
 
-Primary key `(id)`. `(customer_id)` references `customers(id)` on delete cascade. `(link_id)` references `client_links(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. `(matched_order_id)` references `sqsp_orders(id)` on delete set null. `(membership_id, customer_id)` references `memberships(id, customer_id)`. `(membership_id)` references `memberships(id)` on delete cascade. `(location_id, plan_key)` references `membership_plans(location_id, key)`. 7 check constraints. Index `membership_checkouts_customer_idx` `(customer_id, started_at DESC)`. Index `membership_checkouts_email_idx` `(location_id, expected_email)` where `state = ANY (ARRAY['open'::text, 'awaiting_match'::text])`. Index `membership_checkouts_expiry_idx` `(expires_at)` where `state = 'open'::text`. Unique index `uq_membership_checkouts_open` `(membership_id)` where `state = 'open'::text`.
+Primary key `(id)`. `(customer_id)` references `customers(id)` on delete cascade. `(link_id)` references `client_links(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. `(matched_order_id)` references `sqsp_orders(id)` on delete set null. `(membership_id, customer_id)` references `memberships(id, customer_id)`. `(membership_id)` references `memberships(id)` on delete cascade. `(location_id, plan_key)` references `membership_plans(location_id, key)`. 10 check constraints. Index `membership_checkouts_awaiting_idx` `(location_id, created_at DESC)` where `state = 'awaiting_match'::text`. Index `membership_checkouts_customer_idx` `(customer_id, started_at DESC)`. Index `membership_checkouts_email_idx` `(location_id, expected_email)` where `state = ANY (ARRAY['open'::text, 'awaiting_match'::text])`. Index `membership_checkouts_expiry_idx` `(expires_at)` where `state = 'open'::text`. Index `membership_checkouts_order_idx` `(matched_order_id)` where `matched_order_id IS NOT NULL`. Unique index `uq_membership_checkouts_open` `(membership_id)` where `state = 'open'::text`. Unique index `uq_membership_checkouts_sync_order` `(customer_id, matched_order_id)` where `origin = 'sync'::text`.
 
 #### `membership_credit_events`
 
@@ -2397,6 +2399,7 @@ Primary key `(id)`. Unique `(provider, external_id)`. 2 check constraints. Index
 - function `audit_log_immutable() returns trigger`
 - function `catalog_default_category(p_kind text, p_tags text[]) returns text`
 - function `credit_allocations_guard() returns trigger`
+- function `customers_email_unverify() returns trigger`
 - function `ensure_location(p_id uuid, p_slug text, p_name text, p_timezone text DEFAULT 'America/New_York'::text) returns uuid`
 - function `invoice_calc_of(p_invoice uuid) returns TABLE(invoice_id uuid, items bigint, adj bigint, sub bigint, tax bigint, tip bigint, total bigint, paid_orig bigint, credit_applied bigint, paid bigint, refunded bigint, ref_orig bigint, pending_amt bigint, pending_n bigint, issued bigint, balance bigint, refundable bigint, to_orig_max bigint, net bigint, overpaid bigint, status text)`
 - function `ledger_events_guard() returns trigger`

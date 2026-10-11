@@ -4,6 +4,7 @@
 import type { Selectable } from 'kysely'
 import { DateTime } from 'luxon'
 import type { Executor } from '../../platform/db.js'
+import { liveCheckouts } from './checkouts.js'
 import { creditSummaries, type CreditSummary } from './credits.js'
 import { loadPlans, type Plan } from './plans.js'
 import { memberMonths, retentionOf, visitCounts, type Retention } from './retention.js'
@@ -46,6 +47,18 @@ export interface MembershipView {
   flags: { code: string; orderId?: string; note: string }[]
   inferenceReason: string | null
   lastSqspOrderId: string | null
+  /**
+   * The membership's live Squarespace checkout (ADR 0160): an open intent waiting for its order, or a paid order that matches
+   * the client only through an unverified email and waits for staff (awaiting_match). null when there is none.
+   */
+  checkout: {
+    id: string
+    state: 'open' | 'awaiting_match'
+    expectedEmail: string | null
+    startedAt: string
+    expiresAt: string
+    order: { id: string; number: string; createdOn: string } | null
+  } | null
   version: number
 }
 
@@ -65,7 +78,9 @@ export async function viewsOf(
     plans,
   )
   const counts = await visitCounts(db, c.locationId, [...new Set(rows.map((r) => r.customer_id))], c.now)
+  const checkouts = await liveCheckouts(db, rows.map((r) => r.id))
   return rows.map((r) => {
+    const co = checkouts.get(r.id)
     const plan = plans.find((p) => p.id === r.plan_id)!
     const cs = credits.get(r.id)!
     return {
@@ -102,6 +117,16 @@ export async function viewsOf(
       flags: r.review_flags as MembershipView['flags'],
       inferenceReason: r.inference_reason,
       lastSqspOrderId: r.last_sqsp_order_id,
+      checkout: co
+        ? {
+            id: co.id,
+            state: co.state as 'open' | 'awaiting_match',
+            expectedEmail: co.expectedEmail,
+            startedAt: co.startedAt,
+            expiresAt: co.expiresAt,
+            order: co.order ? { id: co.order.id, number: co.order.number, createdOn: co.order.createdOn } : null,
+          }
+        : null,
       version: r.version,
     }
   })
