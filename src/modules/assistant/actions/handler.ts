@@ -133,7 +133,7 @@ async function execute(tx: Tx, deps: AssistantDeps, input: ActionCodeInput, acti
     if (addons.some((a) => a === undefined)) throw new ActionRefused('one of those add-ons is no longer offered online.')
     if ((await aiBookingsAhead(tx, customer.id, now)) >= MAX_AI_BOOKINGS_AHEAD)
       throw new ActionRefused(`you already have ${MAX_AI_BOOKINGS_AHEAD} upcoming visits booked by text.`)
-    const priv = await privilegesOf(tx, loc, customer.id)
+    const priv = await privilegesOf(tx, loc, customer.id, now)
     // the VIP rules only for a VIP whose number is trusted (the action exists only inside the trust)
     const v = await slotVerdict(tx, {
       locationId: loc,
@@ -205,7 +205,7 @@ async function execute(tx: Tx, deps: AssistantDeps, input: ActionCodeInput, acti
     if (!a || a.customerId !== customer.id) throw new ActionRefused('that visit is not on your record any more.')
     if (!['booked', 'confirmed'].includes(a.status) || a.scheduledStart.getTime() <= now.getTime())
       throw new ActionRefused('that visit can no longer be changed by text.')
-    const priv = await privilegesOf(tx, loc, customer.id)
+    const priv = await privilegesOf(tx, loc, customer.id, now)
     const v = await slotVerdict(tx, {
       locationId: loc,
       tz,

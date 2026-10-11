@@ -8,6 +8,7 @@ import type { Executor, Tx } from '../../../platform/db.js'
 import { AppError } from '../../../platform/errors.js'
 import { addDays, diffDays, fmtT, isValidBizDate, toBizDate, wallToInstant } from '../../../platform/time.js'
 import { isVipCustomer } from '../../customers/service.js'
+import { memberPrivilegesHeldUntil } from '../../identity/pin-service.js'
 import { loadPlans } from '../../memberships/plans.js'
 import { activeMembership } from '../../public/members.js'
 import { tierOfPlan } from '../../public/tiers.js'
@@ -58,8 +59,13 @@ export const dayWord = (date: string, today: string): string =>
 export const partOfDayOf = (startMin: number): 'morning' | 'afternoon' | 'evening' =>
   startMin < 12 * 60 ? 'morning' : startMin < 17 * 60 ? 'afternoon' : 'evening'
 
-/** What a client is entitled to: no booking fee with an active membership; the VIP slot rules as a VIP client or VIP-tier member. */
-export async function privilegesOf(db: Executor, locationId: string, customerId: string): Promise<{ member: boolean; vip: boolean }> {
+/**
+ * What a client is entitled to: no booking fee with an active membership; the VIP slot rules as a VIP client or VIP-tier member.
+ * Neither while a PIN reset by texted code holds the member privileges (72 hours; identity/pin-service memberPrivilegesHeldUntil,
+ * design section 5): the number was just trusted again from a code alone.
+ */
+export async function privilegesOf(db: Executor, locationId: string, customerId: string, now: Date): Promise<{ member: boolean; vip: boolean }> {
+  if ((await memberPrivilegesHeldUntil(db, customerId, now)) !== null) return { member: false, vip: false }
   const m = await activeMembership(db, customerId)
   const listed = await isVipCustomer(db, locationId, customerId)
   if (!m) return { member: false, vip: listed }

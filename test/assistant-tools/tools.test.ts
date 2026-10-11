@@ -5,6 +5,8 @@
 import { describe, expect, it } from 'vitest'
 import { sql } from 'kysely'
 import { TOOL_MIN_TRUST, type AnyAssistantTool, type ToolOutcome } from '../../src/modules/assistant/contract.js'
+import { vipFor } from '../../src/modules/assistant/tools/availability.js'
+import { privilegesOf } from '../../src/modules/assistant/tools/common.js'
 import { createToolRegistry } from '../../src/modules/assistant/tools/index.js'
 import { createNewTexters } from '../../src/modules/assistant/welcome/new-texters.js'
 import { hashToken } from '../../src/modules/auth/tokens.js'
@@ -137,6 +139,29 @@ describe('check_availability', () => {
     expect(closed).toMatchObject({ closed: true, times: [] })
     expect((closed.nextOpenDates as { date: string }[])[0]!.date).toBe('2026-06-17')
     await w.t.db.deleteFrom('closures').where('date', '=', '2026-06-16').execute()
+  })
+})
+
+describe('VIP and member privileges', () => {
+  it('count only for a trusted VIP, and not while a PIN reset by code holds the member privileges (72 hours)', async () => {
+    await w.t.db.insertInto('vip_clients').values({ location_id: w.locationId, customer_id: maria().id }).onConflict((oc) => oc.columns(['location_id', 'customer_id']).doNothing()).execute()
+    try {
+      const trusted = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'trusted' })
+      const caller = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'caller' })
+      expect(await vipFor(trusted.ctx)).toBe(true)
+      expect(await vipFor(caller.ctx)).toBe(false)
+      const now = w.clock.now()
+      await w.t.db
+        .insertInto('customer_pins')
+        .values({ customer_id: maria().id, pin_hash: '$scrypt$x'.padEnd(30, 'x'), version: 2, set_at: now, reset_hold_until: new Date(now.getTime() + 72 * 3_600_000) })
+        .execute()
+      expect(await vipFor((await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'trusted' })).ctx)).toBe(false)
+      expect(await privilegesOf(w.t.db, w.locationId, maria().id, now)).toEqual({ member: false, vip: false })
+      // the hold ends: the privileges come back
+      expect(await privilegesOf(w.t.db, w.locationId, maria().id, new Date(now.getTime() + 73 * 3_600_000))).toMatchObject({ vip: true })
+    } finally {
+      await w.t.db.deleteFrom('vip_clients').where('customer_id', '=', maria().id).where('location_id', '=', w.locationId).execute()
+    }
   })
 })
 

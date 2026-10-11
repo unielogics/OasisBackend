@@ -1,6 +1,6 @@
 // The leads' jobs (ADR 0160, plan J; registered in src/platform/job-registry.ts):
-//   leads.follow_up              every 5 minutes: the one automatic follow-up text of a lead who did not book (follow-up.ts); nothing
-//                                while AI_ENABLED, assistant.enabled or leads.follow_up_enabled is off
+//   leads.follow_up              every 5 minutes: the one automatic follow-up text of a lead who did not book (follow-up.ts); no text
+//                                while AI_ENABLED, assistant.enabled or leads.follow_up_enabled is off (booked leads still close)
 //   leads.provisional_archive    nightly: archives the welcome flow's provisional clients that never gave a name nor booked, 30 days
 //                                after their last text (soft delete + archived_at; reversible; the thread is kept); only rows the
 //                                assistant created match, so with the assistant never on it finds nothing

@@ -12,7 +12,7 @@ const MAX_TIMES = 12
 /** VIP rules only for a trusted VIP client (design section 4: "VIP-aware only when verified"). */
 export async function vipFor(ctx: ToolContext): Promise<boolean> {
   if (ctx.identity.trust !== 'trusted' || !ctx.identity.customerId) return false
-  return (await privilegesOf(ctx.db, ctx.identity.locationId, ctx.identity.customerId)).vip
+  return (await privilegesOf(ctx.db, ctx.identity.locationId, ctx.identity.customerId, ctx.now)).vip
 }
 
 /** The catalog service behind a public key the facts list as bookable (a package, not quote-only). */

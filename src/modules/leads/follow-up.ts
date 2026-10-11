@@ -6,7 +6,9 @@
 //   - within leads.within_hours of their last text (the class refuses anything older than 24 hours anyway);
 //   - inside business hours when leads.business_hours_only (otherwise it waits for the next opening, still inside the window);
 //   - never after a STOP since the lead began (lifted by START or not), never to an opted-out number or client;
-//   - never once they booked (any booking since the first contact closes the lead first);
+//   - never once they booked (any booking since the first contact closes the lead first; that closing runs even while follow-ups
+//     are off, since it sends nothing);
+//   - never by name or with a client-bound link to a stale record (identity/stale.ts): such a number gets the stranger's text;
 //   - only to a number inside the assistant's rollout stage (assistant.stage / assistant.allowlist).
 // A follow-up that cannot go any more is dropped (follow_up_at cleared); a new text from the number plans it again.
 import { sql } from 'kysely'
@@ -20,6 +22,7 @@ import type { AssistantLog, AssistantQueue } from '../assistant/contract.js'
 import { assistantOn } from '../assistant/tools/switches.js'
 import { listCategories } from '../catalog/categories.js'
 import { issueClientLink } from '../identity/links.js'
+import { staleRecord } from '../identity/stale.js'
 import { lastInboundAt, loadCustomerTarget, strangerRecipient } from '../messaging/db/recipients.js'
 import { listLiveClosures } from '../settings/closures.js'
 import { dayInfo, type DayInfo } from '../settings/day-info.js'
@@ -133,12 +136,14 @@ export async function runLeadFollowUps(d: LeadJobDeps, o: { locationId?: string 
   for (const loc of await q.execute()) {
     report.locations += 1
     const tz = loc.timezone ?? d.env.BUSINESS_TZ
+    const now = d.clock.now()
+    // a booking (by staff, on the website or by text) closes the lead whether or not follow-ups are on: this sends nothing, and the
+    // staff lead list must not keep showing people who already booked
+    report.reconciledBooked += await reconcileBookedLeads(d.db, loc.id, now)
     if (!(await assistantOn(d.db, d.env, loc.id)) || !(await getSetting(d.db, loc.id, 'leads.follow_up_enabled')).value) {
       report.off += 1
       continue
     }
-    const now = d.clock.now()
-    report.reconciledBooked += await reconcileBookedLeads(d.db, loc.id, now)
     const due = await d.db
       .selectFrom('leads')
       .select('id')
@@ -237,9 +242,12 @@ async function followUpOne(
     await setPlan(null)
     return 'not_in_stage'
   }
+  // the stale-record rule (identity/stale.ts, design section 5): a record whose number went quiet for 180 days or bounced says
+  // nothing about who holds the number today, so the follow-up treats them as a stranger (no name, a link bound to the number only)
+  const known = live && !(await staleRecord(tx, { locationId: o.locationId, customerId: live.id, phone: lead.phone_e164, now })).stale ? live : undefined
   const labels = new Map((await listCategories(tx, o.locationId)).map((c) => [c.key, c.label]))
   const interest = interestPhrase(lead.interests, labels)
-  const first = live && !live.needs_details ? (live.full_name.trim().split(/\s+/)[0] ?? null) : null
+  const first = known && !known.needs_details ? (known.full_name.trim().split(/\s+/)[0] ?? null) : null
 
   try {
     const messageId = await savepoint(tx, 'lead_follow_up', async () => {
@@ -248,17 +256,17 @@ async function followUpOne(
         const issued = await issueClientLink(
           tx,
           { newId: d.newId, now, ...(d.env.PUBLIC_SITE_URL ? { siteUrl: d.env.PUBLIC_SITE_URL } : {}) },
-          live
-            ? { locationId: o.locationId, kind: 'calendar', customerId: live.id, issuedBy: 'system' }
+          known
+            ? { locationId: o.locationId, kind: 'calendar', customerId: known.id, issuedBy: 'system' }
             : { locationId: o.locationId, kind: 'calendar', customerId: null, phone: lead.phone_e164, issuedBy: 'system' },
         )
         link = issued.url
       }
-      const target = live ? await loadCustomerTarget(tx, o.locationId, live.id) : null
+      const target = known ? await loadCustomerTarget(tx, o.locationId, known.id) : null
       const recipient = target?.recipient ?? (await strangerRecipient(tx, o.locationId, lead.phone_e164))
       const out = await d.queue.enqueueFor(tx, {
         locationId: o.locationId,
-        customerId: live?.id ?? null,
+        customerId: known?.id ?? null,
         recipient,
         appointmentId: null,
         templateKey: 'lead_follow_up',

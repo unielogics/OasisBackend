@@ -3,11 +3,12 @@
 // while the assistant or the follow-up is off. The personal calendar link rides as a secretVar: masked in the thread.
 import { describe, expect, it } from 'vitest'
 import { SIM_DEVICE_KEY } from '../../db/seeds/messaging.js'
+import { createToolRegistry } from '../../src/modules/assistant/tools/index.js'
 import { createNewTexters } from '../../src/modules/assistant/welcome/new-texters.js'
 import { createLeadJobs, LEAD_FOLLOW_UP_JOB, runLeadFollowUps } from '../../src/modules/leads/index.js'
 import { interestPhrase } from '../../src/modules/leads/follow-up.js'
 import { noteLeadInterest } from '../../src/modules/leads/service.js'
-import { STRANGER, useToolWorld } from '../assistant-tools/world.js'
+import { STRANGER, STRANGER2, useToolWorld } from '../assistant-tools/world.js'
 
 const w = useToolWorld()
 const MIN = 60_000
@@ -149,6 +150,49 @@ describe('leads.follow_up', () => {
     w.clock.advance(181 * MIN)
     expect(await runLeadFollowUps(w.deps)).toMatchObject({ sent: 0, dropped: { not_in_stage: 1 } })
     expect(await followUps()).toEqual([])
+  })
+
+  it('a booking closes the lead even while follow-ups are off (the staff list stops showing them)', async () => {
+    const id = await strangerLead()
+    await w.setting('leads.follow_up_enabled', false)
+    const appt = w.newId()
+    const svc = await w.t.db.selectFrom('services').select(['id', 'name', 'price_cents', 'duration_min']).where('kind', '=', 'package').executeTakeFirstOrThrow()
+    await w.t.db
+      .insertInto('appointments')
+      .values({ id: appt, location_id: w.locationId, customer_id: id, service_id: svc.id, package_name: svc.name, price_cents: svc.price_cents, duration_min: svc.duration_min, scheduled_start: new Date('2026-06-15T10:00:00-04:00'), scheduled_end: new Date('2026-06-15T11:00:00-04:00') })
+      .execute()
+    w.clock.advance(200 * MIN)
+    expect(await runLeadFollowUps(w.deps)).toMatchObject({ off: 1, reconciledBooked: 1, sent: 0 })
+    expect(await lead()).toMatchObject({ status: 'booked', booked_appointment_id: appt })
+    expect(await followUps()).toEqual([])
+  })
+
+  it('a stale record (the number quiet for 180+ days) gets the stranger’s text: no name, a link bound to the number only', async () => {
+    await w.assistantOn()
+    const olga = w.newId()
+    const old = new Date(w.clock.now().getTime() - 200 * 86_400_000)
+    // source inbound_sms: the world removes it before the next test
+    await w.t.db
+      .insertInto('customers')
+      .values({ id: olga, full_name: 'Olga Previous', phone_e164: STRANGER2, source: 'inbound_sms', sms_opted_in: true, sms_opt_in_source: 'inbound_text', sms_opt_in_at: old, created_at: old, updated_at: old })
+      .execute()
+    await inbound(STRANGER2, 'How much is window tint?')
+    // note_interest with the turn's stale verdict (trust unknown) does not tie the lead to the old record
+    const { ctx } = await w.ctx({ customerId: olga, phone: STRANGER2, trust: 'unknown' })
+    const t = createToolRegistry(w.deps).get('note_interest')!
+    expect(await t.run(ctx, t.input.parse({ categories: ['tint'] }))).toMatchObject({ ok: true })
+    expect(await lead()).toMatchObject({ phone_e164: STRANGER2, customer_id: null })
+    // a lead tied to the record before it went stale: the follow-up still treats the number as a stranger's
+    await w.t.db.updateTable('leads').set({ customer_id: olga }).execute()
+    w.clock.advance(181 * MIN)
+    expect(await runLeadFollowUps(w.deps)).toMatchObject({ sent: 1 })
+    const [m] = await w.t.db.selectFrom('messages').select(['body', 'customer_id']).where('klass', '=', 'lead_follow_up').execute()
+    expect(m!.body).toMatch(/^Hi, thanks for reaching out to Oasis Auto Spa about window tint\./)
+    expect(m!.body).not.toMatch(/Olga/)
+    expect(m!.customer_id).toBeNull()
+    expect(await w.t.db.selectFrom('client_links').select(['kind', 'customer_id', 'phone_e164']).execute()).toEqual([
+      { kind: 'calendar', customer_id: null, phone_e164: STRANGER2 },
+    ])
   })
 
   it('names the interests in plain words', () => {

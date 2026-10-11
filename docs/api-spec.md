@@ -1441,11 +1441,13 @@ client, or creates "New texter ••NNNN" (source `inbound_sms`, `sms_opt_in_so
 
 `createLeads(deps)`: `open` (idempotent per number; a closed lead opens again, a booked one stays booked; the follow-up planned at the
 last contact + `leads.follow_up_delay_min` while none was sent), `noteInterest`, `markBooked`. Jobs (`docs/jobs.md`):
-`leads.follow_up` every 5 minutes: bookings since the first contact close leads first; then each due lead once, under a row lock:
+`leads.follow_up` every 5 minutes: bookings since the first contact close leads first (also while the follow-up or the assistant is
+off: it sends nothing); then each due lead once, under a row lock:
 dropped after `leads.within_hours` from their last text or after any opt-out since the lead began (a later START notwithstanding),
 dropped outside the rollout stage (`assistant.stage` `allowlist`: listed numbers only; `customers`: clients only), waits for the delay after their last text and, with `leads.business_hours_only`, for the next opening inside the window; the text is
 template `lead_follow_up` (sender "Oasis AI", idempotency key `lead-follow-up:<lead>`) with a personal calendar link (`issuedBy
-system`) as a `secretVar` when `PUBLIC_LINKS_ENABLED`: the thread shows `[private link]`, without a link the text stays readable
+system`) as a `secretVar` when `PUBLIC_LINKS_ENABLED` (a stale record gets the stranger's text: no first name, a link bound to the number
+only, the message on no client; `note_interest` with the turn's `unknown` trust leaves the lead's client empty): the thread shows `[private link]`, without a link the text stays readable
 (`lead_follow_up` is a masked class). `leads.provisional_archive` nightly: see 29.3 and ADR 0160.
 
 New SMS templates (class `ai_reply`, not editable, never staff-sendable): `action_booked`, `action_code_wrong`, `action_code_locked`,

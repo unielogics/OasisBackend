@@ -23,7 +23,9 @@ export const noteInterest: AssistantTool<ToolInputs['note_interest']> = {
     const keys = [...new Set(categories.map((c) => c.trim().toLowerCase()))].filter((k) => known.has(k))
     if (keys.length === 0) return fail('invalid', 'Use category keys from the catalog.', { detail: json({ categories: ctx.facts.catalog.categories }) })
     const interests = await transaction(ctx.db, async (tx) => {
-      await openLead(tx, ctx.newId, { locationId: ctx.identity.locationId, phone: ctx.identity.phone, customerId: ctx.identity.customerId, source: 'text', at: ctx.now })
+      // a record the stale-record rule hides (trust 'unknown') is not tied to the lead: whoever holds the number now may be someone else
+      const customerId = atLeast(ctx.identity.trust, 'caller') ? ctx.identity.customerId : null
+      await openLead(tx, ctx.newId, { locationId: ctx.identity.locationId, phone: ctx.identity.phone, customerId, source: 'text', at: ctx.now })
       return noteLeadInterest(tx, { locationId: ctx.identity.locationId, phone: ctx.identity.phone, categories: keys, at: ctx.now })
     })
     return ok({ noted: keys, interests: interests ?? keys })

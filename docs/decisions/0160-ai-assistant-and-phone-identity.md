@@ -245,7 +245,8 @@ action switches), the follow-up job does nothing while they or `leads.follow_up_
 - **Handoffs**: a tool calls `ctx.handoff` and also returns `handoff` in its outcome (the first request of the turn wins either way).
 - **Availability**: `check_availability` reads the same slot engine as the website's `loadBoard` (`loadDayData` + `engineInput`
   channel online + `computeSlots`) for the one asked date, because `loadBoard` is the non-VIP board from today on; the VIP holds and the
-  VIP window count only for a trusted VIP client.
+  VIP window count only for a trusted VIP client. `privilegesOf` (VIP rules and the member no-fee status, for `check_availability`,
+  the proposals and the reply number) grants nothing while `memberPrivilegesHeldUntil` holds them after a PIN reset by code (72 h).
 - **Proposals**: the slot is checked with the online rules at the proposal and again at the reply number (the reschedule command's own
   check is the desk's, so the online check comes first). At most two future bookings made by text per client (plan C).
   `propose_cancel` hands off (`late_cancel`) inside `cancellation.policy.freeCancelHours` or with money on the visit (refundable,
@@ -274,10 +275,12 @@ action switches), the follow-up job does nothing while they or `leads.follow_up_
   the new `customers.archived_at` (never a delete; the thread stays), the open lead closed, audited; a new text from the number
   restores the same record. It runs whatever the switches (only rows the assistant created match, so it finds nothing until then).
 - **Leads**: a booking closes the lead: the handler calls `markBooked`, and the follow-up job first closes every open lead whose
-  client has a booking since the first contact (staff and website bookings included) instead of a hook in the booking code. A lead
-  closed without a booking opens again on a new contact; the follow-up is still once per lead.
+  client has a booking since the first contact (staff and website bookings included) instead of a hook in the booking code; that
+  closing runs for every location before the switch check (it sends nothing), so the staff list drops booked leads while follow-ups
+  are off. A lead closed without a booking opens again on a new contact; the follow-up is still once per lead.
 - **Follow-up**: only to numbers inside the rollout stage (`assistant.stage`: the allowlist, then clients, then everyone), so the
-  staged rollout (W5) holds for it too; "never after STOP" = any opt-out of the number since the lead began, lifted or not, or an opt-out on the client;
+  staged rollout (W5) holds for it too; a stale record (`staleRecord`) is texted as a stranger (no first name, a calendar link bound
+  to the number only, the message on no client), and `note_interest` under the turn's `unknown` trust does not tie the lead to it; "never after STOP" = any opt-out of the number since the lead began, lifted or not, or an opt-out on the client;
   business hours = the shop's hours, closures and emergency (it waits for the next opening inside the window, else it is dropped);
   the link is `issuedBy system` (not counted in the assistant's three a day); sender "Oasis AI". `lead_follow_up` joined
   `SENSITIVE_CLASSES` with the new `MASK_ONLY_CLASSES`: the link is masked in the message row and the outbox body wiped once final,
