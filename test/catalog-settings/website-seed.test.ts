@@ -12,6 +12,9 @@ import {
   WEBSITE_TINT_MATRIX,
 } from '../../db/seeds/website-catalog.js'
 import { apiModules } from '../../src/http/modules.js'
+import { putWebsiteFields, websiteFieldsOf } from '../../src/modules/catalog/website.js'
+import { requireService } from '../../src/modules/catalog/service.js'
+import { loadPlans, ruleCovers } from '../../src/modules/memberships/plans.js'
 import { FixedClock, PARITY_NOW } from '../../src/platform/clock.js'
 import { getSetting } from '../../src/platform/settings.js'
 import { createIdGenerator } from '../../src/platform/ids.js'
@@ -199,6 +202,30 @@ describe('website-catalog seed', () => {
     expect(await byName('Signature Hand Wash')).toMatchObject({ member_price_cents: 4500, visible_online: true, version: sig.version + 1 })
   })
 
+  it('keeps the members’ wash credits redeemable: each credit rule covers the website wash that replaces what it covered (F1)', async () => {
+    const coverage = async () => {
+      const plans = await loadPlans(t.db, locationId)
+      const active = (await services()).filter((s) => s.active && s.kind === 'package')
+      return Object.fromEntries(
+        plans.flatMap((p) => p.rules.map((r) => [`${p.key}: ${r.label}`, active.filter((s) => ruleCovers(r, s.tags)).map((s) => s.name)])),
+      )
+    }
+    const lines: string[] = []
+    await runSeed({ db: t.db, clock, profile: 'website-catalog', log: (l) => lines.push(l) })
+    // Signature (exterior + interior) takes over the premium wash, Exterior the express wash: what each plan redeemed before
+    expect(await coverage()).toEqual({
+      'essential: Express wash': ['Exterior Hand Wash'],
+      'premium: Premium wash': ['Signature Hand Wash'],
+      'executive: Express wash': ['Exterior Hand Wash'],
+      'executive: Executive detail': [],
+      'exotic: Hand wash': ['Signature Hand Wash', 'Exterior Hand Wash'],
+    })
+    // the website sells no executive detail (the owner decides the VIP credits): the run says so, every time
+    expect(lines.filter((l) => l.startsWith('WARNING'))).toEqual([
+      'WARNING website-catalog: credit rule "executive: Executive detail" covers no active package; align the plans’ credit rules before members redeem (ADR 0160 W2a)',
+    ])
+  })
+
   it('re-derives the categories of visits not yet finished', async () => {
     const full = await byName('Full Detail')
     const f = { location: { id: locationId } as never, locationId, newId: createIdGenerator(clock) }
@@ -265,7 +292,7 @@ describe('GET /public/catalog after the seed', () => {
       guestPriceCents: 5400,
       vipInclusion: 'included',
       vipNote: 'Included with Gold and VIP (4 washes a month)',
-      tags: ['handwash', 'signature'],
+      tags: ['handwash', 'signature', 'premium'],
       tintFilm: null,
     })
     expect(svc('Exterior Hand Wash')).toMatchObject({ durationMin: 30, memberPriceCents: 3200, guestPriceCents: 3800 })
@@ -309,6 +336,29 @@ describe('GET /public/catalog after the seed', () => {
       { key: 'vip', name: 'VIP', planKey: 'executive', planName: 'Executive', perks: WEBSITE_PLANS[1]!.perks, priceCents: 16900 },
     ])
     expect([...keysOf(b)].filter((k) => FORBIDDEN.test(k))).toEqual([])
+  })
+
+  it('one starting price per item (design §3b): member and guest prices; the booking charge is the guest price, also after an edit (F3)', async () => {
+    await seed()
+    const check = async () => {
+      const b = (await get('public/catalog')).json()
+      for (const it of [...b.services, ...b.addons]) {
+        expect(it.guestPriceCents, it.key).toBeGreaterThanOrEqual(it.memberPriceCents)
+        expect(it.priceCents, it.key).toBe(it.guestPriceCents)
+      }
+      for (const row of b.tint.prices) expect(row.guestMinCents).toBeGreaterThanOrEqual(row.memberMinCents)
+      return b
+    }
+    const b = await check()
+    expect(b.services.find((x: { key: string }) => x.key === 'signature-hand-wash')).toMatchObject({ memberPriceCents: 4500, guestPriceCents: 5400 })
+    expect(b.services.find((x: { key: string }) => x.key === 'carbon-window-tint')).toMatchObject({ memberPriceCents: 22900, guestPriceCents: 27500, tintFilm: 'carbon' })
+    const sig = await byName('Signature Hand Wash')
+    await t.db.transaction().execute(async (tx) => {
+      const cur = await requireService(tx, locationId, sig.id)
+      await putWebsiteFields(tx, { locationId, serviceId: sig.id, fields: { ...websiteFieldsOf(cur), memberPriceCents: 5000 } })
+    })
+    const after = await check()
+    expect(after.services.find((x: { key: string }) => x.key === 'signature-hand-wash')).toMatchObject({ priceCents: 6000, memberPriceCents: 5000, guestPriceCents: 6000 })
   })
 
   it('the keys are the ones availability takes; the board defaults to the Signature wash', async () => {

@@ -14,7 +14,7 @@ one transaction, after making sure the single location row and the default setti
 | `messaging`       | one simulator SMS device                                                                                                 |
 | `geofence`        | placeholder shop coordinates for the arrival geofence (only when none are set)                                           |
 | `memberships`     | the four plans and the design members with this cycle's credits                                                          |
-| `website-catalog` | the website's services, prices, tint matrix and Gold/VIP plans as the catalog; other services deactivated (ADR 0160)     |
+| `website-catalog` | the website's services, prices, tint matrix and Gold/VIP plans as the catalog; other services deactivated (ADR 0160) **not for production until the Gold/VIP credit rules are decided** (it logs a WARNING per uncovered rule) |
 | `parity-ops`      | the Operations design day frozen at 2026-06-13 10:36 AM and its calendar (parity database only)                          |
 | `parity-pay`      | the Payments design's 105 invoices (parity database only)                                                                |
 | `demo`            | the Operations design day on **today**, as it stands at the moment the seed runs, with the Payments history and calendar |

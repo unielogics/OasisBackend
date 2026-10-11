@@ -4,6 +4,10 @@
 // fee, and the two plans the website sells with their monthly price and perks. Keys are the slug of the service name over every
 // active package (or add-on), exactly as the availability and booking routes key them, so a key read here is a key they accept.
 // Nothing internal: no ids, versions, checklists, Squarespace SKUs or checkout URLs, desk flags or inactive rows.
+//
+// Starting prices (design §3b, the only prices the assistant may state): an item's memberPriceCents and guestPriceCents (a tint
+// package: its film's lowest), a tint row's memberMinCents and guestMinCents, a plan's priceCents. An item's priceCents is what a
+// booking charges, kept equal to its guest price once the item is priced on the website (catalog/pricing.ts bookingPriceOf).
 import { z } from '../../http/zod.js'
 import type { Executor } from '../../platform/db.js'
 import { getSetting } from '../../platform/settings.js'
@@ -23,10 +27,11 @@ const ItemFields = {
   name: z.string(),
   category: z.string(),
   description: z.string().nullable(),
-  /** What a booking charges today (the plain price). */
-  priceCents: Cents,
-  memberPriceCents: Cents,
-  guestPriceCents: Cents,
+  priceCents: Cents.describe(
+    'What a booking charges (kept for the website’s booking flow): the guest price for an item priced on the website. Not a price to state: state memberPriceCents / guestPriceCents',
+  ),
+  memberPriceCents: Cents.describe('The member STARTING price (design §3b): what the website and the assistant state for members'),
+  guestPriceCents: Cents.describe('The guest STARTING price (design §3b): what the website and the assistant state for everyone else'),
   vipInclusion: VipInclusion,
   vipNote: z.string().nullable(),
   tags: z.array(z.string()),
@@ -58,9 +63,9 @@ export const PublicCatalogView = z.object({
       z.object({
         vehicle: z.string(),
         film: z.string(),
-        memberMinCents: Cents,
+        memberMinCents: Cents.describe('The member "from" price of this vehicle type and film (design §3b)'),
         memberMaxCents: Cents,
-        guestMinCents: Cents,
+        guestMinCents: Cents.describe('The guest "from" price of this vehicle type and film (design §3b)'),
         guestMaxCents: Cents,
       }),
     ),

@@ -2,11 +2,17 @@
 // add-on: its category, public name and description, member and guest prices, what VIP members get, quote-only, whether it is
 // listed online, and its order. Saved as one version-checked replace (PUT /catalog/services/{id}); a category change re-derives
 // the categories of the visits not yet finished that hold the service.
+//
+// What a booking charges (price_cents) follows the website prices: for an item priced on the website it is the guest price
+// (pricing.ts bookingPriceOf), set by the same save, and re-set for every such item when the guest markup or the tint matrix is
+// saved (syncBookingPrices). So the public catalog's starting prices (design §3b) and a booking never disagree.
 import type { Tx } from '../../platform/db.js'
 import * as audit from '../../platform/audit.js'
 import { AppError } from '../../platform/errors.js'
+import { getSetting } from '../../platform/settings.js'
 import { refreshCategoriesForService } from './appointment-categories.js'
 import { requireCategory } from './categories.js'
+import { bookingPriceOf, type TintMatrix } from './pricing.js'
 import type { VipInclusion } from './schema.js'
 import { lockService, publishServiceChange, requireService, type CatalogService } from './service.js'
 
@@ -57,6 +63,10 @@ export function normalizeWebsiteFields(f: WebsiteFields): WebsiteFields {
     if (v !== null && (!Number.isSafeInteger(v) || v < 0 || v > MAX_CENTS))
       throw invalid(k, 'Enter a price in whole cents, from 0 to $100,000.')
   }
+  // a guest price is checked against (and only makes sense next to) a member price: without one the member price would be the
+  // plain price, which follows the guest price (bookingPriceOf)
+  if (out.guestPriceCents !== null && out.memberPriceCents === null)
+    throw invalid('guestPriceCents', 'Set the member price first: the guest price cannot be below it.')
   if (out.memberPriceCents !== null && out.guestPriceCents !== null && out.guestPriceCents < out.memberPriceCents)
     throw invalid('guestPriceCents', 'The guest price cannot be below the member price.')
   if (out.vipNote !== null && out.vipNote.length > 200) throw invalid('vipNote', 'The VIP note can be at most 200 characters.')
@@ -85,12 +95,25 @@ export interface PutWebsiteFieldsResult {
   appointmentsUpdated: number
 }
 
+interface Pricing {
+  markupPct: number
+  tint: TintMatrix
+}
+
+async function pricingOf(tx: Tx, locationId: string): Promise<Pricing> {
+  const markup = await getSetting(tx, locationId, 'catalog.guest_markup_pct')
+  const tint = await getSetting(tx, locationId, 'catalog.tint_matrix')
+  return { markupPct: markup.value, tint: tint.value }
+}
+
 export async function putWebsiteFields(tx: Tx, input: PutWebsiteFieldsInput): Promise<PutWebsiteFieldsResult> {
   const row = await lockService(tx, input.locationId, input.serviceId, input.expectedVersion)
   const next = normalizeWebsiteFields(input.fields)
   const before = await requireService(tx, input.locationId, row.id)
   const prev = websiteFieldsOf(before)
-  if (same(prev, next)) return { service: before, changed: false, appointmentsUpdated: 0 }
+  const price =
+    bookingPriceOf({ ...before, ...next, priceCents: before.priceCents }, await pricingOf(tx, input.locationId)) ?? before.priceCents
+  if (same(prev, next) && price === before.priceCents) return { service: before, changed: false, appointmentsUpdated: 0 }
   // a category that is turned off may stay on the services that already have it, but nothing moves into it
   if (next.category !== prev.category) await requireCategory(tx, input.locationId, next.category, { active: true })
   await tx
@@ -106,6 +129,7 @@ export async function putWebsiteFields(tx: Tx, input: PutWebsiteFieldsInput): Pr
       quote_only: next.quoteOnly,
       visible_online: next.visibleOnline,
       sort: next.sort,
+      price_cents: price,
       version: eb('version', '+', 1),
       updated_at: eb.fn('app_now', []),
     }))
@@ -119,10 +143,65 @@ export async function putWebsiteFields(tx: Tx, input: PutWebsiteFieldsInput): Pr
     action: 'catalog.website.update',
     entityType: 'service',
     entityId: row.id,
-    before: { ...prev },
-    after: { ...websiteFieldsOf(after), ...(appointmentsUpdated > 0 ? { appointmentsUpdated } : {}) },
+    before: { ...prev, ...(price !== before.priceCents ? { priceCents: before.priceCents } : {}) },
+    after: {
+      ...websiteFieldsOf(after),
+      ...(price !== before.priceCents ? { priceCents: price } : {}),
+      ...(appointmentsUpdated > 0 ? { appointmentsUpdated } : {}),
+    },
     ctx: input.audit,
   })
   await publishServiceChange(tx, input.locationId, row.id)
   return { service: after, changed: true, appointmentsUpdated }
+}
+
+/**
+ * Re-sets what a booking charges for every item priced on the website after the guest markup or the tint matrix changed (`reason`
+ * names the setting). Rows already right are not written; each moved row is versioned, audited (catalog.price.sync) and published.
+ * Returns the ids of the moved rows.
+ */
+export async function syncBookingPrices(
+  tx: Tx,
+  input: { locationId: string; reason: 'catalog.guest_markup_pct' | 'catalog.tint_matrix'; audit?: audit.AuditContext },
+): Promise<string[]> {
+  const pricing = await pricingOf(tx, input.locationId)
+  const rows = await tx
+    .selectFrom('services')
+    .select(['id', 'price_cents', 'member_price_cents', 'guest_price_cents', 'category', 'tags', 'quote_only'])
+    .where('location_id', '=', input.locationId)
+    .orderBy('id')
+    .forUpdate()
+    .execute()
+  const moved: string[] = []
+  for (const r of rows) {
+    const price = bookingPriceOf(
+      {
+        priceCents: r.price_cents,
+        memberPriceCents: r.member_price_cents,
+        guestPriceCents: r.guest_price_cents,
+        category: r.category,
+        tags: r.tags,
+        quoteOnly: r.quote_only,
+      },
+      pricing,
+    )
+    if (price === null || price === r.price_cents) continue
+    await tx
+      .updateTable('services')
+      .set((eb) => ({ price_cents: price, version: eb('version', '+', 1), updated_at: eb.fn('app_now', []) }))
+      .where('id', '=', r.id)
+      .execute()
+    await audit.record(tx, {
+      locationId: input.locationId,
+      action: 'catalog.price.sync',
+      entityType: 'service',
+      entityId: r.id,
+      before: { priceCents: r.price_cents },
+      after: { priceCents: price, reason: input.reason },
+      ctx: input.audit,
+    })
+    await publishServiceChange(tx, input.locationId, r.id)
+    moved.push(r.id)
+  }
+  return moved
 }

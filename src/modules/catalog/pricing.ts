@@ -4,6 +4,11 @@
 //                 dollars (the website's own rule: Math.round(m * 1.2) on dollar prices, so $45 → $54 and $39 → $47).
 // A tint package (category tint, tagged with a film of catalog.tint_matrix) is priced by the matrix instead: its "from" prices are
 // the lowest member and guest prices of that film over every vehicle type.
+//
+// These member and guest prices (and a tint row's memberMinCents / guestMinCents) are the STARTING prices of design §3b: the only
+// prices the website and the assistant state. price_cents is what a booking charges; for an item priced on the website (a member
+// price, or a tint film) it is kept equal to the guest price (bookingPriceOf) whenever the website prices, the markup or the tint
+// matrix are saved, so the website, a booking and the assistant never disagree.
 import type { SettingValue } from '../../platform/settings.js'
 
 export interface PricedItem {
@@ -57,4 +62,19 @@ export function effectivePrices(
   const from = film ? tintFromPrices(o.tint, film) : null
   if (film && from) return { memberPriceCents: from.memberCents, guestPriceCents: from.guestCents, tintFilm: film }
   return { memberPriceCents: memberPriceOf(s), guestPriceCents: guestPriceOf(s, o.markupPct), tintFilm: null }
+}
+
+/**
+ * What a booking charges (services.price_cents) for an item priced on the website: its guest price (a tint package: its film's
+ * lowest guest price). null when the item is not priced on the website (no member price and no tint film: its plain price stands
+ * as the member price) or quote-only (priced per vehicle).
+ */
+export function bookingPriceOf(
+  s: PricedItem & { category: string; tags: readonly string[]; quoteOnly: boolean },
+  o: { markupPct: number; tint: TintMatrix },
+): number | null {
+  if (s.quoteOnly) return null
+  const p = effectivePrices(s, o)
+  if (p.tintFilm !== null || s.memberPriceCents !== null) return p.guestPriceCents
+  return null
 }

@@ -12,6 +12,13 @@
 //   sets                 catalog.tint_matrix, catalog.guest_markup_pct = 20, and the Gold (premium) and VIP (executive) plans'
 //                        public name, monthly price and perks (the checkout URLs are left as they are: the owner pastes them).
 //
+// Members' credits: a plan's credit rules redeem on service tags (memberships/design-plans.ts). The washes carry the tags of the
+// washes they replace (Signature, exterior + interior, is the premium wash; Exterior is the express wash), so every plan redeems
+// what it redeemed before. The rules themselves are the memberships package's and are NOT changed here: the website's perks
+// ("4 hand washes a month") differ from the rules' counts, and the executive "Executive detail" credit covers no website service.
+// Each run logs a WARNING line per credit rule that covers no active service: align the rules (owner decision) before this runs
+// in production (ADR 0160 W2a).
+//
 // Idempotent: a second run changes nothing (no version bump, no audit row). A run after the owner edited the catalog resets these
 // fields to the website's content again, so run it once (production) and edit in Settings afterwards. Every change is audited under
 // the actor "Seed (website-catalog)".
@@ -19,7 +26,7 @@
 // Durations: the design's own for the washes ("about 45 min", "about 30 min"); the rest are the seed's choices, for the owner to
 // review in Settings (listed in WEBSITE_DURATIONS_CHOSEN).
 import { sql } from 'kysely'
-import { ensurePlans } from '../../src/modules/memberships/plans.js'
+import { ensurePlans, loadPlans, ruleCovers } from '../../src/modules/memberships/plans.js'
 import type { PlanKey } from '../../src/modules/memberships/schema.js'
 import { refreshOpenAppointmentCategories } from '../../src/modules/catalog/appointment-categories.js'
 import { withMarkup, type TintMatrix } from '../../src/modules/catalog/pricing.js'
@@ -68,7 +75,7 @@ export const WEBSITE_SERVICES: readonly WebsiteService[] = [
     vipInclusion: 'included',
     vipNote: MEMBER_WASH_NOTE,
     quoteOnly: false,
-    tags: ['handwash', 'signature'],
+    tags: ['handwash', 'signature', 'premium'],
     sort: 10,
     tasks: [
       'Foam cannon pre-soak',
@@ -89,7 +96,7 @@ export const WEBSITE_SERVICES: readonly WebsiteService[] = [
     vipInclusion: 'included',
     vipNote: MEMBER_WASH_NOTE,
     quoteOnly: false,
-    tags: ['handwash', 'exterior'],
+    tags: ['handwash', 'exterior', 'express'],
     sort: 20,
     tasks: [
       'Foam cannon pre-soak',
@@ -377,13 +384,23 @@ export interface WebsiteCatalogResult {
   settings: string[]
   plans: string[]
   appointmentsUpdated: number
+  /** "plan: rule label" of every credit rule of an active plan that covers no active package after the run (members could not redeem it). */
+  uncoveredRules: string[]
 }
 
 export async function seedWebsiteCatalog(ctx: SeedContext): Promise<WebsiteCatalogResult> {
   const { tx, location } = ctx
   await ensureDomainDefaults(tx, location.id)
   await ensurePlans(tx, { locationId: location.id, clock: ctx.clock, newId: ctx.newId })
-  const out: WebsiteCatalogResult = { created: [], updated: [], deactivated: [], settings: [], plans: [], appointmentsUpdated: 0 }
+  const out: WebsiteCatalogResult = {
+    created: [],
+    updated: [],
+    deactivated: [],
+    settings: [],
+    plans: [],
+    appointmentsUpdated: 0,
+    uncoveredRules: [],
+  }
 
   // settings first: the tint packages' plain price comes from the matrix
   for (const [key, value] of [
@@ -487,6 +504,18 @@ export async function seedWebsiteCatalog(ctx: SeedContext): Promise<WebsiteCatal
 
   if (out.created.length + out.updated.length + out.deactivated.length > 0)
     out.appointmentsUpdated = await refreshOpenAppointmentCategories(tx, location.id)
+
+  const activeTags = (
+    await tx
+      .selectFrom('services')
+      .select('tags')
+      .where('location_id', '=', location.id)
+      .where('kind', '=', 'package')
+      .where('active', '=', true)
+      .execute()
+  ).map((r) => r.tags)
+  for (const p of (await loadPlans(tx, location.id)).filter((x) => x.active))
+    for (const r of p.rules) if (!activeTags.some((tags) => ruleCovers(r, tags))) out.uncoveredRules.push(`${p.key}: ${r.label}`)
   return out
 }
 
@@ -500,5 +529,9 @@ export const websiteCatalogProfile: SeedProfile = {
         (r.deactivated.length ? ` (${r.deactivated.join(', ')})` : '') +
         `, settings ${r.settings.join(', ') || 'unchanged'}, plans ${r.plans.join(', ') || 'unchanged'}, ${r.appointmentsUpdated} visits re-categorised`,
     )
+    for (const rule of r.uncoveredRules)
+      ctx.log(
+        `WARNING website-catalog: credit rule "${rule}" covers no active package; align the plans’ credit rules before members redeem (ADR 0160 W2a)`,
+      )
   },
 }

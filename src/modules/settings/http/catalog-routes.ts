@@ -19,7 +19,7 @@ import {
 import { listPlanPublic, putPlanPublic, type PlanPublic } from '../../catalog/plans.js'
 import { effectivePrices, type TintMatrix } from '../../catalog/pricing.js'
 import { listCatalog, requireService, type CatalogService } from '../../catalog/service.js'
-import { putWebsiteFields } from '../../catalog/website.js'
+import { putWebsiteFields, syncBookingPrices } from '../../catalog/website.js'
 import { etag, expectedVersion, idem, inTx, requestContext, requiredVersion, storedUserId, type SettingsRuntime } from './runtime.js'
 
 const TAGS = ['catalog']
@@ -42,7 +42,9 @@ export const WebsiteServiceView = z.object({
   kind: z.enum(['package', 'addon']),
   name: z.string(),
   active: z.boolean(),
-  priceCents: Cents.describe('The plain price: what a booking charges today'),
+  priceCents: Cents.describe(
+    'What a booking charges. For an item priced on the website (a member price, or a tint film) it follows the guest price; otherwise it is the plain price, which is also the member price',
+  ),
   durationMin: z.number().int(),
   tags: z.array(z.string()),
   category: z.string(),
@@ -57,7 +59,9 @@ export const WebsiteServiceView = z.object({
   sort: z.number().int(),
   effective: z
     .object({ memberPriceCents: Cents, guestPriceCents: Cents, tintFilm: z.string().nullable() })
-    .describe('The prices the website and the assistant show (a tint package: the lowest prices of its film in the tint matrix)'),
+    .describe(
+      'The starting prices the website and the assistant state (design §3b; a tint package: the lowest prices of its film in the tint matrix)',
+    ),
   version: z.number().int(),
 })
 
@@ -256,7 +260,8 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
         summary: 'Save a package’s or add-on’s website fields (category, public name, description, prices, VIP, quote-only, online, order)',
         description:
           'All fields, replaced together; `version` (or If-Match) is required: 428 without, 412 VERSION_CONFLICT when stale (the service’s version, shared with checklist and catalog edits). ' +
-          'Texts are trimmed (blank = none). 422: an unknown or turned-off category (a service may keep a category that was turned off later), a price outside 0..$100,000, a guest price below the member price, `allowance` without a `vipNote`. ' +
+          'Texts are trimmed (blank = none). 422: an unknown or turned-off category (a service may keep a category that was turned off later), a price outside 0..$100,000, a guest price without a member price or below it, `allowance` without a `vipNote`. ' +
+          'The member and guest prices (`effective`) are the starting prices the website and the assistant state; for an item priced on the website (a member price, or a tint film) what a booking charges (`priceCents`) is set to its guest price by the same save. ' +
           'A category change re-derives `categories` on the visits not yet finished that hold the service (`appointmentsUpdated`). Publishes `settings.changed {section: "services"}`.',
         params: z.object({ id: z.string().uuid() }),
         body: z
@@ -323,7 +328,7 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
         operationId: 'createCatalogCategory',
         summary: 'Add a category',
         description:
-          '`key` is immutable once created: a lowercase letter, then letters, digits or underscores (up to 32). `colour` #RRGGBB (stored upper case). `sort` defaults to after the last. 409 CATEGORY_KEY_TAKEN; 422 CATEGORY_LIMIT past 20 categories. Publishes `settings.changed {section: "catalog", key: "categories"}`.',
+          '`key` is immutable once created: a lowercase letter, then letters, digits or underscores (up to 32); `mixed` is reserved (the word a visit with two categories is counted under). `colour` #RRGGBB (stored upper case). `sort` defaults to after the last. 409 CATEGORY_KEY_TAKEN; 422 CATEGORY_LIMIT past 20 categories. Publishes `settings.changed {section: "catalog", key: "categories"}`.',
         body: z
           .object({
             key: z.string().max(64),
@@ -438,7 +443,7 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
         summary: 'Save the whole tint price matrix',
         description:
           '`version` (or If-Match) is required (0 before the first save): 428 without, 412 VERSION_CONFLICT when stale. Keys are lowercase (letters, digits, underscore); a price row names a listed vehicle type and film, each pair once, each range not ending below its start; VLT values 1..100. ' +
-          'A tint package names its film by a tag (e.g. `ceramic`) and shows that film’s lowest prices. Publishes `settings.changed {section: "catalog", key: "catalog.tint_matrix"}`.',
+          'A tint package names its film by a tag (e.g. `ceramic`) and shows that film’s lowest prices; what it charges at booking (`priceCents`) moves to the film’s lowest guest price (audited `catalog.price.sync`). Publishes `settings.changed {section: "catalog", key: "catalog.tint_matrix"}`.',
         body: z.object({ ...TintMatrixShape, version: Version.optional() }).strict(),
         response: { 200: TintMatrixView },
       },
@@ -448,16 +453,18 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
       const { version, ...value } = req.body
       const v = requiredVersion(req, version)
       const matrix = parseTintMatrix(value)
-      const r = await inTx(app.db, async (tx) =>
-        updateSetting(tx, {
+      const r = await inTx(app.db, async (tx) => {
+        const saved = await updateSetting(tx, {
           locationId: c.locationId,
           key: 'catalog.tint_matrix',
           value: matrix,
           expectedVersion: v,
           updatedBy: await storedUserId(tx, c.userId),
           audit: c.audit,
-        }),
-      )
+        })
+        await syncBookingPrices(tx, { locationId: c.locationId, reason: 'catalog.tint_matrix', audit: c.audit })
+        return saved
+      })
       etag(reply, r.version)
       return tintView(r)
     },
@@ -490,7 +497,7 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
         operationId: 'putCatalogGuestMarkup',
         summary: 'Save the guest markup (0 to 200 percent)',
         description:
-          'Applies to every service without its own guest price: guest = member × (100 + pct) / 100, rounded half up to whole dollars. `version` (or If-Match) required (0 before the first save). Publishes `settings.changed {section: "catalog", key: "catalog.guest_markup_pct"}`.',
+          'Applies to every service without its own guest price: guest = member × (100 + pct) / 100, rounded half up to whole dollars; what such a service charges at booking (`priceCents`) moves with it (audited `catalog.price.sync`). `version` (or If-Match) required (0 before the first save). Publishes `settings.changed {section: "catalog", key: "catalog.guest_markup_pct"}`.',
         body: z.object({ pct: z.number().int(), version: Version.optional() }).strict(),
         response: { 200: GuestMarkupView },
       },
@@ -503,16 +510,18 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
           detail: 'Enter a markup from 0 to 200 percent.',
           errors: [{ path: 'pct', message: 'Enter a markup from 0 to 200 percent.' }],
         })
-      const r = await inTx(app.db, async (tx) =>
-        updateSetting(tx, {
+      const r = await inTx(app.db, async (tx) => {
+        const saved = await updateSetting(tx, {
           locationId: c.locationId,
           key: 'catalog.guest_markup_pct',
           value: req.body.pct,
           expectedVersion: v,
           updatedBy: await storedUserId(tx, c.userId),
           audit: c.audit,
-        }),
-      )
+        })
+        await syncBookingPrices(tx, { locationId: c.locationId, reason: 'catalog.guest_markup_pct', audit: c.audit })
+        return saved
+      })
       etag(reply, r.version)
       return { pct: r.value, version: r.version }
     },

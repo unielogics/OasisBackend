@@ -54,13 +54,24 @@ simulator. No route, job or behaviour beyond the policy gate and the masked mess
 - **One pricing rule** (`src/modules/catalog/pricing.ts`): member = `member_price_cents` else `price_cents`; guest =
   `guest_price_cents` else member + `catalog.guest_markup_pct`, rounded half up to whole dollars (the website's own rounding). Tint is
   priced by the matrix: a tint package names its film by a tag and shows the film's lowest prices. `price_cents` stays what a booking
-  charges today (the seed sets it to the guest price); charging members their price at booking is a later wave's.
+  charges (the seed sets it to the guest price); charging members their price at booking is a later wave's.
+- **Starting prices (design §3b).** An item's member and guest prices (a tint package: its film's lowest) and a tint row's
+  `memberMinCents`/`guestMinCents` are the starting prices W3's shop facts and output guard use; the public item's `priceCents` is the
+  booking charge, never stated. For an item priced on the website (a member price, or a tint film; not quote-only) `price_cents` is
+  kept equal to the guest price by the website-fields save, the markup save and the tint matrix save (`bookingPriceOf`, audit
+  `catalog.price.sync`), so the website, a booking and the assistant agree. A guest price needs a member price (422 otherwise).
 - **Public catalog** (`GET /public/catalog`) extended in place (every field the website reads today kept): categories, member/guest
   prices, VIP inclusion, quote-only items, the tint matrix, the guest fee, plan prices and perks. Checkout URLs stay internal: only a
   verified membership link leads to one.
 - **`appointments.categories`** maintained by `createAppointment`, add-on add/remove and a service's category change (open visits);
-  `visitCategory()` gives the chip/KPI word (`mixed` when two categories other than add-ons meet).
+  `visitCategory()` gives the chip/KPI word (`mixed` when two categories other than add-ons meet; `mixed` is reserved as a key).
 - **Seed `website-catalog`** makes the website's content the production catalog and deactivates (never deletes) the rest; idempotent.
   Durations the design does not give were chosen by the seed (tint 180, interior detail 150, full detail 240, quotes 120/480/300/30
   minutes) for the owner to review.
+- **Seed vs members' credits (open owner decision).** Credits redeem on service tags; the seed tags Signature `premium` and Exterior
+  `express` (the washes they replace), so every plan redeems what it did before. It leaves the credit rules alone (memberships
+  module): the website's Gold/VIP perks ("4 hand washes a month", VIP "everything in Gold") differ from the rules (premium: 2
+  premium washes; executive: unlimited express + 2 executive details, the latter covering no website service). Each run logs a
+  WARNING per uncovered rule. Not to be run in production until the owner has decided the Gold/VIP credit rules and the memberships
+  package has applied them.
 

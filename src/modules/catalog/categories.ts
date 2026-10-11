@@ -35,6 +35,8 @@ export const CATEGORY_KEY = /^[a-z][a-z0-9_]{0,31}$/
 export const COLOUR = /^#[0-9A-Fa-f]{6}$/
 /** At most this many categories per location (the dashboard shows them as chips). */
 export const MAX_CATEGORIES = 20
+/** The word visitCategory() counts a visit with two or more categories under: reserved, never a category's key. */
+export const MIXED_CATEGORY = 'mixed'
 
 /** Inserts any missing default category row for the location. */
 export async function ensureCatalogCategories(db: Executor, locationId: string): Promise<void> {
@@ -134,6 +136,8 @@ export async function createCategory(
 ): Promise<Category> {
   if (!CATEGORY_KEY.test(input.key))
     throw invalid('key', 'Use a lowercase key: a letter, then letters, digits or underscores (up to 32).')
+  if (input.key === MIXED_CATEGORY)
+    throw invalid('key', 'The key "mixed" is reserved: it is what a visit with two categories is counted under.')
   checkInput(input)
   const count = await tx
     .selectFrom('catalog_categories')

@@ -172,6 +172,9 @@ describe('a service’s website fields', () => {
       [{ memberPriceCents: -1 }, 'memberPriceCents'],
       [{ guestPriceCents: 10_000_001, memberPriceCents: null }, 'guestPriceCents'],
       [{ memberPriceCents: 5000, guestPriceCents: 4000 }, 'guestPriceCents'],
+      // a guest price needs a member price to be checked against (F2: $1 guests against a $45 plain price)
+      [{ memberPriceCents: null, guestPriceCents: 100 }, 'guestPriceCents'],
+      [{ memberPriceCents: null, guestPriceCents: 9000 }, 'guestPriceCents'],
       [{ vipInclusion: 'allowance', vipNote: '   ' }, 'vipNote'],
       [{ publicName: 'x'.repeat(81) }, 'publicName'],
       [{ description: 'x'.repeat(1001) }, 'description'],
@@ -203,6 +206,45 @@ describe('a service’s website fields', () => {
     const rows = await h.db.selectFrom('appointments').select(['id', 'categories']).execute()
     expect(rows.find((x) => x.id === open)!.categories).toEqual(['detail'])
     expect(rows.find((x) => x.id === done)!.categories).toEqual(['wash'])
+  })
+
+  it('keeps what a booking charges in step with the website prices: the guest price (F3, design §3b)', async () => {
+    const id = await makeService(h.db, h.fx, { name: 'Express Hand Wash', priceCents: 5400 })
+    const legacy = await makeService(h.db, h.fx, { name: 'Old Wash', priceCents: 3000 })
+    const quote = await makeService(h.db, h.fx, { name: 'Chrome delete', priceCents: 0 })
+    const s = await h.admin()
+    const price = async (sid: string) =>
+      (await h.db.selectFrom('services').select('price_cents').where('id', '=', sid).executeTakeFirstOrThrow()).price_cents
+    // member $50, guest by the markup: a booking charges $60, what the public catalog shows guests
+    const r = await h.put(`catalog/services/${id}`, s, { ...website({ memberPriceCents: 5000 }), version: 1 })
+    expect(json(r)).toMatchObject({ priceCents: 6000, effective: { memberPriceCents: 5000, guestPriceCents: 6000 }, version: 2 })
+    expect(await price(id)).toBe(6000)
+    const a = await h.db.selectFrom('audit_log').select(['before', 'after']).where('action', '=', 'catalog.website.update').executeTakeFirstOrThrow()
+    expect(a).toMatchObject({ before: { priceCents: 5400 }, after: { priceCents: 6000 } })
+    // an explicit guest price is the charge
+    await h.put(`catalog/services/${id}`, s, { ...website({ memberPriceCents: 5000, guestPriceCents: 6500 }), version: 2 })
+    expect(await price(id)).toBe(6500)
+    // a quote-only item has no price to keep; an item without website prices keeps its plain price
+    await h.put(`catalog/services/${quote}`, s, { ...website({ category: 'quote', quoteOnly: true, memberPriceCents: null }), version: 1 })
+    expect(await price(quote)).toBe(0)
+    await h.put(`catalog/services/${legacy}`, s, { ...website({ memberPriceCents: null, description: 'Old' }), version: 1 })
+    expect(await price(legacy)).toBe(3000)
+
+    // the markup moves the charge of every item priced by it (not an explicit guest price, not one without website prices)
+    const other = await makeService(h.db, h.fx, { name: 'Exterior Hand Wash', priceCents: 3800 })
+    await h.put(`catalog/services/${other}`, s, { ...website({ memberPriceCents: 3200 }), version: 1 })
+    expect(await price(other)).toBe(3800)
+    const m = json(await h.get('catalog/guest-markup', s))
+    expect((await h.put('catalog/guest-markup', s, { pct: 30, version: m.version })).statusCode).toBe(200)
+    expect(await price(other)).toBe(4200) // 32 x 1.3 = 41.6 -> 42
+    expect(await price(id)).toBe(6500)
+    expect(await price(legacy)).toBe(3000)
+    expect(await price(quote)).toBe(0)
+    const sync = await h.db.selectFrom('audit_log').select(['entity_id', 'before', 'after']).where('action', '=', 'catalog.price.sync').execute()
+    expect(sync).toEqual([{ entity_id: other, before: { priceCents: 3800 }, after: { priceCents: 4200, reason: 'catalog.guest_markup_pct' } }])
+    // the same markup again moves nothing
+    await h.put('catalog/guest-markup', s, { pct: 30, version: m.version + 1 })
+    expect(await h.db.selectFrom('audit_log').select('id').where('action', '=', 'catalog.price.sync').execute()).toHaveLength(1)
   })
 
   it('404 for an unknown service', async () => {
@@ -250,6 +292,8 @@ describe('categories', () => {
       [{ key: 'ok', label: 'x'.repeat(41), colour: '#000000' }, 'label'],
       [{ key: 'ok', label: 'x', colour: 'blue' }, 'colour'],
       [{ key: 'ok', label: 'x', colour: '#000000', sort: 1e6 }, 'sort'],
+      // the word a visit with two categories is counted under (visitCategory) is no category's key (F4)
+      [{ key: 'mixed', label: 'Mixed', colour: '#123456' }, 'key'],
     ]
     for (const [body, path] of cases) {
       const r = await h.post('catalog/categories', s, body)
@@ -301,6 +345,23 @@ describe('tint matrix and guest markup', () => {
     const id = await makeService(h.db, h.fx, { name: 'Ceramic window tint', durationMin: 180, priceCents: 45500 })
     await h.db.updateTable('services').set({ category: 'tint', tags: ['tint', 'ceramic'] }).where('id', '=', id).execute()
     expect(json(await h.get(`catalog/services/${id}`, s)).effective).toEqual({ memberPriceCents: 37900, guestPriceCents: 45500, tintFilm: 'ceramic' })
+  })
+
+  it('a saved matrix moves what a tint package charges to its film’s lowest guest price (F3)', async () => {
+    const s = await h.admin()
+    const carbon = await makeService(h.db, h.fx, { name: 'Carbon window tint', durationMin: 180, priceCents: 0 })
+    const plain = await makeService(h.db, h.fx, { name: 'Tint repair', durationMin: 60, priceCents: 9000 })
+    await h.db.updateTable('services').set({ category: 'tint', tags: ['tint', 'carbon'] }).where('id', '=', carbon).execute()
+    await h.db.updateTable('services').set({ category: 'tint', tags: ['tint'] }).where('id', '=', plain).execute()
+    await h.put('catalog/tint-matrix', s, { ...MATRIX, version: json(await h.get('catalog/tint-matrix', s)).version })
+    const price = async (sid: string) =>
+      (await h.db.selectFrom('services').select('price_cents').where('id', '=', sid).executeTakeFirstOrThrow()).price_cents
+    expect(await price(carbon)).toBe(27500)
+    expect(await price(plain)).toBe(9000)
+    const cheaper = { ...MATRIX, prices: MATRIX.prices.map((p) => (p.film === 'carbon' ? { ...p, guestMinCents: 25000 } : p)) }
+    await h.put('catalog/tint-matrix', s, { ...cheaper, version: json(await h.get('catalog/tint-matrix', s)).version })
+    expect(await price(carbon)).toBe(25000)
+    expect(json(await h.get(`catalog/services/${carbon}`, s))).toMatchObject({ priceCents: 25000, effective: { guestPriceCents: 25000, tintFilm: 'carbon' } })
   })
 
   it('the markup moves every computed guest price and is bounded', async () => {

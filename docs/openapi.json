@@ -15447,7 +15447,7 @@
                           },
                           "effective": {
                             "additionalProperties": false,
-                            "description": "The prices the website and the assistant show (a tint package: the lowest prices of its film in the tint matrix)",
+                            "description": "The starting prices the website and the assistant state (design §3b; a tint package: the lowest prices of its film in the tint matrix)",
                             "properties": {
                               "guestPriceCents": {
                                 "maximum": 9007199254740991,
@@ -15517,7 +15517,7 @@
                             "type": "string"
                           },
                           "priceCents": {
-                            "description": "The plain price: what a booking charges today",
+                            "description": "What a booking charges. For an item priced on the website (a member price, or a tint film) it follows the guest price; otherwise it is the plain price, which is also the member price",
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
                             "type": "integer"
@@ -15695,7 +15695,7 @@
                           },
                           "effective": {
                             "additionalProperties": false,
-                            "description": "The prices the website and the assistant show (a tint package: the lowest prices of its film in the tint matrix)",
+                            "description": "The starting prices the website and the assistant state (design §3b; a tint package: the lowest prices of its film in the tint matrix)",
                             "properties": {
                               "guestPriceCents": {
                                 "maximum": 9007199254740991,
@@ -15765,7 +15765,7 @@
                             "type": "string"
                           },
                           "priceCents": {
-                            "description": "The plain price: what a booking charges today",
+                            "description": "What a booking charges. For an item priced on the website (a member price, or a tint film) it follows the guest price; otherwise it is the plain price, which is also the member price",
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
                             "type": "integer"
@@ -16155,7 +16155,7 @@
         "x-oasis-access": "authenticated"
       },
       "post": {
-        "description": "`key` is immutable once created: a lowercase letter, then letters, digits or underscores (up to 32). `colour` #RRGGBB (stored upper case). `sort` defaults to after the last. 409 CATEGORY_KEY_TAKEN; 422 CATEGORY_LIMIT past 20 categories. Publishes `settings.changed {section: \"catalog\", key: \"categories\"}`.",
+        "description": "`key` is immutable once created: a lowercase letter, then letters, digits or underscores (up to 32); `mixed` is reserved (the word a visit with two categories is counted under). `colour` #RRGGBB (stored upper case). `sort` defaults to after the last. 409 CATEGORY_KEY_TAKEN; 422 CATEGORY_LIMIT past 20 categories. Publishes `settings.changed {section: \"catalog\", key: \"categories\"}`.",
         "operationId": "createCatalogCategory",
         "requestBody": {
           "content": {
@@ -16452,7 +16452,7 @@
         "x-oasis-access": "authenticated"
       },
       "put": {
-        "description": "Applies to every service without its own guest price: guest = member × (100 + pct) / 100, rounded half up to whole dollars. `version` (or If-Match) required (0 before the first save). Publishes `settings.changed {section: \"catalog\", key: \"catalog.guest_markup_pct\"}`.",
+        "description": "Applies to every service without its own guest price: guest = member × (100 + pct) / 100, rounded half up to whole dollars; what such a service charges at booking (`priceCents`) moves with it (audited `catalog.price.sync`). `version` (or If-Match) required (0 before the first save). Publishes `settings.changed {section: \"catalog\", key: \"catalog.guest_markup_pct\"}`.",
         "operationId": "putCatalogGuestMarkup",
         "requestBody": {
           "content": {
@@ -16882,7 +16882,7 @@
                     },
                     "effective": {
                       "additionalProperties": false,
-                      "description": "The prices the website and the assistant show (a tint package: the lowest prices of its film in the tint matrix)",
+                      "description": "The starting prices the website and the assistant state (design §3b; a tint package: the lowest prices of its film in the tint matrix)",
                       "properties": {
                         "guestPriceCents": {
                           "maximum": 9007199254740991,
@@ -16952,7 +16952,7 @@
                       "type": "string"
                     },
                     "priceCents": {
-                      "description": "The plain price: what a booking charges today",
+                      "description": "What a booking charges. For an item priced on the website (a member price, or a tint film) it follows the guest price; otherwise it is the plain price, which is also the member price",
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
                       "type": "integer"
@@ -17043,7 +17043,7 @@
         "x-oasis-access": "authenticated"
       },
       "put": {
-        "description": "All fields, replaced together; `version` (or If-Match) is required: 428 without, 412 VERSION_CONFLICT when stale (the service’s version, shared with checklist and catalog edits). Texts are trimmed (blank = none). 422: an unknown or turned-off category (a service may keep a category that was turned off later), a price outside 0..$100,000, a guest price below the member price, `allowance` without a `vipNote`. A category change re-derives `categories` on the visits not yet finished that hold the service (`appointmentsUpdated`). Publishes `settings.changed {section: \"services\"}`.",
+        "description": "All fields, replaced together; `version` (or If-Match) is required: 428 without, 412 VERSION_CONFLICT when stale (the service’s version, shared with checklist and catalog edits). Texts are trimmed (blank = none). 422: an unknown or turned-off category (a service may keep a category that was turned off later), a price outside 0..$100,000, a guest price without a member price or below it, `allowance` without a `vipNote`. The member and guest prices (`effective`) are the starting prices the website and the assistant state; for an item priced on the website (a member price, or a tint film) what a booking charges (`priceCents`) is set to its guest price by the same save. A category change re-derives `categories` on the visits not yet finished that hold the service (`appointmentsUpdated`). Publishes `settings.changed {section: \"services\"}`.",
         "operationId": "putCatalogService",
         "parameters": [
           {
@@ -17205,7 +17205,7 @@
                     },
                     "effective": {
                       "additionalProperties": false,
-                      "description": "The prices the website and the assistant show (a tint package: the lowest prices of its film in the tint matrix)",
+                      "description": "The starting prices the website and the assistant state (design §3b; a tint package: the lowest prices of its film in the tint matrix)",
                       "properties": {
                         "guestPriceCents": {
                           "maximum": 9007199254740991,
@@ -17275,7 +17275,7 @@
                       "type": "string"
                     },
                     "priceCents": {
-                      "description": "The plain price: what a booking charges today",
+                      "description": "What a booking charges. For an item priced on the website (a member price, or a tint film) it follows the guest price; otherwise it is the plain price, which is also the member price",
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
                       "type": "integer"
@@ -17504,7 +17504,7 @@
         "x-oasis-access": "authenticated"
       },
       "put": {
-        "description": "`version` (or If-Match) is required (0 before the first save): 428 without, 412 VERSION_CONFLICT when stale. Keys are lowercase (letters, digits, underscore); a price row names a listed vehicle type and film, each pair once, each range not ending below its start; VLT values 1..100. A tint package names its film by a tag (e.g. `ceramic`) and shows that film’s lowest prices. Publishes `settings.changed {section: \"catalog\", key: \"catalog.tint_matrix\"}`.",
+        "description": "`version` (or If-Match) is required (0 before the first save): 428 without, 412 VERSION_CONFLICT when stale. Keys are lowercase (letters, digits, underscore); a price row names a listed vehicle type and film, each pair once, each range not ending below its start; VLT values 1..100. A tint package names its film by a tag (e.g. `ceramic`) and shows that film’s lowest prices; what it charges at booking (`priceCents`) moves to the film’s lowest guest price (audited `catalog.price.sync`). Publishes `settings.changed {section: \"catalog\", key: \"catalog.tint_matrix\"}`.",
         "operationId": "putCatalogTintMatrix",
         "requestBody": {
           "content": {
@@ -52147,6 +52147,7 @@
                             ]
                           },
                           "guestPriceCents": {
+                            "description": "The guest STARTING price (design §3b): what the website and the assistant state for everyone else",
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
                             "type": "integer"
@@ -52155,6 +52156,7 @@
                             "type": "string"
                           },
                           "memberPriceCents": {
+                            "description": "The member STARTING price (design §3b): what the website and the assistant state for members",
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
                             "type": "integer"
@@ -52163,6 +52165,7 @@
                             "type": "string"
                           },
                           "priceCents": {
+                            "description": "What a booking charges (kept for the website’s booking flow): the guest price for an item priced on the website. Not a price to state: state memberPriceCents / guestPriceCents",
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
                             "type": "integer"
@@ -52381,6 +52384,7 @@
                             "type": "integer"
                           },
                           "guestPriceCents": {
+                            "description": "The guest STARTING price (design §3b): what the website and the assistant state for everyone else",
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
                             "type": "integer"
@@ -52389,6 +52393,7 @@
                             "type": "string"
                           },
                           "memberPriceCents": {
+                            "description": "The member STARTING price (design §3b): what the website and the assistant state for members",
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
                             "type": "integer"
@@ -52397,6 +52402,7 @@
                             "type": "string"
                           },
                           "priceCents": {
+                            "description": "What a booking charges (kept for the website’s booking flow): the guest price for an item priced on the website. Not a price to state: state memberPriceCents / guestPriceCents",
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
                             "type": "integer"
@@ -52502,6 +52508,7 @@
                                 "type": "integer"
                               },
                               "guestMinCents": {
+                                "description": "The guest \"from\" price of this vehicle type and film (design §3b)",
                                 "maximum": 9007199254740991,
                                 "minimum": -9007199254740991,
                                 "type": "integer"
@@ -52512,6 +52519,7 @@
                                 "type": "integer"
                               },
                               "memberMinCents": {
+                                "description": "The member \"from\" price of this vehicle type and film (design §3b)",
                                 "maximum": 9007199254740991,
                                 "minimum": -9007199254740991,
                                 "type": "integer"

@@ -5,6 +5,7 @@
 import { sql } from 'kysely'
 import type { Executor, Tx } from '../../platform/db.js'
 import { isUuid } from '../../platform/ids.js'
+import { MIXED_CATEGORY } from './categories.js'
 import '../customers/schema.js'
 import './schema.js'
 
@@ -104,7 +105,7 @@ export async function categoriesOf(db: Executor, locationId: string, serviceIds:
  */
 export function visitCategory(categories: readonly string[]): string | null {
   const main = categories.filter((c) => c !== ADDONS_CATEGORY)
-  if (main.length >= 2) return 'mixed'
+  if (main.length >= 2) return MIXED_CATEGORY
   return main[0] ?? categories[0] ?? null
 }
 
