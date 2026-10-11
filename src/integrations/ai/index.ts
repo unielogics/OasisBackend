@@ -1,17 +1,35 @@
 // The AI provider factory (ADR 0160). AI_PROVIDER=sim (the default) answers with the simulator and never reaches AWS;
-// AI_PROVIDER=bedrock (Claude Sonnet 5.5 through the Converse API) arrives in wave 2.
+// AI_PROVIDER=bedrock calls Claude Sonnet 5.5 through Amazon Bedrock's Converse API with the default credential chain (the
+// instance role in production). Building a provider contacts nothing: the first call does.
 import type { AiProvider } from '../ports/ai.js'
+import { BedrockProvider, createBedrockClient, type BedrockProviderOptions } from './bedrock.js'
 import type { AiEnvFragment } from './env.js'
 import { SimAiProvider } from './sim.js'
 
 export * from './env.js'
 export * from './sim.js'
+export * from './bedrock.js'
+export * from './cost.js'
 
-export function createAiProvider(env: Pick<AiEnvFragment, 'AI_PROVIDER' | 'AI_BEDROCK_MODEL_ID'>): AiProvider {
+export type AiProviderEnv = Pick<AiEnvFragment, 'AI_PROVIDER' | 'AI_BEDROCK_MODEL_ID'> &
+  Partial<Pick<AiEnvFragment, 'AI_BEDROCK_REGION' | 'AI_TIMEOUT_MS' | 'AI_EFFORT' | 'AI_BEDROCK_EFFORT_MODE'>>
+
+export interface AiProviderDeps {
+  /** Replaces the Bedrock runtime client (tests, the verify-live simulator). */
+  bedrockClient?: BedrockProviderOptions['client']
+}
+
+export function createAiProvider(env: AiProviderEnv, deps: AiProviderDeps = {}): AiProvider {
   switch (env.AI_PROVIDER) {
     case 'sim':
       return new SimAiProvider()
     case 'bedrock':
-      throw new Error(`AI_PROVIDER=bedrock is not built yet (wave 2); model ${env.AI_BEDROCK_MODEL_ID} cannot be called`)
+      return new BedrockProvider({
+        client: deps.bedrockClient ?? createBedrockClient({ region: env.AI_BEDROCK_REGION ?? 'us-east-1' }),
+        modelId: env.AI_BEDROCK_MODEL_ID,
+        timeoutMs: env.AI_TIMEOUT_MS ?? 20_000,
+        effortMode: env.AI_BEDROCK_EFFORT_MODE ?? 'off',
+        ...(env.AI_EFFORT ? { defaultEffort: env.AI_EFFORT } : {}),
+      })
   }
 }

@@ -1,5 +1,5 @@
 // The AI provider port and its simulator (ADR 0160): scripted, deterministic answers in order, every request recorded, errors and
-// aborts as AiProviderError, and the factory that never reaches AWS before wave 2.
+// aborts as AiProviderError, and the factory (building a provider contacts nothing).
 import { describe, expect, it } from 'vitest'
 import { createAiProvider, DEFAULT_SIM_REPLY, SimAiProvider, simText, simToolUse } from '../../src/integrations/ai/index.js'
 import { AiProviderError, textOf, type AiConverseRequest } from '../../src/integrations/ports/ai.js'
@@ -73,11 +73,11 @@ describe('SimAiProvider', () => {
 })
 
 describe('createAiProvider', () => {
-  it('builds the simulator by default (no AWS), and refuses bedrock until wave 2', async () => {
+  it('builds the simulator by default (no AWS), and the Bedrock provider for AI_PROVIDER=bedrock (test/integrations/ai)', async () => {
     const env = loadEnv({ DATABASE_URL: 'postgres://oasis:x@127.0.0.1:5432/oasis' })
     const ai = createAiProvider(env)
     expect(ai.name).toBe('sim')
     expect(textOf((await ai.converse(req('hello'))).message)).toBe(DEFAULT_SIM_REPLY)
-    expect(() => createAiProvider({ ...env, AI_PROVIDER: 'bedrock' })).toThrow(/not built yet/)
+    expect(createAiProvider({ ...env, AI_PROVIDER: 'bedrock' })).toMatchObject({ name: 'bedrock', model: 'us.anthropic.claude-sonnet-5-5' })
   })
 })

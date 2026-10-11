@@ -21,6 +21,12 @@ export const aiEnvShape = {
   /** The cross-region inference profile of Claude Sonnet 5.5 (owner decision 2026-10-10). */
   AI_BEDROCK_MODEL_ID: z.string().min(1).default('us.anthropic.claude-sonnet-5-5'),
   AI_EFFORT: z.enum(['low', 'medium', 'high']).default('low'),
+  /**
+   * How AI_EFFORT reaches Bedrock: off (default: not sent, the model runs at its own default effort), output_config (Converse's
+   * native outputConfig.effort) or additional_fields (additionalModelRequestFields.output_config.effort, the Anthropic request
+   * field passed through). Off until pnpm verify:ai --probe-effort shows the account's model accepts it (ADR 0160, W2 notes).
+   */
+  AI_BEDROCK_EFFORT_MODE: z.enum(['off', 'output_config', 'additional_fields']).default('off'),
   AI_MAX_TOKENS: int(64, 4096, 800),
   /** One model call; the turn as a whole has AI_TURN_DEADLINE_MS. */
   AI_TIMEOUT_MS: int(1000, 120_000, 20_000),
