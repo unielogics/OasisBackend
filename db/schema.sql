@@ -1101,6 +1101,20 @@ CREATE TABLE public.idempotency_keys (
 );
 
 --
+-- Name: identity_pin_failures; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.identity_pin_failures (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    customer_id uuid,
+    phone_e164 text NOT NULL,
+    ip text,
+    at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT identity_pin_failures_phone_e164_check CHECK ((phone_e164 ~ '^\+[1-9][0-9]{6,14}$'::text))
+);
+
+--
 -- Name: invites; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1767,7 +1781,9 @@ CREATE TABLE public.phone_trust (
     revoke_reason text,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    epoch integer DEFAULT 1 NOT NULL,
     CONSTRAINT phone_trust_check CHECK (((revoked_at IS NULL) = (revoke_reason IS NULL))),
+    CONSTRAINT phone_trust_epoch_check CHECK ((epoch >= 1)),
     CONSTRAINT phone_trust_phone_e164_check CHECK ((phone_e164 ~ '^\+[1-9][0-9]{6,14}$'::text)),
     CONSTRAINT phone_trust_revoke_reason_check CHECK (((revoke_reason IS NULL) OR (revoke_reason = ANY (ARRAY['phone_change'::text, 'pin_set'::text, 'pin_reset'::text, 'pin_cleared'::text, 'merge'::text, 'opt_out'::text, 'staff'::text, 'epoch'::text, 'superseded'::text])))),
     CONSTRAINT phone_trust_verified_by_check CHECK ((verified_by = ANY (ARRAY['pin'::text, 'code'::text]))),
@@ -3036,6 +3052,13 @@ ALTER TABLE ONLY public.idempotency_keys
     ADD CONSTRAINT idempotency_keys_pkey PRIMARY KEY (key, actor);
 
 --
+-- Name: identity_pin_failures identity_pin_failures_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.identity_pin_failures
+    ADD CONSTRAINT identity_pin_failures_pkey PRIMARY KEY (id);
+
+--
 -- Name: invites invites_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4071,6 +4094,24 @@ CREATE INDEX employees_status_idx ON public.employees USING btree (status);
 --
 
 CREATE INDEX idempotency_keys_expires_idx ON public.idempotency_keys USING btree (expires_at);
+
+--
+-- Name: identity_pin_failures_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX identity_pin_failures_at_idx ON public.identity_pin_failures USING btree (at);
+
+--
+-- Name: identity_pin_failures_customer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX identity_pin_failures_customer_idx ON public.identity_pin_failures USING btree (customer_id, at DESC) WHERE (customer_id IS NOT NULL);
+
+--
+-- Name: identity_pin_failures_ip_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX identity_pin_failures_ip_idx ON public.identity_pin_failures USING btree (location_id, ip, at DESC) WHERE (ip IS NOT NULL);
 
 --
 -- Name: invites_employee_idx; Type: INDEX; Schema: public; Owner: -
@@ -5249,6 +5290,20 @@ ALTER TABLE ONLY public.employee_schedules
 
 ALTER TABLE ONLY public.federal_holiday_runs
     ADD CONSTRAINT federal_holiday_runs_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: identity_pin_failures identity_pin_failures_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.identity_pin_failures
+    ADD CONSTRAINT identity_pin_failures_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id) ON DELETE CASCADE;
+
+--
+-- Name: identity_pin_failures identity_pin_failures_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.identity_pin_failures
+    ADD CONSTRAINT identity_pin_failures_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 -- Name: invites invites_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

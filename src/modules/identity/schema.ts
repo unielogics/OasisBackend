@@ -88,6 +88,18 @@ export interface PhoneTrustTable {
   revoke_reason: IdentityRevokeReason | null
   created_at: Generated<Date>
   updated_at: Generated<Date>
+  /** The links.epoch setting when granted (migration 20261011020000); another value voids the trust. */
+  epoch: Generated<number>
+}
+
+/** One wrong PIN entry (migration 20261011020000): the rolling per-client and per-address limits count these rows. */
+export interface IdentityPinFailuresTable {
+  id: string
+  location_id: string
+  customer_id: string | null
+  phone_e164: string
+  ip: string | null
+  at: Generated<Date>
 }
 
 export interface AssistantPendingActionsTable {
@@ -132,5 +144,6 @@ declare module '../../platform/schema.js' {
     customer_pins: CustomerPinsTable
     phone_trust: PhoneTrustTable
     assistant_pending_actions: AssistantPendingActionsTable
+    identity_pin_failures: IdentityPinFailuresTable
   }
 }
