@@ -29,10 +29,20 @@ export type WebhookErrorCode =
 
 export class SmsWebhookError extends Error {
   readonly code: WebhookErrorCode
+  /** Set once the signature verified and the envelope was read: its event name and id (diagnostics, webhook_log). */
+  readonly event?: string
+  readonly envelopeId?: string
 
-  constructor(code: WebhookErrorCode, message: string) {
+  constructor(code: WebhookErrorCode, message: string, envelope: { event?: string; envelopeId?: string } = {}) {
     super(message)
     this.name = 'SmsWebhookError'
     this.code = code
+    if (envelope.event !== undefined) this.event = envelope.event
+    if (envelope.envelopeId !== undefined) this.envelopeId = envelope.envelopeId
+  }
+
+  /** True when the signature verified (the delivery is authentic) but its content could not be used. */
+  get signed(): boolean {
+    return this.code === 'bad_body' || this.code === 'unsupported_event'
   }
 }

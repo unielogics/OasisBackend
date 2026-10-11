@@ -12,7 +12,7 @@
 #                                             register a tablet; prints the webhook signing secret ONCE (type it into the SMS Gate app)
 #   sms-update-device ID [--device-url URL] [--username U] [--password-env VAR] [--webhook-secret-env VAR] [--disable | --enable]
 #   sms-test ID                               reach the tablet, check the credentials, send nothing
-#   sms-register-webhooks ID                  register the seven oasis-* webhooks on the tablet
+#   sms-register-webhooks ID                  register the nine oasis-* webhooks on the tablet
 #   sms-health ID                             live health and queue state of one tablet
 #   sqsp-status                               connection, sync lag, orders waiting, dead letters
 #   sqsp-connect [--key-env VAR]              store the Squarespace Commerce API key (verified first, kept encrypted)

@@ -1222,11 +1222,15 @@ CREATE TABLE public.messages (
     received_at timestamp with time zone,
     read_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    kind text DEFAULT 'sms'::text NOT NULL,
+    attachments jsonb,
+    CONSTRAINT messages_attachments_check CHECK (((attachments IS NULL) OR (jsonb_typeof(attachments) = 'array'::text))),
     CONSTRAINT messages_channel_check CHECK ((channel = ANY (ARRAY['sms'::text, 'email'::text, 'internal'::text]))),
     CONSTRAINT messages_check CHECK (((direction = 'in'::text) = (sender_kind = 'customer'::text))),
     CONSTRAINT messages_check1 CHECK (((direction = 'in'::text) = (status = 'received'::text))),
     CONSTRAINT messages_direction_check CHECK ((direction = ANY (ARRAY['in'::text, 'out'::text]))),
     CONSTRAINT messages_encoding_check CHECK (((encoding IS NULL) OR (encoding = ANY (ARRAY['GSM-7'::text, 'UCS-2'::text])))),
+    CONSTRAINT messages_kind_check CHECK ((kind = ANY (ARRAY['sms'::text, 'mms'::text]))),
     CONSTRAINT messages_segments_check CHECK ((segments >= 1)),
     CONSTRAINT messages_sender_kind_check CHECK ((sender_kind = ANY (ARRAY['staff'::text, 'system'::text, 'customer'::text]))),
     CONSTRAINT messages_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'sending'::text, 'sent'::text, 'delivered'::text, 'failed'::text, 'received'::text, 'canceled'::text, 'expired'::text])))
@@ -1262,6 +1266,7 @@ CREATE TABLE public.notifications (
     entity_id text,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     read_at timestamp with time zone,
+    source_ref text,
     CONSTRAINT notifications_check CHECK (((employee_id IS NULL) OR (role_target IS NULL)))
 );
 
@@ -1686,7 +1691,14 @@ CREATE TABLE public.sms_inbox (
     appointment_id uuid,
     message_id uuid,
     reviewed_at timestamp with time zone,
-    CONSTRAINT sms_inbox_decision_check CHECK (((decision IS NULL) OR (decision = ANY (ARRAY['opt_out'::text, 'opt_in'::text, 'help'::text, 'confirm'::text, 'confirm_nothing'::text, 'cancel_request'::text, 'message'::text, 'quarantined'::text]))))
+    kind text DEFAULT 'sms'::text NOT NULL,
+    attachments jsonb,
+    superseded_by uuid,
+    superseded_at timestamp with time zone,
+    CONSTRAINT sms_inbox_attachments_check CHECK (((attachments IS NULL) OR (jsonb_typeof(attachments) = 'array'::text))),
+    CONSTRAINT sms_inbox_decision_check CHECK (((decision IS NULL) OR (decision = ANY (ARRAY['opt_out'::text, 'opt_in'::text, 'help'::text, 'confirm'::text, 'confirm_nothing'::text, 'cancel_request'::text, 'message'::text, 'quarantined'::text])))),
+    CONSTRAINT sms_inbox_kind_check CHECK ((kind = ANY (ARRAY['sms'::text, 'mms'::text]))),
+    CONSTRAINT sms_inbox_superseded_check CHECK (((superseded_by IS NULL) = (superseded_at IS NULL)))
 );
 
 --
@@ -2280,7 +2292,7 @@ CREATE TABLE public.webhook_log (
     status text DEFAULT 'received'::text NOT NULL,
     error text,
     CONSTRAINT webhook_log_provider_check CHECK ((provider = ANY (ARRAY['squarespace'::text, 'smsgate'::text, 'ses'::text]))),
-    CONSTRAINT webhook_log_status_check CHECK ((status = ANY (ARRAY['received'::text, 'processed'::text, 'ignored'::text, 'failed'::text])))
+    CONSTRAINT webhook_log_status_check CHECK ((status = ANY (ARRAY['received'::text, 'processed'::text, 'ignored'::text, 'failed'::text, 'unparsed'::text])))
 );
 
 --
@@ -3542,6 +3554,12 @@ CREATE INDEX messages_unread_idx ON public.messages USING btree (customer_id) WH
 --
 
 CREATE INDEX notifications_location_idx ON public.notifications USING btree (location_id, created_at DESC);
+
+--
+-- Name: notifications_source_ref_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX notifications_source_ref_idx ON public.notifications USING btree (source_ref) WHERE (source_ref IS NOT NULL);
 
 --
 -- Name: notifications_unread_idx; Type: INDEX; Schema: public; Owner: -
@@ -4890,6 +4908,13 @@ ALTER TABLE ONLY public.sms_inbox
 
 ALTER TABLE ONLY public.sms_inbox
     ADD CONSTRAINT sms_inbox_message_id_fkey FOREIGN KEY (message_id) REFERENCES public.messages(id) ON DELETE SET NULL;
+
+--
+-- Name: sms_inbox sms_inbox_superseded_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sms_inbox
+    ADD CONSTRAINT sms_inbox_superseded_by_fkey FOREIGN KEY (superseded_by) REFERENCES public.sms_inbox(id) ON DELETE SET NULL;
 
 --
 -- Name: sms_opt_outs sms_opt_outs_inbound_message_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

@@ -6,6 +6,11 @@ import type { AppInstance } from '../../../http/types.js'
 import type { MessagingRuntime } from '../runtime.js'
 
 const SWEEP_EVERY_MS = 30_000
+/**
+ * A downloaded MMS carries its attachments base64-encoded in the webhook body (a few MB per picture), so the SMS Gate route
+ * takes up to 16 MB; anything larger is answered 413. Every other path of this listener keeps WEBHOOK_BODY_LIMIT (1 MB).
+ */
+export const SMSGATE_WEBHOOK_BODY_LIMIT = 16 * 1024 * 1024
 
 export interface HooksApp {
   app: FastifyInstance
@@ -18,15 +23,19 @@ export async function buildHooksApp(rt: MessagingRuntime, o: { host: string; por
   const app = Fastify({ ...(o.logger ? { loggerInstance: o.logger } : { logger: false }), bodyLimit: WEBHOOK_BODY_LIMIT, trustProxy: false })
   installRawBodyParsers(app as unknown as AppInstance)
 
-  app.post<{ Params: { deviceKey: string } }>('/hooks/smsgate/:deviceKey', async (req, reply) => {
+  app.post<{ Params: { deviceKey: string } }>('/hooks/smsgate/:deviceKey', { bodyLimit: SMSGATE_WEBHOOK_BODY_LIMIT }, async (req, reply) => {
     const res = await rt.webhooks.receive(req.params.deviceKey, req.headers, req.rawBody ?? '')
     return reply.code(res.status).send(res.body)
   })
   app.setNotFoundHandler((_req, reply) => reply.code(404).send({ ok: false, status: 'not_found' }))
   app.setErrorHandler((err: Error & { statusCode?: number }, req, reply) => {
+    const status = err.statusCode ?? (err as { status?: number }).status // Fastify's own errors, or an AppError from the body parser
+    if (status === 413) {
+      req.log.warn({ bytes: req.headers['content-length'] ?? null }, 'hooks listener: body over the limit')
+      return reply.code(413).send({ ok: false, status: 'payload_too_large' })
+    }
     req.log.error({ err: err.message }, 'hooks listener error')
     // 5xx makes the device retry the delivery, which is what we want for anything we did not persist
-    const status = err.statusCode ?? (err as { status?: number }).status // Fastify's own errors, or an AppError from the body parser
     return reply.code(status && status >= 400 && status < 500 ? status : 500).send({ ok: false, status: 'error' })
   })
   await app.ready()

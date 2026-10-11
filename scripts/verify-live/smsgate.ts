@@ -100,7 +100,7 @@ export const SMSGATE_ITEMS: readonly ItemDef[] = [
     title: 'The device accepts the username and password (Basic auth)',
     source: `${DOC3}, step 2`,
   },
-  { id: 'SG-B3', title: 'GET /webhooks lists the seven oasis-* registrations', source: `${DOC3}, step 3` },
+  { id: 'SG-B3', title: 'GET /webhooks lists the nine oasis-* registrations', source: `${DOC3}, step 3` },
   {
     id: 'SG-B4',
     title: 'One text out to the test phone, with the sent and delivered webhooks',
@@ -467,7 +467,7 @@ async function runSmsGateInner(ctx: RunContext): Promise<RunResult> {
       }
       if (watcher.kind === 'listener') {
         if (sim) {
-          // The simulator plays a deployment where the API already registered its seven webhooks.
+          // The simulator plays a deployment where the API already registered its nine webhooks.
           webhookWatchUrl = `${watcher.where}/hooks/smsgate/sim-device`
           provider = new SmsGateProvider(
             smsGateConfig({

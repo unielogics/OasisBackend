@@ -1,6 +1,7 @@
 // The SMS Gate webhook: verify the HMAC over the raw body, persist the envelope in webhook_log (unique per envelope id),
 // answer 2xx at once, and apply the event asynchronously in one transaction (envelope marker, outbox and message state,
 // inbound routing, device health). A crash between "persisted" and "applied" leaves a `received` row that the sweep picks up.
+import { createHash } from 'node:crypto'
 import { sql } from 'kysely'
 import { transaction, type Tx } from '../../platform/db.js'
 import { SmsProviderError } from '../../integrations/sms/errors.js'
@@ -31,6 +32,52 @@ export interface WebhookResponse {
 }
 
 const STORED_HEADERS = ['x-signature', 'x-timestamp', 'content-type', 'user-agent'] as const
+/** An unparsed delivery keeps only the start of its body: enough to see what the device sent (ADR 0151). */
+export const UNPARSED_BODY_BYTES = 4096
+
+function firstBytes(raw: string, max: number): string {
+  const clean = raw.replaceAll('\u0000', '')
+  const buf = Buffer.from(clean, 'utf8')
+  return buf.length <= max ? clean : buf.subarray(0, max).toString('utf8')
+}
+
+/** A base64 run this long in a "data" field of a body that is not readable JSON is taken for attachment bytes. */
+const BASE64_RUN = /("data"\s*:\s*")(?:data:[^,"]{0,100},)?[A-Za-z0-9+/=_\-\s\\]{64,}("?)/g
+
+/**
+ * A stored delivery without its attachment bytes, for every row that is final (processed, ignored, failed, unparsed): the
+ * pictures are in the photos store or were never usable, and 90 days of webhook_log need not hold megabytes of base64 per MMS.
+ * Readable JSON keeps its shape (each part's `data` becomes null with `dataRedacted: true`); anything else (a body cut short,
+ * broken JSON) has its long base64 runs in "data" fields replaced. The signature no longer verifies, which no longer matters
+ * once the delivery is final. A body with nothing to strip is returned as it is.
+ */
+export function stripAttachmentData(raw: string): string {
+  let env: unknown
+  try {
+    env = JSON.parse(raw)
+  } catch {
+    return raw.replace(BASE64_RUN, '$1[redacted]$2')
+  }
+  const parts = (env as { payload?: { attachments?: unknown } } | null)?.payload?.attachments
+  if (!Array.isArray(parts)) return raw
+  let changed = false
+  for (const p of parts) {
+    if (p && typeof p === 'object' && typeof (p as Record<string, unknown>).data === 'string') {
+      ;(p as Record<string, unknown>).data = null
+      ;(p as Record<string, unknown>).dataRedacted = true
+      changed = true
+    }
+  }
+  return changed ? JSON.stringify(env) : raw
+}
+
+/** The body column update that strips attachment bytes from a final row, or nothing when there is nothing to strip. */
+const stripped = (body: string | null): { body?: string } => {
+  if (body === null) return {}
+  const out = stripAttachmentData(body)
+  return out === body ? {} : { body: out }
+}
+
 const FOREVER = Number.MAX_SAFE_INTEGER
 const SWEEP_AFTER_MS = 30_000
 const GIVE_UP_AFTER_MS = 24 * 3600_000
@@ -87,6 +134,7 @@ export class WebhookService {
       parsed = verifyAndParse(headers, raw, { secret, toleranceSec: this.rt.config.webhookToleranceSec, clock: this.rt.clock })
     } catch (err) {
       if (!(err instanceof SmsWebhookError)) throw err
+      if (err.signed) await this.keepUnparsed(device, headers, raw, err)
       if (err.code === 'unsupported_event') return { status: 200, body: { ok: true, status: 'ignored' } }
       const status = err.code === 'bad_body' ? 400 : 401
       this.rt.log.warn({ device: device.device_key, code: err.code }, 'smsgate webhook rejected')
@@ -119,6 +167,36 @@ export class WebhookService {
     return { status: 200, body: { ok: true, status: 'accepted' } }
   }
 
+  /**
+   * A signed delivery Oasis cannot use (an event it does not handle, a payload it cannot read) is kept as 'unparsed' so it can
+   * be diagnosed (body cut to its first 4 KB, purged after 7 days), and logged by event name only, never its content.
+   */
+  private async keepUnparsed(device: DeviceRow, headers: Record<string, string | undefined>, raw: string, err: SmsWebhookError): Promise<void> {
+    const event = err.event?.slice(0, 64) ?? null
+    this.rt.log.warn({ device: device.device_key, event, code: err.code }, 'smsgate webhook not parsed; kept in webhook_log')
+    const stored: Record<string, string> = { 'x-device-key': device.device_key }
+    for (const h of STORED_HEADERS) if (headers[h]) stored[h] = headers[h]!
+    if (event) stored['x-event'] = event
+    const externalId = err.envelopeId ? err.envelopeId.slice(0, 200) : `unparsed:${createHash('sha256').update(raw).digest('hex').slice(0, 40)}`
+    await this.rt.db
+      .insertInto('webhook_log')
+      .values({
+        id: this.rt.newId(),
+        provider: 'smsgate',
+        external_id: externalId,
+        headers: JSON.stringify(stored),
+        // the bytes go first, so the 4 KB kept show the envelope and its fields rather than the start of a picture
+        body: firstBytes(stripAttachmentData(raw), UNPARSED_BODY_BYTES),
+        signature_valid: true,
+        received_at: this.rt.clock.now(),
+        processed_at: this.rt.clock.now(),
+        status: 'unparsed',
+        error: `${err.code}: ${err.message}`.replaceAll('\u0000', '').slice(0, 500),
+      })
+      .onConflict((oc) => oc.columns(['provider', 'external_id']).doNothing())
+      .execute()
+  }
+
   private schedule(logId: string): void {
     const p = new Promise<void>((resolve) => setImmediate(resolve))
       .then(() => this.process(logId))
@@ -137,7 +215,11 @@ export class WebhookService {
       const key = (row.headers as Record<string, string>)['x-device-key']
       const device = key ? await this.rt.store.getByKey(key) : null
       if (!device) {
-        await tx.updateTable('webhook_log').set({ status: 'failed', processed_at: this.rt.clock.now(), error: 'unknown device' }).where('id', '=', logId).execute()
+        await tx
+          .updateTable('webhook_log')
+          .set({ status: 'failed', processed_at: this.rt.clock.now(), error: 'unknown device', ...stripped(row.body) })
+          .where('id', '=', logId)
+          .execute()
         return 'ignored' as const
       }
       const parsed = verifyAndParse(row.headers as Record<string, string>, row.body, {
@@ -155,7 +237,13 @@ export class WebhookService {
       const ignored = result.outcome === 'duplicate' || (result.outcome === 'handled' && result.result.detail === 'ignored_unknown_message')
       await tx
         .updateTable('webhook_log')
-        .set({ status: ignored ? 'ignored' : 'processed', processed_at: this.rt.clock.now(), error: null })
+        .set({
+          status: ignored ? 'ignored' : 'processed',
+          processed_at: this.rt.clock.now(),
+          error: null,
+          // the pictures are saved; 90 days of webhook_log need not hold megabytes of base64 per MMS
+          ...stripped(row.body),
+        })
         .where('id', '=', logId)
         .execute()
       return ignored ? ('ignored' as const) : ('processed' as const)
@@ -187,6 +275,7 @@ export class WebhookService {
         schedulingCtx: (locationId) => rt.schedulingCtx(locationId),
         notifyManagers: async (t, n) => void (await notifyManagers(t, n, rt.deps)),
         warn: (msg, detail) => rt.log.warn(detail, msg),
+        storage: () => rt.storage(),
       },
       {
         locationId: device.location_id,
@@ -211,17 +300,31 @@ export class WebhookService {
     return result
   }
 
-  /** Applies envelopes that were persisted but never applied (a crash, a lock timeout); gives up on ones older than a day. */
+  /**
+   * Applies envelopes that were persisted but never applied (a crash, a lock timeout); gives up on ones older than a day, which
+   * are failed without their attachment bytes (one row at a time: an MMS body can be megabytes).
+   */
   async sweep(limit = 50): Promise<{ processed: number; abandoned: number }> {
     const now = this.rt.clock.now()
-    const abandoned = await this.rt.db
-      .updateTable('webhook_log')
-      .set({ status: 'failed', processed_at: now, error: 'not applied within 24 hours' })
+    const stale = await this.rt.db
+      .selectFrom('webhook_log')
+      .select('id')
       .where('provider', '=', 'smsgate')
       .where('status', '=', 'received')
       .where('received_at', '<', new Date(now.getTime() - GIVE_UP_AFTER_MS))
-      .returning('id')
       .execute()
+    const abandoned: string[] = []
+    for (const { id } of stale) {
+      const row = await this.rt.db.selectFrom('webhook_log').select('body').where('id', '=', id).where('status', '=', 'received').executeTakeFirst()
+      if (!row) continue
+      const r = await this.rt.db
+        .updateTable('webhook_log')
+        .set({ status: 'failed', processed_at: now, error: 'not applied within 24 hours', ...stripped(row.body) })
+        .where('id', '=', id)
+        .where('status', '=', 'received')
+        .executeTakeFirst()
+      if (Number(r.numUpdatedRows) > 0) abandoned.push(id)
+    }
     const rows = await this.rt.db
       .selectFrom('webhook_log')
       .select('id')

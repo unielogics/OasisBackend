@@ -85,7 +85,8 @@ export interface WebhookLogTable {
   signature_valid: boolean
   received_at: Generated<Date>
   processed_at: Date | null
-  status: Generated<'received' | 'processed' | 'ignored' | 'failed'>
+  /** 'unparsed': signed, but an event Oasis does not handle or could not read (body cut to 4 KB, purged after 7 days). */
+  status: Generated<'received' | 'processed' | 'ignored' | 'failed' | 'unparsed'>
   error: string | null
 }
 
@@ -101,6 +102,8 @@ export interface NotificationsTable {
   entity_id: string | null
   created_at: Generated<Date>
   read_at: Date | null
+  /** What the notification is about, for the code that must find it again (e.g. 'sms_inbox:<device>:<provider id>'). Never shown. */
+  source_ref: string | null
 }
 
 export interface PlatformTables {

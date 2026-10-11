@@ -241,7 +241,7 @@ export function registerDeviceRoutes(app: AppInstance, rt: MessagingRuntime): vo
       schema: {
         tags: TAGS,
         summary:
-          'Register the seven oasis-* webhooks on the device (idempotent; stale oasis-* ones are removed)',
+          'Register the nine oasis-* webhooks (the seven SMS events, mms:received and mms:downloaded) on the device (idempotent; stale oasis-* ones are removed)',
         params: IdParams,
         response: {
           200: z.object({
