@@ -228,3 +228,55 @@ registered by the contract. Test: `test/assistant/contract.test.ts`.
 - **Factories**: every W3 part takes the same `AssistantDeps` (db, clock, ids, env, queue, log, facts source,
   `schedulingFor(location)`, `actorFor(location)`), built once by W3a's wiring. `createLeads` (open / noteInterest / markBooked) is
   added beyond the brief so the link API's bookings and the reply-number handler close a lead the same way.
+
+## Wave W3b (tools, in-chat actions, welcome flow, leads)
+
+The W3b side of the contract (api-spec section 29): `createToolRegistry` (the fifteen tools of design section 4),
+`createActionCodeHandler` (reply numbers), `createNewTexters` (the welcome flow's first step), `createLeads` / `createLeadJobs`
+(leads and their one follow-up), `GET /leads` (`cli.view`). Migration `20261012020000_assistant_tools.sql`. Nothing switches on by
+itself: the tools only run inside a turn, the handler and the welcome flow re-check `AI_ENABLED` / `assistant.enabled` (and the
+action switches), the follow-up job does nothing while they or `leads.follow_up_enabled` are off. Notes and deviations:
+
+- **Contract**: `contract.ts` unchanged; `test/assistant/contract.test.ts` now checks the built parts (the registry against
+  `TOOL_MIN_TRUST`, the factories no longer the W2d "off" defaults); the shop facts stay W3a's stubs. Helpers W3a may use:
+  `loadAppointmentRefs` / `refsOf` (the refs rule of the contract), `isProvisional` / `isProvisionalClient` (TurnIdentity.provisional),
+  `assistantOn` / `actionsOn` (`tools/switches.ts`). The tools resolve `serviceKey` / `addonKeys` with `loadBoardServices` (the public
+  catalog's keys): the facts' items must carry those keys.
+- **Handoffs**: a tool calls `ctx.handoff` and also returns `handoff` in its outcome (the first request of the turn wins either way).
+- **Proposals**: the slot is checked with the online rules at the proposal and again at the reply number (the reschedule command's own
+  check is the desk's, so the online check comes first). At most two future bookings made by text per client (plan C).
+  `propose_cancel` hands off (`late_cancel`) inside `cancellation.policy.freeCancelHours` or with money on the visit (refundable,
+  awaiting the processor or store credit on its live invoice).
+- **Confirmations**: an AI booking is created with no booking-thanks text; the handler's `action_booked` (class `ai_reply`, an answer
+  to the reply number) is the confirmation, with the guest fee as the website states it. A reschedule and a cancel are confirmed by the
+  scheduling texts themselves (`reschedule`; the cancellation notice of `cancelAppointment` with `notify`), not by a second AI line.
+  New non-editable `ai_reply` templates: `action_booked`, `action_code_wrong` / `_locked` / `_expired`, `action_needs_verify`,
+  `action_failed`, `action_unavailable`. With the assistant off a reply number cancels the action silently; with only the actions off
+  the client is told a team member will text back.
+- **STOP and staff takeover** (touching W2d/W2b files, minimal): `PgOptOutRepository.optOut` now calls `revokeForOptOut` (every
+  opt-out: the STOP keyword, the assistant's `opt_out`, a staff opt-out: links, sessions, trust and a pending action end at once; the
+  reads enforced it already), and `noteStaffTakeover` cancels the client's / number's pending action.
+- **Natural-language opt-out**: recorded like STOP (`sms_opt_outs` source `keyword`, keyword "stop (in words, to Oasis AI)", the
+  client's mark) and answered once with `opt_out_confirm`.
+- **send_link**: only to the number that texts; `verify` needs a client (after the welcome flow every texter has one); a stale record
+  (`unknown`) gets only `verify`; `calendar` for a stranger (no client) is a phone-bound link; `membership` needs the tier's plan set up
+  (else `unavailable`); `pay` needs an open invoice with a staff-attached payment URL (else handoff `no_payment_link`). The URL is
+  registered with `ctx.addLink` only after the link row committed.
+- **Welcome flow**: the provisional client is created at once in the webhook transaction (advisory lock per number), consent
+  `inbound_text` unless the number is opted out; a number that already has a client is returned as is. `set_my_name` accepts letters
+  only (1-4 words) and clears `needs_details`, so the client stops being provisional; `set_my_vehicle` stores the tint class in the new
+  `vehicles.vehicle_type` (at most 6 vehicles per client).
+- **Archive** (`leads.provisional_archive`, nightly 4:40): 30 days after the later of the creation and the number's last text (the
+  brief said 30 days; a texter who keeps texting is not archived mid-conversation), no appointment, no membership: `deleted_at` +
+  the new `customers.archived_at` (never a delete; the thread stays), the open lead closed, audited; a new text from the number
+  restores the same record. It runs whatever the switches (only rows the assistant created match, so it finds nothing until then).
+- **Leads**: a booking closes the lead: the handler calls `markBooked`, and the follow-up job first closes every open lead whose
+  client has a booking since the first contact (staff and website bookings included) instead of a hook in the booking code. A lead
+  closed without a booking opens again on a new contact; the follow-up is still once per lead.
+- **Follow-up**: "never after STOP" = any opt-out of the number since the lead began, lifted or not, or an opt-out on the client;
+  business hours = the shop's hours, closures and emergency (it waits for the next opening inside the window, else it is dropped);
+  the link is `issuedBy system` (not counted in the assistant's three a day); sender "Oasis AI". `lead_follow_up` joined
+  `SENSITIVE_CLASSES` with the new `MASK_ONLY_CLASSES`: the link is masked in the message row and the outbox body wiped once final,
+  while a follow-up without a link (links off) stays readable instead of "[link sent privately]".
+- **Jobs registered here**: `leads.follow_up` (every 5 minutes) and `leads.provisional_archive` are in `job-registry.ts` (built from the
+  job context like the messaging jobs); W3a must not register `createLeadJobs(deps)` a second time.

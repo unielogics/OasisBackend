@@ -36,6 +36,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261011000500_membership_checkouts.sql` | the checkout intents of memberships started through a personal link (ADR 0160)                                                                         |
 | `20261011020000_identity_core.sql`     | the identity core (wave W2b): `phone_trust.epoch` (a links-epoch bump voids the trust) and the wrong-PIN rows of the rolling limits (ADR 0160) |
 | `20261011040000_sms_usage_class.sql` | the class of each send in `sms_usage` (`klass`), so the AI classes' sub-cap is counted in the dispatcher (ADR 0160, W2d)                               |
+| `20261012020000_assistant_tools.sql` | `vehicles.vehicle_type` (the tint price class `set_my_vehicle` records) and `customers.archived_at` (the welcome flow's 30-day archive of nameless, never-booked provisional clients) (ADR 0160, W3b) |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -269,7 +270,7 @@ state). What is new is the identification of a member by phone and the abuse con
 | `public_member_tokens`  | The opaque token a verified code issued, by its sha256 (`token_hash`, pk); bound to the number and to `customer_id` (the customer owning the number at that moment, null when nobody did), 30 minutes (`expires_at`), `last_used_at`.                                                 |
 | `public_rate_limits`    | Fixed-window counters shared by every API process: `(key, window_start)` with `count`, keys such as `otp:phone:+1201...`, `booking:ip:203.0.113.9`; one upsert per request. Purged two days past the window.                                                                          |
 
-## AI assistant, phone identity, leads and status texts (migrations `20261011000000` to `20261011000500` and `20261011020000`, ADR 0160)
+## AI assistant, phone identity, leads and status texts (migrations `20261011000000` to `20261011000500`, `20261011020000` and `20261012020000`, ADR 0160)
 
 The foundation of the AI text assistant and the phone-centred identity (design: `docs/design/ai-assistant-and-phone-identity.md`).
 Secrets are never stored: link and session tokens, reply numbers and codes are SHA-256 hashes, PINs scrypt hashes of a peppered
@@ -308,6 +309,8 @@ Columns added to existing tables:
 | `sms_inbox.assistant_conversation_id`, `.assistant_turn_id`, `.decision`                        | the conversation and turn that took the text; decisions gain `assistant`, `handoff`, `action_code`                             |
 | `messages.sender_kind`                                                                         | gains `ai` (shown as "Oasis AI")                                                                                              |
 | `message_threads.ai_paused_until`, `.ai_paused_by`                                             | a staff reply pauses the AI on the thread; `ai_paused_by` only with `ai_paused_until`                                         |
+| `vehicles.vehicle_type`                                                                        | `sedan_coupe\|suv_crossover\|truck_van` (the tint matrix's vehicle types): what `set_my_vehicle` records (W3b, migration `20261012020000`) |
+| `customers.archived_at`                                                                        | the welcome flow's archive (W3b): a provisional client ("New texter ••NNNN", `source inbound_sms`, `needs_details`) with no name and no booking 30 days after its last text is soft-deleted (`deleted_at`) and marked here (check: only with `deleted_at`); a new text from the number restores it. Partial indexes for the scan and the restore |
 
 ## Foreign keys
 
@@ -864,8 +867,9 @@ Primary key `(customer_id)`. `(customer_id)` references `customers(id)` on delet
 | `updated_at` | timestamp with time zone | no | `app_now()` |
 | `email_verified` | boolean | no | `false` |
 | `phone_version` | integer | no | `0` |
+| `archived_at` | timestamp with time zone | yes |  |
 
-Primary key `(id)`. `(merged_into)` references `customers(id)`. 8 check constraints. Index `customers_email_trgm` `(((email)::text) public.gin_trgm_ops)`. Index `customers_full_name_trgm` `(full_name public.gin_trgm_ops)`. Index `customers_merged_into_idx` `(merged_into)` where `merged_into IS NOT NULL`. Index `customers_phone_trgm` `(phone_e164 public.gin_trgm_ops)`. Unique index `uq_customers_phone` `(phone_e164)` where `(phone_e164 IS NOT NULL) AND (merged_into IS NULL) AND (deleted_at IS NULL)`.
+Primary key `(id)`. `(merged_into)` references `customers(id)`. 9 check constraints. Index `customers_archived_phone_idx` `(phone_e164)` where `archived_at IS NOT NULL`. Index `customers_email_trgm` `(((email)::text) public.gin_trgm_ops)`. Index `customers_full_name_trgm` `(full_name public.gin_trgm_ops)`. Index `customers_merged_into_idx` `(merged_into)` where `merged_into IS NOT NULL`. Index `customers_phone_trgm` `(phone_e164 public.gin_trgm_ops)`. Index `customers_provisional_idx` `(created_at)` where `(source = 'inbound_sms'::text) AND needs_details AND (deleted_at IS NULL) AND (merged_into IS NULL)`. Unique index `uq_customers_phone` `(phone_e164)` where `(phone_e164 IS NOT NULL) AND (merged_into IS NULL) AND (deleted_at IS NULL)`.
 
 #### `email_suppressions`
 
@@ -2275,8 +2279,9 @@ Primary key `(id)`. Unique `(email)`. Unique `(employee_id)`. `(employee_id)` re
 | `plate` | text | yes |  |
 | `deleted_at` | timestamp with time zone | yes |  |
 | `created_at` | timestamp with time zone | no | `app_now()` |
+| `vehicle_type` | text | yes |  |
 
-Primary key `(id)`. `(customer_id)` references `customers(id)`. 2 check constraints. Unique index `uq_vehicles_customer_plate` `(customer_id, upper(plate))`. Index `vehicles_customer_idx` `(customer_id)`. Index `vehicles_plate_idx` `(upper(plate))` where `plate IS NOT NULL`.
+Primary key `(id)`. `(customer_id)` references `customers(id)`. 3 check constraints. Unique index `uq_vehicles_customer_plate` `(customer_id, upper(plate))`. Index `vehicles_customer_idx` `(customer_id)`. Index `vehicles_plate_idx` `(upper(plate))` where `plate IS NOT NULL`.
 
 #### `vip_clients`
 
