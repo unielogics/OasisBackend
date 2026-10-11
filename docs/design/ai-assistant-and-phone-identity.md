@@ -5,6 +5,11 @@ binding). This document merges the backend architecture, the threat model and th
 the builders. Where it says MUST, a test must prove it.
 
 ## 0. Owner decisions (binding)
+- INTERIM MODEL (owner, 2026-10-11): the account's Claude 5.x token quotas are 0 until AWS support raises them (case
+  opened by the owner); until then the assistant runs on Claude Sonnet 4.6 (`us.anthropic.claude-sonnet-4-6`, agreement
+  active, 6M TPM, tested OK) and evaluations are judged by Opus 4.6 (`us.anthropic.claude-opus-4-6-v1`). The model is
+  configuration only (AI_BEDROCK_MODEL_ID); the IAM statement must allow every configured model (a list), and switching
+  to Sonnet 5.5 is one setting once its quota is raised.
 - Claude Sonnet 5.5 on Bedrock: Converse API, modelId `us.anthropic.claude-sonnet-5-5` (cross-region profile, us-east-1),
   `@aws-sdk/client-bedrock-runtime@3.1146.0`, instance-role credentials. Judge for evals: `us.anthropic.claude-opus-5-5`.
 - AI answers 24/7 to anyone; staff follow AI conversations ONLY in existing places (appointment Messages tab with an
