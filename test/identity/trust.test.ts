@@ -131,17 +131,23 @@ describe('staleRecord', () => {
       expect(isInvalidNumberError(e), String(e)).toBe(false)
   })
 
-  it('a record quiet for 180 days is stale; a text from the number, a verification or a newer record is activity', async () => {
+  it('a record quiet for 180 days is stale; a verification or a newer record is activity, a text from the number never is', async () => {
     const old = new Date(w.clock.now().getTime() - 200 * DAY)
     const maria = await w.customer({ createdAt: old })
     const verdict = () => staleRecord(w.t.db, { locationId: w.locationId, customerId: maria, phone: PHONES.maria, now: w.clock.now() })
     expect(await verdict()).toMatchObject({ stale: true, reason: 'inactive', lastActivityAt: old })
+    // a recycled number: its new holder texts the shop (the webhook stores the text before the assistant reads the verdict); the
+    // text says nothing about who holds the number, so the old client's record stays unknown
     await inbound(PHONES.maria, new Date(w.clock.now().getTime() - 179 * DAY))
-    expect(await verdict()).toMatchObject({ stale: false, reason: null })
+    await inbound(PHONES.maria, w.clock.now())
+    expect(await verdict()).toMatchObject({ stale: true, reason: 'inactive', lastActivityAt: old })
+    // a verification is activity; 181 days after it, a fresh text from the number still is not
     w.advance(2 * DAY)
-    expect(await verdict()).toMatchObject({ stale: true, reason: 'inactive' })
     await grant(maria)
-    expect(await verdict()).toMatchObject({ stale: false, lastActivityAt: w.clock.now() })
+    expect(await verdict()).toMatchObject({ stale: false, reason: null, lastActivityAt: w.clock.now() })
+    w.advance(181 * DAY)
+    await inbound(PHONES.maria, w.clock.now())
+    expect(await verdict()).toMatchObject({ stale: true, reason: 'inactive' })
     const fresh = await w.customer({ name: 'Liam Chen', phone: PHONES.liam })
     expect((await staleRecord(w.t.db, { locationId: w.locationId, customerId: fresh, phone: PHONES.liam, now: w.clock.now() })).stale).toBe(false)
   })

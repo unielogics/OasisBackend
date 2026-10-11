@@ -60,6 +60,16 @@ trust, pending in-chat actions, the stale-record rule, revocations), the staff r
   number's current owner, the client's phone and PIN versions and the epoch are re-checked on every read too.
 - **Uses**: book-again links allow one booking; membership and payment links three completions (a checkout started and abandoned can
   be restarted) and the kind's lifetime; non-verify links allow 20-30 exchanges (the design set only verify/PIN: 5).
+- **Pay links** live "until paid/void (≤7 d)" on read: a void invoice revokes the link and its sessions, an invoice with nothing left
+  on its balance (`invoice_calc_of`, a payment awaiting the processor included) uses it up; issuing one for a void or paid invoice
+  is refused.
+- **Permissions**: reading the identity state is `cli.view`, changing it (Clear PIN, revoke trust) `cli.edit`. Design section 8 and
+  the plan tie `cli.edit` to Clear PIN only, and the "Website PIN: Set · trusted to …" cell sits on the client file's Overview,
+  which `cli.view` opens; the answer is masked (last four digits, no token, hash or code: less than the client file itself, whose
+  full number needs `cli.contact`). It follows the client file's other read / write pairs: `GET` / `POST
+  /customers/:id/sms-consent` (`cli.view` / `cli.edit`) and `GET /customers/:id/membership` (`cli.view`).
+- **Stale records**: texts from the number are never activity (a recycled number's new holder texts from it, and the webhook stores
+  that text before the assistant asks), so only the record's creation, an appointment, a verification and a live membership count.
 - **Sessions** outlive their link's expiry and consumption within their own 15-minute idle and 1-hour windows, never a revocation or
   a PIN, phone or epoch change. A session opened while the number's trust is live starts verified (by the trust's method) without a
   step-up.

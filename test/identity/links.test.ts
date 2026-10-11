@@ -6,10 +6,32 @@ import { sql } from 'kysely'
 import { hashToken } from '../../src/modules/auth/tokens.js'
 import { updateCustomer } from '../../src/modules/customers/service.js'
 import { ASSISTANT_LINK_LIMITS, consumeLink, LINK_POLICY, linkUrl, resolveLink } from '../../src/modules/identity/links.js'
+import { resolveSession } from '../../src/modules/identity/sessions.js'
 import { PHONES, useIdentityWorld } from './world.js'
 
 const w = useIdentityWorld()
 const MIN = 60_000
+
+let invoiceNo = 0
+/** An invoice of the client: one $50.00 item, no tax, nothing paid. */
+async function invoice(customerId: string, cents = 5000): Promise<string> {
+  const id = w.newId()
+  await w.t.db
+    .insertInto('invoices')
+    .values({ id, location_id: w.locationId, invoice_no: ++invoiceNo, appointment_id: null, customer_id: customerId, client_name: 'Maria Delgado',
+      occurred_at: w.clock.now(), biz_date: '2026-06-13', tax_bp: 0, tip_cents: 0 })
+    .execute()
+  await w.t.db.insertInto('invoice_items').values({ id: w.newId(), invoice_id: id, position: 0, kind: 'package', service_id: null, name: 'Express Hand Wash', price_cents: cents }).execute()
+  return id
+}
+async function pay(invoiceId: string, customerId: string, cents: number): Promise<void> {
+  await w.t.db
+    .insertInto('ledger_events')
+    .values({ id: w.newId(), location_id: w.locationId, invoice_id: invoiceId, customer_id: customerId, type: 'pay', amount_cents: cents, method: 'Cash', method_kind: 'cash', occurred_at: w.clock.now() })
+    .execute()
+}
+const voidInvoice = (id: string) =>
+  w.t.db.updateTable('invoices').set({ canceled_at: w.clock.now(), cancel_reason: 'canceled' }).where('id', '=', id).execute()
 
 describe('issueClientLink', () => {
   it('stores only the SHA-256 of a 43-character token, and the URL carries it in the fragment', async () => {
@@ -64,6 +86,19 @@ describe('issueClientLink', () => {
     await expect(w.link({ customerId: maria, kind: 'calendar', appointmentId: w.newId() })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
     const stranger = await w.link({ customerId: null, kind: 'calendar', phone: '(201) 555-0113' })
     expect(stranger.phone).toBe(PHONES.stranger)
+  })
+
+  it('a pay link names an open invoice: a void or an already paid one is refused', async () => {
+    const maria = await w.customer({})
+    const paid = await invoice(maria)
+    await pay(paid, maria, 5000)
+    await expect(w.link({ customerId: maria, kind: 'pay', invoiceId: paid })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
+    const voided = await invoice(maria)
+    await voidInvoice(voided)
+    await expect(w.link({ customerId: maria, kind: 'pay', invoiceId: voided })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
+    const open = await invoice(maria)
+    await pay(open, maria, 2000)
+    expect((await w.link({ customerId: maria, kind: 'pay', invoiceId: open })).kind).toBe('pay')
   })
 
   it('supersedes the live link of the same kind to the same number', async () => {
@@ -173,5 +208,28 @@ describe('resolveLink and consumeLink', () => {
     const l = await w.link({ customerId: maria, kind: 'calendar' })
     await w.t.db.updateTable('customers').set({ deleted_at: w.clock.now() }).where('id', '=', maria).execute()
     expect(await resolveLink(w.t.db, l.token, w.clock.now())).toEqual({ ok: false, reason: 'revoked' })
+  })
+
+  it('a pay link dies once its invoice is paid or voided after issue (design section 5: "pay until paid/void"), sessions with it', async () => {
+    const maria = await w.customer({})
+    const inv = await invoice(maria)
+    const l = await w.link({ customerId: maria, kind: 'pay', invoiceId: inv })
+    const s = await w.session({ customerId: maria, kind: 'pay', invoiceId: inv })
+    expect((await resolveLink(w.t.db, s.link.token, w.clock.now())).ok).toBe(true)
+    // the first link was superseded by the second one, to the same invoice
+    expect(await resolveLink(w.t.db, l.token, w.clock.now())).toEqual({ ok: false, reason: 'revoked' })
+    await pay(inv, maria, 4999)
+    expect((await resolveLink(w.t.db, s.link.token, w.clock.now())).ok).toBe(true)
+    await pay(inv, maria, 1)
+    expect(await resolveLink(w.t.db, s.link.token, w.clock.now())).toEqual({ ok: false, reason: 'used' })
+    await expect(w.tx((tx) => consumeLink(tx, s.link.id, w.clock.now()))).rejects.toMatchObject({ code: 'IDENTITY_LINK_USED' })
+    await expect(resolveSession(w.t.db, s.session, w.clock.now())).rejects.toMatchObject({ code: 'IDENTITY_SESSION_INVALID' })
+
+    const other = await invoice(maria)
+    const v = await w.session({ customerId: maria, kind: 'pay', invoiceId: other })
+    await voidInvoice(other)
+    expect(await resolveLink(w.t.db, v.link.token, w.clock.now())).toEqual({ ok: false, reason: 'revoked' })
+    await expect(w.tx((tx) => consumeLink(tx, v.link.id, w.clock.now()))).rejects.toMatchObject({ code: 'IDENTITY_LINK_INVALID' })
+    await expect(resolveSession(w.t.db, v.session, w.clock.now())).rejects.toMatchObject({ code: 'IDENTITY_SESSION_INVALID' })
   })
 })

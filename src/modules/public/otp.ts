@@ -219,6 +219,8 @@ export async function verifyOtp(
       .selectAll()
       .where('id', '=', input.challengeId)
       .where('location_id', '=', loc.id)
+      // a link page's step-up code (ADR 0160) is redeemed only on its own page, never for a member token here
+      .where('purpose', '=', 'website')
       .forUpdate()
       .executeTakeFirst()
     if (!row) return { ok: false, error: new AppError('PUBLIC_OTP_EXPIRED') }

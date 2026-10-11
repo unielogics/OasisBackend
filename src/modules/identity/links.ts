@@ -126,6 +126,8 @@ export async function issueClientLink(
     if (!inv || inv.location_id !== input.locationId || inv.customer_id !== input.customerId)
       throw new AppError('VALIDATION_FAILED', { detail: 'That invoice is not this client’s' })
     if (inv.canceled_at !== null) throw new AppError('VALIDATION_FAILED', { detail: 'That invoice is void' })
+    if (input.kind === 'pay' && (await invoiceBalance(tx, input.invoiceId)) <= 0)
+      throw new AppError('VALIDATION_FAILED', { detail: 'That invoice is already paid' })
   }
 
   // one decision per number at a time: the limits count and the supersede see every link issued before this one
@@ -235,8 +237,9 @@ export const linkView = (r: LinkRow): LinkView => ({
 
 /**
  * Whether a link still stands for its client: not revoked, the epoch it was issued in, the client still live and still on that
- * number with the same phone and PIN versions, and no opt-out of the number since it was issued. `use` adds the life rules:
- * 'open' (an exchange) also needs it unexpired and not used up; 'session' (a session already opened) does not.
+ * number with the same phone and PIN versions, no opt-out of the number since it was issued, and for a payment link its invoice
+ * neither void ('revoked') nor paid ('used'; money recorded but awaiting the processor counts, as on the invoice's balance). `use`
+ * adds the life rules: 'open' (an exchange) also needs it unexpired and not used up; 'session' (a session already opened) does not.
  */
 export async function linkDeadReason(db: Executor, link: LinkRow, now: Date, use: 'open' | 'session'): Promise<LinkDeadReason | null> {
   if (link.revoked_at !== null) return 'revoked'
@@ -252,7 +255,18 @@ export async function linkDeadReason(db: Executor, link: LinkRow, now: Date, use
   }
   if (await optedOutSince(db, { locationId: link.location_id, phone: link.phone_e164, customerId: link.customer_id, since: link.created_at }))
     return 'revoked'
+  if (link.kind === 'pay' && link.invoice_id) {
+    const inv = await db.selectFrom('invoices').select('canceled_at').where('id', '=', link.invoice_id).executeTakeFirst()
+    if (!inv || inv.canceled_at !== null) return 'revoked'
+    if ((await invoiceBalance(db, link.invoice_id)) <= 0) return 'used'
+  }
   return null
+}
+
+/** What is left to pay on an invoice, from the ledger's own calculation (0 for a void one). */
+async function invoiceBalance(db: Executor, invoiceId: string): Promise<number> {
+  const r = await sql<{ balance: string | number }>`select balance from invoice_calc_of(${invoiceId}::uuid)`.execute(db)
+  return Number(r.rows[0]?.balance ?? 0)
 }
 
 export type ResolvedLink = { ok: true; link: LinkView; row: LinkRow } | { ok: false; reason: LinkDeadReason }
@@ -273,13 +287,14 @@ export async function resolveLink(db: Executor, token: string, now: Date, o: { f
 
 /**
  * Counts one completion (a booking, a verification, a checkout started) against the link, under a row lock: refused with 409
- * IDENTITY_LINK_USED once its uses are spent, 401 IDENTITY_LINK_INVALID when it was revoked or the client's PIN, number or the
- * epoch changed. A completion within a live session is allowed after the link's own expiry (the session decides that).
+ * IDENTITY_LINK_USED once its uses are spent (or a payment link's invoice is paid), 401 IDENTITY_LINK_INVALID when it was revoked,
+ * the client's PIN, number or the epoch changed, or a payment link's invoice was voided. A completion within a live session is allowed after the link's own expiry (the session decides that).
  */
 export async function consumeLink(tx: Tx, linkId: string, now: Date): Promise<LinkView> {
   const row = await tx.selectFrom('client_links').selectAll().where('id', '=', linkId).forUpdate().executeTakeFirst()
   if (!row) throw new AppError('IDENTITY_LINK_INVALID')
   const dead = await linkDeadReason(tx, row, now, 'session')
+  if (dead === 'used') throw new AppError('IDENTITY_LINK_USED')
   if (dead) throw new AppError('IDENTITY_LINK_INVALID', { meta: { reason: dead } })
   if (row.consumed_at !== null || row.uses >= row.max_uses) throw new AppError('IDENTITY_LINK_USED')
   const uses = row.uses + 1

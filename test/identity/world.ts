@@ -79,6 +79,9 @@ export function useIdentityWorld(): IdentityWorld {
   beforeEach(async () => {
     // deletes, not a truncate (a cascading truncate costs a second per test); the order follows the foreign keys
     await sql`truncate table audit_log`.execute(t.db)
+    // the pay-link tests write invoices and ledger rows (append-only: a delete is refused), so those go by a truncate, only when used
+    if ((await sql<{ used: boolean }>`select exists (select 1 from invoices) as used`.execute(t.db)).rows[0]?.used)
+      await sql`truncate table ledger_events, invoice_items, invoices cascade`.execute(t.db)
     for (const table of [
       'client_link_sessions', 'client_links', 'phone_trust', 'customer_pins', 'assistant_pending_actions', 'assistant_conversations',
       'identity_pin_failures', 'public_otp_challenges', 'public_rate_limits', 'sms_opt_outs', 'sms_outbox', 'messages', 'sms_inbox',
