@@ -1,6 +1,6 @@
 // The HTTP surface of messaging through the production module list (apiModules): the Messages tab, sending, templates,
 // the outbox with retry/cancel, SMS consent, device administration and the dev helpers.
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import type { LightMyRequestResponse } from 'fastify'
 import { sql } from 'kysely'
 import { SIM_DEVICE_KEY } from '../../db/seeds/messaging.js'
@@ -27,6 +27,12 @@ beforeAll(async () => {
     env: { SMS_ALLOWLIST: w.env.SMS_ALLOWLIST, SMSGATE_MIN_INTERVAL_MS: '0', ALLOW_DEV_ENDPOINTS: 'true', EMAIL_CONSOLE_DIR: w.env.EMAIL_CONSOLE_DIR },
   })
   rt = messagingRuntimeFor({ db: w.t.db, clock: w.clock, env: app.env })
+})
+// This file's runtime is the app's (one per env), not the world's: the world's beforeEach waits only for its own runtime, so a
+// test that leaves this one applying simulator events (a tickAll that sent a text) must be waited for here, or the next
+// beforeEach TRUNCATE deadlocks against those writes under file parallelism.
+afterEach(async () => {
+  await rt?.idle()
 })
 afterAll(async () => {
   await rt?.idle()
