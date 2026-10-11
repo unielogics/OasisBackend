@@ -15,6 +15,7 @@ import { z } from '../../../../http/zod.js'
 import { transaction, type Executor } from '../../../../platform/db.js'
 import { AppError } from '../../../../platform/errors.js'
 import type { ScryptParams } from '../../../auth/password.js'
+import { hashToken } from '../../../auth/tokens.js'
 import { consumeLink } from '../../../identity/links.js'
 import { confirmStepUpCode, requestStepUpCode, type StepUpPurpose } from '../../../identity/codes.js'
 import { identityDeps, type IdentityDeps, type IdentityQueue } from '../../../identity/deps.js'
@@ -397,6 +398,9 @@ export function registerLinkRoutes(d: LinkRoutesDeps): void {
         return { status: 201, body: await bookOnLink(tx, deps, s, reqOf(req), req.body as z.infer<typeof BookingBody>) }
       },
       {
+        // the key belongs to the page's session (its token's hash), not to the address: the body names no client, so two pages behind
+        // one address sending the same key and body must not get each other's stored booking (W4c review)
+        actor: (req) => `link:${hashToken(bearerOf(req))}`,
         // on the pool, before the transaction opens: the session (401 first) and the durable limits (a refused booking still counts)
         prepare: async (req) => {
           const s = await session(app.db, req, { touch: false })

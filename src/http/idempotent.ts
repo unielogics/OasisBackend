@@ -15,6 +15,12 @@ export interface IdempotentHandlerOptions<Req, P> {
    * connection while waiting for a second, which deadlocks a full pool.
    */
   prepare?: (req: Req) => Promise<P>
+  /**
+   * Who owns the key when the request has no signed-in user (default: `anon:<address>`). A route that acts for a bearer session
+   * that is not in the body (the personal-link pages) names the session here, so two pages behind one address can never replay each
+   * other's stored answer with the same key and body (W4c review).
+   */
+  actor?: (req: Req) => string
 }
 
 export function idempotentHandler<Req extends FastifyRequest = FastifyRequest, P = undefined>(
@@ -33,7 +39,7 @@ export function idempotentHandler<Req extends FastifyRequest = FastifyRequest, P
           app.clock,
           {
             key,
-            actor: req.auth?.userId ?? `anon:${req.ip}`,
+            actor: req.auth?.userId ?? (o.actor ? o.actor(req) : `anon:${req.ip}`),
             method: req.method,
             url: req.url,
             route: req.routeOptions.url ?? req.url,

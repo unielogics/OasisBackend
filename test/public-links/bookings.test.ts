@@ -68,6 +68,26 @@ describe('POST bookings', () => {
     ])
   })
 
+  it('an Idempotency-Key belongs to the page: another page behind the same address with the same key and body books its own visit (W4c)', async () => {
+    const maria = await trustedPage()
+    const liam = await trustedPage({ name: 'Liam Chen', phone: PHONES.liam })
+    const key = h.nextKey()
+    const ip = h.nextIp()
+    const r1 = await book(maria.session, wash(), key, ip)
+    expect(r1.statusCode, r1.body).toBe(201)
+    // the same key and the very same body from the same address, on Liam's page: Liam's own booking, never Maria's stored answer
+    const r2 = await book(liam.session, wash(), key, ip)
+    expect(r2.statusCode, r2.body).toBe(201)
+    expect(r2.headers['idempotent-replayed']).toBeUndefined()
+    expect(json(r2).bookingRef).not.toBe(json(r1).bookingRef)
+    expect((await appointments()).map((a) => a.customer_id).sort()).toEqual([maria.id, liam.id].sort())
+    // each page still replays its own answer
+    const replay = await book(liam.session, wash(), key, ip)
+    expect(replay.headers['idempotent-replayed']).toBe('true')
+    expect(json(replay).bookingRef).toBe(json(r2).bookingRef)
+    expect(await appointments()).toHaveLength(2)
+  })
+
   it('a calendar link books three visits at most, a book-again link one', async () => {
     const { session } = await trustedPage()
     for (const startMin of [13 * 60, 14 * 60, 15 * 60]) expect((await book(session, wash({ startMin }))).statusCode).toBe(201)
