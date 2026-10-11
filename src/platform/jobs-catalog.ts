@@ -34,11 +34,11 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
   'maintenance.retention': {
     owner: 'platform',
     purpose:
-      'Daily retention: sessions (7 days past expiry), password resets, messages and SMS inbox and emails (24 months, with the MMS pictures they saved in the photos store, ADR 0151), SMS bookkeeping, VIP release markers. audit_log and the ledger are never purged.',
+      'Daily retention: sessions (7 days past expiry), password resets, messages and SMS inbox and emails (24 months, with the MMS pictures they saved in the photos store, ADR 0151), SMS bookkeeping, VIP release markers, and the phone identity (ADR 0160: personal links, link sessions, wrong-PIN rows, ended phone trust, resolved in-chat actions). audit_log and the ledger are never purged.',
     idempotency:
       'Batched deletes by cutoff, storage objects before their row; a row whose pictures cannot be deleted stays and the run fails after the other tasks (retried); a second run finds nothing left to delete.',
     clock: 'Injected clock; month cutoffs by calendar arithmetic.',
-    tests: 'test/jobs/scans.test.ts, test/jobs/registry.test.ts, test/messaging-db/mms.test.ts',
+    tests: 'test/jobs/scans.test.ts, test/jobs/registry.test.ts, test/messaging-db/mms.test.ts, test/identity/purge.test.ts',
     status: 'built',
   },
   'federal_holidays.generate': {

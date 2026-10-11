@@ -42,3 +42,32 @@ Migrations `20261011000000` to `20261011000500` (catalog fields and categories, 
 membership checkouts), the Kysely types, the environment and settings keys, the consent source, the SMS classes and templates, the
 status-texts port (called by nothing yet), the `ai_handoff` and `sms.picture_message` alert kinds, and the AI provider port with its
 simulator. No route, job or behaviour beyond the policy gate and the masked message bodies; later waves build the modules.
+
+## Wave W2b (identity core)
+
+`src/modules/identity/**` builds the services of design sections 1 "Identity" and 5 (links, sessions, PIN, step-up codes, phone
+trust, pending in-chat actions, the stale-record rule, revocations), the staff routes `GET /customers/:id/identity` (`cli.view`),
+`POST /customers/:id/identity/pin/clear` and `POST /customers/:id/identity/trust/revoke` (`cli.edit`), and the daily retention task
+`identity`. No public route: the link API is W3. Migration `20261011020000_identity_core.sql`. Notes on the design:
+
+- **Epoch on the trust**: `phone_trust` gains `epoch` (the links epoch it was granted in), so a `links.epoch` bump ends every trust as
+  well as every link and session, evaluated on read.
+- **Rolling PIN limits**: wrong PINs are one row each (`identity_pin_failures`), so "10 a day per client" and "20 an hour per
+  address" are rolling windows (a fixed-window counter would allow twice the limit across a boundary). A right PIN clears the
+  consecutive count of the lockout schedule, never the 24-hour count.
+- **Revocation on read**: an opt-out of the number at or after a link's issue or a trust's verification voids it even after START
+  (the STOP rule holds whoever records the opt-out); `revokeForOptOut` writes the revocation for the router to call on STOP. The
+  number's current owner, the client's phone and PIN versions and the epoch are re-checked on every read too.
+- **Uses**: book-again links allow one booking; membership and payment links three completions (a checkout started and abandoned can
+  be restarted) and the kind's lifetime; non-verify links allow 20-30 exchanges (the design set only verify/PIN: 5).
+- **Sessions** outlive their link's expiry and consumption within their own 15-minute idle and 1-hour windows, never a revocation or
+  a PIN, phone or epoch change. A session opened while the number's trust is live starts verified (by the trust's method) without a
+  step-up.
+- **Any PIN change** (first set, reset, clear) moves the PIN version: every other link of the client dies (the page that set it is
+  re-bound). A reset ends the old trust and trusts the number again from the reset's code; member privileges wait 72 hours
+  (`memberPrivilegesHeldUntil`, for W3's membership, payment and VIP checks).
+- **Same answer**: a wrong PIN, a PIN where none exists and a stranger's page answer the same 401 after the same HMAC + scrypt work;
+  the fifth wrong entry of a page ends it in every case. A lock (429/423) can only follow five wrong entries against a real PIN.
+- **Merge**: there is no merge operation in the code yet; `revokeForMerge` is ready for it. A phone change through `updateCustomer`
+  bumps `customers.phone_version` and revokes.
+- **Email**: the reset notice is the new SES template `pin_reset_notice` through `queueEmail` (no PIN or code in it).

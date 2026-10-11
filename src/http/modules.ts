@@ -6,6 +6,7 @@ import { createMessagingModule } from '../modules/messaging/http/module.js'
 import { messagingRuntimeFor, productionExternalAlerts, productionPaymentsPorts } from '../composition.js'
 import { authModule, peopleModule } from '../modules/auth/module.js'
 import { customersModule } from '../modules/customers/http/module.js'
+import { identityModule } from '../modules/identity/http/module.js'
 import { paymentsModule, createGatewayFor } from '../modules/payments/module.js'
 import { ledgerRevenueSource } from '../modules/payments/revenue.js'
 import { membershipsModule } from '../modules/memberships/module.js'
@@ -60,6 +61,7 @@ export const apiModules: ApiModule[] = [
   peopleModule,
   settingsModule,
   customersModule,
+  identityModule,
   schedulingModule,
   paymentsWired,
   createMessagingModule((deps) => runtimeOf(deps)),

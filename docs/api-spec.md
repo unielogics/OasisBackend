@@ -311,6 +311,9 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/closures/preview` | set.hours |  |
 | GET | `/api/v1/customers` | cli.view |  |
 | POST | `/api/v1/customers` | sched.edit |  |
+| GET | `/api/v1/customers/:id/identity` | cli.view |  |
+| POST | `/api/v1/customers/:id/identity/pin/clear` | cli.edit |  |
+| POST | `/api/v1/customers/:id/identity/trust/revoke` | cli.edit |  |
 | GET | `/api/v1/customers/:id/membership` | cli.view |  |
 | GET | `/api/v1/customers/:id/messages` | cli.view |  |
 | POST | `/api/v1/customers/:id/messages/read` | msg.send |  |
@@ -1212,3 +1215,35 @@ reads and their strict queries, codes and the hourly ceiling, bookings including
 callers and verified privileges, joins, and `pool.test.ts`: bookings and joins at once on a 2-connection pool), the authz matrix, `test/ops-kit/deploy-site.test.ts` (the nginx host, in a real nginx when installed).
 Deviations from the first contract are noted in ADR 0150 (source `online` rather than `web`; `bayCount` is the bays left; the grid
 ends at the cutoff; plans carry no price; the OTP text is suppressed off the allowlist outside production like every text).
+
+## 27. Phone identity core (ADR 0160, wave W2b)
+
+The services behind personal links, PINs and the 30-day phone trust (`src/modules/identity/**`; design
+`docs/design/ai-assistant-and-phone-identity.md` sections 1 and 5). No public route exists yet: the link API
+(`/api/v1/public/links/*`, behind `PUBLIC_LINKS_ENABLED`) is wave W3 and calls these services; nothing here runs on its own.
+
+### 27.1 Staff routes (`/api/v1`)
+
+| Route | Access | What it does |
+|---|---|---|
+| `GET /customers/:id/identity` | `cli.view` | The client file's "Website PIN: Set · trusted to Nov 9": PIN status (`none`, `set`, `locked`, `disabled`, `cleared`), set time, lock end, the 72-hour reset hold; the number's trust (`until`, `verifiedBy`, why it ended: `none`, `expired`, `revoked`, `epoch`, `owner_changed`, `opted_out`, `stale`); live links by kind and live link sessions; a pending in-chat action; the stale-record verdict. The number is masked (`+1******0142`); no token, hash or code. 404 for an unknown, merged or deleted client. |
+| `POST /customers/:id/identity/pin/clear` | `cli.edit` | Removes the PIN (its version moves on, so every earlier link is dead) and ends the client's links, link sessions, the trust and a pending in-chat action (reason `pin_cleared`). Idempotent; audited `identity.pin.cleared` once. Returns the state. |
+| `POST /customers/:id/identity/trust/revoke` | `cli.edit` | Ends the number's trust (reason `staff`), the client's live link sessions and a pending in-chat action; links stay usable to verify again. Audited `identity.trust.revoked`. Returns the state. |
+
+### 27.2 The services W3 builds on
+
+| Service | Rule |
+|---|---|
+| `issueClientLink(tx, {newId, now, siteUrl?}, {locationId, kind, customerId, phone?, appointmentId?, invoiceId?, planKey?, issuedBy, expiresAt?})` | 32 random bytes (base64url, 43 characters), only the SHA-256 stored; URL `https://oasisautospanj.com/#/c\|m\|p\|pin\|v/<token>` (book-again uses `c`). The number is the client's on file (a stranger's only for calendar / book-again). Bound to the client's PIN version, phone version and `links.epoch`. Lifetime / uses / exchanges: verify and pin 15 min, 1, 5; calendar 72 h, 3, 30; book_again 14 d, 1, 30; membership 24 h, 3, 20; pay 7 d (or the earlier `expiresAt`), 3, 30. Supersedes the live link of the same kind to the number (same invoice for pay). `issuedBy: 'assistant'`: one per kind an hour, three a day per number (429 `IDENTITY_LINK_LIMIT`). The caller texts `url` as a `secretVar` of class `personal_link`. |
+| `resolveLink` / `consumeLink` / `revokeLink` / `revokeLinks` | A link is dead when revoked, superseded, expired, used up, issued in another epoch, its client merged / deleted / on another number or phone version / at another PIN version, or the number opted out (STOP, staff, the client's own mark) after it was issued, START notwithstanding. Opening uses nothing; `consumeLink` counts a completion (409 `IDENTITY_LINK_USED` when spent). |
+| `exchangeLink(db, {token, ip, now})` → `{session, view, numberTrust}` | A new bearer session (only its SHA-256 stored): 15 min idle, 1 h at most; re-exchange while the link can be opened. Starts `verified` when the number's trust is live for the link's client (no step-up), else `link`. 401 `IDENTITY_LINK_INVALID` with `meta.reason` `not_found\|expired\|used\|revoked`. |
+| `resolveSession(db, token, now)` | 401 `IDENTITY_SESSION_INVALID` when unknown, revoked, idle, past its hour, after 5 wrong entries, or its link was revoked / its PIN, phone or epoch binding changed. `requireFreshStepUp` (403 `IDENTITY_STEP_UP_REQUIRED`): memberships and payments need a PIN or code within 5 minutes. |
+| `requestStepUpCode(d, {session, purpose, ip})` / `confirmStepUpCode(d, {session, challengeId, code, ip})` | The code (the website's: six digits, 10 minutes, 3 tries, one active per number) goes to the link's number only (no phone input); limits 10 / 10 min per address, 3 per page, 5 per number; the shared `PUBLIC_OTP_TEXTS_PER_HOUR` ceiling (429 `PUBLIC_CODES_PAUSED`). Purposes: `link_verify` (refused once a PIN exists, 409 `IDENTITY_PIN_REQUIRED`), `pin_set`, `pin_reset` (only with a PIN; verifies nothing by itself). A confirmed verify / set code verifies the page by code and trusts the number 30 days. |
+| `verifySessionPin(d, {session, pin, ip})` | scrypt over HMAC(`PIN_PEPPER`, `customerId:pin`); the same work and the same answer (401 `IDENTITY_PIN_INVALID`, `meta.attemptsLeft` of the page) when no PIN exists. 5 wrong per page (429 `IDENTITY_SESSION_LOCKED`), 20 wrong an hour per address (429 `IDENTITY_TOO_MANY_TRIES`), 10 wrong in 24 hours per client and the schedule 5 → 15 min, +3 → 1 h (429 `IDENTITY_PIN_LOCKED`, Retry-After), +3 → disabled (423 `IDENTITY_PIN_DISABLED`, managers notified `identity.pin_disabled`). A right PIN verifies the page by PIN (step-up now) and trusts the number 30 days. |
+| `setSessionPin` / `resetSessionPin` | 4-6 digits, blocklist (top-100 common, one digit repeated, runs, years 1940-2015, the end of the client's number: 422 `IDENTITY_PIN_REJECTED`). Set: after a code confirmed on the same page within 10 minutes (403 `IDENTITY_CODE_REQUIRED`), only without a PIN (409 `IDENTITY_PIN_EXISTS`); every other link and page of the client ends (`pin_set`), the page's own link is re-bound. Reset: after a `pin_reset` code of the page; every other link, page, the trust and a pending action end (`pin_reset`), the page is verified by code and the number trusted again, member privileges wait 72 hours (`memberPrivilegesHeldUntil`), the client gets the `pin_reset_notice` email (when an address is on file) and the managers `identity.pin_reset`. |
+| `grantTrust` / `evaluateTrust` / `revokeTrust` | One row per (location, number): 30 days from a verification, in the current epoch. Evaluated on every read: revoked, expired, another epoch, the number now owned by another client (or nobody), an opt-out since the verification, the stale-record rule. |
+| `createPendingAction` / `confirmPendingAction` / `completePendingAction` / `failPendingAction` / `findPendingAction` | Only inside the number's trust (403 `IDENTITY_NOT_TRUSTED`). A 4-digit reply number returned once (text it as a `secretVar` of `action_confirm`), stored as sha256(id:code); one pending per number (a new proposal supersedes); 15 minutes; 3 wrong replies lock it. The right reply re-checks the trust, claims the action and returns its payload for the caller to execute in the same transaction. |
+| `staleRecord` | No activity (record creation, an appointment, a text from the number, a verification, a live membership) for 180 days, or the number's newest final text failed as an invalid number after its last verification: treat the client as unknown until verified. |
+| `revokeIdentity`, `revokeForPhoneChange` (called by `updateCustomer`), `revokeForMerge`, `revokeForOptOut` | End links, link sessions, trust and a pending action with the reason. A phone change also bumps `customers.phone_version`. STOP and the epoch are enforced on read as well. |
+
+Retention: `maintenance.retention` task `identity` (see `docs/jobs.md`). Tests: `test/identity/*.test.ts`, the authz matrix.
