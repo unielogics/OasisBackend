@@ -243,6 +243,9 @@ action switches), the follow-up job does nothing while they or `leads.follow_up_
   `assistantOn` / `actionsOn` (`tools/switches.ts`). The tools resolve `serviceKey` / `addonKeys` with `loadBoardServices` (the public
   catalog's keys): the facts' items must carry those keys.
 - **Handoffs**: a tool calls `ctx.handoff` and also returns `handoff` in its outcome (the first request of the turn wins either way).
+- **Availability**: `check_availability` reads the same slot engine as the website's `loadBoard` (`loadDayData` + `engineInput`
+  channel online + `computeSlots`) for the one asked date, because `loadBoard` is the non-VIP board from today on; the VIP holds and the
+  VIP window count only for a trusted VIP client.
 - **Proposals**: the slot is checked with the online rules at the proposal and again at the reply number (the reschedule command's own
   check is the desk's, so the online check comes first). At most two future bookings made by text per client (plan C).
   `propose_cancel` hands off (`late_cancel`) inside `cancellation.policy.freeCancelHours` or with money on the visit (refundable,
