@@ -477,6 +477,8 @@ const dedicated: Record<string, string> = {
   'vip.hold_release_scan': 'test/jobs/scans.test.ts',
   'appointments.reminders': 'test/jobs/reminders.test.ts',
   'appointments.review_request': 'test/jobs/reminders.test.ts',
+  'appointments.checkin_texts': 'test/status-texts/jobs.test.ts',
+  'appointments.late_texts': 'test/status-texts/jobs.test.ts',
   'sms.dispatch': 'test/jobs/matrix-sms.test.ts',
   'sqsp.sync': 'test/jobs/matrix-sqsp.test.ts',
   'sqsp.contacts': 'test/jobs/matrix-sqsp.test.ts',
