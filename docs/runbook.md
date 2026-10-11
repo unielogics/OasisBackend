@@ -295,6 +295,7 @@ On a host without the secret (`--secrets-in-files`), edit the line in `common.en
 | Secret | Where | How | What people notice |
 |---|---|---|---|
 | `SECRETS_KEY` (encrypts stored tablet and Squarespace credentials) | the secret | **not** with a plain push (the stored credentials must be re-encrypted): `sudo $D/secrets-rotate.sh --generate` (dry run), then `sudo $D/secrets-rotate.sh --new-key-file /etc/oasis/secrets-key.new --profile <operator profile> --apply` (`pnpm secrets:rotate` re-encrypts, then the new key is pushed into the secret). Store the new key in the password manager, then shred the key file | API and worker stop for under a minute |
+| `PIN_PEPPER` (HMAC key of the website PINs) | the secret only, never an env file | first time: section 10, "Personal links" (into the secret **before** `PUBLIC_LINKS_ENABLED=true`). Rotate only if it leaked: the recipe above with `gen-secrets.sh PIN_PEPPER > new.env` | every client's PIN stops working; each sets a new one through a texted code |
 | `SESSION_SECRET` | the secret | the recipe above (`gen-secrets.sh SESSION_SECRET > new.env`) | everyone is signed out |
 | Database password | role `oasis`, `DATABASE_URL` in the secret | `sudo -u postgres psql -c "alter role oasis password 'NEW'"`, push the new `DATABASE_URL`, restart all three; update `drill.env` if you rotate `oasis_drill` | a short outage |
 | Tablet password | SMS Gate app, device record | change it in the app, then `oasis-admin.sh ... sms-update-device <id> --password-env VAR` (and `SMSGATE_PASSWORD` in the secret if you keep it for `verify.sh smsgate`) | none |
@@ -510,6 +511,29 @@ What staff then see in the dashboard's notifications:
 * **"Website codes paused: N sent in the last hour"**: the website asked for more one-time codes than `PUBLIC_OTP_TEXTS_PER_HOUR`
   within an hour; new code requests answer "try again in N min" until the oldest leaves the hour. Outside a busy hour, someone is
   probably abusing the form: `grep 'public/otp' /var/log/nginx/oasis-site.access.log | awk '{print $1}' | sort | uniq -c | sort -rn | head`.
+
+### Personal links: PIN_PEPPER into the secret BEFORE turning the links on
+
+The personal-link routes (`/api/v1/public/links/*`: the client's calendar, verification, PIN, membership and payment pages) answer
+404 until `PUBLIC_LINKS_ENABLED=true` (ADR 0160). They need `PIN_PEPPER`, the HMAC key of the website PINs: 32 random bytes that, in
+production, come **only from the Secrets Manager secret**. The app refuses to start when `PUBLIC_LINKS_ENABLED=true` and the secret
+holds no `PIN_PEPPER`, when the value does not decode to exactly 32 bytes, or when a `PIN_PEPPER` comes from an env file
+(`install.sh` also stops on a `PIN_PEPPER` line in `/etc/oasis/*.env`). So the order is fixed; the other way round, the API and
+the worker do not come back after the restart:
+1. With the operator key (section 8), from a backend checkout, generate the value into a private file and push it into the secret:
+   ```bash
+   umask 077
+   deploy/scripts/gen-secrets.sh PIN_PEPPER > pin.env
+   pnpm secrets:push --profile oasis-admin --secret-id oasis/prod/app --from pin.env           # the plan: "+ PIN_PEPPER"
+   pnpm secrets:push --profile oasis-admin --secret-id oasis/prod/app --from pin.env --apply && shred -u pin.env
+   sudo systemctl restart oasis-api oasis-worker          # still with PUBLIC_LINKS_ENABLED=false: proves the secret is read
+   ```
+2. Only then, in `/etc/oasis/common.env`: `PUBLIC_LINKS_ENABLED=true`, and `sudo systemctl restart oasis-api oasis-worker`.
+3. Check: `systemctl is-active oasis-api oasis-worker` is `active` twice. If the API does not start, `journalctl -u oasis-api -n 50`
+   names `PIN_PEPPER`: set `PUBLIC_LINKS_ENABLED=false` again, restart, and redo step 1.
+
+To close the links again, set `PUBLIC_LINKS_ENABLED=false` and restart; leave `PIN_PEPPER` in the secret. Never change `PIN_PEPPER`
+while clients have PINs: a new value voids every PIN (each client sets a new one through a texted code). Never put it in an env file.
 
 ### The host cannot resolve its own new name (health check: "answered HTTP 000")
 
