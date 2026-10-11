@@ -1073,18 +1073,24 @@ closed (23.4a), and `ai.respond` / `ai.sweep` return at once while `AI_ENABLED=f
   hours, closures of the next 30 days, today, booking rules, guest fee, cancellation, VIP, arrival, automatic texts, the catalog with
   member/guest STARTING prices, tint "from" prices and quote-only items, the plans, the FAQ), cached per location by a hash of the
   source rows, the business date and the env values; byte-stable; Settings free text flattened to one line.
-- **Output guard** (`guard.ts`, allow-lists, never excusals): markdown stripped, GSM-7, at most 320 characters (one shorten call, else
-  cut at a sentence), at most one question (one rewrite, else cut after the first). Blocked wherever they appear, each with one
-  rewrite call and then the fallback: (A) any mention of a PIN, passcode, password, code, card number or digits, CVV or a 4-8 digit
-  code (a year and the shop's address digits excepted), except the server's exact safety lines; (B) promise words (free, discount,
-  refund, coupon, deal, guarantee, comp, waive, "on the house", "ready by", legal, insurance and damage words; only "feel free" and
-  "spot-free"-type phrases pass); (C) a `$` amount ("$45" or "45$") that is not a catalog starting price after "starts at" /
-  "starting at" / "from" in a clause naming its item or category, a plan price with "a month" next to its plan's label, the guest fee
-  next to "fee", or a balance a tool declared, and any total or combination; (D) a web address (any host-shaped label.label, "www",
-  "http", "://", a spelled-out dot) but the turn's `{linkN}` placeholders and the shop's own host as text; (E) a phone number other
-  than the shop's own. A rewrite that still trips a rule hands off (`policy_words` for promise words, else `guard`). A refusal, a cut
-  answer, an unknown stop, a provider error or a timeout hand off too. A reply with a `verify`, `pin`, `membership` or `pay` link gets
-  the server's line "For your security, enter codes and your PIN only on the secure page, never by text." after it.
+- **Output guard v3** (`guard.ts`; design 3c, ADR 0160 W3a notes): amounts are SERVER-RENDERED, never written by the model. The
+  model writes placeholders: `{price:<itemKey>}` / `{price:tint:<vehicle>:<film>}` (the starting-price wording "starts at $45 for
+  members, $54 otherwise"; quote-only "is priced by quote - text us a photo"), `{plan:<key>}` ("is $99 a month"), `{fee}` ("a $25
+  booking fee for guests"), `{balance}` (the client's own open balance; only after `get_balance` in the turn) and `{linkN}`; the
+  facts and the prompt name keys, never figures. The guard checks the RAW text, then `facts.ts placeholderValues` renders the
+  placeholders from the current facts. Refused, each with one rewrite call and then the fallback: an unknown placeholder
+  (`unknown_placeholder`); a currency sign or money word (`money`); a number (digits or words) that is not a clock time, a date, a
+  duration, a bare hour about opening times or a count of 1-10 before a noun (`number`; the address, catalog/plan names, the
+  client's vehicles on file and the shop's own phone numbers are server-owned literals); a group of 4+ digits, even split by spaces,
+  dashes, dots or slashes (`digits`); any mention of PINs, codes, passwords, digits, logins or card numbers, the safety line included
+  (`secret`); promise words, time promises, legal/insurance/damage words (`promise_words`); anything host-shaped, an IP, "http",
+  "hxxp", "www", "://" but `{linkN}` and the shop's own host as text (`url`). Word and host checks read the plain text and a
+  skeleton (accents stripped, look-alikes mapped, spaced letters joined, "[.]" / " dot " folded). Markdown stripped, GSM-7, at most
+  320 characters after rendering (one shorten call, else cut at a sentence), at most one question (one rewrite, else cut after the
+  first). A rewrite that still trips a rule hands off (`policy_words` for promise words, else `guard`). A refusal, a cut answer, an
+  unknown stop, a provider error or a timeout hand off too. A reply with a `verify`, `pin`, `membership` or `pay` link gets the
+  server's line "For your security, enter codes and your PIN only on the secure page, never by text." after it. Phone numbers are
+  masked for the model and in the stored transcript by one shared pattern set (`transcript.ts PHONE_PATTERNS`).
 - **Reply**: free text through `enqueueFor` with `senderKind: 'ai'`, rendered from the `ai_reply` template (the first AI text of a
   conversation: "Oasis Auto Spa’s automated assistant here." + the STOP footer, never the AGENT offer; `disclosed_at`), class
   `ai_reply`, or `personal_link` with the links as `secretVars` (the thread shows `[private link]`); a registered link the reply
