@@ -228,3 +228,100 @@ inert while `AI_ENABLED=false` or `assistant.enabled=false`. Contract: docs/api-
 - **Review leftovers**: nginx serves stale hours and open times only while one request refreshes them (`proxy_cache_use_stale
   updating`), never through an API outage; the catalog keeps the error staleness. A verified website booking no longer replaces the
   name on file with the typed one; it fills only a placeholder and notes a different name on the booking.
+
+## W3 contract (the seam between the turn and the tools)
+
+`src/modules/assistant/contract.ts` (types and two constants, no logic) lets the turn (W3a) and the tools, actions, welcome flow and
+leads (W3b) be built in parallel. Compiling stubs sit at the agreed paths and keep the W2d "off" defaults until each package lands:
+`assistant/tools/index.ts` (`createToolRegistry`: no tool), `assistant/actions/handler.ts` (`createActionCodeHandler`:
+`noActionCodes`), `assistant/welcome/new-texters.ts` (`createNewTexters`: `noNewTexters`), `leads/index.ts` (`createLeads`,
+`createLeadJobs`: no job) and `assistant/facts.ts` (`buildShopFacts` / `renderShopFacts` throw "not built"). Nothing is wired or
+registered by the contract. Test: `test/assistant/contract.test.ts`.
+
+- **Identity of a turn** (`TurnIdentity`): location, phone (server side only, never shown to the model), client or null,
+  provisional, trust `unknown` | `caller` | `trusted` (+ `trustUntil`). `unknown` = a stranger or a stale record; `caller` = the live
+  client on file (the provisional one included; stored as `known` in `assistant_turns.trust`); `trusted` = a live phone trust.
+- **Minimum trust per tool** (`TOOL_MIN_TRUST`): the design's §4 "caller" on the public tools means anyone texting, so they are
+  `unknown` here (business info, services, membership plans, availability, interests, send_link verify/calendar, opt-out, handoff);
+  the client's own record is `caller` (appointments, balance, name on a provisional client, vehicle); `propose_*` are `trusted` and
+  flagged `action` (offered only while `AI_ACTIONS_ENABLED` and `assistant.actions_enabled`). Below the minimum, W3a answers
+  `needs_verification` without running the tool.
+- **Shop facts** (`ShopFacts`, design §3b): business, contact (texting vs calling), hours, closures (30 days), today, booking
+  rules, fee, cancellation, VIP, arrival, automatic texts, catalog (categories; items with member/guest STARTING prices, VIP
+  inclusion, quote-only; tint rows with "from" prices only), plans, FAQ; `version` is the hash of the source versions and the
+  business date (the cache key); `renderShopFacts` is deterministic and leaves `generatedAt` out (prompt cache). Whether the shop
+  is open now is not a fact: the turn context carries the time.
+- **Tool context** (`ToolContext`): db, clock, the turn's `now`, ids, env, identity, conversation and turn ids, facts, refs
+  (`A1`..`A3` resolve only to the client's own appointments), `actionsEnabled`, the location's scheduling context and the AI actor
+  (`Oasis AI (SMS)`, sched.edit + jobs.status), the queue, the turn deadline's signal, `addLink(url, {kind, expiresAt})` →
+  `{linkN}` (the reply goes out with the URL as a secretVar, class `personal_link`), `handoff(reason, summary)`,
+  `audit(tx, action, detail)` and `setCustomer(id)`. Deviation from the brief: `audit` takes the tool's transaction, so the audit
+  row commits with the change it records.
+- **Tool inputs** (`ToolInputs`): strict, every property required (null = not given), no client, phone, id or price; dates are
+  business dates and `startMin` minutes from midnight; appointments by ref.
+- **Outcomes** (`ToolOutcome`): `ok` with JSON `data` (no phone, id, token, URL or code), or an error kind (`needs_verification`,
+  `not_allowed`, `invalid`, `not_found`, `unavailable`, `rate_limited`) with a plain message; either may ask for a handoff.
+  `amountsCents` declares the only $ amounts a reply may state besides the facts' starting prices, plan prices and fee: the
+  client's own open balance (`get_balance`; a balance is not a price, so §3b does not forbid it).
+- **Factories**: every W3 part takes the same `AssistantDeps` (db, clock, ids, env, queue, log, facts source,
+  `schedulingFor(location)`, `actorFor(location)`), built once by W3a's wiring. `createLeads` (open / noteInterest / markBooked) is
+  added beyond the brief so the link API's bookings and the reply-number handler close a lead the same way.
+
+## Wave W3b (tools, in-chat actions, welcome flow, leads)
+
+The W3b side of the contract (api-spec section 29): `createToolRegistry` (the fifteen tools of design section 4),
+`createActionCodeHandler` (reply numbers), `createNewTexters` (the welcome flow's first step), `createLeads` / `createLeadJobs`
+(leads and their one follow-up), `GET /leads` (`cli.view`). Migration `20261012020000_assistant_tools.sql`. Nothing switches on by
+itself: the tools only run inside a turn, the handler and the welcome flow re-check `AI_ENABLED` / `assistant.enabled` (and the
+action switches), the follow-up job does nothing while they or `leads.follow_up_enabled` are off. Notes and deviations:
+
+- **Contract**: `contract.ts` unchanged; `test/assistant/contract.test.ts` now checks the built parts (the registry against
+  `TOOL_MIN_TRUST`, the factories no longer the W2d "off" defaults); the shop facts stay W3a's stubs. Helpers W3a may use:
+  `loadAppointmentRefs` / `refsOf` (the refs rule of the contract), `isProvisional` / `isProvisionalClient` (TurnIdentity.provisional),
+  `assistantOn` / `actionsOn` (`tools/switches.ts`). The tools resolve `serviceKey` / `addonKeys` with `loadBoardServices` (the public
+  catalog's keys): the facts' items must carry those keys.
+- **Handoffs**: a tool calls `ctx.handoff` and also returns `handoff` in its outcome (the first request of the turn wins either way).
+- **Availability**: `check_availability` reads the same slot engine as the website's `loadBoard` (`loadDayData` + `engineInput`
+  channel online + `computeSlots`) for the one asked date, because `loadBoard` is the non-VIP board from today on; the VIP holds and the
+  VIP window count only for a trusted VIP client. `privilegesOf` (VIP rules and the member no-fee status, for `check_availability`,
+  the proposals and the reply number) grants nothing while `memberPrivilegesHeldUntil` holds them after a PIN reset by code (72 h).
+- **Proposals**: the slot is checked with the online rules at the proposal and again at the reply number (the reschedule command's own
+  check is the desk's, so the online check comes first). At most two future bookings made by text per client (plan C).
+  `propose_cancel` hands off (`late_cancel`) inside `cancellation.policy.freeCancelHours` or with money on the visit (refundable,
+  awaiting the processor or store credit on its live invoice).
+- **Confirmations**: an AI booking is created with no booking-thanks text; the handler's `action_booked` (class `ai_reply`, an answer
+  to the reply number) is the confirmation, with the guest fee as the website states it. A reschedule and a cancel are confirmed by the
+  scheduling texts themselves (`reschedule`; the cancellation notice of `cancelAppointment` with `notify`), not by a second AI line.
+  New non-editable `ai_reply` templates: `action_booked`, `action_code_wrong` / `_locked` / `_expired`, `action_needs_verify`,
+  `action_failed`, `action_unavailable`. With the assistant off a reply number cancels the action silently; with only the actions off
+  the client is told a team member will text back.
+- **STOP and staff takeover** (touching W2d/W2b files, minimal): `PgOptOutRepository.optOut` now calls `revokeForOptOut` (every
+  opt-out: the STOP keyword, the assistant's `opt_out`, a staff opt-out: links, sessions, trust and a pending action end at once; the
+  reads enforced it already), and `noteStaffTakeover` cancels the client's / number's pending action.
+- **Natural-language opt-out**: recorded like STOP (`sms_opt_outs` source `keyword`, keyword "stop (in words, to Oasis AI)", the
+  client's mark) and answered once with `opt_out_confirm`.
+- **send_link**: only to the number that texts; `verify` needs a client (after the welcome flow every texter has one); a stale record
+  (`unknown`) gets only `verify`; `calendar` for a stranger (no client) is a phone-bound link; `membership` needs the tier's plan set up
+  (else `unavailable`); `pay` needs an open invoice with a staff-attached payment URL (else handoff `no_payment_link`). The URL is
+  registered with `ctx.addLink` only after the link row committed.
+- **Welcome flow**: the provisional client is created at once in the webhook transaction (advisory lock per number), consent
+  `inbound_text` unless the number is opted out; a number that already has a client is returned as is. `set_my_name` accepts letters
+  only (1-4 words) and clears `needs_details`, so the client stops being provisional; `set_my_vehicle` stores the tint class in the new
+  `vehicles.vehicle_type` (at most 6 vehicles per client).
+- **Archive** (`leads.provisional_archive`, nightly 4:40): 30 days after the later of the creation and the number's last text (the
+  brief said 30 days; a texter who keeps texting is not archived mid-conversation), no appointment, no membership: `deleted_at` +
+  the new `customers.archived_at` (never a delete; the thread stays), the open lead closed, audited; a new text from the number
+  restores the same record. It runs whatever the switches (only rows the assistant created match, so it finds nothing until then).
+- **Leads**: a booking closes the lead: the handler calls `markBooked`, and the follow-up job first closes every open lead whose
+  client has a booking since the first contact (staff and website bookings included) instead of a hook in the booking code; that
+  closing runs for every location before the switch check (it sends nothing), so the staff list drops booked leads while follow-ups
+  are off. A lead closed without a booking opens again on a new contact; the follow-up is still once per lead.
+- **Follow-up**: only to numbers inside the rollout stage (`assistant.stage`: the allowlist, then clients, then everyone), so the
+  staged rollout (W5) holds for it too; a stale record (`staleRecord`) is texted as a stranger (no first name, a calendar link bound
+  to the number only, the message on no client), and `note_interest` under the turn's `unknown` trust does not tie the lead to it; "never after STOP" = any opt-out of the number since the lead began, lifted or not, or an opt-out on the client;
+  business hours = the shop's hours, closures and emergency (it waits for the next opening inside the window, else it is dropped);
+  the link is `issuedBy system` (not counted in the assistant's three a day); sender "Oasis AI". `lead_follow_up` joined
+  `SENSITIVE_CLASSES` with the new `MASK_ONLY_CLASSES`: the link is masked in the message row and the outbox body wiped once final,
+  while a follow-up without a link (links off) stays readable instead of "[link sent privately]".
+- **Jobs registered here**: `leads.follow_up` (every 5 minutes) and `leads.provisional_archive` are in `job-registry.ts` (built from the
+  job context like the messaging jobs); W3a must not register `createLeadJobs(deps)` a second time.

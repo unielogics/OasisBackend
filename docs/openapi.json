@@ -44210,6 +44210,224 @@
         "x-oasis-idempotency": "required"
       }
     },
+    "/api/v1/leads": {
+      "get": {
+        "description": "One lead per number (source text, website or walk-in) with the categories they asked about, the one automatic follow-up (planned / sent) and the booking that closed it. `status=open` (the default) lists new and followed-up leads; `all` or one status lists those. The number appears only with cli.contact.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "open",
+              "enum": [
+                "open",
+                "all",
+                "new",
+                "followed_up",
+                "booked",
+                "closed"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "leads": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "bookedAppointmentId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "closedAt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "customerId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "customerName": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The client’s name; \"New texter ••NNNN\" while the welcome flow has no name yet"
+                          },
+                          "firstContactAt": {
+                            "type": "string"
+                          },
+                          "followedUpAt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "When the follow-up text was queued"
+                          },
+                          "followUpAt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "When the one automatic follow-up is planned (null: none planned)"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "interests": {
+                            "description": "The categories they asked about, in the Settings labels and colours (a deleted category keeps its key as label)",
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "colour": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "key": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "key",
+                                "label",
+                                "colour"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "lastContactAt": {
+                            "type": "string"
+                          },
+                          "needsName": {
+                            "description": "The client record is still the welcome flow’s placeholder",
+                            "type": "boolean"
+                          },
+                          "phone": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The number (E.164); null without cli.contact"
+                          },
+                          "source": {
+                            "enum": [
+                              "text",
+                              "website",
+                              "walk_in"
+                            ],
+                            "type": "string"
+                          },
+                          "status": {
+                            "enum": [
+                              "new",
+                              "followed_up",
+                              "booked",
+                              "closed"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "customerId",
+                          "customerName",
+                          "needsName",
+                          "phone",
+                          "source",
+                          "interests",
+                          "status",
+                          "firstContactAt",
+                          "lastContactAt",
+                          "followUpAt",
+                          "followedUpAt",
+                          "bookedAppointmentId",
+                          "closedAt"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "leads"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Leads: numbers that asked about a service and did not book yet",
+        "tags": [
+          "customers"
+        ],
+        "x-oasis-access": "cli.view"
+      }
+    },
     "/api/v1/ledger-events/{id}/confirm-processor": {
       "post": {
         "description": "Needs the permission of the original action: pay.collect for a payment, pay.refund for a refund.",

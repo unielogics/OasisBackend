@@ -15,7 +15,12 @@ import '../schema.js'
  * Classes whose text carries a one-time link or code: the message row keeps a redacted body (or, when the secret was passed as
  * secretVars, the text with it masked) and the outbox body is wiped once the message is final.
  */
-export const SENSITIVE_CLASSES: ReadonlySet<string> = new Set(['staff_invite', 'password_reset', 'otp_code', 'personal_link', 'action_confirm'])
+export const SENSITIVE_CLASSES: ReadonlySet<string> = new Set(['staff_invite', 'password_reset', 'otp_code', 'personal_link', 'action_confirm', 'lead_follow_up'])
+/**
+ * Sensitive classes whose text is readable apart from the secretVars they may carry (ADR 0160, W3b): the lead follow-up carries a
+ * personal calendar link only while personal links are on; without one its message row keeps the text instead of the redaction.
+ */
+export const MASK_ONLY_CLASSES: ReadonlySet<string> = new Set(['lead_follow_up'])
 export const REDACTED_BODY = '[link sent privately]'
 /** How the dashboard names the AI assistant's messages (ADR 0160). */
 export const AI_SENDER_NAME = 'Oasis AI'

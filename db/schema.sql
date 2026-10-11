@@ -917,6 +917,8 @@ CREATE TABLE public.customers (
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     email_verified boolean DEFAULT false NOT NULL,
     phone_version integer DEFAULT 0 NOT NULL,
+    archived_at timestamp with time zone,
+    CONSTRAINT customers_archived_is_deleted CHECK (((archived_at IS NULL) OR (deleted_at IS NOT NULL))),
     CONSTRAINT customers_check CHECK (((NOT synthetic) OR (phone_e164 IS NULL) OR (phone_e164 ~ '^\+1[0-9]{3}55501[0-9]{2}$'::text))),
     CONSTRAINT customers_check1 CHECK (((merged_into IS NULL) OR (merged_into <> id))),
     CONSTRAINT customers_email_check CHECK (((email IS NULL) OR (btrim((email)::text) <> ''::text))),
@@ -2627,7 +2629,9 @@ CREATE TABLE public.vehicles (
     plate text,
     deleted_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    vehicle_type text,
     CONSTRAINT vehicles_plate_check CHECK (((plate IS NULL) OR (btrim(plate) <> ''::text))),
+    CONSTRAINT vehicles_vehicle_type_check CHECK (((vehicle_type IS NULL) OR (vehicle_type = ANY (ARRAY['sedan_coupe'::text, 'suv_crossover'::text, 'truck_van'::text])))),
     CONSTRAINT vehicles_year_check CHECK (((year IS NULL) OR ((year >= 1900) AND (year <= 2100))))
 );
 
@@ -4048,6 +4052,12 @@ CREATE INDEX credit_allocations_lot_idx ON public.credit_allocations USING btree
 CREATE INDEX credit_expiries_customer_idx ON public.credit_expiries USING btree (customer_id);
 
 --
+-- Name: customers_archived_phone_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX customers_archived_phone_idx ON public.customers USING btree (phone_e164) WHERE (archived_at IS NOT NULL);
+
+--
 -- Name: customers_email_trgm; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4070,6 +4080,12 @@ CREATE INDEX customers_merged_into_idx ON public.customers USING btree (merged_i
 --
 
 CREATE INDEX customers_phone_trgm ON public.customers USING gin (phone_e164 public.gin_trgm_ops);
+
+--
+-- Name: customers_provisional_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX customers_provisional_idx ON public.customers USING btree (created_at) WHERE ((source = 'inbound_sms'::text) AND needs_details AND (deleted_at IS NULL) AND (merged_into IS NULL));
 
 --
 -- Name: email_suppressions_active_idx; Type: INDEX; Schema: public; Owner: -

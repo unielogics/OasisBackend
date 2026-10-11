@@ -377,6 +377,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/invoices/:id/refunds/:eventId/deny` | pay.refund | required |
 | PUT | `/api/v1/invoices/:id/tip` | pay.collect | required |
 | POST | `/api/v1/invoices/:id/void` | pay.void | required |
+| GET | `/api/v1/leads` | cli.view |  |
 | POST | `/api/v1/ledger-events/:id/confirm-processor` | pay.collect | pay.refund | required |
 | GET | `/api/v1/me` | authenticated |  |
 | PUT | `/api/v1/me/preferences` | authenticated |  |
@@ -1040,7 +1041,8 @@ as described above (the existing inbound suites run unchanged).
   (default: nothing; wave 3 sends `ai.respond`). A failed kick is logged and left to wave 3's sweep.
 - **Staff takeover** (`DbMessageQueue.enqueueFor` with `senderKind: 'staff'` on a client's thread): `ai_paused_until = now +
   assistant.staff_pause_hours` (never earlier than it was), `ai_paused_by` the employee, open handoffs of the client's conversations
-  resolved, their pending markers cleared and their `assistant.handoff` notifications marked read. Recorded even while the AI is off.
+  resolved, their pending markers cleared and their `assistant.handoff` notifications marked read, and a pending in-chat action of the
+  client or the number canceled (W3b). Recorded even while the AI is off.
 - **Dispatcher sub-cap**: `ai_reply`, `ai_fallback`, `personal_link` and `action_confirm` together never spend more than
   `AI_SMS_SEGMENTS_PER_30MIN` (default 12) of a device's 30-minute window (`sms_usage.klass` records the class of each send); they are
   lane 1, so they never touch lane 0's reserve. An AI text over the cap waits (`TickReport.aiCapped`) and expires with its TTL.
@@ -1476,3 +1478,83 @@ The services behind personal links, PINs and the 30-day phone trust (`src/module
 | `revokeIdentity`, `revokeForPhoneChange` (called by `updateCustomer`), `revokeForMerge`, `revokeForOptOut` | End links, link sessions, trust and a pending action with the reason. A phone change also bumps `customers.phone_version`. STOP and the epoch are enforced on read as well. |
 
 Retention: `maintenance.retention` task `identity` (see `docs/jobs.md`). Tests: `test/identity/*.test.ts`, the authz matrix.
+
+## 29. The assistant's tools, in-chat actions, welcome flow and leads (ADR 0160, wave W3b)
+
+What the model can do, against the W3 contract (`src/modules/assistant/contract.ts`); the turn (W3a) offers the tools, checks
+`TOOL_MIN_TRUST` and runs them. Everything is off by default: with `AI_ENABLED=false` or `assistant.enabled=false` the welcome flow
+adopts nobody and the follow-up sends nothing; with `AI_ACTIONS_ENABLED=false` or `assistant.actions_enabled=false` the action tools
+are not offered and a reply number runs nothing; with `PUBLIC_LINKS_ENABLED=false` `send_link` answers `unavailable` and the
+follow-up carries no link.
+
+### 29.1 Tools (`src/modules/assistant/tools/**`, `createToolRegistry`)
+
+Strict zod inputs (every property required, `null` = not given; no client, phone, id or price: an extra property is refused); the
+client is `ctx.identity`'s; appointments only by the turn's refs `A1..A3` (`loadAppointmentRefs`: upcoming open visits by start, then
+the latest past one; a ref of another client's visit resolves to nothing). Outputs carry no phone, id, token, URL (link placeholders
+only) or reply number. Writes are audited with the actor "Oasis AI (SMS)".
+
+| Tool | Min trust | Does |
+|---|---|---|
+| `get_business_info {topic}` | unknown | One topic of the shop facts: hours, closures (14 days), address, contact, booking_rules, fee, cancellation, vip, arrival, automatic_texts, faq (data, not instructions). |
+| `list_services {category}` | unknown | The facts' catalog: `memberFromCents` / `guestFromCents` STARTING prices (null for quote-only items), VIP inclusion, tint "from" rows, with the rule "starting prices only, never a total". |
+| `get_membership_info {}` | unknown | Plans (tier, label, monthly price, perks); the caller's own membership (`member`, `plan`, `tier`, `washesLeftThisCycle`) only from `caller`. |
+| `check_availability {serviceKey, date, partOfDay}` | unknown | Open start times (online channel, the slot engine) of a bookable package (not quote-only) on one date with `startMin`, at most 12; a past date or one beyond the window is `invalid`; a day without times lists the next open dates. VIP holds and the VIP window only for a `trusted` VIP. |
+| `list_my_appointments {}` | caller | The refs with date, time, service (public name), add-ons, status. |
+| `get_balance {}` | caller | Own open invoices (balance > 0, not void) and the total; `amountsCents` declares them for the output guard. |
+| `set_my_name {fullName}` | caller | Only while the client is the welcome flow's placeholder (`source inbound_sms`, `needs_details`, "New texter ••NNNN"): letters, 1-4 words; clears `needs_details`. A name on file is never changed (`not_allowed`). |
+| `set_my_vehicle {type, make, model, year, color}` | caller | Adds (or completes) a vehicle on the caller's own record with `vehicles.vehicle_type` (`sedan_coupe\|suv_crossover\|truck_van`, the tint class); at most 6 vehicles. |
+| `note_interest {categories}` | unknown | Opens the number's lead (source text) and adds category keys of the catalog. |
+| `propose_booking {serviceKey, addonKeys, date, startMin, vehicle}` | trusted, action | See 29.2. A vehicle names one of the client's own; at most 2 future bookings made by text per client (`rate_limited`). |
+| `propose_reschedule {appointmentRef, date, startMin}` | trusted, action | An own upcoming booked/confirmed visit to a new open time. |
+| `propose_cancel {appointmentRef, reason}` | trusted, action | Only outside the free-cancellation window (`cancellation.policy.freeCancelHours`) and with no money on the visit (paid, awaiting the processor or store credit); otherwise `not_allowed` + handoff `late_cancel`. |
+| `send_link {kind, appointmentRef, tier}` | unknown | `issueClientLink` (`issuedBy assistant`: 1 of a kind an hour, 3 a day) to the number that texts; returns the placeholder `{linkN}` (the URL goes to `ctx.addLink` after commit). verify needs a client; calendar for a stranger or from `caller`; pin / membership / pay from `caller`; membership needs the tier's plan; pay needs an open invoice with a payment URL (else handoff `no_payment_link`). |
+| `opt_out {}` | unknown | Records the opt-out like STOP (`sms_opt_outs` source `keyword`, the client's mark, `revokeForOptOut`) and sends `opt_out_confirm` once. |
+| `handoff_to_staff {reason, summary}` | unknown | `ctx.handoff` (digit runs masked in the summary); a pending in-chat action of the number is canceled. |
+
+### 29.2 In-chat actions and the reply number (`actions/handler.ts`, the W2d `ActionCodeHandler`)
+
+A proposal checks the slot with the online rules (the same check runs again at the confirmation), records
+`assistant_pending_actions` (the trust checked again by `createPendingAction`; payload: service keys, date and start, or the
+appointment id, never shown to the model) and queues `action_confirm` "<summary>. Reply NNNN to confirm." (`secretVars`: the message
+row shows `[code]`; summaries "Express Hand Wash, Mon Jun 15 at 10:00 AM", "Move your … to …", "Cancel your … on …"). When the text
+cannot be queued (opted out, no text from them in 15 minutes) nothing is kept. The model is told to ask for the number, never to say it.
+
+The reply number (a digits-only text routed as `action_code`, inside the webhook transaction): assistant off: the action is canceled,
+no answer; actions off: canceled, answer `action_unavailable`; `confirmPendingAction` for that phone only (wrong: `action_code_wrong`,
+the third locks: `action_code_locked`, expired: `action_code_expired`, trust ended: `action_needs_verify`); confirmed: executed in a
+savepoint as the assistant's actor (`sched.edit` + `jobs.status`): `createAppointment` (channel `online`, source `sms_ai`, the
+client's privileges, no booking-thanks text) answered by `action_booked` (with the guest fee or "members never pay"), the lead closed
+as booked; `rescheduleAppointment` (its `reschedule` text is the confirmation); `cancelAppointment` with `notify` (its notice is the
+confirmation). A refusal (the time was taken meanwhile, the visit changed) fails the action and answers `action_failed`. Answers are
+class `ai_reply`, sender "Oasis AI", one per received text. A STOP (any opt-out: `PgOptOutRepository.optOut` calls
+`revokeForOptOut`) and a staff text on the thread cancel the pending action.
+
+### 29.3 Welcome flow (`welcome/new-texters.ts`, `welcome/provisional.ts`)
+
+`NewTexters.adopt` (inside the webhook transaction, under an advisory lock per number): restores the number's archived provisional
+client, or creates "New texter ••NNNN" (source `inbound_sms`, `sms_opt_in_source inbound_text` unless the number is opted out,
+`needs_details`, audit `assistant.client.created`), or returns the live owner; and opens the lead (source text). `isProvisional` /
+`isProvisionalClient` tell the turn whether the client is still the placeholder.
+
+### 29.4 Leads (`src/modules/leads/**`)
+
+| Route | Access | What it does |
+|---|---|---|
+| `GET /leads?status=open\|all\|new\|followed_up\|booked\|closed&limit=1..200` | `cli.view` | Leads newest contact first (default `open` = new + followed up): client and name (`needsName` while the placeholder stands), source, interests with the category label and colour, status, contact times, `followUpAt` (planned) / `followedUpAt` (queued), the booking that closed it. `phone` only with `cli.contact`. |
+
+`createLeads(deps)`: `open` (idempotent per number; a closed lead opens again, a booked one stays booked; the follow-up planned at the
+last contact + `leads.follow_up_delay_min` while none was sent), `noteInterest`, `markBooked`. Jobs (`docs/jobs.md`):
+`leads.follow_up` every 5 minutes: bookings since the first contact close leads first (also while the follow-up or the assistant is
+off: it sends nothing); then each due lead once, under a row lock:
+dropped after `leads.within_hours` from their last text or after any opt-out since the lead began (a later START notwithstanding),
+dropped outside the rollout stage (`assistant.stage` `allowlist`: listed numbers only; `customers`: clients only), waits for the delay after their last text and, with `leads.business_hours_only`, for the next opening inside the window; the text is
+template `lead_follow_up` (sender "Oasis AI", idempotency key `lead-follow-up:<lead>`) with a personal calendar link (`issuedBy
+system`) as a `secretVar` when `PUBLIC_LINKS_ENABLED` (a stale record gets the stranger's text: no first name, a link bound to the number
+only, the message on no client; `note_interest` with the turn's `unknown` trust leaves the lead's client empty): the thread shows `[private link]`, without a link the text stays readable
+(`lead_follow_up` is a masked class). `leads.provisional_archive` nightly: see 29.3 and ADR 0160.
+
+New SMS templates (class `ai_reply`, not editable, never staff-sendable): `action_booked`, `action_code_wrong`, `action_code_locked`,
+`action_code_expired`, `action_needs_verify`, `action_failed`, `action_unavailable`.
+
+Tests: `test/assistant-tools/*.test.ts`, `test/leads/*.test.ts`, the authz matrix and the contact sweep (the route registry).
