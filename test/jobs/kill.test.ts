@@ -90,7 +90,10 @@ describe('a worker killed mid-job', () => {
     const doomed = spawnWorker(schema)
     await doomed.saw('WORKER_READY')
 
-    const hanging = { name: 'test.reminders-then-hang' } as JobDefinition<never>
+    // The producer re-applies its queue options on start (createQueue + updateQueue), and the job row takes the queue's options when
+    // it is sent: it must carry the child's (fixtures/child-worker.ts) or the retry waits pg-boss's default 30 s delay with backoff
+    // (30 to 60 s) and races the 60 s wait below.
+    const hanging = { name: 'test.reminders-then-hang', retryLimit: 3, retryDelaySeconds: 1, expireInSeconds: 3 } as JobDefinition<never>
     const producer = createJobs({
       connectionString: testDatabaseUrl(),
       schema,
