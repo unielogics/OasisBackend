@@ -4,6 +4,7 @@
 import type { SmsClass } from '../../messaging/policy/classes.js'
 import { offsetLabel, prepTextFor, reminderMessage } from '../../messaging/jobs/reminders.js'
 import { renderSms, type TemplateVars } from '../../messaging/templates/render.js'
+import { checkedInMessage, lateMessage, pickedUpMessage, receiptLine } from '../../status-texts/compose.js'
 import { addDays, fmtT, toBizDate, wallToInstant } from '../../../platform/time.js'
 import type { ReminderCategory, ReminderValues } from './reminders-service.js'
 
@@ -39,6 +40,8 @@ export interface PreviewResult {
 
 /** A personal link as long as a real one (32-byte token), so the segment count is the real count. */
 export const SAMPLE_LINK = `https://oasisautospanj.com/#/c/${'x'.repeat(43)}`
+/** The sample visit's paid invoice, for the picked-up text's receipt line. */
+export const SAMPLE_PAID_CENTS = 4500
 
 export function buildPreview(o: {
   values: ReminderValues
@@ -103,15 +106,17 @@ export function buildPreview(o: {
     vars: {},
   })
 
+  // the status texts compose exactly as the status-texts module sends them (src/modules/status-texts/compose.ts)
   const s = v.statusTexts
+  const checkedIn = checkedInMessage()
   add({
     id: 'status.checked_in',
     group: 'statusTexts',
     label: 'Checked in',
-    timing: `${s.checkedInDelayMin} min after check-in (not sent once the wash starts)`,
-    templateKey: 'welcome',
+    timing: `${s.checkedInDelayMin} min after a manual check-in (not sent once the wash starts)`,
+    templateKey: checkedIn.templateKey,
     enabled: s.checkedIn,
-    vars: { bay: 2 },
+    vars: checkedIn.vars,
   })
   add({
     id: 'status.wash_started',
@@ -122,14 +127,15 @@ export function buildPreview(o: {
     enabled: true,
     vars: {},
   })
+  const late = lateMessage(new Date(start.getTime() + 90 * 60_000), o.tz)
   add({
     id: 'status.running_late',
     group: 'statusTexts',
     label: 'Running late',
     timing: `${s.lateGraceMin} min past the promised time, at most ${s.lateMax} per visit`,
-    templateKey: 'job_delay',
+    templateKey: late.templateKey,
     enabled: s.runningLate && s.lateMax > 0,
-    vars: { eta: fmtT(Math.min(startMin + 90, 23 * 60 + 55)) },
+    vars: late.vars,
   })
   add({
     id: 'status.ready',
@@ -140,14 +146,19 @@ export function buildPreview(o: {
     enabled: s.ready,
     vars: {},
   })
+  const pickedUp = pickedUpMessage({
+    firstName,
+    receipt: receiptLine({ totalCents: SAMPLE_PAID_CENTS, balanceCents: 0 }, false),
+    link: s.bookAgainLink ? SAMPLE_LINK : null,
+  })
   add({
     id: 'status.picked_up',
     group: 'statusTexts',
     label: 'Picked up',
-    timing: 'when the car leaves',
-    templateKey: 'picked_up',
+    timing: `when the car leaves (“Paid in full” only when nothing is owed and no receipt text went in the last 2 h${s.bookAgainLink ? '; the link only for clients who agreed to marketing texts' : ''})`,
+    templateKey: pickedUp.templateKey,
     enabled: s.pickedUp,
-    vars: { first: firstName, ...(s.bookAgainLink ? { link: SAMPLE_LINK } : {}) },
+    vars: { ...pickedUp.vars, ...pickedUp.secretVars },
   })
 
   const l = v.leads

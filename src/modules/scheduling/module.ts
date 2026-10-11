@@ -49,6 +49,8 @@ export function resolvePorts(deps: AppDeps, given: Partial<SchedulingPorts> = {}
       createDbDepositSettlement({ clock: deps.clock, newId: deps.newId ?? createIdGenerator(deps.clock) }),
     // a canceled job's slot is offered to the waitlist; inert unless the standing/waitlist feature setting is on
     waitlist: given.waitlist ?? dbWaitlistPort,
+    // status texts (ADR 0160): only when the caller wires them (src/http/modules.ts); absent = noStatusTexts
+    ...(given.statusTexts ? { statusTexts: given.statusTexts } : {}),
   }
 }
 

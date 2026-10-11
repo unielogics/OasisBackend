@@ -95,6 +95,14 @@ export function replyRuleOf(klass: SmsClass, lastInboundAt: Date | null | undefi
 /** Consent sources that count as explicit opt-in for marketing-category messages. */
 const MARKETING_CONSENT: ReadonlySet<ConsentSource> = new Set(['web_form', 'inbound_reply'])
 
+/**
+ * Marketing-grade consent: opted in from a source that counts for marketing texts, and not opted out. The picked-up text carries the
+ * book-again link only for such a client (ADR 0160, status texts).
+ */
+export function hasMarketingConsent(recipient: Pick<SmsRecipient, 'smsOptIn' | 'activeOptOut' | 'consentSource'>): boolean {
+  return recipient.smsOptIn && !recipient.activeOptOut && !!recipient.consentSource && MARKETING_CONSENT.has(recipient.consentSource)
+}
+
 export function canSendSms(recipient: SmsRecipient, purpose: SmsPurpose, ctx: SmsPolicyContext): SmsDecision {
   const spec = classSpec(purpose.klass)
   const warnings: string[] = []

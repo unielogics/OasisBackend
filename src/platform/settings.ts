@@ -126,14 +126,15 @@ export const settingDefs = {
   },
   // Status texts as the car moves (design section 6): checked in (queued checked_in_delay_min after a manual arrival), running
   // late (cleaning past the promised end + late_grace_min, at most late_max per visit), ready, picked up (with the book-again link
-  // only when this is on and the client has marketing-grade consent).
-  'status_texts.checked_in': { schema: z.boolean(), default: true },
+  // only when this is on and the client has marketing-grade consent). The three new texts are OFF until the owner turns them on in
+  // Settings -> Reminders (wave W3d: nothing switches on by itself in production); ready-for-pickup was sent before and stays on.
+  'status_texts.checked_in': { schema: z.boolean(), default: false },
   'status_texts.checked_in_delay_min': { schema: z.number().int().min(0).max(30), default: 3 },
-  'status_texts.running_late': { schema: z.boolean(), default: true },
+  'status_texts.running_late': { schema: z.boolean(), default: false },
   'status_texts.late_grace_min': { schema: z.number().int().min(0).max(120), default: 10 },
   'status_texts.late_max': { schema: z.number().int().min(0).max(2), default: 2 },
   'status_texts.ready': { schema: z.boolean(), default: true },
-  'status_texts.picked_up': { schema: z.boolean(), default: true },
+  'status_texts.picked_up': { schema: z.boolean(), default: false },
   'status_texts.book_again_link': { schema: z.boolean(), default: false },
   // The one automatic follow-up text to a lead who did not book (plan J).
   'leads.follow_up_enabled': { schema: z.boolean(), default: true },

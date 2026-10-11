@@ -227,7 +227,8 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
       schema: {
         tags: TAGS,
         summary: 'booked or confirmed to arrived',
-        description: '`source: geofence` also records the geofence check-in and queues the welcome SMS.',
+        description:
+          '`source: geofence` also records the geofence check-in and queues the welcome SMS. A manual arrival queues the checked-in text status_texts.checked_in_delay_min later, dropped if the wash starts first (only while Settings → Reminders turns it on; ADR 0160).',
         params: IdParams,
         body: z
           .object({ source: z.enum(['manual', 'geofence']).optional() })
@@ -293,6 +294,7 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
       schema: {
         tags: TAGS,
         summary: 'cleaning to completed: checks the remaining tasks, queues the ready SMS, frees the bay',
+        description: 'The ready-for-pickup SMS goes unless Settings → Reminders turned it off (status_texts.ready, on by default; ADR 0160).',
         params: IdParams,
         response: { 200: CommandResult },
       },
@@ -452,7 +454,8 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
       schema: {
         tags: TAGS,
         summary: 'Release the vehicle (collected) or reopen the pickup (pending)',
-        description: 'Not gated on payment, as in the design. No message is sent.',
+        description:
+          'Not gated on payment, as in the design. Collected sends the picked-up thank-you once per visit (with "Paid in full" when nothing is owed, and a book-again link only with marketing-grade consent) while Settings → Reminders turns it on (status_texts.picked_up, off by default; ADR 0160).',
         params: IdParams,
         body: z.object({ state: z.enum(['collected', 'pending']) }).strict(),
         response: { 200: CommandResult },

@@ -11,13 +11,13 @@ const sectionVersion = async (s: Session): Promise<number> => json(await h.get('
 const DEFAULTS = {
   reminders: { offsetsMin: [1440, 120], confirmRequest: true, categoryPrep: {}, reviewRequest: false },
   statusTexts: {
-    checkedIn: true,
+    checkedIn: false,
     checkedInDelayMin: 3,
-    runningLate: true,
+    runningLate: false,
     lateGraceMin: 10,
     lateMax: 2,
     ready: true,
-    pickedUp: true,
+    pickedUp: false,
     bookAgainLink: false,
   },
   leads: { followUpEnabled: true, followUpDelayMin: 180, businessHoursOnly: true, withinHours: 24 },
@@ -185,9 +185,15 @@ describe('POST /settings/reminders/preview', () => {
     expect(body(t.get('reminder.120.confirmed')!)).toBe('Reminder: your Oasis Auto Spa appointment is today at 10:00 AM.')
     expect(t.get('review')).toMatchObject({ enabled: false })
     expect(body(t.get('review')!)).toBe('Thanks for visiting Oasis Auto Spa! How did we do?')
-    expect(t.get('status.checked_in')).toMatchObject({ templateKey: 'welcome', timing: '3 min after check-in (not sent once the wash starts)' })
+    // the status texts are the status-texts module's own composition (src/modules/status-texts/compose.ts); the new ones are off by
+    // default, ready-for-pickup stays on
+    expect(t.get('status.checked_in')).toMatchObject({ templateKey: 'welcome', enabled: false, timing: '3 min after a manual check-in (not sent once the wash starts)' })
+    expect(body(t.get('status.checked_in')!)).toBe("Welcome to Oasis! You're checked in.")
+    expect(t.get('status.running_late')).toMatchObject({ templateKey: 'job_delay', enabled: false })
     expect(body(t.get('status.running_late')!)).toBe("We're running a little behind on your vehicle. New estimate: 11:30 AM. Sorry for the wait!")
-    expect(body(t.get('status.picked_up')!)).toBe('Thanks for visiting Oasis Auto Spa, Maria!')
+    expect(t.get('status.ready')).toMatchObject({ templateKey: 'ready', enabled: true })
+    expect(t.get('status.picked_up')).toMatchObject({ templateKey: 'picked_up', klass: 'picked_up', enabled: false })
+    expect(body(t.get('status.picked_up')!)).toBe('Thanks for visiting Oasis Auto Spa, Maria! Paid in full: $45.00.')
     expect(body(t.get('lead.follow_up')!)).toMatch(/^Hi Maria, thanks for reaching out to Oasis Auto Spa about window tint\. Reply here and we'll save you a spot\. Or pick a time: https:\/\/oasisautospanj\.com\/#\/c\/x{43}$/)
   })
 
@@ -208,8 +214,9 @@ describe('POST /settings/reminders/preview', () => {
     expect(body(t.get('reminder.2880.booked')!)).toBe(
       'Reminder: your Oasis Auto Spa appointment is on Sat, Jun 20 at 1:30 PM. Remove valuables. Plan for 2-3 hours.',
     )
-    expect(t.get('status.picked_up')).toMatchObject({ enabled: false })
-    expect(t.get('status.picked_up')!.text).toMatch(/^Thanks for visiting Oasis Auto Spa, Ana! Book your next visit: https:/)
+    // with the book-again link the picked-up text is the personal-link variant (the link is a secret: masked in the message row)
+    expect(t.get('status.picked_up')).toMatchObject({ enabled: false, templateKey: 'picked_up_link', klass: 'personal_link' })
+    expect(t.get('status.picked_up')!.text).toMatch(/^Thanks for visiting Oasis Auto Spa, Ana! Paid in full: \$45\.00\. Book your next visit: https:\/\/oasisautospanj\.com\/#\/c\/x{43}$/)
     // nothing was saved
     expect(json(await h.get('settings/reminders', s))).toMatchObject({ ...DEFAULTS, version: 16 })
     // a draft is validated like a save

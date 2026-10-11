@@ -100,6 +100,26 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
     tests: 'test/jobs/reminders.test.ts, test/jobs/registry.test.ts',
     status: 'built',
   },
+  'appointments.checkin_texts': {
+    owner: 'status-texts',
+    purpose:
+      'Sends the "checked in" text that a manual arrival queued status_texts.checked_in_delay_min earlier (pending_checkin_texts); drops it when the wash started first (the "wash started" text went instead), the visit was canceled, the setting is off, the client cannot be texted or it is over 15 minutes late (ADR 0160). Off by default.',
+    idempotency:
+      'Each pending row is settled once under the appointment and row locks; the text carries the message idempotency key status:checked_in:<appointment>.',
+    clock: 'Injected clock against due_at.',
+    tests: 'test/status-texts/status-texts.test.ts, test/status-texts/jobs.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'appointments.late_texts': {
+    owner: 'status-texts',
+    purpose:
+      'Texts "running a little behind, new estimate h:mm" (now + 15 min, rounded up to 5) to a visit still cleaning past its promised end + status_texts.late_grace_min, the next one only past that estimate + the grace, at most status_texts.late_max per visit, never over 30 minutes after its moment (ADR 0160). Off by default.',
+    idempotency:
+      'One appointment_late_texts row per (appointment, seq), decided again under the appointment row lock; message idempotency key status:running_late:<appointment>:<seq>.',
+    clock: 'Injected clock against the promised end (the booked end, or cleaning start + duration when later) and the last estimate.',
+    tests: 'test/status-texts/status-texts.test.ts, test/status-texts/jobs.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
   'vip.hold_release_scan': {
     owner: 'scheduling',
     purpose:
