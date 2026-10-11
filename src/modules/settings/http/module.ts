@@ -1,9 +1,10 @@
-// Route module for the Settings vertical: hours and rules, closures, emergency, VIP, arrival, services, reminders, the bundle and
-// the public hours (the one route without a session, for the website).
+// Route module for the Settings vertical: hours and rules, closures, emergency, VIP, arrival, services, reminders, the assistant,
+// the bundle and the public hours (the one route without a session, for the website).
 // Registered in src/http/modules.ts; src/server.ts wires the ports with configureSettings().
 import type { ApiModule } from '../../../http/modules.js'
 import { registerCatalogRoutes } from '../../catalog/http/routes.js'
 import { registerVipClientRoutes } from '../../customers/http/vip-clients.js'
+import { registerAssistantRoutes } from './assistant-routes.js'
 import { registerBundleRoute } from './bundle-routes.js'
 import { registerClosureRoutes } from './closure-routes.js'
 import { registerEmergencyRoutes } from './emergency-routes.js'
@@ -24,6 +25,7 @@ export function createSettingsModule(overrides?: Partial<SettingsPorts>): ApiMod
     registerVipClientRoutes(rt)
     registerCatalogRoutes(rt)
     registerRemindersRoutes(rt)
+    registerAssistantRoutes(rt)
     registerBundleRoute(rt)
     registerPublicRoutes(rt)
   }

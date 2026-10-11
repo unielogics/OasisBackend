@@ -426,3 +426,39 @@ transaction (wired in `src/http/modules.ts` and `src/composition.ts`). Jobs `app
   owner's phone (arrive manually, wait 3 minutes; leave a wash past its end + 10 minutes; pick up a paid visit). The book-again link
   needs `PUBLIC_LINKS_ENABLED=true` (W3 link API) and a client with marketing-grade consent; the site's `#/c/<token>` page must treat a
   `book_again` link like a calendar link with one booking.
+
+## Wave W3-dashapi: the backend the dashboard screens need (design section 8, plan G, I, K)
+
+Read and write models only; no migration, no job, nothing that switches anything on. Contract: docs/api-spec.md sections 15.6b, 20
+(categories), 21 (`byCategory`) and 23.2 (thread AI state).
+
+- **Settings → Assistant** (`GET/PUT /api/v1/settings/assistant`, `src/modules/settings/http/assistant-{routes,service}.ts`): the six
+  `assistant.*` settings as one section with one version (the sum of theirs) under a per-location advisory lock, exactly like
+  Reminders; `set.hours` to save (the permission of the shop's business settings: hours, rules, location, cancellation policy,
+  reminders; the plan names no other, and adding a permission key would touch every role). Allowlist numbers are normalised to E.164
+  and must pass `normalizeTextableNanp`, the gate's own check (the gate answers textable US/CA numbers only, so any other entry
+  would never be answered); the FAQ is plain text (no HTML, and no character a reader cannot see: a `u`-flag class of control,
+  format, private-use, unassigned, surrogate, line/paragraph-separator and default-ignorable code points, which covers the Unicode
+  tag block, zero-width and bidi marks, the soft hyphen, variation selectors and Hangul fillers: they hide text from staff while
+  the model reads it; a tab or line break passes, and so do the emoji presentation selector after an emoji and the zero-width
+  joiner between two emoji, which a phone keyboard types and which cannot carry text), each question once. The view adds the
+  read-only `server {aiEnabled, actionsEnabled}` (environment) and `active`, so the screen can say that the server keeps the AI
+  off whatever the switch says. Reading stays open to any session like the other Settings sections, but the allowlist (the
+  owner's and staff's own mobiles) comes masked to the last four digits without `set.hours`, as staff numbers elsewhere need
+  `team.view` and client numbers are masked. Review fixes F1-F3 (2026-10-11).
+- **Categories on every appointment DTO**: `AppointmentRecord` carries `appointments.categories`, so board cards, the list, the
+  calendar day, the appointment file and its history, the command core and the add-on change all answer `categories` and
+  `category` (`visitCategory()`). The per-category KPI counts are NOT computable from the board on the client (the board follows
+  the window and the search; the KPIs do not), so `categoryCounts` is computed beside the seven tiles (today's live jobs) on
+  `/ops/snapshot` and `/ops/kpis`; the `kpis` array stays seven tiles (parity).
+- **Payments split**: rows carry `categories`/`category` (the appointment's; an invoice without one takes the categories of the
+  services its items name); the summary's `byCategory` counts each invoice once with gross, net and outstanding, so the entries add
+  up to the KPIs. One helper (`src/modules/catalog/category-split.ts splitByCategory`) orders both splits: active categories (zero
+  included), then `mixed`, then inactive/unknown keys and `_none` only when used. `mixed` and `_none` have no colour (null): the
+  dashboard picks its neutral. The CSV export is unchanged (its columns are a tested contract).
+- **Threads**: the thread DTO gains `assistantActive` (AI_ENABLED and `assistant.enabled`: the "AI paused" line shows only then,
+  as the W2d note asks), `aiPausedUntil` (only while the pause lies ahead) and `handoff {open, since, reason}` (the open handoff of
+  the client's number, found by client or by phone, so a stranger's conversation adopted later still shows). The message DTO
+  already marked AI texts (W1: `author: 'ai'`, `from: 'system'`, `senderName: 'Oasis AI'`); a route test now covers it.
+- **Identity**: `GET /customers/:id/identity` (W2b) already answers what "Website PIN: Set · trusted to Nov 9" needs
+  (`pin.status`, `trust.trusted`, `trust.until`); nothing added. Leads stay with the W3 assistant package.

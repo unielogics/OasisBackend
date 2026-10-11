@@ -6,6 +6,7 @@ import type { AuthContext } from '../../http/authorizer.js'
 import type { Executor } from '../../platform/db.js'
 import { atLabel, dateLabel, fmtT, minutesOfDay, toBizDate } from '../../platform/time.js'
 import { maskEmail, maskPhone } from '../../platform/phone.js'
+import { visitCategory } from '../catalog/appointment-categories.js'
 import { listCatalog } from '../catalog/service.js'
 import '../customers/schema.js'
 import type { AppointmentStatus } from '../customers/schema.js'
@@ -47,6 +48,9 @@ export interface AppointmentFile {
   badge: { label: string; color: string }
   canDrag: boolean
   next: { label: string; step: NextStep }
+  /** appointments.categories and the word the visit counts under (ADR 0160, plan K). */
+  categories: string[]
+  category: string | null
   customer: {
     id: string
     name: string
@@ -107,7 +111,15 @@ export interface AppointmentFile {
   membershipUpgrade: UpgradeCandidacy | null
   history: {
     visitCount: number
-    recent: { id: string; bizDate: string; service: string; status: string; priceCents: number }[]
+    recent: {
+      id: string
+      bizDate: string
+      service: string
+      status: string
+      priceCents: number
+      categories: string[]
+      category: string | null
+    }[]
   }
 }
 
@@ -167,7 +179,7 @@ export async function loadAppointmentFile(
   ])
   const history = await db
     .selectFrom('appointments')
-    .select(['id', 'scheduled_start', 'package_name', 'status', 'price_cents'])
+    .select(['id', 'scheduled_start', 'package_name', 'status', 'price_cents', 'categories'])
     .where('location_id', '=', c.locationId)
     .where('customer_id', '=', a.customerId)
     .where('status', '=', 'completed')
@@ -210,6 +222,8 @@ export async function loadAppointmentFile(
     badge: { label: meta.label, color: meta.color },
     canDrag: canDrag(a.status),
     next: nextOf({ a, invoice }),
+    categories: a.categories,
+    category: visitCategory(a.categories),
     customer: {
       id: customer.id,
       name: customer.fullName,
@@ -280,6 +294,8 @@ export async function loadAppointmentFile(
         service: h.package_name,
         status: h.status,
         priceCents: h.price_cents,
+        categories: h.categories,
+        category: visitCategory(h.categories),
       })),
     },
   }

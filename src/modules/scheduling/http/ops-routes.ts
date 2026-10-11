@@ -8,7 +8,7 @@ import { getAvailability } from '../availability-loader.js'
 import { loadAlerts } from '../alerts.js'
 import { listBays, getBay } from '../appointments.js'
 import { calendarDay, calendarSummary } from '../calendar.js'
-import { loadKpis } from '../kpis.js'
+import { loadCategoryCounts, loadKpis, loadOpsRows } from '../kpis.js'
 import type { SchedulingPorts } from '../ports.js'
 import { loadSnapshot } from '../snapshot.js'
 import { listBayStaff } from '../staff.js'
@@ -22,6 +22,7 @@ import {
   BizDate,
   CalendarDay,
   CalendarSummary,
+  CategoryCounts,
   Kpi,
   OpsSnapshot,
   StaffView,
@@ -63,11 +64,16 @@ export function registerOpsRoutes(app: AppInstance, ports: SchedulingPorts): voi
       config: { access: access.perm('sched.view') },
       schema: {
         tags: TAGS,
-        summary: 'The seven KPI tiles',
-        response: { 200: z.object({ kpis: z.array(Kpi) }) },
+        summary: 'The seven KPI tiles and today’s visits by category',
+        response: { 200: z.object({ kpis: z.array(Kpi), categoryCounts: CategoryCounts }) },
       },
     },
-    async (req) => ({ kpis: await loadKpis(app.db, await ctxOf(app, req, ports)) }),
+    async (req) => {
+      const c = await ctxOf(app, req, ports)
+      const rows = await loadOpsRows(app.db, c, c.clock.now())
+      const [kpis, categoryCounts] = await Promise.all([loadKpis(app.db, c, rows), loadCategoryCounts(app.db, c, rows)])
+      return { kpis, categoryCounts }
+    },
   )
 
   app.get(

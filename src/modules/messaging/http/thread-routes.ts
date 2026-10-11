@@ -9,6 +9,7 @@ import { z } from '../../../http/zod.js'
 import { AppError } from '../../../platform/errors.js'
 import { transaction, type Executor, type Tx } from '../../../platform/db.js'
 import * as realtime from '../../../platform/realtime.js'
+import { getSetting } from '../../../platform/settings.js'
 import { actorName, type Actor } from '../../scheduling/context.js'
 import { loadCustomerTarget } from '../db/recipients.js'
 import { listThreadMessages, loadMessageDto, locationTz, type MessageDto } from '../db/messages.js'
@@ -18,6 +19,7 @@ import { formatAppointmentTime, formatWhen } from '../templates/format.js'
 import { isTemplateKey, QUICK_REPLIES, TEMPLATES, type TemplateKey } from '../templates/registry.js'
 import { problemForSkip } from './problems.js'
 import { Message } from './schemas.js'
+import '../../assistant/schema.js'
 import './problems.js'
 
 const TAGS = ['messages']
@@ -52,7 +54,71 @@ const ThreadCustomer = z.object({
   canMessage: z.boolean(),
 })
 
-const Thread = z.object({ items: z.array(Message), customer: ThreadCustomer.nullable(), unread: z.number().int() })
+const Handoff = z
+  .object({
+    open: z.boolean().describe('An open handoff: the client asked for a person (AGENT) or the assistant could not help; staff answer'),
+    since: z.string().nullable().describe('When the open handoff began (null when none is open)'),
+    reason: z.string().nullable().describe('Why it was handed off (null when none is open)'),
+  })
+  .describe('The AI handoff of the client’s number (ADR 0160): closed by a staff reply')
+
+const Thread = z.object({
+  items: z.array(Message),
+  customer: ThreadCustomer.nullable(),
+  unread: z.number().int(),
+  assistantActive: z
+    .boolean()
+    .describe('The AI assistant answers texts now (AI_ENABLED and Settings → Assistant on): show the "AI paused" line only then'),
+  aiPausedUntil: z
+    .string()
+    .nullable()
+    .describe('A staff reply paused the AI on this thread until then (null when not paused or the pause is over)'),
+  handoff: Handoff,
+})
+
+interface AssistantThreadState {
+  assistantActive: boolean
+  aiPausedUntil: string | null
+  handoff: z.infer<typeof Handoff>
+}
+
+/** The AI state of a client's thread: the staff pause (message_threads) and the open handoff of their number (by client or phone). */
+async function assistantStateOf(
+  db: Executor,
+  locationId: string,
+  customerId: string,
+  now: Date,
+  aiEnabled: boolean,
+): Promise<AssistantThreadState> {
+  const [enabled, thread, customer] = await Promise.all([
+    aiEnabled ? getSetting(db, locationId, 'assistant.enabled').then((s) => s.value) : Promise.resolve(false),
+    db
+      .selectFrom('message_threads')
+      .select('ai_paused_until')
+      .where('location_id', '=', locationId)
+      .where('customer_id', '=', customerId)
+      .executeTakeFirst(),
+    db.selectFrom('customers').select('phone_e164').where('id', '=', customerId).executeTakeFirst(),
+  ])
+  const phone = customer?.phone_e164 ?? null
+  const open = await db
+    .selectFrom('assistant_conversations')
+    .select(['handoff_at', 'handoff_reason'])
+    .where('location_id', '=', locationId)
+    .where('handoff_state', '=', 'open')
+    .where((eb) => (phone ? eb.or([eb('customer_id', '=', customerId), eb('phone_e164', '=', phone)]) : eb('customer_id', '=', customerId)))
+    .orderBy('handoff_at', 'desc')
+    .limit(1)
+    .executeTakeFirst()
+  const until = thread?.ai_paused_until ?? null
+  return {
+    assistantActive: aiEnabled && enabled,
+    aiPausedUntil: until && until > now ? until.toISOString() : null,
+    handoff: open
+      ? { open: true, since: open.handoff_at ? open.handoff_at.toISOString() : null, reason: open.handoff_reason }
+      : { open: false, since: null, reason: null },
+  }
+}
 
 const SendBody = z
   .object({
@@ -127,7 +193,8 @@ export function registerThreadRoutes(app: AppInstance, rt: MessagingRuntime): vo
       if (req.query.markRead && req.auth!.permissions.has('msg.send')) await transaction(app.db, (tx) => markRead(tx, locationId, { appointmentId: appt.id }, app.clock.now()))
       const items = await listThreadMessages(app.db, locationId, { appointmentId: appt.id, limit: req.query.limit })
       const customer = await customerFlags(app.db, locationId, appt.customer_id)
-      return { items, customer, unread: items.filter((m) => !m.read).length }
+      const ai = await assistantStateOf(app.db, locationId, appt.customer_id, app.clock.now(), app.env.AI_ENABLED)
+      return { items, customer, unread: items.filter((m) => !m.read).length, ...ai }
     },
   )
 
@@ -149,7 +216,8 @@ export function registerThreadRoutes(app: AppInstance, rt: MessagingRuntime): vo
       if (!customer) throw new AppError('NOT_FOUND')
       if (req.query.markRead && req.auth!.permissions.has('msg.send')) await transaction(app.db, (tx) => markRead(tx, locationId, { customerId: req.params.id }, app.clock.now()))
       const items = await listThreadMessages(app.db, locationId, { customerId: req.params.id, limit: req.query.limit })
-      return { items, customer, unread: items.filter((m) => !m.read).length }
+      const ai = await assistantStateOf(app.db, locationId, req.params.id, app.clock.now(), app.env.AI_ENABLED)
+      return { items, customer, unread: items.filter((m) => !m.read).length, ...ai }
     },
   )
 

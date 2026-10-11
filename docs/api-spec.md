@@ -435,6 +435,8 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/services` | set.services | optional |
 | PATCH | `/api/v1/services/:id` | set.services |  |
 | PUT | `/api/v1/services/:id/checklist` | set.services |  |
+| GET | `/api/v1/settings/assistant` | authenticated |  |
+| PUT | `/api/v1/settings/assistant` | set.hours |  |
 | PUT | `/api/v1/settings/auto-federal-holidays` | set.hours |  |
 | GET | `/api/v1/settings/bundle` | authenticated |  |
 | GET | `/api/v1/settings/cancellation-policy` | authenticated |  |
@@ -702,6 +704,32 @@ as `{prep}` to both templates ("... at 2:00 PM. Plan for 2–3 hours. Reply C to
 (`reminderMessage()` in `src/modules/messaging/jobs/reminders.ts`). Tests: `test/settings-http/reminders.test.ts`,
 `test/jobs/reminders.test.ts`.
 
+### 15.6b The AI text assistant: `/settings/assistant` (ADR 0160, design section 8, plan G)
+
+`GET /settings/assistant` (any session) answers `{enabled, actionsEnabled, stage allowlist|customers|everyone, allowlist[E.164],
+staffPauseHours, faq[{q, a}], server{aiEnabled, actionsEnabled} (read-only), active (read-only), version}` with `ETag: "<version>"`.
+The values are the registry settings `assistant.enabled`, `assistant.actions_enabled`, `assistant.stage`, `assistant.allowlist`,
+`assistant.staff_pause_hours` and `assistant.faq` (all off / empty by default: `enabled` and `actionsEnabled` false, stage
+`allowlist`, 12 hours); `version` is the sum of their versions, which any write to any of them raises. `server` are the environment
+switches `AI_ENABLED` and `AI_ACTIONS_ENABLED`, which this section cannot change: with `AI_ENABLED=false` the assistant answers nobody
+whatever the section says. `active` = `AI_ENABLED` and `enabled`. The allowlist holds the owner's and staff's own mobile numbers,
+so a reader without `set.hours` gets them masked to the last four digits (`+1******0142`); `set.hours` sees them in full.
+
+`PUT /settings/assistant` (`set.hours`, the permission of the shop's other business settings): any field (strict; `allowlist` and
+`faq` replace the whole list), `version` or `If-Match` required (428 without, 412 `VERSION_CONFLICT {currentVersion}` when stale;
+saves take a per-location advisory lock). Each value is validated by its registry schema, then the section's rules: allowlist numbers
+are read as E.164 (`(201) 555-0142` becomes `+12015550142`), must be textable US/Canadian numbers, the check the assistant's gate
+uses (`normalizeTextableNanp`: no area code 000, no toll-free, premium or other +1 country; `The assistant texts US and Canadian
+mobile numbers only.`), each listed once, at most 50; the FAQ holds at most 40 pairs of 1..500 characters each (trimmed), plain text
+(no HTML tag and no character a reader cannot see: control characters but a tab or line break, format characters such as zero-width,
+direction marks, the soft hyphen and the Unicode tag block, line/paragraph separators, private-use, unassigned and default-ignorable
+code points such as variation selectors and Hangul fillers; only the emoji presentation selector after an emoji and the zero-width
+joiner between two emoji pass), each question once (case and spaces ignored). 422
+names every field (`allowlist.1`, `faq.0.a`, `staffPauseHours`; a stage outside the enum is the request schema's `body.stage`), and
+nothing is written. Only changed keys are written, each audited (`settings.update`, before/after) and published as
+`settings.changed {section: assistant, key, version}`. The answer is the view plus `changed`. A loaded view may be sent back as it
+is (`server` and `active` are accepted and ignored). Tests: `test/settings-http/assistant.test.ts`.
+
 ### 15.7 The public website's hours: `GET /api/v1/public/hours`
 
 The first route of the API that answered without a session (`access.public`, listed in the authz matrix's `PUBLIC_ROUTES`; ADR 0145;
@@ -775,6 +803,15 @@ update, `activity_log`, a queued message (`MessageQueue`, never sent inline), `a
 problem+json whose `title` and `detail` are the design's toast strings (curly apostrophes included). Success responses carry
 the toast for the command (`toast: {title, detail}`) and the changed appointment (`appointment`, a compact core with
 `version`, `status`, bays, `late`, `canDrag`); the dashboard refetches the board on the ops events.
+
+Categories (ADR 0160, plan K): every card (`/ops/snapshot`, `/appointments`, `/calendar/day`), the file (`GET /appointments/:id`)
+and each visit of its `history.recent`, the command core (`appointment` of every command result, booking included) and the add-on
+change carry `categories` (the category keys of the package and live add-ons in the categories' order: `appointments.categories`)
+and `category` (`visitCategory()`: the category ignoring add-ons, `mixed` for two or more, `addons` for add-ons alone, null for none).
+`GET /ops/snapshot` and `GET /ops/kpis` add `categoryCounts {bizDate, total, items[{key, label, colour, count}]}`: today's jobs that
+are not canceled or no-show, each counted once under its `category`; every active category (zero included) in the categories'
+order, then `mixed` (colour null); an inactive or unknown category and `_none` (no category) only when something counts under them.
+Search and window never affect it; the seven `kpis` are unchanged. Tests: `test/scheduling/categories-dto.test.ts`.
 
 Pay views (`pay` on a card and in the file): `kind` is `paid`, `deposit`, `due`, `pending` or `none`. `pending` (label `Payment pending`, or
 `Payment pending · $X due` while the invoice is not fully funded) means card money staff recorded and Squarespace has not confirmed;
@@ -868,8 +905,8 @@ called by the Settings checklist route after `putChecklist`.
 (`test/golden/ops/original.json`, re-extract with `test/golden/ops/extract/extract-original.ts`, see
 `test/golden/ops/DEVIATIONS.md` for every deliberate difference). The seed profile `parity-ops` (`db/seeds/scheduling.ts`)
 is the design's day as data.
-| `GET /payments/summary?range=today\|7d\|30d\|mtd` | `pay.reports` | Inclusive business days ending today (business tz). `{range{key,from,to,label}, kpis{grossSales,netRevenue,refunds,adjustments,creditsIssued,outstanding,counts{invoices,refunded,adjusted,creditInvoices,creditClients,openBalances}}, chart{granularity,buckets[{key,label,title,netCents,lossCents}],maxCents}, byMethod{card,applePay,cash,storeCredit,other}, filterCounts{all,unpaid,refunds,adjusted,credits}, pendingApprovals{count,text,first,all[]}, awaitingProcessor{count,cents}}`. An invoice belongs to a range by `biz_date`. |
-| `GET /payments/invoices?range&filter&q&limit&cursor` | `pay.reports` | Sorted `bizDate desc, invoiceNo desc`; keyset `nextCursor`. `filter`: `all`, `unpaid` (balance > 0), `refunds` (refunded or pending), `adjusted`, `credits` (issued or applied). `q` matches the joined text of invoice id, client, vehicle and item names, case-insensitive. Rows: `{id,invoiceNo,label,bizDate,date,time,client,vehicle,staff,items{first,more},totalCents,paidCents,balanceCents,status,statusLabel,refundPending,awaiting,adjusted}` (`awaiting` is `payment`, `refund` or null: card money recorded by staff and not yet confirmed in Squarespace, a refund wins). |
+| `GET /payments/summary?range=today\|7d\|30d\|mtd` | `pay.reports` | Inclusive business days ending today (business tz). `{range{key,from,to,label}, kpis{grossSales,netRevenue,refunds,adjustments,creditsIssued,outstanding,counts{invoices,refunded,adjusted,creditInvoices,creditClients,openBalances}}, chart{granularity,buckets[{key,label,title,netCents,lossCents}],maxCents}, byMethod{card,applePay,cash,storeCredit,other}, filterCounts{all,unpaid,refunds,adjusted,credits}, pendingApprovals{count,text,first,all[]}, awaitingProcessor{count,cents}, byCategory[{key,label,colour,count,grossCents,netCents,outstandingCents}]}`. An invoice belongs to a range by `biz_date`. `byCategory` (ADR 0160, plan K) splits the range's invoices by visit category, each invoice once (`mixed` for a multi-category visit, `_none` for none), every active category listed (zero included), then `mixed`; the amounts are the invoices' items (gross), net and balance, so the entries add up to `grossSales` and `outstanding`. |
+| `GET /payments/invoices?range&filter&q&limit&cursor` | `pay.reports` | Sorted `bizDate desc, invoiceNo desc`; keyset `nextCursor`. `filter`: `all`, `unpaid` (balance > 0), `refunds` (refunded or pending), `adjusted`, `credits` (issued or applied). `q` matches the joined text of invoice id, client, vehicle and item names, case-insensitive. Rows: `{id,invoiceNo,label,bizDate,date,time,client,vehicle,staff,items{first,more},totalCents,paidCents,balanceCents,status,statusLabel,refundPending,awaiting,adjusted,categories,category}` (`categories`: the appointment's, else those of the invoiced services; `category` as on the board; `awaiting` is `payment`, `refund` or null: card money recorded by staff and not yet confirmed in Squarespace, a refund wins). |
 | `GET /invoices/:id` | `pay.reports` | Items (with `refunded` flag), adjustment lines, full `calc`, `refundCaps{cardCents,otherCents,totalCents}` (the refund command's own caps after done and pending refunds: card checks `cardCents` then `totalCents`, cash `totalCents` then `otherCents`, store credit `totalCents`), `clientCredit{balanceCents,nextExpiry}`, `ledger[]` newest first (`occurredAt desc, seq desc`, `atLabel` Today / Yesterday / `Jun 11 · 9:12 AM`), per pending refund `canApprove` and `approveBlock` (`permission`, `limit`, `self`) for the caller, `caller{canCollect,canRefund,...,refundLimitCents}`. |
 | `GET /payments/approvals` | `pay.reports` | Pending refunds oldest first with the caller's approval rights. |
 | `GET /payments/export.csv?range&filter&q` | `pay.reports` | UTF-8 BOM, CRLF, RFC 4180, plain decimals, dates in the business tz, text cells starting with `= + - @` get a leading apostrophe (numeric columns never). Scope = range and filter and search. `oasis-invoices_{from}_{to}.csv`, at most 20,000 rows (422 `EXPORT_TOO_LARGE`). Columns: `Invoice, Date, Time, Client, Vehicle, Staff, Items, Tip, Adjustments, Subtotal, Tax, Total, Paid, Credit applied, Refunded, Refund pending, Balance, Credits issued, Net revenue, Status`. |
@@ -952,7 +989,7 @@ caller learns `skipped` (`opted_out`, `not_opted_in`, `no_valid_phone`, `synthet
 
 | Endpoint | Permission | Notes |
 |---|---|---|
-| `GET /appointments/:id/messages` | `cli.view` | The Messages tab. `{items: Message[], customer: {id, name, smsOptedIn, optedOut, hasPhone, canMessage}, unread}`, oldest first. Outbound texts of the appointment and inbound replies attributed to it. No phone number in the payload. `?markRead=true` clears unread (needs `msg.send` to take effect); `?limit` (default 200). |
+| `GET /appointments/:id/messages` | `cli.view` | The Messages tab. `{items: Message[], customer: {id, name, smsOptedIn, optedOut, hasPhone, canMessage}, unread, assistantActive, aiPausedUntil, handoff{open, since, reason}}`, oldest first. The AI state (ADR 0160): `assistantActive` = `AI_ENABLED` and Settings → Assistant on (show the "AI paused" line only then); `aiPausedUntil` = `message_threads.ai_paused_until` while it lies ahead (a staff reply pauses the AI `assistant.staff_pause_hours`), else null; `handoff` = the open handoff of the client's number (`assistant_conversations` by client or phone: `since` = `handoff_at`, `reason`), `{open: false, since: null, reason: null}` when none. Outbound texts of the appointment and inbound replies attributed to it. No phone number in the payload. `?markRead=true` clears unread (needs `msg.send` to take effect); `?limit` (default 200). |
 | `GET /customers/:id/messages` | `cli.view` | The customer-level thread across appointments (B31). Same shape. |
 | `POST /appointments/:id/messages` | `msg.send`, **Idempotency-Key required** | Body `{text}` (free text, class `staff_message`) or `{templateKey, vars?}` (a quick reply key `qr_*` or an automation: `booking_thanks confirm_request confirmed reminder welcome in_progress ready reschedule review late_nudge payment_link addon_approval`; `first`, `time`, `when`, `bay` are filled from the appointment). 201 `{message, queued: true, held, holdUntil, segments}`. Sending also marks the customer's replies read and writes the activity line "Staff message sent". 422 `SMS_OPTED_OUT`, `SMS_NOT_OPTED_IN`, `SMS_NO_PHONE`, `SMS_BLOCKED` (synthetic number or off the allow-list), `SMS_TOO_LONG` (over `SMSGATE_MAX_SEGMENTS`), `SMS_EMPTY`, `SMS_TEMPLATE_INVALID`. |
 | `POST /customers/:id/messages/read` | `msg.send` | Marks the customer's unread replies read. `{marked}`. |
@@ -971,13 +1008,14 @@ caller learns `skipped` (`opted_out`, `not_opted_in`, `no_valid_phone`, `synthet
 | `GET /integrations/sms/devices/:id/health?refresh=` | `set.billing` | Device state plus the dispatcher: `state` (idle, sending, rate_limited, quiet_hours, device_offline), the sliding-window budget, queue depth by lane with ETAs, quiet hours, failures in 24 h. |
 | `POST /dev/sms/inbound`, `GET /dev/mail` | `set.billing`, only with `ALLOW_DEV_ENDPOINTS=true` | Inject a text into the simulated device (handled by the same code path; returns once applied); read the console mailbox. |
 
-`Message` = `{id, direction in|out, from staff|system|customer, senderName, text, time "10:36 AM", at, channel, status, error, templateKey, appointmentId, customerId, segments, read, kind sms|mms, attachments}`.
+`Message` = `{id, direction in|out, from staff|system|customer, author staff|system|customer|ai, senderName, text, time "10:36 AM", at, channel, status, error, templateKey, appointmentId, customerId, segments, read, kind sms|mms, attachments}`.
 `kind` is `mms` for an inbound text that arrived as MMS (`channel` stays `sms`: same thread). `attachments` lists its parts
 (`[]` for an SMS): `{index, name, contentType, size, status stored|listed|unavailable|skipped}`; `stored` pictures are in the
 photos store (no URL or key is exposed yet). The text of an MMS is its body, else the text of its `text/plain` parts, else its
 subject. An MMS with no text reads `[Picture message]`, or `[Picture message — content unavailable]` when the device could not
 download it; when the complete delivery of such an incomplete MMS arrives later, it is filed normally and the placeholder message is
 removed (`message.removed`).
+The assistant's own texts (`sender_kind` `ai`) read `from: system`, `author: ai`, `senderName: "Oasis AI"` (the "Oasis AI" tag).
 `status` is `queued sending sent delivered failed received canceled expired`; the outbox states `accepted` and `sent` both read as `sent`.
 The dashboard's `MessagesPort.thread` is typed as a bare array today; the live wave must read `.items`.
 

@@ -55,6 +55,10 @@ describe('the Messages tab', () => {
       items: [],
       customer: { id: maria().id, name: 'Maria Delgado', smsOptedIn: true, optedOut: false, hasPhone: true, canMessage: true },
       unread: 0,
+      // the AI state (ADR 0160): nothing while the assistant is off
+      assistantActive: false,
+      aiPausedUntil: null,
+      handoff: { open: false, since: null, reason: null },
     })
     expect(res.body).not.toContain(maria().phone)
     expect((await call('GET', '/appointments/00000000-0000-7000-8000-000000000000/messages')).statusCode).toBe(404)

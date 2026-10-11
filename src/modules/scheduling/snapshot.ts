@@ -16,7 +16,7 @@ import {
   type OpsCard,
 } from './board.js'
 import { loadSettingsBundle, type SchedulingCtx } from './context.js'
-import { loadKpis, loadOpsRows, type Kpi } from './kpis.js'
+import { loadCategoryCounts, loadKpis, loadOpsRows, type CategoryCounts, type Kpi } from './kpis.js'
 import { listBayStaff } from './staff.js'
 
 export type OpsWindow = 'next24' | 'today' | 'tomorrow' | 'week'
@@ -87,6 +87,8 @@ export interface OpsSnapshot {
   window: OpsWindow
   q: string
   kpis: Kpi[]
+  /** Today's visits by category (ADR 0160, plan K), beside the seven tiles. */
+  categoryCounts: CategoryCounts
   alerts: Alert[]
   inFacilityLabel: string
   timeline: { count: number; groups: TimelineGroup[] }
@@ -288,9 +290,10 @@ export async function loadSnapshot(
     })(),
   ]
 
-  const [kpis, alerts] = await Promise.all([
+  const [kpis, alerts, categoryCounts] = await Promise.all([
     loadKpis(db, c, opsRows),
     loadAlerts(db, c, { manager: o.manager, preloaded: opsRows }),
+    loadCategoryCounts(db, c, opsRows),
   ])
   return {
     now: {
@@ -303,6 +306,7 @@ export async function loadSnapshot(
     window: o.window,
     q,
     kpis,
+    categoryCounts,
     alerts,
     inFacilityLabel: `${opsRows.filter((r) => r.a.status === 'cleaning').length} in facility`,
     timeline: { count: upcoming.length, groups },

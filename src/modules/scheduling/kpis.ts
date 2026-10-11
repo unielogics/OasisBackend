@@ -17,6 +17,7 @@ import { loadBoardRows } from './board.js'
 import type { SchedulingCtx } from './context.js'
 import { loadDayData } from './availability-loader.js'
 import { MS_PER_MIN } from './availability.js'
+import { loadCategoryRefs, splitByCategory, type CategoryCount, type CategoryRef } from '../catalog/category-split.js'
 
 export type KpiKey =
   | 'appointments24h'
@@ -163,6 +164,36 @@ export function computeKpis(i: KpiInputs): Kpi[] {
       raw: i.revenueTodayCents,
     },
   ]
+}
+
+/**
+ * Today's visits by category (ADR 0160, plan K: the per-category counts beside the KPI strip): today's jobs that are not canceled
+ * or no-show (the "Members today" population), each counted once under its visit category. Search and range tabs never affect it.
+ */
+export interface CategoryCounts {
+  bizDate: string
+  total: number
+  items: CategoryCount[]
+}
+
+export function categoryCountsOf(
+  rows: readonly BoardRow[],
+  now: Date,
+  tz: string,
+  refs: readonly CategoryRef[],
+): CategoryCounts {
+  const today = toBizDate(now, tz)
+  const todayRows = rows.filter((r) => !OUT.has(r.a.status) && toBizDate(r.a.scheduledStart, tz) === today)
+  return { bizDate: today, total: todayRows.length, items: splitByCategory(todayRows, (r) => r.a.categories ?? [], refs) }
+}
+
+export async function loadCategoryCounts(db: Executor, c: SchedulingCtx, preloaded?: BoardRow[]): Promise<CategoryCounts> {
+  const now = c.clock.now()
+  const [rows, refs] = await Promise.all([
+    preloaded ? Promise.resolve(preloaded) : loadOpsRows(db, c, now),
+    loadCategoryRefs(db, c.locationId),
+  ])
+  return categoryCountsOf(rows, now, c.tz, refs)
 }
 
 /** The rows the KPIs and alerts read: yesterday's start through the end of tomorrow, plus anything in a bay. */

@@ -219,6 +219,24 @@
                           "canDrag": {
                             "type": "boolean"
                           },
+                          "categories": {
+                            "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "category": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                          },
                           "customer": {
                             "additionalProperties": false,
                             "properties": {
@@ -555,6 +573,8 @@
                           "vehicleLine",
                           "vehicleShort",
                           "service",
+                          "categories",
+                          "category",
                           "startsAt",
                           "endsAt",
                           "time",
@@ -880,6 +900,24 @@
                         "canDrag": {
                           "type": "boolean"
                         },
+                        "categories": {
+                          "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "category": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                        },
                         "etaMinutes": {
                           "anyOf": [
                             {
@@ -983,7 +1021,9 @@
                         "prepped",
                         "pickupState",
                         "late",
-                        "canDrag"
+                        "canDrag",
+                        "categories",
+                        "category"
                       ],
                       "type": "object"
                     },
@@ -1364,6 +1404,24 @@
                     "canDrag": {
                       "type": "boolean"
                     },
+                    "categories": {
+                      "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "category": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                    },
                     "checklist": {
                       "additionalProperties": false,
                       "properties": {
@@ -1544,6 +1602,24 @@
                                 "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
                                 "type": "string"
                               },
+                              "categories": {
+                                "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "category": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                              },
                               "id": {
                                 "type": "string"
                               },
@@ -1564,7 +1640,9 @@
                               "bizDate",
                               "service",
                               "status",
-                              "priceCents"
+                              "priceCents",
+                              "categories",
+                              "category"
                             ],
                             "type": "object"
                           },
@@ -2721,6 +2799,8 @@
                     "badge",
                     "canDrag",
                     "next",
+                    "categories",
+                    "category",
                     "customer",
                     "vehicle",
                     "overview",
@@ -2871,6 +2951,24 @@
                         "canDrag": {
                           "type": "boolean"
                         },
+                        "categories": {
+                          "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "category": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                        },
                         "etaMinutes": {
                           "anyOf": [
                             {
@@ -2974,7 +3072,9 @@
                         "prepped",
                         "pickupState",
                         "late",
-                        "canDrag"
+                        "canDrag",
+                        "categories",
+                        "category"
                       ],
                       "type": "object"
                     },
@@ -3313,6 +3413,24 @@
                       ],
                       "type": "object"
                     },
+                    "categories": {
+                      "description": "The appointment’s categories after the change (a tint add-on makes a wash \"mixed\")",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "category": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                    },
                     "changed": {
                       "type": "boolean"
                     },
@@ -3498,7 +3616,9 @@
                     "addon",
                     "invoice",
                     "checklist",
-                    "toast"
+                    "toast",
+                    "categories",
+                    "category"
                   ],
                   "type": "object"
                 }
@@ -3568,6 +3688,24 @@
                       ],
                       "type": "object"
                     },
+                    "categories": {
+                      "description": "The appointment’s categories after the change (a tint add-on makes a wash \"mixed\")",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "category": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                    },
                     "changed": {
                       "type": "boolean"
                     },
@@ -3753,7 +3891,9 @@
                     "addon",
                     "invoice",
                     "checklist",
-                    "toast"
+                    "toast",
+                    "categories",
+                    "category"
                   ],
                   "type": "object"
                 }
@@ -3860,6 +4000,24 @@
                         "canDrag": {
                           "type": "boolean"
                         },
+                        "categories": {
+                          "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "category": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                        },
                         "etaMinutes": {
                           "anyOf": [
                             {
@@ -3963,7 +4121,9 @@
                         "prepped",
                         "pickupState",
                         "late",
-                        "canDrag"
+                        "canDrag",
+                        "categories",
+                        "category"
                       ],
                       "type": "object"
                     },
@@ -4383,6 +4543,24 @@
                         "canDrag": {
                           "type": "boolean"
                         },
+                        "categories": {
+                          "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "category": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                        },
                         "etaMinutes": {
                           "anyOf": [
                             {
@@ -4486,7 +4664,9 @@
                         "prepped",
                         "pickupState",
                         "late",
-                        "canDrag"
+                        "canDrag",
+                        "categories",
+                        "category"
                       ],
                       "type": "object"
                     },
@@ -4852,6 +5032,24 @@
                         "canDrag": {
                           "type": "boolean"
                         },
+                        "categories": {
+                          "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "category": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                        },
                         "etaMinutes": {
                           "anyOf": [
                             {
@@ -4955,7 +5153,9 @@
                         "prepped",
                         "pickupState",
                         "late",
-                        "canDrag"
+                        "canDrag",
+                        "categories",
+                        "category"
                       ],
                       "type": "object"
                     },
@@ -5333,6 +5533,24 @@
                         "canDrag": {
                           "type": "boolean"
                         },
+                        "categories": {
+                          "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "category": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                        },
                         "etaMinutes": {
                           "anyOf": [
                             {
@@ -5436,7 +5654,9 @@
                         "prepped",
                         "pickupState",
                         "late",
-                        "canDrag"
+                        "canDrag",
+                        "categories",
+                        "category"
                       ],
                       "type": "object"
                     },
@@ -6017,6 +6237,24 @@
                         "canDrag": {
                           "type": "boolean"
                         },
+                        "categories": {
+                          "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "category": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                        },
                         "etaMinutes": {
                           "anyOf": [
                             {
@@ -6120,7 +6358,9 @@
                         "prepped",
                         "pickupState",
                         "late",
-                        "canDrag"
+                        "canDrag",
+                        "categories",
+                        "category"
                       ],
                       "type": "object"
                     },
@@ -6464,6 +6704,24 @@
                         "canDrag": {
                           "type": "boolean"
                         },
+                        "categories": {
+                          "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "category": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                        },
                         "etaMinutes": {
                           "anyOf": [
                             {
@@ -6567,7 +6825,9 @@
                         "prepped",
                         "pickupState",
                         "late",
-                        "canDrag"
+                        "canDrag",
+                        "categories",
+                        "category"
                       ],
                       "type": "object"
                     },
@@ -8555,6 +8815,21 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
+                    "aiPausedUntil": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "A staff reply paused the AI on this thread until then (null when not paused or the pause is over)"
+                    },
+                    "assistantActive": {
+                      "description": "The AI assistant answers texts now (AI_ENABLED and Settings → Assistant on): show the \"AI paused\" line only then",
+                      "type": "boolean"
+                    },
                     "customer": {
                       "anyOf": [
                         {
@@ -8593,6 +8868,44 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "handoff": {
+                      "additionalProperties": false,
+                      "description": "The AI handoff of the client’s number (ADR 0160): closed by a staff reply",
+                      "properties": {
+                        "open": {
+                          "description": "An open handoff: the client asked for a person (AGENT) or the assistant could not help; staff answer",
+                          "type": "boolean"
+                        },
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Why it was handed off (null when none is open)"
+                        },
+                        "since": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "When the open handoff began (null when none is open)"
+                        }
+                      },
+                      "required": [
+                        "open",
+                        "since",
+                        "reason"
+                      ],
+                      "type": "object"
                     },
                     "items": {
                       "items": {
@@ -8809,7 +9122,10 @@
                   "required": [
                     "items",
                     "customer",
-                    "unread"
+                    "unread",
+                    "assistantActive",
+                    "aiPausedUntil",
+                    "handoff"
                   ],
                   "type": "object"
                 }
@@ -9217,6 +9533,24 @@
                         "canDrag": {
                           "type": "boolean"
                         },
+                        "categories": {
+                          "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "category": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                        },
                         "etaMinutes": {
                           "anyOf": [
                             {
@@ -9320,7 +9654,9 @@
                         "prepped",
                         "pickupState",
                         "late",
-                        "canDrag"
+                        "canDrag",
+                        "categories",
+                        "category"
                       ],
                       "type": "object"
                     },
@@ -9665,6 +10001,24 @@
                         "canDrag": {
                           "type": "boolean"
                         },
+                        "categories": {
+                          "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "category": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                        },
                         "etaMinutes": {
                           "anyOf": [
                             {
@@ -9768,7 +10122,9 @@
                         "prepped",
                         "pickupState",
                         "late",
-                        "canDrag"
+                        "canDrag",
+                        "categories",
+                        "category"
                       ],
                       "type": "object"
                     },
@@ -10444,6 +10800,24 @@
                         "canDrag": {
                           "type": "boolean"
                         },
+                        "categories": {
+                          "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "category": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                        },
                         "etaMinutes": {
                           "anyOf": [
                             {
@@ -10547,7 +10921,9 @@
                         "prepped",
                         "pickupState",
                         "late",
-                        "canDrag"
+                        "canDrag",
+                        "categories",
+                        "category"
                       ],
                       "type": "object"
                     },
@@ -10891,6 +11267,24 @@
                         "canDrag": {
                           "type": "boolean"
                         },
+                        "categories": {
+                          "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "category": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                        },
                         "etaMinutes": {
                           "anyOf": [
                             {
@@ -10994,7 +11388,9 @@
                         "prepped",
                         "pickupState",
                         "late",
-                        "canDrag"
+                        "canDrag",
+                        "categories",
+                        "category"
                       ],
                       "type": "object"
                     },
@@ -11369,6 +11765,24 @@
                         "canDrag": {
                           "type": "boolean"
                         },
+                        "categories": {
+                          "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "category": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                        },
                         "etaMinutes": {
                           "anyOf": [
                             {
@@ -11472,7 +11886,9 @@
                         "prepped",
                         "pickupState",
                         "late",
-                        "canDrag"
+                        "canDrag",
+                        "categories",
+                        "category"
                       ],
                       "type": "object"
                     },
@@ -11851,6 +12267,24 @@
                         "canDrag": {
                           "type": "boolean"
                         },
+                        "categories": {
+                          "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "category": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                        },
                         "etaMinutes": {
                           "anyOf": [
                             {
@@ -11954,7 +12388,9 @@
                         "prepped",
                         "pickupState",
                         "late",
-                        "canDrag"
+                        "canDrag",
+                        "categories",
+                        "category"
                       ],
                       "type": "object"
                     },
@@ -12317,6 +12753,24 @@
                         "canDrag": {
                           "type": "boolean"
                         },
+                        "categories": {
+                          "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "category": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                        },
                         "etaMinutes": {
                           "anyOf": [
                             {
@@ -12420,7 +12874,9 @@
                         "prepped",
                         "pickupState",
                         "late",
-                        "canDrag"
+                        "canDrag",
+                        "categories",
+                        "category"
                       ],
                       "type": "object"
                     },
@@ -13872,6 +14328,24 @@
                           "canDrag": {
                             "type": "boolean"
                           },
+                          "categories": {
+                            "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "category": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                          },
                           "customer": {
                             "additionalProperties": false,
                             "properties": {
@@ -14208,6 +14682,8 @@
                           "vehicleLine",
                           "vehicleShort",
                           "service",
+                          "categories",
+                          "category",
                           "startsAt",
                           "endsAt",
                           "time",
@@ -14401,6 +14877,24 @@
                           "canDrag": {
                             "type": "boolean"
                           },
+                          "categories": {
+                            "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "category": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                          },
                           "customer": {
                             "additionalProperties": false,
                             "properties": {
@@ -14737,6 +15231,8 @@
                           "vehicleLine",
                           "vehicleShort",
                           "service",
+                          "categories",
+                          "category",
                           "startsAt",
                           "endsAt",
                           "time",
@@ -14833,6 +15329,24 @@
                                 },
                                 "canDrag": {
                                   "type": "boolean"
+                                },
+                                "categories": {
+                                  "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "category": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
                                 },
                                 "customer": {
                                   "additionalProperties": false,
@@ -15170,6 +15684,8 @@
                                 "vehicleLine",
                                 "vehicleShort",
                                 "service",
+                                "categories",
+                                "category",
                                 "startsAt",
                                 "endsAt",
                                 "time",
@@ -20963,6 +21479,21 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
+                    "aiPausedUntil": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "A staff reply paused the AI on this thread until then (null when not paused or the pause is over)"
+                    },
+                    "assistantActive": {
+                      "description": "The AI assistant answers texts now (AI_ENABLED and Settings → Assistant on): show the \"AI paused\" line only then",
+                      "type": "boolean"
+                    },
                     "customer": {
                       "anyOf": [
                         {
@@ -21001,6 +21532,44 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "handoff": {
+                      "additionalProperties": false,
+                      "description": "The AI handoff of the client’s number (ADR 0160): closed by a staff reply",
+                      "properties": {
+                        "open": {
+                          "description": "An open handoff: the client asked for a person (AGENT) or the assistant could not help; staff answer",
+                          "type": "boolean"
+                        },
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Why it was handed off (null when none is open)"
+                        },
+                        "since": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "When the open handoff began (null when none is open)"
+                        }
+                      },
+                      "required": [
+                        "open",
+                        "since",
+                        "reason"
+                      ],
+                      "type": "object"
                     },
                     "items": {
                       "items": {
@@ -21217,7 +21786,10 @@
                   "required": [
                     "items",
                     "customer",
-                    "unread"
+                    "unread",
+                    "assistantActive",
+                    "aiPausedUntil",
+                    "handoff"
                   ],
                   "type": "object"
                 }
@@ -50537,6 +51109,66 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
+                    "categoryCounts": {
+                      "additionalProperties": false,
+                      "description": "Today’s visits by category, each counted once: every active category (zero included) in the categories’ order, then \"mixed\"; an inactive category and \"_none\" only when something counts under them. Search and window never affect it.",
+                      "properties": {
+                        "bizDate": {
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                          "type": "string"
+                        },
+                        "items": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "colour": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "#RRGGBB of the category; null for \"mixed\", \"_none\" and an unknown key"
+                              },
+                              "count": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "key": {
+                                "description": "A category key, \"mixed\" (two or more categories other than add-ons), or \"_none\" (no category)",
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "key",
+                              "label",
+                              "colour",
+                              "count"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "total": {
+                          "description": "Today’s jobs that are not canceled or no-show",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "bizDate",
+                        "total",
+                        "items"
+                      ],
+                      "type": "object"
+                    },
                     "kpis": {
                       "items": {
                         "additionalProperties": false,
@@ -50581,7 +51213,8 @@
                     }
                   },
                   "required": [
-                    "kpis"
+                    "kpis",
+                    "categoryCounts"
                   ],
                   "type": "object"
                 }
@@ -50590,7 +51223,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "The seven KPI tiles",
+        "summary": "The seven KPI tiles and today’s visits by category",
         "tags": [
           "operations"
         ],
@@ -50881,6 +51514,24 @@
                                       },
                                       "canDrag": {
                                         "type": "boolean"
+                                      },
+                                      "categories": {
+                                        "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                                        "items": {
+                                          "type": "string"
+                                        },
+                                        "type": "array"
+                                      },
+                                      "category": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
                                       },
                                       "customer": {
                                         "additionalProperties": false,
@@ -51218,6 +51869,8 @@
                                       "vehicleLine",
                                       "vehicleShort",
                                       "service",
+                                      "categories",
+                                      "category",
                                       "startsAt",
                                       "endsAt",
                                       "time",
@@ -51345,6 +51998,66 @@
                       },
                       "type": "array"
                     },
+                    "categoryCounts": {
+                      "additionalProperties": false,
+                      "description": "Today’s visits by category, each counted once: every active category (zero included) in the categories’ order, then \"mixed\"; an inactive category and \"_none\" only when something counts under them. Search and window never affect it.",
+                      "properties": {
+                        "bizDate": {
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                          "type": "string"
+                        },
+                        "items": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "colour": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "#RRGGBB of the category; null for \"mixed\", \"_none\" and an unknown key"
+                              },
+                              "count": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "key": {
+                                "description": "A category key, \"mixed\" (two or more categories other than add-ons), or \"_none\" (no category)",
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "key",
+                              "label",
+                              "colour",
+                              "count"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "total": {
+                          "description": "Today’s jobs that are not canceled or no-show",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "bizDate",
+                        "total",
+                        "items"
+                      ],
+                      "type": "object"
+                    },
                     "completed": {
                       "additionalProperties": false,
                       "properties": {
@@ -51412,6 +52125,24 @@
                               },
                               "canDrag": {
                                 "type": "boolean"
+                              },
+                              "categories": {
+                                "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "category": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
                               },
                               "customer": {
                                 "additionalProperties": false,
@@ -51749,6 +52480,8 @@
                               "vehicleLine",
                               "vehicleShort",
                               "service",
+                              "categories",
+                              "category",
                               "startsAt",
                               "endsAt",
                               "time",
@@ -51951,6 +52684,24 @@
                           },
                           "canDrag": {
                             "type": "boolean"
+                          },
+                          "categories": {
+                            "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "category": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
                           },
                           "customer": {
                             "additionalProperties": false,
@@ -52288,6 +53039,8 @@
                           "vehicleLine",
                           "vehicleShort",
                           "service",
+                          "categories",
+                          "category",
                           "startsAt",
                           "endsAt",
                           "time",
@@ -52404,6 +53157,24 @@
                                 },
                                 "canDrag": {
                                   "type": "boolean"
+                                },
+                                "categories": {
+                                  "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "category": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
                                 },
                                 "customer": {
                                   "additionalProperties": false,
@@ -52741,6 +53512,8 @@
                                 "vehicleLine",
                                 "vehicleShort",
                                 "service",
+                                "categories",
+                                "category",
                                 "startsAt",
                                 "endsAt",
                                 "time",
@@ -52867,6 +53640,24 @@
                                     },
                                     "canDrag": {
                                       "type": "boolean"
+                                    },
+                                    "categories": {
+                                      "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "category": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
                                     },
                                     "customer": {
                                       "additionalProperties": false,
@@ -53204,6 +53995,8 @@
                                     "vehicleLine",
                                     "vehicleShort",
                                     "service",
+                                    "categories",
+                                    "category",
                                     "startsAt",
                                     "endsAt",
                                     "time",
@@ -53270,6 +54063,7 @@
                     "window",
                     "q",
                     "kpis",
+                    "categoryCounts",
                     "alerts",
                     "inFacilityLabel",
                     "timeline",
@@ -53617,6 +54411,24 @@
                           "bizDate": {
                             "type": "string"
                           },
+                          "categories": {
+                            "description": "The visit’s category keys (its appointment’s), in the categories’ order: the chips",
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "category": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The one word the visit counts under: its category ignoring add-ons, \"mixed\" for two or more, null for none"
+                          },
                           "client": {
                             "type": "string"
                           },
@@ -53709,7 +54521,9 @@
                           "statusLabel",
                           "refundPending",
                           "awaiting",
-                          "adjusted"
+                          "adjusted",
+                          "categories",
+                          "category"
                         ],
                         "type": "object"
                       },
@@ -54012,6 +54826,64 @@
                         "cents"
                       ],
                       "type": "object"
+                    },
+                    "byCategory": {
+                      "description": "The range’s invoices split by visit category (ADR 0160, plan K), each once: every active category (zero included) in the categories’ order, then \"mixed\"; an inactive category and \"_none\" only when something counts under them",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "colour": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "#RRGGBB of the category; null for \"mixed\", \"_none\" and an unknown key"
+                          },
+                          "count": {
+                            "description": "Invoices of the range counted under it",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "grossCents": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "key": {
+                            "description": "A category key, \"mixed\" (two or more categories other than add-ons), or \"_none\" (no category)",
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "netCents": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "outstandingCents": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "colour",
+                          "count",
+                          "grossCents",
+                          "netCents",
+                          "outstandingCents"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
                     },
                     "byMethod": {
                       "additionalProperties": false,
@@ -54539,7 +55411,8 @@
                     "byMethod",
                     "filterCounts",
                     "pendingApprovals",
-                    "awaitingProcessor"
+                    "awaitingProcessor",
+                    "byCategory"
                   ],
                   "type": "object"
                 }
@@ -61154,6 +62027,319 @@
         "x-oasis-access": "set.services"
       }
     },
+    "/api/v1/settings/assistant": {
+      "get": {
+        "description": "Any signed-in user may read it; without set.hours the allowlist numbers come masked to their last four digits.",
+        "operationId": "getSettingsAssistant",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "actionsEnabled": {
+                      "description": "The assistant may book, reschedule and cancel in the chat, each confirmed by a reply number (with AI_ACTIONS_ENABLED on the server)",
+                      "type": "boolean"
+                    },
+                    "active": {
+                      "description": "Read-only: the assistant answers texts now (AI_ENABLED and enabled)",
+                      "type": "boolean"
+                    },
+                    "allowlist": {
+                      "description": "The numbers of the first stage (the owner and staff), E.164 (+12015550142; \"(201) 555-0142\" is read too), textable US/Canadian numbers, at most 50, each once. GET shows them masked to the last four digits (\"+1******0142\") to a reader without set.hours",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "enabled": {
+                      "description": "The assistant answers texts (with AI_ENABLED on the server); off: texts reach staff as today",
+                      "type": "boolean"
+                    },
+                    "faq": {
+                      "description": "Questions and answers the assistant answers from, at most 40 pairs, plain text, each question once",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "a": {
+                            "description": "The answer the assistant gives, plain text, 500 characters at most",
+                            "type": "string"
+                          },
+                          "q": {
+                            "description": "The question as a client would ask it, plain text, 500 characters at most",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "q",
+                          "a"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "server": {
+                      "additionalProperties": false,
+                      "description": "Read-only: the server switches (environment), which this section cannot change",
+                      "properties": {
+                        "actionsEnabled": {
+                          "description": "AI_ACTIONS_ENABLED: off, no in-chat booking, rescheduling or cancelling",
+                          "type": "boolean"
+                        },
+                        "aiEnabled": {
+                          "description": "AI_ENABLED: off, the assistant answers nobody whatever this section says",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "aiEnabled",
+                        "actionsEnabled"
+                      ],
+                      "type": "object"
+                    },
+                    "staffPauseHours": {
+                      "description": "A staff reply pauses the assistant on that thread this many hours, 1 to 72",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "stage": {
+                      "description": "Who it answers: only the allowlisted numbers, then also known clients, then everyone",
+                      "enum": [
+                        "allowlist",
+                        "customers",
+                        "everyone"
+                      ],
+                      "type": "string"
+                    },
+                    "version": {
+                      "description": "The section’s version (ETag): send it back with PUT",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "enabled",
+                    "actionsEnabled",
+                    "stage",
+                    "allowlist",
+                    "staffPauseHours",
+                    "faq",
+                    "server",
+                    "active",
+                    "version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "The AI text assistant: on/off, in-chat actions, stage, allowlist, staff pause and FAQ (ETag = version)",
+        "tags": [
+          "settings"
+        ],
+        "x-oasis-access": "authenticated"
+      },
+      "put": {
+        "description": "Partial: any field; the rest stays (`allowlist` and `faq` are replaced as a whole). `version` (or If-Match) is required and must be the section’s current version: 412 VERSION_CONFLICT otherwise, 428 without one. Validated against the settings registry plus the section’s rules (allowlist: E.164 textable US/Canadian numbers, each once, at most 50; FAQ: at most 40 pairs of plain text, 500 characters each, no hidden, invisible or control characters (a tab or line break is fine) or HTML, each question once). Each changed setting is audited (settings.update) and published as `settings.changed` (section assistant). The server switches (`server`) are read-only.",
+        "operationId": "putSettingsAssistant",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "actionsEnabled": {
+                    "description": "The assistant may book, reschedule and cancel in the chat, each confirmed by a reply number (with AI_ACTIONS_ENABLED on the server)",
+                    "type": "boolean"
+                  },
+                  "active": {},
+                  "allowlist": {
+                    "description": "The numbers of the first stage (the owner and staff), E.164 (+12015550142; \"(201) 555-0142\" is read too), textable US/Canadian numbers, at most 50, each once. GET shows them masked to the last four digits (\"+1******0142\") to a reader without set.hours",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "enabled": {
+                    "description": "The assistant answers texts (with AI_ENABLED on the server); off: texts reach staff as today",
+                    "type": "boolean"
+                  },
+                  "faq": {
+                    "description": "Questions and answers the assistant answers from, at most 40 pairs, plain text, each question once",
+                    "items": {
+                      "properties": {
+                        "a": {
+                          "description": "The answer the assistant gives, plain text, 500 characters at most",
+                          "type": "string"
+                        },
+                        "q": {
+                          "description": "The question as a client would ask it, plain text, 500 characters at most",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "q",
+                        "a"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "server": {},
+                  "staffPauseHours": {
+                    "description": "A staff reply pauses the assistant on that thread this many hours, 1 to 72",
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
+                  },
+                  "stage": {
+                    "description": "Who it answers: only the allowlisted numbers, then also known clients, then everyone",
+                    "enum": [
+                      "allowlist",
+                      "customers",
+                      "everyone"
+                    ],
+                    "type": "string"
+                  },
+                  "version": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "actionsEnabled": {
+                      "description": "The assistant may book, reschedule and cancel in the chat, each confirmed by a reply number (with AI_ACTIONS_ENABLED on the server)",
+                      "type": "boolean"
+                    },
+                    "active": {
+                      "description": "Read-only: the assistant answers texts now (AI_ENABLED and enabled)",
+                      "type": "boolean"
+                    },
+                    "allowlist": {
+                      "description": "The numbers of the first stage (the owner and staff), E.164 (+12015550142; \"(201) 555-0142\" is read too), textable US/Canadian numbers, at most 50, each once. GET shows them masked to the last four digits (\"+1******0142\") to a reader without set.hours",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "changed": {
+                      "description": "The setting keys this save changed",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "enabled": {
+                      "description": "The assistant answers texts (with AI_ENABLED on the server); off: texts reach staff as today",
+                      "type": "boolean"
+                    },
+                    "faq": {
+                      "description": "Questions and answers the assistant answers from, at most 40 pairs, plain text, each question once",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "a": {
+                            "description": "The answer the assistant gives, plain text, 500 characters at most",
+                            "type": "string"
+                          },
+                          "q": {
+                            "description": "The question as a client would ask it, plain text, 500 characters at most",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "q",
+                          "a"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "server": {
+                      "additionalProperties": false,
+                      "description": "Read-only: the server switches (environment), which this section cannot change",
+                      "properties": {
+                        "actionsEnabled": {
+                          "description": "AI_ACTIONS_ENABLED: off, no in-chat booking, rescheduling or cancelling",
+                          "type": "boolean"
+                        },
+                        "aiEnabled": {
+                          "description": "AI_ENABLED: off, the assistant answers nobody whatever this section says",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "aiEnabled",
+                        "actionsEnabled"
+                      ],
+                      "type": "object"
+                    },
+                    "staffPauseHours": {
+                      "description": "A staff reply pauses the assistant on that thread this many hours, 1 to 72",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "stage": {
+                      "description": "Who it answers: only the allowlisted numbers, then also known clients, then everyone",
+                      "enum": [
+                        "allowlist",
+                        "customers",
+                        "everyone"
+                      ],
+                      "type": "string"
+                    },
+                    "version": {
+                      "description": "The section’s version (ETag): send it back with PUT",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "enabled",
+                    "actionsEnabled",
+                    "stage",
+                    "allowlist",
+                    "staffPauseHours",
+                    "faq",
+                    "server",
+                    "active",
+                    "version",
+                    "changed"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Save the Assistant section (the dirty-tracked save)",
+        "tags": [
+          "settings"
+        ],
+        "x-oasis-access": "set.hours"
+      }
+    },
     "/api/v1/settings/auto-federal-holidays": {
       "put": {
         "description": "Generated closures are closed days with notify off, skip past dates and any holiday that already has a closure (by date or name) or was generated and removed before. Idempotent. Publishes `settings.changed {section: \"federal_holidays\"}` and `{section: \"closures\"}`.",
@@ -67533,6 +68719,24 @@
                             "canDrag": {
                               "type": "boolean"
                             },
+                            "categories": {
+                              "description": "The category keys the visit holds (package and live add-ons), in the categories’ order: the chips",
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "category": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, \"mixed\" for two or more, the add-ons category for add-ons alone, null for none"
+                            },
                             "etaMinutes": {
                               "anyOf": [
                                 {
@@ -67636,7 +68840,9 @@
                             "prepped",
                             "pickupState",
                             "late",
-                            "canDrag"
+                            "canDrag",
+                            "categories",
+                            "category"
                           ],
                           "type": "object"
                         },

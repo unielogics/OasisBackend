@@ -42,6 +42,9 @@ const EXPECTED: [string, string, string, 'required' | 'optional' | undefined][] 
   ['GET', '/api/v1/settings/reminders', 'authenticated', undefined],
   ['PUT', '/api/v1/settings/reminders', 'set.hours', undefined],
   ['POST', '/api/v1/settings/reminders/preview', 'authenticated', undefined],
+  // Settings → Assistant (ADR 0160, design section 8)
+  ['GET', '/api/v1/settings/assistant', 'authenticated', undefined],
+  ['PUT', '/api/v1/settings/assistant', 'set.hours', undefined],
   ['GET', '/api/v1/public/hours', 'public', undefined],
 ]
 
