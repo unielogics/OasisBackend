@@ -1,12 +1,15 @@
 // Needs Attention alerts 10 and 11 (design 4.4): an unread inbound text (also one that could not be tied to an appointment,
 // and a customer's CANCEL) and an SMS device that is offline, or texts queued with no device enabled at all. Computed on read,
-// like the other alerts.
+// like the other alerts. An open AI handoff (ADR 0160: AGENT, and wave 3's fallbacks) is one alert per conversation, in place of
+// that client's new-reply alert.
 import type { Executor } from '../../../platform/db.js'
+import { maskPhone } from '../../../platform/phone.js'
 import { fmtT, minutesOfDay } from '../../../platform/time.js'
 import type { ExternalAlert, ExternalAlertSource } from '../../scheduling/ports.js'
 import { parseKeyword } from '../inbound/keywords.js'
 import { locationTz } from '../db/messages.js'
 import '../schema.js'
+import '../../assistant/schema.js'
 
 const PREVIEW = 56
 const MAX_REPLY_ALERTS = 12
@@ -15,6 +18,31 @@ export const messagingAlertSource: ExternalAlertSource = {
   async list(db: Executor, ctx: { locationId: string; now: Date; manager: boolean }): Promise<ExternalAlert[]> {
     const out: ExternalAlert[] = []
     const tz = await locationTz(db, ctx.locationId)
+
+    const handoffs = await db
+      .selectFrom('assistant_conversations as a')
+      .leftJoin('customers as c', 'c.id', 'a.customer_id')
+      .select(['a.id', 'a.phone_e164', 'a.customer_id', 'a.handoff_reason', 'a.handoff_at', 'c.full_name'])
+      .where('a.location_id', '=', ctx.locationId)
+      .where('a.handoff_state', '=', 'open')
+      .orderBy('a.handoff_at', 'desc')
+      .limit(MAX_REPLY_ALERTS)
+      .execute()
+    const handedOff = new Set<string>()
+    for (const h of handoffs) {
+      if (h.customer_id) handedOff.add(h.customer_id)
+      const asked = h.handoff_reason === 'agent_keyword'
+      out.push({
+        key: `ai_handoff:${h.id}`,
+        kind: 'ai_handoff',
+        tone: 'violet',
+        title: `${asked ? 'Asked for a person' : 'Oasis AI handed off'} · ${h.full_name ?? maskPhone(h.phone_e164)}`,
+        desc: `${h.handoff_at ? `${fmtT(minutesOfDay(h.handoff_at, tz))} · ` : ''}${asked ? 'texted AGENT' : 'the assistant could not help'} · reply in Messages`,
+        actionLabel: 'Open messages',
+        appointmentId: null,
+        priority: 1,
+      })
+    }
 
     const unread = await db
       .selectFrom('messages as m')
@@ -29,6 +57,8 @@ export const messagingAlertSource: ExternalAlertSource = {
     const seen = new Set<string>()
     for (const m of unread) {
       const key = m.appointment_id ?? `c:${m.customer_id}`
+      // the handoff alert stands for this client's unread texts
+      if (m.customer_id && handedOff.has(m.customer_id)) continue
       if (seen.has(key)) continue
       seen.add(key)
       if (seen.size > MAX_REPLY_ALERTS) break

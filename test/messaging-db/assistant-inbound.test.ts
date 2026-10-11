@@ -7,6 +7,7 @@ import { SIM_DEVICE_KEY } from '../../db/seeds/messaging.js'
 import { CODE_MASK } from '../../src/modules/messaging/inbound/keywords.js'
 import { hasPendingAction, handoffSourceRef } from '../../src/modules/messaging/assistant/inbox.js'
 import type { ActionCodeInput } from '../../src/modules/assistant/ports.js'
+import { messagingAlertSource } from '../../src/modules/messaging/adapters/alerts.js'
 import { STRANGER, useWorld } from './world.js'
 
 const kicked: string[][] = []
@@ -186,6 +187,20 @@ describe('AGENT', () => {
     await inbound(maria(), 'are you there?')
     expect((await lastInbox()).decision).toBe('message')
     expect(kicked).toHaveLength(1)
+  })
+
+  it('an open handoff is one Needs-attention alert in place of the new-reply alert; a staff reply clears it', async () => {
+    await assistantOn()
+    await inbound(maria(), 'AGENT')
+    const list = () => messagingAlertSource.list(w.t.db, { locationId: w.locationId, now: w.clock.now(), manager: false })
+    const alerts = await list()
+    expect(alerts.map((a) => a.kind)).toEqual(['ai_handoff'])
+    expect(alerts[0]).toMatchObject({ tone: 'violet', title: 'Asked for a person · Maria Delgado', actionLabel: 'Open messages' })
+    await w.tx(async (tx) => {
+      const t = (await w.rt.queue.target(tx, w.locationId, w.customer('Maria Delgado').id))!
+      await w.rt.queue.enqueueFor(tx, { locationId: w.locationId, customerId: w.customer('Maria Delgado').id, recipient: t.recipient, appointmentId: null, text: 'On it', klass: 'staff_message', purpose: 'staff', senderKind: 'staff' })
+    })
+    expect((await list()).map((a) => a.kind)).toEqual(['new_reply'])
   })
 
   it('from a stranger: handoff kept for review in the quarantine list, alert names the masked number', async () => {
