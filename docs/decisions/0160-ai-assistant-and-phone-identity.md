@@ -228,3 +228,48 @@ registered by the contract. Test: `test/assistant/contract.test.ts`.
 - **Factories**: every W3 part takes the same `AssistantDeps` (db, clock, ids, env, queue, log, facts source,
   `schedulingFor(location)`, `actorFor(location)`), built once by W3a's wiring. `createLeads` (open / noteInterest / markBooked) is
   added beyond the brief so the link API's bookings and the reply-number handler close a lead the same way.
+
+## Wave W3a (the assistant's turn)
+
+`src/modules/assistant/{facts,guard,prompt,context,turn,tool-runner,transcript,handoff,config,runtime,jobs}.ts`, the `ai_reply` template,
+the jobs `ai.respond` / `ai.sweep`, and the wiring (`wireAssistant` in `src/server.ts`, `configureAssistantJobs` in `src/worker.ts`).
+No migration: the W1 tables carry it. Contract: docs/api-spec.md section 23.4b. Everything is inert with the defaults (the gate marks
+nothing; both jobs return at once while `AI_ENABLED=false`). Notes and deviations:
+
+- **Pricing rule** follows design section 3b (newer than section 3's "every $ must appear in this turn's tool outputs"): an amount must be a
+  starting price, a plan price or the guest fee of the CURRENT shop facts, or an amount a tool of the turn declared (`amountsCents`: the
+  client's own balance); a service price needs "starts at" / "starting at" / "from" in its sentence before it; totals and combinations
+  ("total", "for both", "plus $", "together", tax, ...) are blocked. One rewrite call, then the fallback.
+- **The shop website as text** is allowed in a reply (the contract's facts state it "as text"); every other web address is blocked, and
+  only the turn's registered `{linkN}` placeholders pass.
+- **Handoff words**: "free" is not one in "feel free", "a free slot", "spot-free" and the like; a word the owner's own facts use with the
+  same neighbour (the VIP perk "Priority booking and same-day guarantee", an FAQ answer) may be repeated. The facts phrase the
+  cancellation policy without "refund" for that reason.
+- **One question per text** (the owner's intake rule) is enforced by the guard: one rewrite, else the text is cut after its first question.
+  Too long: one shorten call, else a cut at a sentence.
+- **Disclosure**: the first AI text of a conversation is the template `ai_reply` with its disclosure block, "Oasis Auto Spa’s automated
+  assistant here. … Reply STOP to opt out." (owner 2026-10-11: no AGENT offer); `assistant_conversations.disclosed_at` records it. Replies
+  are queued as free text rendered from that template (class `ai_reply`, or `personal_link` with the links as `secretVars`).
+- **The conversation** reaches the model as one user message (the texts of the last 48 hours, at most 20, labelled Client / You / (staff) /
+  (shop), the unanswered ones marked NEW, digit runs masked), not as alternating roles: staff and automatic texts are not model turns, and
+  Converse needs the conversation to start with the user. The tool rounds of the turn are real toolUse / toolResult turns.
+- **Intake** is server-driven: the turn context names the next step (name, intent, memberships, vehicle). A new texter is a stranger, a
+  provisional client, or a client the welcome flow created (source `inbound_sms`) who never booked. Intent = the lead has interests or the
+  client has an appointment; memberships presented = an active membership or a successful `get_membership_info` in the conversation.
+- **Caps**: "a day" is the business day; the turn counts are turns that called the model (gate refusals write no turn row; capped turns
+  call no model). A cap hands off with the fallback (at most one per 2 hours) rather than staying silent; a shop-wide cap or the budget also
+  notifies the managers once a business day (`assistant.cap`). "The daily cap switches the AI off" = every turn hands off until the next
+  business day; no setting is changed.
+- **Loop breaker**: six answered turns in a row (within 24 hours) without a successful tool call (other than `handoff_to_staff` / `opt_out`)
+  hand off (`no_progress`). Note: while W3b's registry is the contract stub (no tool), a long chat reaches it after six turns.
+- **Edges**: a gate refusal at the turn clears the marker and marks the client's thread unread (the texts were filed read for the AI), except
+  after an opt-out; texts older than 15 minutes when the turn starts (the reply window) go to staff without a fallback (`stale`); a staff
+  text or AGENT that arrives while the model is thinking wins (the reply is dropped, turn `skipped` / `superseded`); a reply the policy
+  refuses (opt-out) is `skipped`, any other refusal `failed` with a handoff.
+- **Contract changes (minimal)**: `ShopFactsDeps.env` gains `BUSINESS_TEXT_NUMBER` and `BUSINESS_EMAIL` (new optional env: the texting line,
+  and the public email, for the facts; `BUSINESS_PHONE` is the number to call). The texting line is also one of the shop's own numbers for
+  the gate (`wireAssistant` passes the gate). The contract test's facts case now checks the facts are built.
+- **Welcome adoption** stays in the webhook (W3b's `NewTexters.adopt`); the turn creates no client. Until W3b lands, a stranger gets the
+  intake as an unknown number. The reply-number handler is passed to `useAssistant` only when W3b's is not the contract stub.
+- **Jobs**: `ai.respond` (queue only, stately, retry 0, expiry 180 s) and `ai.sweep` (every minute, stately). pg-boss runs one `ai.respond` at a
+  time per worker (its work loop is serial), so turns are answered one after another; enough for the rollout's volumes, to watch in W5.
