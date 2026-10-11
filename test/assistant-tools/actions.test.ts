@@ -157,7 +157,7 @@ describe('the reply number (ActionCodeHandler)', () => {
     expect(await w.t.db.selectFrom('leads').select(['status', 'booked_appointment_id']).executeTakeFirstOrThrow()).toEqual({ status: 'booked', booked_appointment_id: a!.id })
     const booked = (await aiTexts(maria().id)).find((m) => m.template_key === 'action_booked')!
     expect(booked).toMatchObject({ klass: 'ai_reply', sender_kind: 'ai' })
-    expect(booked.body).toMatch(/^You're booked: Express Hand Wash, Mon Jun 15 at 10:00 AM\. \$\d+\.\d\d booking fee due at the shop\. See you then!/)
+    expect(booked.body).toMatch(/^You're booked: Express Hand Wash, Mon Jun 15 at 10:00 AM\. \$\d+(?:\.\d\d)? booking fee due at the shop\. See you then!/)
     const vehicle = await w.t.db.selectFrom('appointments').innerJoin('vehicles', 'vehicles.id', 'appointments.vehicle_id').select(['vehicles.model']).where('appointments.id', '=', a!.id).executeTakeFirst()
     expect(vehicle).toEqual({ model: 'Q5' })
     expect(await w.t.db.selectFrom('audit_log').select('actor_name').where('action', '=', 'assistant.booking.confirmed').execute()).toEqual([{ actor_name: 'Oasis AI (SMS)' }])

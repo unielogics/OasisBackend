@@ -109,8 +109,10 @@ async function propose(
     summary: o.summary,
     confirmationTexted: true,
     expiresInMinutes: 15,
+    // the server's own text already says how to confirm; the policy judge fails any reply of the model that asks for a number they
+    // received (design 3c rubric (c)), so the model only points at that text
     instruction:
-      'We texted the client this summary with a 4-digit confirmation number. Ask them to reply with that number to confirm. You do not know the number: never guess, ask for or repeat it. Nothing is booked or changed until they reply with it.',
+      'The server just texted the client this summary with how to confirm it. In your reply say only that you sent the details in a separate text to confirm (for example "I just texted you the details: confirm with that text."). Never mention, ask for or repeat any number or code. Nothing is booked or changed until they confirm.',
   })
 }
 

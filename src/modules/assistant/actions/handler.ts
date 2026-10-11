@@ -23,6 +23,7 @@ import { createAppointment } from '../../scheduling/booking.js'
 import { cancelAppointment, rescheduleAppointment } from '../../scheduling/lifecycle.js'
 import type { ActionCodeHandler, ActionCodeInput } from '../ports.js'
 import type { AssistantDeps, CreateActionCodeHandler } from '../contract.js'
+import { usd } from '../facts.js'
 import { actionsOn, assistantOn } from '../tools/switches.js'
 import { aiBookingsAhead, dayWord, inSavepoint, MAX_AI_BOOKINGS_AHEAD, plainSchedulingError, privilegesOf, slotVerdict, windowDaysFor } from '../tools/common.js'
 import { BookPayload, CancelPayload, cancelBlockOf, ReschedulePayload } from './plan.js'
@@ -174,7 +175,7 @@ async function execute(tx: Tx, deps: AssistantDeps, input: ActionCodeInput, acti
     const how = fee.value.collect === 'link' ? 'by payment link' : 'at the shop'
     await logActivity(tx, sched, {
       appointmentId,
-      text: `Booked by text with Oasis AI · confirmed with the reply number${priv.member ? ' · member, no booking fee' : dueCents > 0 ? ` · $${(dueCents / 100).toFixed(2)} booking fee due ${how}` : ''}`,
+      text: `Booked by text with Oasis AI · confirmed with the reply number${priv.member ? ' · member, no booking fee' : dueCents > 0 ? ` · ${usd(dueCents)} booking fee due ${how}` : ''}`,
       channels: ['system'],
       actor,
     })
@@ -194,7 +195,8 @@ async function execute(tx: Tx, deps: AssistantDeps, input: ActionCodeInput, acti
         service: p.serviceName,
         when: dayWord(p.date, today),
         time: fmtT(p.startMin),
-        ...(priv.member ? { member: 'yes' } : dueCents > 0 ? { fee: `$${(dueCents / 100).toFixed(2)}`, how } : {}),
+        // the fee written the way the {fee} placeholder writes it in the same conversation (facts.ts usd: "$25", "$25.50")
+        ...(priv.member ? { member: 'yes' } : dueCents > 0 ? { fee: usd(dueCents), how } : {}),
       },
     }
   }

@@ -7,7 +7,7 @@ import { createAiProvider } from '../../integrations/ai/index.js'
 import type { AiProvider } from '../../integrations/ports/ai.js'
 import type { Clock } from '../../platform/clock.js'
 import { transaction, type Db } from '../../platform/db.js'
-import { NIL_UUID, type NewId } from '../../platform/ids.js'
+import type { NewId } from '../../platform/ids.js'
 import type { EnqueueOptions } from '../../platform/jobs.js'
 import { schedulingPortsFor } from '../../composition.js'
 import { createAssistantGate } from '../messaging/assistant/gate.js'
@@ -34,10 +34,15 @@ export type Enqueue = (name: string, data: object, opts?: EnqueueOptions) => Pro
 
 const quiet: AssistantLog = { info: () => undefined, warn: () => undefined, error: () => undefined }
 
-/** The assistant's actor: permissions sched.edit + jobs.status only, audit name "Oasis AI (SMS)" (design section 4). */
+/**
+ * The assistant's actor: permissions sched.edit + jobs.status only, audit name "Oasis AI (SMS)" (design section 4). No user: its
+ * userId is not a uuid (like the website's and the link pages' actors), so createAppointment records created_by null; the nil uuid
+ * would be written as a user id and break the appointments.created_by foreign key on every in-chat booking.
+ */
+export const ASSISTANT_USER_ID = 'assistant'
 export function assistantActor(locationId: string): Actor {
   return {
-    auth: { userId: NIL_UUID, employeeId: null, locationId, permissions: new Set(['sched.edit', 'jobs.status']), actorName: AI_ACTOR_NAME },
+    auth: { userId: ASSISTANT_USER_ID, employeeId: null, locationId, permissions: new Set(['sched.edit', 'jobs.status']), actorName: AI_ACTOR_NAME, roles: ['assistant'] },
     audit: { actor: { userId: null, name: AI_ACTOR_NAME } },
   }
 }

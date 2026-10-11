@@ -301,6 +301,34 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     return { status: 'handed_off', turnId, reason: o.reason, fallbackMessageId: fallbackId }
   }
 
+  /** The client opted out in this turn (the opt_out tool): the turn ends without a reply; the texts it took are answered. */
+  const finishOptedOut = async (o: { usage: AiUsage; model: string | null; rounds: number; stop: string | null }): Promise<TurnResult> => {
+    transcript.add({ kind: 'error', error: 'opted_out' })
+    await transaction(d.db, async (tx) => {
+      await tx.selectFrom('assistant_conversations').select('id').where('id', '=', conv.id).forUpdate().executeTakeFirstOrThrow()
+      await tx
+        .updateTable('assistant_turns')
+        .set({
+          status: 'skipped',
+          error: 'opted_out',
+          model: o.model,
+          rounds: o.rounds,
+          ...tokensOf(o.usage),
+          cost_micros: costOf(o.usage),
+          stop_reason: o.stop,
+          latency_ms: Math.max(0, Math.round(nowMs() - began)),
+          transcript: JSON.stringify(transcript.toJson()) as never,
+          finished_at: d.clock.now(),
+        })
+        .where('id', '=', turnId)
+        .execute()
+      await tx.updateTable('sms_inbox').set({ assistant_turn_id: turnId }).where('assistant_conversation_id', '=', conv.id).where('assistant_turn_id', 'is', null).execute()
+      await tx.updateTable('assistant_conversations').set({ pending_since: null, running_since: null, updated_at: d.clock.now() }).where('id', '=', conv.id).execute()
+    })
+    d.log.info({ conversation: conv.id, turn: turnId }, 'assistant turn ended: the client opted out')
+    return { status: 'skipped', reason: 'opted_out', turnId }
+  }
+
   // ---- texts too old to answer (the reply window is 15 minutes): staff take them, no fallback (it would be refused too)
   if (conv.last_inbound_at && now.getTime() - conv.last_inbound_at.getTime() > d.cfg.staleMarkerMs) return finishHandoff({ reason: 'stale', status: 'handed_off', fallback: false })
 
@@ -428,6 +456,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     e instanceof TurnAbort ? 'timeout:turn' : e instanceof AiProviderError ? `ai:${e.kind}` : `error:${(e as Error)?.name ?? 'Error'}`
 
   let text: string | null = null
+  let optedOut = false
   try {
     try {
       for (;;) {
@@ -443,6 +472,12 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
           if (r.balanceCents !== null) balanceCents = r.balanceCents
           toolHandoff ??= r.handoff
           transcript.add({ kind: 'tools', round: rounds, calls: r.calls })
+          // the client opted out in words (opt_out sent the confirmation): nothing more is written to that number, not even a reply
+          // the queue would refuse, and no rewrite, judge or fallback runs over an empty "nothing else to say"
+          if (r.calls.some((c) => c.tool === 'opt_out' && c.outcome === 'ok')) {
+            optedOut = true
+            break
+          }
           const content: AiContentBlock[] = [...r.results]
           if (rounds >= d.cfg.maxToolRounds) content.push({ type: 'text', text: REPLY_NOW_TEXT })
           messages.push({ role: 'user', content })
@@ -458,6 +493,8 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
       transcript.add({ kind: 'error', error: reason })
       return await finishHandoff({ reason: 'fallback', status: 'failed', fallback: true, error: reason, usage, model, rounds, stop })
     }
+    // the loop ends without a text only after an opt-out
+    if (optedOut || text === null) return await finishOptedOut({ usage, model, rounds, stop })
 
     // ---- the output guard
     // what the placeholders render to (the current facts; {balance} only after get_balance; the links stay for composeReply)
