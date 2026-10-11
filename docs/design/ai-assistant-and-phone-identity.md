@@ -141,11 +141,30 @@ the builders. Where it says MUST, a test must prove it.
 - Loop breakers: 3 identical inbound texts, > 5 texts/min, 6 turns without progress, own number/short codes/alnum
   senders → no AI.
 
+## 3b. Shop facts and pricing (owner, 2026-10-11)
+- The assistant's baseline is EVERY setting in the system, assembled server-side into one read-only "shop facts" document
+  (src/modules/assistant/facts.ts): business name, address, contact numbers (texting vs calling), hours per weekday,
+  closures (next 30 days), today's state and any emergency closure, booking rules (online lead time, cutoff, slot size,
+  booking windows standard/VIP, same-day rules), guest booking fee and how it is collected, cancellation and no-show
+  policy, VIP rules in plain words, arrival instructions, which automatic texts clients receive (status texts, reminders),
+  the catalog (categories, services and add-ons with public names, descriptions, durations, member and guest STARTING
+  prices, VIP inclusion, quote-only items, tint price classes as "starting at"), membership plans (public label, monthly
+  price, perks), and the Settings FAQ. It is rebuilt whenever a settings/catalog version changes (cache keyed by a hash of
+  the source versions) and placed in the cached system prefix; time-sensitive facts (availability, the client's own
+  appointments, balance) still come from tools at the moment of the question.
+- PRICING IS NOT THE AI'S TASK: it never quotes a final price, never adds up totals, never prices combinations, never
+  computes discounts. It may state STARTING prices only ("Signature Hand Wash starts at $45 for members, $54 otherwise";
+  "window tint starts at $229"), membership monthly prices, and the guest booking fee, all from the facts; for an exact
+  price it says the team confirms it at the shop, or offers "text us a photo for a quote" for tint/detailing/quote-only.
+  Output guard: every $ amount in a reply must equal a starting price, a plan price or the fee from the current facts,
+  and a service price must be introduced by "starts at"/"from"/"starting at"; anything else is blocked (fallback or a
+  rewrite call) — tested.
+
 ## 4. Tools (zod-validated, strict schemas, customer bound server-side, refs A1..A3 resolve only to own rows)
 | tool | trust | does |
 |---|---|---|
 | get_business_info {topic} | caller | hours (public-hours view), closures 14 d, address, policies, fee settings |
-| list_services {category?} | caller | catalog from Settings (the ONLY price source) |
+| list_services {category?} | caller | catalog from Settings (the ONLY price source; starting prices only) |
 | get_membership_info {} | caller | plans with prices/perks + the client's membership view |
 | check_availability {serviceKey, date, partOfDay?} | caller | loadBoard (VIP-aware only when verified) |
 | list_my_appointments {} | caller | own upcoming/recent as refs |
