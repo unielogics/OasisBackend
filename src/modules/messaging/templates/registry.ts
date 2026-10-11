@@ -42,9 +42,10 @@ export const TEMPLATES = {
     klass: 'confirm_request',
     // the design's seeded text said "is confirmed for {time}. Reply C to confirm.", asking to confirm what it called confirmed;
     // the request goes to a booking that is not confirmed yet, so it says "booked" and keeps the rest of the design's words
-    body: 'Your appointment at Oasis Auto Spa is booked for {time}. Reply C to confirm.',
+    body: 'Your appointment at Oasis Auto Spa is booked for {time}.{#prep} {prep}{/prep} Reply C to confirm.',
     required: ['time'],
-    optional: [],
+    // the preparation line of the visit's categories (Settings → Reminders, reminders.category_prep; ADR 0160)
+    optional: ['prep'],
     editable: true,
     source: 'cc-domain 7.6 confirmed message ("is confirmed" -> "is booked")',
   }),
@@ -62,9 +63,10 @@ export const TEMPLATES = {
     key: 'reminder',
     label: 'Reminder',
     klass: 'reminder',
-    body: 'Reminder: your Oasis Auto Spa appointment is {when} at {time}.',
+    body: 'Reminder: your Oasis Auto Spa appointment is {when} at {time}.{#prep} {prep}{/prep}',
     required: ['when', 'time'],
-    optional: [],
+    // the preparation line of the visit's categories (Settings → Reminders, reminders.category_prep; ADR 0160)
+    optional: ['prep'],
     editable: true,
     source: 'backend design 7.2 / reminders 24 h and 2 h',
   }),

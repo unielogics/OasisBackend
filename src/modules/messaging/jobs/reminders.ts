@@ -12,6 +12,11 @@
 // Offsets are elapsed time: "24 h before" is start minus 1440 minutes, not the same wall-clock time yesterday (ADR 0090). Local
 // time only matters for the words in the text ("tomorrow at 9:00 AM") and for quiet hours, both computed from calendar dates
 // so they stay right on the 23 and 25 hour days of a DST change.
+//
+// The Reminders settings (ADR 0160, plan I) shape the text: reminders.confirm_request off sends a booked (unconfirmed) visit the
+// plain reminder instead of "Reply C to confirm", and reminders.category_prep adds the preparation line of each category the
+// appointment holds (appointments.categories, e.g. tint: "Plan for 2–3 hours."). reminderMessage() is the one composition, also
+// used by the Settings preview (PUT /settings/reminders/preview), so the preview is the exact text.
 import { transaction } from '../../../platform/db.js'
 import type { JobDefinition } from '../../../platform/jobs.js'
 import { getSetting } from '../../../platform/settings.js'
@@ -19,6 +24,7 @@ import { addDays, fmtT, minutesOfDay, toBizDate } from '../../../platform/time.j
 import { DateTime } from 'luxon'
 import { whenLabel } from '../../scheduling/appointments.js'
 import { classSpec, type SmsClass } from '../policy/classes.js'
+import type { TemplateVars } from '../templates/render.js'
 import { isQuietHour, quietHoursEnd } from '../policy/quietHours.js'
 import type { MessagingRuntime } from '../runtime.js'
 import { jobRuntime } from './index.js'
@@ -70,6 +76,47 @@ export function dueOffsets(offsets: readonly number[], start: Date, bookedAt: Da
     .sort((a, b) => a - b)
 }
 
+/**
+ * The preparation lines for the categories an appointment holds, in the appointment's category order (the order the catalog
+ * gives them), each text once: "Plan for 2–3 hours. Remove valuables from the cabin." null when none of them has one.
+ */
+export function prepTextFor(categories: readonly string[], prep: Readonly<Record<string, string>>): string | null {
+  const texts: string[] = []
+  for (const key of categories) {
+    const t = prep[key]?.trim()
+    if (t && !texts.includes(t)) texts.push(t)
+  }
+  return texts.length ? texts.join(' ') : null
+}
+
+export interface ReminderMessage {
+  templateKey: 'confirm_request' | 'reminder'
+  klass: SmsClass
+  vars: TemplateVars
+}
+
+/**
+ * The reminder an appointment gets: a booked (unconfirmed) visit is asked to reply C when reminders.confirm_request is on,
+ * otherwise (and for a confirmed visit) it is reminded; the categories' preparation text rides along as {prep}.
+ */
+export function reminderMessage(o: {
+  status: 'booked' | 'confirmed'
+  confirmRequest: boolean
+  start: Date
+  now: Date
+  tz: string
+  prep: string | null
+}): ReminderMessage {
+  const prep = o.prep ? { prep: o.prep } : {}
+  if (o.status === 'booked' && o.confirmRequest)
+    return { templateKey: 'confirm_request', klass: 'confirm_request', vars: { time: whenLabel(o.start, o.now, o.tz), ...prep } }
+  return {
+    templateKey: 'reminder',
+    klass: 'reminder',
+    vars: { when: reminderWhen(o.start, o.now, o.tz), time: fmtT(minutesOfDay(o.start, o.tz)), ...prep },
+  }
+}
+
 async function locations(rt: MessagingRuntime, only?: string): Promise<Array<{ id: string; tz: string }>> {
   let q = rt.db.selectFrom('locations').select(['id', 'timezone']).orderBy('created_at').orderBy('id')
   if (only) q = q.where('id', '=', only)
@@ -85,6 +132,8 @@ export async function runReminders(
   for (const loc of await locations(rt, o.locationId)) {
     const offsets = (await getSetting(rt.db, loc.id, 'reminders.offsets_min')).value
     if (offsets.length === 0) continue
+    const confirmRequest = (await getSetting(rt.db, loc.id, 'reminders.confirm_request')).value
+    const categoryPrep = (await getSetting(rt.db, loc.id, 'reminders.category_prep')).value
     const horizon = new Date(now.getTime() + Math.max(...offsets) * 60_000)
     const candidates = await rt.db
       .selectFrom('appointments')
@@ -106,7 +155,7 @@ export async function runReminders(
       await transaction(rt.db, async (tx) => {
         const a = await tx
           .selectFrom('appointments')
-          .select(['id', 'customer_id', 'status', 'scheduled_start'])
+          .select(['id', 'customer_id', 'status', 'scheduled_start', 'categories'])
           .where('id', '=', c.id)
           .forUpdate()
           .executeTakeFirst()
@@ -118,8 +167,16 @@ export async function runReminders(
           return skip(report, 'changed')
         const target = await rt.queue.target(tx, loc.id, a.customer_id)
         if (!target) return skip(report, 'no_customer')
-        const unconfirmed = a.status === 'booked'
-        const klass: SmsClass = unconfirmed ? 'confirm_request' : 'reminder'
+        const msg = reminderMessage({
+          status: a.status,
+          confirmRequest,
+          start: a.scheduled_start,
+          now,
+          tz: loc.tz,
+          prep: prepTextFor(a.categories, categoryPrep),
+        })
+        const asksToConfirm = msg.templateKey === 'confirm_request'
+        const klass: SmsClass = msg.klass
         // Quiet hours hold automated texts until morning, and a held text gets its full TTL from the release moment. A
         // reminder must never arrive after the visit has begun, so it is dropped when the hold leaves less than the minimum
         // lead, and otherwise expires at the start of the visit.
@@ -132,14 +189,9 @@ export async function runReminders(
           customerId: a.customer_id,
           recipient: target.recipient,
           appointmentId: a.id,
-          // an unconfirmed booking is asked to reply C; a confirmed one is only reminded
-          templateKey: unconfirmed ? 'confirm_request' : 'reminder',
-          vars: unconfirmed
-            ? { time: whenLabel(a.scheduled_start, now, loc.tz) }
-            : {
-                when: reminderWhen(a.scheduled_start, now, loc.tz),
-                time: fmtT(minutesOfDay(a.scheduled_start, loc.tz)),
-              },
+          // an unconfirmed booking is asked to reply C (unless the setting is off); a confirmed one is only reminded
+          templateKey: msg.templateKey,
+          vars: msg.vars,
           purpose: 'reminder',
           senderKind: 'system',
           ttlOverrideSec: Math.min(classSpec(klass).ttlSec, Math.floor(leadMs / 1000)),
@@ -156,7 +208,7 @@ export async function runReminders(
           .values({
             appointment_id: a.id,
             at: now,
-            text: `${unconfirmed ? 'Confirmation request' : 'Reminder'} sent · ${offsetLabel(offset)} before`,
+            text: `${asksToConfirm ? 'Confirmation request' : 'Reminder'} sent · ${offsetLabel(offset)} before`,
             channels: ['sms'],
             actor_type: 'automation',
             actor_name: null,

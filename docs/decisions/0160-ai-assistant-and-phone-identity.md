@@ -42,3 +42,27 @@ Migrations `20261011000000` to `20261011000500` (catalog fields and categories, 
 membership checkouts), the Kysely types, the environment and settings keys, the consent source, the SMS classes and templates, the
 status-texts port (called by nothing yet), the `ai_handoff` and `sms.picture_message` alert kinds, and the AI provider port with its
 simulator. No route, job or behaviour beyond the policy gate and the masked message bodies; later waves build the modules.
+
+## Wave W2e: membership matching, the Reminders settings, review leftovers
+
+- **Order matching** (`payments-sync/membership.ts`, `memberships/checkouts.ts`, migration `20261011050000`): the checkout-intent
+  tier comes first (the bound order, an open intent's email + product + 72-hour window, then that email's renewals of the product
+  once an intent matched); then the Squarespace id, a **verified** email, the phone. An unverified email never links, and a
+  Squarespace contact the contacts job linked by such an email does not either. A paid order that matches one client only through an
+  unverified email opens an `awaiting_match` row (origin `sync`) on that client's membership (a pending one is created when they have
+  none), one manager notice and an alert; staff match or reject it (`/api/v1/membership-checkouts/:id/match|reject`). A second paid
+  order of the same plan inside the paid period is flagged `duplicate_payment` (alert once per order) and never moves the period; a
+  newer payment still releases a hand-set status. `customers.email_verified` drops whenever the email changes unless the same update
+  sets it (trigger), so a stale flag can never make a new address claim orders.
+- **Deviations from the design text**: `membership_checkouts` gains `origin` (link | sync), a nullable `checkout_url` (sync rows have
+  none) and the state `rejected` (a staff "not this client" must be remembered so the sync does not ask again); "abandoned after 7
+  days" closes the pending membership as `canceled` with `cancel_reason` `checkout_abandoned` (no sixth membership status), for
+  website joins as well as link checkouts, and sets `manual_status_at` so a late paid order still reactivates it. Rows waiting for
+  staff are never closed by the job.
+- **Reminders settings** (`/api/v1/settings/reminders`, `set.hours` to save): one version for the 16 settings of the section (the sum
+  of their versions) under a per-location advisory lock; per-key audit and `settings.changed`; a preview of the exact texts. The
+  reminders job reads `reminders.confirm_request` and appends `reminders.category_prep` for the appointment's categories (template
+  variable `{prep}` in `reminder` and `confirm_request`).
+- **Review leftovers**: nginx serves stale hours and open times only while one request refreshes them (`proxy_cache_use_stale
+  updating`), never through an API outage; the catalog keeps the error staleness. A verified website booking no longer replaces the
+  name on file with the typed one; it fills only a placeholder and notes a different name on the booking.

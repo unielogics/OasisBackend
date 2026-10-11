@@ -61,7 +61,7 @@ const messages = (appointmentId: string) =>
 const at = (iso: string): void => w.clock.set(iso)
 
 afterEach(async () => {
-  await sql`delete from settings where key = 'reviews.enabled'`.execute(w.t.db)
+  await sql`delete from settings where key in ('reviews.enabled', 'reminders.confirm_request', 'reminders.category_prep')`.execute(w.t.db)
 })
 
 describe('appointments.reminders', () => {
@@ -224,6 +224,43 @@ describe('appointments.reminders', () => {
         (await h.states(schema, 'appointments.reminders')).filter((s) => s === 'completed').length === 4,
     )
     for (const id of ids) expect(await messages(id), id).toHaveLength(1)
+  })
+})
+
+describe('appointments.reminders reads the Reminders settings (ADR 0160)', () => {
+  const setSetting = (key: string, value: unknown) =>
+    sql`insert into settings (location_id, key, value) values (${w.locationId}, ${key}, ${JSON.stringify(value)}::jsonb)
+        on conflict (location_id, key) do update set value = excluded.value, version = settings.version + 1`.execute(w.t.db)
+
+  it('confirm_request off: a booked visit gets the plain reminder; the categories’ preparation lines ride along, in category order, each once', async () => {
+    const booked = await w.appointment({ customer: 'Maria Delgado', at: '2026-06-13T14:00:00-04:00' })
+    const plain = await w.appointment({ customer: 'Maria Delgado', at: '2026-06-13T14:00:00-04:00', status: 'confirmed' })
+    await sql`update appointments set categories = '{wash,tint,detail}' where id = ${booked}`.execute(w.t.db)
+    await sql`update appointments set categories = '{wash}' where id = ${plain}`.execute(w.t.db)
+    await setSetting('reminders.confirm_request', false)
+    await setSetting('reminders.category_prep', { tint: 'Plan for 2–3 hours.', detail: 'Plan for 2–3 hours.', addons: 'Unused.' })
+    const worker = await h.start({ definitions: defs })
+    at('2026-06-12T14:00:00-04:00')
+    await runThroughQueue(worker, 'appointments.reminders')
+    const [m] = await messages(booked)
+    expect(m).toMatchObject({ template_key: 'reminder', klass: 'reminder' })
+    expect(m!.body).toMatch(/^Reminder: your Oasis Auto Spa appointment is tomorrow at 2:00 PM\. Plan for 2-3 hours\.( Reply STOP to opt out\.)?$/)
+    const [p] = await messages(plain)
+    expect(p!.body).toMatch(/^Reminder: your Oasis Auto Spa appointment is tomorrow at 2:00 PM\.( Reply STOP to opt out\.)?$/)
+    const activity = await w.t.db.selectFrom('activity_log').select('text').where('appointment_id', '=', booked).execute()
+    expect(activity.map((a) => a.text)).toEqual(['Reminder sent · 24 h before'])
+  })
+
+  it('confirm_request on (the default): the booked visit is asked to reply C, with the preparation line before the request', async () => {
+    const booked = await w.appointment({ customer: 'Maria Delgado', at: '2026-06-13T14:00:00-04:00' })
+    await sql`update appointments set categories = '{tint}' where id = ${booked}`.execute(w.t.db)
+    await setSetting('reminders.category_prep', { tint: 'Plan for 2–3 hours.' })
+    const worker = await h.start({ definitions: defs })
+    at('2026-06-12T14:00:00-04:00')
+    await runThroughQueue(worker, 'appointments.reminders')
+    const [m] = await messages(booked)
+    expect(m).toMatchObject({ template_key: 'confirm_request', klass: 'confirm_request' })
+    expect(m!.body).toMatch(/^Your appointment at Oasis Auto Spa is booked for tomorrow at 2:00 PM\. Plan for 2-3 hours\. Reply C to confirm\./)
   })
 })
 

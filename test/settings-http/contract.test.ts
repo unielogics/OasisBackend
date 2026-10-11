@@ -38,6 +38,10 @@ const EXPECTED: [string, string, string, 'required' | 'optional' | undefined][] 
   ['POST', '/api/v1/services', 'set.services', 'optional'],
   ['PATCH', '/api/v1/services/:id', 'set.services', undefined],
   ['GET', '/api/v1/settings/bundle', 'authenticated', undefined],
+  // Settings → Reminders (ADR 0160, plan I)
+  ['GET', '/api/v1/settings/reminders', 'authenticated', undefined],
+  ['PUT', '/api/v1/settings/reminders', 'set.hours', undefined],
+  ['POST', '/api/v1/settings/reminders/preview', 'authenticated', undefined],
   ['GET', '/api/v1/public/hours', 'public', undefined],
 ]
 
