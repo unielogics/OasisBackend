@@ -78,6 +78,6 @@ describe('createAiProvider', () => {
     const ai = createAiProvider(env)
     expect(ai.name).toBe('sim')
     expect(textOf((await ai.converse(req('hello'))).message)).toBe(DEFAULT_SIM_REPLY)
-    expect(createAiProvider({ ...env, AI_PROVIDER: 'bedrock' })).toMatchObject({ name: 'bedrock', model: 'us.anthropic.claude-sonnet-5-5' })
+    expect(createAiProvider({ ...env, AI_PROVIDER: 'bedrock' })).toMatchObject({ name: 'bedrock', model: 'us.anthropic.claude-sonnet-4-6' })
   })
 })

@@ -18,14 +18,14 @@ const prod = {
 const PEPPER = Buffer.alloc(32, 9).toString('base64')
 
 describe('AI environment', () => {
-  it('defaults: off, simulated, Sonnet 5.5 in us-east-1, the design caps; links closed', () => {
+  it('defaults: off, simulated, Sonnet 4.6 (the interim model, owner 2026-10-11) in us-east-1, the design caps; links closed', () => {
     const e = loadEnv(base)
     expect(e).toMatchObject({
       AI_ENABLED: false,
       AI_ACTIONS_ENABLED: false,
       AI_PROVIDER: 'sim',
       AI_BEDROCK_REGION: 'us-east-1',
-      AI_BEDROCK_MODEL_ID: 'us.anthropic.claude-sonnet-5-5',
+      AI_BEDROCK_MODEL_ID: 'us.anthropic.claude-sonnet-4-6',
       AI_EFFORT: 'low',
       AI_MAX_TOKENS: 800,
       AI_TIMEOUT_MS: 20_000,
@@ -41,8 +41,9 @@ describe('AI environment', () => {
       PUBLIC_LINKS_ENABLED: false,
     })
     expect(e.PIN_PEPPER).toBe(DEV_PIN_PEPPER) // a development stand-in while links are off (test/ai-foundation/pin-pepper.test.ts)
+    // unset: cost_micros uses the configured model's list prices (test/integrations/ai/cost.test.ts)
     for (const k of ['AI_PRICE_INPUT_PER_MTOK', 'AI_PRICE_OUTPUT_PER_MTOK', 'AI_PRICE_CACHE_READ_PER_MTOK', 'AI_PRICE_CACHE_WRITE_PER_MTOK'] as const)
-      expect(e[k]).toBeGreaterThan(0)
+      expect(e[k]).toBeUndefined()
   })
 
   it('declares every AI variable in the environment contract', () => {

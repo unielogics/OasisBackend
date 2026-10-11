@@ -1,5 +1,7 @@
-// BedrockProvider (ADR 0160, design section 9): the AiProvider port on Amazon Bedrock's Converse API, Claude Sonnet 5.5 through the
-// cross-region inference profile us.anthropic.claude-sonnet-5-5, with the instance role's credentials.
+// BedrockProvider (ADR 0160, design section 9): the AiProvider port on Amazon Bedrock's Converse API, Claude through a cross-region
+// inference profile (AI_BEDROCK_MODEL_ID: us.anthropic.claude-sonnet-4-6 for now, us.anthropic.claude-sonnet-5-5 once the
+// account's quota allows; models.ts), with the instance role's credentials. Nothing here depends on the model: no thinking or
+// other version-specific field is sent, and the effort only when AI_BEDROCK_EFFORT_MODE says how (default off).
 //
 // The mapping is pure and deterministic (toConverseInput / fromConverseOutput): the same port request always gives the same
 // Converse input, key for key, so the prompt-cache prefix (tools -> system -> messages) stays byte-identical from one call to the
@@ -40,7 +42,7 @@ export type BedrockEffortMode = 'off' | 'output_config' | 'additional_fields'
 export interface BedrockProviderOptions {
   /** The Bedrock runtime client (tests inject a mock or a client pointed at a local stand-in). */
   client: Pick<BedrockRuntimeClient, 'send'>
-  /** Inference profile or model id, e.g. us.anthropic.claude-sonnet-5-5. */
+  /** Inference profile or model id, e.g. us.anthropic.claude-sonnet-4-6. */
   modelId: string
   /** One call's limit (AI_TIMEOUT_MS); combined with the caller's signal (the turn deadline). */
   timeoutMs: number

@@ -1,5 +1,6 @@
 // The AI provider factory (ADR 0160). AI_PROVIDER=sim (the default) answers with the simulator and never reaches AWS;
-// AI_PROVIDER=bedrock calls Claude Sonnet 5.5 through Amazon Bedrock's Converse API with the default credential chain (the
+// AI_PROVIDER=bedrock calls the Claude model of AI_BEDROCK_MODEL_ID (Sonnet 4.6 for now, Sonnet 5.5 once its quota is raised;
+// models.ts) through Amazon Bedrock's Converse API with the default credential chain (the
 // instance role in production). Building a provider contacts nothing: the first call does.
 import type { AiProvider } from '../ports/ai.js'
 import { BedrockProvider, createBedrockClient, type BedrockProviderOptions } from './bedrock.js'
@@ -10,6 +11,7 @@ export * from './env.js'
 export * from './sim.js'
 export * from './bedrock.js'
 export * from './cost.js'
+export * from './models.js'
 
 export type AiProviderEnv = Pick<AiEnvFragment, 'AI_PROVIDER' | 'AI_BEDROCK_MODEL_ID'> &
   Partial<Pick<AiEnvFragment, 'AI_BEDROCK_REGION' | 'AI_TIMEOUT_MS' | 'AI_EFFORT' | 'AI_BEDROCK_EFFORT_MODE'>>

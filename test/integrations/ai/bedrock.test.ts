@@ -28,6 +28,9 @@ import {
   mapStopReason,
   safeAwsMessage,
   toConverseInput,
+  CLAUDE_BEDROCK_MODELS,
+  INTERIM_ASSISTANT_MODEL,
+  TARGET_ASSISTANT_MODEL,
 } from '../../../src/integrations/ai/index.js'
 import {
   AiProviderError,
@@ -256,6 +259,33 @@ describe('request mapping', () => {
     expect(toConverseInput(request(), { modelId: MODEL, effortMode: 'output_config' })).not.toHaveProperty(
       'outputConfig',
     )
+  })
+
+  it('is the same request for every listed model (Sonnet/Opus 4.6 and 5.5): only modelId differs, no version-specific field', () => {
+    const withReasoning = request({
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'Book me in' }] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'reasoning', text: 'They want a slot.', signature: 'sig-1' },
+            { type: 'toolUse', id: 'tu_1', name: 'list_services', input: { category: 'wash' } },
+          ],
+        },
+        { role: 'user', content: [{ type: 'toolResult', toolUseId: 'tu_1', content: [{ type: 'json', json: { ok: true } }], status: 'success' }] },
+      ],
+      effort: 'low',
+    })
+    const shapes = CLAUDE_BEDROCK_MODELS.map((m) => {
+      const input = toConverseInput(withReasoning, { modelId: m.profileId, defaultEffort: 'low' })
+      expect(input.modelId).toBe(m.profileId)
+      return JSON.stringify({ ...input, modelId: 'X' })
+    })
+    expect(new Set(shapes).size).toBe(1)
+    // nothing a 4.6 model could reject: no thinking / reasoning config, no effort (AI_BEDROCK_EFFORT_MODE is off), no extra fields
+    expect(Object.keys(JSON.parse(shapes[0]!) as object).sort()).toEqual(['inferenceConfig', 'messages', 'modelId', 'system', 'toolConfig'])
+    expect(shapes[0]).not.toMatch(/thinking|reasoningConfig|budget_tokens|outputConfig|additionalModelRequestFields|between_tools/)
+    expect(JSON.parse(shapes[0]!).inferenceConfig).toEqual({ maxTokens: 800 })
   })
 
   it('toolChoice none: no tools without tool blocks; the tools stay (Bedrock requires them) once the conversation used one', () => {
@@ -547,7 +577,9 @@ describe('the provider', () => {
     )
     const ai = createAiProvider(env)
     expect(ai).toBeInstanceOf(BedrockProvider)
-    expect(ai).toMatchObject({ name: 'bedrock', model: MODEL })
+    // the interim model by default (owner 2026-10-11); Sonnet 5.5 is the one setting AI_BEDROCK_MODEL_ID
+    expect(ai).toMatchObject({ name: 'bedrock', model: INTERIM_ASSISTANT_MODEL })
+    expect(createAiProvider({ ...env, AI_BEDROCK_MODEL_ID: TARGET_ASSISTANT_MODEL })).toMatchObject({ model: 'us.anthropic.claude-sonnet-5-5' })
     mock.on(ConverseCommand).resolves(answer())
     await ai.converse(request())
     expect(mock.commandCalls(ConverseCommand)[0]!.args[0].input.outputConfig).toEqual({ effort: 'low' })
