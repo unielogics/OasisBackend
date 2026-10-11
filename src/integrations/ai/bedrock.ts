@@ -209,7 +209,7 @@ export function fromConverseOutput(
   model: string,
   latencyMs: number,
 ): AiConverseResponse {
-  const msg = out.output?.message
+  const msg = out?.output?.message
   if (!msg) throw new AiProviderError('unknown', 'Bedrock answered without a message')
   const raw = out.stopReason ?? 'unknown'
   const u = out.usage

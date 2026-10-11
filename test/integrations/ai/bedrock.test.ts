@@ -18,7 +18,7 @@ import {
   type ConverseCommandOutput,
 } from '@aws-sdk/client-bedrock-runtime'
 import { mockClient } from 'aws-sdk-client-mock'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import {
   BedrockProvider,
   classifyBedrockError,
@@ -38,8 +38,10 @@ import {
 import { loadEnv } from '../../../src/config/env.js'
 
 const MODEL = 'us.anthropic.claude-sonnet-5-5'
+// mockClient stubs the class prototype for every instance: restore it, or later test files in the same fork get the stub
 const mock = mockClient(BedrockRuntimeClient)
 afterEach(() => mock.reset())
+afterAll(() => mock.restore())
 
 const SCHEMA = {
   type: 'object',
