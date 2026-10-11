@@ -16,7 +16,15 @@ import {
 import type { FactAmounts } from '../../src/modules/assistant/facts.js'
 
 // Signature Hand Wash starts at $45 for members, $54 otherwise; tint from $229 / $275; Gold $99 a month; the guest fee $25
-const amounts: FactAmounts = { starting: new Set([4500, 5400, 22900, 27500, 3200, 3800]), plain: new Set([9900, 16900, 2500]) }
+const amounts: FactAmounts = {
+  starting: new Set([4500, 5400, 22900, 27500, 3200, 3800]),
+  plain: new Set([9900, 16900, 2500]),
+  plainWords: new Map([
+    [9900, ['gold', 'month', 'monthly', 'membership', 'plan']],
+    [16900, ['vip', 'month', 'monthly', 'membership', 'plan']],
+    [2500, ['fee']],
+  ]),
+}
 const website = 'https://oasisautospanj.com'
 const g = (text: string, extra: { extraAmounts?: number[]; placeholders?: string[] } = {}) => guardReply({ text, amounts, website, ...extra })
 
@@ -55,6 +63,26 @@ describe('the pricing rule (design section 3b)', () => {
 
   it('reads every form of an amount', () => {
     expect(findAmounts('$45, $1,299, $45.50, 45 dollars and 12 bucks').map((a) => a.cents)).toEqual([4500, 129900, 4550, 4500, 1200])
+    expect(findAmounts('54$ total, 12.50 $ more').map((a) => a.cents)).toEqual([5400, 1250])
+  })
+
+  it('a plan price or the fee is not a service price: it needs its plan or "fee" in the sentence (F6a)', () => {
+    expect(g('The Signature Hand Wash is $99.')).toMatchObject({ kind: 'fix', problems: ['price_unqualified'] })
+    expect(g('The Signature Hand Wash is $25.')).toMatchObject({ kind: 'fix', problems: ['price_unqualified'] })
+    expect(g('The booking fee is $99.')).toMatchObject({ kind: 'fix', problems: ['price_unqualified'] })
+    expect(g('VIP is $169.').kind).toBe('ok')
+    expect(g('Our Gold membership is $99.').kind).toBe('ok')
+  })
+
+  it('"starts at" / "from" counts only right before the amount (or a list of starting prices it opens) (F6b)', () => {
+    expect(g('From Monday the Signature Hand Wash is $45.')).toMatchObject({ kind: 'fix', problems: ['price_unqualified'] })
+    expect(g('Starting at noon, the Signature wash is $45.')).toMatchObject({ kind: 'fix', problems: ['price_unqualified'] })
+    expect(g('Tint starts at $229 for a sedan or $275 for an SUV.').kind).toBe('ok')
+    expect(g('The Signature Hand Wash starts at $45 for members and is $54 otherwise.')).toMatchObject({ kind: 'fix', problems: ['price_unqualified'] })
+  })
+
+  it('reads "54$" too, so a total written that way is blocked (F6c)', () => {
+    expect(g('A Signature wash is 54$ total.')).toMatchObject({ kind: 'fix', problems: expect.arrayContaining(['price_combination']) })
   })
 })
 
@@ -73,10 +101,25 @@ describe('handoff words', () => {
     expect(handoffWords('Feel free to text us. We have a free slot at 2 PM, spot-free rinse included.')).toEqual([])
   })
 
+  it('a benign "free" excuses only itself, never another "free" next to it (F2)', () => {
+    expect(handoffWords('Your first wash is free, feel free to stop by.')).toEqual(['free'])
+    expect(g('Your first wash is free, feel free to stop by.')).toMatchObject({ kind: 'handoff', words: ['free'] })
+    expect(handoffWords('A spot-free rinse is free today.')).toEqual(['free'])
+    expect(handoffWords('The wash is free to all members.')).toEqual(['free'])
+  })
+
   it("lets the owner's own wording through (a perk or an FAQ answer of the facts), nothing else", () => {
-    const factsText = '- vip: $169 a month. perks: everything in gold; priority booking and same-day guarantee.'
-    expect(guardReply({ text: 'VIP adds priority booking and a same-day guarantee.', amounts, website, factsText }).kind).toBe('ok')
-    expect(guardReply({ text: 'We guarantee your car will shine.', amounts, website, factsText }).kind).toBe('handoff')
+    const ownerWording = ['Everything in Gold', 'Priority booking and same-day guarantee']
+    expect(guardReply({ text: 'VIP adds priority booking and a same-day guarantee.', amounts, website, ownerWording }).kind).toBe('ok')
+    expect(guardReply({ text: 'We guarantee your car will shine.', amounts, website, ownerWording }).kind).toBe('handoff')
+  })
+
+  it("never excuses a word by a function-word neighbour or by the server's own rules (F1)", () => {
+    // the owner wrote "a discount" in a perk, but "a" is no wording of theirs: "offer a discount" still hands off
+    const ownerWording = ['Members never pay a discount fee', 'No refunds on memberships']
+    expect(guardReply({ text: 'Sure, we can offer a discount on your next wash.', amounts, website, ownerWording })).toMatchObject({ kind: 'handoff', words: ['discount'] })
+    expect(guardReply({ text: 'No refunds on memberships.', amounts, website, ownerWording }).kind).toBe('handoff')
+    expect(g('We can give you a discount next time.').kind).toBe('handoff')
   })
 })
 
@@ -89,6 +132,17 @@ describe('links and placeholders', () => {
     expect(g('Pick a time here: {link1}', { placeholders: ['{link1}'] }).kind).toBe('ok')
     expect(g('Pick a time here: {link2}', { placeholders: ['{link1}'] })).toMatchObject({ kind: 'fix', problems: ['unknown_placeholder'] })
   })
+
+  it('any top-level domain is a web address, a look-alike of the shop too (F4)', () => {
+    expect(g('You can pay at oasis-pay.dev/maria today.')).toMatchObject({ kind: 'fix', problems: ['url'] })
+    expect(g('Pay at oasisautospanj.ai/pay please.')).toMatchObject({ kind: 'fix', problems: ['url'] })
+    expect(g('See oasis-autospa.ca for more.')).toMatchObject({ kind: 'fix', problems: ['url'] })
+    expect(g('Book at Oasis-Pay.Com now.')).toMatchObject({ kind: 'fix', problems: ['url'] })
+    expect(g('Our website oasisautospanj.com/hours has them.')).toMatchObject({ kind: 'fix', problems: ['url'] })
+    // not addresses: times, abbreviations, a missing space after a full stop
+    expect(g('We open at 8 a.m. on Saturdays, e.g. this one.').kind).toBe('ok')
+    expect(g('All done.Thanks for waiting!').kind).toBe('ok')
+  })
 })
 
 describe('secrets', () => {
@@ -98,6 +152,23 @@ describe('secrets', () => {
     expect(asksForSecret('Reply with the code we sent.')).toBe(true)
     expect(asksForSecret('Open the link and enter your PIN on the secure page.')).toBe(false)
     expect(g('Send me your credit card number to hold the spot.')).toMatchObject({ kind: 'fix', problems: ['secret_request'] })
+  })
+
+  it('a link or a page in the sentence never excuses asking to text, send or reply with one; card digits are a secret (F3)', () => {
+    expect(asksForSecret('Reply with your PIN and I will send you the link.')).toBe(true)
+    expect(asksForSecret('Text me the code shown on the link page.')).toBe(true)
+    expect(asksForSecret('Send us the code from the page.')).toBe(true)
+    expect(asksForSecret('What are the last 4 digits of your card?')).toBe(true)
+    expect(asksForSecret('Can you share the last four digits of the card on file?')).toBe(true)
+    expect(asksForSecret('What is the code we sent?')).toBe(true)
+    expect(asksForSecret('Enter your PIN here.')).toBe(true)
+    // entry on the secure page stays fine
+    expect(asksForSecret('I will send you a link; enter your PIN on the secure page.')).toBe(false)
+    expect(asksForSecret('Use the link to type the code we texted you.')).toBe(false)
+    expect(asksForSecret("We'll text you a code; type it on the link page.")).toBe(false)
+    expect(asksForSecret('Codes are typed only on the secure page, never by text.')).toBe(false)
+    expect(asksForSecret('Text us your zip code and we will check.')).toBe(false)
+    expect(g('Reply with your PIN and I will send you the link.')).toMatchObject({ kind: 'fix', problems: ['secret_request'] })
   })
 })
 

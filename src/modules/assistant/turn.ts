@@ -37,7 +37,7 @@ import type { Actor, SchedulingCtx } from '../scheduling/context.js'
 import { AI_ACTOR_NAME, type AssistantLog, type AssistantQueue, type HandoffRequest, type ShopFactsSource, type ToolContext, type ToolRegistry, type TurnIdentity } from './contract.js'
 import type { AssistantConfig } from './config.js'
 import { appointmentRefs, loadAppointmentRefs, loadConversation, loadTurnContext, resolveIdentity } from './context.js'
-import { factAmounts, renderShopFacts } from './facts.js'
+import { factAmounts, ownerWording, renderShopFacts } from './facts.js'
 import { cutAfterFirstQuestion, cutAtSentence, guardReply, HARD_PROBLEMS, type GuardProblem } from './guard.js'
 import { HANDOFF_SUMMARIES, markUnanswered, openTurnHandoff, recipientOf, sendFallback, type ConversationRef, type HandoffDeps } from './handoff.js'
 import type { AssistantGate, AssistantInbox } from './ports.js'
@@ -445,6 +445,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
 
     // ---- the output guard
     const factsAmounts = factAmounts(facts)
+    const owner = ownerWording(facts)
     let rewriteUsed = false
     let shortenUsed = false
     const fix = async (draft: string, problems: readonly GuardProblem[]): Promise<string> => {
@@ -459,7 +460,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     let reply: string | null = null
     try {
       for (let i = 0; i < 8 && reply === null; i++) {
-        const v = guardReply({ text: draft, amounts: factsAmounts, extraAmounts: amounts, placeholders: links.keys(), website: facts.business.website, factsText })
+        const v = guardReply({ text: draft, amounts: factsAmounts, extraAmounts: amounts, placeholders: links.keys(), website: facts.business.website, ownerWording: owner })
         transcript.add({ kind: 'guard', verdict: v.kind, ...(v.kind === 'fix' ? { problems: v.problems } : {}), ...(v.kind === 'handoff' ? { words: v.words } : {}) })
         if (v.kind === 'ok') {
           reply = v.text

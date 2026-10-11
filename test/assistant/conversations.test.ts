@@ -316,6 +316,26 @@ describe('the pricing rule in a turn (design section 3b)', () => {
     await inbound(maria(), 'Can I get my money back?')
     expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'policy_words' })
   })
+
+  it("a discount hands off although the facts' own rules say \"never offer a discount\" (F1)", async () => {
+    const a = assistant([simText('Sure, we can offer a discount on your next wash.')])
+    await inbound(maria(), 'Any deals for me this week?')
+    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'policy_words' })
+    expect(systemText(a.provider.requests[0]!)).toContain('never offer a discount')
+    const texts = await aiTexts(maria())
+    expect(texts.map((t) => t.klass)).toEqual(['ai_fallback'])
+    expect(texts[0]!.body).not.toContain('discount')
+  })
+
+  it('asking for a PIN by text is never sent, even next to the link (F3)', async () => {
+    const a = assistant([simText('Reply with your PIN and I will send you the link.'), simText('Reply with your PIN and I will send you the link.')])
+    await inbound(maria(), 'I want to see my visits')
+    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'guard' })
+    expect(a.provider.requests).toHaveLength(2)
+    expect(JSON.stringify(a.provider.requests[1]!.messages.at(-1))).toContain('Never ask for a PIN')
+    const texts = await aiTexts(maria())
+    expect(texts.map((t) => t.klass)).toEqual(['ai_fallback'])
+  })
 })
 
 describe('injection cannot reach another record (design section 10)', () => {
@@ -585,6 +605,16 @@ describe('the turn', () => {
     const audit = await w.t.db.selectFrom('audit_log').select(['action', 'actor_name']).where('action', '=', 'assistant.reply').execute()
     expect(audit).toEqual([{ action: 'assistant.reply', actor_name: 'Oasis AI (SMS)' }])
     expect((await w.t.db.selectFrom('sms_inbox').select('assistant_turn_id').executeTakeFirstOrThrow()).assistant_turn_id).toBe(t.id)
+  })
+
+  it('a number written the usual US way reaches neither the model nor the stored transcript (F5)', async () => {
+    const a = assistant([simText('Thanks, noted.')])
+    await inbound(maria(), 'my husband is at (201) 555-0123 or 201.555.0124 if needed')
+    expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
+    expect(JSON.stringify(a.provider.requests)).not.toMatch(/555.012[34]/)
+    expect(contextOf(a.provider.requests[0]!) + JSON.stringify(a.provider.requests[0]!.messages)).toContain('[number]')
+    const t = await w.t.db.selectFrom('assistant_turns').select('transcript').executeTakeFirstOrThrow()
+    expect(JSON.stringify(t.transcript)).not.toMatch(/555.012[34]/)
   })
 
   it('six turns without progress hand the conversation to staff', async () => {

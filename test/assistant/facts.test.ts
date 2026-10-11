@@ -5,7 +5,8 @@ import { sql } from 'kysely'
 import { runSeed } from '../../db/seeds/index.js'
 import { loadEnv, type Env } from '../../src/config/env.js'
 import { FixedClock, PARITY_NOW } from '../../src/platform/clock.js'
-import { buildShopFacts, factAmounts, oneLine, renderShopFacts, usd } from '../../src/modules/assistant/facts.js'
+import { buildShopFacts, factAmounts, oneLine, ownerWording, renderShopFacts, usd } from '../../src/modules/assistant/facts.js'
+import { guardReply } from '../../src/modules/assistant/guard.js'
 import { createTestDb, truncateAll, type TestDb } from '../helpers/db.js'
 import { testDatabaseUrl } from '../helpers/env.js'
 
@@ -82,6 +83,24 @@ describe('the shop facts document', () => {
     const a = factAmounts(f)
     expect(a.starting.has(4500) && a.starting.has(5400)).toBe(true)
     expect(a.plain.has(9900) && a.plain.has(16900) && a.plain.has(2500)).toBe(true)
+    expect(a.plainWords?.get(9900)).toEqual(expect.arrayContaining(['gold', 'month']))
+    expect(a.plainWords?.get(2500)).toEqual(['fee'])
+  })
+
+  it("the guard reads the real facts: the server's own rules excuse no handoff word, the owner's perks may be repeated (F1)", async () => {
+    await setting('assistant.faq', [{ q: 'Any discounts?', a: 'We never offer a discount on memberships.' }])
+    const f = await source().get(locationId)
+    const text = renderShopFacts(f)
+    expect(text.toLowerCase()).toContain('never offer a discount')
+    const owner = ownerWording(f)
+    expect(owner).toEqual(expect.arrayContaining(f.plans.flatMap((p) => p.perks)))
+    expect(owner.join('\n')).not.toContain('never offer a discount')
+    const guard = (reply: string) => guardReply({ text: reply, amounts: factAmounts(f), website: f.business.website, ownerWording: owner })
+    expect(guard('Sure, we can offer a discount on your next wash.')).toMatchObject({ kind: 'handoff', words: ['discount'] })
+    expect(guard('We can give you a discount next time.').kind).toBe('handoff')
+    expect(guard('Our Signature Hand Wash starts at $45 for members, $54 otherwise.').kind).toBe('ok')
+    expect(guard('Gold is $99 a month.').kind).toBe('ok')
+    expect(guard('The Signature Hand Wash is $99.').kind).toBe('fix')
   })
 
   it('is cached by the source versions: the same sources give the same object and the same bytes', async () => {

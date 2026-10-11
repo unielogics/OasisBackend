@@ -84,6 +84,15 @@ describe('the conversation the model reads', () => {
     expect(maskForModel('call me at +1 305 555 0101 or 2015550142, id 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b')).toBe('call me at [number] or [number], id [id]')
   })
 
+  it('masks every way people write a phone number (F5)', () => {
+    expect(maskForModel('call my husband at (201) 555-0123 please')).toBe('call my husband at [number] please')
+    expect(maskForModel('201.555.0123, 201-555-0123, 201 555 0123, (201)555-0123, +1 (201) 555-0123, +44 20 7946 0958')).toBe(
+      '[number], [number], [number], [number], [number], [number]',
+    )
+    // not numbers: a date, a time, a price
+    expect(maskForModel('Sat 2026-06-13 at 10:30, $1,299')).toBe('Sat 2026-06-13 at 10:30, $1,299')
+  })
+
   it('refs resolve only to the turn’s own rows', () => {
     const refs = appointmentRefs([{ ref: 'A1', appointmentId: 'appt-1', start: new Date(), packageName: 'x', status: 'booked' }])
     expect(refs.resolve('a1')).toBe('appt-1')
@@ -145,5 +154,15 @@ describe('redaction of what is stored', () => {
     expect(
       redactJson({ a: ['+13055550101', { b: 'mail maria@example.com, id 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b, ref 12345678' }], n: 5, t: true, z: null }),
     ).toEqual({ a: ['+1******0101', { b: 'mail m***@example.com, id [id], ref ****5678' }], n: 5, t: true, z: null })
+  })
+
+  it('masks a phone number written with brackets, dots, dashes or spaces (F5)', () => {
+    expect(redactJson(['my husband is at (201) 555-0123', '201.555.0123', '201 555 0123', '+44 20 7946 0958', 'Sat 2026-06-13 10:30'])).toEqual([
+      'my husband is at ******0123',
+      '******0123',
+      '******0123',
+      '+44******0958',
+      'Sat 2026-06-13 10:30',
+    ])
   })
 })

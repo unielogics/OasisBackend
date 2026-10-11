@@ -8,6 +8,12 @@ import { maskEmail, maskPhone } from '../../platform/phone.js'
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
 const E164 = /\+\d{8,15}\b/g
 const DIGITS = /\b\d{7,}\b/g
+/**
+ * Phone numbers as people write them (shared with the turn context, context.ts maskForModel): "(201) 555-0123", "201.555.0123",
+ * "201 555 0123", "+1 (201) 555-0123" (NANP), and any "+" number with spaces, dots or dashes ("+44 20 7946 0958").
+ */
+export const INTL_PHONE = /\+\d(?:[\s().-]{0,2}\d){7,14}(?!\d)/g
+export const NANP_PHONE = /(?<![\w+])(?:1[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s.-]?\d{3}[\s.-]?\d{4}(?!\d)/g
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g
 
 export function redactText(s: string): string {
@@ -15,6 +21,8 @@ export function redactText(s: string): string {
     .replace(UUID, '[id]')
     .replace(EMAIL, (m) => maskEmail(m))
     .replace(E164, (m) => maskPhone(m))
+    .replace(INTL_PHONE, (m) => maskPhone(m))
+    .replace(NANP_PHONE, (m) => maskPhone(m))
     .replace(DIGITS, (m) => maskPhone(m))
 }
 

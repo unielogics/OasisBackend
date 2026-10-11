@@ -476,8 +476,10 @@ export const renderShopFacts: RenderShopFacts = (f) => {
 export interface FactAmounts {
   /** Service and tint starting prices: a reply must introduce them with "starts at" / "starting at" / "from". */
   starting: Set<number>
-  /** Membership monthly prices and the guest booking fee: stated as they are. */
+  /** Membership monthly prices and the guest booking fee: stated as they are, in a sentence that names what they are. */
   plain: Set<number>
+  /** Per plain amount, the words that name it (the plan's label, "month", "membership", "plan"; "fee"), lower case. */
+  plainWords?: Map<number, string[]>
 }
 
 export function factAmounts(f: ShopFacts): FactAmounts {
@@ -491,7 +493,24 @@ export function factAmounts(f: ShopFacts): FactAmounts {
     starting.add(r.guestFromCents)
   }
   const plain = new Set<number>()
-  for (const p of f.plans) if (p.monthlyPriceCents !== null) plain.add(p.monthlyPriceCents)
-  if (f.fee.guestBookingFeeCents > 0) plain.add(f.fee.guestBookingFeeCents)
-  return { starting, plain }
+  const plainWords = new Map<number, string[]>()
+  const name = (cents: number, words: string[]): void => {
+    plain.add(cents)
+    plainWords.set(cents, [...new Set([...(plainWords.get(cents) ?? []), ...words])])
+  }
+  for (const p of f.plans) if (p.monthlyPriceCents !== null) name(p.monthlyPriceCents, [p.label.toLowerCase(), 'month', 'monthly', 'membership', 'plan'])
+  if (f.fee.guestBookingFeeCents > 0) name(f.fee.guestBookingFeeCents, ['fee'])
+  return { starting, plain, plainWords }
+}
+
+/**
+ * What the owner wrote as an offer: plan perks, service descriptions and VIP notes. The guard lets a handoff word through only
+ * in this wording ("same-day guarantee"), never in the server's own lines of the facts ("never offer a discount") and never in
+ * an FAQ answer (answers deny as often as they offer: "no refunds on memberships").
+ */
+export function ownerWording(f: ShopFacts): string[] {
+  return [
+    ...f.plans.flatMap((p) => p.perks),
+    ...f.catalog.items.flatMap((it) => [it.description, it.vipNote]),
+  ].filter((x): x is string => typeof x === 'string' && x.length > 0)
 }
