@@ -24,7 +24,9 @@ the builders. Where it says MUST, a test must prove it.
 - Raise the tablet's Android SMS limit (owner USB step); shop texts keep lane priority over AI replies.
 
 ## 1. Data model (migrations; names are proposals, keep them unless the code forces otherwise)
-- Catalog: services gain `category` (fk categories.key), `public_name`, `description`, `member_price_cents`,
+- Catalog: services gain `category` (fk categories.key, NOT NULL; backfill and the default for a new row without one: add-ons →
+  addons, tag tint → tint, tags detail/ceramic/exotic/executive → detail (Executive Detail and its + Ceramic are details),
+  any other package → wash; the catalog API sets it explicitly from W2), `public_name`, `description`, `member_price_cents`,
   `guest_price_cents`, `vip_inclusion` ('included'|'allowance'|'none') + `vip_note`, `quote_only`, `visible_online`,
   `sort`; table `catalog_categories(key, label, colour, sort, active)`; setting `catalog.tint_matrix` (vehicle types ×
   films → member/guest ranges, VLT options); membership_plans gain `monthly_price_cents`, `perks text[]`,
@@ -38,8 +40,13 @@ the builders. Where it says MUST, a test must prove it.
   scrypt over HMAC(PIN_PEPPER, customerId:pin), version, failed_attempts, lock_level, locked_until, set_at, reset_hold_until);
   `phone_trust` ((location, phone) pk, customer_id, verified_at, verified_by, expires_at (+30 d), revoked_at/reason);
   `assistant_pending_actions` (id, conversation_id, customer_id, kind book|reschedule|cancel, payload jsonb, code_hash,
-  attempts, expires_at (+15 min), state); OTP table gains `purpose` (website|link_verify|pin_set|pin_reset) and
-  `link_session_hash`; customers gain `email_verified boolean default false`.
+  attempts ≤ max_attempts, expires_at (+15 min), state); OTP table gains `purpose` (website|link_verify|pin_set|pin_reset) and
+  `link_session_hash` (ON DELETE SET NULL: deleting a session or its link keeps the code rows, so the hourly ceiling counts every
+  code sent; a website code never names a session); customers gain `email_verified boolean default false`. Guards:
+  `(location_id, plan_key)` → membership_plans on client_links and membership_checkouts; client_links `expires_at > created_at`;
+  phone_trust `expires_at ≤ verified_at + 30 days` (+1 h slack); membership_checkouts `(membership_id, customer_id)` →
+  memberships `(id, customer_id)` (on update cascade, so a merge moves the intent with the membership);
+  message_threads `ai_paused_by` only with `ai_paused_until`.
 - Assistant: `assistant_conversations` ((location, phone) unique, customer_id, pending_since (durable marker),
   last_inbound_at, running_since (lease), handoff_state open|resolved, handoff_reason, last_fallback_at, disclosed_at);
   `assistant_turns` (status running|replied|handed_off|skipped|failed, trust, provider, model, prompt_version, rounds,
@@ -58,7 +65,7 @@ the builders. Where it says MUST, a test must prove it.
   allowlist[], staff_pause_hours=12, faq[{q,a}≤40×500}, actions_enabled}`, `reminders.{offsets_min[], confirm_request,
   category_prep{key:text}}`, `status_texts.{checked_in, checked_in_delay_min=3, running_late, late_grace_min=10,
   late_max=2, ready, picked_up, book_again_link}`, `leads.{follow_up_enabled, follow_up_delay_min=180, business_hours_only,
-  within_hours=24}`, `catalog.guest_markup_pct=20`.
+  within_hours=24 (1..24: the lead_follow_up class's reply window)}`, `catalog.guest_markup_pct=20`.
 - Env: `AI_ENABLED`, `AI_ACTIONS_ENABLED`, `AI_PROVIDER=sim|bedrock`, `AI_BEDROCK_REGION`, `AI_BEDROCK_MODEL_ID`,
   `AI_EFFORT=low`, `AI_MAX_TOKENS=800`, `AI_TIMEOUT_MS=20000`, `AI_TURN_DEADLINE_MS=60000`, `AI_DEBOUNCE_MS=8000`,
   caps (`AI_TURNS_PER_NUMBER_HOUR=8`, `AI_TURNS_PER_NUMBER_DAY=25`, `AI_TURNS_UNKNOWN_DAY=10`, `AI_GLOBAL_TURNS_HOUR=100`,
@@ -76,6 +83,15 @@ the builders. Where it says MUST, a test must prove it.
   4-digit number, stored redacted), `ai_fallback` (fixed text), `lead_follow_up` (lane 2, held by quiet hours, once per
   lead, consent: reply-related within 24 h of their last text, never to opted-out), `picked_up` (lane 1, transactional),
   `job_delay` (lane 1, TTL 20 min). Checked-in reuses `welcome`.
+- Consent of the reply classes (owner-aligned decision, 2026-10-11): `action_confirm` and `personal_link` are consent-exempt
+  ONLY as replies within 15 minutes of that number's last inbound text (the same rule as `ai_reply`), and never go to an
+  opted-out number. `action_confirm` is refused outside that window (`no_recent_inbound`); a `personal_link` outside it is
+  not refused for the window alone but needs normal consent (opted in; an AI-created client's `inbound_text` kind counts,
+  it is transactional). `enqueueFor` reads the number's last inbound text and its opt-out (sms_opt_outs by number and the
+  client's own opt-out) itself for every reply class, never trusting the caller, so a STOPped number is refused at enqueue.
+- Staff never send the AI, link or code classes (`ai_reply`, `ai_fallback`, `personal_link`, `action_confirm`, `otp_code`)
+  from the dashboard: `STAFF_SENDABLE` excludes them (tested). The status texts and the lead follow-up are editable
+  templates.
 - `EnqueueArgs.senderKind` adds 'ai'; `secretVars` for links/codes (outbox real, messages masked); DTO maps ai →
   from:'system', senderName 'Oasis AI', author:'ai'.
 

@@ -3,7 +3,8 @@
 // the lane the design gives it.
 import { describe, expect, it } from 'vitest'
 import { canSendSms, type SmsPolicyContext, type SmsRecipient } from '../../src/modules/messaging/policy/canSend.js'
-import { classSpec, SMS_CLASSES, TRANSACTIONAL_CLASSES, type SmsClass } from '../../src/modules/messaging/policy/classes.js'
+import { classSpec, replyContextOf, SMS_CLASSES, TRANSACTIONAL_CLASSES, type SmsClass } from '../../src/modules/messaging/policy/classes.js'
+import { STAFF_SENDABLE } from '../../src/modules/messaging/http/thread-routes.js'
 import { consentSourceOf } from '../../src/modules/messaging/db/recipients.js'
 import { renderTemplate } from '../../src/modules/messaging/templates/render.js'
 import { TEMPLATES } from '../../src/modules/messaging/templates/registry.js'
@@ -68,9 +69,27 @@ describe('reply-only classes', () => {
     expect(canSendSms({ ...lead, lastInboundAt: minutesBefore(at930pm, 60) }, { klass: 'lead_follow_up' }, ctx({ now: at930pm }))).toMatchObject({ verdict: 'hold', reason: 'quiet_hours' })
   })
 
-  it('an action confirmation answers the request it confirms (15 minutes)', () => {
+  it('an action confirmation answers the request it confirms (15 minutes), consent-exempt only as that reply', () => {
     expect(canSendSms(person(), { klass: 'action_confirm' }, ctx())).toMatchObject({ reason: 'no_recent_inbound' })
     expect(canSendSms(person({ lastInboundAt: minutesBefore(noon, 2) }), { klass: 'action_confirm' }, ctx()).verdict).toBe('allow')
+    const stranger = person({ smsOptIn: false, consentSource: null })
+    expect(canSendSms({ ...stranger, lastInboundAt: minutesBefore(noon, 2) }, { klass: 'action_confirm' }, ctx()).verdict).toBe('allow')
+    expect(canSendSms({ ...stranger, lastInboundAt: minutesBefore(noon, 16) }, { klass: 'action_confirm' }, ctx())).toMatchObject({ reason: 'no_recent_inbound' })
+    expect(canSendSms({ ...stranger, activeOptOut: true, lastInboundAt: minutesBefore(noon, 1) }, { klass: 'action_confirm' }, ctx())).toMatchObject({ reason: 'opted_out' })
+  })
+
+  it('a personal link is consent-exempt as a reply within 15 minutes; outside that window it needs normal consent', () => {
+    const stranger = person({ smsOptIn: false, consentSource: null })
+    expect(canSendSms({ ...stranger, lastInboundAt: minutesBefore(noon, 14) }, { klass: 'personal_link' }, ctx()).verdict).toBe('allow')
+    expect(canSendSms({ ...stranger, lastInboundAt: minutesBefore(noon, 16) }, { klass: 'personal_link' }, ctx())).toMatchObject({ reason: 'not_opted_in' })
+    expect(canSendSms(stranger, { klass: 'personal_link' }, ctx())).toMatchObject({ reason: 'not_opted_in' })
+    // a client with consent gets one any time (staff send a pay link the next day)
+    expect(canSendSms(person({ consentSource: 'inbound_text' }), { klass: 'personal_link' }, ctx()).verdict).toBe('allow')
+    expect(canSendSms({ ...stranger, activeOptOut: true, lastInboundAt: minutesBefore(noon, 1) }, { klass: 'personal_link' }, ctx())).toMatchObject({ reason: 'opted_out' })
+    expect(classSpec('personal_link').replyWindowSec).toBeUndefined()
+    expect(replyContextOf('personal_link')).toBe(15 * 60)
+    expect(replyContextOf('action_confirm')).toBe(15 * 60)
+    expect(replyContextOf('ready')).toBeNull()
   })
 })
 
@@ -118,5 +137,14 @@ describe('templates', () => {
     const plain = renderTemplate('lead_follow_up', { first: 'Maria', interest: 'window tint' }).text
     expect(plain).not.toContain('http')
     expect(renderTemplate('lead_follow_up', { first: 'Maria', interest: 'window tint', link: 'https://oasisautospanj.com/#/c/T' }).text).toContain('https://oasisautospanj.com/#/c/T')
+  })
+})
+
+describe('the staff composer', () => {
+  it('STAFF_SENDABLE holds no AI, link or code template', () => {
+    const PRIVATE = new Set(['ai_reply', 'ai_fallback', 'personal_link', 'action_confirm', 'otp_code', 'staff_invite', 'password_reset'])
+    for (const key of STAFF_SENDABLE) expect(PRIVATE.has(TEMPLATES[key].klass), key).toBe(false)
+    // nor any class that answers a text (reply window or reply consent)
+    for (const key of STAFF_SENDABLE) expect(replyContextOf(TEMPLATES[key].klass), key).toBeNull()
   })
 })

@@ -219,6 +219,23 @@ describe('templates', () => {
     expect(b.templates.find((t: { key: string }) => t.key === 'welcome').body).toContain('Welcome to Oasis!')
     expect(JSON.stringify(b).toLowerCase()).not.toContain('whatsapp')
   })
+
+  it('staff can never send the AI, link or code classes from the dashboard (ADR 0160); the status texts stay editable', async () => {
+    const PRIVATE = new Set(['ai_reply', 'ai_fallback', 'personal_link', 'action_confirm', 'otp_code', 'staff_invite', 'password_reset'])
+    const b = json(await call('GET', '/messages/templates'))
+    const privateKeys = b.templates.filter((t: { class: string }) => PRIVATE.has(t.class)).map((t: { key: string }) => t.key)
+    expect(privateKeys).toEqual(expect.arrayContaining(['ai_fallback', 'action_confirm', 'personal_link_calendar', 'personal_link_pay', 'otp_code']))
+    for (const t of b.templates.filter((x: { class: string }) => PRIVATE.has(x.class))) expect(t.staffSendable, t.key).toBe(false)
+    for (const k of ['picked_up', 'job_delay', 'lead_follow_up']) expect(b.templates.find((t: { key: string }) => t.key === k), k).toMatchObject({ editable: true })
+    const appt = await w.appointment({ customer: 'Maria Delgado', at: '2026-06-13T14:00:00-04:00' })
+    const before = (await w.t.db.selectFrom('messages').select('id').execute()).length
+    for (const templateKey of privateKeys) {
+      const res = await post(`/appointments/${appt}/messages`, { templateKey, vars: { summary: 'Wash', code: '4821', link: 'https://x.test/t', plan: 'Gold' } })
+      expect(res.statusCode, templateKey).toBe(422)
+      expect(json(res).code, templateKey).toBe('SMS_TEMPLATE_INVALID')
+    }
+    expect((await w.t.db.selectFrom('messages').select('id').execute()).length).toBe(before)
+  })
 })
 
 describe('outbox: failed texts, retry and cancel', () => {

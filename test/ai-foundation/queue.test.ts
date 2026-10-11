@@ -54,6 +54,51 @@ describe('reply-only classes in enqueueFor', () => {
     expect(await send({ templateKey: 'ai_fallback' })).toMatchObject({ queued: true })
   })
 
+  it('reads the opt-out itself for the reply classes: a caller that says "not opted out" cannot get a text to a STOPped number', async () => {
+    await inbound(STRANGER, 1)
+    const stop = w.newId()
+    await w.t.db
+      .insertInto('sms_opt_outs')
+      .values({ id: stop, location_id: w.locationId, phone_e164: STRANGER, opted_out_at: w.clock.now(), source: 'keyword', keyword: 'STOP' })
+      .execute()
+    for (const klass of ['ai_reply', 'ai_fallback', 'action_confirm', 'lead_follow_up', 'personal_link'] as const)
+      expect(await send({ text: 'Hi {code}', klass, ...(klass === 'action_confirm' || klass === 'personal_link' ? { secretVars: { code: '4821' } } : {}) }), klass).toEqual({
+        queued: false,
+        skipped: 'opted_out',
+      })
+    // START lifts it
+    await w.t.db.updateTable('sms_opt_outs').set({ opted_in_again_at: w.clock.now() }).where('id', '=', stop).execute()
+    expect(await send({ text: 'Hi!', klass: 'ai_reply' })).toMatchObject({ queued: true })
+  })
+
+  it('a client marked opted out is refused too, even when the caller passes activeOptOut false', async () => {
+    const maria = w.customer('Maria Delgado')
+    await inbound(maria.phone, 1)
+    await w.t.db.updateTable('customers').set({ sms_opted_out_at: w.clock.now() }).where('id', '=', maria.id).execute()
+    const r = await send({ customerId: maria.id, text: 'Hi!', klass: 'ai_reply', recipient: { kind: 'customer', phone: maria.phone, smsOptIn: true, activeOptOut: false, synthetic: false } })
+    expect(r).toEqual({ queued: false, skipped: 'opted_out' })
+  })
+
+  it('action_confirm and personal_link are consent-exempt only as replies within 15 minutes; a link outside that needs consent', async () => {
+    // a stranger (no consent) who texted 2 minutes ago gets the reply number and a link
+    await inbound(STRANGER, 2)
+    expect(await send({ templateKey: 'action_confirm', vars: { summary: 'Wash, Sat 10:00 AM' }, secretVars: { code: '4821' } })).toMatchObject({ queued: true })
+    expect(await send({ templateKey: 'personal_link_verify', secretVars: { link: 'https://oasisautospanj.com/#/v/T' } })).toMatchObject({ queued: true })
+    // 20 minutes later: no reply number at all, and a link only with consent
+    w.clock.advance(20 * 60_000)
+    expect(await send({ templateKey: 'action_confirm', vars: { summary: 'Wash' }, secretVars: { code: '4821' } })).toEqual({ queued: false, skipped: 'no_recent_inbound' })
+    expect(await send({ templateKey: 'personal_link_verify', secretVars: { link: 'https://oasisautospanj.com/#/v/T' } })).toEqual({ queued: false, skipped: 'not_opted_in' })
+    const maria = w.customer('Maria Delgado')
+    expect(
+      await send({
+        customerId: maria.id,
+        recipient: { kind: 'customer', phone: maria.phone, smsOptIn: true, activeOptOut: false, synthetic: false, consentSource: 'staff_attested' },
+        templateKey: 'personal_link_calendar',
+        secretVars: { link: 'https://oasisautospanj.com/#/c/T' },
+      }),
+    ).toMatchObject({ queued: true })
+  })
+
   it('never to an opted-out number, however recent the text', async () => {
     await inbound(STRANGER, 1)
     const r = await send({ text: 'Hi!', klass: 'ai_reply', recipient: { kind: 'customer', phone: STRANGER, smsOptIn: false, activeOptOut: true, synthetic: false } })

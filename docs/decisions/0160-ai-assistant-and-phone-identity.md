@@ -28,6 +28,11 @@ are binding.
 - **Consent**: a client the assistant creates has the transactional-only opt-in source `inbound_text`; an `inbound_sms` source maps
   to it too, so neither ever counts as marketing consent (`MARKETING_CONSENT` is unchanged). The AI's own replies are consent-exempt
   only as replies: the `ai_reply` class is refused (`no_recent_inbound`) unless that number texted in the last 15 minutes.
+  Owner-aligned (2026-10-11): `action_confirm` and `personal_link` are consent-exempt ONLY as replies within 15 minutes of that
+  number's last inbound text (the `ai_reply` rule) and never go to an opted-out number; `action_confirm` is refused outside the
+  window, a `personal_link` outside it needs normal consent. `enqueueFor` reads the last inbound text and the opt-out itself for
+  every reply class, never trusting the caller. Staff cannot send the AI, link or code classes from the dashboard
+  (`STAFF_SENDABLE`).
 - **Secrets in texts**: links and reply numbers are queued with `secretVars`: the outbox carries the real text, the message row
   (what staff and the event stream see) the masked one.
 

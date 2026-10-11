@@ -8,12 +8,12 @@ import type { NewId } from '../../platform/ids.js'
 import type { Clock } from '../../platform/clock.js'
 import type { MessageQueue, OutboundMessage, QueuedResult } from '../scheduling/ports.js'
 import type { MessagingConfig } from './config.js'
-import { lastInboundAt, loadCustomerTarget, type CustomerTarget } from './db/recipients.js'
+import { hasActiveOptOut, lastInboundAt, loadCustomerTarget, type CustomerTarget } from './db/recipients.js'
 import { PgOutboxRepository, rowValues } from './db/outbox-repo.js'
 import { ensureThread, loadMessageDto, publishMessage, REDACTED_BODY, SENSITIVE_CLASSES, touchThread } from './db/messages.js'
 import { planEnqueue } from './dispatch/enqueue.js'
 import type { SmsDenyReason, SmsRecipient } from './policy/canSend.js'
-import { isSmsClass, replyWindowOf, type SmsClass } from './policy/classes.js'
+import { isSmsClass, replyContextOf, type SmsClass } from './policy/classes.js'
 import { renderTemplate, TemplateError, type TemplateVars } from './templates/render.js'
 
 export interface EnqueueArgs {
@@ -128,11 +128,22 @@ export class DbMessageQueue implements MessageQueue {
     if (secrets.length > 0 && !SENSITIVE_CLASSES.has(klass))
       throw new Error(`secretVars need a class whose outbox body is wiped (${[...SENSITIVE_CLASSES].join(', ')}), not ${klass}`)
 
-    // The reply-only classes (the AI's answers, action confirmations, lead follow-ups) answer a text from that number: when it last
-    // texted is read here, never taken from the caller.
+    // The classes that answer a text from that number (the AI's answers, action confirmations, personal links, lead follow-ups) are
+    // consent-exempt as replies, so what decides them is read here, never taken from the caller: when the number last texted, and
+    // whether it opted out (sms_opt_outs by number, the client's own opt-out). A STOP is refused at enqueue, not only at dispatch.
     let recipient = a.recipient
-    if (replyWindowOf(klass) !== null)
-      recipient = { ...recipient, lastInboundAt: recipient.phone ? await lastInboundAt(tx, a.locationId, recipient.phone) : null }
+    if (replyContextOf(klass) !== null) {
+      const phone = recipient.phone
+      const client = a.customerId
+        ? await tx.selectFrom('customers').select('sms_opted_out_at').where('id', '=', a.customerId).executeTakeFirst()
+        : undefined
+      const clientOptedOut = !!client?.sms_opted_out_at
+      recipient = {
+        ...recipient,
+        lastInboundAt: phone ? await lastInboundAt(tx, a.locationId, phone) : null,
+        activeOptOut: recipient.activeOptOut || clientOptedOut || (phone ? await hasActiveOptOut(tx, a.locationId, phone) : false),
+      }
+    }
 
     const id = newId()
     const now = clock.now()

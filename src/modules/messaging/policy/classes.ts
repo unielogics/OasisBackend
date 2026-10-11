@@ -30,6 +30,11 @@ export interface SmsClassSpec {
    * the number's last inbound text for these classes (SmsRecipient.lastInboundAt).
    */
   replyWindowSec?: number
+  /**
+   * Consent-exempt only as an answer: when that number texted the shop within this many seconds the text needs no opt-in; outside
+   * it normal consent applies (never refused for the window alone). enqueueFor loads the last inbound text for these classes too.
+   */
+  replyConsentSec?: number
 }
 
 const MIN = 60
@@ -79,11 +84,13 @@ export const SMS_CLASSES = {
   ai_reply: { priority: 1, category: 'conversation', transactional: true, ttlSec: 15 * MIN, footer: 'first_only', consentExempt: true, replyWindowSec: 15 * MIN },
   ai_fallback: { priority: 1, category: 'conversation', transactional: true, ttlSec: 15 * MIN, footer: 'first_only', consentExempt: true, replyWindowSec: 15 * MIN },
   // A personal link (calendar, verify, PIN, membership, payment, book again): the message row keeps the masked text, the outbox the
-  // real one (secretVars). Normal consent: a client the assistant created has the transactional kind.
-  personal_link: { priority: 1, category: 'transactional', transactional: true, ttlSec: 30 * MIN, footer: 'first_only' },
-  // "<summary>. Reply 4821 to confirm.": the server's reply number for an in-chat action, masked in the message row; it answers the
-  // request it confirms, so the same 15-minute reply window applies.
-  action_confirm: { priority: 1, category: 'transactional', transactional: true, ttlSec: 15 * MIN, footer: 'first_only', replyWindowSec: 15 * MIN },
+  // real one (secretVars). Consent-exempt only as a reply within 15 minutes of that number's last text (the assistant answering);
+  // otherwise normal consent (a client the assistant created has the transactional kind). Never to an opted-out number.
+  personal_link: { priority: 1, category: 'transactional', transactional: true, ttlSec: 30 * MIN, footer: 'first_only', replyConsentSec: 15 * MIN },
+  // "<summary>. Reply 4821 to confirm.": the server's reply number for an in-chat action, masked in the message row. It answers the
+  // request it confirms: only within 15 minutes of that number's last text (same rule as ai_reply), consent-exempt as that reply,
+  // never to an opted-out number.
+  action_confirm: { priority: 1, category: 'transactional', transactional: true, ttlSec: 15 * MIN, footer: 'first_only', consentExempt: true, replyWindowSec: 15 * MIN },
   // The one automatic follow-up of a lead: held by quiet hours, only within 24 hours of their last text (that is its consent: a
   // follow-up to their own question), never to an opted-out number.
   lead_follow_up: { priority: 2, category: 'automated', transactional: false, ttlSec: 2 * HOUR, footer: 'always', consentExempt: true, replyWindowSec: 24 * HOUR },
@@ -98,9 +105,14 @@ export function classSpec(klass: SmsClass): SmsClassSpec {
   return SMS_CLASSES[klass]
 }
 
-/** The reply window of a reply-only class (seconds), or null. */
-export function replyWindowOf(klass: SmsClass): number | null {
-  return classSpec(klass).replyWindowSec ?? null
+/**
+ * How far back a class looks at the number's last inbound text (its reply window or its reply consent), or null when it does not.
+ * enqueueFor reads the last inbound text and the opt-out itself for these classes, never trusting the caller.
+ */
+export function replyContextOf(klass: SmsClass): number | null {
+  const spec = classSpec(klass)
+  const w = Math.max(spec.replyWindowSec ?? 0, spec.replyConsentSec ?? 0)
+  return w > 0 ? w : null
 }
 
 export function isTransactional(klass: SmsClass): boolean {

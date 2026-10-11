@@ -92,12 +92,15 @@ export function canSendSms(recipient: SmsRecipient, purpose: SmsPurpose, ctx: Sm
   if (!production && !allowlisted) return deny('not_allowlisted')
   if (production && ctx.allowlist.length > 0 && !allowlisted) return deny('not_allowlisted')
 
-  if (spec.replyWindowSec !== undefined) {
+  const textedWithin = (sec: number): boolean => {
     const last = recipient.lastInboundAt
-    if (!last || ctx.now.getTime() - last.getTime() > spec.replyWindowSec * 1000) return deny('no_recent_inbound')
+    return !!last && ctx.now.getTime() - last.getTime() <= sec * 1000
   }
+  if (spec.replyWindowSec !== undefined && !textedWithin(spec.replyWindowSec)) return deny('no_recent_inbound')
+  // consent-exempt only as a reply (personal_link): within the window no opt-in is needed, outside it the normal rules apply
+  const exemptAsReply = spec.replyConsentSec !== undefined && textedWithin(spec.replyConsentSec)
 
-  if (recipient.kind === 'customer' && !spec.consentExempt) {
+  if (recipient.kind === 'customer' && !spec.consentExempt && !exemptAsReply) {
     if (!recipient.smsOptIn) return deny('not_opted_in')
     if (spec.category === 'marketing' && !(recipient.consentSource && MARKETING_CONSENT.has(recipient.consentSource))) {
       return deny('consent_source_insufficient')
