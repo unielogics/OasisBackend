@@ -17,6 +17,7 @@ import type { JobDefinition } from './jobs.js'
 import { purgeRealtimeEvents } from './realtime.js'
 import { purgeOtpRows } from '../modules/public/otp.js'
 import { purgeRateLimits } from '../modules/public/limits.js'
+import { purgeIdentityRows } from '../modules/identity/purge.js'
 
 export const REALTIME_RETENTION_MS = 10 * 60 * 1000
 export const WEBHOOK_LOG_RETENTION_MS = 90 * 24 * 3600 * 1000
@@ -100,6 +101,9 @@ registerPurgeTask(
   },
   'daily',
 )
+
+// personal links, link sessions, wrong-PIN rows, ended phone trust and resolved in-chat actions (ADR 0160; customer_pins is never purged)
+registerPurgeTask('identity', (db, clock) => purgeIdentityRows(db, clock.now()), 'daily')
 
 registerPurgeTask(
   'password_resets',

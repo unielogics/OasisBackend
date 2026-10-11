@@ -34,6 +34,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261011000300_leads.sql`             | leads and their single automatic follow-up (ADR 0160)                                                                                                     |
 | `20261011000400_status_texts.sql`      | the delayed "checked in" text queue and the running-late texts (ADR 0160)                                                                                |
 | `20261011000500_membership_checkouts.sql` | the checkout intents of memberships started through a personal link (ADR 0160)                                                                         |
+| `20261011020000_identity_core.sql`     | the identity core (wave W2b): `phone_trust.epoch` (a links-epoch bump voids the trust) and the wrong-PIN rows of the rolling limits (ADR 0160) |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -267,7 +268,7 @@ state). What is new is the identification of a member by phone and the abuse con
 | `public_member_tokens`  | The opaque token a verified code issued, by its sha256 (`token_hash`, pk); bound to the number and to `customer_id` (the customer owning the number at that moment, null when nobody did), 30 minutes (`expires_at`), `last_used_at`.                                                 |
 | `public_rate_limits`    | Fixed-window counters shared by every API process: `(key, window_start)` with `count`, keys such as `otp:phone:+1201...`, `booking:ip:203.0.113.9`; one upsert per request. Purged two days past the window.                                                                          |
 
-## AI assistant, phone identity, leads and status texts (migrations `20261011000000` to `20261011000500`, ADR 0160)
+## AI assistant, phone identity, leads and status texts (migrations `20261011000000` to `20261011000500` and `20261011020000`, ADR 0160)
 
 The foundation of the AI text assistant and the phone-centred identity (design: `docs/design/ai-assistant-and-phone-identity.md`).
 Secrets are never stored: link and session tokens, reply numbers and codes are SHA-256 hashes, PINs scrypt hashes of a peppered
@@ -282,7 +283,8 @@ HMAC. Location-scoped tables lead their unique keys with `location_id`; a phone 
 | `client_links`              | A personal link: `token_hash` unique (sha256 of a 32-byte base64url token), `kind calendar\|verify\|pin\|membership\|pay\|book_again`, `customer_id` (null only for a stranger's calendar or book-again link), `phone_e164`, appointment/invoice/plan bindings (the plan: fk `(location_id, plan_key)` to the location's plans), `pin_version`, `phone_version`, `epoch`, `issued_by`, `expires_at` (after `created_at`), `uses` of `max_uses`, `consumed_at`, `revoked_at` + `revoke_reason`. |
 | `client_link_sessions`      | The bearer session a link is exchanged for, by `token_hash`: `trust link\|verified`, `verified_by pin\|code`, `step_up_at`, `failed_attempts`, `idle_expires_at` (15 minutes) within `expires_at` (1 hour), `revoked_at`, `ip`.                    |
 | `customer_pins`             | pk `customer_id`: `pin_hash` (null once cleared, the row keeps counting), `version` (bumped on set, reset, clear), `failed_attempts`, `lock_level` 0-3, `locked_until`, `set_at`, `reset_hold_until`, `cleared_at`.                            |
-| `phone_trust`               | pk `(location_id, phone_e164)`: the client, `verified_at`, `verified_by pin\|code`, `expires_at` (+30 days at most, an hour of slack), `revoked_at` + `revoke_reason`.                                                                                                 |
+| `phone_trust`               | pk `(location_id, phone_e164)`: the client, `verified_at`, `verified_by pin\|code`, `expires_at` (+30 days at most, an hour of slack), `revoked_at` + `revoke_reason`, `epoch` (the links epoch it was granted in, migration `20261011020000`).                                                                                                 |
+| `identity_pin_failures`     | One wrong PIN entry on a link page: `customer_id` (null when the number has no client or no PIN: the try still counts against the address and the page), `phone_e164`, `ip`, `at`. The rolling limits count these rows: 10 a day per client, 20 an hour per client address. Purged after two days. |
 | `assistant_pending_actions` | An in-chat `book\|reschedule\|cancel` proposal waiting for its reply number: `payload`, `code_hash`, `attempts` of `max_attempts` (3), `expires_at` (+15 minutes), `state` (one `pending` per phone), `confirm_message_id`, `appointment_id`, `resolved_at`. |
 | `leads`                     | One per `(location_id, phone_e164)`: `customer_id`, `source text\|website\|walk_in`, `interests` (category keys), `status new\|followed_up\|booked\|closed` (`closed_at` iff booked or closed), contact times, `follow_up_at` (due index), `follow_up_message_id`, `booked_appointment_id`. |
 | `pending_checkin_texts`     | pk `appointment_id`: the "checked in" text due 3 minutes after a manual arrival, `state pending\|sent\|dropped` (with `drop_reason`), `message_id`, `settled_at`.                                                                              |
@@ -374,7 +376,7 @@ Operations design day re-anchored on **today** in the business time zone with th
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (105 tables, 1 view, 11 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (106 tables, 1 view, 11 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -1030,6 +1032,19 @@ Primary key `(location_id, year)`. `(location_id)` references `locations(id)` on
 
 Primary key `(key, actor)`. 1 check constraint. Index `idempotency_keys_expires_idx` `(expires_at)`.
 
+#### `identity_pin_failures`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `customer_id` | uuid | yes |  |
+| `phone_e164` | text | no |  |
+| `ip` | text | yes |  |
+| `at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. `(customer_id)` references `customers(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. 1 check constraint. Index `identity_pin_failures_at_idx` `(at)`. Index `identity_pin_failures_customer_idx` `(customer_id, at DESC)` where `customer_id IS NOT NULL`. Index `identity_pin_failures_ip_idx` `(location_id, ip, at DESC)` where `ip IS NOT NULL`.
+
 #### `invites`
 
 | Column | Type | Null | Default |
@@ -1559,8 +1574,9 @@ Primary key `(key)`. Unique `(sort)`.
 | `revoke_reason` | text | yes |  |
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `updated_at` | timestamp with time zone | no | `app_now()` |
+| `epoch` | integer | no | `1` |
 
-Primary key `(location_id, phone_e164)`. `(customer_id)` references `customers(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. 5 check constraints. Index `phone_trust_customer_idx` `(customer_id)`.
+Primary key `(location_id, phone_e164)`. `(customer_id)` references `customers(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. 6 check constraints. Index `phone_trust_customer_idx` `(customer_id)`.
 
 #### `plan_credit_rules`
 

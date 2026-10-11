@@ -134,7 +134,7 @@ const HOUR_MS = 3_600_000
  * The website's codes actually handed to the queue in the hour before `now` (a code suppressed by the policy costs the tablet
  * nothing), and when the oldest of them leaves that hour.
  */
-async function codesSentWithin(tx: Tx, locationId: string, now: Date): Promise<{ sent: number; retryAfterSec: number }> {
+export async function codesSentWithin(tx: Tx, locationId: string, now: Date): Promise<{ sent: number; retryAfterSec: number }> {
   const r = await tx
     .selectFrom('public_otp_challenges')
     .select((eb) => [eb.fn.countAll<string>().as('n'), eb.fn.min('created_at').as('oldest')])
@@ -146,8 +146,20 @@ async function codesSentWithin(tx: Tx, locationId: string, now: Date): Promise<{
   return { sent: Number(r.n), retryAfterSec: Math.max(1, Math.ceil((oldest.getTime() + HOUR_MS - now.getTime()) / 1000)) }
 }
 
-/** One notification per manager when the ceiling is reached, at most once an hour (its own transaction: the refusal rolls back). */
-async function tellManagersCodesPaused(d: PublicDeps, loc: PublicLocation, sent: number): Promise<void> {
+/**
+ * One notification per manager when the ceiling is reached, at most once an hour (its own transaction: the refusal rolls back). The
+ * link pages' codes (src/modules/identity) share the ceiling and call this too.
+ */
+export async function tellManagersCodesPaused(
+  d: {
+    app: Pick<PublicDeps['app'], 'db' | 'clock' | 'newId'> & {
+      log: { warn(obj: Record<string, unknown>, msg: string): void }
+      env: Pick<PublicDeps['app']['env'], 'PUBLIC_OTP_TEXTS_PER_HOUR'>
+    }
+  },
+  loc: Pick<PublicLocation, 'id'>,
+  sent: number,
+): Promise<void> {
   const { db, clock, newId } = d.app
   const now = clock.now()
   d.app.log.warn({ sent, cap: d.app.env.PUBLIC_OTP_TEXTS_PER_HOUR }, 'public one-time codes paused: hourly ceiling reached')
@@ -207,6 +219,8 @@ export async function verifyOtp(
       .selectAll()
       .where('id', '=', input.challengeId)
       .where('location_id', '=', loc.id)
+      // a link page's step-up code (ADR 0160) is redeemed only on its own page, never for a member token here
+      .where('purpose', '=', 'website')
       .forUpdate()
       .executeTakeFirst()
     if (!row) return { ok: false, error: new AppError('PUBLIC_OTP_EXPIRED') }

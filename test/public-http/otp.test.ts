@@ -5,6 +5,10 @@ import { describe, expect, it } from 'vitest'
 import { sql } from 'kysely'
 import { createManualMembership } from '../../src/modules/memberships/service.js'
 import { upsertCustomerByPhone } from '../../src/modules/customers/service.js'
+import { hashToken } from '../../src/modules/auth/tokens.js'
+import { issueClientLink } from '../../src/modules/identity/links.js'
+import { exchangeLink } from '../../src/modules/identity/sessions.js'
+import { hashCode } from '../../src/modules/public/otp.js'
 import { json, PHONES, usePublicHarness } from './harness.js'
 
 const h = usePublicHarness()
@@ -136,6 +140,34 @@ describe('POST /public/otp/verify', () => {
     expect((await verify(c2, code2)).statusCode).toBe(410)
     expect((await verify('00000000-0000-7000-8000-000000000000', '123456')).statusCode).toBe(410)
     expect((await verify('not-a-uuid', '123456')).statusCode).toBe(422)
+  })
+
+  it('a link page’s step-up code (ADR 0160: link_verify, pin_set, pin_reset) is not a website code: 410 like an unknown one, no try counted', async () => {
+    // a real link page: a stranger's calendar link to the number, opened once (the challenge belongs to that page's session)
+    const now = h.clock.now()
+    const link = await h.db.transaction().execute((tx) =>
+      issueClientLink(tx, { newId: h.newId, now }, { locationId: h.locationId, kind: 'calendar', issuedBy: 'staff', customerId: null, phone: PHONES.otp }),
+    )
+    const page = await exchangeLink(h.db, { token: link.token, ip: null, now })
+    for (const purpose of ['link_verify', 'pin_set', 'pin_reset'] as const) {
+      // one active code per number: the page's previous one is superseded
+      await h.db.updateTable('public_otp_challenges').set({ consumed_at: now, consumed_reason: 'superseded' }).where('consumed_at', 'is', null).execute()
+      const id = h.newId()
+      const code = '482913'
+      await h.db
+        .insertInto('public_otp_challenges')
+        .values({ id, location_id: h.locationId, phone_e164: PHONES.otp, code_hash: hashCode(id, code), expires_at: new Date(now.getTime() + 600_000),
+          purpose, link_session_hash: hashToken(page.session) })
+        .execute()
+      const r = await verify(id, code)
+      expect(json(r), purpose).toMatchObject({ code: 'PUBLIC_OTP_EXPIRED', status: 410 })
+      expect(json(r).memberToken, purpose).toBeUndefined()
+      const row = await h.db.selectFrom('public_otp_challenges').select(['attempts', 'consumed_at']).where('id', '=', id).executeTakeFirstOrThrow()
+      expect(row, purpose).toEqual({ attempts: 0, consumed_at: null })
+    }
+    await h.db.deleteFrom('public_otp_challenges').execute()
+    await h.db.deleteFrom('client_link_sessions').execute()
+    await h.db.deleteFrom('client_links').execute()
   })
 
   it('a right code issues an opaque token (hashed at rest, 30 min) and the member view: first name, tier, washes left, active', async () => {
