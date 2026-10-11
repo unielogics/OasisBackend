@@ -12,12 +12,11 @@
 //   - The model never sees a phone number, an id (uuid), a token, a URL, a reply number or a PIN/code. Tools bind the client from
 //     ctx.identity (server side); their inputs never name a client, a phone or an id. Appointments are refs A1..A3 (ctx.refs), links
 //     are placeholders "{link1}" (ctx.addLink).
-//   - Pricing is not the AI's task: a tool states only STARTING prices (ShopFacts.catalog / tint "from" prices), plan monthly prices
-//     and the guest booking fee, as integer cents fields named *Cents, never a total, a combination or a discount, WITH the item /
-//     plan keys. The model never writes an amount (output guard v3, design section 3c): it writes the placeholders {price:<key>},
-//     {price:tint:<vehicle>:<film>}, {plan:<key>}, {fee} and {balance}, and the server renders them from the current facts after
-//     the guard (facts.ts placeholderValues). {balance} renders get_balance's data.openBalanceCents (else its first amountsCents),
-//     only in a turn where get_balance succeeded.
+//   - Pricing is not the AI's task, and the model never writes an amount (output guard v4, design section 3c): a tool hands it no
+//     dollar figure, only the placeholder of each priced thing ({price:<key>}, {price:tint:<vehicle>:<film>}, {plan:<key>}, {fee},
+//     {balance}; the keys facts.ts placeholderValues renders), and the server renders STARTING prices, plan prices, the fee and the
+//     balance from the current facts after the guard, never a total, a combination or a discount. {balance} renders get_balance's
+//     data.openBalanceCents when present, else its first amountsCents (the total), only in a turn where get_balance succeeded.
 //   - Everything stays off by default: with AI_ENABLED=false, assistant.enabled=false, AI_ACTIONS_ENABLED=false or
 //     assistant.actions_enabled=false, no tool runs an action, no reply number executes, no client is adopted and no lead job
 //     sends anything.

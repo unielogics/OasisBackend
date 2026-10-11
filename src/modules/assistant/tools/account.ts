@@ -9,9 +9,20 @@ import { listVehicles, updateCustomer, upsertVehicleByPlate } from '../../custom
 import { STATUS_PHRASE } from '../../scheduling/appointments.js'
 import { TOOL_MIN_TRUST, type AssistantTool, type ToolInputs } from '../contract.js'
 import { isProvisionalClient } from '../welcome/provisional.js'
-import { VEHICLE_TYPES } from '../welcome/schema.js'
+import { VEHICLE_TYPES, type VehicleType } from '../welcome/schema.js'
+import { tintPlaceholder } from '../facts.js'
 import '../welcome/schema.js'
 import { fail, json, ok, shortDate } from './common.js'
+
+/**
+ * The tint matrix rows of a vehicle class. set_my_vehicle's types (sedan_coupe | suv_crossover | truck_van, vehicles.vehicle_type)
+ * are the price classes; the matrix (setting catalog.tint_matrix) keys its vehicle types itself ("sedan", "suv", "truck" in the
+ * website's matrix), so a class matches its own key or the key of its first word.
+ */
+export function tintRowsFor<R extends { vehicle: string }>(tint: readonly R[], type: VehicleType): R[] {
+  const keys = new Set([type, type.split('_')[0]!])
+  return tint.filter((t) => keys.has(t.vehicle))
+}
 
 /** Vehicles a client may have added by text in all (the record is theirs; a flood of vehicles is not). */
 export const MAX_VEHICLES = 6
@@ -57,12 +68,14 @@ export const listMyAppointments: AssistantTool<ToolInputs['list_my_appointments'
 
 export const getBalance: AssistantTool<ToolInputs['get_balance']> = {
   name: 'get_balance',
-  description: 'The client’s own open invoices and what is left to pay on each (not a price). For paying, offer send_link {kind: pay}.',
+  description:
+    'The client’s own open invoices (visit, date, whether a payment is on its way). To state what they owe, write "{balance}." as its own sentence: the server writes the open balance. For paying, offer send_link {kind: pay}.',
   input: z.strictObject({}),
   minTrust: TOOL_MIN_TRUST.get_balance,
   async run(ctx) {
     const customerId = ctx.identity.customerId
-    if (!customerId) return ok({ openBalanceCents: 0, invoices: [] })
+    // the model never sees an amount (guard v4): {balance} renders the total the runner takes from amountsCents[0]
+    if (!customerId) return ok({ hasOpenBalance: false, invoices: [] }, { amountsCents: [0] })
     const r = await sql<{ id: string; appointment_id: string | null; biz_date: string; balance: string; pending_amt: string; service: string | null }>`
       select i.id, i.appointment_id, i.biz_date::text as biz_date, c.balance, c.pending_amt, coalesce(s.public_name, a.package_name) as service
       from invoices i cross join lateral invoice_calc_of(i.id) c
@@ -72,15 +85,22 @@ export const getBalance: AssistantTool<ToolInputs['get_balance']> = {
       order by i.occurred_at desc, i.id desc
       limit 5`.execute(ctx.db)
     const refOf = new Map(ctx.refs.all().map((x) => [x.appointmentId, x.ref]))
+    const balances = r.rows.map((x) => Number(x.balance))
     const invoices = r.rows.map((x) => ({
       ref: x.appointment_id ? (refOf.get(x.appointment_id) ?? null) : null,
       dateLabel: shortDate(x.biz_date),
       service: x.service,
-      balanceCents: Number(x.balance),
       paymentPending: Number(x.pending_amt) > 0,
     }))
-    const total = invoices.reduce((s, x) => s + x.balanceCents, 0)
-    return ok(json({ openBalanceCents: total, invoices }), { amountsCents: [...new Set([total, ...invoices.map((x) => x.balanceCents)])] })
+    const total = balances.reduce((s, x) => s + x, 0)
+    return ok(
+      json({
+        hasOpenBalance: total > 0,
+        invoices,
+        balanceRule: 'Never write an amount: write "{balance}." as its own sentence and the server writes "Your open balance is ...". Never add up or split it.',
+      }),
+      { amountsCents: [...new Set([total, ...balances])] },
+    )
   },
 }
 
@@ -170,8 +190,15 @@ export const setMyVehicle: AssistantTool<ToolInputs['set_my_vehicle']> = {
         entityId: vehicleId,
         after: { customerId, type: input.type, year: input.year, make, model, color },
       })
-      const tintClass = ctx.facts.catalog.tint.find((t) => t.vehicle === input.type)?.vehicleLabel ?? null
-      return ok({ saved: true, vehicle: [input.year, make, model].filter((x) => x !== null).join(' '), type: input.type, tintClass })
+      const rows = tintRowsFor(ctx.facts.catalog.tint, input.type)
+      return ok({
+        saved: true,
+        vehicle: [input.year, make, model].filter((x) => x !== null).join(' '),
+        type: input.type,
+        tintClass: rows[0]?.vehicleLabel ?? null,
+        // the tint prices for their vehicle class, as placeholders (the model never writes an amount)
+        tintPriceKeys: rows.map((r) => ({ film: r.filmLabel, priceKey: tintPlaceholder(r.vehicle, r.film) })),
+      })
     })
   },
 }

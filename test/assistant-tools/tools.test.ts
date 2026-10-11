@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import { sql } from 'kysely'
 import { TOOL_MIN_TRUST, type AnyAssistantTool, type ToolOutcome } from '../../src/modules/assistant/contract.js'
+import { tintRowsFor } from '../../src/modules/assistant/tools/account.js'
 import { vipFor } from '../../src/modules/assistant/tools/availability.js'
 import { privilegesOf } from '../../src/modules/assistant/tools/common.js'
 import { createToolRegistry } from '../../src/modules/assistant/tools/index.js'
@@ -75,23 +76,27 @@ describe('public facts: business info, services (starting prices only), membersh
       address: '468 River Drive, Garfield NJ 07026',
       website: 'https://oasisautospanj.com',
     })
-    expect(data(await run('get_business_info', ctx, { topic: 'fee' }))).toMatchObject({ guestBookingFeeCents: w.facts.fee.guestBookingFeeCents })
+    // the fee as a placeholder: the model never sees the amount (guard v4)
+    const fee = data(await run('get_business_info', ctx, { topic: 'fee' }))
+    expect(fee).toMatchObject({ hasFee: w.facts.fee.guestBookingFeeCents > 0, placeholder: '{fee}', collect: 'counter' })
+    expect(JSON.stringify(fee)).not.toMatch(/Cents|\$\d/)
     expect(data(await run('get_business_info', ctx, { topic: 'hours' }))).toMatchObject({ today: { day: 'Saturday' } })
     expect(data(await run('get_business_info', ctx, { topic: 'faq' }))).toMatchObject({ faq: [{ q: 'Do you take walk-ins?' }] })
     expect(() => tool('get_business_info').input.parse({ topic: 'secrets' })).toThrow()
   })
 
-  it('list_services states starting prices for members and guests, quote-only items without a price, and never a total', async () => {
+  it('list_services gives each item its price placeholder (never an amount), quote-only items included, and never a total', async () => {
     const { ctx } = await w.ctx({ customerId: null, phone: STRANGER, trust: 'unknown' })
     const d = data(await run('list_services', ctx, { category: null }))
+    expect(d.priceRule).toMatch(/Never write an amount/)
     expect(d.priceRule).toMatch(/STARTING prices/)
-    const items = d.items as { key: string; memberFromCents: number | null; guestFromCents: number | null; quoteOnly: boolean; kind: string }[]
+    const items = d.items as { key: string; priceKey: string; quoteOnly: boolean; kind: string }[]
     const express = items.find((i) => i.key === 'express-hand-wash')!
-    const fact = w.facts.catalog.items.find((i) => i.key === 'express-hand-wash')!
-    expect(express).toMatchObject({ memberFromCents: fact.memberFromCents, guestFromCents: fact.guestFromCents, kind: 'package' })
-    expect(JSON.stringify(d)).not.toMatch(/"priceCents"|"total|"sumCents|"discount/i)
-    for (const q of items.filter((i) => i.quoteOnly)) expect([q.memberFromCents, q.guestFromCents]).toEqual([null, null])
-    expect(d.tint).toEqual([{ vehicle: 'Sedan / coupe', film: 'Ceramic', vlt: [5, 20, 35], memberFromCents: 22900, guestFromCents: 27500 }])
+    expect(express).toMatchObject({ priceKey: '{price:express-hand-wash}', kind: 'package' })
+    // no amount reaches the model: a model-written amount is refused by the output guard
+    expect(JSON.stringify(d)).not.toMatch(/Cents|\$\d|"total|"discount/i)
+    for (const i of items) expect(i.priceKey).toBe(`{price:${i.key}}`)
+    expect(d.tint).toEqual([{ vehicle: 'Sedan / coupe', vehicleKey: 'sedan_coupe', film: 'Ceramic', filmKey: 'ceramic', vlt: [5, 20, 35], priceKey: '{price:tint:sedan_coupe:ceramic}' }])
     const washOnly = data(await run('list_services', ctx, { category: 'wash' }))
     expect((washOnly.items as { category: string }[]).every((i) => i.category === 'wash')).toBe(true)
     expect(await run('list_services', ctx, { category: 'nope' })).toMatchObject({ ok: false, error: 'invalid' })
@@ -101,9 +106,10 @@ describe('public facts: business info, services (starting prices only), membersh
     const stranger = await w.ctx({ customerId: null, phone: STRANGER, trust: 'unknown' })
     const s = data(await run('get_membership_info', stranger.ctx, {}))
     expect(s.plans).toEqual([
-      { tier: 'gold', label: 'Gold', monthlyPriceCents: 9900, perks: ['4 hand washes a month'] },
-      { tier: 'vip', label: 'VIP', monthlyPriceCents: 16900, perks: ['Everything in Gold'] },
+      { tier: 'gold', label: 'Gold', priceKey: '{plan:gold}', perks: ['4 hand washes a month'] },
+      { tier: 'vip', label: 'VIP', priceKey: '{plan:vip}', perks: ['Everything in Gold'] },
     ])
+    expect(JSON.stringify(s)).not.toMatch(/Cents|\$\d/)
     expect(s.mine).toBeNull()
     const own = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'caller' })
     expect(data(await run('get_membership_info', own.ctx, {})).mine).toMatchObject({ member: expect.any(Boolean) })
@@ -182,7 +188,9 @@ describe('the client’s own record', () => {
   it('get_balance lists only the own open invoices and declares the amounts the reply may state', async () => {
     const { ctx } = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'caller' })
     const none = await run('get_balance', ctx, {})
-    expect(none).toMatchObject({ ok: true, data: { openBalanceCents: 0, invoices: [] } })
+    // the model reads no amount; the turn renders {balance} from amountsCents[0] (the total)
+    expect(none).toMatchObject({ ok: true, data: { hasOpenBalance: false, invoices: [] }, amountsCents: [0] })
+    expect(JSON.stringify(none.ok && none.data)).not.toMatch(/Cents/)
   })
 
   it('set_my_name fills the welcome flow’s placeholder once, and never replaces a real name', async () => {
@@ -215,6 +223,13 @@ describe('the client’s own record', () => {
     expect(await w.t.db.selectFrom('vehicles').select('id').where('customer_id', '=', david().id).execute()).toHaveLength(before.length + 1)
     expect(await run('set_my_vehicle', ctx, { type: 'truck_van', make: '<script>', model: 'x', year: null, color: null })).toMatchObject({ ok: false, error: 'invalid' })
     expect(() => tool('set_my_vehicle').input.parse({ type: 'boat', make: 'a', model: 'b', year: null, color: null })).toThrow()
+  })
+
+  it('a vehicle class finds its tint rows whether the matrix keys it "suv" (the website’s matrix) or "suv_crossover"', () => {
+    const rows = [{ vehicle: 'sedan' }, { vehicle: 'suv' }, { vehicle: 'truck' }, { vehicle: 'suv_crossover' }]
+    expect(tintRowsFor(rows, 'suv_crossover')).toEqual([{ vehicle: 'suv' }, { vehicle: 'suv_crossover' }])
+    expect(tintRowsFor(rows, 'truck_van')).toEqual([{ vehicle: 'truck' }])
+    expect(tintRowsFor([{ vehicle: 'coupe' }], 'sedan_coupe')).toEqual([])
   })
 })
 
