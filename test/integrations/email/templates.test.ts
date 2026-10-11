@@ -50,6 +50,12 @@ const valid: Record<string, Record<string, string | number>> = {
     reason: 'storm',
     message: 'Stay safe.',
   },
+  pin_reset_notice: {
+    customerName: 'Maria',
+    phoneLast4: '0142',
+    changedLabel: 'on Sat, Jun 13 at 10:36 AM',
+    holdLabel: 'Tue, Jun 16 at 10:36 AM',
+  },
 }
 
 describe('template registry', () => {

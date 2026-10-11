@@ -96,6 +96,7 @@ const TEMPLATE_LABEL: Record<string, string> = {
   password_reset: 'Password reset email',
   closure_notice: 'Closure email',
   device_alert: 'Alert email',
+  pin_reset_notice: 'PIN reset email',
 }
 
 function detailOf(d: FeedbackDecision): string {

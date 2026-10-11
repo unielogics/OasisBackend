@@ -189,7 +189,7 @@ async function recordLock(
   )
 }
 
-/** The client's verified code of this page (link_verify / pin_set, or pin_reset) confirmed within 10 minutes and after `since`. */
+/** A code of this page (link_verify / pin_set, or pin_reset) confirmed within the last 10 minutes and not before `since`. */
 async function recentCodeOf(tx: Executor, s: SessionView, purposes: readonly string[], now: Date, since: Date | null): Promise<boolean> {
   const r = await tx
     .selectFrom('public_otp_challenges')
@@ -198,7 +198,7 @@ async function recentCodeOf(tx: Executor, s: SessionView, purposes: readonly str
     .where('consumed_reason', '=', 'verified')
     .where('purpose', 'in', purposes as never)
     .where('consumed_at', '>=', new Date(now.getTime() - PIN_AFTER_CODE_MS))
-    .$if(since !== null, (q) => q.where('consumed_at', '>', since!))
+    .$if(since !== null, (q) => q.where('consumed_at', '>=', since!))
     .limit(1)
     .executeTakeFirst()
   return r !== undefined

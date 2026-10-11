@@ -2,7 +2,7 @@ import type { EmailRequest } from '../ports/email.js'
 import { EmailError } from './errors.js'
 import { renderHtml, renderText, type Doc } from './content.js'
 
-export type TemplateKey = 'receipt' | 'staff_invite' | 'password_reset' | 'device_alert' | 'closure_notice'
+export type TemplateKey = 'receipt' | 'staff_invite' | 'password_reset' | 'device_alert' | 'closure_notice' | 'pin_reset_notice'
 
 type VarKind = 'text' | 'multiline' | 'url' | 'cents' | 'int' | 'items'
 interface VarSpec {
@@ -230,6 +230,33 @@ const defs: TemplateDef[] = [
         ...(v.rescheduleUrl
           ? [{ t: 'button' as const, label: 'Pick a new time', url: String(v.rescheduleUrl) }]
           : [{ t: 'p' as const, text: 'Reply to this email or call us and we will find you a new time.' }]),
+      ],
+      footer: footer(v),
+    }),
+  },
+  {
+    // the client's website PIN was reset with a texted code (ADR 0160): the notice goes to the email on file, so a reset by someone
+    // holding the phone does not go unnoticed; membership and payment changes wait for the hold
+    key: 'pin_reset_notice',
+    vars: {
+      customerName: { kind: 'text', max: 120 },
+      phoneLast4: { kind: 'text', required: true, max: 4 },
+      changedLabel: { kind: 'text', required: true, max: 80 },
+      holdLabel: { kind: 'text', required: true, max: 80 },
+      ...shopVars,
+    },
+    build: (v) => ({
+      subject: `Your ${v.shopName} PIN was reset`,
+      heading: 'Your PIN was reset',
+      blocks: [
+        {
+          t: 'p',
+          text:
+            `${hello(v.customerName)}\nThe PIN for your ${v.shopName} personal links was reset ${v.changedLabel}, ` +
+            `with a code texted to your number ending in ${v.phoneLast4}.`,
+        },
+        { t: 'note', text: `For your safety, membership changes and payments through your links wait until ${v.holdLabel}.` },
+        { t: 'p', text: 'If this was you, there is nothing else to do. If it was not, call or text us right away.' },
       ],
       footer: footer(v),
     }),
