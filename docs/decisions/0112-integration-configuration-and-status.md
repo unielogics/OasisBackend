@@ -14,7 +14,7 @@ Status: accepted (2026-10-08)
 * **Switching to SES and S3 is configuration only.** `EMAIL_PROVIDER=ses` and `STORAGE_PROVIDER=s3` with the settings above change the
   API and the worker without code: proven end to end by spawning the real `src/server.ts` and `src/worker.ts` against the AWS simulator
   (test/aws/sim-e2e.test.ts). Credentials come from the SDK's default chain; the app never reads them itself.
-* **`GET /api/v1/system/integrations` (`set.billing`)** answers per integration (email, storage, sms, squarespace): provider, `live`,
+* **`GET /api/v1/system/integrations` (`set.billing`)** answers per integration (email, storage, sms, squarespace, and since ADR 0160 ai): provider, `live`,
   `configured` (live and nothing required missing), `missing` (exact variable names or steps such as registering a tablet),
   `warnings` (recommended settings, simulator overrides, an offline tablet), last success and last error with time, and non-secret
   details. Sources: `outbox_emails` (`sent_at`, new `error_at`), `webhook_log` (last SES feedback), `email_suppressions`,

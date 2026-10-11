@@ -1102,6 +1102,21 @@ when none ever ran. With `JOBS_ENABLED=false` the answer is `{enabled: false, jo
 | `ledger.integrity_check` | a `ledger_integrity_runs` row per business date; notification `ledger.integrity_failed` to the managers when it finds a new set of problems (ADR 0123) |
 | `sms.device.healthcheck`, `sms.dispatch` | notifications `sms.device_offline` / `sms.device_recovered` debounced per 30-minute flap window with the end state announced when it closes, `sms.no_device` once per episode (ADR 0122) |
 
+### 25.3 `GET /api/v1/system/integrations`: the `ai` row (ADR 0160)
+
+Besides `email`, `storage`, `sms` and `squarespace` (ADR 0112) the answer has a fifth row, `key: 'ai'`: `provider` is
+`AI_PROVIDER` (`sim` | `bedrock`), `live` is `bedrock`, `missing` is `AI_PROVIDER=bedrock` while simulated (and the AWS
+credentials when live and none is available), `warnings` say why the assistant answers nothing (`AI_ENABLED=false`, Settings,
+Assistant off), the rollout stage when it is not `everyone`, the simulator answering while enabled, and a reached daily
+budget. `lastSuccessAt` is the last `replied` turn, `lastErrorAt` / `lastError` the last `failed` turn (error masked, 300
+characters). `details`:
+
+```
+{ model ('sim' or AI_BEDROCK_MODEL_ID), region (null while simulated), enabled (AI_ENABLED and assistant.enabled),
+  envEnabled, settingEnabled, stage, actionsEnabled, effortMode (AI_BEDROCK_EFFORT_MODE),
+  turnsToday, spendTodayUsd (sum of cost_micros since the location's midnight), dailyBudgetUsd, credentials }
+```
+
 
 ## 26. Public website API: `/api/v1/public/*`
 
