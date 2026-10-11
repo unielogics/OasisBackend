@@ -42,3 +42,28 @@ Migrations `20261011000000` to `20261011000500` (catalog fields and categories, 
 membership checkouts), the Kysely types, the environment and settings keys, the consent source, the SMS classes and templates, the
 status-texts port (called by nothing yet), the `ai_handoff` and `sms.picture_message` alert kinds, and the AI provider port with its
 simulator. No route, job or behaviour beyond the policy gate and the masked message bodies; later waves build the modules.
+
+## Wave W2d (messaging plumbing)
+
+The inbound path and the dispatcher are ready for the assistant; nothing answers yet (no turn, no kick consumer) and everything is
+inert while `AI_ENABLED=false` or `assistant.enabled=false`. Contract: docs/api-spec.md section 23.4a.
+
+- **Ports** (`src/modules/assistant/ports.ts`): `AssistantGate` (active/allow/reason), `AssistantInbox` (the durable marker and the
+  AGENT handoff, in the webhook transaction), `AssistantKick` (after commit), `ActionCodeHandler` (reply numbers). Defaults are off;
+  the messaging runtime supplies the Postgres gate and conversation store and looks pending actions up itself, and wave 3 plugs its
+  kick and reply-number handler in with `MessagingRuntime.useAssistant()`.
+- **Gate**: `active` = AI_ENABLED, assistant.enabled, a real sender that is not ours, a US/CA mobile number, the stage, no opt-out;
+  `allow` = active and no staff pause, no open handoff, no loop breaker (3 identical texts within 30 min, more than 5 a minute).
+  The turn-level breaker (6 turns without progress) and the caps belong to the turn (wave 3).
+- **AGENT** is a keyword only while the assistant serves the number (`active`), so with the assistant off it stays an ordinary message
+  and nothing changes for today's texters. It opens a handoff even when the thread is paused or already handed off.
+- **Codes**: decided before routing reaches the model. A reply number is recognised whenever an in-chat action is pending for the
+  phone, even with the gate closed (a pending action only exists while the AI runs; the handler re-checks the kill switches), so the
+  digits are never filed readable. Without a pending action they are masked only while the assistant answers the number: with it off
+  "2015" or a ZIP code from a client stays an ordinary message, as before.
+- **Strangers** routed to the assistant are not quarantined (wave 3 creates the provisional client from the first text and backfills
+  the thread from `sms_inbox.assistant_conversation_id`); a stranger's AGENT stays in the quarantine list with the handoff alert.
+- **Staff takeover** is recorded on every staff text, the AI on or off, so turning the AI on never answers a thread staff just
+  answered. The "AI paused" line in the dashboard should show only while the assistant is enabled.
+- **Sub-cap**: the window accounting (`sms_usage`) records the class of each send (migration `20261011040000_sms_usage_class`); the
+  AI classes are counted together against `AI_SMS_SEGMENTS_PER_30MIN` on a fixed 30-minute window, independent of the device window.
