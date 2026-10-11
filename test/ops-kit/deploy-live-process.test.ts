@@ -181,8 +181,19 @@ describe('the production process', () => {
     const web = (await import('node:http')).createServer((_q, res) => res.writeHead(200).end('ok'))
     await new Promise<void>((r) => web.listen(4594, '127.0.0.1', r))
     try {
-      const r = await sh(script('healthcheck.sh'), ['--api', API, '--web', 'http://127.0.0.1:4594'])
-      expect(r.code, r.out).toBe(0)
+      // the worker check is about this machine's systemd, not the API under test: a stub says it is active, so the
+      // test passes on any machine (it used to need a live oasis-worker.service on the host running it)
+      const bin = mkdtempSync(path.join(tmpdir(), 'oasis-hc-'))
+      const systemctl = path.join(bin, 'systemctl')
+      writeFileSync(systemctl, '#!/usr/bin/env bash\necho active\n', { mode: 0o755 })
+      try {
+        const r = await sh(script('healthcheck.sh'), ['--api', API, '--web', 'http://127.0.0.1:4594'], {
+          SYSTEMCTL: systemctl,
+        })
+        expect(r.code, r.out).toBe(0)
+      } finally {
+        rmSync(bin, { recursive: true, force: true })
+      }
     } finally {
       await new Promise((r) => web.close(r))
     }
