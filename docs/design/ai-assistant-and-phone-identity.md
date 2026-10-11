@@ -160,21 +160,20 @@ the builders. Where it says MUST, a test must prove it.
   and a service price must be introduced by "starts at"/"from"/"starting at"; anything else is blocked (fallback or a
   rewrite call) — tested.
 
-## 3c. Output guard v3 (orchestrator decision after two adversarial review rounds, 2026-10-11)
-Word lists cannot cover every phrasing (round 2: 68 of 99 adversarial replies leaked), so sensitive content is
-SERVER-RENDERED and the model's own text is held to strict rules:
-- Amounts are never written by the model. It writes placeholders the server renders from the current shop facts AFTER the
-  guard checked the raw text: {price:<itemKey>} / {price:tint:<vehicle>:<film>} (approved "starts at $45 for members, $54
-  otherwise" wording; quote-only → photo quote), {plan:<tier>} ("Gold is $99 a month"), {fee}, {balance} (only after
-  get_balance this turn), {linkN}. Unknown keys are rejected.
-- Numbers rule on the raw text: no currency signs or money words, no numbers (digits or words) except clock times, dates
-  and small counts (1–10) before a non-money noun; no digit group that could be a code or phone.
-- Checks run on the plain text AND a skeleton (accents stripped, look-alike characters mapped, spaced-out letters joined,
-  "[.]"/" dot " folded) for secrets (the model may not mention PINs/codes at all; the server appends the safety line after
-  verify/pin/membership/pay links), promise words (free/discount/refund/guarantee/time promises/legal words and their
-  equivalents) and hosts/URLs/IPs.
-- Any hit → one rewrite call with a precise hint → else fallback + handoff. A semantic LLM judge for borderline intent is
-  evaluated in W4 (cost/latency vs. benefit) before rollout.
+## 3c. Output guard v4 (orchestrator decision after three adversarial review rounds, 2026-10-11)
+A fixed word list cannot recognise meaning (round 2: 68/99 adversarial replies leaked; round 3 with server-rendered
+amounts and skeleton matching: 113/232 leaked AND 17/81 ordinary replies were wrongly blocked — paraphrases, slang,
+Spanish). The guard therefore has three layers:
+1. Self-contained renderings: the model writes placeholders as their own sentence; the server renders each with its own
+   subject ({price:<key>} → "<Name> starts at $45 for members, $54 otherwise"; {plan:<tier>} → "<Plan> is $99 a month";
+   {fee}; {balance}; {linkN}; the safety line after verify/pin/membership/pay links). Only placeholders carry amounts.
+2. A small deterministic layer for unambiguous cases (money signs/words, code/phone digit runs incl. disguised ones,
+   hosts/URLs, unmistakable PIN/code/free/discount/refund words in English and Spanish), tuned so ordinary replies pass.
+3. A policy judge: a second model call on every reply with a fixed rubric (no amounts outside trusted segments, no
+   free/discount/refund/compensation/guarantee/finish-time promises, never asks for codes/PINs/card data, no links or
+   phone numbers outside trusted segments, no legal statements), language-agnostic. Fail → one rewrite → judge again →
+   fallback + handoff; judge error → fail closed. W4 measures recall and false blocks on Bedrock with the 232 + 81 set
+   before any rollout.
 
 ## 4. Tools (zod-validated, strict schemas, customer bound server-side, refs A1..A3 resolve only to own rows)
 | tool | trust | does |
