@@ -1,84 +1,73 @@
-// The output guard (ADR 0160, design sections 3 and 3b): every text the model writes passes here before it can reach a client.
+// The output guard v3 (ADR 0160, design sections 3, 3b and 3c): every text the model writes passes here before it can reach a client.
 // Pure: the turn (turn.ts) decides what to do with the verdict (one rewrite call, one shorten call, a cut, or the fallback).
 //
-// ALLOW-LISTS, never excusals (owner-level redesign 2026-10-11): a forbidden thing is blocked wherever it appears, and only an
-// exact, server-owned phrase lets it through. Nothing is excused because it sits near a "link", a "warning", the owner's facts or
-// a capitalised word.
+// SENSITIVE CONTENT IS SERVER-RENDERED, NOT WRITTEN BY THE MODEL (orchestrator decision 2026-10-11, after two adversarial review rounds
+// showed that word lists cannot cover every phrasing). The model writes placeholders; the guard checks the model's RAW text; only then
+// does the server render the placeholders from the current shop facts (facts.ts placeholderValues). Rendering is the only way a $
+// amount reaches a client.
 //
-//   - plain text: markdown stripped, GSM-7 only (typography and emoji normalised like every other text; anything else dropped)
-//   - at most MAX_REPLY_CHARS characters, at most one question
-//   - (A) secrets: no PIN, passcode, password, code, card number, CVV, card digits or 4-8 digit code anywhere, except inside one of
-//     the server's own SAFETY_LINES written as a whole sentence; the server appends SAFETY_LINE itself when a verify / pin /
-//     membership / pay link goes out (turn.ts composeReply)
-//   - (B) promise words: free, discount, refund, coupon, deal, guarantee, comp, waive, "on the house", "ready by", legal and
-//     damage words; only the whole phrases of ALLOWED_PHRASES ("feel free", "spot-free" ...) pass
-//   - (C) the PRICING RULE: a dollar amount is (1) a catalog starting price introduced by "starts at" / "starting at" / "from"
-//     right before it, in a clause that names that item or its category, (2) a plan's monthly price with "a month" / "/month"
-//     right after it and the plan's label right before it, (3) the guest booking fee next to the word "fee", or (4) an amount a
-//     tool of this turn declared (the client's own balance); never a total or a combination
-//   - (D) no web address: no "http", "://", "www", nothing shaped like label.label with a 2+ letter last label (any case); only
-//     the server's {linkN} placeholders and the shop's own host as text (no path) pass
-//   - (E) no phone number but the shop's own
-// Every problem is fixed by one rewrite call; a reply that still has a hard problem after it becomes the fallback and a handoff.
+//   (1) placeholders: {price:<itemKey>}, {price:tint:<vehicle>:<film>}, {plan:<key>}, {fee}, {balance} (only after get_balance this
+//       turn) and the turn's {linkN}; anything else in braces is `unknown_placeholder`
+//   (2) the NUMBERS RULE (raw text, placeholders and server-owned literals removed): no currency sign, no money word (`money`); no
+//       number, in digits or in words, except clock times, dates, durations and counts of 1-10 before a noun (`number`); never a
+//       digit group of 4+ digits, even split by spaces, dashes, dots or slashes (`digits`: codes, phone numbers)
+//   (3) every word check runs on the plain text AND on a SKELETON: accents stripped (NFKD), lower case, look-alikes mapped inside
+//       words (0->o 1->i 3->e 4->a 5->s 7->t @->a $->s), i/l treated alike, zero-width characters gone, spaced-out letters joined
+//       ("f r e e", "P - I - N"), "[.]" / "(.)" / " . " / " dot " / "name,com" folded to a dot for the host check
+//   (4) secrets: no PIN, code, password, passphrase, OTP, one-time, digits, login, card numbers, CVV, expiry... at all (`secret`); the
+//       server appends SAFETY_LINE itself after a verify / pin / membership / pay link, and the model writing it is a mention too
+//   (5) promise words (`promise_words`): free (only "feel free" and "<word>-free" compounds pass), costs nothing, on me / on us,
+//       percent off, sale, rebate, refund, discount, coupon, promo, deal, comp, waive, cover the cost, promise, guarantee, warranty,
+//       time promises (ready / done / finished by, at, in, around ...), legal, insurance and damage words
+//   (6) hosts (`url`): anything shaped like label.label, an IP, "http", "hxxp", "www", "://"; only the {linkN} placeholders and the
+//       shop's own host exactly as text (no path) pass
+// Kept: markdown stripped, GSM-7, at most MAX_REPLY_CHARS after rendering, at most one question. Every problem gets one rewrite
+// call with a precise hint; a reply that still has a hard problem after it becomes the fallback and a handoff.
 import { isGsm7Char, normalizeForSms } from '../../integrations/sms/gsm.js'
-import type { FactAmounts } from './facts.js'
-import { INTL_PHONE, LOCAL_PHONE, NANP_PHONE } from './transcript.js'
 
-/** The longest reply (characters, placeholders counted as written). */
+/** The longest reply (characters, after rendering; {linkN} counted as written). */
 export const MAX_REPLY_CHARS = 320
 
-/** The safety line the server appends to a reply that carries a verify, PIN, membership or payment link (A). */
+/** The safety line the server appends to a reply that carries a verify, PIN, membership or payment link (A). The model never writes it. */
 export const SAFETY_LINE = 'For your security, enter codes and your PIN only on the secure page, never by text.'
-/** Every server-owned sentence that may mention codes or a PIN (the model may repeat one exactly, as a whole sentence). */
-export const SAFETY_LINES: readonly string[] = [
-  SAFETY_LINE,
-  // the code_on_link_page template's line (messaging/templates/registry.ts): the model may see it in the conversation
-  'For your security, codes are only entered on your secure link page, never by text.',
-]
 /** The link kinds whose reply gets SAFETY_LINE. */
 export const SAFETY_LINK_KINDS: ReadonlySet<string> = new Set(['verify', 'pin', 'membership', 'pay'])
 
 export type GuardProblem =
   | 'empty'
-  | 'price_unknown'
-  | 'price_unqualified'
-  | 'price_combination'
-  | 'url'
   | 'unknown_placeholder'
+  | 'money'
+  | 'number'
+  | 'digits'
   | 'secret'
   | 'promise_words'
-  | 'phone'
+  | 'url'
   | 'questions'
   | 'too_long'
 
 /** Problems only a rewrite can fix; a reply that still has one after the rewrite becomes the fallback. */
-export const HARD_PROBLEMS: ReadonlySet<GuardProblem> = new Set([
-  'empty',
-  'price_unknown',
-  'price_unqualified',
-  'price_combination',
-  'url',
-  'unknown_placeholder',
-  'secret',
-  'promise_words',
-  'phone',
-])
+export const HARD_PROBLEMS: ReadonlySet<GuardProblem> = new Set(['empty', 'unknown_placeholder', 'money', 'number', 'digits', 'secret', 'promise_words', 'url'])
 
-export type GuardVerdict = { kind: 'ok'; text: string } | { kind: 'fix'; text: string; problems: GuardProblem[]; words: string[] }
+export type GuardVerdict =
+  | { kind: 'ok'; text: string; rendered: string }
+  | { kind: 'fix'; text: string; rendered: string; problems: GuardProblem[]; words: string[] }
 
 export interface GuardInput {
   text: string
-  amounts: FactAmounts
-  /** Amounts a tool of this turn declared (ToolOutcome.amountsCents: the client's own balance). */
-  extraAmounts?: Iterable<number>
-  /** The placeholders the turn registered ("{link1}"). */
-  placeholders?: Iterable<string>
-  /** The shop's website (https://oasisautospanj.com): its host, exactly, may be written as text. */
+  /**
+   * Every placeholder the reply may use this turn and what the server writes for it (facts.ts placeholderValues, plus the turn's
+   * {linkN}, which render as themselves: composeReply turns them into links).
+   */
+  values?: ReadonlyMap<string, string>
+  /** The shop's website (https://oasisautospanj.com): its host, exactly and with no path, may be written as text. */
   website: string
-  /** The shop's own phone numbers (any form): the only numbers a reply may write. */
+  /** The shop's own phone numbers (any form): the only phone numbers a reply may write. */
   shopNumbers?: readonly (string | null | undefined)[]
-  /** The shop's address: its own digit runs (the house number, the ZIP) are no code. */
-  shopAddress?: string | null
+  /**
+   * Server-owned phrases that may carry digits (facts.ts factLiterals: the address, catalog and plan names; the client's own vehicles
+   * on file, "2021 Tesla Model 3"): the numbers rule skips them where they stand exactly.
+   */
+  literals?: readonly (string | null | undefined)[]
   maxChars?: number
 }
 
@@ -96,6 +85,11 @@ export function stripMarkdown(text: string): string {
     .replace(/\s*\n+\s*/g, ' ')
     .replace(/\s{2,}/g, ' ')
     .trim()
+}
+
+/** Compatibility forms folded (NFKC: full-width "ＰＩＮ" -> "PIN") and look-alike full stops ("。", "．") made a dot, before GSM-7. */
+export function foldInput(text: string): string {
+  return text.normalize('NFKC').replace(/[\u3002\uff61\uff0e\u2024\u2027]/g, '.')
 }
 
 /** GSM-7 only: the shared SMS normalisation, then any character GSM-7 still lacks is dropped. */
@@ -131,64 +125,210 @@ export function cutAfterFirstQuestion(text: string): string {
 
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-// ---- (A) secrets ----------------------------------------------------------------------------------------------------------------
+// ---- (1) placeholders -----------------------------------------------------------------------------------------------------------
 
-/** What a reply never mentions (A). "code" alone counts: only the compounds of NOT_SECRET_CODE are no secret. */
-const SECRET_WORDS =
-  /\b(?:p[.-]?i[.-]?n(?:s|codes?|numbers?)?|p\.? i\.? n|pass[\s-]?codes?|pass[\s-]?words?|codes?|otp|card\s*(?:numbers?|details|info(?:rmation)?|digits)|cvv2?|cvc|ssn|social security|expir(?:y|ation) dates?|(?:last|first) (?:4|four) (?:digits|numbers))\b|\bdigits?\b[^.!?]{0,40}\bcards?\b|\bcards?\b[^.!?]{0,40}\bdigits?\b/i
-/** Whole phrases with "code" that are no secret (an allow-list). */
-const NOT_SECRET_CODE = /\b(?:zip|postal|area|dress|paint|colou?r|qr|bar)\s+codes?\b/gi
-/** A 4-8 digit run on its own (not a price, a time, a phone number, a decimal, a percentage). */
-const CODE_DIGITS = /(?<![\d$.,:/-])\d{4,8}(?![\d%$]|[.,:/-]\d|\s?(?:dollars?|bucks|usd)\b)/gi
+/** Anything in braces (a placeholder or an attempt at one), and a brace left alone. */
+const BRACED = /\{[^{}]{0,120}\}/g
+const LONE_BRACE = /[{}]/
 
-/** The text without the server's safety lines, each removed only where it stands as a whole sentence (or right after a {linkN}). */
-function withoutSafetyLines(text: string): string {
-  let out = text
-  for (const line of SAFETY_LINES) out = out.replace(new RegExp(`(?<=^|[.!?]\\s|\\}\\s)${escapeRe(line)}(?=\\s|$)`, 'g'), ' ')
-  return out
+/** The text with every known placeholder replaced by what the server writes for it ({linkN} stay: composeReply links them). */
+export function renderPlaceholders(text: string, values: ReadonlyMap<string, string>): string {
+  return text.replace(BRACED, (p) => values.get(p) ?? p)
 }
 
+// ---- (3) the skeleton -----------------------------------------------------------------------------------------------------------
+
+/** Look-alike characters inside a word (a run that holds at least one letter). */
+const LOOKALIKE: Record<string, string> = { '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't', '@': 'a', $: 's', '!': 'i', '|': 'i' }
+/** Zero-width and format characters, the soft hyphen. */
+const INVISIBLE = /[\p{Cf}­]/gu
 /**
- * True when the text mentions a PIN, a code, a password, card numbers or a 4-8 digit code anywhere (A). Only a server safety line,
- * written exactly and as a whole sentence, may; a year (19xx/20xx) and the digits of the shop's own address are no code.
+ * Three or more single characters in a row, separated by spaces, dots, dashes or underscores ("f r e e", "P - I - N", "c.o.d.e",
+ * "P - 1 - N"): joined before the look-alikes are mapped.
  */
-export function mentionsSecret(text: string, shopAddress?: string | null): boolean {
-  const rest = withoutSafetyLines(text).replace(NOT_SECRET_CODE, ' ')
-  if (SECRET_WORDS.test(rest)) return true
-  const own = new Set(shopAddress?.match(/\d+/g) ?? [])
-  for (const m of rest.matchAll(CODE_DIGITS)) {
-    if (/^(?:19|20)\d\d$/.test(m[0]) || own.has(m[0])) continue
-    return true
-  }
-  return false
+const SPACED_LETTERS = /(?<![\p{L}\p{N}@$!|])[\p{L}\p{N}@$!|](?:[\s._-]+[\p{L}\p{N}@$!|](?![\p{L}\p{N}@$!|])){2,}/gu
+
+/** Accents stripped (NFKD), invisible characters out, lower case. */
+export function plainFold(text: string): string {
+  return text.normalize('NFKD').replace(/\p{M}+/gu, '').replace(INVISIBLE, '').toLowerCase()
 }
 
-// ---- (B) promise words ----------------------------------------------------------------------------------------------------------
+/** Look-alikes mapped inside words ("p1n" -> "pin", "fr33" -> "free", "u$d" -> "usd"); digit-only runs stay digits. */
+function mapLookalikes(text: string): string {
+  return text.replace(/[\p{L}\p{N}@$!|]+/gu, (w) => (/\p{L}/u.test(w) ? w.replace(/[013457@$!|]/g, (c) => LOOKALIKE[c] ?? c) : w))
+}
 
-/** What the assistant never promises or discusses (B): one rewrite, then the fallback and a person. */
-const PROMISE_WORDS =
-  /\b(?:free of charge|free|freebies?|gratis|refund\w*|money back|store credit|discount\w*|coupons?|promo(?:tion)?s?|deals?|guarantee[sd]?|guaranteeing|guarant(?:y|ies)|warrant(?:y|ies)|comp(?:s|ed|ing)?|complimentary|compensat\w*|reimburs\w*|waive[sd]?|waiving|waivers?|on the house|(?:it'?s|is|be|that'?s) on us|no charge|(?:at )?no (?:extra )?cost|half[- ](?:off|price)|bogo|buy one,? get one|ready (?:by|at|in|before)|(?:done|finished) (?:by|at|before)|lawyers?|attorneys?|lawsuits?|sue[sd]?|suing|legal(?:ly)?|liab(?:le|ility)|insurance|damage[sd]?)\b|\d+\s?%\s?off\b|\$\s?\d+(?:\.\d{2})?\s+off\b|\bsave\s+(?:\$|\d)/gi
-/** The only whole phrases with a promise word that pass (an allow-list): "free" meaning "without", and "feel free". */
-const ALLOWED_PHRASES = /\bfeel free\b|\b(?:spot|streak|scratch|swirl|touch|toll|hands|stress|worry|hassle)[- ]free\b/gi
+/** The skeleton the word checks read (3): folded, look-alikes mapped, spaced-out letters joined into words. */
+export function skeleton(text: string): string {
+  return mapLookalikes(plainFold(text).replace(SPACED_LETTERS, (m) => m.replace(/[\s._-]+/g, '')))
+}
 
-/** The promise words of a text, as found (lower case); a word inside an ALLOWED_PHRASES match passes, nothing else does. */
+/** The skeleton the host check reads: spaced-out letters joined (a dot among them kept), "[.]", "(.)", " . ", " dot ", "a,b" folded. */
+export function hostSkeleton(text: string): string {
+  return mapLookalikes(plainFold(text).replace(SPACED_LETTERS, (m) => m.replace(/[\s._-]+/g, (sep) => (sep.includes('.') ? '.' : ''))))
+    .replace(/\s*(?:\[\s*(?:\.|dot)\s*\]|\(\s*(?:\.|dot)\s*\)|\{\s*(?:\.|dot)\s*\}|<\s*(?:\.|dot)\s*>)\s*/g, '.')
+    .replace(/(?<=[\p{L}\p{N}])\s+\.\s*(?=[\p{L}\p{N}])/gu, '.')
+    .replace(/(?<=[\p{L}\p{N}])\s+dot\s+(?=[\p{L}\p{N}])/gu, '.')
+    .replace(/(?<=\p{L}),(?=\p{L}{2,})/gu, '.')
+}
+
+/** A phrase as a pattern that reads "i" and "l" alike (P1N -> pin, PlN -> pln: both are "p[il]n"); spaces and hyphens interchangeable. */
+function fuzzy(phrase: string): string {
+  return phrase
+    .split(/[\s-]+/)
+    .map((w) => escapeRe(w).replace(/[il]/g, '[il]'))
+    .join('[\\s-]*')
+}
+
+/** A whole-word pattern over a list of phrases (each may carry its own regex tail, written after a "~"). */
+function wordList(items: readonly string[]): RegExp {
+  const alts = items.map((x) => {
+    const [phrase, tail] = x.split('~') as [string, string | undefined]
+    return `${fuzzy(phrase)}${tail ?? ''}`
+  })
+  return new RegExp(`(?<![\\p{L}\\p{N}])(?:${alts.join('|')})(?![\\p{L}\\p{N}])`, 'gu')
+}
+
+/** The matches of a pattern in the plain text and in the skeleton (lower case, deduplicated). */
+function hits(re: RegExp, texts: readonly string[], skip?: RegExp): string[] {
+  const out: string[] = []
+  for (const t of texts) {
+    const allowed = skip ? [...t.matchAll(skip)].map((m) => [m.index, m.index + m[0].length] as const) : []
+    for (const m of t.matchAll(re)) {
+      const end = m.index + m[0].length
+      if (allowed.some(([from, to]) => m.index >= from && end <= to)) continue
+      out.push(m[0].trim())
+    }
+  }
+  return [...new Set(out)]
+}
+
+// ---- (4) secrets ----------------------------------------------------------------------------------------------------------------
+
+const SECRET_WORDS = wordList([
+  'pin~s?',
+  'pincode~s?',
+  'pin code~s?',
+  'pin number~s?',
+  'passcode~s?',
+  'password~s?',
+  'passwd',
+  'passphrase~s?',
+  'code~s?',
+  'otp~s?',
+  'one time',
+  'onetime',
+  'digit~s?',
+  'personal identification',
+  'identification number~s?',
+  'secret number~s?',
+  'secret code~s?',
+  'secret word~s?',
+  'verification number~s?',
+  'security number~s?',
+  'account number~s?',
+  'routing number~s?',
+  'login~s?',
+  'log in details',
+  'card number~s?',
+  'card digits',
+  'card details',
+  'card info~(?:rmation)?',
+  'cvv~2?',
+  'cvc',
+  'expiry',
+  'expiration',
+  'ssn',
+  'social security',
+])
+/** Numbers asked for about a card, or "the number we sent". */
+const SECRET_CONTEXT =
+  /\bnumbers?\b[^.!?]{0,40}\b(?:cards?|visa|mastercard|amex|discover|debit|credit)\b|\b(?:cards?|visa|mastercard|amex|discover|debit|credit)\b[^.!?]{0,40}\bnumbers?\b|\bnumbers?\b\s+(?:we|i|you)\s+(?:just\s+)?(?:sent|texted|gave|got)\b|\bnumbers?\b\s+(?:from|in)\s+(?:the|our|my|your|that)\s+(?:text|message|sms)\b/g
+
+/** What the text says about PINs, codes, passwords or cards (A): the words as found, on the plain text and the skeleton. */
+export function secretWords(text: string): string[] {
+  const texts = [plainFold(text), skeleton(text)]
+  return [...new Set([...hits(SECRET_WORDS, texts), ...hits(SECRET_CONTEXT, texts)])]
+}
+
+// ---- (5) promise words ----------------------------------------------------------------------------------------------------------
+
+const PROMISE_WORDS = wordList([
+  'free',
+  'freebie~s?',
+  'gratis',
+  'costs nothing',
+  'cost nothing',
+  'cost you nothing',
+  'no charge',
+  'no extra charge',
+  'no cost',
+  'no extra cost',
+  'at no cost',
+  'on me',
+  'on us',
+  'on the house',
+  'per cent',
+  'percent',
+  'half off',
+  'half price',
+  'on sale',
+  'sale~s?',
+  'zero dollars',
+  'rebate~s?',
+  'refund~\\w*',
+  'money back',
+  'store credit',
+  'credit your account',
+  'account credit',
+  'discount~\\w*',
+  'coupon~s?',
+  'promo~\\w*',
+  'deal~s?',
+  'comp~(?:s|ed|ing)?',
+  'complimentary',
+  'compensat~\\w*',
+  'reimburs~\\w*',
+  'waive~\\w*',
+  'waiver~s?',
+  'cover the cost~s?',
+  'cover the costs',
+  'covered by us',
+  'promise~\\w*',
+  'guarantee~\\w*',
+  'guarant~(?:y|ies)',
+  'warrant~(?:y|ies)',
+  'bogo',
+  'buy one get one',
+  'lawyer~s?',
+  'attorney~s?',
+  'lawsuit~s?',
+  'sue~[sd]?',
+  'suing',
+  'legal~(?:ly)?',
+  'liab~(?:le|ility)',
+  'insurance',
+  'insured',
+  'damage~[sd]?',
+])
+/** Time promises: "ready by 3", "finished in an hour", "done around noon", "have it back to you by 3 PM". */
+const TIME_PROMISE =
+  /\b(?:ready|done|finished|complete[d]?)\s+(?:by|at|in|around|before|within|after|until|no later)\b|\b(?:have|get|bring|give)\s+(?:it|them|your\s+\w+)\s+back\b|\bback\s+to\s+you\s+(?:by|at|in|around|before|within)\b|%\s*off\b|\boff\s+(?:your|the|any|each|every)\s+(?:next\s+)?(?:wash|visit|tint|detail|service|price|bill)\b|\bsave\s+(?:\$|\d|money|big)/g
+/** The only phrases with "free" that pass: "feel free", "<word>-free" ("spot-free"), except money ones ("cost-free"). */
+const FREE_OK = /\bfee[il][\s-]*free\b|\b(?!(?:cost|charge|fee|price|payment|tax|interest|risk)-)[\p{L}]{2,}-free\b/gu
+
+/** The promise words of a text, as found (lower case), on the plain text and the skeleton. */
 export function promiseWords(text: string): string[] {
-  const allowed = [...text.matchAll(ALLOWED_PHRASES)].map((m) => [m.index, m.index + m[0].length] as const)
-  const found: string[] = []
-  for (const m of text.matchAll(PROMISE_WORDS)) {
-    const end = m.index + m[0].length
-    if (allowed.some(([from, to]) => m.index >= from && end <= to)) continue
-    found.push(m[0].toLowerCase())
-  }
-  return [...new Set(found)]
+  const texts = [plainFold(text), skeleton(text)]
+  return [...new Set([...hits(PROMISE_WORDS, texts, FREE_OK), ...hits(TIME_PROMISE, texts)])]
 }
 
-// ---- (D) web addresses ----------------------------------------------------------------------------------------------------------
+// ---- (6) web addresses ----------------------------------------------------------------------------------------------------------
 
-/** A scheme, "www", or a spelled-out dot ("oasis-pay dot com", "(dot)"). */
-const SCHEME = /\bhttps?\b|:\/\/|\bwww\b|[([]\s*dot\s*[)\]]|\bdot\s+(?:com|net|org|io|co|us|app|dev|ai|shop|me|ly|info|biz)\b/i
-/** Anything shaped like a host name: label.label with a last label of 2+ letters, any case ("oasis-deals.Shop", "soon.Thanks"). */
-const HOSTISH = /(?<![\p{L}\p{N}-])(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?\.)+\p{L}{2,}(?![\p{L}\p{N}-])/gu
+const SCHEME = /\bh(?:tt|xx|t|x)ps?\b|:\/\/|\bwww\d*\b/g
+/** label.label: any labels of letters or digits, a last label of 2+ characters with a letter in it, any TLD. */
+const HOSTISH = /(?<![\p{L}\p{N}-])(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?\.)+(?=[\p{N}-]*\p{L})[\p{L}\p{N}][\p{L}\p{N}-]*[\p{L}\p{N}](?![\p{L}\p{N}-])/gu
+const IPV4 = /(?<![\d.])\d{1,3}(?:\s*\.\s*\d{1,3}){3}(?![\d])/g
 
 const hostOf = (url: string): string =>
   url
@@ -197,197 +337,220 @@ const hostOf = (url: string): string =>
     .replace(/^www\./i, '')
     .toLowerCase()
 
-/** True when the text holds a web address (D): only the shop's own host, exactly and without a path, passes. */
-export function urlProblems(text: string, website: string): boolean {
-  if (SCHEME.test(text)) return true
+/** The text without the shop's own host where it stands exactly, as text (no subdomain, no path, no port). */
+function withoutOwnHost(text: string, website: string): string {
   const own = hostOf(website)
-  for (const m of text.matchAll(HOSTISH)) {
-    const next = text.slice(m.index + m[0].length)
-    if (m[0].toLowerCase() === own && !/^[/:?#]\S/.test(next)) continue
-    return true
-  }
-  return false
+  if (!own) return text
+  return text.replace(new RegExp(`(?<![\\p{L}\\p{N}.-])${escapeRe(own)}(?![\\p{L}\\p{N}-]|\\.[\\p{L}\\p{N}]|[/:?#]\\S)`, 'giu'), '~')
 }
 
-// ---- (E) phone numbers ----------------------------------------------------------------------------------------------------------
-
-const digitsOf = (s: string): string => s.replace(/\D/g, '')
-
-/** True when the text writes a phone number that is not one of the shop's own. */
-export function foreignPhone(text: string, shopNumbers: readonly (string | null | undefined)[] = []): boolean {
-  const own = shopNumbers.map((n) => digitsOf(n ?? '')).filter((d) => d.length >= 7)
-  const isOwn = (d: string): boolean => own.some((o) => (d.length >= 10 ? o.slice(-10) === d.slice(-10) : o.slice(-7) === d.slice(-7)))
-  let rest = text
-  for (const re of [INTL_PHONE, NANP_PHONE, LOCAL_PHONE]) {
-    for (const m of rest.matchAll(re)) if (!isOwn(digitsOf(m[0]))) return true
-    rest = rest.replace(re, ' ')
-  }
-  return false
+/** The web addresses of a text (D), on the plain text and the host skeleton; the shop's own host as text passes. */
+export function urlWords(text: string, website: string): string[] {
+  const rest = withoutOwnHost(text, website)
+  const texts = [plainFold(rest), hostSkeleton(rest)]
+  return [...new Set([...hits(SCHEME, texts), ...hits(HOSTISH, texts), ...hits(IPV4, texts)])]
 }
 
-// ---- (C) prices -----------------------------------------------------------------------------------------------------------------
+// ---- (2) the numbers rule -------------------------------------------------------------------------------------------------------
 
-export interface FoundAmount {
-  cents: number
-  index: number
-  raw: string
+const CURRENCY = /[$¢€£¥¤]/g
+const MONEY_WORDS = wordList(['dollar~s?', 'buck~s?', 'cent~s?', 'usd', 'quid'])
+const NUMBER_WORDS_BIG = wordList([
+  'zero',
+  'eleven',
+  'twelve',
+  'thirteen',
+  'fourteen',
+  'fifteen',
+  'sixteen',
+  'seventeen',
+  'eighteen',
+  'nineteen',
+  'twenty',
+  'thirty',
+  'forty',
+  'fourty',
+  'fifty',
+  'sixty',
+  'seventy',
+  'eighty',
+  'ninety',
+  'hundred~s?',
+  'thousand~s?',
+  'million~s?',
+  'dozen~s?',
+  'twenties',
+  'thirties',
+  'forties',
+  'fifties',
+])
+const SMALL_WORDS = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'] as const
+const DIGIT_SPELLING = '(?:zero|oh|o|one|two|three|four|five|six|seven|eight|nine|ten)'
+/** Two or more spelled digits in a row ("five five five, oh one two three", "one two three"). */
+const SPELLED_RUN = new RegExp(`(?<![\\p{L}])${DIGIT_SPELLING}(?:[\\s,.-]+${DIGIT_SPELLING}){1,}(?![\\p{L}])`, 'gu')
+const SMALL_WORD = new RegExp(`(?<![\\p{L}\\p{N}-])(${SMALL_WORDS.join('|')})(?![\\p{L}\\p{N}])`, 'gu')
+
+/** Words a count may not stand before: function words, money, codes, other numbers. */
+const NOT_A_NOUN = new Set(
+  (
+    'a an the and or but nor so to of for at by in on off from with without into onto x times plus minus per each every is are was were be been ' +
+    'it its this that these those you your we our i me my us they them their he she his her what which who when where how than then more less ' +
+    'total totals left over only just about around after before until till dollar dollars buck bucks cent cents usd percent quid digit ' +
+    'digits number numbers code codes pin pins am pm a.m p.m o clock oclock if as also too please now here there will would can could should ' +
+    'may might must do does did have has had not no yes ok okay sure thanks thank'
+  ).split(' '),
+)
+const HOURS_CUE =
+  /\b(?:open|opens|opening|openings|close|closes|closed|closing|hours?|slots?|times?|appointments?|visits?|drop[\s-]?off|pick[\s-]?up|pickup|arrive|arrival|come|see you|book|booked|booking|morning|afternoon|evening|tonight|today|tomorrow|weekend|weekdays?|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|noon)\b/i
+const MONEY_CUE = /\b(?:prices?|priced|costs?|pay|pays|paid|paying|charges?|charged|fees?|rates?|totals?|starts?\s+at|starting\s+at|dollars?|bucks?)\b|[$¢€£]/i
+const MONTHS = '(?:jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)'
+const DAY = '(?:3[01]|[12]\\d|0?[1-9])'
+
+/** Numbers a reply may write, in the order they are taken out (each replaced by a marker without digits). */
+const ALLOWED_NUMBERS: readonly RegExp[] = [
+  // clock times: 10:30, 9:00 AM, 18:00
+  /(?<![\d:.,$])(?:[01]?\d|2[0-3]):[0-5]\d(?:\s?(?:a\.?m\.?|p\.?m\.?)(?![\p{L}]))?(?![\d:])/giu,
+  // 10am, 10 AM, 3 p.m.
+  /(?<![\d:.,$])(?:1[0-2]|0?[1-9])\s?(?:a\.?m\.?|p\.?m\.?)(?![\p{L}])/giu,
+  // dates: Oct 12, October 12th, 12 Oct, the 12th, 10/12
+  new RegExp(`\\b${MONTHS}\\.?\\s+${DAY}(?:st|nd|rd|th)?(?![\\d])`, 'giu'),
+  new RegExp(`(?<![\\d$.,])${DAY}(?:st|nd|rd|th)?\\s+(?:of\\s+)?${MONTHS}\\b`, 'giu'),
+  new RegExp(`(?<![\\d$.,])${DAY}(?:st|nd|rd|th)(?![\\p{L}\\d])`, 'giu'),
+  /(?<![\d/.\-$,])(?:1[0-2]|0?[1-9])\/(?:3[01]|[12]\d|0?[1-9])(?![\d]|[/.-]\d)/g,
+  // durations: 45 minutes, 2 hours, a 30-minute wash
+  /(?<![\d$.,])\d{1,3}\s?-?\s?(?:minutes?|mins?|hours?|hrs?|days?|weeks?|months?|years?|yrs?)\b/giu,
+]
+
+/** True when the word after a count is a noun it may count ("2 add-ons", "3 openings"). */
+function countsANoun(after: string): boolean {
+  const m = /^\s+([\p{L}][\p{L}'-]*)/u.exec(after)
+  if (!m) return false
+  const w = m[1]!.toLowerCase().replace(/[-']+$/, '')
+  return w.length >= 2 && !NOT_A_NOUN.has(w) && !SMALL_WORDS.includes(w as never)
 }
 
-/** Dollar amounts in a text: "$45", "$1,299", "$45.50", "45$", "45 dollars", "45 bucks". */
-export function findAmounts(text: string): FoundAmount[] {
-  const out: FoundAmount[] = []
-  const toCents = (whole: string, frac: string | undefined): number => {
-    const w = Number(whole.replace(/,/g, ''))
-    const f = frac ? Number(frac.padEnd(2, '0')) : 0
-    return w * 100 + f
-  }
-  for (const m of text.matchAll(/\$\s?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?/g))
-    out.push({ cents: toCents(m[1]!, m[2]), index: m.index, raw: m[0] })
-  for (const m of text.matchAll(/\b(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{2}))?\s?(?:dollars?|bucks|usd)\b/gi))
-    out.push({ cents: toCents(m[1]!, m[2]), index: m.index, raw: m[0] })
-  for (const m of text.matchAll(/(?<![\d$.,])(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?\s?\$/g))
-    out.push({ cents: toCents(m[1]!, m[2]), index: m.index, raw: m[0] })
-  return out.sort((a, b) => a.index - b.index)
-}
-
-const COMBINATION =
-  /\b(totals?|totaling|totalling|altogether|all together|combined|together|for both|for all|both for|in all|all[- ]in|comes? to|subtotal|sum|tax(?:es)?|bundle[sd]?|each additional|per extra)\b|\bplus\s+\$|\+\s*\$|\$\s?\d[\d,.]*\s*\+/i
-/** "starts at" / "starting at" / "from" right before an amount (the text before it ends so). */
-const QUALIFIER_BEFORE = /\b(?:starts?\s+at|starting\s+(?:at|from)|from)\s+(?:just\s+|only\s+)?$/i
-/** Between two starting prices of one list ("starts at $45 for members, $54 otherwise"): short, and no new claim. */
-const LIST_GAP_MAX = 30
-const LIST_GAP_BREAK = /\b(?:is|are|was|were|be|costs?|runs?|pays?|charges?|totals?)\b|[;:]/i
-/** A plan price: "a month" / "/month" right after the amount. */
-const MONTH_AFTER = /^\s*(?:\/\s*(?:month|mo)\b|(?:a|per|each|every)\s+month\b|monthly\b)/i
-/** The guest fee: "fee" right before ("the booking fee is $25") or right after ("a $25 booking fee") the amount. */
-const FEE_BEFORE = /\bfees?\s*(?::\s*|(?:(?:is|are|of|costs?|runs?|at|just|only|stays)\s+){0,3})$/i
-const FEE_AFTER = /^\s+(?:[a-z-]+\s+){0,2}fees?\b/i
-/** Where a clause ends inside a sentence (a name in another clause does not name an amount). */
-const CLAUSE_BREAK = /;|,\s*(?:and|but|while|whereas)\b|\b(?:but|while|whereas)\b/gi
-
-/** The phrase as a whole-word pattern; spaces and hyphens interchangeable, a plural or "-ing" allowed. */
-const phraseRe = (phrase: string, suffix = '(?:s|es|ing)?'): string =>
-  `(?<![\\p{L}\\p{N}])${escapeRe(phrase).replace(/(?:\\-|\s)+/g, '[\\s-]+')}${suffix}(?![\\p{L}\\p{N}])`
-
-function clauseAround(sentence: string, index: number): { start: number; end: number } {
-  let start = 0
-  let end = sentence.length
-  for (const m of sentence.matchAll(CLAUSE_BREAK)) {
-    if (m.index + m[0].length <= index) start = m.index + m[0].length
-    else if (m.index >= index) {
-      end = m.index
-      break
-    }
-  }
-  return { start, end }
-}
-
-/** The plan's label right before the amount (at most four words between, no comma) or "for <label>" right after "a month". */
-function namesPlanNextTo(sentence: string, a: FoundAmount, labels: readonly string[], clauseStart: number, monthEnd: number): boolean {
-  const before = sentence.slice(clauseStart, a.index)
-  const after = sentence.slice(monthEnd)
-  return labels.some(
-    (l) =>
-      new RegExp(`${phraseRe(l, "(?:'s)?")}(?:\\s*[:-]\\s*|\\s+)(?:[\\p{L}']+\\s+){0,4}$`, 'iu').test(before) ||
-      new RegExp(`^\\s*(?:for|with|on)\\s+(?:the\\s+|a\\s+|our\\s+)?${phraseRe(l, '')}`, 'iu').test(after),
-  )
-}
-
-/** An accepted starting price a list may continue: where it ends, and the names it was accepted under. */
-interface ListHead {
-  end: number
-  names: string[]
-}
-
-/** The pricing rule of design section 3b over one text (C). */
-export function pricingProblems(text: string, amounts: FactAmounts, extra: ReadonlySet<number>): GuardProblem[] {
+/** The numbers rule (2) over a text whose placeholders and literals are already out: the problems and the offending pieces. */
+export function numberProblems(text: string): { problems: GuardProblem[]; words: string[] } {
   const problems = new Set<GuardProblem>()
-  for (const sentence of sentencesOf(text)) {
-    const found = findAmounts(sentence)
-    if (found.length === 0) continue
-    if (COMBINATION.test(sentence)) problems.add('price_combination')
-    if (found.length >= 2 && /\band\b[^.!?]*\$/i.test(sentence) && /\b(both|two|all)\b/i.test(sentence)) problems.add('price_combination')
-    // the previous amount when it was an accepted starting price: the names it was accepted under (a list it opens may follow)
-    let list: ListHead | null = null
-    for (const a of found) {
-      const prev: ListHead | null = list
-      list = null
-      if (extra.has(a.cents)) continue
-      const names = amounts.starting.get(a.cents)
-      const labels = amounts.plans.get(a.cents)
-      const isFee = amounts.fee !== null && amounts.fee === a.cents
-      const { start, end } = clauseAround(sentence, a.index)
-      // (1) a starting price: the qualifier right before it and its item (or category) named in the clause, or the next price of
-      //     a list an accepted starting price opened ("starts at $45 for members, $54 otherwise")
-      if (names) {
-        const gap = prev === null ? null : sentence.slice(prev.end, a.index)
-        if (prev && gap !== null && gap.length <= LIST_GAP_MAX && !LIST_GAP_BREAK.test(gap) && !/[$\d]/.test(gap)) {
-          const shared: string[] = names.filter((n) => prev.names.includes(n))
-          if (shared.length > 0) {
-            list = { end: a.index + a.raw.length, names: shared }
-            continue
-          }
-        }
-        if (QUALIFIER_BEFORE.test(sentence.slice(start, a.index)) && !MONTH_AFTER.test(sentence.slice(a.index + a.raw.length))) {
-          const clause = sentence.slice(start, end)
-          const named = names.filter((n) => new RegExp(phraseRe(n), 'iu').test(clause))
-          if (named.length > 0) {
-            list = { end: a.index + a.raw.length, names: named }
-            continue
-          }
-        }
-      }
-      // (2) a plan's monthly price: "a month" right after it, its label right before it
-      if (labels) {
-        const month = MONTH_AFTER.exec(sentence.slice(a.index + a.raw.length))
-        if (month && namesPlanNextTo(sentence, a, labels, start, a.index + a.raw.length + month[0].length)) continue
-      }
-      // (3) the guest booking fee, stated as the fee
-      if (isFee && (FEE_BEFORE.test(sentence.slice(start, a.index)) || FEE_AFTER.test(sentence.slice(a.index + a.raw.length)))) continue
-      problems.add(names || labels || isFee ? 'price_unqualified' : 'price_unknown')
+  const words: string[] = []
+  const add = (p: GuardProblem, w: string): void => {
+    problems.add(p)
+    words.push(w.trim())
+  }
+  const plain = plainFold(text)
+  const skel = skeleton(text)
+  // money: a currency sign anywhere, a money word on the plain text or the skeleton
+  for (const m of text.matchAll(CURRENCY)) add('money', m[0])
+  for (const w of hits(MONEY_WORDS, [plain, skel])) add('money', w)
+  // numbers in words: anything past ten, a run of spelled digits, one to ten not counting a noun
+  for (const w of hits(NUMBER_WORDS_BIG, [plain, skel])) add('number', w)
+  for (const w of hits(SPELLED_RUN, [plain, skel])) add('number', w)
+  for (const t of [plain, skel])
+    for (const m of t.matchAll(SMALL_WORD)) {
+      const after = t.slice(m.index + m[0].length)
+      const before = t.slice(Math.max(0, m.index - 24), m.index)
+      if (countsANoun(after)) continue
+      if (m[1] === 'one' && /\b(?:the|this|that|which|any|each|every|no|another|other|a|just|only|right|new|old|first|last|next|nearest)\s+$/.test(before)) continue
+      if (m[1] === 'one' && /^\s+(?:of|more)\b/.test(after)) continue
+      add('number', m[0])
+    }
+  // digits: the allowed forms out, then any group of 4+ digits (split or not) is a code or a phone number, any other digit a number
+  let rest = text
+  for (const re of ALLOWED_NUMBERS) rest = rest.replace(re, (m) => m.replace(/\d/g, '#'))
+  for (const g of rest.matchAll(/\d+(?:(?:\s*[-./–]\s*|\s+)\d+)*/g)) {
+    const digits = g[0].replace(/\D/g, '')
+    if (digits.length >= 4) {
+      add('digits', g[0])
+      continue
+    }
+    for (const d of g[0].matchAll(/\d+/g)) {
+      const at = g.index + d.index
+      const n = Number(d[0])
+      const before = rest.slice(Math.max(0, at - 40), at)
+      const after = rest.slice(at + d[0].length)
+      const sentence = rest.slice(rest.lastIndexOf('.', at) + 1, at + d[0].length + (/[.!?]/.exec(after)?.index ?? after.length))
+      // a bare hour ("at 10", "and 11") in a sentence about hours and not about money
+      const bareHour =
+        n >= 1 && n <= 12 && /(?:\b(?:at|until|till|til|before|after|around|from|to|between|and|or|by)|[,–-])\s*$/i.test(before) && HOURS_CUE.test(sentence) && !MONEY_CUE.test(sentence)
+      // a count of 1 to 10 before a noun ("2 add-ons", "3 openings"), not glued to a letter ("P1N", "A2B")
+      const count = n >= 1 && n <= 10 && !/[\p{L}]$/u.test(before) && !/^[\p{L}]/u.test(after) && countsANoun(after)
+      if (bareHour || count) continue
+      add('number', d[0])
     }
   }
-  return [...problems]
+  return { problems: [...problems], words: [...new Set(words)] }
+}
+
+/** The text without the server-owned literals and the shop's own phone numbers (any spacing of their digits). */
+function withoutLiterals(text: string, literals: readonly (string | null | undefined)[], shopNumbers: readonly (string | null | undefined)[]): string {
+  let out = text
+  const phrases = [...new Set(literals.map((x) => x?.trim() ?? '').filter((x) => x.length >= 2))].sort((a, b) => b.length - a.length)
+  for (const p of phrases) out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(p).replace(/\s+/g, '\\s+')}(?![\\p{L}\\p{N}])`, 'giu'), '~')
+  for (const n of shopNumbers) {
+    const d = (n ?? '').replace(/\D/g, '')
+    if (d.length < 10) continue
+    const ten = d.slice(-10)
+    const flexible = ten.split('').join('[\\s().\\/-]{0,2}')
+    out = out.replace(new RegExp(`(?<![\\d+])(?:\\+?1[\\s().\\/-]{0,2})?\\(?${flexible}(?!\\d)`, 'g'), '~')
+  }
+  return out
 }
 
 // ---- the verdict ----------------------------------------------------------------------------------------------------------------
 
-/** Cleans a draft and checks every rule. */
+/** Cleans a draft, checks every rule on the model's raw text and, when it passes, renders the placeholders. */
 export function guardReply(i: GuardInput): GuardVerdict {
   const max = i.maxChars ?? MAX_REPLY_CHARS
-  const text = toGsm7(stripMarkdown(i.text))
-  if (text.length === 0) return { kind: 'fix', text, problems: ['empty'], words: [] }
+  const values = i.values ?? new Map<string, string>()
+  const text = toGsm7(stripMarkdown(foldInput(i.text)))
+  if (text.length === 0) return { kind: 'fix', text, rendered: text, problems: ['empty'], words: [] }
   const problems: GuardProblem[] = []
-  const words = promiseWords(text)
-  if (words.length > 0) problems.push('promise_words')
-  const registered = new Set(i.placeholders ?? [])
-  const withoutPlaceholders = text.replace(/\{link\d+\}/g, (p) => {
-    if (!registered.has(p)) problems.push('unknown_placeholder')
-    return ' '
+  const words: string[] = []
+  const flag = (p: GuardProblem, found: readonly string[]): void => {
+    if (found.length === 0) return
+    problems.push(p)
+    words.push(...found)
+  }
+  // (1) placeholders: only the known ones; each is taken out before any other check
+  const unknown: string[] = []
+  // a placeholder becomes "~" (no letter, digit or space: it can neither join nor split a word, a number or a host)
+  const raw = text.replace(BRACED, (p) => {
+    if (!values.has(p)) unknown.push(p)
+    return '~'
   })
-  if (mentionsSecret(text, i.shopAddress)) problems.push('secret')
-  if (urlProblems(withoutPlaceholders, i.website)) problems.push('url')
-  if (foreignPhone(withoutPlaceholders, i.shopNumbers)) problems.push('phone')
-  problems.push(...pricingProblems(withoutPlaceholders, i.amounts, new Set(i.extraAmounts ?? [])))
-  if ((text.match(/\?/g) ?? []).length > 1) problems.push('questions')
-  if (text.length > max) problems.push('too_long')
+  if (LONE_BRACE.test(raw)) unknown.push(raw.match(LONE_BRACE)![0])
+  flag('unknown_placeholder', unknown)
+  // (4) secrets, (5) promise words, (6) hosts: plain text and skeleton
+  flag('secret', secretWords(raw))
+  flag('promise_words', promiseWords(raw))
+  flag('url', urlWords(raw, i.website))
+  // (2) numbers: the shop's own numbers, the server-owned literals and the shop's host out first
+  const n = numberProblems(withoutOwnHost(withoutLiterals(raw, i.literals ?? [], i.shopNumbers ?? []), i.website))
+  for (const p of n.problems) problems.push(p)
+  words.push(...n.words)
+  // the form: one question, the length after rendering
+  const rendered = toGsm7(renderPlaceholders(text, values))
+  if ((rendered.match(/\?/g) ?? []).length > 1) problems.push('questions')
+  if (rendered.length > max) problems.push('too_long')
   const unique = [...new Set(problems)]
-  return unique.length === 0 ? { kind: 'ok', text } : { kind: 'fix', text, problems: unique, words }
+  return unique.length === 0 ? { kind: 'ok', text, rendered } : { kind: 'fix', text, rendered, problems: unique, words: [...new Set(words)] }
 }
 
 /** What the rewrite call is told, per problem (plain words for the model). */
 export const PROBLEM_HINTS: Record<GuardProblem, string> = {
   empty: 'The reply was empty: write the text for the client.',
-  price_unknown: 'It states a dollar amount that is not a starting price, a membership price or the booking fee in SHOP FACTS. Use only those, or say the team confirms the exact price at the shop.',
-  price_unqualified:
-    'Write a service price as "<service> starts at $X" (the service or its category named in the same part of the sentence), a membership price as "<plan> is $X a month", and the booking fee as "the booking fee is $X".',
-  price_combination: 'Never add prices up, never give a total and never price a combination; state starting prices one by one or say the team confirms the exact price.',
-  url: 'Never write a web address (only the shop website as plain text, or a {linkN} placeholder a tool gave you). If it was a missing space after a full stop, add the space.',
-  unknown_placeholder: 'Use only the {linkN} placeholders a tool gave you in this turn.',
-  secret: 'Write nothing about PINs, codes, passwords, card numbers or digit codes, and never ask for them: the server adds the security line itself.',
+  unknown_placeholder:
+    'Use only these placeholders, exactly: {price:<key>} or {price:tint:<vehicle>:<film>} with a key from SHOP FACTS, {plan:<key>}, {fee}, {balance} (only after get_balance in this turn) and {linkN} exactly as send_link returned it.',
+  money:
+    'Never write an amount, a currency sign or a money word (dollars, bucks, cents, USD). Write the placeholder and the server fills in the amount: "<service> {price:<key>}", "<plan> {plan:<key>}", "There is {fee}.", "Your open balance is {balance}." (after get_balance). Never add prices up or give a total.',
+  number:
+    'Write no numbers (in digits or in words) except clock times (10, 10:30, 10 AM, noon), dates (Oct 12, 10/12, the 12th), durations (45 minutes) and a count of 1 to 10 right before a noun ("2 add-ons"). For prices use the placeholders.',
+  digits: 'Never write a digit code, a phone number or any number of 4 or more digits, even split by spaces, dashes, dots or slashes (only the shop\'s own numbers in SHOP FACTS).',
+  secret:
+    'Write nothing about PINs, codes, passwords, digits, logins or card numbers, never ask for them and do not write a security reminder: the server adds the security line itself.',
   promise_words:
-    'Rephrase without promising anything free, discounts, refunds, guarantees or times, and without legal, insurance or damage words (say "open times" or "openings" for availability). If the client asked for one of these, say a team member will text them back.',
-  phone: "Never write a phone number other than the shop's own numbers in SHOP FACTS.",
+    'Rephrase without promising anything free, sales, discounts, refunds, guarantees, promises or times, and without legal, insurance or damage words (say "open times" or "openings" for availability). If the client asked for one of these, say a team member will text them back.',
+  url: 'Never write a web address or anything shaped like one (name.com, name dot com, an IP address, http, www): only the shop website exactly as in SHOP FACTS, or a {linkN} placeholder a tool gave you. If it was a missing space after a full stop or a comma, add the space.',
   questions: 'Ask at most one question per text.',
   too_long: `Keep it under ${MAX_REPLY_CHARS - 20} characters.`,
 }

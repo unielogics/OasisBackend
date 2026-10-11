@@ -36,8 +36,11 @@ export const NON_PROGRESS_TOOLS: ReadonlySet<string> = new Set(['handoff_to_staf
 export interface ToolRoundResult {
   /** One toolResult block per toolUse, in order. */
   results: AiContentBlock[]
-  /** Dollar amounts the tools declared (the client's own balance). */
-  amounts: number[]
+  /**
+   * The client's own open balance (cents) when get_balance succeeded in this round (its data.openBalanceCents, else the first of its
+   * amountsCents): the only value the {balance} placeholder renders (guard v3, design section 3c).
+   */
+  balanceCents: number | null
   handoff: HandoffRequest | null
   /** Records for the transcript. */
   calls: { tool: string; outcome: 'ok' | 'error' | 'denied'; error?: string }[]
@@ -64,7 +67,7 @@ export async function runToolRound(
   d: ToolRunnerDeps,
   o: { registry: ToolRegistry; ctx: ToolContext; uses: readonly ToolUse[]; round: number; seq: number; actionsEnabled: boolean },
 ): Promise<ToolRoundResult & { seq: number }> {
-  const out: ToolRoundResult = { results: [], amounts: [], handoff: null, calls: [] }
+  const out: ToolRoundResult = { results: [], balanceCents: null, handoff: null, calls: [] }
   let seq = o.seq
   for (const u of o.uses) {
     seq += 1
@@ -100,7 +103,10 @@ export async function runToolRound(
       }
     }
     if (outcome.handoff && !out.handoff) out.handoff = outcome.handoff
-    if (outcome.ok) for (const c of outcome.amountsCents ?? []) if (Number.isInteger(c) && c >= 0) out.amounts.push(c)
+    if (outcome.ok && u.name === 'get_balance') {
+      const declared = outcome.data.openBalanceCents ?? outcome.amountsCents?.[0]
+      if (typeof declared === 'number' && Number.isInteger(declared) && declared >= 0) out.balanceCents = declared
+    }
     const json: AiJson = outcome.ok ? { ok: true, ...outcome.data } : { ok: false, error: outcome.error, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}) }
     out.results.push(
       outcome.ok

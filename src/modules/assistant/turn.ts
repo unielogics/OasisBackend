@@ -4,7 +4,9 @@
 //   -> claim (conversation lock, lease running_since, the turn row) -> context (shop facts, the turn context, the last texts)
 //   -> Converse loop (system: rules + SHOP FACTS [cache point], turn context; tools [cache point]; at most 4 tool rounds, then one
 //      "reply now without tools" call; AI_TIMEOUT_MS per call, AI_TURN_DEADLINE_MS per turn)
-//   -> output guard (one rewrite call, one shorten call, else a sentence cut or the fallback)
+//   -> output guard v3 on the model's RAW text (one rewrite call, one shorten call, else a sentence cut or the fallback), then the
+//      server renders the placeholders ({price:..}, {plan:..}, {fee}, {balance}) from the current facts: the only way a $ amount
+//      reaches a client
 //   -> the reply (ai_reply, or personal_link with the links as secretVars; the first AI text discloses the assistant; a verify, PIN,
 //      membership or payment link gets the server's safety line)
 //   -> audit assistant.reply -> the marker cleared, or kept and kicked again when newer texts arrived meanwhile.
@@ -38,7 +40,7 @@ import type { Actor, SchedulingCtx } from '../scheduling/context.js'
 import { AI_ACTOR_NAME, type AssistantLog, type AssistantQueue, type HandoffRequest, type ShopFactsSource, type ToolContext, type ToolRegistry, type TurnIdentity } from './contract.js'
 import type { AssistantConfig } from './config.js'
 import { appointmentRefs, loadAppointmentRefs, loadConversation, loadTurnContext, resolveIdentity } from './context.js'
-import { factAmounts, renderShopFacts } from './facts.js'
+import { factLiterals, placeholderValues, renderShopFacts } from './facts.js'
 import { cutAfterFirstQuestion, cutAtSentence, guardReply, HARD_PROBLEMS, MAX_REPLY_CHARS, SAFETY_LINE, SAFETY_LINK_KINDS, type GuardProblem } from './guard.js'
 import { HANDOFF_SUMMARIES, markUnanswered, openTurnHandoff, recipientOf, sendFallback, type ConversationRef, type HandoffDeps } from './handoff.js'
 import type { AssistantGate, AssistantInbox } from './ports.js'
@@ -151,7 +153,7 @@ export function composeReply(o: { text: string; disclose: boolean; links: Readon
   let reply = o.text
   // a registered link the reply left out is appended (the contract: the model may forget the placeholder)
   for (const p of o.links.keys()) if (!reply.includes(p)) reply = `${reply} ${p}`
-  if (o.safety && !reply.includes(SAFETY_LINE)) reply = `${reply} ${SAFETY_LINE}`
+  if (o.safety) reply = `${reply} ${SAFETY_LINE}`
   const text = renderTemplate('ai_reply', { reply, ...(o.disclose ? { disclosure: 'yes' } : {}) }).text
   const used = [...o.links.entries()].filter(([p]) => text.includes(p))
   if (used.length === 0) return { text, klass: 'ai_reply' }
@@ -315,9 +317,8 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     limit: d.cfg.historyLimit,
     windowMs: d.cfg.historyWindowMs,
   })
-  const contextText = renderTurnContext(
-    await loadTurnContext(d.db, { resolved, conversationId: conv.id, refs: refRows, actionsEnabled, firstContact: snap.firstContact, now, tz }),
-  )
+  const turnContext = await loadTurnContext(d.db, { resolved, conversationId: conv.id, refs: refRows, actionsEnabled, firstContact: snap.firstContact, now, tz })
+  const contextText = renderTurnContext(turnContext)
   const tools = offeredTools(d.registry, actionsEnabled)
   const specs = toolSpecs(tools)
   const factsText = renderShopFacts(facts)
@@ -334,7 +335,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
   const links = new Map<string, string>()
   const linkKinds = new Set<string>()
   let toolHandoff: HandoffRequest | null = null
-  const amounts: number[] = []
+  let balanceCents: number | null = null
   const ctx: ToolContext = {
     db: d.db,
     clock: d.clock,
@@ -431,7 +432,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
           rounds += 1
           const r = await runToolRound({ db: d.db, newId: d.newId, nowMs }, { registry: d.registry, ctx, uses, round: rounds, seq, actionsEnabled })
           seq = r.seq
-          amounts.push(...r.amounts)
+          if (r.balanceCents !== null) balanceCents = r.balanceCents
           toolHandoff ??= r.handoff
           transcript.add({ kind: 'tools', round: rounds, calls: r.calls })
           const content: AiContentBlock[] = [...r.results]
@@ -451,7 +452,10 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     }
 
     // ---- the output guard
-    const factsAmounts = factAmounts(facts)
+    // what the placeholders render to (the current facts; {balance} only after get_balance; the links stay for composeReply)
+    const values = placeholderValues(facts, { balanceCents })
+    for (const p of links.keys()) values.set(p, p)
+    const literals = [...factLiterals(facts), ...(turnContext.vehicleNames ?? [])]
     // a verify / PIN / membership / payment link: the server appends the safety line, so the reply leaves room for it
     const safety = [...linkKinds].some((k) => SAFETY_LINK_KINDS.has(k))
     const maxChars = safety ? MAX_REPLY_CHARS - SAFETY_LINE.length - 1 : MAX_REPLY_CHARS
@@ -471,17 +475,15 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
       for (let i = 0; i < 8 && reply === null; i++) {
         const v = guardReply({
           text: draft,
-          amounts: factsAmounts,
-          extraAmounts: amounts,
-          placeholders: links.keys(),
+          values,
+          literals,
           website: facts.business.website,
           shopNumbers: [facts.contact.textingNumber, facts.contact.callingNumber],
-          shopAddress: facts.business.address,
           maxChars,
         })
         transcript.add({ kind: 'guard', verdict: v.kind, ...(v.kind === 'fix' ? { problems: v.problems, ...(v.words.length > 0 ? { words: v.words } : {}) } : {}) })
         if (v.kind === 'ok') {
-          reply = v.text
+          reply = v.rendered
           break
         }
         const hard = v.problems.filter((p) => HARD_PROBLEMS.has(p))
@@ -506,7 +508,8 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
           draft = await fix(v.text, ['too_long'])
           continue
         }
-        draft = cutAtSentence(v.text, maxChars)
+        // the cut is on the raw text: leave room for what the placeholders add when rendered
+        draft = cutAtSentence(v.text, maxChars - Math.max(0, v.rendered.length - v.text.length))
       }
     } catch (e) {
       const reason = e instanceof TurnAbort ? e.reason : failureOf(e)

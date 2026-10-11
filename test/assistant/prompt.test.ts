@@ -63,10 +63,18 @@ describe('the turn context', () => {
       'starts at',
       'Never add prices up',
       'send_link',
-      'Never write anything about PINs, codes, passwords or card numbers',
+      'Never write anything about PINs, codes, passwords, digits, logins or card numbers',
+      'Do not write a security reminder either',
       'the server adds the security line itself',
       '"open times" or "openings"',
-      'Never write: free, discount, refund',
+      'Never write: free, "costs nothing", "on me", "on us"',
+      'you never write an amount, a $ sign or a money word yourself',
+      '{price:<key>}',
+      '{price:tint:<vehicle key>:<film key>}',
+      '{plan:<key>}',
+      '{fee}',
+      '{balance} for the client\'s own open balance, only after get_balance in this turn',
+      'Write numbers only as clock times',
       'Never write a phone number other than',
       'one question per text',
       'Do not offer a person up front',
@@ -138,7 +146,6 @@ describe('the reply as queued', () => {
     const links = new Map([['{link1}', 'https://oasisautospanj.com/#/c/TOKEN']])
     expect(composeReply({ text: 'Here is your secure link: {link1}', disclose: false, links, safety: true }).text).toBe(`Here is your secure link: {link1} ${SAFETY_LINE}`)
     expect(composeReply({ text: 'Here you go.', disclose: false, links, safety: true }).text).toBe(`Here you go. {link1} ${SAFETY_LINE}`)
-    expect(composeReply({ text: `Here: {link1} ${SAFETY_LINE}`, disclose: false, links, safety: true }).text).toBe(`Here: {link1} ${SAFETY_LINE}`)
     expect(composeReply({ text: 'Pick a time: {link1}', disclose: false, links }).text).not.toContain(SAFETY_LINE)
   })
 })

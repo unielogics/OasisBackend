@@ -7,27 +7,34 @@ import { maskEmail, maskPhone } from '../../platform/phone.js'
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
 const E164 = /\+\d{8,15}\b/g
-const DIGITS = /\b\d{7,}\b/g
 /**
- * Phone numbers as people write them (shared with the turn context, context.ts maskForModel, and the output guard): "(201) 555-0123",
- * "201.555.0123", "201-555-0123", "201 555 0123", "2015550123", "+1 (201) 555-0123" (NANP), any "+" number with spaces, dots or
- * dashes ("+44 20 7946 0958"), and the 7-digit local form "555-0123" / "555.0123" / "555 0123" (apply it after the other two).
- * Not numbers: dates ("2026-06-13"), times ("10:30"), prices ("$1,299"), a ZIP+4 ("07026-1234").
+ * Phone numbers as people write them: ONE pattern set (PHONE_PATTERNS, in this order) shared by maskForModel (context.ts: what the
+ * model reads) and redactText (what is stored), so both always mask the same things:
+ *   INTL_PHONE   any "+" number with spaces, dots, dashes or brackets ("+44 20 7946 0958", "+1 (201) 555-0123")
+ *   NANP_PHONE   "(201) 555-0123", "201.555.0123", "201-555-0123", "201 555 0123", "201/555-0123", "2015550123", "1-201-555-0123"
+ *   SPLIT_PHONE  10 to 15 digits split any other way ("2 0 1 5 5 5 0 1 2 3", "201 555 01 23", "201-5550-123")
+ *   LOCAL_PHONE  the 7-digit local form "555-0123" / "555.0123" / "555 0123"
+ *   LONG_DIGITS  any other run of 7 or more digits (a code, an account number)
+ * Not numbers: dates ("2026-06-13", "2026-06-13 10:30"), times ("10:30"), prices ("$1,299"), a ZIP+4 ("07026-1234"), an invoice
+ * number ("INV-2026-0042"). The output guard does not use these: its numbers rule refuses every digit group of 4 or more digits.
  */
 export const INTL_PHONE = /\+\d(?:[\s().-]{0,2}\d){7,14}(?!\d)/g
-export const NANP_PHONE = /(?<![\w+])(?:1[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s.-]?\d{3}[\s.-]?\d{4}(?!\d)/g
+export const NANP_PHONE = /(?<![\w+])(?:1[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s./-]?\d{3}[\s.-]?\d{4}(?!\d)/g
+export const SPLIT_PHONE = /(?<![\w+$:.,/-])(?:\d[\s()./-]{0,3}){9,14}\d(?![\d:])/g
 export const LOCAL_PHONE = /(?<![\w$+.,:/*-])\d{3}[-. ]\d{4}(?![\w-]|[.,:]\d)/g
+export const LONG_DIGITS = /\b\d{7,}\b/g
+export const PHONE_PATTERNS: readonly RegExp[] = [INTL_PHONE, NANP_PHONE, SPLIT_PHONE, LOCAL_PHONE, LONG_DIGITS]
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g
 
+/** Every phone number of the text replaced (PHONE_PATTERNS, in order). */
+export function maskPhones(s: string, by: (match: string) => string): string {
+  let out = s
+  for (const re of PHONE_PATTERNS) out = out.replace(re, by)
+  return out
+}
+
 export function redactText(s: string): string {
-  return s
-    .replace(UUID, '[id]')
-    .replace(EMAIL, (m) => maskEmail(m))
-    .replace(E164, (m) => maskPhone(m))
-    .replace(INTL_PHONE, (m) => maskPhone(m))
-    .replace(NANP_PHONE, (m) => maskPhone(m))
-    .replace(LOCAL_PHONE, (m) => maskPhone(m))
-    .replace(DIGITS, (m) => maskPhone(m))
+  return maskPhones(s.replace(UUID, '[id]').replace(EMAIL, (m) => maskEmail(m)).replace(E164, (m) => maskPhone(m)), (m) => maskPhone(m))
 }
 
 /** A deep copy with every string redacted (keys kept). */

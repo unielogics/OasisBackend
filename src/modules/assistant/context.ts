@@ -13,7 +13,7 @@ import { evaluateTrust } from '../identity/trust.js'
 import { memberView } from '../public/members.js'
 import type { AppointmentRefLabel, AppointmentRefs, TurnIdentity } from './contract.js'
 import { nextIntakeStep, type HistoryLine, type TurnContextData } from './prompt.js'
-import { INTL_PHONE, LOCAL_PHONE, NANP_PHONE } from './transcript.js'
+import { maskPhones } from './transcript.js'
 import '../customers/schema.js'
 import '../messaging/schema.js'
 import '../scheduling/schema.js'
@@ -133,15 +133,15 @@ const STATUS_WORDS: Record<string, string> = {
   no_show: 'missed',
 }
 
-/** Phone numbers, ids and long digit runs in a text, masked (texts are data for the model, never a way to pass a number). */
+/**
+ * Phone numbers, ids and long digit runs in a text, masked (texts are data for the model, never a way to pass a number): the same
+ * pattern set as the stored transcript (transcript.ts PHONE_PATTERNS via maskPhones).
+ */
 export function maskForModel(text: string): string {
-  return text
-    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '[id]')
-    .replace(INTL_PHONE, '[number]')
-    .replace(NANP_PHONE, '[number]')
-    .replace(/\+?\d(?:[\s().-]?\d){9,}/g, '[number]')
-    .replace(LOCAL_PHONE, '[number]')
-    .replace(/\b(?:oa_|tok_)[A-Za-z0-9_-]{8,}\b/g, '[token]')
+  return maskPhones(text.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '[id]'), () => '[number]').replace(
+    /\b(?:oa_|tok_)[A-Za-z0-9_-]{8,}\b/g,
+    '[token]',
+  )
 }
 
 export interface ConversationSnapshot {
@@ -215,6 +215,18 @@ export async function loadConversation(
   }
 }
 
+/**
+ * How a reply may name a vehicle on file with its digits (the guard's numbers rule skips these exact phrases): "2021 Tesla Model 3",
+ * "Tesla Model 3", and the model alone when it has a letter ("Model 3", "C300", "F-150"; never a bare "911").
+ */
+export function vehicleLiterals(v: { year: number | null; make: string | null; model: string | null }): string[] {
+  const make = v.make?.trim() ?? ''
+  const model = v.model?.trim() ?? ''
+  const out = [[v.year, make, model].filter((x) => x !== null && String(x).trim() !== '').join(' '), [make, model].filter((x) => x !== '').join(' ')]
+  if (/\p{L}/u.test(model) && /\d/.test(model)) out.push(model)
+  return [...new Set(out.filter((x) => /\d/.test(x)))]
+}
+
 /** The turn context data of design section 3 (no phone, ids or tokens). */
 export async function loadTurnContext(
   db: Executor,
@@ -234,6 +246,7 @@ export async function loadTurnContext(
   let membership: string | null = null
   let memberActive = false
   let vehicles: string[] = []
+  let vehicleNames: string[] = []
   let hasAppointments = false
   let welcomed = false
   if (customerId) {
@@ -245,16 +258,16 @@ export async function loadTurnContext(
       memberActive = true
       membership = `${view.plan ?? 'member'}, active${view.washesLeft !== null ? `, ${view.washesLeft} wash${view.washesLeft === 1 ? '' : 'es'} left this cycle` : ''}`
     }
-    vehicles = (
-      await db
-        .selectFrom('vehicles')
-        .select(['year', 'make', 'model', 'color'])
-        .where('customer_id', '=', customerId)
-        .where('deleted_at', 'is', null)
-        .orderBy('created_at')
-        .limit(3)
-        .execute()
-    ).map((v) => [v.year, v.make, v.model].filter((x) => x !== null && String(x).trim() !== '').join(' ') + (v.color ? `, ${v.color}` : ''))
+    const rows = await db
+      .selectFrom('vehicles')
+      .select(['year', 'make', 'model', 'color'])
+      .where('customer_id', '=', customerId)
+      .where('deleted_at', 'is', null)
+      .orderBy('created_at')
+      .limit(3)
+      .execute()
+    vehicles = rows.map((v) => [v.year, v.make, v.model].filter((x) => x !== null && String(x).trim() !== '').join(' ') + (v.color ? `, ${v.color}` : ''))
+    vehicleNames = rows.flatMap((v) => vehicleLiterals(v))
     hasAppointments =
       (await db.selectFrom('appointments').select('id').where('customer_id', '=', customerId).limit(1).executeTakeFirst()) !== undefined
   }
@@ -285,6 +298,7 @@ export async function loadTurnContext(
     actionsEnabled: o.actionsEnabled,
     membership,
     vehicles,
+    vehicleNames,
     appointments: o.refs.map((r) => ({
       ref: r.ref,
       label: `${dateLabel(r.start, o.tz)} at ${clockLabel(r.start, o.tz)}, ${maskForModel(r.packageName)} (${STATUS_WORDS[r.status] ?? r.status})`,
