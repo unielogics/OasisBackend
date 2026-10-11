@@ -47,4 +47,19 @@ registerProblems({
     title: 'Already a member',
     detail: 'This client already has a membership',
   },
+  MEMBERSHIP_CHECKOUT_NOT_FOUND: {
+    status: 404,
+    title: 'Checkout not found',
+    detail: 'That membership checkout does not exist',
+  },
+  MEMBERSHIP_CHECKOUT_NOT_WAITING: {
+    status: 409,
+    title: 'Not waiting for staff',
+    detail: 'This checkout is {state}, not waiting for a match: reload and try again',
+  },
+  MEMBERSHIP_CHECKOUT_UNAVAILABLE: {
+    status: 409,
+    title: 'No checkout for this plan',
+    detail: 'This plan has no Squarespace checkout link yet. Add it in Settings → Catalog → Memberships',
+  },
 })

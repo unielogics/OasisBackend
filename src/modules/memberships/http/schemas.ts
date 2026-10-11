@@ -60,6 +60,19 @@ export const MembershipView = z.object({
   flags: z.array(z.object({ code: z.string(), orderId: z.string().optional(), note: z.string() })),
   inferenceReason: z.string().nullable(),
   lastSqspOrderId: z.string().nullable(),
+  checkout: z
+    .object({
+      id: z.string(),
+      state: z.enum(['open', 'awaiting_match']),
+      expectedEmail: z.string().nullable(),
+      startedAt: z.string(),
+      expiresAt: z.string(),
+      order: z.object({ id: z.string(), number: z.string(), createdOn: z.string() }).nullable(),
+    })
+    .nullable()
+    .describe(
+      'The live Squarespace checkout: an open intent from a personal link waiting for its order, or a paid order that matches the client only through an unverified email and waits for staff (awaiting_match; confirm or reject it under /membership-checkouts)',
+    ),
   version: z.number().int(),
 })
 
@@ -163,3 +176,49 @@ export const PlansResult = z.object({ plans: z.array(PlanView) })
 
 export const RuleParams = z.object({ id: Uuid })
 export const RulePatch = z.object({ autoApply: z.boolean() }).strict()
+
+// ---- membership checkouts (ADR 0160) --------------------------------------------------------------------------------
+
+export const CheckoutState = z.enum(['open', 'matched', 'awaiting_match', 'expired', 'superseded', 'abandoned', 'rejected'])
+
+export const CheckoutView = z.object({
+  id: z.string(),
+  membershipId: z.string(),
+  customer: z.object({ id: z.string(), name: z.string() }),
+  state: CheckoutState,
+  origin: z.enum(['link', 'sync']).describe('link: started on the membership page of a personal link; sync: opened by the order sync for staff'),
+  planKey: z.string(),
+  productKey: z.string().nullable(),
+  expectedEmail: z.string().nullable(),
+  startedAt: z.string(),
+  expiresAt: z.string(),
+  matchedAt: z.string().nullable(),
+  order: z
+    .object({
+      id: z.string().describe('Squarespace order id'),
+      number: z.string(),
+      createdOn: z.string(),
+      email: z.string().nullable(),
+      totalCents: z.number().int(),
+    })
+    .nullable()
+    .describe('The order the row is matched to, or waits for (awaiting_match)'),
+  version: z.number().int(),
+})
+
+export const CheckoutListQuery = z.object({
+  state: CheckoutState.optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+})
+
+export const CheckoutListResult = z.object({
+  items: z.array(CheckoutView),
+  awaitingMatch: z.number().int().describe('Rows waiting for staff at this location'),
+})
+
+export const CheckoutDecisionBody = z.object({ note: z.string().trim().max(200).nullable().optional() }).strict()
+
+export const CheckoutDecisionResult = z.object({
+  checkout: CheckoutView,
+  membership: MembershipView.nullable(),
+})

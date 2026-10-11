@@ -1,7 +1,8 @@
 // POST /public/bookings (ADR 0150): a real appointment from the website, through the same createAppointment() the dashboard's
 // booking sheet uses, with the online channel's rules (lead time, booking window, paused days; no overrides: there is nobody to
 // grant one). The customer is created or linked by E.164 phone with the SMS consent recorded (source online); an existing
-// customer's name and email are never replaced unless the person verified that number (a member token). Guests owe the shop's
+// customer's record is never changed unless the person verified that number (a member token), and even then the name on file
+// is only filled when it is a placeholder (a different typed name becomes a note on the booking). Guests owe the shop's
 // booking fee at the counter or by a payment link staff text afterwards (settings booking.guest_fee); an active member owes
 // nothing. The confirmation text is the design's, queued in the booking's transaction; the usual reminders follow from the
 // reminder job. Slot failures answer with the design's wording, never the dashboard's override hints.
@@ -166,12 +167,18 @@ export async function createWebBooking(
   const when = whenWord(input.date, today)
   const time = fmtT(input.startMin)
 
-  // a verified member may correct their own name and email; a guest never overwrites what the shop has on file
+  // A verified member may correct their own email. The name on file is never replaced by what was typed (a booking form's
+  // "Maria" must not overwrite "Maria Lopez", review 2026-10-10): the typed name only fills a placeholder (a walk-in or a texter
+  // whose name is still unknown); a different one is kept as a note on the booking for staff. A guest changes nothing.
+  let typedNameNote: string | null = null
   if (verified && existing && existing.id === verified.customerId) {
-    const name = input.name.trim()
+    const name = input.name.trim().replace(/\s+/g, ' ')
     const email = input.email?.trim() || null
     const patch: { fullName?: string; email?: string | null } = {}
-    if (name && name !== existing.fullName) patch.fullName = name
+    if (name && name !== existing.fullName) {
+      if (isPlaceholderName(existing)) patch.fullName = name
+      else typedNameNote = `Booked on the website as "${name}"; the name on file ("${existing.fullName}") was kept. Update it in the client file if the client asks.`
+    }
     if (email && email.toLowerCase() !== (existing.email ?? '').toLowerCase()) patch.email = email
     if (Object.keys(patch).length) await updateCustomer(tx, { id: existing.id, patch })
   }
@@ -206,6 +213,7 @@ export async function createWebBooking(
   const appointmentId = booked.appointment.id
   if (linkOnly)
     await logActivity(tx, c, { appointmentId, text: unverifiedDetails(input), channels: ['internal'], actor })
+  if (typedNameNote) await logActivity(tx, c, { appointmentId, text: typedNameNote, channels: ['internal'], actor })
   await logActivity(tx, c, {
     appointmentId,
     text: member
@@ -256,6 +264,15 @@ async function privilegesOf(tx: Tx, locationId: string, customerId: string): Pro
   if (!m) return { member: false, vip: listed }
   const plan = (await loadPlans(tx, locationId)).find((p) => p.id === m.planId)
   return { member: true, vip: listed || (plan !== undefined && tierOfPlan(plan.key) === 'vip') }
+}
+
+/**
+ * A name the shop does not really have yet: a record still flagged needs_details, the walk-in placeholder, or the assistant's
+ * provisional "New texter ••1234" (ADR 0160). Only such a name is filled from a booking form.
+ */
+export function isPlaceholderName(c: { fullName: string; needsDetails: boolean }): boolean {
+  const n = c.fullName.trim()
+  return c.needsDetails || n === '' || n === 'Walk-in guest' || /^New texter\b/i.test(n)
 }
 
 /** What an unverified caller typed for a customer the shop already has, for staff to confirm (nothing of it reaches the record). */

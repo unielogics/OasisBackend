@@ -381,6 +381,9 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/api/v1/me` | authenticated |  |
 | PUT | `/api/v1/me/preferences` | authenticated |  |
 | POST | `/api/v1/me/view-as` | authenticated |  |
+| GET | `/api/v1/membership-checkouts` | cli.member |  |
+| POST | `/api/v1/membership-checkouts/:id/match` | cli.member |  |
+| POST | `/api/v1/membership-checkouts/:id/reject` | cli.member |  |
 | GET | `/api/v1/membership-plans` | cli.view |  |
 | PATCH | `/api/v1/membership-plans/rules/:id` | cli.member |  |
 | GET | `/api/v1/memberships` | cli.member |  |
@@ -429,6 +432,9 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | PUT | `/api/v1/settings/hours` | set.hours |  |
 | GET | `/api/v1/settings/location` | authenticated |  |
 | PUT | `/api/v1/settings/location` | set.hours |  |
+| GET | `/api/v1/settings/reminders` | authenticated |  |
+| PUT | `/api/v1/settings/reminders` | set.hours |  |
+| POST | `/api/v1/settings/reminders/preview` | authenticated |  |
 | GET | `/api/v1/settings/rules` | authenticated |  |
 | PUT | `/api/v1/settings/rules` | set.hours |  |
 | GET | `/api/v1/staff` | sched.view |  |
@@ -647,6 +653,39 @@ Handlers take the injected `Clock`; tests move a `FixedClock` (`test/settings-ht
 `pnpm test:settings` runs `test/settings-http` (real Postgres). `oracle.test.ts` compares the API with values read from the
 original Settings prototype (`test/fixtures/golden/settings-original.json`, produced by
 `test/settings-http/golden/extract-settings-oracle.mjs`; commands in `test/fixtures/golden/README.md`).
+
+### 15.6a Reminders, status texts and the lead follow-up: `/settings/reminders` (ADR 0160, plan I)
+
+`GET /settings/reminders` (any session) answers `{reminders{offsetsMin, confirmRequest, categoryPrep{categoryKey: text},
+reviewRequest}, statusTexts{checkedIn, checkedInDelayMin, runningLate, lateGraceMin, lateMax, ready, pickedUp, bookAgainLink},
+leads{followUpEnabled, followUpDelayMin, businessHoursOnly, withinHours}, categories[{key, label, colour, active}] (read-only),
+quietHours{enabled, start, end} (read-only), version}` with `ETag: "<version>"`. The values are the registry settings
+`reminders.offsets_min`, `reminders.confirm_request`, `reminders.category_prep`, `reviews.enabled`, `status_texts.*` and `leads.*`;
+`version` is the sum of their versions, which any write to any of them raises.
+
+`PUT /settings/reminders` (`set.hours`): any group and any field (strict), `version` or `If-Match` required (428 without, 412
+`VERSION_CONFLICT {currentVersion}` when stale; saves take a per-location advisory lock so two never both pass). Each value is
+validated by its registry schema, then the section's rules: offsets listed once (stored longest first, at most 5, 1..10080 minutes;
+`[]` turns appointment reminders off), a preparation line only for an existing category (`There is no category "x".`), at most 160
+characters and plain SMS characters (a line that would make the text UCS-2 is refused), an emptied line removes it; 422 with every
+field named (`reminders.offsetsMin`, `statusTexts.lateMax`, ...), and nothing is written. Only changed keys are written, each audited
+(`settings.update`, before/after) and published as `settings.changed {section: reminders | reviews | status_texts | leads, key,
+version}`. The answer is the view plus `changed` (the keys written). A loaded view may be sent back as it is (the read-only fields are
+accepted and ignored).
+
+`POST /settings/reminders/preview` (any session; changes nothing): `{draft?: <the PUT shape without version>, sample?: {firstName?,
+date?, startMin?, categories?}}` → `{sample{firstName, startsAt, date, time, categories}, texts[{id, group, label, timing,
+templateKey, klass, enabled, text, segments, encoding}]}`: per offset a booked and a confirmed reminder, the review request, the
+status texts (checked in = `welcome`, wash started = `in_progress`, running late = `job_delay`, ready, picked up) and the lead
+follow-up, rendered through the template registry exactly as sent (GSM-7, the STOP line of automated classes, the segment count; a
+link is a placeholder as long as a real personal link). The sample visit is tomorrow 10:00 AM with the categories that have a
+preparation line (else wash), in catalog order. A draft is validated like a save (422).
+
+The reminders job reads these settings: with `reminders.confirm_request` off a booked visit gets the plain `reminder` instead of the
+"Reply C to confirm" request; the preparation lines of the appointment's `categories` (in their order, each text once) are appended
+as `{prep}` to both templates ("... at 2:00 PM. Plan for 2–3 hours. Reply C to confirm."). The preview uses the same composition
+(`reminderMessage()` in `src/modules/messaging/jobs/reminders.ts`). Tests: `test/settings-http/reminders.test.ts`,
+`test/jobs/reminders.test.ts`.
 
 ### 15.7 The public website's hours: `GET /api/v1/public/hours`
 
@@ -1096,6 +1135,71 @@ The Operations appointment file's `membership` (and the board's member badge) no
 `creditsLeft` (null = unlimited), `creditAvailable`, and additively `planKey`, `renewsAt`, `renewLabel`, `creditsUsed`, `perks`,
 `color`, `bgColor`, `tint`, `memberMonths`, `retention{label, desc, tone}`.
 
+### 23.2a Membership checkouts and order matching (ADR 0160, wave W2e)
+
+Who a Squarespace membership order belongs to (`payments-sync/membership.ts linkCustomer`), in this order:
+
+1. **Checkout intent** (`membership_checkouts`): the row a matched order is bound to; else an `open` intent whose `expected_email`
+   and product (`product_key`, the product id or SKU, any letter case; any product of the plan when null) match the order and whose
+   window (`started_at` .. `expires_at`, 72 hours) contains the order's time, which the sync then marks `matched`
+   (`matched_order_id`, audit `membership.checkout.matched`); else the renewals of a `matched` intent: an order of the same
+   Squarespace customer as the bound order (any email: Squarespace renews with the customer's current email) and product, or,
+   when the bound order names no Squarespace customer, the same email and product. Two clients' intents for one order link
+   nobody (ambiguous). An intent (open or a renewal) never takes an order another client holds: a `sqsp_customer_links` row of
+   another client for the order's Squarespace customer (whatever its `source`, one the contacts job made by an unverified email
+   included), that Squarespace customer on another client's `memberships` row, another client's email on file (verified **or
+   not**: after the identity migration no member's email is verified), another client's phone, or another client's checkout row
+   (matched or `awaiting_match`) for the same Squarespace customer or this order. Such an intent is ignored (not consumed, never
+   making the order ambiguous): the order links through tiers 2-4 exactly as without it (its owner, `awaiting_match` for staff,
+   or nobody: then review flag `ambiguous_customer` naming the order and a `membership_needs_customer` alert that says why). A
+   matched intent never binds a Squarespace customer another client holds either: `loadIntentRefs` marks a row an intent matched
+   by itself (origin `link`) whose order's Squarespace customer is on another client's link or membership row
+   (`orderHeldByAnother`), and that row binds neither its order nor renewals; a row staff matched is never second-guessed. An
+   intent only names an email the client typed, so it can never take a member's renewals.
+2. The Squarespace customer id (`sqsp_customer_links`; a link the contacts job made **by email** counts only while that client's
+   email is verified).
+3. An email the client **verified** (`customers.email_verified`; trigger `customers_email_unverify` drops the flag whenever the
+   email changes, letter case aside, even when the statement also sets it; the only way to store a new verified email is
+   `setVerifiedEmail(tx, customerId, email)` in `src/modules/memberships/verified-email.ts`, which names the address in the
+   transaction-local setting `oasis.verified_email` for that one statement).
+4. The phone.
+
+An email nobody verified never links. A **paid** order whose email matches exactly one client only that way waits for staff: the
+sync opens a `membership_checkouts` row `awaiting_match` (origin `sync`, the order in `matched_order_id`, no checkout URL) on that
+client's live membership, creating a `pending` one (source `squarespace`) when they have none; managers get one notification
+(`membership.awaiting_match`, "Confirm Ana’s membership payment") and an open `membership_awaiting_match` alert; nothing activates.
+A second paid order of the **same plan** placed while the paid period still runs (more than 3 days before its end) is a duplicate:
+review flag `duplicate_payment` on the membership, one `membership_duplicate_payment` alert per order, and the period, renewal date
+and paid-order count are the first order's (a newer payment, duplicate or not, still releases a hand-set status). Another plan
+mid-period stays a tier change (`tier_changed`). The pass report gains `awaitingMatch`, `intentsMatched` and `duplicates`.
+
+| Verb path | Permission | Notes |
+|---|---|---|
+| `GET /membership-checkouts?state&limit` | `cli.member` | newest first: `{items[{id, membershipId, customer{id,name}, state, origin link \| sync, planKey, productKey, expectedEmail, startedAt, expiresAt, matchedAt, order{id, number, createdOn, email, totalCents} \| null, version}], awaitingMatch}`. |
+| `POST /membership-checkouts/:id/match` | `cli.member` | `{note?}`; staff confirmed the order is the client's: `awaiting_match` → `matched`, the membership pass runs at once (the order links through the row, so the membership activates when paid; the same email's renewals follow), the alert closes, audit `membership.checkout.confirmed`. `{checkout, membership}`. |
+| `POST /membership-checkouts/:id/reject` | `cli.member` | `{note?}`; not the client's: `awaiting_match` → `rejected` (the order is never offered for that client again and goes back to `membership_needs_customer`); a pending membership the sync opened only for it is canceled; the alert closes; audit `membership.checkout.rejected`. |
+
+Errors: 404 `MEMBERSHIP_CHECKOUT_NOT_FOUND`, 409 `MEMBERSHIP_CHECKOUT_NOT_WAITING` (the row is not `awaiting_match`). The membership
+view (`GET /customers/:id/membership`, `GET /memberships`, the PATCH/POST answers) gains `checkout`: the live row (`open` or
+`awaiting_match`: `{id, state, expectedEmail, startedAt, expiresAt, order{id, number, createdOn} | null}`) or null.
+
+For wave W3 (the link API's `POST membership/start`), `openCheckoutIntent(tx, ctx, {customerId, planKey, email, linkId?,
+envProductMap?, planLabel?}, audit)` in `src/modules/memberships/checkouts.ts`: 409 `MEMBERSHIP_EXISTS` for an active, past-due or
+paused member, 409 `MEMBERSHIP_CHECKOUT_UNAVAILABLE` when the plan has no `checkout_url`; otherwise it reuses the client's pending
+membership (switching its plan if another was chosen) or creates one (source `manual`), supersedes its earlier open intent, opens a
+new one for 72 hours with the normalised email and the plan's product key, audits `membership.checkout.started`, and returns
+`{membershipId, checkoutId, checkoutUrl, expiresAt, membershipCreated}` for the redirect.
+
+Job `membership.checkouts` (every 15 minutes): open intents past `expires_at` become `expired`; a pending membership of source
+`manual` (a website join or a personal-link checkout) that staff never made or edited (`manual_status_at` null: a staff-made
+membership, or one staff put on pending by hand, is never closed), with no paid order, 7 days after its last checkout attempt
+(`started_at` and every checkout row's `started_at` are 7 days old: a client who restarts the checkout gets the full window
+again), with no intent still open and no order waiting for staff, is canceled (`cancel_reason` `checkout_abandoned`, `manual_status_at` set so a later paid order still reactivates it), its
+open or expired intents `abandoned`, audit `membership.canceled` (actor "Membership checkouts"). It changes nothing when there are
+none. Tests: `test/payments-sync/membership-intents.test.ts` (pure), `test/memberships/checkouts.test.ts` (over the simulator: the legacy
+member, the member known only by their membership row and the honest new client of F1),
+`test/jobs/matrix-sqsp.test.ts`.
+
 ### 23.3 Realtime and alerts
 
 `payments` channel: `squarespace.order_synced` `{orderId, orderNumber, matchState, invoiceId?}` whenever an order is stored or its match
@@ -1291,7 +1395,7 @@ make and model are absent). A non-empty `website` (the honeypot) answers **202**
 | Step | Rule |
 |---|---|
 | Limits | Section 26 above (10 an hour per address, 3 per number from one address, 5 per number), charged before the booking runs and outside its transaction (a booking refused for its slot still counts). |
-| Customer | A **new** number creates the customer (`upsertCustomerByPhone`, source `online`, `synthetic = false`, name, email, vehicle); `smsConsent` records the SMS opt-in with source `online`, which the policy reads as consent kind `web_booking`: the texts about the booking (confirmation, reminders, receipts), never marketing. The number of a customer the shop **already has**, without a `memberToken` issued for that customer: the booking is linked to them by id and their record is left exactly as it is (no name, placeholder or not, no email, no consent, no vehicle; the appointment has no vehicle); what was typed goes on the appointment's internal log ("Booked on the website with the number of this customer, not verified by a code ... Typed: name ..., email ..., vehicle ..., texts yes"). With that token the person may correct their own name and email, and consent and the vehicle are recorded. A token for another number is 422 `PUBLIC_TOKEN_PHONE_MISMATCH`; an unknown or expired token 401 `PUBLIC_TOKEN_INVALID`. |
+| Customer | A **new** number creates the customer (`upsertCustomerByPhone`, source `online`, `synthetic = false`, name, email, vehicle); `smsConsent` records the SMS opt-in with source `online`, which the policy reads as consent kind `web_booking`: the texts about the booking (confirmation, reminders, receipts), never marketing. The number of a customer the shop **already has**, without a `memberToken` issued for that customer: the booking is linked to them by id and their record is left exactly as it is (no name, placeholder or not, no email, no consent, no vehicle; the appointment has no vehicle); what was typed goes on the appointment's internal log ("Booked on the website with the number of this customer, not verified by a code ... Typed: name ..., email ..., vehicle ..., texts yes"). With that token the person may correct their own email, and consent and the vehicle are recorded; the name on file is only filled when it is a placeholder (needs_details, "Walk-in guest", the assistant's "New texter ••1234"): a different typed name never replaces it (a shorter "Maria" must not overwrite "Maria Lopez", W2 review leftover) and goes on the appointment's internal log instead ("Booked on the website as \"Maria\"; the name on file (\"Maria Lopez\") was kept. ..."). A token for another number is 422 `PUBLIC_TOKEN_PHONE_MISMATCH`; an unknown or expired token 401 `PUBLIC_TOKEN_INVALID`. |
 | Booking | The start must be on the board's grid (opening time plus whole slots of an open day): 422 `body.startMin` "Pick one of the times on the board." otherwise. `createAppointment()` with `source: 'online'`, `channel: 'online'` (lead time, booking window, paused days; no overrides: there is nobody to grant one), `vip` as proven (below), the package and add-ons by catalog key (422 otherwise), the slot guard under the per-date advisory lock, the invoice through the payments gateway, the checklist snapshot, the audit row (actor "Website"), the `ops` events (`appointment.updated {change: created}`, `availability.changed`, `kpi.dirty`): the dashboard's board updates live. |
 | Privileges | Only with a `memberToken` issued for the customer on file. Then an **active** membership waives the fee (`member: true`), and a VIP client (the staff's list) or an active member of the plan the website sells as VIP (`executive`) gets the VIP slot rules (VIP-held times, the VIP online window of `vip.windowVipDays`). Without the token the booking is evaluated as a guest's and a non-VIP's, whatever the number's record says: the fee is due and `PUBLIC_SLOT_VIP` / `PUBLIC_SLOT_TOO_FAR` (with the standard window's days) answer as for anyone. |
 | Fee | Settings key `booking.guest_fee {cents: 2500, collect: counter \| link}`. A verified active member owes nothing (`member: true`); anyone else owes `cents`, collected at the counter or through a Squarespace payment link staff text afterwards (the dashboard's payment-link flow, kind deposit). Nothing is charged online: there is no card capture anywhere. The answer says `deposit {dueCents, how}` and the activity log records "Booked on the website · $25 booking fee due at the counter". |

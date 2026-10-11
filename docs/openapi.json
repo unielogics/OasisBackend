@@ -20447,6 +20447,81 @@
                                 }
                               ]
                             },
+                            "checkout": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "expectedEmail": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "expiresAt": {
+                                      "type": "string"
+                                    },
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "order": {
+                                      "anyOf": [
+                                        {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "createdOn": {
+                                              "type": "string"
+                                            },
+                                            "id": {
+                                              "type": "string"
+                                            },
+                                            "number": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "id",
+                                            "number",
+                                            "createdOn"
+                                          ],
+                                          "type": "object"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "startedAt": {
+                                      "type": "string"
+                                    },
+                                    "state": {
+                                      "enum": [
+                                        "open",
+                                        "awaiting_match"
+                                      ],
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "state",
+                                    "expectedEmail",
+                                    "startedAt",
+                                    "expiresAt",
+                                    "order"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "The live Squarespace checkout: an open intent from a personal link waiting for its order, or a paid order that matches the client only through an unverified email and waits for staff (awaiting_match; confirm or reject it under /membership-checkouts)"
+                            },
                             "credits": {
                               "additionalProperties": false,
                               "properties": {
@@ -20779,6 +20854,7 @@
                             "flags",
                             "inferenceReason",
                             "lastSqspOrderId",
+                            "checkout",
                             "version"
                           ],
                           "type": "object"
@@ -46169,6 +46245,1533 @@
         "x-oasis-access": "authenticated"
       }
     },
+    "/api/v1/membership-checkouts": {
+      "get": {
+        "description": "Newest first, optionally of one state. A row in `awaiting_match` is a paid Squarespace membership order whose email matches the client only through an email nobody verified (ADR 0160): confirm it with the client, then match or reject it.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "enum": [
+                "open",
+                "matched",
+                "awaiting_match",
+                "expired",
+                "superseded",
+                "abandoned",
+                "rejected"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "awaitingMatch": {
+                      "description": "Rows waiting for staff at this location",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "items": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "customer": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "name"
+                            ],
+                            "type": "object"
+                          },
+                          "expectedEmail": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "expiresAt": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "matchedAt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "membershipId": {
+                            "type": "string"
+                          },
+                          "order": {
+                            "anyOf": [
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "createdOn": {
+                                    "type": "string"
+                                  },
+                                  "email": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "id": {
+                                    "description": "Squarespace order id",
+                                    "type": "string"
+                                  },
+                                  "number": {
+                                    "type": "string"
+                                  },
+                                  "totalCents": {
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "number",
+                                  "createdOn",
+                                  "email",
+                                  "totalCents"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The order the row is matched to, or waits for (awaiting_match)"
+                          },
+                          "origin": {
+                            "description": "link: started on the membership page of a personal link; sync: opened by the order sync for staff",
+                            "enum": [
+                              "link",
+                              "sync"
+                            ],
+                            "type": "string"
+                          },
+                          "planKey": {
+                            "type": "string"
+                          },
+                          "productKey": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "startedAt": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "enum": [
+                              "open",
+                              "matched",
+                              "awaiting_match",
+                              "expired",
+                              "superseded",
+                              "abandoned",
+                              "rejected"
+                            ],
+                            "type": "string"
+                          },
+                          "version": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "membershipId",
+                          "customer",
+                          "state",
+                          "origin",
+                          "planKey",
+                          "productKey",
+                          "expectedEmail",
+                          "startedAt",
+                          "expiresAt",
+                          "matchedAt",
+                          "order",
+                          "version"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "awaitingMatch"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Membership checkouts: personal-link checkouts and paid orders waiting for staff to match",
+        "tags": [
+          "memberships"
+        ],
+        "x-oasis-access": "cli.member"
+      }
+    },
+    "/api/v1/membership-checkouts/{id}/match": {
+      "post": {
+        "description": "Only a row in `awaiting_match`. The row becomes `matched`, the membership pass runs at once and links the order (and the same email’s later renewals of the plan) to the client, so the membership activates when the order is paid. Audited; closes the alert.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "note": {
+                    "anyOf": [
+                      {
+                        "maxLength": 200,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "checkout": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "customer": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name"
+                          ],
+                          "type": "object"
+                        },
+                        "expectedEmail": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "expiresAt": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "matchedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "membershipId": {
+                          "type": "string"
+                        },
+                        "order": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "createdOn": {
+                                  "type": "string"
+                                },
+                                "email": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "id": {
+                                  "description": "Squarespace order id",
+                                  "type": "string"
+                                },
+                                "number": {
+                                  "type": "string"
+                                },
+                                "totalCents": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "number",
+                                "createdOn",
+                                "email",
+                                "totalCents"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The order the row is matched to, or waits for (awaiting_match)"
+                        },
+                        "origin": {
+                          "description": "link: started on the membership page of a personal link; sync: opened by the order sync for staff",
+                          "enum": [
+                            "link",
+                            "sync"
+                          ],
+                          "type": "string"
+                        },
+                        "planKey": {
+                          "type": "string"
+                        },
+                        "productKey": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "startedAt": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "open",
+                            "matched",
+                            "awaiting_match",
+                            "expired",
+                            "superseded",
+                            "abandoned",
+                            "rejected"
+                          ],
+                          "type": "string"
+                        },
+                        "version": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "membershipId",
+                        "customer",
+                        "state",
+                        "origin",
+                        "planKey",
+                        "productKey",
+                        "expectedEmail",
+                        "startedAt",
+                        "expiresAt",
+                        "matchedAt",
+                        "order",
+                        "version"
+                      ],
+                      "type": "object"
+                    },
+                    "membership": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "autoApply": {
+                              "type": "boolean"
+                            },
+                            "canceledAt": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "checkout": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "expectedEmail": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "expiresAt": {
+                                      "type": "string"
+                                    },
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "order": {
+                                      "anyOf": [
+                                        {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "createdOn": {
+                                              "type": "string"
+                                            },
+                                            "id": {
+                                              "type": "string"
+                                            },
+                                            "number": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "id",
+                                            "number",
+                                            "createdOn"
+                                          ],
+                                          "type": "object"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "startedAt": {
+                                      "type": "string"
+                                    },
+                                    "state": {
+                                      "enum": [
+                                        "open",
+                                        "awaiting_match"
+                                      ],
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "state",
+                                    "expectedEmail",
+                                    "startedAt",
+                                    "expiresAt",
+                                    "order"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "The live Squarespace checkout: an open intent from a personal link waiting for its order, or a paid order that matches the client only through an unverified email and waits for staff (awaiting_match; confirm or reject it under /membership-checkouts)"
+                            },
+                            "credits": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "cycleStart": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "left": {
+                                  "anyOf": [
+                                    {
+                                      "maximum": 9007199254740991,
+                                      "minimum": -9007199254740991,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "rules": {
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "autoApply": {
+                                        "description": "The rule redeems itself when a covered visit is completed",
+                                        "type": "boolean"
+                                      },
+                                      "granted": {
+                                        "anyOf": [
+                                          {
+                                            "maximum": 9007199254740991,
+                                            "minimum": -9007199254740991,
+                                            "type": "integer"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "label": {
+                                        "type": "string"
+                                      },
+                                      "left": {
+                                        "anyOf": [
+                                          {
+                                            "maximum": 9007199254740991,
+                                            "minimum": -9007199254740991,
+                                            "type": "integer"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "ruleId": {
+                                        "type": "string"
+                                      },
+                                      "unlimited": {
+                                        "type": "boolean"
+                                      },
+                                      "used": {
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "ruleId",
+                                      "label",
+                                      "autoApply",
+                                      "unlimited",
+                                      "granted",
+                                      "used",
+                                      "left"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                "used": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "cycleStart",
+                                "left",
+                                "used",
+                                "rules"
+                              ],
+                              "type": "object"
+                            },
+                            "currentPeriodStart": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "customerId": {
+                              "type": "string"
+                            },
+                            "flags": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "code": {
+                                    "type": "string"
+                                  },
+                                  "note": {
+                                    "type": "string"
+                                  },
+                                  "orderId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "code",
+                                  "note"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "inferenceReason": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "inGrace": {
+                              "type": "boolean"
+                            },
+                            "lastSqspOrderId": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "memberMonths": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "plan": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "addonDiscountBp": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "bgColor": {
+                                  "type": "string"
+                                },
+                                "color": {
+                                  "type": "string"
+                                },
+                                "key": {
+                                  "enum": [
+                                    "essential",
+                                    "premium",
+                                    "executive",
+                                    "exotic"
+                                  ],
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "perks": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "serviceDiscountBp": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "tint": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "key",
+                                "name",
+                                "label",
+                                "color",
+                                "bgColor",
+                                "tint",
+                                "perks",
+                                "addonDiscountBp",
+                                "serviceDiscountBp"
+                              ],
+                              "type": "object"
+                            },
+                            "renewLabel": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "renewsAt": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "retention": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "cur30": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "desc": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "prev30": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "state": {
+                                  "enum": [
+                                    "loyal",
+                                    "watch",
+                                    "new"
+                                  ],
+                                  "type": "string"
+                                },
+                                "tone": {
+                                  "enum": [
+                                    "green",
+                                    "red"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "label",
+                                "desc",
+                                "tone",
+                                "state",
+                                "cur30",
+                                "prev30"
+                              ],
+                              "type": "object"
+                            },
+                            "source": {
+                              "enum": [
+                                "squarespace",
+                                "manual"
+                              ],
+                              "type": "string"
+                            },
+                            "startedAt": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "enum": [
+                                "pending",
+                                "active",
+                                "past_due",
+                                "paused",
+                                "canceled"
+                              ],
+                              "type": "string"
+                            },
+                            "version": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "customerId",
+                            "status",
+                            "source",
+                            "plan",
+                            "startedAt",
+                            "memberMonths",
+                            "currentPeriodStart",
+                            "renewsAt",
+                            "renewLabel",
+                            "inGrace",
+                            "canceledAt",
+                            "autoApply",
+                            "credits",
+                            "retention",
+                            "flags",
+                            "inferenceReason",
+                            "lastSqspOrderId",
+                            "checkout",
+                            "version"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "checkout",
+                    "membership"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Match a waiting Squarespace order to this client (staff confirmed it with them)",
+        "tags": [
+          "memberships"
+        ],
+        "x-oasis-access": "cli.member"
+      }
+    },
+    "/api/v1/membership-checkouts/{id}/reject": {
+      "post": {
+        "description": "Only a row in `awaiting_match`. The row becomes `rejected` and the order goes back to \"needs a customer\"; a pending membership the sync opened only for it is canceled. Audited; closes the alert.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "note": {
+                    "anyOf": [
+                      {
+                        "maxLength": 200,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "checkout": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "customer": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name"
+                          ],
+                          "type": "object"
+                        },
+                        "expectedEmail": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "expiresAt": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "matchedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "membershipId": {
+                          "type": "string"
+                        },
+                        "order": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "createdOn": {
+                                  "type": "string"
+                                },
+                                "email": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "id": {
+                                  "description": "Squarespace order id",
+                                  "type": "string"
+                                },
+                                "number": {
+                                  "type": "string"
+                                },
+                                "totalCents": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "number",
+                                "createdOn",
+                                "email",
+                                "totalCents"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The order the row is matched to, or waits for (awaiting_match)"
+                        },
+                        "origin": {
+                          "description": "link: started on the membership page of a personal link; sync: opened by the order sync for staff",
+                          "enum": [
+                            "link",
+                            "sync"
+                          ],
+                          "type": "string"
+                        },
+                        "planKey": {
+                          "type": "string"
+                        },
+                        "productKey": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "startedAt": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "open",
+                            "matched",
+                            "awaiting_match",
+                            "expired",
+                            "superseded",
+                            "abandoned",
+                            "rejected"
+                          ],
+                          "type": "string"
+                        },
+                        "version": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "membershipId",
+                        "customer",
+                        "state",
+                        "origin",
+                        "planKey",
+                        "productKey",
+                        "expectedEmail",
+                        "startedAt",
+                        "expiresAt",
+                        "matchedAt",
+                        "order",
+                        "version"
+                      ],
+                      "type": "object"
+                    },
+                    "membership": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "autoApply": {
+                              "type": "boolean"
+                            },
+                            "canceledAt": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "checkout": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "expectedEmail": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "expiresAt": {
+                                      "type": "string"
+                                    },
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "order": {
+                                      "anyOf": [
+                                        {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "createdOn": {
+                                              "type": "string"
+                                            },
+                                            "id": {
+                                              "type": "string"
+                                            },
+                                            "number": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "id",
+                                            "number",
+                                            "createdOn"
+                                          ],
+                                          "type": "object"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "startedAt": {
+                                      "type": "string"
+                                    },
+                                    "state": {
+                                      "enum": [
+                                        "open",
+                                        "awaiting_match"
+                                      ],
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "state",
+                                    "expectedEmail",
+                                    "startedAt",
+                                    "expiresAt",
+                                    "order"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "The live Squarespace checkout: an open intent from a personal link waiting for its order, or a paid order that matches the client only through an unverified email and waits for staff (awaiting_match; confirm or reject it under /membership-checkouts)"
+                            },
+                            "credits": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "cycleStart": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "left": {
+                                  "anyOf": [
+                                    {
+                                      "maximum": 9007199254740991,
+                                      "minimum": -9007199254740991,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "rules": {
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "autoApply": {
+                                        "description": "The rule redeems itself when a covered visit is completed",
+                                        "type": "boolean"
+                                      },
+                                      "granted": {
+                                        "anyOf": [
+                                          {
+                                            "maximum": 9007199254740991,
+                                            "minimum": -9007199254740991,
+                                            "type": "integer"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "label": {
+                                        "type": "string"
+                                      },
+                                      "left": {
+                                        "anyOf": [
+                                          {
+                                            "maximum": 9007199254740991,
+                                            "minimum": -9007199254740991,
+                                            "type": "integer"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "ruleId": {
+                                        "type": "string"
+                                      },
+                                      "unlimited": {
+                                        "type": "boolean"
+                                      },
+                                      "used": {
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "ruleId",
+                                      "label",
+                                      "autoApply",
+                                      "unlimited",
+                                      "granted",
+                                      "used",
+                                      "left"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                "used": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "cycleStart",
+                                "left",
+                                "used",
+                                "rules"
+                              ],
+                              "type": "object"
+                            },
+                            "currentPeriodStart": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "customerId": {
+                              "type": "string"
+                            },
+                            "flags": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "code": {
+                                    "type": "string"
+                                  },
+                                  "note": {
+                                    "type": "string"
+                                  },
+                                  "orderId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "code",
+                                  "note"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "inferenceReason": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "inGrace": {
+                              "type": "boolean"
+                            },
+                            "lastSqspOrderId": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "memberMonths": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "plan": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "addonDiscountBp": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "bgColor": {
+                                  "type": "string"
+                                },
+                                "color": {
+                                  "type": "string"
+                                },
+                                "key": {
+                                  "enum": [
+                                    "essential",
+                                    "premium",
+                                    "executive",
+                                    "exotic"
+                                  ],
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "perks": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "serviceDiscountBp": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "tint": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "key",
+                                "name",
+                                "label",
+                                "color",
+                                "bgColor",
+                                "tint",
+                                "perks",
+                                "addonDiscountBp",
+                                "serviceDiscountBp"
+                              ],
+                              "type": "object"
+                            },
+                            "renewLabel": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "renewsAt": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "retention": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "cur30": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "desc": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "prev30": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "state": {
+                                  "enum": [
+                                    "loyal",
+                                    "watch",
+                                    "new"
+                                  ],
+                                  "type": "string"
+                                },
+                                "tone": {
+                                  "enum": [
+                                    "green",
+                                    "red"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "label",
+                                "desc",
+                                "tone",
+                                "state",
+                                "cur30",
+                                "prev30"
+                              ],
+                              "type": "object"
+                            },
+                            "source": {
+                              "enum": [
+                                "squarespace",
+                                "manual"
+                              ],
+                              "type": "string"
+                            },
+                            "startedAt": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "enum": [
+                                "pending",
+                                "active",
+                                "past_due",
+                                "paused",
+                                "canceled"
+                              ],
+                              "type": "string"
+                            },
+                            "version": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "customerId",
+                            "status",
+                            "source",
+                            "plan",
+                            "startedAt",
+                            "memberMonths",
+                            "currentPeriodStart",
+                            "renewsAt",
+                            "renewLabel",
+                            "inGrace",
+                            "canceledAt",
+                            "autoApply",
+                            "credits",
+                            "retention",
+                            "flags",
+                            "inferenceReason",
+                            "lastSqspOrderId",
+                            "checkout",
+                            "version"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "checkout",
+                    "membership"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Reject a waiting Squarespace order: it is not this client’s",
+        "tags": [
+          "memberships"
+        ],
+        "x-oasis-access": "cli.member"
+      }
+    },
     "/api/v1/membership-plans": {
       "get": {
         "description": "Display data (perks, discount basis points) and the rules a visit can redeem. A rule with `autoApply` redeems itself when a covered visit is completed (default off).",
@@ -46521,6 +48124,81 @@
                               }
                             ]
                           },
+                          "checkout": {
+                            "anyOf": [
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "expectedEmail": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "expiresAt": {
+                                    "type": "string"
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "order": {
+                                    "anyOf": [
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "createdOn": {
+                                            "type": "string"
+                                          },
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "number": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "id",
+                                          "number",
+                                          "createdOn"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "startedAt": {
+                                    "type": "string"
+                                  },
+                                  "state": {
+                                    "enum": [
+                                      "open",
+                                      "awaiting_match"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "state",
+                                  "expectedEmail",
+                                  "startedAt",
+                                  "expiresAt",
+                                  "order"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The live Squarespace checkout: an open intent from a personal link waiting for its order, or a paid order that matches the client only through an unverified email and waits for staff (awaiting_match; confirm or reject it under /membership-checkouts)"
+                          },
                           "credits": {
                             "additionalProperties": false,
                             "properties": {
@@ -46869,6 +48547,7 @@
                           "flags",
                           "inferenceReason",
                           "lastSqspOrderId",
+                          "checkout",
                           "version",
                           "customer"
                         ],
@@ -46969,6 +48648,81 @@
                               "type": "null"
                             }
                           ]
+                        },
+                        "checkout": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "expectedEmail": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "expiresAt": {
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "order": {
+                                  "anyOf": [
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "createdOn": {
+                                          "type": "string"
+                                        },
+                                        "id": {
+                                          "type": "string"
+                                        },
+                                        "number": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "id",
+                                        "number",
+                                        "createdOn"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "startedAt": {
+                                  "type": "string"
+                                },
+                                "state": {
+                                  "enum": [
+                                    "open",
+                                    "awaiting_match"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "state",
+                                "expectedEmail",
+                                "startedAt",
+                                "expiresAt",
+                                "order"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The live Squarespace checkout: an open intent from a personal link waiting for its order, or a paid order that matches the client only through an unverified email and waits for staff (awaiting_match; confirm or reject it under /membership-checkouts)"
                         },
                         "credits": {
                           "additionalProperties": false,
@@ -47302,6 +49056,7 @@
                         "flags",
                         "inferenceReason",
                         "lastSqspOrderId",
+                        "checkout",
                         "version"
                       ],
                       "type": "object"
@@ -47422,6 +49177,81 @@
                             }
                           ]
                         },
+                        "checkout": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "expectedEmail": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "expiresAt": {
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "order": {
+                                  "anyOf": [
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "createdOn": {
+                                          "type": "string"
+                                        },
+                                        "id": {
+                                          "type": "string"
+                                        },
+                                        "number": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "id",
+                                        "number",
+                                        "createdOn"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "startedAt": {
+                                  "type": "string"
+                                },
+                                "state": {
+                                  "enum": [
+                                    "open",
+                                    "awaiting_match"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "state",
+                                "expectedEmail",
+                                "startedAt",
+                                "expiresAt",
+                                "order"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The live Squarespace checkout: an open intent from a personal link waiting for its order, or a paid order that matches the client only through an unverified email and waits for staff (awaiting_match; confirm or reject it under /membership-checkouts)"
+                        },
                         "credits": {
                           "additionalProperties": false,
                           "properties": {
@@ -47754,6 +49584,7 @@
                         "flags",
                         "inferenceReason",
                         "lastSqspOrderId",
+                        "checkout",
                         "version"
                       ],
                       "type": "object"
@@ -58388,6 +60219,823 @@
           "arrivals"
         ],
         "x-oasis-access": "set.hours"
+      }
+    },
+    "/api/v1/settings/reminders": {
+      "get": {
+        "operationId": "getSettingsReminders",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "categories": {
+                      "description": "The catalog categories a preparation line can name (read-only here; Settings → Catalog edits them)",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "active": {
+                            "type": "boolean"
+                          },
+                          "colour": {
+                            "type": "string"
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "colour",
+                          "active"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "leads": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "businessHoursOnly": {
+                          "type": "boolean"
+                        },
+                        "followUpDelayMin": {
+                          "description": "15 to 1440 minutes after their last text",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "followUpEnabled": {
+                          "description": "One automatic follow-up text to a lead who did not book",
+                          "type": "boolean"
+                        },
+                        "withinHours": {
+                          "description": "Only within this many hours of their last text, 1 to 24",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "followUpEnabled",
+                        "followUpDelayMin",
+                        "businessHoursOnly",
+                        "withinHours"
+                      ],
+                      "type": "object"
+                    },
+                    "quietHours": {
+                      "additionalProperties": false,
+                      "description": "Read-only: automated texts wait for the end of quiet hours",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "end": {
+                          "type": "string"
+                        },
+                        "start": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "start",
+                        "end"
+                      ],
+                      "type": "object"
+                    },
+                    "reminders": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "categoryPrep": {
+                          "additionalProperties": {
+                            "type": "string"
+                          },
+                          "description": "The preparation line added to the reminder of a visit holding that category (e.g. tint: \"Plan for 2–3 hours.\"), 160 characters at most",
+                          "propertyNames": {
+                            "pattern": "^[a-z][a-z0-9_]{0,31}$",
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "confirmRequest": {
+                          "description": "A booked visit that is not confirmed yet is asked to \"Reply C to confirm\"; off: it gets the plain reminder",
+                          "type": "boolean"
+                        },
+                        "offsetsMin": {
+                          "description": "Minutes before the visit, longest first (at most 5, each 1 to 10080); [] turns appointment reminders off",
+                          "items": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "type": "array"
+                        },
+                        "reviewRequest": {
+                          "description": "One review request 2 hours after a completed visit (reviews.enabled)",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "offsetsMin",
+                        "confirmRequest",
+                        "categoryPrep",
+                        "reviewRequest"
+                      ],
+                      "type": "object"
+                    },
+                    "statusTexts": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "bookAgainLink": {
+                          "description": "The picked-up text carries a book-again link (only to clients with marketing-grade consent)",
+                          "type": "boolean"
+                        },
+                        "checkedIn": {
+                          "type": "boolean"
+                        },
+                        "checkedInDelayMin": {
+                          "description": "0 to 30; the text is dropped when the wash starts first",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "lateGraceMin": {
+                          "description": "Minutes past the promised end before the first \"running late\" text, 0 to 120",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "lateMax": {
+                          "description": "At most this many per visit, 0 to 2",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "pickedUp": {
+                          "type": "boolean"
+                        },
+                        "ready": {
+                          "type": "boolean"
+                        },
+                        "runningLate": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "checkedIn",
+                        "checkedInDelayMin",
+                        "runningLate",
+                        "lateGraceMin",
+                        "lateMax",
+                        "ready",
+                        "pickedUp",
+                        "bookAgainLink"
+                      ],
+                      "type": "object"
+                    },
+                    "version": {
+                      "description": "The section’s version (ETag): send it back with PUT",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "reminders",
+                    "statusTexts",
+                    "leads",
+                    "categories",
+                    "quietHours",
+                    "version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Reminders, status texts and the lead follow-up (ETag = version)",
+        "tags": [
+          "settings"
+        ],
+        "x-oasis-access": "authenticated"
+      },
+      "put": {
+        "description": "Partial: any group and any field of it; the rest stays. `version` (or If-Match) is required and must be the section’s current version: 412 VERSION_CONFLICT otherwise, 428 without one. Validated against the settings registry plus the section’s rules (offsets listed once, stored longest first; a preparation line only for an existing category, in plain SMS characters; an empty line removes it). Each changed setting is audited (settings.update) and published as `settings.changed` (sections reminders, reviews, status_texts, leads).",
+        "operationId": "putSettingsReminders",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "categories": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "leads": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "businessHoursOnly": {
+                        "type": "boolean"
+                      },
+                      "followUpDelayMin": {
+                        "description": "15 to 1440 minutes after their last text",
+                        "maximum": 9007199254740991,
+                        "minimum": -9007199254740991,
+                        "type": "integer"
+                      },
+                      "followUpEnabled": {
+                        "description": "One automatic follow-up text to a lead who did not book",
+                        "type": "boolean"
+                      },
+                      "withinHours": {
+                        "description": "Only within this many hours of their last text, 1 to 24",
+                        "maximum": 9007199254740991,
+                        "minimum": -9007199254740991,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "quietHours": {},
+                  "reminders": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "categoryPrep": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "description": "The preparation line added to the reminder of a visit holding that category (e.g. tint: \"Plan for 2–3 hours.\"), 160 characters at most",
+                        "propertyNames": {
+                          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+                          "type": "string"
+                        },
+                        "type": "object"
+                      },
+                      "confirmRequest": {
+                        "description": "A booked visit that is not confirmed yet is asked to \"Reply C to confirm\"; off: it gets the plain reminder",
+                        "type": "boolean"
+                      },
+                      "offsetsMin": {
+                        "description": "Minutes before the visit, longest first (at most 5, each 1 to 10080); [] turns appointment reminders off",
+                        "items": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "type": "array"
+                      },
+                      "reviewRequest": {
+                        "description": "One review request 2 hours after a completed visit (reviews.enabled)",
+                        "type": "boolean"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "statusTexts": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "bookAgainLink": {
+                        "description": "The picked-up text carries a book-again link (only to clients with marketing-grade consent)",
+                        "type": "boolean"
+                      },
+                      "checkedIn": {
+                        "type": "boolean"
+                      },
+                      "checkedInDelayMin": {
+                        "description": "0 to 30; the text is dropped when the wash starts first",
+                        "maximum": 9007199254740991,
+                        "minimum": -9007199254740991,
+                        "type": "integer"
+                      },
+                      "lateGraceMin": {
+                        "description": "Minutes past the promised end before the first \"running late\" text, 0 to 120",
+                        "maximum": 9007199254740991,
+                        "minimum": -9007199254740991,
+                        "type": "integer"
+                      },
+                      "lateMax": {
+                        "description": "At most this many per visit, 0 to 2",
+                        "maximum": 9007199254740991,
+                        "minimum": -9007199254740991,
+                        "type": "integer"
+                      },
+                      "pickedUp": {
+                        "type": "boolean"
+                      },
+                      "ready": {
+                        "type": "boolean"
+                      },
+                      "runningLate": {
+                        "type": "boolean"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "version": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "categories": {
+                      "description": "The catalog categories a preparation line can name (read-only here; Settings → Catalog edits them)",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "active": {
+                            "type": "boolean"
+                          },
+                          "colour": {
+                            "type": "string"
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "colour",
+                          "active"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "changed": {
+                      "description": "The setting keys this save changed",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "leads": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "businessHoursOnly": {
+                          "type": "boolean"
+                        },
+                        "followUpDelayMin": {
+                          "description": "15 to 1440 minutes after their last text",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "followUpEnabled": {
+                          "description": "One automatic follow-up text to a lead who did not book",
+                          "type": "boolean"
+                        },
+                        "withinHours": {
+                          "description": "Only within this many hours of their last text, 1 to 24",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "followUpEnabled",
+                        "followUpDelayMin",
+                        "businessHoursOnly",
+                        "withinHours"
+                      ],
+                      "type": "object"
+                    },
+                    "quietHours": {
+                      "additionalProperties": false,
+                      "description": "Read-only: automated texts wait for the end of quiet hours",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "end": {
+                          "type": "string"
+                        },
+                        "start": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "start",
+                        "end"
+                      ],
+                      "type": "object"
+                    },
+                    "reminders": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "categoryPrep": {
+                          "additionalProperties": {
+                            "type": "string"
+                          },
+                          "description": "The preparation line added to the reminder of a visit holding that category (e.g. tint: \"Plan for 2–3 hours.\"), 160 characters at most",
+                          "propertyNames": {
+                            "pattern": "^[a-z][a-z0-9_]{0,31}$",
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "confirmRequest": {
+                          "description": "A booked visit that is not confirmed yet is asked to \"Reply C to confirm\"; off: it gets the plain reminder",
+                          "type": "boolean"
+                        },
+                        "offsetsMin": {
+                          "description": "Minutes before the visit, longest first (at most 5, each 1 to 10080); [] turns appointment reminders off",
+                          "items": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "type": "array"
+                        },
+                        "reviewRequest": {
+                          "description": "One review request 2 hours after a completed visit (reviews.enabled)",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "offsetsMin",
+                        "confirmRequest",
+                        "categoryPrep",
+                        "reviewRequest"
+                      ],
+                      "type": "object"
+                    },
+                    "statusTexts": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "bookAgainLink": {
+                          "description": "The picked-up text carries a book-again link (only to clients with marketing-grade consent)",
+                          "type": "boolean"
+                        },
+                        "checkedIn": {
+                          "type": "boolean"
+                        },
+                        "checkedInDelayMin": {
+                          "description": "0 to 30; the text is dropped when the wash starts first",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "lateGraceMin": {
+                          "description": "Minutes past the promised end before the first \"running late\" text, 0 to 120",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "lateMax": {
+                          "description": "At most this many per visit, 0 to 2",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "pickedUp": {
+                          "type": "boolean"
+                        },
+                        "ready": {
+                          "type": "boolean"
+                        },
+                        "runningLate": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "checkedIn",
+                        "checkedInDelayMin",
+                        "runningLate",
+                        "lateGraceMin",
+                        "lateMax",
+                        "ready",
+                        "pickedUp",
+                        "bookAgainLink"
+                      ],
+                      "type": "object"
+                    },
+                    "version": {
+                      "description": "The section’s version (ETag): send it back with PUT",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "reminders",
+                    "statusTexts",
+                    "leads",
+                    "categories",
+                    "quietHours",
+                    "version",
+                    "changed"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Save the Reminders section (the dirty-tracked save)",
+        "tags": [
+          "settings"
+        ],
+        "x-oasis-access": "set.hours"
+      }
+    },
+    "/api/v1/settings/reminders/preview": {
+      "post": {
+        "description": "Renders every reminder (per offset, booked and confirmed), the review request, the status texts and the lead follow-up through the template registry, as they go out: GSM-7 normalised with the segment count. `draft` (the same shape as PUT, validated the same way) previews unsaved edits; `sample` sets the visit (tomorrow 10:00 AM with the categories that have a preparation line by default). Changes nothing.",
+        "operationId": "previewSettingsReminders",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "draft": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "leads": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "businessHoursOnly": {
+                            "type": "boolean"
+                          },
+                          "followUpDelayMin": {
+                            "description": "15 to 1440 minutes after their last text",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "followUpEnabled": {
+                            "description": "One automatic follow-up text to a lead who did not book",
+                            "type": "boolean"
+                          },
+                          "withinHours": {
+                            "description": "Only within this many hours of their last text, 1 to 24",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "reminders": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "categoryPrep": {
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "description": "The preparation line added to the reminder of a visit holding that category (e.g. tint: \"Plan for 2–3 hours.\"), 160 characters at most",
+                            "propertyNames": {
+                              "pattern": "^[a-z][a-z0-9_]{0,31}$",
+                              "type": "string"
+                            },
+                            "type": "object"
+                          },
+                          "confirmRequest": {
+                            "description": "A booked visit that is not confirmed yet is asked to \"Reply C to confirm\"; off: it gets the plain reminder",
+                            "type": "boolean"
+                          },
+                          "offsetsMin": {
+                            "description": "Minutes before the visit, longest first (at most 5, each 1 to 10080); [] turns appointment reminders off",
+                            "items": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "type": "array"
+                          },
+                          "reviewRequest": {
+                            "description": "One review request 2 hours after a completed visit (reviews.enabled)",
+                            "type": "boolean"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "statusTexts": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "bookAgainLink": {
+                            "description": "The picked-up text carries a book-again link (only to clients with marketing-grade consent)",
+                            "type": "boolean"
+                          },
+                          "checkedIn": {
+                            "type": "boolean"
+                          },
+                          "checkedInDelayMin": {
+                            "description": "0 to 30; the text is dropped when the wash starts first",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "lateGraceMin": {
+                            "description": "Minutes past the promised end before the first \"running late\" text, 0 to 120",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "lateMax": {
+                            "description": "At most this many per visit, 0 to 2",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "pickedUp": {
+                            "type": "boolean"
+                          },
+                          "ready": {
+                            "type": "boolean"
+                          },
+                          "runningLate": {
+                            "type": "boolean"
+                          }
+                        },
+                        "type": "object"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "sample": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "categories": {
+                        "items": {
+                          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+                          "type": "string"
+                        },
+                        "maxItems": 10,
+                        "type": "array"
+                      },
+                      "date": {
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                        "type": "string"
+                      },
+                      "firstName": {
+                        "maxLength": 40,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "startMin": {
+                        "maximum": 1439,
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "sample": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "categories": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "date": {
+                          "type": "string"
+                        },
+                        "firstName": {
+                          "type": "string"
+                        },
+                        "startsAt": {
+                          "type": "string"
+                        },
+                        "time": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "firstName",
+                        "startsAt",
+                        "date",
+                        "time",
+                        "categories"
+                      ],
+                      "type": "object"
+                    },
+                    "texts": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "encoding": {
+                            "enum": [
+                              "GSM-7",
+                              "UCS-2"
+                            ],
+                            "type": "string"
+                          },
+                          "group": {
+                            "enum": [
+                              "reminders",
+                              "statusTexts",
+                              "leads"
+                            ],
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "klass": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "segments": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "templateKey": {
+                            "type": "string"
+                          },
+                          "text": {
+                            "description": "Exactly what the phone receives (GSM-7 normalised; the first text to a number also gets the STOP line)",
+                            "type": "string"
+                          },
+                          "timing": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "group",
+                          "label",
+                          "timing",
+                          "templateKey",
+                          "klass",
+                          "enabled",
+                          "text",
+                          "segments",
+                          "encoding"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "sample",
+                    "texts"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "The exact texts of the Reminders section for a sample appointment (saved settings, or a draft)",
+        "tags": [
+          "settings"
+        ],
+        "x-oasis-access": "authenticated"
       }
     },
     "/api/v1/settings/rules": {

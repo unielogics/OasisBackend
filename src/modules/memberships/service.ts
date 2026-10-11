@@ -25,6 +25,7 @@ import {
   type MembershipInference,
 } from '../payments-sync/membership.js'
 import type { ProductMap } from '../payments-sync/product-map.js'
+import { loadIntentRefs, markIntentsMatched, openAwaitingMatch } from './checkouts.js'
 import { grantCycleCredits } from './credits.js'
 import { ensurePlans, loadPlans, planByKey, type Plan } from './plans.js'
 import './problems.js'
@@ -50,6 +51,12 @@ export interface MembershipSyncReport {
   unchanged: number
   held: number
   needsCustomer: number
+  /** Orders that match a client only through an unverified email, waiting for staff (membership_checkouts awaiting_match). */
+  awaitingMatch: number
+  /** Checkout intents an order arrived for (open -> matched). */
+  intentsMatched: number
+  /** Paid orders of a plan the member was already paying for (flagged duplicate_payment, alert raised once). */
+  duplicates: number
   creditsGranted: number
 }
 
@@ -60,6 +67,9 @@ const empty = (): MembershipSyncReport => ({
   unchanged: 0,
   held: 0,
   needsCustomer: 0,
+  awaitingMatch: 0,
+  intentsMatched: 0,
+  duplicates: 0,
   creditsGranted: 0,
 })
 
@@ -83,20 +93,22 @@ async function customerRefs(
   ]
   const sqsp = [...new Set(orders.map((o) => o.customerId).filter((x): x is string => !!x))]
   if (emails.length + phones.length + sqsp.length === 0) return []
-  const rows = await sql<{ id: string; email: string | null; phone_e164: string | null }>`
-    select c.id, c.email::text as email, c.phone_e164
+  const rows = await sql<{ id: string; email: string | null; email_verified: boolean; phone_e164: string | null }>`
+    select c.id, c.email::text as email, c.email_verified, c.phone_e164
     from customers c
     where c.merged_into is null and c.deleted_at is null
       and (c.email = any(${emails}::citext[])
         or c.phone_e164 = any(${phones}::text[])
         or c.id in (select l.customer_id from sqsp_customer_links l
-                    where l.location_id = ${locationId} and l.sqsp_customer_id = any(${sqsp}::text[])))`.execute(
+                    where l.location_id = ${locationId} and l.sqsp_customer_id = any(${sqsp}::text[]))
+        or c.id in (select m.customer_id from memberships m
+                    where m.location_id = ${locationId} and m.sqsp_customer_id = any(${sqsp}::text[])))`.execute(
     db,
   )
   if (rows.rows.length === 0) return []
   const links = await db
     .selectFrom('sqsp_customer_links')
-    .select(['customer_id', 'sqsp_customer_id'])
+    .select(['customer_id', 'sqsp_customer_id', 'source'])
     .where('location_id', '=', locationId)
     .where(
       'customer_id',
@@ -104,11 +116,35 @@ async function customerRefs(
       rows.rows.map((r) => r.id),
     )
     .execute()
+  const held = await db
+    .selectFrom('memberships')
+    .select(['customer_id', 'sqsp_customer_id'])
+    .where('location_id', '=', locationId)
+    .where('sqsp_customer_id', 'is not', null)
+    .where(
+      'customer_id',
+      'in',
+      rows.rows.map((r) => r.id),
+    )
+    .execute()
+  // Only a verified email links an order (ADR 0160): an unverified one is offered to staff instead, and a Squarespace contact
+  // that was linked automatically BY that email (sqsp.contacts) is not a way around it. Phone and staff links count as before.
+  // What a client HOLDS is wider (F1): every link whatever its source and the Squarespace customer on their membership rows; and
+  // their email even unverified: another client's checkout intent never takes such an order (payments-sync/membership.ts).
   return rows.rows.map((r) => ({
     id: r.id,
-    emails: r.email ? [r.email] : [],
+    emails: r.email && r.email_verified ? [r.email] : [],
+    unverifiedEmails: r.email && !r.email_verified ? [r.email] : [],
     phones: r.phone_e164 ? [r.phone_e164] : [],
-    sqspCustomerIds: links.filter((l) => l.customer_id === r.id).map((l) => l.sqsp_customer_id),
+    sqspCustomerIds: links
+      .filter((l) => l.customer_id === r.id && (l.source !== 'email' || r.email_verified))
+      .map((l) => l.sqsp_customer_id),
+    heldSqspCustomerIds: [
+      ...new Set([
+        ...links.filter((l) => l.customer_id === r.id).map((l) => l.sqsp_customer_id),
+        ...held.filter((m) => m.customer_id === r.id).map((m) => m.sqsp_customer_id!),
+      ]),
+    ],
   }))
 }
 
@@ -133,13 +169,16 @@ export async function syncMemberships(db: Db, d: MembershipSyncDeps): Promise<Me
   if (orders.length === 0) return report
 
   const customers = await customerRefs(db, d.locationId, orders)
-  const inferences = inferMemberships(orders, d.productMap, customers, now, d.config)
+  const intents = await loadIntentRefs(db, d.locationId)
+  const inferences = inferMemberships(orders, d.productMap, customers, now, d.config, intents)
   const plans = await loadPlans(db, d.locationId)
   report.considered = inferences.length
 
   for (const inf of inferences) {
     const plan = planByKey(plans, inf.tier)
     if (!plan) continue
+    if (inf.checkoutMatches.length > 0)
+      report.intentsMatched += await transaction(db, (tx) => markIntentsMatched(tx, d, inf.checkoutMatches))
     await resolveAlertKeys(
       db,
       d,
@@ -161,10 +200,8 @@ export async function syncMemberships(db: Db, d: MembershipSyncDeps): Promise<Me
       manualStatusAt: existing.manual_status_at ?? undefined,
     }
     // a hand edit holds until a newer paid order arrives (the pure rule only covers paused and canceled)
-    if (
-      existing?.manual_status_at &&
-      !(inf.lastPaidAt && inf.lastPaidAt.getTime() > existing.manual_status_at.getTime())
-    ) {
+    const paidAt = inf.newestPaidAt ?? inf.lastPaidAt
+    if (existing?.manual_status_at && !(paidAt && paidAt.getTime() > existing.manual_status_at.getTime())) {
       report.held++
       continue
     }
@@ -179,14 +216,37 @@ export async function syncMemberships(db: Db, d: MembershipSyncDeps): Promise<Me
         existing.inference_reason !== inf.reason)
     )
       action = { action: 'update', membershipId: existing.id, inference: inf, changes: ['grace or flags'] }
+    if (action.action === 'needs_customer' && inf.linkedBy === 'unverified_email' && inf.paidOrderCount > 0) {
+      // the email matches a client nobody verified it for: staff confirm before it activates anything (ADR 0160)
+      const outcome = await openAwaitingMatch(db, d, inf, plan, labelFor(inf, plan))
+      if (outcome !== 'rejected') {
+        report.awaitingMatch++
+        continue
+      }
+    }
     if (action.action === 'needs_customer') {
       report.needsCustomer++
+      // an order a checkout intent named while another client's identity points at it says why (payments-sync/membership.ts)
+      const conflict = inf.flags.find((f) => f.code === 'ambiguous_customer' && f.orderId !== undefined)
       await raiseAlert(db, d, {
         code: 'membership_needs_customer',
         subject: inf.personKey,
-        message: `${action.reason}. Paid for ${labelFor(inf, plan)} on order ${inf.lastOrderId}.`,
+        message: `${conflict ? conflict.note : action.reason}. Paid for ${labelFor(inf, plan)} on order ${inf.lastOrderId}.`,
       })
       continue
+    }
+    const known = new Set(
+      ((existing?.review_flags ?? []) as { code?: string; orderId?: string }[])
+        .filter((f) => f.code === 'duplicate_payment')
+        .map((f) => f.orderId),
+    )
+    for (const f of inf.flags.filter((x) => x.code === 'duplicate_payment' && !known.has(x.orderId))) {
+      report.duplicates++
+      await raiseAlert(db, d, {
+        code: 'membership_duplicate_payment',
+        orderId: f.orderId,
+        message: `${labelFor(inf, plan)}: ${f.note}.`,
+      })
     }
     if (action.action === 'none') {
       if (action.reason === 'unchanged') report.unchanged++
