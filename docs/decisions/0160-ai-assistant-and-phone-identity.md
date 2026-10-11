@@ -49,9 +49,10 @@ The inbound path and the dispatcher are ready for the assistant; nothing answers
 inert while `AI_ENABLED=false` or `assistant.enabled=false`. Contract: docs/api-spec.md section 23.4a.
 
 - **Ports** (`src/modules/assistant/ports.ts`): `AssistantGate` (active/allow/reason), `AssistantInbox` (the durable marker and the
-  AGENT handoff, in the webhook transaction), `AssistantKick` (after commit), `ActionCodeHandler` (reply numbers). Defaults are off;
+  AGENT handoff, in the webhook transaction), `AssistantKick` (after commit), `ActionCodeHandler` (reply numbers), `NewTexters` (the
+  welcome flow's provisional client, in the webhook transaction). Defaults are off;
   the messaging runtime supplies the Postgres gate and conversation store and looks pending actions up itself, and wave 3 plugs its
-  kick and reply-number handler in with `MessagingRuntime.useAssistant()`.
+  kick, reply-number handler and welcome flow in with `MessagingRuntime.useAssistant()`.
 - **Gate**: `active` = AI_ENABLED, assistant.enabled, a real sender that is not ours, a US/CA mobile number, the stage, no opt-out;
   `allow` = active and no staff pause, no open handoff, no loop breaker (3 identical texts within 30 min, more than 5 a minute).
   The turn-level breaker (6 turns without progress) and the caps belong to the turn (wave 3).
@@ -61,8 +62,11 @@ inert while `AI_ENABLED=false` or `assistant.enabled=false`. Contract: docs/api-
   phone, even with the gate closed (a pending action only exists while the AI runs; the handler re-checks the kill switches), so the
   digits are never filed readable. Without a pending action they are masked only while the assistant answers the number: with it off
   "2015" or a ZIP code from a client stays an ordinary message, as before.
-- **Strangers** routed to the assistant are not quarantined (wave 3 creates the provisional client from the first text and backfills
-  the thread from `sms_inbox.assistant_conversation_id`); a stranger's AGENT stays in the quarantine list with the handoff alert.
+- **Strangers** routed to the assistant are not quarantined. The welcome flow (owner, 2026-10-11: the provisional client exists from
+  the first text) plugs in through `NewTexters.adopt`, called in the webhook transaction before the marker: when it returns a client
+  the first text is filed read in that client's thread at once. If wave 3 prefers to create the client at the turn's claim instead,
+  the stranger's texts are found by `sms_inbox.assistant_conversation_id` and filed then. A stranger's AGENT stays in the quarantine
+  list with the handoff alert (no adoption: the person asked for staff, not the welcome flow).
 - **Staff takeover** is recorded on every staff text, the AI on or off, so turning the AI on never answers a thread staff just
   answered. The "AI paused" line in the dashboard should show only while the assistant is enabled.
 - **Sub-cap**: the window accounting (`sms_usage`) records the class of each send (migration `20261011040000_sms_usage_class`); the

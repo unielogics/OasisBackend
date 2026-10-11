@@ -916,6 +916,11 @@ as described above (the existing inbound suites run unchanged).
   Needs-attention list an `ai_handoff` alert (it replaces that client's `new_reply` alert). When `allow`: plain texts (SMS and an MMS's
   text, never a picture placeholder) go to the assistant (decision `assistant`): a client's is filed **read** (no new-reply alert), a
   stranger's stays in `sms_inbox` unquarantined (non-E.164 senders are still quarantined); a picture message routes as before.
+- **Welcome flow** (owner 2026-10-11; port `NewTexters.adopt`, default: no client): a stranger's plain text that the gate admits is
+  offered to the port inside the webhook transaction, before the marker. When wave 3 returns a client (the provisional "New texter
+  ••NNNN", source `inbound_sms`, consent `inbound_text`, `needs_details`, plus its lead), the text is filed **read** in that client's
+  thread (`sms_inbox.customer_id`/`message_id` set) and the conversation carries the client; the next text comes from a client. Codes,
+  AGENT, picture-only texts and a closed gate never adopt.
 - **Codes**: a digits-only text (4-8 digits, spaces and dashes between them ignored, `parseReplyCode`) while an in-chat action waits
   for its reply number from that phone (`assistant_pending_actions` pending and unexpired) is decision `action_code`: the digits go only
   to the `ActionCodeHandler` port (wave 3), never to the model. With no action waiting and `allow`: a canned `code_on_link_page` reply
