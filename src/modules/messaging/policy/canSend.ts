@@ -69,6 +69,29 @@ export type SmsDecision =
   | { verdict: 'hold'; allowed: true; reason: 'quiet_hours'; holdUntil: Date; warnings: string[] }
   | { verdict: 'deny'; allowed: false; reason: SmsDenyReason; warnings: string[] }
 
+/**
+ * The reply rule of a class, given when the number last texted the shop. The one rule enqueue (canSendSms) and the dispatcher's
+ * gate both apply (ADR 0160): the dispatcher re-reads the last inbound text when the text is about to leave, so a text queued as a
+ * reply that waited past its window is not sent as one.
+ */
+export interface ReplyRule {
+  /** A reply-only class (replyWindowSec) and that number has not texted within the window: refused (no_recent_inbound). */
+  windowPassed: boolean
+  /**
+   * No opt-in needed: the class is consent-exempt, or consent-exempt only as a reply (replyConsentSec, personal_link) and the
+   * number texted within that window. Outside it the normal consent rules apply (never refused for the window alone).
+   */
+  consentExempt: boolean
+}
+
+export function replyRuleOf(klass: SmsClass, lastInboundAt: Date | null | undefined, now: Date): ReplyRule {
+  const spec = classSpec(klass)
+  const textedWithin = (sec: number): boolean => !!lastInboundAt && now.getTime() - lastInboundAt.getTime() <= sec * 1000
+  const windowPassed = spec.replyWindowSec !== undefined && !textedWithin(spec.replyWindowSec)
+  const exemptAsReply = spec.replyConsentSec !== undefined && textedWithin(spec.replyConsentSec)
+  return { windowPassed, consentExempt: !!spec.consentExempt || exemptAsReply }
+}
+
 /** Consent sources that count as explicit opt-in for marketing-category messages. */
 const MARKETING_CONSENT: ReadonlySet<ConsentSource> = new Set(['web_form', 'inbound_reply'])
 
@@ -92,15 +115,10 @@ export function canSendSms(recipient: SmsRecipient, purpose: SmsPurpose, ctx: Sm
   if (!production && !allowlisted) return deny('not_allowlisted')
   if (production && ctx.allowlist.length > 0 && !allowlisted) return deny('not_allowlisted')
 
-  const textedWithin = (sec: number): boolean => {
-    const last = recipient.lastInboundAt
-    return !!last && ctx.now.getTime() - last.getTime() <= sec * 1000
-  }
-  if (spec.replyWindowSec !== undefined && !textedWithin(spec.replyWindowSec)) return deny('no_recent_inbound')
-  // consent-exempt only as a reply (personal_link): within the window no opt-in is needed, outside it the normal rules apply
-  const exemptAsReply = spec.replyConsentSec !== undefined && textedWithin(spec.replyConsentSec)
+  const reply = replyRuleOf(purpose.klass, recipient.lastInboundAt, ctx.now)
+  if (reply.windowPassed) return deny('no_recent_inbound')
 
-  if (recipient.kind === 'customer' && !spec.consentExempt && !exemptAsReply) {
+  if (recipient.kind === 'customer' && !reply.consentExempt) {
     if (!recipient.smsOptIn) return deny('not_opted_in')
     if (spec.category === 'marketing' && !(recipient.consentSource && MARKETING_CONSENT.has(recipient.consentSource))) {
       return deny('consent_source_insufficient')

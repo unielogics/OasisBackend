@@ -2,8 +2,8 @@ import type { Clock } from '../../../platform/clock.js'
 import type { SmsEvent, SmsPriority, SmsProvider, SmsState } from '../../../integrations/ports/sms.js'
 import { SmsProviderError } from '../../../integrations/sms/errors.js'
 import { expiryFor } from '../policy/body.js'
-import type { SmsDenyReason, SmsPolicyContext, SmsRecipient } from '../policy/canSend.js'
-import { classSpec, isTransactional, type SmsClass } from '../policy/classes.js'
+import { replyRuleOf, type SmsDenyReason, type SmsPolicyContext, type SmsRecipient } from '../policy/canSend.js'
+import { classSpec, isTransactional, replyContextOf, type SmsClass } from '../policy/classes.js'
 import { DEFAULT_QUIET_HOURS, isQuietHour, type QuietHoursConfig } from '../policy/quietHours.js'
 import { canSpend, DEFAULT_BUDGET, nextFit, snapshot, type BudgetConfig, type BudgetSnapshot } from './budget.js'
 import { estimateQueue, type QueueEstimate } from './eta.js'
@@ -213,21 +213,31 @@ export class Dispatcher {
     pending = pending.filter((i) => !report.expired.includes(i.id))
 
     // The policy gate ran when the text was queued. A STOP, a staff opt-out or a consent switched off since then must still stop
-    // it, whether it waits for quiet hours, a retry, the budget or a staff "retry" of a failed text.
+    // it, whether it waits for quiet hours, a retry, the budget or a staff "retry" of a failed text. The reply classes are decided by
+    // the same rule as at enqueue (replyRuleOf) on the number's last inbound text read now: a reply-only text whose window has passed
+    // is not sent, and a text consent-exempt only as a reply (personal_link) goes to a client without opt-in only within its window.
     const gate = await this.outbox.suppressedAmong?.([...new Set(pending.map((i) => i.toE164))])
-    if (gate && (gate.optedOut.size > 0 || gate.notConsented.size > 0)) {
-      const reason = (i: OutboxItem): string | null => {
-        const spec = classSpec(i.klass)
-        if (gate.optedOut.has(i.toE164) && !spec.ignoresOptOut) return 'recipient opted out'
-        if (gate.notConsented.has(i.toE164) && !spec.consentExempt && spec.recipient !== 'employee') return 'recipient no longer opted in'
-        return null
-      }
-      for (const item of pending) {
-        const why = reason(item)
-        if (why) await this.outbox.update(item.id, { state: 'cancelled', lastError: why })
-      }
-      pending = pending.filter((i) => reason(i) === null)
+    const replies = pending.filter((i) => replyContextOf(i.klass) !== null).map((i) => i.id)
+    const lastInbound = replies.length > 0 ? await this.outbox.lastInboundAmong?.(replies) : undefined
+    const reason = (i: OutboxItem): string | null => {
+      const spec = classSpec(i.klass)
+      if (gate?.optedOut.has(i.toE164) && !spec.ignoresOptOut) return 'recipient opted out'
+      const reply = lastInbound?.has(i.id) ? replyRuleOf(i.klass, lastInbound.get(i.id), now) : null
+      if (reply?.windowPassed) return 'reply window passed'
+      const exempt = reply ? reply.consentExempt : !!spec.consentExempt
+      if (gate?.notConsented.has(i.toE164) && !exempt && spec.recipient !== 'employee')
+        return spec.replyConsentSec !== undefined ? 'reply window passed' : 'recipient no longer opted in'
+      return null
     }
+    const refused = new Set<string>()
+    for (const item of pending) {
+      const why = reason(item)
+      if (why) {
+        await this.outbox.update(item.id, { state: 'cancelled', lastError: why })
+        refused.add(item.id)
+      }
+    }
+    pending = pending.filter((i) => !refused.has(i.id))
 
     // A number corrected while the text waited is somebody else's now.
     const moved = await this.outbox.reassignedAmong?.(pending.map((i) => i.id))

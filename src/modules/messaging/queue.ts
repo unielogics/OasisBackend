@@ -7,6 +7,7 @@ import type { Executor, Tx } from '../../platform/db.js'
 import type { NewId } from '../../platform/ids.js'
 import type { Clock } from '../../platform/clock.js'
 import type { MessageQueue, OutboundMessage, QueuedResult } from '../scheduling/ports.js'
+import { findCustomerByPhone } from '../customers/service.js'
 import type { MessagingConfig } from './config.js'
 import { hasActiveOptOut, lastInboundAt, loadCustomerTarget, type CustomerTarget } from './db/recipients.js'
 import { PgOutboxRepository, rowValues } from './db/outbox-repo.js'
@@ -134,9 +135,13 @@ export class DbMessageQueue implements MessageQueue {
     let recipient = a.recipient
     if (replyContextOf(klass) !== null) {
       const phone = recipient.phone
+      // the client's own opt-out: by id, or, with no id (a reply to a number), by the number, so a client-level opt-out with no
+      // sms_opt_outs row still refuses
       const client = a.customerId
         ? await tx.selectFrom('customers').select('sms_opted_out_at').where('id', '=', a.customerId).executeTakeFirst()
-        : undefined
+        : phone
+          ? await findCustomerByPhone(tx, phone).then((c) => (c ? { sms_opted_out_at: c.smsOptedOutAt } : undefined))
+          : undefined
       const clientOptedOut = !!client?.sms_opted_out_at
       recipient = {
         ...recipient,

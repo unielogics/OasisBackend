@@ -70,6 +70,11 @@ export interface OutboxRepository {
   /** Which of the pending items (by id) are addressed to a number their customer no longer has (the phone was corrected while the text waited). Optional like suppressedAmong. */
   reassignedAmong?(ids: readonly string[]): Promise<ReadonlySet<string>>
   suppressedAmong?(phones: readonly string[]): Promise<{ optedOut: ReadonlySet<string>; notConsented: ReadonlySet<string> }>
+  /**
+   * When each pending item's number (by item id) last texted the item's location, read now: the reply classes are decided by it at
+   * dispatch exactly as at enqueue (replyRuleOf). Optional like suppressedAmong.
+   */
+  lastInboundAmong?(ids: readonly string[]): Promise<ReadonlyMap<string, Date | null>>
   recordUsage(entry: UsageEntry): Promise<void>
   markUsageSent(providerMessageId: string, sentAt: Date): Promise<void>
   /** Window accounting rows with their effective time at or after `since`. */

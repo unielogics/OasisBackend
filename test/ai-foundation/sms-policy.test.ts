@@ -2,7 +2,7 @@
 // only as a reply (no_recent_inbound otherwise), a client it created has transactional consent only, and every new class sits in
 // the lane the design gives it.
 import { describe, expect, it } from 'vitest'
-import { canSendSms, type SmsPolicyContext, type SmsRecipient } from '../../src/modules/messaging/policy/canSend.js'
+import { canSendSms, replyRuleOf, type SmsPolicyContext, type SmsRecipient } from '../../src/modules/messaging/policy/canSend.js'
 import { classSpec, replyContextOf, SMS_CLASSES, TRANSACTIONAL_CLASSES, type SmsClass } from '../../src/modules/messaging/policy/classes.js'
 import { STAFF_SENDABLE } from '../../src/modules/messaging/http/thread-routes.js'
 import { consentSourceOf } from '../../src/modules/messaging/db/recipients.js'
@@ -146,5 +146,32 @@ describe('the staff composer', () => {
     for (const key of STAFF_SENDABLE) expect(PRIVATE.has(TEMPLATES[key].klass), key).toBe(false)
     // nor any class that answers a text (reply window or reply consent)
     for (const key of STAFF_SENDABLE) expect(replyContextOf(TEMPLATES[key].klass), key).toBeNull()
+  })
+})
+
+describe('replyRuleOf: the one reply rule of enqueue and dispatch', () => {
+  it('agrees with canSendSms for every class, at every distance from the last inbound text, with and without opt-in', () => {
+    for (const klass of Object.keys(SMS_CLASSES) as SmsClass[]) {
+      if (classSpec(klass).recipient === 'employee' || classSpec(klass).category === 'marketing') continue // marketing: consent source
+      for (const last of [null, 1, 14, 16, 60, 23 * 60, 25 * 60]) {
+        const lastInboundAt = last === null ? null : minutesBefore(noon, last)
+        const rule = replyRuleOf(klass, lastInboundAt, noon)
+        for (const smsOptIn of [true, false]) {
+          const d = canSendSms(person({ smsOptIn, lastInboundAt }), { klass }, ctx())
+          const label = `${klass} last=${String(last)} optIn=${String(smsOptIn)}`
+          if (rule.windowPassed) expect(d, label).toMatchObject({ allowed: false, reason: 'no_recent_inbound' })
+          else if (!smsOptIn && !rule.consentExempt) expect(d, label).toMatchObject({ allowed: false, reason: 'not_opted_in' })
+          else expect(d.allowed, label).toBe(true)
+        }
+      }
+    }
+  })
+
+  it('personal_link: exempt only within 15 minutes; ai_reply/action_confirm: refused outside 15 minutes', () => {
+    expect(replyRuleOf('personal_link', minutesBefore(noon, 14), noon)).toEqual({ windowPassed: false, consentExempt: true })
+    expect(replyRuleOf('personal_link', minutesBefore(noon, 16), noon)).toEqual({ windowPassed: false, consentExempt: false })
+    expect(replyRuleOf('ai_reply', minutesBefore(noon, 16), noon)).toEqual({ windowPassed: true, consentExempt: true })
+    expect(replyRuleOf('action_confirm', null, noon)).toEqual({ windowPassed: true, consentExempt: true })
+    expect(replyRuleOf('ready', null, noon)).toEqual({ windowPassed: false, consentExempt: false })
   })
 })

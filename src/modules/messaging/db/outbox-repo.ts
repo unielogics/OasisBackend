@@ -8,6 +8,7 @@ import type { SmsClass } from '../policy/classes.js'
 import type { SmsOutboxTable } from '../schema.js'
 import { inTx } from './exec.js'
 import { syncMessageFromOutbox } from './messages.js'
+import { lastInboundAt } from './recipients.js'
 
 type Row = Selectable<SmsOutboxTable>
 
@@ -208,6 +209,25 @@ export class PgOutboxRepository implements OutboxRepository {
       .where(sql<boolean>`c.phone_e164 is distinct from o.to_e164`)
       .execute()
     return new Set(rows.map((r) => r.id))
+  }
+
+  async lastInboundAmong(ids: readonly string[]): Promise<ReadonlyMap<string, Date | null>> {
+    const out = new Map<string, Date | null>()
+    if (ids.length === 0) return out
+    const rows = await this.exec
+      .selectFrom('sms_outbox as o')
+      .innerJoin('messages as m', 'm.id', 'o.message_id')
+      .select(['o.id', 'o.to_e164', 'm.location_id'])
+      .where('o.id', 'in', ids)
+      .execute()
+    // the same read enqueueFor makes (lastInboundAt), once per location and number
+    const seen = new Map<string, Date | null>()
+    for (const r of rows) {
+      const key = `${r.location_id} ${r.to_e164}`
+      if (!seen.has(key)) seen.set(key, await lastInboundAt(this.exec, r.location_id, r.to_e164))
+      out.set(r.id, seen.get(key)!)
+    }
+    return out
   }
 
   async suppressedAmong(phones: readonly string[]): Promise<{ optedOut: ReadonlySet<string>; notConsented: ReadonlySet<string> }> {
