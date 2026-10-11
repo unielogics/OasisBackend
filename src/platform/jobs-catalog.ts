@@ -332,6 +332,26 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
     tests: 'test/standing/waitlist.test.ts, test/standing/jobs.test.ts, test/jobs/registry.test.ts, test/jobs/matrix.test.ts',
     status: 'built',
   },
+  'ai.respond': {
+    owner: 'assistant',
+    purpose:
+      'One turn of the AI text assistant for a conversation whose texts wait (ADR 0160): deferred while the newest text is under AI_DEBOUNCE_MS old (at most 45 s after the first), then the gate again, the caps, the claim, the Converse loop, the output guard and the reply (or the fallback and a handoff). Returns at once while AI_ENABLED=false.',
+    idempotency:
+      'Stately per conversation (singletonKey); the turn claims the conversation under a row lock and a 3-minute lease, answers only while its marker (pending_since) is set and clears it, and queues the reply with a per-turn dedupe key.',
+    clock: 'Injected clock for the debounce, the lease, the caps and the reply window; monotonic time only for latencies.',
+    enqueuedBy: 'the webhook after commit (assistant kick, singleton key = the conversation, 8 s later), the turn itself (deferral, newer texts) and ai.sweep',
+    tests: 'test/assistant/jobs.test.ts, test/assistant/conversations.test.ts, test/assistant/guard.test.ts, test/assistant/prompt.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'ai.sweep': {
+    owner: 'assistant',
+    purpose:
+      'Backstop of the assistant (ADR 0160): re-kicks conversations whose texts have waited over 30 s with no turn running, and fails turns that held their lease over 3 minutes (the fallback text and a handoff to staff). Returns at once while AI_ENABLED=false.',
+    idempotency: 'Kicks collapse on the stately ai.respond queue; a dead lease is failed under a row lock once (the lease is cleared in the same transaction).',
+    clock: 'Injected clock against pending_since and running_since.',
+    tests: 'test/assistant/jobs.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
 }
 
 const policyOf = (d: JobDefinition<never>): string => d.policy ?? 'standard'

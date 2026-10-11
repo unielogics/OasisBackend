@@ -47,6 +47,13 @@ export const aiEnvShape = {
   AI_SMS_SEGMENTS_PER_30MIN: int(0, 1000, 12),
   /** Spend of a day (business time zone) after which the AI stops answering and hands off. */
   AI_DAILY_BUDGET_USD: z.coerce.number().min(0).max(10_000).default(10),
+  /**
+   * The output guard's policy judge (ADR 0160, design section 3c): one extra model call that reads every reply before it goes out.
+   * Unset = on whenever AI_ENABLED is; false switches it off (the replies then go out after the deterministic checks only).
+   */
+  AI_GUARD_JUDGE: flag.optional(),
+  /** The judge's model (a cross-region profile of models.ts); unset = AI_BEDROCK_MODEL_ID. */
+  AI_GUARD_MODEL_ID: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(1).optional()),
   AI_PRICE_INPUT_PER_MTOK: price(),
   AI_PRICE_OUTPUT_PER_MTOK: price(),
   AI_PRICE_CACHE_READ_PER_MTOK: price(),

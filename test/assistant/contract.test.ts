@@ -20,7 +20,7 @@ import { createLeadJobs, createLeads } from '../../src/modules/leads/index.js'
 
 const deps = {} as AssistantDeps
 
-describe('W3 contract: the W3b parts are built, the W3a stubs stay', () => {
+describe('W3 contract: both sides are built', () => {
   it('offers every tool of the contract with its minimum trust; the W3b factories are no longer the W2d "off" defaults', () => {
     const registry = createToolRegistry(deps)
     expect(registry.tools.map((t) => t.name).sort()).toEqual(Object.keys(TOOL_MIN_TRUST).sort())
@@ -33,9 +33,9 @@ describe('W3 contract: the W3b parts are built, the W3a stubs stay', () => {
     expect(createLeadJobs(deps).map((j) => j.name)).toEqual(['leads.follow_up', 'leads.provisional_archive'])
   })
 
-  it('leaves the shop facts to W3a', () => {
-    expect(() => buildShopFacts({} as Parameters<typeof buildShopFacts>[0])).toThrow('not built')
-    expect(() => renderShopFacts({} as Parameters<typeof renderShopFacts>[0])).toThrow('not built')
+  it('W3a built the shop facts and W3b the leads (their own suites test them: facts.test.ts, test/leads/*)', () => {
+    expect(typeof buildShopFacts).toBe('function')
+    expect(typeof renderShopFacts).toBe('function')
     expect(typeof createLeads(deps).noteInterest).toBe('function')
   })
 

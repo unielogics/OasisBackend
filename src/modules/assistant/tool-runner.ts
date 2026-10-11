@@ -1,0 +1,135 @@
+// Runs the model's tool calls (ADR 0160, design section 4; the W3 contract's AssistantTool rules): an unknown tool, an action tool
+// while in-chat actions are off, a trust below the tool's minimum and an input its strict schema refuses never run; every call is
+// recorded in assistant_tool_calls (input, output, outcome, latency; an exception's message is never stored: it may hold data).
+import { z } from 'zod/v4'
+import type { AiContentBlock, AiJson, AiJsonObject, AiToolSpec } from '../../integrations/ports/ai.js'
+import type { Db } from '../../platform/db.js'
+import type { NewId } from '../../platform/ids.js'
+import type { AnyAssistantTool, HandoffRequest, ToolContext, ToolOutcome, ToolRegistry, TurnTrust } from './contract.js'
+import { redactJson } from './transcript.js'
+import './schema.js'
+
+const RANK: Record<TurnTrust, number> = { unknown: 0, caller: 1, trusted: 2 }
+
+/** True when `have` is at least `need`. */
+export const trustAtLeast = (have: TurnTrust, need: TurnTrust): boolean => RANK[have] >= RANK[need]
+
+/** The tools offered to the model this turn, in the registry's fixed order (action tools only while actions are on). */
+export function offeredTools(registry: ToolRegistry, actionsEnabled: boolean): AnyAssistantTool[] {
+  return registry.tools.filter((t) => actionsEnabled || !t.action)
+}
+
+/** The strict JSON Schema of a tool's zod input, for Converse. */
+export function inputSchemaOf(tool: AnyAssistantTool): AiJsonObject {
+  const schema = { ...(z.toJSONSchema(tool.input as z.ZodType, { unrepresentable: 'any' }) as Record<string, unknown>) }
+  delete schema.$schema
+  return schema as AiJsonObject
+}
+
+export function toolSpecs(tools: readonly AnyAssistantTool[]): AiToolSpec[] {
+  return tools.map((t) => ({ name: t.name, description: t.description, inputSchema: inputSchemaOf(t) }))
+}
+
+/** The tools whose success counts as progress for the "6 turns without progress" breaker. */
+export const NON_PROGRESS_TOOLS: ReadonlySet<string> = new Set(['handoff_to_staff', 'opt_out', 'policy_judge'])
+
+export interface ToolRoundResult {
+  /** One toolResult block per toolUse, in order. */
+  results: AiContentBlock[]
+  /**
+   * The client's own open balance (cents) when get_balance succeeded in this round (its data.openBalanceCents, else the first of its
+   * amountsCents): the only value the {balance} placeholder renders (guard v3, design section 3c).
+   */
+  balanceCents: number | null
+  handoff: HandoffRequest | null
+  /** Records for the transcript. */
+  calls: { tool: string; outcome: 'ok' | 'error' | 'denied'; error?: string }[]
+}
+
+type ToolUse = Extract<AiContentBlock, { type: 'toolUse' }>
+
+export interface ToolRunnerDeps {
+  db: Db
+  newId: NewId
+  /** Monotonic milliseconds (latency). */
+  nowMs: () => number
+}
+
+const errorResult = (u: ToolUse, outcome: { error: string; message: string; detail?: AiJsonObject }): AiContentBlock => ({
+  type: 'toolResult',
+  toolUseId: u.id,
+  status: 'error',
+  content: [{ type: 'json', json: { ok: false, error: outcome.error, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}) } }],
+})
+
+/** Runs one round of tool calls, in order, recording each. `seq` is the turn's running call counter (returned advanced). */
+export async function runToolRound(
+  d: ToolRunnerDeps,
+  o: { registry: ToolRegistry; ctx: ToolContext; uses: readonly ToolUse[]; round: number; seq: number; actionsEnabled: boolean },
+): Promise<ToolRoundResult & { seq: number }> {
+  const out: ToolRoundResult = { results: [], balanceCents: null, handoff: null, calls: [] }
+  let seq = o.seq
+  for (const u of o.uses) {
+    seq += 1
+    const began = d.nowMs()
+    const tool = o.registry.get(u.name)
+    let outcome: ToolOutcome
+    let rowOutcome: 'ok' | 'error' | 'denied'
+    let rowError: string | null = null
+    if (!tool || (tool.action && !o.actionsEnabled)) {
+      outcome = { ok: false, error: tool ? 'unavailable' : 'invalid', message: tool ? 'In-chat booking is off: send a calendar link instead.' : 'There is no such tool.' }
+      rowOutcome = 'denied'
+      rowError = tool ? 'actions_disabled' : 'unknown_tool'
+    } else if (!trustAtLeast(o.ctx.identity.trust, tool.minTrust)) {
+      outcome = { ok: false, error: 'needs_verification', message: 'This needs a quick verification first: offer a verify link with send_link.' }
+      rowOutcome = 'denied'
+      rowError = `trust_below_${tool.minTrust}`
+    } else {
+      const parsed = tool.input.safeParse(u.input)
+      if (!parsed.success) {
+        outcome = { ok: false, error: 'invalid', message: 'The tool input was not valid: check the fields and try again.' }
+        rowOutcome = 'error'
+        rowError = 'invalid_input'
+      } else {
+        try {
+          outcome = await tool.run(o.ctx, parsed.data)
+          rowOutcome = outcome.ok ? 'ok' : 'error'
+          if (!outcome.ok) rowError = outcome.error
+        } catch (e) {
+          outcome = { ok: false, error: 'unavailable', message: 'That is not available right now.' }
+          rowOutcome = 'error'
+          rowError = `exception:${(e as Error)?.name ?? 'Error'}`
+        }
+      }
+    }
+    if (outcome.handoff && !out.handoff) out.handoff = outcome.handoff
+    if (outcome.ok && u.name === 'get_balance') {
+      const declared = outcome.data.openBalanceCents ?? outcome.amountsCents?.[0]
+      if (typeof declared === 'number' && Number.isInteger(declared) && declared >= 0) out.balanceCents = declared
+    }
+    const json: AiJson = outcome.ok ? { ok: true, ...outcome.data } : { ok: false, error: outcome.error, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}) }
+    out.results.push(
+      outcome.ok
+        ? { type: 'toolResult', toolUseId: u.id, status: 'success', content: [{ type: 'json', json }] }
+        : errorResult(u, { error: outcome.error, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}) }),
+    )
+    out.calls.push({ tool: u.name, outcome: rowOutcome, ...(rowError ? { error: rowError } : {}) })
+    await d.db
+      .insertInto('assistant_tool_calls')
+      .values({
+        id: d.newId(),
+        turn_id: o.ctx.turnId,
+        seq,
+        round: o.round,
+        tool: /^[a-z][a-z0-9_]{0,63}$/.test(u.name) ? u.name : 'unknown',
+        tool_use_id: u.id.slice(0, 200),
+        input: JSON.stringify(redactJson(u.input ?? {})),
+        output: JSON.stringify(redactJson(json)),
+        outcome: rowOutcome,
+        error: rowError,
+        latency_ms: Math.max(0, Math.round(d.nowMs() - began)),
+      })
+      .execute()
+  }
+  return { ...out, seq }
+}

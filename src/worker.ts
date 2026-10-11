@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url'
 import type { Env } from './config/env.js'
 import { loadRuntimeEnv } from './config/secrets-source.js'
 import { configureProductionSchedulingJobs } from './composition.js'
+import { configureAssistantJobs } from './modules/assistant/jobs.js'
 import { notifyManagers } from './modules/messaging/notify.js'
 import { createClock, type Clock } from './platform/clock.js'
 import { createDb, transaction, type Db } from './platform/db.js'
@@ -96,6 +97,8 @@ export async function startWorker(o: WorkerOptions): Promise<RunningWorker> {
         )
       }),
   })
+  // the assistant's own enqueues (deferrals, re-kicks, the sweep's kicks) go through this worker's pg-boss handle (ADR 0160)
+  configureAssistantJobs({ jobs })
   await jobs.start({ workers: true })
   logger.info({ jobs: (o.definitions ?? jobDefinitions).map((j) => j.name) }, 'worker started')
   let stopped = false

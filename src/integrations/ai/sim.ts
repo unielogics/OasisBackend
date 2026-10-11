@@ -46,7 +46,14 @@ export const simToolUse = (name: string, input: Record<string, unknown>, id = `t
 
 /** What AI_PROVIDER=sim answers when nobody scripted it: a fixed, honest line. */
 export const DEFAULT_SIM_REPLY = 'Thanks for your message! This is the Oasis Auto Spa assistant in test mode.'
-export const defaultSimResponder: SimResponder = () => simText(DEFAULT_SIM_REPLY)
+/**
+ * The first words of a policy judge's system prompt (the assistant's output guard v4, src/modules/assistant/judge.ts). The default
+ * simulator answers such a request with a passing JSON verdict, so AI_PROVIDER=sim runs the whole guard without judging anything.
+ */
+export const POLICY_JUDGE_HEADER = 'OUTPUT POLICY JUDGE'
+export const DEFAULT_SIM_VERDICT = '{"ok":true,"category":"none","reason":""}'
+export const defaultSimResponder: SimResponder = (req) =>
+  simText(req.system[0]?.text.startsWith(POLICY_JUDGE_HEADER) ? DEFAULT_SIM_VERDICT : DEFAULT_SIM_REPLY)
 
 const clone = <T>(v: T): T => structuredClone(v)
 

@@ -3,7 +3,9 @@
 import { describe, expect, it } from 'vitest'
 import { DEV_PIN_PEPPER, ENV_KEYS, loadEnv } from '../../src/config/env.js'
 import { FORBIDDEN_SECRET_KEYS, SECRET_KEYS } from '../../src/config/secrets-source.js'
+import { aiPricesFromEnv } from '../../src/integrations/ai/cost.js'
 import { aiEnvShape } from '../../src/integrations/ai/env.js'
+import { judgeConfig } from '../../src/modules/assistant/config.js'
 
 const base = { DATABASE_URL: 'postgres://oasis:x@127.0.0.1:5432/oasis' }
 const prod = {
@@ -46,6 +48,23 @@ describe('AI environment', () => {
       expect(e[k]).toBeUndefined()
   })
 
+  it('the output guard judge (design 3c): on whenever AI_ENABLED unless AI_GUARD_JUDGE=false; its model one of the listed ones', () => {
+    const off = loadEnv(base)
+    expect(off.AI_GUARD_JUDGE).toBeUndefined()
+    expect(off.AI_GUARD_MODEL_ID).toBeUndefined()
+    const prices = aiPricesFromEnv(off)
+    expect(judgeConfig(off, prices)).toEqual({ enabled: false, modelId: 'us.anthropic.claude-sonnet-4-6', timeoutMs: 8000, maxTokens: 120, prices })
+    const on = loadEnv({ ...base, AI_ENABLED: 'true' })
+    expect(judgeConfig(on, prices).enabled).toBe(true)
+    expect(judgeConfig(loadEnv({ ...base, AI_ENABLED: 'true', AI_GUARD_JUDGE: 'false' }), prices).enabled).toBe(false)
+    // another listed model: its own list prices (AI_PRICE_* are the assistant model's)
+    const opus = loadEnv({ ...base, AI_GUARD_MODEL_ID: 'us.anthropic.claude-opus-4-6-v1' })
+    expect(judgeConfig(opus, prices)).toMatchObject({ modelId: 'us.anthropic.claude-opus-4-6-v1', prices: { inputPerMTok: 5, outputPerMTok: 25 } })
+    expect(loadEnv({ ...base, AI_GUARD_MODEL_ID: '' }).AI_GUARD_MODEL_ID).toBeUndefined()
+    expect(() => loadEnv({ ...base, AI_GUARD_MODEL_ID: 'gpt-4o' })).toThrow(/AI_GUARD_MODEL_ID: must be one of the listed models/)
+    expect(() => loadEnv({ ...base, AI_GUARD_JUDGE: 'maybe' })).toThrow(/AI_GUARD_JUDGE/)
+  })
+
   it('declares every AI variable in the environment contract', () => {
     for (const k of [...Object.keys(aiEnvShape), 'PUBLIC_LINKS_ENABLED', 'PIN_PEPPER']) expect(ENV_KEYS.has(k), k).toBe(true)
   })
@@ -61,6 +80,16 @@ describe('AI environment', () => {
   it('PIN_PEPPER is secret material: it belongs in the secret, never in the plain env files', () => {
     expect(SECRET_KEYS).toContain('PIN_PEPPER')
     expect(FORBIDDEN_SECRET_KEYS.PIN_PEPPER).toBeUndefined()
+  })
+
+  it('production: the policy judge cannot be turned off while the AI answers (AI_GUARD_JUDGE=false with AI_ENABLED=true)', () => {
+    const live = { ...prod, AI_ENABLED: 'true', AI_PROVIDER: 'bedrock' }
+    expect(() => loadEnv({ ...live, AI_GUARD_JUDGE: 'false' })).toThrow(/AI_GUARD_JUDGE: must not be false in production when AI_ENABLED=true/)
+    expect(loadEnv({ ...live, AI_GUARD_JUDGE: 'true' }).AI_GUARD_JUDGE).toBe(true)
+    expect(loadEnv(live).AI_GUARD_JUDGE).toBeUndefined() // unset = on (judgeConfig)
+    // with the AI off it may stay false in production; outside production it may be turned off for local runs
+    expect(loadEnv({ ...prod, AI_GUARD_JUDGE: 'false' }).AI_GUARD_JUDGE).toBe(false)
+    expect(loadEnv({ ...base, AI_ENABLED: 'true', AI_GUARD_JUDGE: 'false' }).AI_GUARD_JUDGE).toBe(false)
   })
 
   it('production: personal links need PIN_PEPPER; the AI may only answer through Bedrock', () => {

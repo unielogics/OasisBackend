@@ -1,6 +1,7 @@
 // Every pg-boss job in the system. A module adds one import and one entry; queues are created for all of them by
 // both the API process (producer) and the worker (consumer, which also registers handlers and cron schedules).
 import type { JobDefinition } from './jobs.js'
+import { assistantJobs } from '../modules/assistant/jobs.js'
 import { membershipJobs } from '../modules/memberships/jobs.js'
 import { messagingJobs } from '../modules/messaging/jobs/index.js'
 import { remindersJob, reviewRequestJob } from '../modules/messaging/jobs/reminders.js'
@@ -38,4 +39,5 @@ export const jobDefinitions: readonly JobDefinition<never>[] = [
   ...membershipJobs,
   ...standingJobs,
   ...leadJobs,
+  ...assistantJobs,
 ]

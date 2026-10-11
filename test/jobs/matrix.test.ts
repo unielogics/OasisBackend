@@ -488,6 +488,8 @@ const dedicated: Record<string, string> = {
   'membership.checkouts': 'test/jobs/matrix-sqsp.test.ts',
   'leads.follow_up': 'test/leads/follow-up.test.ts',
   'leads.provisional_archive': 'test/leads/archive.test.ts',
+  'ai.respond': 'test/assistant/jobs.test.ts',
+  'ai.sweep': 'test/assistant/jobs.test.ts',
 }
 
 describe('every registered job runs twice through the real worker', () => {

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { aiEnvShape } from '../integrations/ai/env.js'
+import { CLAUDE_BEDROCK_MODELS, findClaudeModel } from '../integrations/ai/models.js'
 import { emailEnvShape } from '../integrations/email/env.js'
 import { squarespaceEnvSchema } from '../integrations/squarespace/config.js'
 import { storageEnvShape } from '../integrations/storage/env.js'
@@ -153,6 +154,8 @@ export const envSchema = z
     SMSGATE_HEARTBEAT_STALE_SECONDS: z.coerce.number().int().min(60).default(600),
     SMSGATE_ONLINE_WITHIN_SECONDS: z.coerce.number().int().min(30).default(180),
     BUSINESS_PHONE: z.string().optional(), // shown in the HELP reply
+    BUSINESS_TEXT_NUMBER: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()), // the texting line (the front-desk tablet), in the assistant's shop facts (ADR 0160)
+    BUSINESS_EMAIL: z.preprocess((v) => (v === '' ? undefined : v), z.string().email().optional()), // the public email, in the assistant's shop facts (ADR 0160)
     HOOKS_HOST: z.string().default('127.0.0.1'), // the tailnet-facing hooks listener (src/server.ts)
     HOOKS_PORT: z.coerce.number().int().min(0).default(3002), // 0 disables the second listener
 
@@ -258,6 +261,18 @@ export const envSchema = z
       e.NODE_ENV === 'production' && e.AI_ENABLED && e.AI_PROVIDER !== 'bedrock',
       'AI_PROVIDER',
       'must be bedrock in production when AI_ENABLED=true',
+    )
+    // the policy judge (design 3c) is the layer that reads meaning: no live assistant answers clients without it
+    need(
+      e.NODE_ENV === 'production' && e.AI_ENABLED && e.AI_GUARD_JUDGE === false,
+      'AI_GUARD_JUDGE',
+      'must not be false in production when AI_ENABLED=true',
+    )
+    // the judge's model must be one the app role may call (models.ts, the IAM grant of pnpm aws:provision --bedrock)
+    need(
+      !!e.AI_GUARD_MODEL_ID && !findClaudeModel(e.AI_GUARD_MODEL_ID),
+      'AI_GUARD_MODEL_ID',
+      `must be one of the listed models (${CLAUDE_BEDROCK_MODELS.map((m) => m.profileId).join(', ')})`,
     )
     need(
       !!e.AWS_ACCESS_KEY_ID !== !!e.AWS_SECRET_ACCESS_KEY,

@@ -147,13 +147,16 @@ export function toConverseInput(
       `maxTokens must be a positive integer (got ${req.maxTokens})`,
     )
 
+  if (req.temperature !== undefined && !(Number.isFinite(req.temperature) && req.temperature >= 0 && req.temperature <= 1))
+    throw new AiProviderError('invalid_request', `temperature must be between 0 and 1 (got ${req.temperature})`)
+
   const effort = req.effort ?? o.defaultEffort
   const mode = o.effortMode ?? 'off'
   const input: ConverseCommandInput = {
     modelId: o.modelId,
     messages,
     ...(system.length ? { system } : {}),
-    inferenceConfig: { maxTokens: req.maxTokens },
+    inferenceConfig: { maxTokens: req.maxTokens, ...(req.temperature !== undefined ? { temperature: req.temperature } : {}) },
     ...(toolConfig ? { toolConfig } : {}),
   }
   if (effort && mode === 'output_config') input.outputConfig = { effort }

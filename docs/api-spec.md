@@ -1121,6 +1121,81 @@ sent" (actor `automation`). The port's work runs in a savepoint: an unexpected e
 transition still commits. Tests: `test/status-texts/*` (compose, the port and jobs on Postgres with the real queue, the worker, the
 production HTTP composition), `test/settings-http/reminders.test.ts` (the preview).
 
+### 23.4c The AI assistant's turn (ADR 0160, wave W3a)
+
+No route: the turn runs in the worker (`src/modules/assistant/**`). Inert with the defaults: nothing is marked while the gate is
+closed (23.4a), and `ai.respond` / `ai.sweep` return at once while `AI_ENABLED=false`.
+
+- **Jobs**: the webhook's kick sends `ai.respond {conversationId}` (stately, `singletonKey` = the conversation, `startAfter`
+  `AI_DEBOUNCE_MS`, 8 s). The job defers itself while the newest text is younger than that, at most 45 s after the first text of the
+  burst, then runs one turn. `ai.sweep` (every minute) re-kicks markers older than 30 s that no turn holds and fails leases
+  (`running_since`) older than 3 minutes: the turn row `failed` (`lease_timeout`), the fallback text and a handoff.
+- **Turn** (`turn.ts`): the gate again (a closed gate clears the marker and marks the client's thread unread, except after an
+  opt-out); the caps (per number 8 an hour and 25 a business day, a number with no client or a stale record 10 a day; shop-wide 100 an
+  hour and 600 a day, counting turns that called the model; `AI_DAILY_BUDGET_USD` against today's summed `cost_micros`); the claim
+  (conversation row lock, lease, `assistant_turns` row `running` with trust `unknown`|`known`|`trusted` and `prompt_version`); the
+  context; the Converse loop; the output guard; the reply; `audit_log` `assistant.reply` (actor "Oasis AI (SMS)"); the marker cleared,
+  or kept from the oldest newer text and kicked again when texts arrived meanwhile. A staff text or AGENT during the model call wins:
+  the reply is not sent (turn `skipped`, `superseded`).
+- **What the model reads** (never a client's phone number, an id, a token, a URL or a code): system blocks = the static rules, the
+  SHOP FACTS (cache point after them), the turn context (now, first name or "new client, name unknown, first contact", verified phone
+  and until when, in-chat booking on/off, membership, vehicles, appointments as A1..A3, the next intake step: name, intent,
+  memberships, vehicle); the tools with a cache point (`toolChoice` auto, action tools only while `AI_ACTIONS_ENABLED` and
+  `assistant.actions_enabled`); one user message with the texts of the last 48 h (at most 20; "(staff)" lines, numbers masked,
+  the unanswered ones marked NEW). At most 4 tool rounds, then one "reply now without tools" call; `AI_TIMEOUT_MS` per call,
+  `AI_TURN_DEADLINE_MS` per turn. Tool calls run through the W3 contract (unknown tool, actions off, trust below `minTrust`, a
+  strict-schema miss and an exception never run or never leak) and are recorded in `assistant_tool_calls`.
+- **Shop facts** (`facts.ts`, design 3b): every setting as one read-only document (business, texting and calling numbers, email,
+  hours, closures of the next 30 days, today, booking rules, guest fee, cancellation, VIP, arrival, automatic texts, the catalog with
+  member/guest STARTING prices, tint "from" prices and quote-only items, the plans, the FAQ), cached per location by a hash of the
+  source rows, the business date and the env values; byte-stable; Settings free text flattened to one line.
+- **Output guard v4** (`guard.ts`, `judge.ts`; design 3c, ADR 0160 W3a notes): three layers. (1) Amounts are SERVER-RENDERED as
+  self-contained phrases that name their own subject: `{price:<itemKey>}` "Signature Hand Wash starts at $45 for members, $54
+  otherwise" (quote-only "<name> is priced by quote - text us a photo"), `{price:tint:<vehicle>:<film>}` "Carbon tint for a
+  sedan/coupe starts at $229 ...", `{plan:<key>}` "Gold is $99 a month", `{fee}` "Guests pay a $25 booking fee" ("There is no
+  booking fee"), `{balance}` "Your open balance is $12.50" (only after `get_balance` in the turn), and `{linkN}`. The facts and the
+  prompt name keys, never figures. A placeholder must stand as its own clause: it starts the text or follows `. ! ? ; :`, a spaced
+  dash or a line break, and ends the text or is followed by `. ! ? ; : ,` or a spaced dash (`placement`). (2) A small deterministic
+  layer on the RAW text: an unknown placeholder (`unknown_placeholder`); a currency sign or money word (dollar(s), dólar(es),
+  cent(s), centavo(s), peso(s), USD, buck(s) but not the name "Buck") (`money`); a code or phone number: 5+ digits in a row, 7+
+  digits in one group split by spaces, dashes, dots, slashes or underscores, 3+ numeric tokens holding 7+ digits, every digit
+  counted (clock-time and duration disguises; only an ascending list of appointment times inside the opening window passes:
+  "Openings: 9:10, 9:40, 10:20"), 5+ spelled digits, an extension, a vanity number, look-alike letters for digits (`digits`; the
+  shop's own numbers, address, catalog and plan names excepted, punctuation and the state name normalised; client-entered text such
+  as a vehicle never is); anything host-shaped incl. "period com", "punto com", "-dot-", ";com",
+  "<word> com slash", an IP, "http", "hxxp", "www", "://" but `{linkN}` and the shop's own host as plain text (`url`); unambiguous
+  secret words (pin, passcode, password, OTP, CVV, card number, código, contraseña, clave, ...; English "code"/"digits" only in a
+  secret sense: "the code we sent", "your code", "a verification code", "6-digit number", "digits on your card", not "promo/ZIP/
+  dress/area code") (`secret`) and
+  promise words (free, discount, refund, coupon, guarantee, warranty, complimentary, on the house, % off, gratis, gratuito,
+  descuento, reembolso, garantía, ...) (`promise_words`), on the plain text and a skeleton; the client's own first name and
+  vehicles are skipped by these two word lists only (the money, digit and host rules read them; the judge never trusts them). Ordinary numbers pass ("2 to 3 days", "open 8 to 6", "bay 2", "October 12,
+  2026"). Each problem gets one rewrite call, then the fallback (`policy_words` for promise words, else `guard`). (3) The POLICY
+  JUDGE: every reply that passed is read once more, rendered, by one extra model call (`AI_GUARD_MODEL_ID`, default
+  `AI_BEDROCK_MODEL_ID`; temperature 0, at most 120 tokens, 8 s) with a fixed, cached rubric; the server's segments (rendered
+  placeholders, links as "[link]", the safety line, the shop's phone numbers, address and website; never client-entered text) are
+  marked trusted; it never
+  sees the client's phone, an id, a token or a URL. It answers strict JSON `{ok, category: none|price|promise|secret|
+  link_or_phone|other, reason}`. A fail gets one rewrite with the category's hint, then the guard and the judge again, then the
+  fallback (`policy_judge`); a judge error, timeout or an answer that is not the JSON fails closed (fallback, `judge_error`). Each
+  judgement is an `assistant_tool_calls` row (tool `policy_judge`, redacted) and its cost is in the turn's `cost_micros` (the
+  daily budget). `AI_GUARD_JUDGE` (default: on whenever `AI_ENABLED`; false is refused in production while `AI_ENABLED=true`). Markdown stripped, GSM-7, at most 320 characters after
+  rendering (one shorten call, else cut at a sentence), at most one question (one rewrite, else cut after the first). A refusal,
+  a cut answer, an unknown stop, a provider error or a timeout hand off too. A reply with a `verify`, `pin`, `membership` or
+  `pay` link gets the server's line "For your security, enter codes and your PIN only on the secure page, never by text." after
+  it. Phone numbers (any dash or an underscore as separator too) are masked for the model and in the stored transcript by one
+  shared pattern set (`transcript.ts PHONE_PATTERNS`). `pnpm eval:guard` runs the whole guard over
+  `test/assistant/fixtures/guard-eval.json` and prints recall per category and the false-block rate (W4: against Bedrock).
+- **Reply**: free text through `enqueueFor` with `senderKind: 'ai'`, rendered from the `ai_reply` template (the first AI text of a
+  conversation: "Oasis Auto Spa’s automated assistant here." + the STOP footer, never the AGENT offer; `disclosed_at`), class
+  `ai_reply`, or `personal_link` with the links as `secretVars` (the thread shows `[private link]`); a registered link the reply
+  left out is appended, then the safety line when one is due.
+- **Fallback and handoff** (`handoff.ts`): `ai_fallback` ("Thanks — a team member will text you back shortly.", at most one per
+  conversation every 2 hours), `AssistantInbox.openHandoff` (no AI until staff answer), notification `assistant.handoff` once per
+  open handoff, the thread unread, `alerts.changed`. A shop-wide cap or the budget also notifies the managers once a day
+  (`assistant.cap`, `source_ref` `assistant_cap:<kind>:<date>`). Six answered turns in a row (24 h) without a successful tool call
+  hand off (`no_progress`); texts older than 15 minutes when the turn starts go to staff without a fallback (`stale`).
+
 ### 23.5 Webhook and listeners
 
 `POST /hooks/smsgate/:deviceKey` exists **only** on the second listener (`HOOKS_HOST:HOOKS_PORT`, default 127.0.0.1:3002, started by
@@ -1143,7 +1218,7 @@ The envelope is persisted in `webhook_log` (unique `(provider, external_id)` = e
 loop; single-process deployments and the live-stack harness), `off`. Jobs (all in `src/platform/job-registry.ts`): `sms.dispatch`
 (every minute, a ~55 s window ticking every `SMS_TICK_INTERVAL_MS`, under the leader advisory lock), `sms.reconcile` (every 2
 minutes, plus housekeeping), `sms.device.healthcheck` (every minute), `sms.webhooks.register` (hourly, and once at boot from
-`src/server.ts`; also on every `app:started`), `email.send` (every minute). A session advisory lock per database schema keeps
+`src/server.ts`; also on every `app:started`), `email.send` (every minute), and the assistant's `ai.respond` / `ai.sweep` (23.4b). A session advisory lock per database schema keeps
 the worker and the inline runner from overlapping; the atomic claim keeps two dispatchers from sending one message twice anyway.
 
 ### 23.7 Environment
@@ -1152,7 +1227,8 @@ New in `src/config/env.ts` (all optional): `SMS_DISPATCH_MODE`, `SMS_TICK_INTERV
 `SMSGATE_API_PATH`, `SMSGATE_TIMEOUT_MS`, `SMSGATE_WEBHOOK_TOLERANCE_SECONDS`, `SMSGATE_RESEND_ATTEMPTS`, `SMSGATE_SIM_NUMBER`,
 `SMSGATE_LEGACY_MESSAGE_FIELD`, `SMSGATE_SYNC_SIGNING_KEY`, `SMSGATE_ALLOW_INSECURE_WEBHOOK_URL`, `SMSGATE_RESERVED_P0`,
 `SMSGATE_SAFETY_MARGIN`, `SMSGATE_MIN_INTERVAL_MS`, `SMSGATE_MAX_SEGMENTS`, `SMSGATE_HEARTBEAT_STALE_SECONDS`,
-`SMSGATE_ONLINE_WITHIN_SECONDS`, `BUSINESS_PHONE` (HELP reply), `HOOKS_HOST`, `HOOKS_PORT`, `SES_FROM_NAME`, `SES_REPLY_TO`,
+`SMSGATE_ONLINE_WITHIN_SECONDS`, `BUSINESS_PHONE` (HELP reply; the number to call in the assistant's shop facts), `BUSINESS_TEXT_NUMBER` and
+`BUSINESS_EMAIL` (the texting line, also one of the shop's own numbers for the gate, and the public email, both in the shop facts), `HOOKS_HOST`, `HOOKS_PORT`, `SES_FROM_NAME`, `SES_REPLY_TO`,
 `SES_CONFIGURATION_SET`, `EMAIL_CONSOLE_DIR`. `SECRETS_KEY` (base64, 32 bytes) is now used: required in production as soon as a
 device credential is stored; outside production a fixed development key is used when it is unset. Devices live in `sms_devices`;
 `SMSGATE_DEVICE_URL`, `SMSGATE_USERNAME`, `SMSGATE_PASSWORD`, `SMSGATE_WEBHOOK_SECRET` are not read by the runtime (add the tablet
@@ -1165,12 +1241,16 @@ through `POST /integrations/sms/devices`; the `design` seed adds a simulator dev
 called, as in the payments suite, the payments module keeps its own dev outbox; `src/server.ts` calls both). `src/http/modules.ts`: scheduling gets
 `messages: rt.queue` and `externalAlerts: messagingAlertSource`, payments takes the messenger over `DbPaymentOutbox` from `configureProductionPayments`, and the messaging
 routes are mounted. `src/server.ts`: `MessagingAccountNotifier` for invites and reset links (SMS when a usable device and number
-exist, else email through the EmailProvider; `delivered` is true only for a real SMS Gate device or SES), the hooks listener, the inline runner.
+exist, else email through the EmailProvider; `delivered` is true only for a real SMS Gate device or SES), the hooks listener, the inline runner,
+and `wireAssistant` (`src/modules/assistant/runtime.ts`: the assistant's gate with the texting line among the shop's own numbers, the
+`ai.respond` kick, the welcome flow, and W3b's reply-number handler once it is not the contract stub). `src/worker.ts` hands its pg-boss
+handle to the assistant (`configureAssistantJobs`) for deferrals and re-kicks.
 Receipts go out as an SMS and an itemised email (`receipt` template built from the invoice and its ledger calc).
 
 ### 23.9 Tests
 
-`test/messaging-db/*` (Postgres, the in-process simulator, the HTTP simulator server and the real `src/server.ts` process; run
+`test/assistant/*` (the turn, the shop facts, the guard, the jobs through the real worker, the deterministic conversations with the
+SimAiProvider), `test/messaging-db/*` (Postgres, the in-process simulator, the HTTP simulator server and the real `src/server.ts` process; run
 `pnpm vitest run test/messaging-db`), `test/messaging/*` (pure units). Still to verify on the real tablet: the 20 items in section 2 of
 `docs/integrations/smsgate.md` (route path, duplicate-id 409, `textMessage`, signature on a real delivery, HTTPS to the tailnet name,
 Android's send limit, delivery reports, `sms:delivered` per multipart part, inbound sender format, RCS, reboot behaviour, the SIM slot

@@ -5,6 +5,7 @@ import { createPermissiveAuthorizer, type Authorizer } from './http/authorizer.j
 import { createIdentity, bootstrapAdmin, type IdentityAuthorizer } from './modules/auth/index.js'
 import type { NotificationPort } from './modules/auth/notifications.js'
 import { MessagingAccountNotifier } from './modules/messaging/adapters/accounts.js'
+import { wireAssistant } from './modules/assistant/runtime.js'
 import { buildHooksApp, type HooksApp } from './modules/messaging/http/hooks-app.js'
 import { startInlineRunner, type InlineRunner } from './modules/messaging/jobs/runner.js'
 import { DbBusinessHours } from './modules/settings/db-adapters/index.js'
@@ -80,6 +81,9 @@ async function main(): Promise<void> {
     logger.warn({ err: err.message, job }, 'startup job not enqueued'),
   )
   const messaging = messagingRuntimeFor({ db, clock, env, newId }, { logger })
+  // The AI assistant's ports on the inbound path (ADR 0160): the kick (pg-boss ai.respond), the welcome flow, the reply-number
+  // handler. Inert while AI_ENABLED=false or Settings assistant.enabled=false: the gate admits no text, so nothing is ever kicked.
+  wireAssistant({ db, clock, newId, env, messaging, enqueue: (name, data, opts) => jobs.enqueue(name, data, opts), log: logger.child({ module: 'assistant' }) })
   configureProductionSettings({ clock, newId, messaging })
   configureProductionPayments(messaging)
 

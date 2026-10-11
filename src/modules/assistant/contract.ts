@@ -13,9 +13,11 @@
 //     ctx.identity (server side); their inputs never name a client, a phone or an id. Appointments are refs A1..A3 (ctx.refs), links
 //     are placeholders "{link1}" (ctx.addLink).
 //   - Pricing is not the AI's task: a tool states only STARTING prices (ShopFacts.catalog / tint "from" prices), plan monthly prices
-//     and the guest booking fee, as integer cents fields named *Cents, never a total, a combination or a discount. The output guard
-//     (W3a) allows a $ amount in a reply only when it equals one of those from the current facts, or one a tool of this turn
-//     declared in ToolOutcome.amountsCents (the client's own open balance: get_balance; not a price).
+//     and the guest booking fee, as integer cents fields named *Cents, never a total, a combination or a discount, WITH the item /
+//     plan keys. The model never writes an amount (output guard v3, design section 3c): it writes the placeholders {price:<key>},
+//     {price:tint:<vehicle>:<film>}, {plan:<key>}, {fee} and {balance}, and the server renders them from the current facts after
+//     the guard (facts.ts placeholderValues). {balance} renders get_balance's data.openBalanceCents (else its first amountsCents),
+//     only in a turn where get_balance succeeded.
 //   - Everything stays off by default: with AI_ENABLED=false, assistant.enabled=false, AI_ACTIONS_ENABLED=false or
 //     assistant.actions_enabled=false, no tool runs an action, no reply number executes, no client is adopted and no lead job
 //     sends anything.
@@ -284,7 +286,8 @@ export interface ShopFacts {
 export interface ShopFactsDeps {
   db: Db
   clock: Clock
-  env: Pick<Env, 'BUSINESS_TZ' | 'BUSINESS_PHONE' | 'PUBLIC_SITE_URL'>
+  /** BUSINESS_PHONE is the number to call; BUSINESS_TEXT_NUMBER the texting line; BUSINESS_EMAIL the public email (W3a addition). */
+  env: Pick<Env, 'BUSINESS_TZ' | 'BUSINESS_PHONE' | 'BUSINESS_TEXT_NUMBER' | 'BUSINESS_EMAIL' | 'PUBLIC_SITE_URL'>
 }
 
 /** The facts of a location, rebuilt only when a source version or the business date changed. */
@@ -484,8 +487,8 @@ export type ToolOutcome =
       /** What the model reads (the toolResult's JSON). No phone, id, token, URL (placeholders only), code or PII of others. */
       data: AiJsonObject
       /**
-       * Dollar amounts (cents) the reply may state besides the facts' starting prices, plan prices and fee: only the client's own
-       * open balance (get_balance). The output guard (W3a) collects them over the turn.
+       * Dollar amounts (cents) a tool declares: only the client's own open balance (get_balance; the first one is the total). The
+       * turn renders {balance} from get_balance's data.openBalanceCents, else from the first of these.
        */
       amountsCents?: number[]
       handoff?: HandoffRequest

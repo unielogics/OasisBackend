@@ -20,6 +20,7 @@
     "dev": "tsx watch src/server.ts",
     "dev:worker": "tsx watch src/worker.ts",
     "format": "prettier --write .",
+    "eval:guard": "tsx scripts/eval-guard.ts",
     "jobs:doc": "tsx src/platform/jobs-doc.ts",
     "jobs:doc:check": "tsx src/platform/jobs-doc.ts --check",
     "lint": "eslint .",
