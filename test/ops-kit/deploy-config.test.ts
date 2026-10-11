@@ -676,6 +676,22 @@ describe('nginx site', () => {
       expect(args(uri, 'proxy_set_header').map((a) => a.join(' ')), uri).toContain('Cookie ')
       expect(args(uri, 'proxy_hide_header').map((a) => a[0]), uri).toContain('Set-Cookie')
     }
+    // the personal-link pages' API (ADR 0160): its own location and zone, never cached, no-store on every answer, no cookies
+    for (const uri of ['/api/v1/public/links/exchange', '/api/v1/public/links/me', '/api/v1/public/links/appointments/OAS-00001/reschedule']) {
+      expect(`${at(uri).modifier} ${at(uri).pattern}`, uri).toBe('^~ /api/v1/public/links/')
+      expect(args(uri, 'limit_req'), uri).toEqual([['zone=oasis_public_links', 'burst=20', 'nodelay']])
+      expect(args(uri, 'client_max_body_size'), uri).toEqual([['4k']])
+      expect(args(uri, 'proxy_cache'), uri).toEqual([['off']])
+      expect(args(uri, 'proxy_cache_key'), uri).toEqual([])
+      expect(args(uri, 'proxy_pass'), uri).toEqual([['http://oasis_api']])
+      expect(args(uri, 'add_header').filter((a) => a[0] === 'Cache-Control'), uri).toEqual([['Cache-Control', 'no-store', 'always']])
+      expect(args(uri, 'proxy_hide_header').map((a) => a[0]), uri).toEqual(expect.arrayContaining(['Set-Cookie', 'Cache-Control', 'Expires']))
+      expect(args(uri, 'proxy_set_header').map((a) => a.join(' ')), uri).toContain('Cookie ')
+      // the page's bearer session reaches the API: nothing here drops or rewrites Authorization
+      expect(args(uri, 'proxy_set_header').map((a) => a[0]), uri).not.toContain('Authorization')
+    }
+    const zones = parseNginx(read('etc/nginx/conf.d/00-oasis-zones.conf'))
+    expect(find(zones, 'limit_req_zone').map((z) => z.args.join(' '))).toContain('$binary_remote_addr zone=oasis_public_links:10m rate=60r/m')
     // the dashboard's own API is untouched
     expect(`${at('/api/v1/customers').modifier} ${at('/api/v1/customers').pattern}`).toBe('^~ /api/')
     expect(`${at('/api/v1/publicity').modifier} ${at('/api/v1/publicity').pattern}`).toBe('^~ /api/')
@@ -1132,5 +1148,20 @@ describe.skipIf(!NGINX)('nginx site in a real nginx', () => {
     for (let i = 0; i < 14; i++) answers.push((await call(`${site}/api/v1/public/otp`, ['-X', 'POST', '-d', '{}', '-H', 'content-type: application/json'])).status)
     expect(answers.filter((x) => x === 200).length).toBeLessThanOrEqual(11)
     expect(answers.at(-1)).toBe(429)
+    // the personal-link API: passed through every time (never cached), no-store on the answer, a 4k body limit
+    hits.length = 0
+    const noStore = async (url: string, extra: string[] = []) => {
+      const r = await sh('curl', ['-sk', '-D', '-', '-o', '/dev/null', '--max-time', '5', ...resolve, ...extra, url])
+      const lines = r.stdout.split('\r\n')
+      return {
+        status: Number(/^HTTP\/\S+ (\d+)/.exec(lines[0] ?? '')?.[1] ?? 0),
+        cacheControl: lines.filter((l) => l.toLowerCase().startsWith('cache-control:')).map((l) => l.slice(14).trim()),
+      }
+    }
+    for (let i = 0; i < 2; i++) expect(await noStore(`${site}/api/v1/public/links/me`, ['-H', 'Authorization: Bearer abc'])).toEqual({ status: 200, cacheControl: ['no-store'] })
+    expect(hits).toEqual(['api GET /api/v1/public/links/me', 'api GET /api/v1/public/links/me'])
+    const bigLink = path.join(dir, 'links-big.json')
+    writeFileSync(bigLink, `{"token":"${'x'.repeat(5 * 1024)}"}`)
+    expect(await noStore(`${site}/api/v1/public/links/exchange`, ['-X', 'POST', '--data-binary', `@${bigLink}`, '-H', 'content-type: application/json'])).toEqual({ status: 413, cacheControl: ['no-store'] })
   }, 60_000)
 })

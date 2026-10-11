@@ -35,6 +35,20 @@ const PUBLIC_ROUTES = new Set([
   'POST /api/v1/public/otp/verify',
   'POST /api/v1/public/bookings',
   'POST /api/v1/public/memberships',
+  // personal links (ADR 0160, wave W3c): the token from the link (exchange body only) and then the bearer session it buys are the
+  // credential; 404 while PUBLIC_LINKS_ENABLED is false; no-store, JSON only, durable per-address, link, session and number limits
+  'POST /api/v1/public/links/exchange',
+  'GET /api/v1/public/links/me',
+  'GET /api/v1/public/links/availability',
+  'POST /api/v1/public/links/verify/code',
+  'POST /api/v1/public/links/verify/code/confirm',
+  'POST /api/v1/public/links/verify/pin',
+  'POST /api/v1/public/links/pin',
+  'POST /api/v1/public/links/pin/reset',
+  'POST /api/v1/public/links/bookings',
+  'POST /api/v1/public/links/appointments/:ref/reschedule',
+  'POST /api/v1/public/links/membership/start',
+  'POST /api/v1/public/links/pay/start',
 ])
 
 /** 403 codes a permitted caller may still get from a business rule, keyed by "METHOD url". Empty with the generic {} body. */

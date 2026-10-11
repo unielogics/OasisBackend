@@ -44,7 +44,7 @@ export interface VehiclesTable {
 
 export type AppointmentStatus =
   'booked' | 'confirmed' | 'arrived' | 'cleaning' | 'completed' | 'canceled' | 'no_show'
-export type AppointmentSource = 'dashboard' | 'walk_in' | 'online' | 'phone' | 'standing' | 'reschedule_link' | 'sms_ai'
+export type AppointmentSource = 'dashboard' | 'walk_in' | 'online' | 'phone' | 'standing' | 'reschedule_link' | 'sms_ai' | 'link'
 
 export interface AppointmentsTable {
   id: string
