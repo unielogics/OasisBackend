@@ -20,21 +20,23 @@ import { createLeadJobs, createLeads } from '../../src/modules/leads/index.js'
 
 const deps = {} as AssistantDeps
 
-describe('W3 contract stubs', () => {
-  it('offer no tool and keep the W2d "off" defaults', () => {
+describe('W3 contract: the W3b parts are built, the W3a stubs stay', () => {
+  it('offers every tool of the contract with its minimum trust; the W3b factories are no longer the W2d "off" defaults', () => {
     const registry = createToolRegistry(deps)
-    expect(registry.tools).toEqual([])
-    expect(registry.get('list_services')).toBeUndefined()
-    expect(createActionCodeHandler(deps)).toBe(noActionCodes)
-    expect(createNewTexters(deps)).toBe(noNewTexters)
+    expect(registry.tools.map((t) => t.name).sort()).toEqual(Object.keys(TOOL_MIN_TRUST).sort())
+    for (const t of registry.tools) expect(t.minTrust, t.name).toBe(TOOL_MIN_TRUST[t.name])
+    expect(registry.get('list_services')?.name).toBe('list_services')
+    expect(registry.get('nope')).toBeUndefined()
+    expect(createActionCodeHandler(deps)).not.toBe(noActionCodes)
+    expect(createNewTexters(deps)).not.toBe(noNewTexters)
     expect(ASSISTANT_OFF.actionCodes).toBe(noActionCodes)
-    expect(createLeadJobs(deps)).toEqual([])
+    expect(createLeadJobs(deps).map((j) => j.name)).toEqual(['leads.follow_up', 'leads.provisional_archive'])
   })
 
-  it('leave the shop facts and leads unbuilt', async () => {
+  it('leaves the shop facts to W3a', () => {
     expect(() => buildShopFacts({} as Parameters<typeof buildShopFacts>[0])).toThrow('not built')
     expect(() => renderShopFacts({} as Parameters<typeof renderShopFacts>[0])).toThrow('not built')
-    await expect(createLeads(deps).noteInterest({} as never, {} as never)).resolves.toBeUndefined()
+    expect(typeof createLeads(deps).noteInterest).toBe('function')
   })
 
   it('names a minimum trust for every tool', () => {

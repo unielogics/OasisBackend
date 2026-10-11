@@ -1,6 +1,7 @@
 import type { Executor } from '../../../platform/db.js'
 import type { NewId } from '../../../platform/ids.js'
 import type { OptOutRecord, OptOutRepository } from '../policy/optouts.js'
+import { revokeForOptOut } from '../../identity/revoke.js'
 import { inTx } from './exec.js'
 import '../schema.js'
 import '../../customers/schema.js'
@@ -58,6 +59,9 @@ export class PgOptOutRepository implements OptOutRepository {
         .where('deleted_at', 'is', null)
         .where('sms_opted_out_at', 'is', null)
         .execute()
+      // a STOP ends what the number holds (ADR 0160, design section 5): its personal links, link sessions, phone trust and an in-chat
+      // action waiting for its reply number (the reads enforce it too; this records it and cancels the action at once)
+      await revokeForOptOut(tx, { locationId: this.o.locationId, phone: record.phone, now: record.optedOutAt })
       return { created: Number(r.numInsertedOrUpdatedRows ?? 0n) > 0 }
     })
   }

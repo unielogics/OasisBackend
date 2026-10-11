@@ -12,7 +12,7 @@ import { noteStaffTakeover } from './assistant/inbox.js'
 import type { MessagingConfig } from './config.js'
 import { hasActiveOptOut, lastInboundAt, loadCustomerTarget, type CustomerTarget } from './db/recipients.js'
 import { PgOutboxRepository, rowValues } from './db/outbox-repo.js'
-import { ensureThread, loadMessageDto, publishMessage, REDACTED_BODY, SENSITIVE_CLASSES, touchThread } from './db/messages.js'
+import { ensureThread, loadMessageDto, MASK_ONLY_CLASSES, publishMessage, REDACTED_BODY, SENSITIVE_CLASSES, touchThread } from './db/messages.js'
 import { planEnqueue } from './dispatch/enqueue.js'
 import type { SmsDenyReason, SmsRecipient } from './policy/canSend.js'
 import { isSmsClass, replyContextOf, type SmsClass } from './policy/classes.js'
@@ -161,7 +161,13 @@ export class DbMessageQueue implements MessageQueue {
     if (plan.status === 'suppressed') return { queued: false, skipped: plan.reason }
     if (plan.status === 'rejected') return { queued: false, skipped: plan.reason, ...(plan.segments !== undefined ? { segments: plan.segments } : {}) }
     const { item } = plan
-    const storedBody = !SENSITIVE_CLASSES.has(klass) ? item.body : secrets.length > 0 ? maskSecrets(item.body, secrets) : REDACTED_BODY
+    const storedBody = !SENSITIVE_CLASSES.has(klass)
+      ? item.body
+      : secrets.length > 0
+        ? maskSecrets(item.body, secrets)
+        : MASK_ONLY_CLASSES.has(klass)
+          ? item.body
+          : REDACTED_BODY
     const publishable = !SENSITIVE_CLASSES.has(klass) || storedBody !== REDACTED_BODY
 
     const threadId = a.customerId ? await ensureThread(tx, { locationId: a.locationId, customerId: a.customerId, newId }) : null

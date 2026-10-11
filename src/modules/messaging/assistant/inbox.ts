@@ -10,6 +10,7 @@ import type { NewId } from '../../../platform/ids.js'
 import * as realtime from '../../../platform/realtime.js'
 import { getSetting } from '../../../platform/settings.js'
 import type { AssistantInbox, HandoffInput, PendingMarkInput } from '../../assistant/ports.js'
+import { cancelPendingActions } from '../../identity/pending-actions.js'
 import { publishToManagers } from '../notify.js'
 import '../schema.js'
 import '../../assistant/schema.js'
@@ -123,6 +124,8 @@ export async function noteStaffTakeover(tx: Tx, t: StaffTakeover): Promise<{ pau
     .where((eb) => eb.or([eb('handoff_state', '=', 'open'), eb('pending_since', 'is not', null)]))
     .returning('id')
     .execute()
+  // an in-chat action waiting for its reply number is the AI's: staff took the thread over, so it no longer runs (ADR 0160, W3b)
+  await cancelPendingActions(tx, { locationId: t.locationId, customerId: t.customerId, phone: t.phone, now: t.now, error: 'staff took the thread over' })
   // the handoff alerts of those conversations are answered
   const refs = touched.map((c) => handoffSourceRef(c.id))
   if (refs.length > 0) {
