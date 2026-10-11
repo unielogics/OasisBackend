@@ -190,3 +190,41 @@ inert while `AI_ENABLED=false` or `assistant.enabled=false`. Contract: docs/api-
   answered. The "AI paused" line in the dashboard should show only while the assistant is enabled.
 - **Sub-cap**: the window accounting (`sms_usage`) records the class of each send (migration `20261011040000_sms_usage_class`); the
   AI classes are counted together against `AI_SMS_SEGMENTS_PER_30MIN` on a fixed 30-minute window, independent of the device window.
+
+## W3 contract (the seam between the turn and the tools)
+
+`src/modules/assistant/contract.ts` (types and two constants, no logic) lets the turn (W3a) and the tools, actions, welcome flow and
+leads (W3b) be built in parallel. Compiling stubs sit at the agreed paths and keep the W2d "off" defaults until each package lands:
+`assistant/tools/index.ts` (`createToolRegistry`: no tool), `assistant/actions/handler.ts` (`createActionCodeHandler`:
+`noActionCodes`), `assistant/welcome/new-texters.ts` (`createNewTexters`: `noNewTexters`), `leads/index.ts` (`createLeads`,
+`createLeadJobs`: no job) and `assistant/facts.ts` (`buildShopFacts` / `renderShopFacts` throw "not built"). Nothing is wired or
+registered by the contract. Test: `test/assistant/contract.test.ts`.
+
+- **Identity of a turn** (`TurnIdentity`): location, phone (server side only, never shown to the model), client or null,
+  provisional, trust `unknown` | `caller` | `trusted` (+ `trustUntil`). `unknown` = a stranger or a stale record; `caller` = the live
+  client on file (the provisional one included; stored as `known` in `assistant_turns.trust`); `trusted` = a live phone trust.
+- **Minimum trust per tool** (`TOOL_MIN_TRUST`): the design's §4 "caller" on the public tools means anyone texting, so they are
+  `unknown` here (business info, services, membership plans, availability, interests, send_link verify/calendar, opt-out, handoff);
+  the client's own record is `caller` (appointments, balance, name on a provisional client, vehicle); `propose_*` are `trusted` and
+  flagged `action` (offered only while `AI_ACTIONS_ENABLED` and `assistant.actions_enabled`). Below the minimum, W3a answers
+  `needs_verification` without running the tool.
+- **Shop facts** (`ShopFacts`, design §3b): business, contact (texting vs calling), hours, closures (30 days), today, booking
+  rules, fee, cancellation, VIP, arrival, automatic texts, catalog (categories; items with member/guest STARTING prices, VIP
+  inclusion, quote-only; tint rows with "from" prices only), plans, FAQ; `version` is the hash of the source versions and the
+  business date (the cache key); `renderShopFacts` is deterministic and leaves `generatedAt` out (prompt cache). Whether the shop
+  is open now is not a fact: the turn context carries the time.
+- **Tool context** (`ToolContext`): db, clock, the turn's `now`, ids, env, identity, conversation and turn ids, facts, refs
+  (`A1`..`A3` resolve only to the client's own appointments), `actionsEnabled`, the location's scheduling context and the AI actor
+  (`Oasis AI (SMS)`, sched.edit + jobs.status), the queue, the turn deadline's signal, `addLink(url, {kind, expiresAt})` →
+  `{linkN}` (the reply goes out with the URL as a secretVar, class `personal_link`), `handoff(reason, summary)`,
+  `audit(tx, action, detail)` and `setCustomer(id)`. Deviation from the brief: `audit` takes the tool's transaction, so the audit
+  row commits with the change it records.
+- **Tool inputs** (`ToolInputs`): strict, every property required (null = not given), no client, phone, id or price; dates are
+  business dates and `startMin` minutes from midnight; appointments by ref.
+- **Outcomes** (`ToolOutcome`): `ok` with JSON `data` (no phone, id, token, URL or code), or an error kind (`needs_verification`,
+  `not_allowed`, `invalid`, `not_found`, `unavailable`, `rate_limited`) with a plain message; either may ask for a handoff.
+  `amountsCents` declares the only $ amounts a reply may state besides the facts' starting prices, plan prices and fee: the
+  client's own open balance (`get_balance`; a balance is not a price, so §3b does not forbid it).
+- **Factories**: every W3 part takes the same `AssistantDeps` (db, clock, ids, env, queue, log, facts source,
+  `schedulingFor(location)`, `actorFor(location)`), built once by W3a's wiring. `createLeads` (open / noteInterest / markBooked) is
+  added beyond the brief so the link API's bookings and the reply-number handler close a lead the same way.
