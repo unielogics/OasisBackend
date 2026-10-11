@@ -21,7 +21,7 @@ let n = 0
 export async function makeCustomer(
   db: Executor,
   env: Env,
-  o: { name?: string; optedIn?: boolean; email?: string | null; phone?: string | null } = {},
+  o: { name?: string; optedIn?: boolean; email?: string | null; phone?: string | null; emailVerified?: boolean } = {},
 ): Promise<string> {
   const id = env.newId()
   const i = ++n
@@ -32,6 +32,7 @@ export async function makeCustomer(
       full_name: o.name ?? `Test Client ${i}`,
       phone_e164: o.phone === undefined ? `+1305555${String(1000 + (i % 9000)).padStart(4, '0')}` : o.phone,
       email: o.email === undefined ? null : o.email,
+      email_verified: o.emailVerified ?? false,
       sms_opted_in: o.optedIn ?? true,
       source: 'import',
     })

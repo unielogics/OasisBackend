@@ -16,6 +16,15 @@ import { defaultPorts } from '../../payments/ports.js'
 import { applyMembershipCredit } from '../apply.js'
 import { historyFor, upgradeOf, visitCounts } from '../retention.js'
 import '../problems.js'
+import {
+  checkoutCount,
+  checkoutViews,
+  confirmAwaitingMatch,
+  listCheckouts,
+  rejectAwaitingMatch,
+  type CheckoutRow,
+} from '../checkouts.js'
+import { runMembershipPass } from '../jobs.js'
 import { createManualMembership, currentMembership, patchMembership } from '../service.js'
 import { locationTz, viewsOf, type MembershipRow } from '../view.js'
 import { loadPlans } from '../plans.js'
@@ -23,6 +32,10 @@ import * as audit from '../../../platform/audit.js'
 import {
   ApplyBody,
   ApplyResult,
+  CheckoutDecisionBody,
+  CheckoutDecisionResult,
+  CheckoutListQuery,
+  CheckoutListResult,
   CreateBody,
   CustomerMembership,
   IdParams,
@@ -315,6 +328,82 @@ export function registerMembershipRoutes(app: AppInstance): void {
       return { membership: view! }
     },
   )
+
+  // ---- membership checkouts (ADR 0160): orders waiting for staff, personal-link checkouts ------------------------------
+
+  const checkoutOut = async (row: CheckoutRow) => {
+    const [view] = await checkoutViews(app.db, [row])
+    const cust = await app.db.selectFrom('customers').select('full_name').where('id', '=', row.customer_id).executeTakeFirst()
+    const { customerId, ...rest } = view!
+    return { ...rest, customer: { id: customerId, name: cust?.full_name ?? '' } }
+  }
+
+  app.get(
+    '/membership-checkouts',
+    {
+      config: { access: access.perm('cli.member') },
+      schema: {
+        tags: [TAG],
+        summary: 'Membership checkouts: personal-link checkouts and paid orders waiting for staff to match',
+        description:
+          'Newest first, optionally of one state. A row in `awaiting_match` is a paid Squarespace membership order whose email matches the client only through an email nobody verified (ADR 0160): confirm it with the client, then match or reject it.',
+        querystring: CheckoutListQuery,
+        response: { 200: CheckoutListResult },
+      },
+    },
+    async (req) => {
+      const a = auth(req)
+      const q = req.query as z.infer<typeof CheckoutListQuery>
+      const rows = await listCheckouts(app.db, a.locationId, { state: q.state, limit: q.limit })
+      return {
+        items: rows.map(({ customerId, customerName, ...rest }) => ({ ...rest, customer: { id: customerId, name: customerName } })),
+        awaitingMatch: await checkoutCount(app.db, a.locationId, 'awaiting_match'),
+      }
+    },
+  )
+
+  for (const [verb, decide, summary, description] of [
+    [
+      'match',
+      confirmAwaitingMatch,
+      'Match a waiting Squarespace order to this client (staff confirmed it with them)',
+      'Only a row in `awaiting_match`. The row becomes `matched`, the membership pass runs at once and links the order (and the same email’s later renewals of the plan) to the client, so the membership activates when the order is paid. Audited; closes the alert.',
+    ],
+    [
+      'reject',
+      rejectAwaitingMatch,
+      'Reject a waiting Squarespace order: it is not this client’s',
+      'Only a row in `awaiting_match`. The row becomes `rejected` and the order goes back to "needs a customer"; a pending membership the sync opened only for it is canceled. Audited; closes the alert.',
+    ],
+  ] as const) {
+    app.post(
+      `/membership-checkouts/:id/${verb}`,
+      {
+        config: { access: access.perm('cli.member') },
+        schema: {
+          tags: [TAG],
+          summary,
+          description,
+          params: IdParams,
+          body: CheckoutDecisionBody,
+          response: { 200: CheckoutDecisionResult },
+        },
+      },
+      async (req) => {
+        const c = dctx(req)
+        const b = req.body as z.infer<typeof CheckoutDecisionBody>
+        const row = await app.db
+          .transaction()
+          .execute((tx) => decide(tx, c, (req.params as { id: string }).id, { audit: auditContextOf(req), note: b.note ?? null }))
+        if (verb === 'match') await runMembershipPass(app.db, app.clock, c.locationId, app.env)
+        const fresh = await app.db.selectFrom('membership_checkouts').selectAll().where('id', '=', row.id).executeTakeFirstOrThrow()
+        const m = await app.db.selectFrom('memberships').selectAll().where('id', '=', fresh.membership_id).executeTakeFirst()
+        const tz = await locationTz(app.db, c.locationId)
+        const [view] = m ? await viewsOf(app.db, { ...c, now: app.clock.now(), tz }, [m]) : []
+        return { checkout: await checkoutOut(fresh), membership: view ?? null }
+      },
+    )
+  }
 
   app.post(
     '/appointments/:id/membership-perks/apply',

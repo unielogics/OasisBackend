@@ -64,6 +64,21 @@ begin
 end $$;
 
 --
+-- Name: customers_email_unverify(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.customers_email_unverify() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  if new.email is distinct from old.email and new.email_verified is not distinct from old.email_verified then
+    new.email_verified := false;
+  end if;
+  return new;
+end
+$$;
+
+--
 -- Name: ensure_location(uuid, text, text, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1422,7 +1437,7 @@ CREATE TABLE public.membership_checkouts (
     plan_key text NOT NULL,
     product_key text,
     expected_email public.citext,
-    checkout_url text NOT NULL,
+    checkout_url text,
     started_at timestamp with time zone NOT NULL,
     expires_at timestamp with time zone NOT NULL,
     state text DEFAULT 'open'::text NOT NULL,
@@ -1431,13 +1446,17 @@ CREATE TABLE public.membership_checkouts (
     version integer DEFAULT 1 NOT NULL,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    origin text DEFAULT 'link'::text NOT NULL,
     CONSTRAINT membership_checkouts_check CHECK ((expires_at > started_at)),
     CONSTRAINT membership_checkouts_check1 CHECK (((state = 'matched'::text) = (matched_at IS NOT NULL))),
     CONSTRAINT membership_checkouts_checkout_url_check CHECK (((checkout_url ~ '^https://([a-z0-9-]+\.)*squarespace\.com(/[^[:space:]]*)?$'::text) AND (length(checkout_url) <= 2048))),
     CONSTRAINT membership_checkouts_expected_email_check CHECK (((expected_email IS NULL) OR (btrim((expected_email)::text) <> ''::text))),
+    CONSTRAINT membership_checkouts_origin_check CHECK ((origin = ANY (ARRAY['link'::text, 'sync'::text]))),
     CONSTRAINT membership_checkouts_plan_key_check CHECK ((plan_key ~ '^[a-z][a-z0-9_]{0,31}$'::text)),
     CONSTRAINT membership_checkouts_product_key_check CHECK (((product_key IS NULL) OR (length(product_key) <= 200))),
-    CONSTRAINT membership_checkouts_state_check CHECK ((state = ANY (ARRAY['open'::text, 'matched'::text, 'awaiting_match'::text, 'expired'::text, 'superseded'::text, 'abandoned'::text])))
+    CONSTRAINT membership_checkouts_state_check CHECK ((state = ANY (ARRAY['open'::text, 'matched'::text, 'awaiting_match'::text, 'expired'::text, 'superseded'::text, 'abandoned'::text, 'rejected'::text]))),
+    CONSTRAINT membership_checkouts_sync_order_check CHECK (((origin = 'link'::text) OR (matched_order_id IS NOT NULL))),
+    CONSTRAINT membership_checkouts_url_origin_check CHECK (((checkout_url IS NOT NULL) OR (origin = 'sync'::text)))
 );
 
 --
@@ -4157,6 +4176,12 @@ CREATE INDEX ledger_events_pending_idx ON public.ledger_events USING btree (loca
 CREATE INDEX ledger_events_sqsp_order_idx ON public.ledger_events USING btree (sqsp_order_id) WHERE (sqsp_order_id IS NOT NULL);
 
 --
+-- Name: membership_checkouts_awaiting_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX membership_checkouts_awaiting_idx ON public.membership_checkouts USING btree (location_id, created_at DESC) WHERE (state = 'awaiting_match'::text);
+
+--
 -- Name: membership_checkouts_customer_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4173,6 +4198,12 @@ CREATE INDEX membership_checkouts_email_idx ON public.membership_checkouts USING
 --
 
 CREATE INDEX membership_checkouts_expiry_idx ON public.membership_checkouts USING btree (expires_at) WHERE (state = 'open'::text);
+
+--
+-- Name: membership_checkouts_order_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX membership_checkouts_order_idx ON public.membership_checkouts USING btree (matched_order_id) WHERE (matched_order_id IS NOT NULL);
 
 --
 -- Name: membership_credit_events_cycle_idx; Type: INDEX; Schema: public; Owner: -
@@ -4613,6 +4644,12 @@ CREATE UNIQUE INDEX uq_emergency_one_active ON public.emergency_closures USING b
 CREATE UNIQUE INDEX uq_membership_checkouts_open ON public.membership_checkouts USING btree (membership_id) WHERE (state = 'open'::text);
 
 --
+-- Name: uq_membership_checkouts_sync_order; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_membership_checkouts_sync_order ON public.membership_checkouts USING btree (customer_id, matched_order_id) WHERE (origin = 'sync'::text);
+
+--
 -- Name: uq_memberships_customer_live; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4713,6 +4750,12 @@ CREATE TRIGGER audit_log_no_update_delete BEFORE DELETE OR UPDATE ON public.audi
 --
 
 CREATE TRIGGER credit_allocations_guard BEFORE DELETE OR UPDATE ON public.credit_allocations FOR EACH ROW EXECUTE FUNCTION public.credit_allocations_guard();
+
+--
+-- Name: customers customers_email_unverify; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER customers_email_unverify BEFORE UPDATE OF email ON public.customers FOR EACH ROW EXECUTE FUNCTION public.customers_email_unverify();
 
 --
 -- Name: ledger_events ledger_events_guard; Type: TRIGGER; Schema: public; Owner: -
