@@ -320,7 +320,8 @@ CreatePayment (`source_id` the card, `customer_id` its Square customer, `autocom
 ledger reason "Balance" / "No-show fee" / "Late-cancel fee", in the name of the staff member who confirmed it). A decline answers 422
 `CARD_DECLINED` with the plain reason and keeps the charge `declined`. No answer leaves it `unknown` (202): `square.charges.resolve`
 asks again within 23 hours (GetPayment when the payment id is known, otherwise the same request with the same key: Square answers the
-payment it made, or makes it once). The webhook of the payment finds the charge by its `reference_id` and records it the same way, so
+payment it made, or makes it once); after 10 minutes without an answer staff see the alert "Saved-card charge not confirmed". The
+webhook of the payment finds the charge by its `reference_id` and records it the same way, so
 whichever comes first records it.
 
 ### 12.4 Fees

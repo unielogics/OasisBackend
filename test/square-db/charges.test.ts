@@ -254,15 +254,33 @@ describe('a balance on a saved card (POST /invoices/:id/card-charges)', () => {
     const blocked = await chargeCard(a.invoiceId, { cardId: card.cardId, amountCents: balance })
     expect(blocked.statusCode).toBe(409)
     expect((blocked.json() as Json).code).toBe('CARD_CHARGE_IN_PROGRESS')
+    // after 10 minutes without an answer staff see it
+    m.h.clock.set(new Date(m.h.clock.now().getTime() + 11 * 60_000))
+    const alerts = await squareExternalAlerts.list(m.h.t.db, { locationId: m.locationId(), now: m.h.clock.now(), manager: false })
+    expect(alerts.filter((x) => x.kind === 'square_charge_unknown').map((x) => x.title)).toEqual(['Saved-card charge not confirmed · Maria Delgado'])
     const report = await resolveCharges({ db: m.h.t.db, clock: m.h.clock, newId: m.h.t.app.newId, env: lost.env, api: lost.sim.api, locationId: m.locationId(), logger: silent })
-    expect(report).toMatchObject({ considered: 1, charged: 1 })
+    expect(report).toMatchObject({ considered: 1, charged: 1, stale: 0 })
     expect(lost.sim.store.payments.size).toBe(1) // the same key: Square answered the payment it had made
+    expect((await squareExternalAlerts.list(m.h.t.db, { locationId: m.locationId(), now: m.h.clock.now(), manager: false })).filter((x) => x.kind === 'square_charge_unknown')).toEqual([])
     const [row] = await charges()
     expect(row).toMatchObject({ state: 'charged', square_payment_id: [...lost.sim.store.payments.keys()][0] })
     expect((await ledgerOf(m, a.invoiceId)).filter((e) => e.type === 'pay')).toHaveLength(1)
     expect(await balanceOf(a.invoiceId)).toBe(0)
     // a second run has nothing to do
     expect(await resolveCharges({ db: m.h.t.db, clock: m.h.clock, newId: m.h.t.app.newId, env: lost.env, api: lost.sim.api, locationId: m.locationId(), logger: silent })).toMatchObject({ considered: 0 })
+  })
+
+  it('the job leaves an attempt older than 23 hours to the webhook and staff (no re-send)', async () => {
+    const maria = await m.customer('Maria Delgado')
+    const card = await saveCard(maria)
+    const a = await m.book('Maria Delgado', 'Express Hand Wash')
+    sq.sim.sim.injectFault({ hang: true, times: 4, path: '/v2/payments', method: 'POST' })
+    expect((await chargeCard(a.invoiceId, { cardId: card.cardId, amountCents: await balanceOf(a.invoiceId) })).statusCode).toBe(202)
+    m.h.clock.set(new Date(m.h.clock.now().getTime() + 24 * 3_600_000))
+    const report = await resolveCharges({ db: m.h.t.db, clock: m.h.clock, newId: m.h.t.app.newId, env: sq.env, api: sq.sim.api, locationId: m.locationId(), logger: silent })
+    expect(report).toMatchObject({ considered: 0, stale: 1 })
+    expect(sq.sim.store.payments.size).toBe(0)
+    expect((await charges())[0]).toMatchObject({ state: 'unknown' })
   })
 
   it('an unanswered charge whose request never reached Square is made once by the job', async () => {

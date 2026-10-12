@@ -573,6 +573,8 @@ export interface ExternalAlert {
     | 'square_external_refund'
     | 'square_overpaid'
     | 'square_problem'
+    // a saved-card charge Square has not confirmed (wave Q3a)
+    | 'square_charge_unknown'
   tone: AlertTone
   title: string
   desc: string

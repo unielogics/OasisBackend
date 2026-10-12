@@ -20,6 +20,9 @@ export const UNMATCHED_ALERT_MINUTES = 30
 /** A failed card refund and an overpaid invoice stay on the board this long (staff give the money back another way). */
 export const SQUARE_ALERT_DAYS = 14
 
+/** A saved-card charge Square has not answered for this long is shown to staff (wave Q3a). */
+export const UNANSWERED_CHARGE_ALERT_MINUTES = 10
+
 export interface SquarePaymentToMatch {
   paymentId: string
   matchState: 'pending' | 'unmatched'
@@ -208,6 +211,25 @@ export const squareExternalAlerts: ExternalAlertSource = {
         priority: 0,
       })
     }
+    // a saved-card charge Square has not confirmed (wave Q3a): the job re-sends it for 23 hours; after 10 minutes staff should know
+    const unanswered = await sql<{ id: string; amount_cents: number; reason: string | null; client: string; appointment_id: string | null }>`
+      select q.id, q.amount_cents, q.reason, c.full_name as client, q.appointment_id
+      from square_charges q join customers c on c.id = q.customer_id
+      where q.location_id = ${ctx.locationId}
+        and (q.state = 'unknown' or (q.state = 'charging' and q.attempted_at < ${new Date(now.getTime() - 5 * MIN)}))
+        and q.attempted_at < ${new Date(now.getTime() - UNANSWERED_CHARGE_ALERT_MINUTES * MIN)}
+      order by q.attempted_at limit 20`.execute(db)
+    for (const q of unanswered.rows)
+      out.push({
+        key: `square_charge_unknown:${q.id}`,
+        kind: 'square_charge_unknown',
+        tone: 'amber',
+        title: `Saved-card charge not confirmed · ${q.client}`,
+        desc: `${q.reason ?? 'Charge'} of ${formatUsd(q.amount_cents)}: Square has not answered yet · check the Square dashboard before charging again`,
+        actionLabel: 'Review',
+        appointmentId: q.appointment_id,
+        priority: 0,
+      })
     // a refund made directly in the Square app, outside Oasis limits and approvals
     const external = await sql<{ id: string; amount_cents: number; invoice_no: number; client_name: string; appointment_id: string | null }>`
       select e.id, e.amount_cents, i.invoice_no, i.client_name, i.appointment_id

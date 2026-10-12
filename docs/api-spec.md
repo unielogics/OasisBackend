@@ -2260,6 +2260,7 @@ amountCents, cardLabel}`, the activity log says "No-show fee proposed · $15.00 
 visit waives it.
 
 **Jobs.** `square.charges.resolve` (every minute, writes on): charges Square did not answer are asked again within 23 hours (GetPayment,
-or the same CreatePayment with the same key). `square.cards.nightly` (04:20): a card link for each membership card that expires within 30
+or the same CreatePayment with the same key); one still unanswered after 10 minutes is a "Needs attention" alert
+(`square_charge_unknown`, amber, "Saved-card charge not confirmed · Maria Delgado"). `square.cards.nightly` (04:20): a card link for each membership card that expires within 30
 days (once per expiry), and the cards of deleted clients disabled at Square. The webhook's `card.*` and `customer.deleted` events keep
 the saved cards in step (ADR 0171, "Cards on file and fees").

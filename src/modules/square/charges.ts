@@ -16,7 +16,7 @@
 // Square answered. The webhook of the same payment (classified `charge` by its reference_id) records it the same way, so whichever
 // comes first records it and the other finds it recorded. Nothing is charged while PAYMENT_PROCESSOR is squarespace (409
 // CARD_PAYMENTS_OFF) or Square is watch-only (409 SQUARE_WRITES_OFF).
-import { sql, type Selectable } from 'kysely'
+import { sql, type ExpressionBuilder, type Selectable } from 'kysely'
 import type { Env } from '../../config/env.js'
 import type { CreatePaymentInput, SquareApi } from '../../integrations/ports/square.js'
 import { squareLocationId } from '../../integrations/square/config.js'
@@ -39,6 +39,7 @@ import { transaction, type Db, type Executor, type Tx } from '../../platform/db.
 import { AppError } from '../../platform/errors.js'
 import type { NewId } from '../../platform/ids.js'
 import { formatUsd } from '../../platform/money.js'
+import type { Database } from '../../platform/schema.js'
 import { invoiceLabel } from '../payments/format.js'
 import { calcOf, cardLabel, lockInvoice } from '../payments/repository.js'
 import { loadCustomerTarget } from '../messaging/db/recipients.js'
@@ -261,7 +262,14 @@ type Answer =
 
 /** What one CreatePayment answered, sorted into the three outcomes. */
 async function send(d: CardChargeDeps, r: ChargeRow): Promise<Answer> {
-  const req = await paymentRequestOf(d.db, d.env, r)
+  let req: Awaited<ReturnType<typeof paymentRequestOf>>
+  try {
+    req = await paymentRequestOf(d.db, d.env, r)
+  } catch (e) {
+    // nothing was sent (no card, no Square location): nothing can have been charged
+    const detail = e instanceof AppError ? e.detail : 'The charge could not be sent'
+    return { kind: 'declined', code: 'NOT_SENT', text: `Nothing was charged: ${detail}` }
+  }
   try {
     const p = await d.api.payments.create(req.key, req.body)
     if (p.status === 'COMPLETED') return { kind: 'paid', payment: p }
@@ -631,22 +639,29 @@ export async function resolveCharges(d: CardChargeDeps): Promise<ResolveReport> 
   const report: ResolveReport = { considered: 0, charged: 0, declined: 0, unknown: 0, stale: 0 }
   if (!squareWritesOn(d.env)) return report
   const now = d.clock.now()
+  const waiting = (eb: ExpressionBuilder<Database, 'square_charges'>) =>
+    eb.or([eb('state', '=', 'unknown'), eb.and([eb('state', '=', 'charging'), eb('attempted_at', '<', new Date(now.getTime() - CHARGING_STALE_MS))])])
+  const oldest = new Date(now.getTime() - RESEND_WINDOW_MS)
+  // past the re-send window: left to the webhook and to staff (the alert "Saved-card charge not confirmed")
+  const stale = await d.db
+    .selectFrom('square_charges')
+    .select((eb) => eb.fn.countAll<string>().as('n'))
+    .where('location_id', '=', d.locationId)
+    .where(waiting)
+    .where((eb) => eb.or([eb('attempted_at', 'is', null), eb('attempted_at', '<', oldest)]))
+    .executeTakeFirst()
+  report.stale = Number(stale?.n ?? 0)
   const rows = await d.db
     .selectFrom('square_charges')
     .selectAll()
     .where('location_id', '=', d.locationId)
-    .where((eb) =>
-      eb.or([eb('state', '=', 'unknown'), eb.and([eb('state', '=', 'charging'), eb('attempted_at', '<', new Date(now.getTime() - CHARGING_STALE_MS))])]),
-    )
+    .where(waiting)
+    .where('attempted_at', '>=', oldest)
     .orderBy('attempted_at')
     .limit(50)
     .execute()
   for (const r of rows) {
     report.considered += 1
-    if (!r.attempted_at || now.getTime() - r.attempted_at.getTime() > RESEND_WINDOW_MS) {
-      report.stale += 1
-      continue
-    }
     let answer: Answer
     if (r.square_payment_id) {
       try {

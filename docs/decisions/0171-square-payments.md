@@ -216,7 +216,7 @@ reconcile do nothing, and the hook verifies nothing (no key) and answers 401.
   `ch_<id>` (`ch_<id:attempt>` after a decline), and a second transaction records the answer: `charged` through `SquareLedgerOps`
   (rule `charge`, ledger reason, in the confirming staff member's name), `declined` (422 `CARD_DECLINED`, the plain reason in `detail`;
   the key is released), or `unknown` (202; the job `square.charges.resolve` re-sends the same request with the same key within 23 hours,
-  or GetPayment when the payment id is known). The classifier's `charge` rule (a payment whose `reference_id` is a waiting charge, or
+  or GetPayment when the payment id is known; after 10 minutes the alert `square_charge_unknown` "Saved-card charge not confirmed"). The classifier's `charge` rule (a payment whose `reference_id` is a waiting charge, or
   whose id a charge holds) records a charge's payment from the webhook the same way; a payment is recorded once whichever path comes
   first.
 - **Fees** (`src/modules/square/fees.ts`, design 4.3): setting `fees.card_on_file {enabled:false, noShowCents:0, lateCancelCents:0}`
