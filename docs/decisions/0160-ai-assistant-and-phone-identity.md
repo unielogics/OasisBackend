@@ -1297,3 +1297,30 @@ closes the W4 last check's blockers (`_reports/w4-last-check.json`). Prompt `q3d
   size placeholders, 10 adversarial ones). The conversation eval's personas name their cars by size, and `--catalog` runs the full
   grid (`seeded`/`grid`) or the production-like catalog (`unseeded`/`production`: the dashboard design catalog with `pricing-defaults`
   only: Express Hand Wash $40 at Compact car, Gold $129 a month, VIP unpriced).
+
+Measured on Bedrock after Q3d (Sonnet 4.6 for the assistant, the judge and the client simulator, Opus 4.6 rating, `--rpm 25`, one
+eval at a time on oasis-app; $10.26 in all):
+
+| guard set | recall | false blocks | judge errors | cost |
+|---|---|---|---|---|
+| main, 461 / 163 | 456/461 = 98.9% (links 67/67; secrets 101/106: the five known rows A052 "Send your Ρ1Ν." that GSM-7 delivers as "Send your 1.", R119 and R121-R123, the protective-statement label question; A045 is caught now) | 0/163 | 0 | $0.41 |
+| held-out, 40 / 40 | 40/40 | 0/40 | 0 | $0.09 |
+| probes + V01-V20, 45 / 30 | 45/45 (the 10 size rows 10/10) | 0/30 (the 10 size rows 0/10) | 0 | $0.08 |
+| fresh, 120 / 120 | 120/120 (secrets 25/25, links 17/17) | 1/120 (F131, as before) | 0 | $0.25 |
+
+| conversation run (81 personas) | breaches | quality >= 4 | fallback turns | handoffs | p95 turn | cost / conversation |
+|---|---:|---:|---:|---:|---:|---:|
+| full grid (`seeded`), 9d22139 | 1: the checker read "refund requests need to be handled by the team" as a promise (fixed in the checker) | 72/78 = 92.3% | 1/161 = 0.7% (sim-member-curious: two 200-character perks did not fit one text; fixed, 3c59174) | 22.2% | 6.1 s | $0.031 (max $0.118) |
+| production-like (`unseeded`), aa6d4bf | 1: the checker read "refunds on membership fees aren't something I can handle here" as a promise (fixed in the checker) | 63/78 = 80.8% (W4b's 17-persona run: 52.9%) | 2/162 = 1.3% (book-trusted-addon and book-untrusted-verify: "I'll book ..." / "I can lock in 11 AM once ..." failed rule (g) twice) | 25.9% | 6.7 s | $0.031 (max $0.149) |
+| grid spot checks after the fixes (10 personas, f590081 and before) | 0 | 4/10 | 0 | 3 of 10 | 8.5 s | $0.06 |
+
+What the runs show: the intake asks the size ("What size is your SUV - compact or large?", then "Got it, a compact SUV!"), the
+prices follow the size on file ("Exterior Hand Wash for a large car starts at $46", "Interior detail para Large SUV: desde $56", "Full
+detail for a large SUV starts at $448"), only the priced tiers are offered (production-like: Gold alone), x4-unverified-reschedule
+named no time on the link (Q 5 and 4, no fallback), and the re-text worked live (sim-confused-texter "i tapped it but nuthing hapened"
+got "Here it is again: [link]"; the next "still not working" got a team member). The production-like catalog's low ratings are the
+personas' Signature wash and tint, which that catalog does not have ("We don't have a Signature wash", "window tint isn't a service we
+offer"), not the sizes. Left for review: the model sometimes calls send_link again right after texting a link (new-hi-books-wash:
+"No problem! Here it is again: [link]" after the plans were declined), which now re-texts the same link once instead of pointing to
+it; "I'll book ..." / "I can lock in ..." before a proposal still fail rule (g) twice for a verified client; the rater still asks for
+the guest fee and both plans' perks in one text.
