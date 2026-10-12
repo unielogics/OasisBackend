@@ -5,11 +5,12 @@
 //   1. plans the legs under the invoice lock: the invoice's Square payments newest first, each capped by what it can still give back
 //      (its total, tip included, less its live legs); a refund the Square money cannot cover is marked failed at once (alert);
 //   2. sends RefundPayment for each leg with its own key (rf_<leg id>): a retry after a timeout answers the same refund;
-//   3. refund.* webhooks (and the catch-up) move the legs; all legs completed -> the refund is confirmed; any leg FAILED or REJECTED
-//      -> processor_state 'failed': it no longer counts as refunded (invoice_calc_of and its twins) and staff are alerted to give the
-//      money back another way.
-// A refund made in the Square POS app is attached to the staff's awaiting card refund of that amount, or recorded as an external
-// refund that needs review (ingestSquareRefund).
+//   3. refund.* webhooks (and the catch-up) move the legs; once every leg is settled: all completed -> the refund is confirmed; any leg
+//      FAILED or REJECTED -> processor_state 'failed': it no longer counts as refunded (invoice_calc_of and its twins), what the
+//      completed legs gave back is written as its own confirmed card refund (settleRefundEvent), and staff are alerted to give the
+//      rest back another way. A refund sent to Square is not confirmed by hand (PaymentsService.confirmProcessor refuses it).
+// A refund made in the Square POS app is attached to the staff's awaiting card refund of that amount (or to one they confirmed by hand
+// before Square's event arrived), or recorded as an external refund that needs review (ingestSquareRefund).
 import { sql } from 'kysely'
 import type { Env } from '../../config/env.js'
 import type { SquareApi } from '../../integrations/ports/square.js'
@@ -21,7 +22,7 @@ import { transaction, type Db, type Tx } from '../../platform/db.js'
 import type { NewId } from '../../platform/ids.js'
 import { maskText } from '../../platform/logging.js'
 import { announceInvoiceChange, invoiceSnapshot } from '../payments/announce.js'
-import { lockInvoice } from '../payments/repository.js'
+import { insertEvent, lockInvoice } from '../payments/repository.js'
 import type { SquareRefundLegState } from './db/schema.js'
 import { factsOfRow, type SquareRefundFacts } from './facts.js'
 import type { SquareLogger } from './ingest.js'
@@ -103,16 +104,27 @@ async function squarePaysOf(tx: Tx, invoiceId: string): Promise<SquarePayRef[]> 
   return out
 }
 
-/** Moves the refund event once its legs are settled: all completed -> confirmed; any failed or rejected -> failed. Under the lock. */
-export async function settleRefundEvent(tx: Tx, d: { locationId: string; clock: Clock }, eventId: string): Promise<'confirmed' | 'failed' | 'waiting'> {
+/**
+ * Moves the refund event once every leg is settled (none to submit or pending), under the invoice lock:
+ *   all completed -> confirmed;
+ *   any failed or rejected -> the event is failed (it stops counting) and what the completed legs did give back is written as its
+ *   own confirmed card refund (parent_event_id = the event, key square:refund-part:<event id>), so the ledger counts exactly the money
+ *   that went back and the alert asks staff only for the rest.
+ * A leg that fails while another is still on its way leaves the event waiting (the alert already shows the failed part).
+ */
+export async function settleRefundEvent(
+  tx: Tx,
+  d: { locationId: string; clock: Clock; newId: NewId },
+  eventId: string,
+): Promise<'confirmed' | 'failed' | 'waiting'> {
   const ev = await tx.selectFrom('ledger_events').selectAll().where('id', '=', eventId).executeTakeFirst()
   if (!ev) return 'waiting'
   await lockInvoice(tx, d.locationId, ev.invoice_id)
   const legs = await tx.selectFrom('square_refund_legs').selectAll().where('ledger_event_id', '=', eventId).orderBy('created_at').execute()
   if (ev.processor_state !== 'awaiting_processor' || legs.length === 0) return 'waiting'
+  if (legs.some((l) => l.state === 'to_submit' || l.state === 'pending')) return 'waiting'
   const failed = legs.some((l) => l.state === 'failed' || l.state === 'rejected')
-  const done = legs.every((l) => l.state === 'completed')
-  if (!failed && !done) return 'waiting'
+  const completed = legs.filter((l) => l.state === 'completed')
   const before = await invoiceSnapshot(tx, ev.invoice_id)
   const now = d.clock.now()
   await tx
@@ -130,6 +142,47 @@ export async function settleRefundEvent(tx: Tx, d: { locationId: string; clock: 
     )
     .where('id', '=', eventId)
     .execute()
+  const doneCents = completed.reduce((s, l) => s + l.amount_cents, 0)
+  const part =
+    failed && doneCents > 0
+      ? await insertEvent(tx, {
+          id: d.newId(),
+          location_id: ev.location_id,
+          invoice_id: ev.invoice_id,
+          customer_id: ev.customer_id,
+          type: 'refund',
+          amount_cents: doneCents,
+          status: 'done',
+          dest: 'card',
+          method: ev.method,
+          method_kind: ev.method_kind,
+          brand: ev.brand,
+          last4: ev.last4,
+          deposit: ev.deposit,
+          reason: ev.reason,
+          note: 'The part of the card refund Square gave back (the rest failed)',
+          item_ids: ev.item_ids,
+          parent_event_id: ev.id,
+          actor_user_id: ev.actor_user_id,
+          actor_employee_id: ev.actor_employee_id,
+          actor_name: ev.actor_name,
+          actor_roles: ev.actor_roles,
+          approved_by_user_id: ev.approved_by_user_id,
+          approved_by_employee_id: ev.approved_by_employee_id,
+          approved_by_name: ev.approved_by_name,
+          approved_by_roles: ev.approved_by_roles,
+          approved_at: ev.approved_at,
+          occurred_at: ev.occurred_at,
+          resolved_at: ev.resolved_at ?? now,
+          source: 'square',
+          processor: 'square',
+          processor_state: 'confirmed',
+          processor_ref: completed.find((l) => l.square_refund_id)?.square_refund_id ?? null,
+          processor_confirmed_at: now,
+          processor_confirmed_by: 'Square',
+          idempotency_key: `square:refund-part:${ev.id}`,
+        })
+      : null
   await announceInvoiceChange(tx, {
     locationId: d.locationId,
     invoiceId: ev.invoice_id,
@@ -139,9 +192,10 @@ export async function settleRefundEvent(tx: Tx, d: { locationId: string; clock: 
     before,
     after: {
       eventId,
+      ...(failed ? { refundedCents: doneCents, partEventId: part?.id ?? null } : {}),
       legs: legs.map((l) => ({ id: l.id, paymentId: l.square_payment_id, amountCents: l.amount_cents, state: l.state, error: l.error })),
     },
-    events: [{ id: eventId, type: 'refund' }],
+    events: part ? [{ id: eventId, type: 'refund' }, { id: part.id, type: 'refund' }] : [{ id: eventId, type: 'refund' }],
   })
   return failed ? 'failed' : 'confirmed'
 }
@@ -367,6 +421,31 @@ export async function ingestSquareRefund(
     try {
       await ops.attachPosRefund(tx, { refund: rf, eventId: awaiting.id })
       return { status: 'processed', note: 'refund made in the Square app: attached to the staff refund' }
+    } catch (e) {
+      if (!(e instanceof SquareStaleDecision)) throw e
+    }
+  }
+  // the staff confirmed their card refund by hand (today's step before the cutover) before Square's refund event arrived: that refund
+  // is this one, so it takes the Square ids instead of the money counting twice. Not one finished in Squarespace (its order id).
+  const byHand = await tx
+    .selectFrom('ledger_events as e')
+    .select('e.id')
+    .where('e.invoice_id', '=', mirror.invoice_id)
+    .where('e.type', '=', 'refund')
+    .where('e.dest', '=', 'card')
+    .where('e.status', '=', 'done')
+    .where('e.processor_state', '=', 'confirmed')
+    .where('e.amount_cents', '=', rf.amountCents)
+    .where('e.processor_ref', 'is', null)
+    .where('e.sqsp_order_id', 'is', null)
+    .where((eb) => eb.or([eb('e.processor', 'is', null), eb('e.processor', '=', 'square')]))
+    .where(({ not, exists, selectFrom }) => not(exists(selectFrom('square_refund_legs as l').select('l.id').whereRef('l.ledger_event_id', '=', 'e.id'))))
+    .orderBy('e.seq')
+    .executeTakeFirst()
+  if (byHand) {
+    try {
+      await ops.attachConfirmedRefund(tx, { refund: rf, eventId: byHand.id })
+      return { status: 'processed', note: 'refund made in the Square app, confirmed by hand: attached to the staff refund' }
     } catch (e) {
       if (!(e instanceof SquareStaleDecision)) throw e
     }

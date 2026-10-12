@@ -550,7 +550,7 @@ export function registerPaymentsRoutes(
         tags: [TAG],
         summary: 'Confirm by hand that a card payment or refund was completed at the processor',
         description:
-          'Needs the permission of the original action: pay.collect for a payment, pay.refund for a refund.',
+          'Needs the permission of the original action: pay.collect for a payment, pay.refund for a refund. 409 `EVENT_NOT_AWAITING` (names the processor); 409 `REFUND_SENT_TO_SQUARE` for a refund sent through the Square API (its legs settle it).',
         params: z.object({ id: z.string().uuid() }),
         body: ConfirmBody,
         response: { 200: EventResult },

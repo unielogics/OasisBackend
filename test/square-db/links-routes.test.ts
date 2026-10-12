@@ -235,4 +235,29 @@ describe('Square payments to match (queue routes)', () => {
     const m = await p.h.t.db.selectFrom('square_payments').selectAll().where('square_payment_id', '=', String(pay.id)).executeTakeFirstOrThrow()
     expect(m).toMatchObject({ invoice_id: b.id, rule: 'reassign', match_state: 'matched' })
   })
+
+  it('a second reassign takes the tip along again (it never stays on the invoice in between)', async () => {
+    const s = square()
+    const { amara } = p.people()
+    const a = await makeInvoice(p.h.t.db, p.env(), { items: [{ name: 'Wash', priceCents: 4000 }] })
+    const b = await makeInvoice(p.h.t.db, p.env(), { items: [{ name: 'Wash', priceCents: 4000 }] })
+    const c = await makeInvoice(p.h.t.db, p.env(), { items: [{ name: 'Wash', priceCents: 4000 }] })
+    const pay = s.sim.store.posPayment({ amountCents: 4280, tipCents: 500, note: `INV-${a.no}` })
+    expect(await s.decide(String(pay.id))).toBe('matched')
+    for (const to of [b, c]) {
+      const moved = await p.send(amara, 'POST', `payments/square/${pay.id}/reassign`, { toInvoiceId: to.id })
+      expect(moved.statusCode, moved.body).toBe(200)
+    }
+    const calcOf = async (id: string) => p.json<{ calc: { paid: number; tip: number; balance: number } }>(await p.get(amara, `invoices/${id}`)).calc
+    expect(await calcOf(a.id)).toMatchObject({ paid: 0, tip: 0, balance: 4280 })
+    expect(await calcOf(b.id)).toMatchObject({ paid: 0, tip: 0, balance: 4280 })
+    expect(await calcOf(c.id)).toMatchObject({ paid: 4780, tip: 500, balance: 0 })
+    const m = await p.h.t.db.selectFrom('square_payments').selectAll().where('square_payment_id', '=', String(pay.id)).executeTakeFirstOrThrow()
+    const tip = await p.h.t.db.selectFrom('ledger_events').selectAll().where('id', '=', m.tip_event_id!).executeTakeFirstOrThrow()
+    expect(tip).toMatchObject({ invoice_id: c.id, reason: 'Tip', amount_cents: 500 })
+    // and back to the first invoice
+    expect((await p.send(amara, 'POST', `payments/square/${pay.id}/reassign`, { toInvoiceId: a.id })).statusCode).toBe(200)
+    expect(await calcOf(c.id)).toMatchObject({ paid: 0, tip: 0, balance: 4280 })
+    expect(await calcOf(a.id)).toMatchObject({ paid: 4780, tip: 500, balance: 0 })
+  })
 })

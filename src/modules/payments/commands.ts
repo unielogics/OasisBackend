@@ -964,6 +964,11 @@ export class PaymentsService {
     const ev = await getEventForUpdate(tx, c.locationId, eventId)
     if (ev.processor_state !== 'awaiting_processor')
       throw new AppError('EVENT_NOT_AWAITING', { params: { processor: processorName(ev.processor) } })
+    // a refund sent through the Square API is settled by its legs (ADR 0171 D4): a hand confirmation would hide a leg that fails
+    if (ev.type === 'refund') {
+      const sent = await tx.selectFrom('square_refund_legs').select('id').where('ledger_event_id', '=', ev.id).where('origin', '=', 'api').executeTakeFirst()
+      if (sent) throw new AppError('REFUND_SENT_TO_SQUARE')
+    }
     const now = this.d.clock.now()
     const calc = await calcOf(tx, inv.id)
     const row = await tx

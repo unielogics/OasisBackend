@@ -80,11 +80,17 @@ export interface FailedSquareRefund {
   client: string
   amountCents: number
   occurredAt: string
-  /** What Square did give back of it (legs that completed before another failed). */
+  /** What Square did give back of it (legs that completed; written as its own confirmed refund once every leg settled). */
   refundedCents: number
+  /** What did not go back to the card and is not on its way: the staff give this back another way. */
+  uncoveredCents: number
   errors: string[]
 }
 
+/**
+ * Card refunds through Square that did not (all) go back: failed ones, and ones still waiting with a leg already failed or rejected
+ * (another leg on its way), so the staff learn at once.
+ */
 export async function failedSquareRefunds(db: Executor, locationId: string, since: Date): Promise<FailedSquareRefund[]> {
   const r = await sql<{
     id: string
@@ -94,13 +100,19 @@ export async function failedSquareRefunds(db: Executor, locationId: string, sinc
     amount_cents: number
     occurred_at: Date
     done: string | number | null
+    live: string | number | null
     errors: string[] | null
   }>`
     select e.id, e.invoice_id, i.invoice_no, i.client_name, e.amount_cents, e.occurred_at,
            (select sum(l.amount_cents) from square_refund_legs l where l.ledger_event_id = e.id and l.state = 'completed') as done,
+           (select sum(l.amount_cents) from square_refund_legs l
+              where l.ledger_event_id = e.id and l.state in ('to_submit', 'pending', 'completed')) as live,
            (select array_agg(l.error) from square_refund_legs l where l.ledger_event_id = e.id and l.error is not null) as errors
     from ledger_events e join invoices i on i.id = e.invoice_id
-    where e.location_id = ${locationId} and e.type = 'refund' and e.processor = 'square' and e.processor_state = 'failed'
+    where e.location_id = ${locationId} and e.type = 'refund' and e.processor = 'square'
+      and (e.processor_state = 'failed'
+        or (e.processor_state = 'awaiting_processor'
+          and exists (select 1 from square_refund_legs l where l.ledger_event_id = e.id and l.state in ('failed', 'rejected'))))
       and e.occurred_at >= ${since}
     order by e.occurred_at desc, e.seq desc
     limit 50`.execute(db)
@@ -112,6 +124,7 @@ export async function failedSquareRefunds(db: Executor, locationId: string, sinc
     amountCents: x.amount_cents,
     occurredAt: x.occurred_at.toISOString(),
     refundedCents: Number(x.done ?? 0),
+    uncoveredCents: Math.max(0, x.amount_cents - Number(x.live ?? 0)),
     errors: x.errors ?? [],
   }))
 }
@@ -188,7 +201,8 @@ export const squareExternalAlerts: ExternalAlertSource = {
         kind: 'square_refund_failed',
         tone: 'red',
         title: `Card refund failed · ${f.client}`,
-        desc: `${formatUsd(f.amountCents)} on ${f.label} did not go back to the card${f.refundedCents > 0 ? ` (${formatUsd(f.refundedCents)} did)` : ''} · refund it in cash or store credit`,
+        // only what did not go back (and is not on its way): the part Square gave back stays counted as refunded
+        desc: `${f.uncoveredCents < f.amountCents ? `${formatUsd(f.uncoveredCents)} of a ${formatUsd(f.amountCents)} card refund` : formatUsd(f.amountCents)} on ${f.label} did not go back to the card · refund it in cash or store credit`,
         actionLabel: 'Review',
         appointmentId: inv?.appointment_id ?? null,
         priority: 0,

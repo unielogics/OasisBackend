@@ -97,7 +97,7 @@ reconcile do nothing, and the hook verifies nothing (no key) and answers 401.
   `square_pos_intents`.
 - **Ledger** (`src/modules/square/ledger.ts`, `SquareLedgerOps`): `recordPayment` (`square:pay:<id>`), `confirmAwaiting`, `recordTip`
   (`square:tip:<id>`, raises `invoices.tip_cents`), `attachCash`, `reassign` (`pay.void`), `recordExternalRefund` (`square:refund:<id>`,
-  needs review), `attachPosRefund`; refund legs are confirmed or failed by `settleRefundEvent` (`refunds.ts`). Every write locks the
+  needs review), `attachPosRefund`, `attachConfirmedRefund`; refund legs are confirmed or failed by `settleRefundEvent` (`refunds.ts`). Every write locks the
   invoice, re-checks under the lock, and never writes a second live `pay` of one Square payment. The common tail (version, audit, SSE,
   Operations refresh) is `src/modules/payments/announce.ts`, now shared with `PaymentsService` and `SqspLedgerOps`.
 - **Classifier and matcher** (`classify.ts`, pure `matcher.ts`, driver `payments.ts`): rules as the design (2.3, 2.4) with one order
@@ -129,7 +129,13 @@ reconcile do nothing, and the hook verifies nothing (no key) and answers 401.
 - **Refunds** (D4): the refund row is the outbox; it carries `processor square` when written while Square is the processor on an invoice
   holding Square card money (`PaymentsService.refund` and the adjust settlement). `square.refunds.submit` plans legs and sends them;
   a refund the Square money cannot cover is failed without sending (all or nothing: no partial Square refund with the rest left to
-  staff); refund events settle legs, including the race where Square's event arrives before the job recorded its answer.
+  staff); refund events settle legs, including the race where Square's event arrives before the job recorded its answer. The refund
+  settles once every leg has: when some legs completed and another failed, the refund is failed and the completed part is written as
+  its own confirmed card refund (`parent_event_id`, key `square:refund-part:<event id>`), so the ledger counts exactly what went back
+  and the alert asks only for the rest (verifier finding A). `confirmProcessor` refuses a refund with API legs
+  (`REFUND_SENT_TO_SQUARE`; the awaiting alert offers Review, finding B). A Square-app refund also attaches to a card refund the staff
+  confirmed by hand without a reference before Square's event arrived, instead of being recorded a second time (finding C). A second
+  reassign finds the payment's live tip whatever key wrote it (finding D).
 - **Wording** (design 2.7): `VOID_NOT_ALLOWED`, `EVENT_NOT_AWAITING` name the event's processor (`processorName`), `PAYMENT_LINK_REQUIRED`
   is neutral; the awaiting alert of a Square entry reads "Square has not confirmed it yet".
 - **Off by default**: with `SQUARE_PROVIDER=sim`, `SQUARE_WRITES_ENABLED=false` and `PAYMENT_PROCESSOR=squarespace` no payment reaches

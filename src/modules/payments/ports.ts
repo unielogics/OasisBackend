@@ -69,6 +69,7 @@ export interface SquareSection {
     amountCents: number
     occurredAt: string
     refundedCents: number
+    uncoveredCents: number
     errors: string[]
   }>
   refundsInFlight: number

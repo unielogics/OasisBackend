@@ -139,8 +139,9 @@ confirming its "Square reader" entry), Set aside (not an Oasis sale, a duplicate
 (INV-20640) in the POS note: that is recorded at once (rule R1).
 
 **A card refund Square refused** (FAILED or REJECTED, or the Square money on the invoice cannot cover it) no longer counts as refunded;
-the alert "Card refund failed" says what did go back. Give the rest back in cash or store credit (a new refund), or try the card refund
-again.
+when part of it did go back (a refund split over two payments), that part stays counted as its own refund and the alert "Card refund
+failed" names only the rest. Give the rest back in cash or store credit (a new refund), or try the card refund again. A refund sent to
+Square updates by itself: there is nothing to confirm by hand.
 
 **Rotating the webhook signature key**
 
@@ -256,9 +257,11 @@ it. Link hosts: `square.link`, `square.site`, and `squareupsandbox.com` outside 
 
 The refund ledger row is the outbox: a card refund on an invoice holding Square card money, written while Square is the processor,
 carries `processor square`. `square.refunds.submit` plans legs (newest Square payment first, each capped), sends RefundPayment with the
-leg's own key (`rf_<leg id>`, a retry answers the same refund), and `refund.*` events settle them: all completed, the refund is
-confirmed; any failed or rejected, it is `failed` (not counted) and an alert. Refunds made in the Square app are attached to the
-staff's waiting card refund of the amount, or recorded for review ("Refunded in Square").
+leg's own key (`rf_<leg id>`, a retry answers the same refund), and `refund.*` events settle them once every leg has: all completed,
+the refund is confirmed; any failed or rejected, it is `failed` (not counted), the completed part becomes its own confirmed refund
+(key `square:refund-part:<event id>`) and an alert asks for the rest. Staff cannot confirm such a refund by hand. Refunds made in the
+Square app are attached to the staff's waiting card refund of the amount (or one they confirmed by hand before Square's event came),
+or recorded for review ("Refunded in Square").
 
 ### 11.5 POS app switch
 

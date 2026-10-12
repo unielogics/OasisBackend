@@ -90,8 +90,10 @@ export const sqspExternalAlerts: ExternalAlertSource = {
       client_name: string
       appointment_id: string | null
       processor: 'square' | 'squarespace' | null
+      sent: boolean
     }>`
-      select e.id, e.type, e.amount_cents, e.occurred_at, i.invoice_no, i.client_name, i.appointment_id, e.processor
+      select e.id, e.type, e.amount_cents, e.occurred_at, i.invoice_no, i.client_name, i.appointment_id, e.processor,
+        exists (select 1 from square_refund_legs l where l.ledger_event_id = e.id and l.origin = 'api') as sent
       from ledger_events e join invoices i on i.id = e.invoice_id
       where e.location_id = ${ctx.locationId} and e.processor_state = 'awaiting_processor' and e.occurred_at <= ${cutoff}
         and not exists (select 1 from ledger_events v where v.voids_event_id = e.id)
@@ -106,7 +108,8 @@ export const sqspExternalAlerts: ExternalAlertSource = {
         title: `${e.type === 'refund' ? 'Card refund' : 'Card payment'} not confirmed · ${e.client_name}`,
         // processor-neutral (ADR 0171, design 2.7): a Square entry waits on Square's webhook; anything else is finished in Squarespace
         desc: `${formatUsd(e.amount_cents)} on INV-${e.invoice_no} recorded ${ageLabel(minutes)} ago · ${e.processor === 'square' ? 'Square has not confirmed it yet' : 'finish it in Squarespace'}`,
-        actionLabel: 'Confirm',
+        // a refund sent through the Square API settles by itself (confirming it by hand is refused): look, don't confirm
+        actionLabel: e.sent ? 'Review' : 'Confirm',
         appointmentId: e.appointment_id,
         priority: 0,
       })

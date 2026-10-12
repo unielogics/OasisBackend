@@ -84,6 +84,11 @@ registerProblems({
     title: 'Nothing to confirm',
     detail: 'This entry is not waiting on {processor}',
   },
+  REFUND_SENT_TO_SQUARE: {
+    status: 409,
+    title: 'Square is handling it',
+    detail: 'This refund was sent to Square. It updates by itself when Square answers',
+  },
   ADDON_REMOVE_OVERPAID: {
     status: 409,
     title: 'Can’t remove add-on',

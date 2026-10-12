@@ -9,6 +9,7 @@
 //   reassign               a matched payment moves: a `void` of what it wrote on the wrong invoice, then recordPayment on the right one
 //   recordExternalRefund   a refund made in the Square app that matches nothing: a `refund` needing review, key square:refund:<id>
 //   attachPosRefund        a refund made in the Square app that is the staff's awaiting card refund of that amount
+//   attachConfirmedRefund  the same, for a card refund the staff already confirmed by hand (it only takes the Square refund id)
 // The common tail (version, audit, SSE, Operations refresh) is payments/announce.ts. The mirror row (square_payments) records the
 // decision in the same transaction.
 import { sql } from 'kysely'
@@ -93,6 +94,17 @@ export class SquareLedgerOps {
         and e.reason is distinct from 'Tip'
         and not exists (select 1 from ledger_events v where v.voids_event_id = e.id)
       order by e.seq limit 1`.execute(tx)
+    return r.rows[0]
+  }
+
+  /** The live (not voided) tip pay of this payment, whatever key wrote it. */
+  private async liveTipOf(tx: Tx, paymentId: string): Promise<EventRow | undefined> {
+    const r = await sql<EventRow>`
+      select e.* from ledger_events e
+      where e.location_id = ${this.d.locationId} and e.type = 'pay' and e.processor = 'square' and e.processor_ref = ${paymentId}
+        and e.reason = 'Tip'
+        and not exists (select 1 from ledger_events v where v.voids_event_id = e.id)
+      order by e.seq desc limit 1`.execute(tx)
     return r.rows[0]
   }
 
@@ -405,7 +417,8 @@ export class SquareLedgerOps {
       .where('square_payment_id', '=', i.facts.paymentId)
       .where('state', 'in', ['to_submit', 'pending', 'completed'])
       .executeTakeFirst()
-    const tipRow = await this.eventByKey(tx, tipKey(i.facts.paymentId))
+    // the payment's live tip, whatever key wrote it (square:tip:<id>, or the key of an earlier reassign)
+    const tipRow = await this.liveTipOf(tx, i.facts.paymentId)
     const moving = from.amount_cents + (tipRow && tipRow.invoice_id === from.invoice_id ? tipRow.amount_cents : 0)
     const calc = await calcOf(tx, from.invoice_id)
     if (legs || calc.paid - moving - calc.refunded - calc.pendingAmt < 0) throw new AppError('SQUARE_REASSIGN_REFUNDED')
@@ -459,8 +472,9 @@ export class SquareLedgerOps {
       after: { squarePaymentId: i.facts.paymentId, toInvoiceId: i.toInvoiceId, voided: voids.map((v) => v.voids_event_id) },
       events: voids,
     })
+    // the tip is moved below under its own key (recordPayment would find the first tip's key and take nothing along)
     const moved = await this.recordPayment(tx, {
-      facts: { ...i.facts, tipCents: tipRow && tipRow.invoice_id === from.invoice_id ? i.facts.tipCents : 0 },
+      facts: { ...i.facts, tipCents: 0 },
       invoiceId: i.toInvoiceId,
       rule: 'reassign',
       confidence: 1,
@@ -595,6 +609,39 @@ export class SquareLedgerOps {
       action: 'square.confirm_refund',
       ctx: auditCtx(SQUARE_ACTOR),
       before,
+      after: { eventId: ev.id, squareRefundId: i.refund.refundId },
+      events: [{ id: ev.id, type: 'refund' }],
+    })
+  }
+
+  /**
+   * The staff's card refund they confirmed by hand (no processor reference, no legs, same amount) is this refund made in the Square
+   * app: it takes the Square refund id; nothing else changes (the money already counts once).
+   */
+  async attachConfirmedRefund(tx: Tx, i: { refund: SquareRefundFacts; eventId: string }): Promise<void> {
+    const probe = await this.eventFor(tx, i.eventId)
+    await lockInvoice(tx, this.d.locationId, probe.invoice_id)
+    const ev = await this.eventFor(tx, i.eventId)
+    const legs = await tx.selectFrom('square_refund_legs').select('id').where('ledger_event_id', '=', ev.id).executeTakeFirst()
+    if (
+      ev.type !== 'refund' ||
+      ev.dest !== 'card' ||
+      ev.processor_state !== 'confirmed' ||
+      ev.processor_ref ||
+      ev.sqsp_order_id ||
+      ev.processor === 'squarespace' ||
+      legs ||
+      ev.amount_cents !== i.refund.amountCents
+    )
+      throw new SquareStaleDecision('the refund changed')
+    await tx.updateTable('ledger_events').set({ processor: 'square', processor_ref: i.refund.refundId }).where('id', '=', ev.id).execute()
+    await this.posLeg(tx, ev.id, i.refund)
+    await announceInvoiceChange(tx, {
+      locationId: this.d.locationId,
+      invoiceId: ev.invoice_id,
+      now: this.now(),
+      action: 'square.attach_refund',
+      ctx: auditCtx(SQUARE_ACTOR),
       after: { eventId: ev.id, squareRefundId: i.refund.refundId },
       events: [{ id: ev.id, type: 'refund' }],
     })
