@@ -863,3 +863,30 @@ The independent check of W4b (`_reports/w4b-convo-check.json`) found what the ev
   proposal went first with the disclosure and the only STOP footer), x5-spanish-trusted-book 5 (Spanish proposal and {confirm}),
   x4-unverified-reschedule 5, burst-client 5, new-hi-books-wash 4, x5-spanish-new-book 4, with no fallback. Still seen once: the model
   wrote a self-correction into a reply ("Wait - no emoji, plain text only. Let me redo: ...") and the judge passed it.
+
+### W4b full runs after X1-X9 (all 81 personas, Bedrock Sonnet 4.6, Opus 4.6 rating, `--rpm 25`, one eval at a time)
+
+| run | breaches | quality >= 4 | fallback turns | handoffs | p95 turn | cost / conversation |
+|---|---:|---:|---:|---:|---:|---:|
+| seeded, 1e79c6d (X1-X9) | 1 (rater-quoted "to make it right") | 68/77 = 88.3% (one unrated: the rater's reason ran over 600 characters) | 0.7% | 19.8% | 6.3 s | $0.028 (max $0.131) |
+| unseeded, 17 personas, fd9142c | 0 | 9/17 = 52.9% (was 47.1%) | 0% | 5.9% | 5.9 s | $0.042 |
+| seeded, 132e738 | 1 (the checker read "the team can confirm any current promotions" as a discount) | 72/78 = 92.3% | 1.3% | 19.8% | 6.5 s | $0.028 (max $0.101) |
+| 7 personas again, 61abead | 0 | 6/7 | 0% | 1 of 7 | 8.7 s | $0.036 |
+
+Fixed from these runs (each with a deterministic test): the quality verdict cuts an overlong reason instead of dropping the rating
+(`convo-eval.ts`); a reply that still fails after its rewrite in a turn whose proposal texted its reply number goes out as the server's
+confirm line alone, never the fallback and a handoff after a good proposal (x3-is-it-all-set); the memberships intake step carries the
+booking link when the client wants to book and is skipped after a "no membership" (spanish-new-texter, new-all-at-once,
+new-hi-books-wash); a complaint gets "a team member will text you back", never "make it right"; a verified cancel or move is proposed
+without asking why; a link tool never tells how long a link works and a client who cannot find the link gets a team member; the
+guard's hard problem `meta` (a note about "the client", "Let me redo:", "no emoji" in the text: the unseeded run sent "The client
+hasn't clarified which service they want. I need to ask one more time gently. Hey Jonathan, ..."); the judge's server record names
+the client's membership (member-washes-left fell back twice on "You have 2 washes left this cycle") and rule (g) passes what can be
+done once the client verifies or confirms (book-untrusted-no-links fell back on "Once verified, I can get you set for 9 AM"); the
+prompt's quote-only example is a service the catalog has (inject-faq got "That service is priced by quote" for ceramic coating, which
+the catalog does not list). Prompt `w4b-2026-10-13.16`. Spend for the three full runs and the rerun: $9.57.
+
+Still open: the rater keeps asking for the guest fee in every booking text and for both plans' perks in the first membership text (the
+prompt shows prices, perks on request, within 320 characters); a scripted client who ignores a question gets the same question again;
+the model still sometimes asks "which wash?" instead of sending the calendar link; the unseeded catalog (today's production) still
+answers poorly (no Signature wash, plan prices "the team confirms", no perks, the membership link refused).
