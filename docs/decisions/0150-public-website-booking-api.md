@@ -1,5 +1,5 @@
 # 0150 The public website books for real: a small public API with abuse controls, no card capture, and SMS as the dependency
-Status: accepted (2026-10-10); amended the same day after the public-surface review (section "The review of 2026-10-10")
+Status: accepted (2026-10-10); amended the same day after the public-surface review (section "The review of 2026-10-10"); the fixed Gold → premium / VIP → executive mapping and the VIP-by-key rule are replaced by editable tiers (ADR 0170)
 
 The owner decided (2026-10-10) that the website (ADR 0145) books **real** appointments and signs members up, with "book now, pay at the
 shop or by link": no card data is ever typed on the site. The open-times board shows **real** availability, the "N of 3 bays open now"
