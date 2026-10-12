@@ -3,14 +3,15 @@
 //    are priced again at that size for the client (the member price, or the regular price on a line the membership covers), the
 //    invoice follows, class_confirmed_at is stamped (no more "Confirm size" / "Confirm price"), the car on file gets the size
 //    (source staff). A change that would leave the invoice overpaid is refused whole (409 PRICE_CHANGE_OVERPAID: refund or adjust
-//    first). A visit the membership already covered keeps its coverage (the credits it spent count as still there for the reprice).
+//    first). A visit the membership already covered is settled again at the new size (its own credits count as still there): a
+//    line it covered stays covered, up to the plan size's price.
 //  * quoteFor (POST /appointments/quote): the booking sheet's price preview, the same engine as the booking, nothing written.
 import type { Executor, Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
 import { isUuid } from '../../platform/ids.js'
 import { requireService } from '../catalog/service.js'
 import { formatUsdOps as dollars } from '../../platform/money.js'
-import { invalidTransition, lockAppointment, logActivity, publishOps } from './appointments.js'
+import { invalidTransition, lockAppointment, logActivity, publishOps, type AppointmentRecord } from './appointments.js'
 import { audit } from './audit-helper.js'
 import type { Actor, SchedulingCtx } from './context.js'
 import { liveAddons, syncInvoiceItems } from './invoicing.js'
@@ -23,6 +24,7 @@ import {
   priceVisit,
   pricingView,
   recordVehicleClass,
+  resettleCoverage,
   resolveVisitClass,
   withVisitCredits,
   type PricingView,
@@ -70,9 +72,12 @@ export async function setAppointmentClass(
     .execute()
   for (const [i, x] of addons.entries())
     await tx.updateTable('appointment_addons').set(lineColumns(rest[i]!)).where('id', '=', x.id).execute()
-  const fresh = await lockAppointment(tx, c.locationId, a.id)
+  let fresh: AppointmentRecord
   let invoice: InvoiceSummary
   try {
+    // a visit the membership already covered is settled again at the new size (the plan covers up to its size's price)
+    await resettleCoverage(tx, c, actor, a.id)
+    fresh = await lockAppointment(tx, c.locationId, a.id)
     invoice = await syncInvoiceItems(tx, c, fresh, { relabel: true })
   } catch (e) {
     // the gateway's overpaid guard in the words of a size change (the whole change rolls back with the transaction)

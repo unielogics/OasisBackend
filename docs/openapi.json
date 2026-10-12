@@ -3973,7 +3973,7 @@
     },
     "/api/v1/appointments/{id}/addons/{serviceId}": {
       "delete": {
-        "description": "409 ADDON_REMOVE_OVERPAID when the invoice would be left overpaid: refund or adjust instead.",
+        "description": "A covered add-on gives its membership coverage and credit back (ADR 0170). 409 ADDON_REMOVE_OVERPAID when the invoice would be left overpaid: refund or adjust instead.",
         "parameters": [
           {
             "in": "path",
@@ -4351,6 +4351,7 @@
         "x-oasis-access": "sched.edit"
       },
       "put": {
+        "description": "Priced at the visit’s size for the client (ADR 0170). On a visit the membership already covered, an add-on an inclusion names is covered too (the visit is settled again; noted on the visit).",
         "parameters": [
           {
             "in": "path",
@@ -15935,7 +15936,7 @@
     },
     "/api/v1/appointments/{id}/vehicle-class": {
       "put": {
-        "description": "The package and live add-ons are priced again at the size for the client (ADR 0170), the invoice follows, the \"Confirm size\" / \"Confirm price\" badges go away (class_confirmed_at) and the visit’s car gets the size (source staff). A change that would leave the invoice paid above its new total: 409 `PRICE_CHANGE_OVERPAID` (refund or adjust first); nothing changes. Stale `version`: 409 `VERSION_CONFLICT`. A canceled or no-show visit: 409 `INVALID_TRANSITION`. Audited (`appointment.vehicle_class.set`).",
+        "description": "The package and live add-ons are priced again at the size for the client (ADR 0170), the invoice follows, the \"Confirm size\" / \"Confirm price\" badges go away (class_confirmed_at) and the visit’s car gets the size (source staff). A visit the membership already covered is settled again at the new size: a covered line stays covered, up to the plan size’s price (the coverage adjusts follow; noted on the visit). A change that would leave the invoice paid above its new total: 409 `PRICE_CHANGE_OVERPAID` (refund or adjust first); nothing changes. Stale `version`: 412 `VERSION_CONFLICT`. A canceled or no-show visit: 409 `INVALID_TRANSITION`. Audited (`appointment.vehicle_class.set`).",
         "parameters": [
           {
             "in": "path",
@@ -68499,7 +68500,7 @@
     },
     "/api/v1/public/links/membership/start": {
       "post": {
-        "description": "Bearer session (`Authorization: Bearer <session>` from the exchange); no cookie. Needs a PIN or code entered on this page in the last 5 minutes (403 `IDENTITY_STEP_UP_REQUIRED`, `meta.need` `fresh`); 403 `LINK_PRIVILEGES_HELD` within 72 hours of a PIN reset; 401 `LINK_WRONG_PURPOSE` on another kind of link. A pending membership of the link’s plan (reused when one is pending) and a checkout intent: the typed `email` (the one they will pay with), the plan’s Squarespace product, 72 hours. The email is never stored as the client’s verified email (an unverified email never links an order by itself). `vehicles` are added to the client. 409 `LINK_ALREADY_MEMBER` for a live membership, 409 `LINK_CHECKOUT_UNAVAILABLE` when the plan has no checkout link. `redirectUrl` is the plan’s checkout (https, squarespace.com only). One completion of the link (3). Limits: 10 an hour per address, 5 a day per number.",
+        "description": "Bearer session (`Authorization: Bearer <session>` from the exchange); no cookie. Needs a PIN or code entered on this page in the last 5 minutes (403 `IDENTITY_STEP_UP_REQUIRED`, `meta.need` `fresh`); 403 `LINK_PRIVILEGES_HELD` within 72 hours of a PIN reset; 401 `LINK_WRONG_PURPOSE` on another kind of link. A pending membership of the link’s plan (reused when one is pending) and a checkout intent: the typed `email` (the one they will pay with), the plan’s Squarespace product, 72 hours. The email is never stored as the client’s verified email (an unverified email never links an order by itself). `vehicles` are added to the client. 409 `LINK_ALREADY_MEMBER` for a live membership (held, or shared as a household member), 409 `LINK_CHECKOUT_UNAVAILABLE` when the plan has no checkout link. `redirectUrl` is the plan’s checkout (https, squarespace.com only). One completion of the link (3). Limits: 10 an hour per address, 5 a day per number.",
         "operationId": "startClientLinkMembership",
         "requestBody": {
           "content": {
@@ -70702,7 +70703,7 @@
     },
     "/api/v1/public/memberships": {
       "post": {
-        "description": "No session; Idempotency-Key required. A new number: the customer, their vehicles and a membership in the pending state tied to the tier’s Squarespace product (when the product map has none the membership still waits and an alert is raised); staff get a notification asking them to text the checkout link; the person gets a welcome text saying so. The membership activates when the Squarespace sync sees the paid order. The number of a customer the shop already has, without a member token issued for that customer: the same 201, nothing written to the record and no text; staff get the request to confirm with the customer. With the token: the full path, and 409 PUBLIC_ALREADY_MEMBER for a live membership; 409 IDENTITY_PIN_REQUIRED when the number’s client has a PIN (a PIN outranks a code). 422 on validation; 429 over 10 an hour per address, 2 a day per number from one address or 3 a day per number.",
+        "description": "No session; Idempotency-Key required. A new number: the customer, their vehicles and a membership in the pending state tied to the tier’s Squarespace product (when the product map has none the membership still waits and an alert is raised); staff get a notification asking them to text the checkout link; the person gets a welcome text saying so. The membership activates when the Squarespace sync sees the paid order. The number of a customer the shop already has, without a member token issued for that customer: the same 201, nothing written to the record and no text; staff get the request to confirm with the customer. With the token: the full path, and 409 PUBLIC_ALREADY_MEMBER for a live membership (held, or shared as a household member); 409 IDENTITY_PIN_REQUIRED when the number’s client has a PIN (a PIN outranks a code). 422 on validation; 429 over 10 an hour per address, 2 a day per number from one address or 3 a day per number.",
         "operationId": "createPublicMembership",
         "requestBody": {
           "content": {

@@ -126,6 +126,21 @@ describe('sizes on the website', () => {
     expect(json(r).pricing).toMatchObject({ confirmAtShop: false, listCents: 4500 })
     expect((await h.texts(PHONES.guest)).at(-1)!.body).not.toContain('exact price')
   })
+
+  it('the honeypot’s answer prices the visit as a real booking would (review F6); nothing is written', async () => {
+    await cells('Express Hand Wash', { compact_car: 4000, large_suv: 6000 })
+    const real = await book(bookingBody(h, { vehicleClass: 'large_suv' }))
+    expect(real.statusCode, real.body).toBe(201)
+    const before = await h.db.selectFrom('appointments').select('id').execute()
+    const decoy = await book(bookingBody(h, { vehicleClass: 'large_suv', website: 'http://spam.example', phone: PHONES.extra, startMin: 14 * 60 }))
+    expect(decoy.statusCode).toBe(202)
+    expect(json(decoy).pricing).toEqual(json(real).pricing)
+    expect(json(decoy).pricing).toMatchObject({ vehicleClassLabel: 'Large SUV', listCents: 6000, dueCents: 6000 })
+    // a size the shop does not have is refused the same way
+    const bad = await book(bookingBody(h, { vehicleClass: 'boat', website: 'http://spam.example', phone: PHONES.extra }))
+    expect(bad.statusCode).toBe(422)
+    expect(await h.db.selectFrom('appointments').select('id').execute()).toEqual(before)
+  })
 })
 
 describe('the plan size on the website’s join', () => {
@@ -173,5 +188,30 @@ describe('the plan size on the website’s join', () => {
     const old = await h.post('public/memberships', joinBody({ phone: PHONES.extra, name: 'Old Page' }))
     expect(old.statusCode, old.body).toBe(201)
     expect(json(old)).toMatchObject({ planClass: 'compact_suv' })
+  })
+  it('the honeypot’s join answers the size, its label and price as a real join would (review F6); nothing is created', async () => {
+    expect((await h.post('public/memberships', joinBody({ phone: PHONES.otp, name: 'Warm Up' }))).statusCode).toBe(201)
+    await goldPrice('compact_suv', 14900)
+    const decoy = await h.post('public/memberships', joinBody({ website: 'spam', phone: PHONES.extra }))
+    expect(decoy.statusCode, decoy.body).toBe(202)
+    expect(json(decoy)).toMatchObject({ plan: 'Gold', planClass: 'compact_suv', planClassLabel: 'Compact SUV', monthlyCents: 14900 })
+    const unpriced = await h.post('public/memberships', joinBody({ website: 'spam', phone: PHONES.extra, planClass: 'truck' }))
+    expect(unpriced.statusCode).toBe(422)
+    expect(json(unpriced).code).toBe('TIER_CLASS_UNPRICED')
+    expect(await h.db.selectFrom('customers').select('id').where('phone_e164', '=', PHONES.extra).execute()).toEqual([])
+  })
+
+  it('a verified household member’s join is refused as already a member (review F3): no membership of their own', async () => {
+    const holderId = await goldMember(PHONES.member, 0)
+    const holder = await h.db.selectFrom('memberships').select('id').where('customer_id', '=', holderId).executeTakeFirstOrThrow()
+    const jo = await h.db.transaction().execute(async (tx) =>
+      (await upsertCustomerByPhone(tx, { newId: h.newId, now: h.clock.now(), fullName: 'Jo Joiner', phone: PHONES.joiner, email: 'jo@example.test', source: 'dashboard' })).customer.id,
+    )
+    await h.db.insertInto('membership_household').values({ id: h.newId(), membership_id: holder.id, customer_id: jo, added_by: null, removed_at: null }).execute()
+    const token = await tokenFor(PHONES.joiner)
+    const r = await h.post('public/memberships', joinBody({ memberToken: token }))
+    expect(r.statusCode, r.body).toBe(409)
+    expect(json(r).code).toBe('PUBLIC_ALREADY_MEMBER')
+    expect(await h.db.selectFrom('memberships').select('id').where('customer_id', '=', jo).execute()).toEqual([])
   })
 })

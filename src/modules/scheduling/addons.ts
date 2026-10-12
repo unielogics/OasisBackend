@@ -18,7 +18,7 @@ import type { Actor, SchedulingCtx } from './context.js'
 import { liveAddons, syncInvoiceItems } from './invoicing.js'
 import type { InvoiceSummary } from './ports.js'
 import './problems.js'
-import { lineColumns, memberFor, priceVisit, withVisitCredits } from './visit-pricing.js'
+import { lineColumns, memberFor, priceVisit, resettleCoverage, withVisitCredits } from './visit-pricing.js'
 
 export interface AddonChange {
   /** The add-on is on the appointment after the call (what the toast direction follows). */
@@ -81,8 +81,11 @@ export async function addAddon(
     await addAddonChecklist(tx, c, a.id, rowId, svc)
     await refreshAppointmentCategories(tx, a.id)
     changed = true
+    // a visit the membership already covered: the new line is covered too when an inclusion names it
+    await resettleCoverage(tx, c, actor, a.id)
   }
-  const invoice = await syncInvoiceItems(tx, c, a)
+  // read again: settling the visit again may have repriced the package line
+  const invoice = await syncInvoiceItems(tx, c, changed ? await lockAppointment(tx, c.locationId, a.id) : a)
   if (changed) {
     await tx
       .updateTable('appointments')
@@ -144,7 +147,9 @@ export async function removeAddon(
     .execute()
   await hideAddonChecklist(tx, c, live.id)
   await refreshAppointmentCategories(tx, a.id)
-  const invoice = await syncInvoiceItems(tx, c, a)
+  // a covered line removed gives its coverage and credit back before the invoice follows
+  await resettleCoverage(tx, c, actor, a.id)
+  const invoice = await syncInvoiceItems(tx, c, await lockAppointment(tx, c.locationId, a.id))
   await tx
     .updateTable('appointments')
     .set((eb) => ({ version: eb('version', '+', 1), updated_at: eb.fn('app_now', []) }))

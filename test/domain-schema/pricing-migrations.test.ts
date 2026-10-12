@@ -210,14 +210,17 @@ describe('the pricing migrations on top of existing data', () => {
       await expect(sql`update memberships set plan_class = null where id = ${mem(4)}`.execute(db)).rejects.toThrow(/null value/)
       await expect(sql`update memberships set plan_class = 'boat' where id = ${mem(4)}`.execute(db)).rejects.toThrow(/memberships_plan_class_fkey/)
 
-      // one redeem per appointment and inclusion: a second inclusion on the same visit is allowed, the same one twice is not
+      // a visit holds one redeem per covered line (wave Q2a review: an inclusion may cover several lines, and a changed line is
+      // given back and redeemed again); the idempotency key names each, so the same key twice is refused
       await sql`insert into membership_inclusions (id, plan_id, label, mode) values (${rule(9)}, ${plan(2)}, 'Wax every wash', 'every_visit')`.execute(db)
-      await sql`insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, inclusion_id, appointment_id)
-        values (${ev(3)}, ${mem(1)}, ${start}, 'redeem', 1, ${rule(9)}, ${appt(1)})`.execute(db)
+      await sql`insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, inclusion_id, appointment_id, idempotency_key)
+        values (${ev(3)}, ${mem(1)}, ${start}, 'redeem', 1, ${rule(9)}, ${appt(1)}, ${`redeem:${appt(1)}:${rule(9)}`})`.execute(db)
+      await sql`insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, inclusion_id, appointment_id, idempotency_key)
+        values (${ev(4)}, ${mem(1)}, ${start}, 'redeem', 1, ${rule(9)}, ${appt(1)}, ${`redeem:${appt(1)}:${rule(9)}:2`})`.execute(db)
       await expect(
-        sql`insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, inclusion_id, appointment_id)
-          values (${ev(4)}, ${mem(1)}, ${start}, 'redeem', 1, ${rule(1)}, ${appt(1)})`.execute(db),
-      ).rejects.toThrow(/uq_credit_redeem_appointment/)
+        sql`insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, inclusion_id, appointment_id, idempotency_key)
+          values (${ev(5)}, ${mem(1)}, ${start}, 'redeem', 1, ${rule(9)}, ${appt(1)}, ${`redeem:${appt(1)}:${rule(9)}:2`})`.execute(db),
+      ).rejects.toThrow(/membership_credit_events_idempotency_key_key/)
       // an every_visit inclusion has no count
       await expect(
         sql`insert into membership_inclusions (id, plan_id, label, mode, per_cycle) values (${rule(8)}, ${plan(2)}, 'x', 'every_visit', 2)`.execute(db),

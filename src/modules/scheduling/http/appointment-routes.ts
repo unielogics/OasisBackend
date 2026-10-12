@@ -231,7 +231,7 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
         tags: TAGS,
         summary: 'Set or confirm the vehicle size at the shop: the visit is priced again',
         description:
-          'The package and live add-ons are priced again at the size for the client (ADR 0170), the invoice follows, the "Confirm size" / "Confirm price" badges go away (class_confirmed_at) and the visit’s car gets the size (source staff). A change that would leave the invoice paid above its new total: 409 `PRICE_CHANGE_OVERPAID` (refund or adjust first); nothing changes. Stale `version`: 409 `VERSION_CONFLICT`. A canceled or no-show visit: 409 `INVALID_TRANSITION`. Audited (`appointment.vehicle_class.set`).',
+          'The package and live add-ons are priced again at the size for the client (ADR 0170), the invoice follows, the "Confirm size" / "Confirm price" badges go away (class_confirmed_at) and the visit’s car gets the size (source staff). A visit the membership already covered is settled again at the new size: a covered line stays covered, up to the plan size’s price (the coverage adjusts follow; noted on the visit). A change that would leave the invoice paid above its new total: 409 `PRICE_CHANGE_OVERPAID` (refund or adjust first); nothing changes. Stale `version`: 412 `VERSION_CONFLICT`. A canceled or no-show visit: 409 `INVALID_TRANSITION`. Audited (`appointment.vehicle_class.set`).',
         params: IdParams,
         body: z.object({ vehicleClass: ClassKey, version: z.number().int() }).strict(),
         response: { 200: CommandResult },
@@ -560,6 +560,8 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
       schema: {
         tags: TAGS,
         summary: 'Add an add-on (price from the catalog; invoice and checklist follow)',
+        description:
+          'Priced at the visit’s size for the client (ADR 0170). On a visit the membership already covered, an add-on an inclusion names is covered too (the visit is settled again; noted on the visit).',
         params: AddonParams,
         response: { 200: AddonChange },
       },
@@ -578,7 +580,7 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
         tags: TAGS,
         summary: 'Remove an add-on',
         description:
-          '409 ADDON_REMOVE_OVERPAID when the invoice would be left overpaid: refund or adjust instead.',
+          'A covered add-on gives its membership coverage and credit back (ADR 0170). 409 ADDON_REMOVE_OVERPAID when the invoice would be left overpaid: refund or adjust instead.',
         params: AddonParams,
         response: { 200: AddonChange },
       },

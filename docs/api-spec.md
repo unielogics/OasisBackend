@@ -889,9 +889,8 @@ the **active public** tiers by key; the **VIP slot rules** come from the tier's 
 
 **Credits by inclusion (`memberships/credits.ts`).** A cycle grants one event per active per_cycle inclusion (none for
 every_visit); credits left are counted per inclusion (`coalesce(inclusion_id, rule_id)`, so events written before ADR 0170 count
-through the inclusion the migration made from their rule); a visit is covered by the first inclusion naming its package. A visit
-still redeems at most one credit (`redeem:<appointment>` key) until wave Q2 settles every covered line; the database already allows
-one redeem per appointment and inclusion. `GET /membership-plans` lists each tier's `inclusions` (and the same list as `rules`, its
+through the inclusion the migration made from their rule); a visit is covered by the first inclusion naming its package. Since wave
+Q2a a visit holds one redeem per covered line (section 24.3); a redeem given back has a `restore` keyed `restore:<redeem id>`. `GET /membership-plans` lists each tier's `inclusions` (and the same list as `rules`, its
 old name); `PATCH /membership-plans/rules/{id}` turns an inclusion's auto-apply on or off.
 
 ## 20. Operations: appointments, availability, board, calendar
@@ -956,7 +955,7 @@ Code: `src/modules/payments/**` (routes in `http/`), migration `20261006190000_p
 | `POST /appointments/:id/prep-bay` | `jobs.status` or `sched.edit` | Not reversible; warns when the planned bay is occupied. |
 | `POST /appointments/:id/pickup {state}` | `jobs.status` | `collected` or `pending`; not gated on payment; no SMS. |
 | `POST /appointments/:id/notify-ready` | `msg.send` | Re-sends the ready SMS. |
-| `PUT` / `DELETE /appointments/:id/addons/:serviceId` | `sched.edit` | Priced at the visit's size for the client (section 20.2a). `{added, changed, addon, invoice, checklist, toast}`; 409 `ADDON_REMOVE_OVERPAID`. |
+| `PUT` / `DELETE /appointments/:id/addons/:serviceId` | `sched.edit` | Priced at the visit's size for the client (section 20.2a). On a visit the membership already covered the visit is settled again (section 24.3): an add-on an inclusion names is covered, a covered add-on removed gives its coverage and credit back. `{added, changed, addon, invoice, checklist, toast}`; 409 `ADDON_REMOVE_OVERPAID`. |
 | `PUT /appointments/:id/checklist/items/:itemId {done}` | `jobs.checklist` | Records who and when. |
 | `POST /appointments/:id/checklist/bulk {itemIds, done}` | `jobs.checklist` | A section, or every id for "Check all". |
 | `POST /appointments/:id/photos/presign {category, contentType, bytes, note?}` | `jobs.checklist` | Presigned POST (5 min, size policy). JPEG, PNG, WebP up to 15 MB; HEIC is 422. |
@@ -1010,8 +1009,10 @@ Code: `src/modules/scheduling/{visit-pricing,sizing,booking,addons,invoicing}.ts
 * **Changing the size at the shop** (`PUT /appointments/:id/vehicle-class`): the package and the live add-ons are priced again at the
   size for the client, the invoice is synced (a repriced line is a removed line plus an added one), `class_confirmed_at` is stamped,
   the visit's car gets the size (source staff), activity "Size changed · Large SUV · $70 → $105", audit `appointment.vehicle_class.set`,
-  ops `appointment.updated {change: "pricing"}`. A visit the membership already covered keeps its coverage (its own credits count as
-  still there). Refused whole with 409 `PRICE_CHANGE_OVERPAID` when it would leave the invoice overpaid.
+  ops `appointment.updated {change: "pricing"}`. A visit the membership already covered is **settled again** at the new size (its own
+  credits count as still there, section 24.3): a covered line stays covered, up to the plan size's price, so a Large SUV plan's member
+  whose visit was booked with no size owes nothing once the size is confirmed; activity "Membership coverage updated · $40 → $60".
+  Refused whole with 409 `PRICE_CHANGE_OVERPAID` when it would leave the invoice overpaid.
 * **Reads.** The file adds `vehicleClass`, `vehicleClassLabel`, `needsSizeConfirm`, `needsPriceConfirm`, `priceBasis`,
   `classConfirmedAt`, and `vehicle.vehicleClass` / `vehicleClassSource`; its add-on catalog shows each add-on's regular price at the
   visit's size. The invoice summary (cards, file, command results) adds per item `listCents`, `discountBp`, `memberDiscountCents`,
@@ -1452,7 +1453,8 @@ is read-only for payments; Oasis owns the ledger. Polling is the baseline; the w
 Membership views (ADR 0170, wave Q2a) add `planClass`, `planClassLabel`, `plan.memberDiscountBp` and `household[{customerId, name,
 addedAt}]`; `POST /memberships` takes `planClass` (a size of the shop that is on; absent: the tier's cheapest priced size, else the
 smallest size; the tier's current price there becomes `tier_price_id`) and refuses a client who shares another membership (409
-`MEMBERSHIP_HOUSEHOLD_TAKEN`). `GET /customers/:id/membership` of a client who shares a membership answers that membership with
+`MEMBERSHIP_HOUSEHOLD_TAKEN`); so do a personal link's `membership/start` (409 `LINK_ALREADY_MEMBER`) and the verified website join
+(409 `PUBLIC_ALREADY_MEMBER`) for a client who shares a live membership. `GET /customers/:id/membership` of a client who shares a membership answers that membership with
 `sharedFrom {customerId, name}` (null otherwise). The port's `membership` of a card or file is the holder's or the shared one.
 
 The Operations appointment file's `membership` (and the board's member badge) now come from the real port: `plan` is the label sold,
@@ -1590,13 +1592,20 @@ origin must be in `ALLOWED_ORIGINS`.
 **Settling a visit (ADR 0170, wave Q2a: `settleMembershipVisit`, `src/modules/memberships/apply.ts`).** The membership the client
 holds or shares as a household member (active; one membership row locked, so a household spends its credits one visit at a time)
 covers each line one of its inclusions names: an every-visit inclusion, or a per-cycle one with a credit left (or unlimited); an
-inclusion covers one line of a visit. The covered amount is min(price at the visit size, price at the plan size), so a larger car's
+inclusion covers every line of the visit it names while it can ("Wax and rain repellent every wash" covers both). The covered amount is min(price at the visit size, price at the plan size), so a larger car's
 size difference stays due, with no % off. First the lines are priced again from the regular price each was booked at (a covered line
 at the regular price, every other line at the member price: an included line the allowance no longer covers gets the member price, a
 newly covered line goes back to the regular price) through the invoice item sync (409 `PRICE_CHANGE_OVERPAID` when that would leave
 the invoice overpaid); then ONE system adjust (reason "Membership credit", note "Express Hand Wash · Gold (Compact car plan) · covers
-$40 of $60") and ONE redeem (`covered_cents`, `line_cents`, `plan_class`, `visit_class`, key `redeem:<appointment>:<inclusion>`) per
-covered line. A visit is settled once (409 `MEMBERSHIP_CREDIT_APPLIED`). Auto-apply: the inclusions with `autoApply` (all of them
+$40 of $60") and ONE redeem (`covered_cents`, `line_cents`, `plan_class`, `visit_class`, `service_id`; key
+`redeem:<appointment>:<inclusion>`, then `…:<n>` for the inclusion's n-th line or replacement) per covered line. **The coverage follows
+the visit**: when a settled visit changes (the size set at the shop, an add-on added or removed) it is settled again with its own
+credits counted as still there: a redeem whose line is gone, no longer covered, or changed price or plan size is given back (a
+reversing system adjust, reason "Membership credit", note "Wax · Gold · coverage of $30 given back (the visit changed)", and a
+`restore` keyed `restore:<redeem id>` whose `ledger_event_id` is that adjust, in the redeem's own cycle), then each covered line
+without a redeem gets one (a replacement keeps the cycle of the redeem it replaces); the invoice's `coverage` lists only the redeems in
+force. An apply with nothing new to cover answers 409 `MEMBERSHIP_CREDIT_APPLIED`; one that finds a newly covered line (an inclusion
+that does not apply itself) covers it. Auto-apply: the inclusions with `autoApply` (all of them
 for a member with `autoApply`, `PATCH /memberships/:id`) settle when the visit is **completed** (no payments permission needed; under
 a savepoint: anything that stops it is a quiet skip, the completion never fails; a skip keeps the repricing). `GET /appointments/:id` gains `membershipUpgrade {candidate, visits60, copy} | null` (non-members only; real
 completed visits in 60 days, 3 or more = candidate). An emergency closure with "Protect member credits" marks held credits (`protect`) and a later cancel or
@@ -1740,7 +1749,8 @@ old site's "Sedan / Coupe", "SUV / Crossover", "Truck / Van" (Compact car, Compa
 size prices the visit and never reaches someone else's record. Member prices only with a `memberToken` issued for the customer on
 file (an unverified member's number is priced as a guest's). The answer adds `pricing {vehicleClass, vehicleClassLabel,
 confirmAtShop, listCents, discountCents, coveredCents, dueCents}`; with `confirmAtShop` the confirmation text adds "We’ll confirm
-the exact price at the shop.". A non-empty `website` (the honeypot) answers **202** with a plausible, fake `bookingRef` and writes nothing.
+the exact price at the shop.". A non-empty `website` (the honeypot) answers **202** with a plausible, fake `bookingRef` and writes nothing
+(its `pricing` is a guest's price at the size, from the price book, as a real booking's).
 
 | Step | Rule |
 |---|---|
@@ -1770,7 +1780,7 @@ no card fields exist). Limits: section 26 (10 an hour per address, 2 a day per n
   `product_map_empty` alert is raised, and nothing fails. The person gets `membership_welcome_web` ("Hi Jo, thanks for joining Oasis
   Auto Spa Gold. We’ll text your secure checkout link shortly; your membership starts once it’s paid."). The membership activates when
   the existing sync sees the paid subscription order. With a token, 409 `PUBLIC_ALREADY_MEMBER` "This number already has a
-  membership. Text us to change your plan." for a live membership, and 409 `IDENTITY_PIN_REQUIRED` when the number's client has a PIN
+  membership. Text us to change your plan." for a live membership (held, or shared as a household member: ADR 0170), and 409 `IDENTITY_PIN_REQUIRED` when the number's client has a PIN
   (a PIN outranks a texted code; ADR 0160 W4c re-review).
 * **The number of an existing customer without that token:** nothing is written to the customer's record (no name, email, consent,
   vehicle or membership) and nothing is texted; the managers get `membership.web_join` "Website join to confirm: <customer> (Gold)"
@@ -1784,7 +1794,7 @@ no card fields exist). Limits: section 26 (10 an hour per address, 2 a day per n
 
 201 `{memberRef "OAS-M-1A2B3C4D", status: "pending_payment", next: "checkout_link_by_sms", tier, plan, confirmationBy}`
 (`confirmationBy` as for a booking: the policy's outcome with a token, what was asked for otherwise); the honeypot answers 202 with a
-fake reference.
+fake reference, after the same tier and size checks, with the size, label and monthly price a real join would answer.
 
 ### 26.5 Origin, environment, retention, tests
 
@@ -1925,7 +1935,7 @@ The exchange (with `session` added), `GET me` and every verification step answer
 | `POST /public/links/pin/reset` | `{pin}` (strict) | A new PIN after a `pin_reset` code confirmed on this page in the last 10 minutes: 200 `{verified: true, ...LinkState}`; every other link, page and the old trust end, the number is trusted again, the client is emailed (when an address is on file) and the managers notified; memberships and payments wait 72 hours. 403 `IDENTITY_CODE_REQUIRED`, 409 `IDENTITY_PIN_NOT_SET`, 422 `IDENTITY_PIN_REJECTED`. |
 | `POST /public/links/bookings` (Idempotency-Key required) | `{serviceKey, addonKeys[] (≤12), date "YYYY-MM-DD", startMin, vehicle? {year?, make?, model?, color?, label?, plate?}, vehicleClass?, name?, email?, smsConsent?}` (strict) | 201 `{bookingRef, status: "booked", start, end, deposit {dueCents, how counter \| link}, confirmationBy sms \| none, service {key, name}, addons[{key, name}], when "Today · 1:00 PM", member, bayCount, pricing}`. Sizes (ADR 0170): `vehicleClass` (or a size label sent as the car, as on the website) prices the visit and is recorded on the page's client's car (source client); 422 `body.vehicleClass` before the link is used; `pricing` as on the website (section 26.3). Verified calendar or book-again pages. Books through the dashboard's `createAppointment` with channel `online` (lead time, windows, paused days, no overrides), source **`link`**, on the board's grid (422 `body.startMin` "Pick one of the times on the board."), the categories of the package and add-ons, the invoice, the `booking_confirmed_web` text ("Booked: Express Hand Wash, today at 1:00 PM. $25 booking fee due at the shop. Reply here to change it.") and the activity line "Booked on a personal link · …". The fee and VIP rules follow the page's own client (active member: no fee, `member: true`; VIP client or VIP-plan member: VIP rules), never during a reset hold. On a client's link `name` only fills a placeholder name (a real name is never replaced) and `email` only fills an empty one (never as a verified email; the email on file is never replaced from a link page, so a page trusted by the number alone cannot move the address a PIN reset's notice goes to — staff change it); on a stranger's link `name` is required (422 `body.name` "Enter your name.") and creates the client (source online; `smsConsent` their consent to the texts about the booking), or books for the number's client when one holds it (only their PIN verifies such a page once they have one: 409 `IDENTITY_PIN_REQUIRED`). A page verified by code on a record the stale-record rule holds (a stranger's link or the client's own) books a **new client** and the number moves to it (section 27.2 `bindPartyToNumber`; `name` fills the new record, a placeholder when empty; no member privileges). A booking made with the client's PIN records `booked_with_pin`. The Idempotency-Key belongs to the **link** (resolved from the session before the key is claimed): the same key and body from a re-opened page of the same link answers the stored booking with `Idempotent-Replayed: true`, and two links (behind one address or not) never share a key. 409 `IDENTITY_LINK_USED` once the link's bookings are spent; slot refusals in the website's words (409 `PUBLIC_SLOT_TAKEN`, `PUBLIC_SLOT_VIP`, `PUBLIC_SLOT_PAST`, `PUBLIC_SLOT_CLOSED`, `PUBLIC_SLOT_TOO_FAR`); 422 for an unknown service or add-on key. |
 | `POST /public/links/appointments/:ref/reschedule` | `:ref` `OAS-00042`; `{date, startMin}` (strict) | 200 `{bookingRef, status, start, end, when}`. Verified calendar pages; only the page's own client's visits (a calendar link sent for one visit: only that one), 404 `LINK_APPOINTMENT_NOT_FOUND` "We can’t find that visit. Text us and we’ll help." otherwise; a visit that started, ended or was canceled: 409 `LINK_CANT_RESCHEDULE` "This visit can’t be moved online. Text us and we’ll help.". The online rules (the page's VIP privileges included) and the grid as for a booking, then the dashboard's reschedule (the client is texted the new time). Uses nothing of the link. A stale record's visits are not found by a page verified only by code. |
-| `POST /public/links/membership/start` | `{email, planClass?, vehicles? [{car, plate?}] (≤5)}` (strict; `planClass` as in section 26.4: 422 `TIER_CLASS_UNPRICED`, stored on the membership and the checkout) | 200 `{redirectUrl, membershipRef "OAS-M-1A2B3C4D", checkoutExpiresAt}`: send the browser to `redirectUrl`, the plan's Squarespace checkout (https on squarespace.com only, checked again on the way out). Membership pages with a **fresh** step-up. A pending membership of the link's plan (reused when one is pending) and a checkout intent (W2e `openCheckoutIntent`): the typed email, the plan's product, 72 hours; the membership activates when the Squarespace sync matches the paid order to the intent. The page should say the email must be the one they pay with: it is stored only on the intent, never as the client's email or a verified email, so an email alone never links an order (design section 10); an order that matches only the intent's email but carries another phone or name waits for staff (`awaiting_match`, W4c fixes). `vehicles` are added to the client (`car` like "2021 Tesla Model 3"). One completion of the link. 409 `IDENTITY_RECORD_UNCONFIRMED` on a stale record proven only by a code, 409 `LINK_ALREADY_MEMBER` "You already have a membership. Text us to change your plan.", 409 `LINK_CHECKOUT_UNAVAILABLE` "Joining online isn’t open right now. Text us and we’ll help you join." (no checkout link in Settings yet), 403 `LINK_PRIVILEGES_HELD`, 422 `body.email` "Enter a valid email.". |
+| `POST /public/links/membership/start` | `{email, planClass?, vehicles? [{car, plate?}] (≤5)}` (strict; `planClass` as in section 26.4: 422 `TIER_CLASS_UNPRICED`, stored on the membership and the checkout) | 200 `{redirectUrl, membershipRef "OAS-M-1A2B3C4D", checkoutExpiresAt}`: send the browser to `redirectUrl`, the plan's Squarespace checkout (https on squarespace.com only, checked again on the way out). Membership pages with a **fresh** step-up. A pending membership of the link's plan (reused when one is pending) and a checkout intent (W2e `openCheckoutIntent`): the typed email, the plan's product, 72 hours; the membership activates when the Squarespace sync matches the paid order to the intent. The page should say the email must be the one they pay with: it is stored only on the intent, never as the client's email or a verified email, so an email alone never links an order (design section 10); an order that matches only the intent's email but carries another phone or name waits for staff (`awaiting_match`, W4c fixes). `vehicles` are added to the client (`car` like "2021 Tesla Model 3"). One completion of the link. 409 `IDENTITY_RECORD_UNCONFIRMED` on a stale record proven only by a code, 409 `LINK_ALREADY_MEMBER` "You already have a membership. Text us to change your plan." (a live membership held, or shared as a household member), 409 `LINK_CHECKOUT_UNAVAILABLE` "Joining online isn’t open right now. Text us and we’ll help you join." (no checkout link in Settings yet), 403 `LINK_PRIVILEGES_HELD`, 422 `body.email` "Enter a valid email.". |
 | `POST /public/links/pay/start` | `{}` | 200 `{status: "redirect", redirectUrl}`: the payment URL staff attached to the invoice, only https on a `PAYMENT_LINK_HOSTS` host (default squarespace.com) with no user, password or port; one completion of the link. 200 `{status: "link_pending", redirectUrl: null}`: the invoice has no allowed URL; tell the client the shop will text a payment link (the managers get one `payments.link_requested` notice "Text Maria a payment link", not repeated while unread). Payment pages with a **fresh** step-up; 403 `LINK_PRIVILEGES_HELD`; 409 `IDENTITY_RECORD_UNCONFIRMED` on a stale record proven only by a code. A paid or voided invoice has already ended the page (401 `IDENTITY_SESSION_INVALID`). |
 
 ### 28.4 Flows the website builds

@@ -29,6 +29,7 @@ import { ensurePlans, loadPlans, planByKey, type Plan } from './plans.js'
 import './problems.js'
 import type { MembershipCheckoutState, MembershipCheckoutsTable } from './schema.js'
 import type { Selectable } from 'kysely'
+import { sharedMembershipId } from './household.js'
 import { resolvePlanClass } from './plan-class.js'
 
 const HOUR = 3_600_000
@@ -451,7 +452,8 @@ export async function planProductKey(
 
 /**
  * Starts a Squarespace checkout for a verified client (the caller has checked the fresh PIN or code): refuses a client who is a
- * member already (a second paid subscription would only be flagged as a duplicate), reuses their pending membership (switching
+ * member already (a second paid subscription would only be flagged as a duplicate; 409 MEMBERSHIP_EXISTS), or shares a live
+ * membership as a household member (409 MEMBERSHIP_HOUSEHOLD_TAKEN), reuses their pending membership (switching
  * its plan if they chose another) or creates one, supersedes its earlier open intent and opens a new one for 72 hours.
  */
 export async function openCheckoutIntent(tx: Tx, d: Ctx, input: OpenCheckoutInput, ctx: AuditContext): Promise<OpenCheckoutResult> {
@@ -491,6 +493,8 @@ export async function openCheckoutIntent(tx: Tx, d: Ctx, input: OpenCheckoutInpu
     .forUpdate()
     .executeTakeFirst()
   if (live && live.status !== 'pending') throw new AppError('MEMBERSHIP_EXISTS')
+  // a household member is a member through the membership they share: none of their own while they do (ADR 0170)
+  if (await sharedMembershipId(tx, customer.id)) throw new AppError('MEMBERSHIP_HOUSEHOLD_TAKEN')
   let membershipId: string
   const created = !live
   if (live) {

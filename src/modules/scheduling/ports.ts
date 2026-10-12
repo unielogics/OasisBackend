@@ -476,6 +476,14 @@ export type AutoCreditOutcome =
   | { applied: true; ruleLabel: string; creditsLeft: number | null; discountCents: number }
   | { applied: false; skipped: string }
 
+/** What settling a changed visit again did: the membership's coverage of it before and after (cents), redeems given back and added. */
+export interface CoverageChange {
+  beforeCents: number
+  afterCents: number
+  released: number
+  added: number
+}
+
 /** A credit handed back because the shop's closure cost the member the visit that held it. */
 export interface ReleasedCredit {
   ruleLabel: string
@@ -503,6 +511,13 @@ export interface MembershipPort {
    * credits" on) is why the visit did not happen. null when nothing was held or the closure was not the cause.
    */
   releaseCredit?(tx: Tx, c: SchedulingCtx, appointmentId: string): Promise<ReleasedCredit | null>
+  /**
+   * Called when a visit the membership already covered changes (the size set at the shop, an add-on added or removed; ADR 0170), in
+   * the changing transaction, after the lines are written and before the invoice sync: settles the visit again so the coverage
+   * follows it. null when the visit holds no redeem yet (the completion settles it) or the membership no longer covers it. Throws
+   * the invoice sync's 409 ADDON_REMOVE_OVERPAID when the new prices would leave the invoice overpaid.
+   */
+  resettleCredit?(tx: Tx, c: SchedulingCtx, actor: Actor, appointmentId: string): Promise<CoverageChange | null>
   /**
    * What the price book needs to price a visit for this customer (ADR 0170): the ACTIVE membership they hold or share as a household
    * member, with the tier's % off, the plan size and the inclusions with this cycle's credits; null for anyone else. Wave Q2's

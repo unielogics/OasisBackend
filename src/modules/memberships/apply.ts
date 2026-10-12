@@ -1,23 +1,28 @@
-// Settling a member's visit (ADR 0170, wave Q2): what the membership covers on a visit, written once. Two entry points share one
-// evaluation and one write:
+// Settling a member's visit (ADR 0170, wave Q2): what the membership covers on a visit. Three entry points share one evaluation and
+// one write:
 //  * applyMembershipCredit: the explicit command (staff press "Apply credit", POST /appointments/:id/membership-perks/apply),
 //    refusing with the design's guard errors;
 //  * autoApplyMembershipCredit: the same settlement when a visit is completed, for the inclusions marked auto_apply (or every one
 //    when the member asked for it). It never refuses: anything that stops it is a quiet skip, under a savepoint, so completing a
-//    job cannot fail because of it.
-// settleMembershipVisit:
+//    job cannot fail because of it;
+//  * resettleMembershipVisit: a visit changed after it was settled (the size set at the shop, an add-on added or removed) is settled
+//    again, so the coverage follows the visit (wave Q2a review).
+// settle:
 //  1. the membership the client holds OR shares as a live household member (one membership row locked: credits are per membership,
 //     so a household spends them one visit at a time), ACTIVE;
-//  2. quoteVisit decides which line each inclusion covers (an inclusion covers one line of a visit; credits as they stand);
+//  2. quoteVisit decides which lines the inclusions cover (an inclusion covers every line it names while it can; credits as they
+//     stand, the visit's own redeems counted as still there);
 //  3. the lines are priced again through the invoice item sync, from the price each line was booked at (its regular price at the
 //     visit's size never changes here): a covered line is charged the regular price, any other line the member price; so an included
 //     line no longer covered (the allowance ran out) gets the member price and a newly covered line goes back to the regular price;
 //  4. for each covered line ONE system adjust (reason "Membership credit") of the covered amount — min(price at the visit size, price
 //     at the plan size), so a larger car's size difference stays due, with no % off — and ONE redeem event (covered_cents,
-//     line_cents, plan_class, visit_class; key redeem:<appointment>:<inclusion>). The adjust goes through the Payments command layer
-//     exempt from the actor's adjust limit (cli.member, or only jobs.status for the automatic one, not pay.adjust) and attributed to
-//     the real person; tax falls with it. calcInvoice / invoice_calc_of do not change.
-// A visit is settled once: a second apply answers MEMBERSHIP_CREDIT_APPLIED. Releasing (emergency closure) works per redeem.
+//     line_cents, plan_class, visit_class, service_id; key redeem:<appointment>:<inclusion>, then …:<n> for the inclusion's n-th
+//     line or replacement). A redeem whose line is gone or changed is given back first: a reversing adjust and a `restore` keyed
+//     restore:<redeem>. The adjusts go through the Payments command layer exempt from the actor's adjust limit (cli.member, or only
+//     jobs.status for the automatic one, not pay.adjust) and attributed to the real person; tax falls with them. calcInvoice /
+//     invoice_calc_of do not change.
+// An apply with nothing new to cover answers MEMBERSHIP_CREDIT_APPLIED. Releasing (emergency closure) works per redeem.
 import { sql } from 'kysely'
 import type { AuditContext } from '../../platform/audit.js'
 import type { Clock } from '../../platform/clock.js'
@@ -89,12 +94,14 @@ export interface SettleResult {
   appointmentId: string
   lines: SettledLine[]
   coveredCents: number
+  /** How many redeems were given back (a re-settle: the line is gone or changed). */
+  released: number
   /** Whether a line's price changed (the member price, or back to the regular price). */
   repriced: boolean
   credits: { left: number | null; used: number }
-  /** The first adjust and the invoice after the last one. */
-  first: AdjustResult
-  last: AdjustResult
+  /** The first adjust and the invoice after the last one (null when nothing was adjusted). */
+  first: AdjustResult | null
+  last: AdjustResult | null
 }
 
 export interface ApplyResult extends AdjustResult {
@@ -154,7 +161,7 @@ function blockError(b: Block): AppError {
 }
 
 class Blocked extends Error {
-  constructor(readonly block: Block | 'not_auto') {
+  constructor(readonly block: Block | 'not_auto' | 'not_settled') {
     super(block)
   }
 }
@@ -246,11 +253,97 @@ export function coverageNote(o: { service: string; tier: string; planClassLabel:
   return `${o.service} · ${o.tier} (${o.planClassLabel} plan) · covers ${usd(o.coveredCents)} of ${usd(o.lineCents)}`
 }
 
+/** A redeem the visit holds (not given back), with the adjust it wrote. */
+interface HeldRedeem {
+  id: string
+  membershipId: string
+  /** coalesce(inclusion_id, rule_id): the inclusion the redeem counts under. */
+  inclusionId: string | null
+  rawInclusionId: string | null
+  ruleId: string | null
+  serviceId: string | null
+  qty: number
+  lineCents: number | null
+  coveredCents: number | null
+  planClass: string | null
+  cycleStart: Date
+  invoiceId: string | null
+  /** The adjust's signed amount (negative: the discount it wrote); null when it has none. */
+  adjustCents: number | null
+}
+
+/** The redeems a visit holds: every redeem naming it that no `restore` (closure or a change of the visit) has given back. */
+async function heldRedeems(tx: Tx, appointmentId: string): Promise<HeldRedeem[]> {
+  const r = await sql<{
+    id: string
+    membership_id: string
+    inclusion_id: string | null
+    raw_inclusion_id: string | null
+    rule_id: string | null
+    service_id: string | null
+    qty: number
+    line_cents: number | null
+    covered_cents: number | null
+    plan_class: string | null
+    cycle_start: Date
+    invoice_id: string | null
+    adjust_cents: number | null
+  }>`
+    select e.id, e.membership_id, coalesce(e.inclusion_id, e.rule_id) as inclusion_id, e.inclusion_id as raw_inclusion_id, e.rule_id, e.service_id, e.qty::int as qty,
+      e.line_cents, e.covered_cents, e.plan_class, e.cycle_start, e.invoice_id, le.amount_cents::int as adjust_cents
+    from membership_credit_events e
+    left join ledger_events le on le.id = e.ledger_event_id
+    where e.kind = 'redeem' and e.appointment_id = ${appointmentId}
+      and not exists (select 1 from membership_credit_events x where x.idempotency_key = 'restore:' || e.id::text)
+    order by e.created_at, e.id`.execute(tx)
+  return r.rows.map((x) => ({
+    id: x.id,
+    membershipId: x.membership_id,
+    inclusionId: x.inclusion_id,
+    rawInclusionId: x.raw_inclusion_id,
+    ruleId: x.rule_id,
+    serviceId: x.service_id,
+    qty: x.qty,
+    lineCents: x.line_cents,
+    coveredCents: x.covered_cents,
+    planClass: x.plan_class,
+    cycleStart: x.cycle_start,
+    invoiceId: x.invoice_id,
+    adjustCents: x.adjust_cents,
+  }))
+}
+
+/** The idempotency key of the next redeem of an inclusion on a visit: redeem:<appointment>:<inclusion>, then …:<n> for the n-th. */
+async function redeemKeyOf(tx: Tx, appointmentId: string, inclusionId: string, taken: Map<string, number>): Promise<string> {
+  if (!taken.has(inclusionId)) {
+    const r = await sql<{ n: number }>`
+      select count(*)::int as n from membership_credit_events
+      where kind = 'redeem' and appointment_id = ${appointmentId} and coalesce(inclusion_id, rule_id) = ${inclusionId}`.execute(tx)
+    taken.set(inclusionId, r.rows[0]?.n ?? 0)
+  }
+  const n = taken.get(inclusionId)! + 1
+  taken.set(inclusionId, n)
+  return n === 1 ? `redeem:${appointmentId}:${inclusionId}` : `redeem:${appointmentId}:${inclusionId}:${n}`
+}
+
 /**
- * Settles the visit: reprices, then one adjust + one redeem per covered line. `auto`: only the inclusions that apply themselves (or
- * all of them when the member asked), and the lines are repriced even when nothing is covered. Throws Blocked for a business reason.
+ * How a settlement runs: `apply` (staff press "Apply credit": every inclusion), `auto` (the completion: the inclusions that apply
+ * themselves, or all of them when the member asked), `resettle` (the visit changed after it was settled: the size, an add-on added
+ * or removed; the inclusions `auto` uses plus the ones the visit already holds).
  */
-async function settle(tx: Tx, d: ApplyDeps, appointmentId: string, c: ApplyContext, o: { auto: boolean }): Promise<SettleResult> {
+type Mode = 'apply' | 'auto' | 'resettle'
+
+/**
+ * Settles the visit, or settles it again (ADR 0170, wave Q2a review): the coverage follows the visit as it is now.
+ *  * The lines are quoted with the member's credits as if this visit had spent none (its own redeems count as still there).
+ *  * A redeem whose line is gone, is no longer covered, or changed price or plan size is given back: an adjust reverses its discount
+ *    and a `restore` (key restore:<redeem>, ledger_event_id = that adjust) returns the credit in the redeem's own cycle.
+ *  * Each covered line without a redeem gets one + its adjust (a replacement keeps the cycle of the redeem it replaces).
+ * Throws Blocked for a business reason: `apply` and `auto` with nothing new to cover answer `done` when the visit already holds a
+ * redeem (MEMBERSHIP_CREDIT_APPLIED), else why nothing is covered. Writes in this order: the give-backs, the reprice of the lines,
+ * the new redeems (so the invoice's overpaid guard sees the reversed coverage first).
+ */
+async function settle(tx: Tx, d: ApplyDeps, appointmentId: string, c: ApplyContext, mode: Mode): Promise<SettleResult> {
   // the appointment first (the completion already holds it), then the membership, then the invoice: one lock order everywhere
   const appt = await tx
     .selectFrom('appointments')
@@ -264,20 +357,24 @@ async function settle(tx: Tx, d: ApplyDeps, appointmentId: string, c: ApplyConte
   const membership = await lockMembership(tx, d.locationId, appt.customer_id)
   if (!membership) throw new Blocked('no_membership')
   if (membership.status !== 'active') throw new Blocked('not_active')
-  const done = await tx
-    .selectFrom('membership_credit_events')
-    .select('id')
-    .where('appointment_id', '=', appt.id)
-    .where('kind', '=', 'redeem')
-    .executeTakeFirst()
-  if (done) throw new Blocked('done')
   const ctx = await contextOf(tx, d.locationId, appt.customer_id, membership.id)
   if (!ctx) throw new Blocked('not_active')
-  // a membership without a current cycle has no credits to spend (every_visit inclusions still cover)
+  // redeems another membership wrote (the client changed membership since) stay as they are
+  const held = (await heldRedeems(tx, appt.id)).filter((h) => h.membershipId === membership.id)
+  if (mode === 'resettle' && held.length === 0) throw new Blocked('not_settled')
+  // a membership without a current cycle has no credits to spend (every_visit inclusions still cover); the visit's own redeems
+  // count as credits still there, so a line it covered stays covered when the visit changes
   const cycle = membership.current_period_start
-  const member: MemberContext = cycle
-    ? ctx
-    : { ...ctx, inclusions: ctx.inclusions.map((i) => (i.mode === 'per_cycle' ? { ...i, left: 0 } : i)) }
+  const back = new Map<string, number>()
+  for (const h of held) if (h.inclusionId) back.set(h.inclusionId, (back.get(h.inclusionId) ?? 0) + h.qty)
+  const member: MemberContext = {
+    ...ctx,
+    inclusions: ctx.inclusions.map((i) => {
+      if (i.mode !== 'per_cycle') return i
+      const left = cycle ? i.left : 0
+      return left === null ? i : { ...i, left: left + (back.get(i.id) ?? 0) }
+    }),
+  }
   const invoice = await tx
     .selectFrom('invoices')
     .select(['id', 'canceled_at'])
@@ -287,96 +384,119 @@ async function settle(tx: Tx, d: ApplyDeps, appointmentId: string, c: ApplyConte
 
   const book = await loadPriceBook(tx, d.locationId)
   const lines = await visitLines(tx, appt)
-  const auto = (m: MemberContext): MemberContext =>
-    o.auto && !membership.auto_apply ? { ...m, inclusions: m.inclusions.filter((i) => i.autoApply) } : m
+  const heldInclusions = new Set(held.flatMap((h) => (h.inclusionId ? [h.inclusionId] : [])))
+  const scoped = (m: MemberContext): MemberContext =>
+    mode !== 'apply' && !membership.auto_apply
+      ? { ...m, inclusions: m.inclusions.filter((i) => i.autoApply || heldInclusions.has(i.id)) }
+      : m
   const visit = { packageId: lines[0]!.serviceId, addonIds: lines.slice(1).map((l) => l.serviceId), classKey: appt.vehicle_class }
   const all = quoteVisit(book, visit, member)
-  const chosen = quoteVisit(book, visit, auto(member))
+  const chosen = quoteVisit(book, visit, scoped(member))
   const covered = chosen.lines.map((l) => l.coverage)
-
-  // 3. reprice from the booked regular price: covered lines at the regular price, the others at the member price
+  // from the booked regular price: covered lines at the regular price, the others at the member price
   const target = lines.map((l, i) => repriced(l, covered[i] ?? null, member, book))
   const changed = target.some((t, i) => t.priceCents !== lines[i]!.priceCents || t.discountBp !== lines[i]!.discountBp)
-  if (changed) {
-    if (!invoice || invoice.canceled_at) throw new Blocked('no_invoice')
-    for (const [i, t] of target.entries()) {
-      const l = lines[i]!
-      if (t.priceCents === l.priceCents && t.discountBp === l.discountBp) continue
-      const cols = { price_cents: t.priceCents, list_price_cents: t.listCents, discount_bp: t.discountBp }
-      if (l.rowId) await tx.updateTable('appointment_addons').set(cols).where('id', '=', l.rowId).execute()
-      else await tx.updateTable('appointments').set(cols).where('id', '=', appt.id).execute()
-    }
-    try {
-      await d.invoices.syncItems(
-        tx,
-        appt.id,
-        target.map((t, i) => ({
-          name: lines[i]!.name,
-          kind: lines[i]!.kind,
-          priceCents: t.priceCents,
-          listCents: t.listCents,
-          discountBp: t.discountBp,
-          basis: lines[i]!.basis,
-        })),
-      )
-    } catch (e) {
-      if (e instanceof AppError && e.code === 'ADDON_REMOVE_OVERPAID') throw new AppError('PRICE_CHANGE_OVERPAID', { cause: e })
-      throw e
-    }
-  }
 
-  const coveredIdx = covered.flatMap((cv, i) => (cv ? [i] : []))
-  if (coveredIdx.length === 0) {
+  // the redeems the visit keeps: same inclusion and line (a redeem written before wave Q2 names no line: the first its inclusion
+  // covers), same line price and plan size
+  const free = [...held]
+  const kept = new Map<number, HeldRedeem>()
+  const replaces = new Map<number, HeldRedeem>()
+  for (const [i, cv] of covered.entries()) {
+    if (!cv) continue
+    let k = free.findIndex((h) => h.inclusionId === cv.inclusionId && h.serviceId === lines[i]!.serviceId)
+    if (k < 0) k = free.findIndex((h) => h.inclusionId === cv.inclusionId && h.serviceId === null)
+    if (k < 0) continue
+    const h = free.splice(k, 1)[0]!
+    const same = h.lineCents === null || (h.lineCents === target[i]!.priceCents && h.planClass === member.planClass)
+    if (same) kept.set(i, h)
+    else replaces.set(i, h)
+  }
+  const releases = [...free, ...replaces.values()]
+  const creates = covered.flatMap((cv, i) => (cv && !kept.has(i) ? [i] : []))
+
+  if (creates.length === 0 && (mode !== 'resettle' || releases.length === 0)) {
+    // nothing to cover anew: the explicit apply writes nothing; the completion keeps the reprice; a re-settle only reprices
+    if (mode !== 'apply' && changed) await repriceLines(tx, d, appt.id, lines, target, invoice, mode)
+    if (mode === 'resettle') return emptyResult(membership.id, appt.id, changed)
+    if (held.length > 0) throw new Blocked('done')
     if (all.lines.some((l) => l.coverage)) throw new Blocked('not_auto')
     const named = lines.some((l) => member.inclusions.some((inc) => inc.serviceIds.includes(l.serviceId)))
     throw new Blocked(named ? 'no_credit' : 'not_eligible')
   }
   if (!invoice || invoice.canceled_at) throw new Blocked('no_invoice')
-  const calc = await calcOf(tx, invoice.id)
-  if (calc.balance <= 0) throw new Blocked('no_balance')
 
   const tier = membership.plan_label
   const planClassLabel = book.labels.get(member.planClass) ?? member.planClass
+  const actor = creditActor(c.actor)
+  const ledgerKey = (suffix: string): string | null => (c.idempotencyKey ? `${c.idempotencyKey}:${suffix}` : null)
+  const adjusts: AdjustResult[] = []
+
+  // 1. give back what no longer matches the visit
+  for (const h of releases) {
+    const lineName = lines.find((l) => l.serviceId === h.serviceId)?.name ?? book.services.get(h.serviceId ?? '')?.name ?? CREDIT_REASON
+    const amount = h.adjustCents !== null && h.adjustCents < 0 ? -h.adjustCents : 0
+    const why = `${lineName} · ${tier} · coverage of ${usd(amount)} given back (the visit changed)`
+    let eventId: string | null = null
+    if (amount > 0) {
+      const r = await d.payments.adjust(
+        tx,
+        { locationId: d.locationId, actor, audit: c.audit, idempotencyKey: ledgerKey(`release:${h.id}`), source: 'system' },
+        invoice.id,
+        { kind: 'surcharge', unit: '$', value: amount, reason: CREDIT_REASON, note: why, settle: 'credit' },
+      )
+      adjusts.push(r)
+      eventId = r.event.id
+    }
+    await sql`
+      insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, rule_id, inclusion_id, service_id, appointment_id,
+        invoice_id, ledger_event_id, note, actor, actor_user_id, idempotency_key, created_at)
+      values (${d.newId()}, ${h.membershipId}, ${h.cycleStart}, 'restore', ${h.qty}, ${h.ruleId}, ${h.rawInclusionId}, ${h.serviceId},
+        ${appt.id}, ${h.invoiceId ?? invoice.id}, ${eventId}, ${why}, ${c.actor.name}, ${c.actor.userId}, ${`restore:${h.id}`},
+        ${d.clock.now()})`.execute(tx)
+  }
+
+  // 2. the lines at their prices now (a re-settle always syncs: the caller changed the lines, the invoice follows before the caps)
+  if (changed || mode === 'resettle') await repriceLines(tx, d, appt.id, lines, target, invoice, mode)
+
+  // 3. one adjust + one redeem per line newly covered, each capped at what is left of the subtotal
+  const calc = await calcOf(tx, invoice.id)
+  if (held.length === 0 && calc.balance <= 0) throw new Blocked('no_balance')
   let sub = calc.sub
   const settled: SettledLine[] = []
-  const results: AdjustResult[] = []
-  for (const i of coveredIdx) {
+  const taken = new Map<string, number>()
+  for (const i of creates) {
     const cv = covered[i]!
     const line = lines[i]!
     const t = target[i]!
     const value = Math.min(t.coveredCents, sub)
     if (value <= 0) continue
+    const key = await redeemKeyOf(tx, appt.id, cv.inclusionId, taken)
     const note = coverageNote({ service: line.name, tier, planClassLabel, coveredCents: value, lineCents: t.priceCents })
     const result = await d.payments.adjust(
       tx,
-      {
-        locationId: d.locationId,
-        actor: creditActor(c.actor),
-        audit: c.audit,
-        idempotencyKey: c.idempotencyKey ? `${c.idempotencyKey}:${cv.inclusionId}` : null,
-        source: 'system',
-      },
+      { locationId: d.locationId, actor, audit: c.audit, idempotencyKey: ledgerKey(key), source: 'system' },
       invoice.id,
       {
         kind: 'discount',
         unit: '$',
         value,
         reason: CREDIT_REASON,
-        note: `${note}${o.auto ? ' · auto-applied' : ''}`,
+        note: `${note}${mode === 'auto' ? ' · auto-applied' : ''}`,
         settle: 'credit',
       },
     )
     sub -= value
     const redeemId = d.newId()
+    const cycleStart = replaces.get(i)?.cycleStart ?? cycle ?? d.clock.now()
     await sql`
       insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, inclusion_id, service_id, appointment_id,
         invoice_id, ledger_event_id, line_cents, covered_cents, plan_class, visit_class, note, actor, actor_user_id, idempotency_key,
         created_at)
-      values (${redeemId}, ${membership.id}, ${cycle ?? d.clock.now()}, 'redeem', 1, ${cv.inclusionId}, ${line.serviceId},
+      values (${redeemId}, ${membership.id}, ${cycleStart}, 'redeem', 1, ${cv.inclusionId}, ${line.serviceId},
         ${appt.id}, ${invoice.id}, ${result.event.id}, ${t.priceCents}, ${value}, ${member.planClass}, ${appt.vehicle_class},
-        ${`${note}${o.auto ? ' (auto-applied)' : ''}`}, ${c.actor.name}, ${c.actor.userId}, ${`redeem:${appt.id}:${cv.inclusionId}`},
-        ${d.clock.now()})`.execute(tx)
-    results.push(result)
+        ${`${note}${mode === 'auto' ? ' (auto-applied)' : ''}`}, ${c.actor.name}, ${c.actor.userId}, ${key}, ${d.clock.now()})`.execute(tx)
+    adjusts.push(result)
     settled.push({
       inclusionId: cv.inclusionId,
       label: cv.label,
@@ -392,7 +512,7 @@ async function settle(tx: Tx, d: ApplyDeps, appointmentId: string, c: ApplyConte
       redeemId,
     })
   }
-  if (settled.length === 0) throw new Blocked('no_balance')
+  if (settled.length === 0 && mode !== 'resettle') throw new Blocked('no_balance')
   const plans = await loadPlans(tx, d.locationId)
   const after = (
     await creditSummaries(
@@ -406,10 +526,64 @@ async function settle(tx: Tx, d: ApplyDeps, appointmentId: string, c: ApplyConte
     appointmentId: appt.id,
     lines: settled,
     coveredCents: settled.reduce((n, l) => n + l.coveredCents, 0),
+    released: releases.length,
     repriced: changed,
     credits: { left: after.creditsLeft, used: after.creditsUsed },
-    first: results[0]!,
-    last: results[results.length - 1]!,
+    first: adjusts[0] ?? null,
+    last: adjusts[adjusts.length - 1] ?? null,
+  }
+}
+
+const emptyResult = (membershipId: string, appointmentId: string, repriced: boolean): SettleResult => ({
+  membershipId,
+  appointmentId,
+  lines: [],
+  coveredCents: 0,
+  released: 0,
+  repriced,
+  credits: { left: null, used: 0 },
+  first: null,
+  last: null,
+})
+
+/**
+ * Writes the lines' new prices on the appointment and its add-ons, and syncs the invoice: 409 PRICE_CHANGE_OVERPAID when that would
+ * leave it overpaid (a re-settle leaves the gateway's ADDON_REMOVE_OVERPAID to its caller: a removal says it in its own words).
+ */
+async function repriceLines(
+  tx: Tx,
+  d: ApplyDeps,
+  appointmentId: string,
+  lines: VisitLine[],
+  target: ReturnType<typeof repriced>[],
+  invoice: { canceled_at: Date | null } | undefined,
+  mode: Mode,
+): Promise<void> {
+  if (!invoice || invoice.canceled_at) throw new Blocked('no_invoice')
+  for (const [i, t] of target.entries()) {
+    const l = lines[i]!
+    if (t.priceCents === l.priceCents && t.discountBp === l.discountBp) continue
+    const cols = { price_cents: t.priceCents, list_price_cents: t.listCents, discount_bp: t.discountBp }
+    if (l.rowId) await tx.updateTable('appointment_addons').set(cols).where('id', '=', l.rowId).execute()
+    else await tx.updateTable('appointments').set(cols).where('id', '=', appointmentId).execute()
+  }
+  try {
+    await d.invoices.syncItems(
+      tx,
+      appointmentId,
+      target.map((t, i) => ({
+        name: lines[i]!.name,
+        kind: lines[i]!.kind,
+        priceCents: t.priceCents,
+        listCents: t.listCents,
+        discountBp: t.discountBp,
+        basis: lines[i]!.basis,
+      })),
+    )
+  } catch (e) {
+    if (mode !== 'resettle' && e instanceof AppError && e.code === 'ADDON_REMOVE_OVERPAID')
+      throw new AppError('PRICE_CHANGE_OVERPAID', { cause: e })
+    throw e
   }
 }
 
@@ -442,7 +616,7 @@ export async function settleMembershipVisit(
   appointmentId: string,
   ctx: ApplyContext & { auto?: boolean },
 ): Promise<SettleResult> {
-  return settle(tx, d, appointmentId, ctx, { auto: ctx.auto === true })
+  return settle(tx, d, appointmentId, ctx, ctx.auto === true ? 'auto' : 'apply')
 }
 
 export async function applyMembershipCredit(
@@ -453,15 +627,15 @@ export async function applyMembershipCredit(
 ): Promise<ApplyResult> {
   let r: SettleResult
   try {
-    r = await settle(tx, d, input.appointmentId, c, { auto: false })
+    r = await settle(tx, d, input.appointmentId, c, 'apply')
   } catch (e) {
-    if (e instanceof Blocked) throw blockError(e.block === 'not_auto' ? 'no_credit' : e.block)
+    if (e instanceof Blocked) throw blockError(e.block === 'not_auto' || e.block === 'not_settled' ? 'no_credit' : e.block)
     throw e
   }
   return {
-    event: r.first.event,
-    settlement: r.first.settlement,
-    invoice: r.last.invoice,
+    event: r.first!.event,
+    settlement: r.first!.settlement,
+    invoice: r.last!.invoice,
     membershipId: r.membershipId,
     appointmentId: r.appointmentId,
     rule: { id: r.lines[0]!.inclusionId, label: r.lines[0]!.label },
@@ -474,7 +648,7 @@ export async function applyMembershipCredit(
 
 export type AutoApplyOutcome =
   | { applied: true; ruleLabel: string; creditsLeft: number | null; discountCents: number; lines: number }
-  | { applied: false; skipped: Block | 'not_auto' | 'error' }
+  | { applied: false; skipped: Block | 'not_auto' | 'not_settled' | 'error' }
 
 /**
  * Settles the visit when it is completed (the inclusions that apply themselves, or all of them when the member asked); otherwise
@@ -489,11 +663,11 @@ export async function autoApplyMembershipCredit(
 ): Promise<AutoApplyOutcome> {
   await sql`savepoint auto_credit`.execute(tx)
   try {
-    const r = await settle(tx, d, input.appointmentId, { ...c, idempotencyKey: `auto-credit:${input.appointmentId}` }, { auto: true })
+    const r = await settle(tx, d, input.appointmentId, { ...c, idempotencyKey: `auto-credit:${input.appointmentId}` }, 'auto')
     await sql`release savepoint auto_credit`.execute(tx)
     return {
       applied: true,
-      ruleLabel: r.lines.map((l) => l.label).join(' + '),
+      ruleLabel: [...new Set(r.lines.map((l) => l.label))].join(' + '),
       creditsLeft: r.credits.left,
       discountCents: r.coveredCents,
       lines: r.lines.length,
@@ -508,4 +682,42 @@ export async function autoApplyMembershipCredit(
     if (err instanceof AppError) return { applied: false, skipped: 'error' }
     throw err
   }
+}
+
+export interface ResettleOutcome {
+  /** What the membership covered on the visit before and after. */
+  beforeCents: number
+  afterCents: number
+  /** Redeems given back and written. */
+  released: number
+  added: number
+}
+
+/**
+ * Settles a visit again after it changed (the size set at the shop, an add-on added or removed; ADR 0170 wave Q2a review), so the
+ * coverage follows the visit: a larger size confirmed after the visit was covered is covered up to the plan size, an included add-on
+ * added later is covered, a covered add-on removed gives its coverage and credit back. null when the visit holds no redeem yet (the
+ * completion settles it) or the membership no longer covers it (what was covered stays). Runs in the caller's transaction, before
+ * the caller syncs the invoice; an error (the sync's 409 ADDON_REMOVE_OVERPAID) refuses the whole change.
+ */
+export async function resettleMembershipVisit(
+  tx: Tx,
+  d: ApplyDeps,
+  input: { appointmentId: string },
+  c: ApplyContext,
+): Promise<ResettleOutcome | null> {
+  const before = await coveredOn(tx, input.appointmentId)
+  let r: SettleResult
+  try {
+    r = await settle(tx, d, input.appointmentId, { ...c, idempotencyKey: null }, 'resettle')
+  } catch (err) {
+    if (err instanceof Blocked) return null
+    throw err
+  }
+  return { beforeCents: before, afterCents: await coveredOn(tx, input.appointmentId), released: r.released, added: r.lines.length }
+}
+
+/** What the redeems a visit holds cover, in cents. */
+async function coveredOn(tx: Tx, appointmentId: string): Promise<number> {
+  return (await heldRedeems(tx, appointmentId)).reduce((n, h) => n + (h.adjustCents !== null && h.adjustCents < 0 ? -h.adjustCents : 0), 0)
 }

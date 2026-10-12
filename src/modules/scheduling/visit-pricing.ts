@@ -5,6 +5,7 @@
 // The size of a visit, in order: the size the caller names (a size of the shop that is on), then the size on file for the visit's
 // vehicle (when that size is still on), else none: priced at the smallest size, the "starts at" price (basis unknown_class), and
 // the appointment shows "Confirm size" until staff set it at the shop (class_confirmed_at).
+import { sql } from 'kysely'
 import type { Executor, Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
 import {
@@ -17,8 +18,9 @@ import {
 } from '../catalog/price-book.js'
 import { requireVehicleClass } from '../catalog/vehicle-classes.js'
 import type { PriceBasis } from '../customers/schema.js'
-import type { AppointmentRecord } from './appointments.js'
-import type { SchedulingCtx } from './context.js'
+import { logActivity, type AppointmentRecord } from './appointments.js'
+import type { Actor, SchedulingCtx } from './context.js'
+import { formatUsdOps } from '../../platform/money.js'
 
 /** Who may say a car's size: staff, the client (a verified website or link page), the AI assistant. */
 export type ClassSource = 'staff' | 'client' | 'ai'
@@ -110,6 +112,16 @@ export async function withVisitCredits(
     .select((eb) => [eb.fn.coalesce('e.inclusion_id', 'e.rule_id').as('inclusion_id'), 'e.qty'])
     .where('e.appointment_id', '=', appointmentId)
     .where('e.kind', '=', 'redeem')
+    // a redeem given back (a closure, or the visit changed after it was settled) holds no credit any more
+    .where(({ not, exists, selectFrom }) =>
+      not(
+        exists(
+          selectFrom('membership_credit_events as x')
+            .select('x.id')
+            .whereRef('x.idempotency_key', '=', sql<string>`'restore:' || e.id::text`),
+        ),
+      ),
+    )
     .execute()
   if (rows.length === 0) return member
   const spent = new Map<string, number>()
@@ -190,3 +202,19 @@ export const notTheirVehicle = (path: string): AppError =>
     detail: 'Pick one of the client’s vehicles.',
     errors: [{ path, message: 'Pick one of the client’s vehicles.' }],
   })
+
+/**
+ * A visit the membership already covered changed (the size, an add-on): it is settled again before the invoice sync, so the
+ * coverage follows the visit (ADR 0170, wave Q2a review); a change of what is covered is noted on the visit. Nothing when the visit
+ * holds no redeem yet. Throws the sync's 409 ADDON_REMOVE_OVERPAID when the new prices would leave the invoice overpaid.
+ */
+export async function resettleCoverage(tx: Tx, c: SchedulingCtx, actor: Actor, appointmentId: string): Promise<void> {
+  const r = await c.ports.memberships.resettleCredit?.(tx, c, actor, appointmentId)
+  if (!r || r.beforeCents === r.afterCents) return
+  await logActivity(tx, c, {
+    appointmentId,
+    text: `Membership coverage updated · ${formatUsdOps(r.beforeCents)} → ${formatUsdOps(r.afterCents)}`,
+    channels: ['internal'],
+    actor,
+  })
+}

@@ -14,13 +14,11 @@ import { getSetting } from '../../../platform/settings.js'
 import { fmtT, wallToInstant } from '../../../platform/time.js'
 import { MS_PER_MIN } from '../../scheduling/availability.js'
 import { BOARD_DEFAULT_DAYS, loadBoard } from '../availability-loader.js'
-import { bookingRefOf, chargeBookingLimits, createWebBooking, dollars } from '../bookings.js'
+import { bookingRefOf, chargeBookingLimits, createWebBooking, dollars, guestPricingOf } from '../bookings.js'
 import { loadPublicCatalog } from '../catalog.js'
 import { publicLocation, type PublicDeps, type PublicLocation, type PublicRequest } from '../deps.js'
-import { chargeJoinLimits, joinWeb, memberRefOf } from '../memberships.js'
+import { chargeJoinLimits, joinTierOf, joinWeb, memberRefOf } from '../memberships.js'
 import { phoneOrThrow, requestOtp, verifyOtp } from '../otp.js'
-import { loadPlans } from '../../memberships/plans.js'
-import { publicTierOf } from '../tiers.js'
 import {
   AVAILABILITY_RAW_QUERY,
   AvailabilityQuery,
@@ -235,7 +233,7 @@ export function registerPublicRoutes(d: PublicDeps): void {
         summary: 'Join Gold or VIP from the website',
         description:
           'No session; Idempotency-Key required. A new number: the customer, their vehicles and a membership in the pending state tied to the tier’s Squarespace product (when the product map has none the membership still waits and an alert is raised); staff get a notification asking them to text the checkout link; the person gets a welcome text saying so. The membership activates when the Squarespace sync sees the paid order. ' +
-          'The number of a customer the shop already has, without a member token issued for that customer: the same 201, nothing written to the record and no text; staff get the request to confirm with the customer. With the token: the full path, and 409 PUBLIC_ALREADY_MEMBER for a live membership; 409 IDENTITY_PIN_REQUIRED when the number’s client has a PIN (a PIN outranks a code). 422 on validation; 429 over 10 an hour per address, 2 a day per number from one address or 3 a day per number.',
+          'The number of a customer the shop already has, without a member token issued for that customer: the same 201, nothing written to the record and no text; staff get the request to confirm with the customer. With the token: the full path, and 409 PUBLIC_ALREADY_MEMBER for a live membership (held, or shared as a household member); 409 IDENTITY_PIN_REQUIRED when the number’s client has a PIN (a PIN outranks a code). 422 on validation; 429 over 10 an hour per address, 2 a day per number from one address or 3 a day per number.',
         body: MembershipBody,
         response: { 201: MembershipResult, 202: MembershipResult },
       },
@@ -245,7 +243,8 @@ export function registerPublicRoutes(d: PublicDeps): void {
         async (req, tx, _reply, p: Prepared) => {
           const b = req.body as z.infer<typeof MembershipBody>
           if (p.decoy) {
-            const tier = publicTierOf(await loadPlans(tx, p.loc.id), b.tier)
+            // the size answered as a real join would (the same checks, the same size, label and price; nothing else written)
+            const { spec, sized } = await joinTierOf(tx, d, p.loc, b)
             return {
               status: 202,
               body: {
@@ -253,11 +252,9 @@ export function registerPublicRoutes(d: PublicDeps): void {
                 status: 'pending_payment',
                 next: 'checkout_link_by_sms',
                 tier: b.tier,
-                plan: tier?.name ?? b.tier,
+                plan: spec.label,
                 confirmationBy: 'sms',
-                planClass: b.planClass ?? 'compact_car',
-                planClassLabel: null,
-                monthlyCents: null,
+                ...sized,
               },
             }
           }
@@ -299,6 +296,7 @@ async function decoy(tx: Tx, l: PublicLocation, b: z.infer<typeof BookingBody>):
     addons: [],
     when: `${b.date} · ${fmtT(b.startMin)} (${dollars(fee.value.cents)} fee)`,
     member: false,
-    pricing: { vehicleClass: b.vehicleClass ?? null, vehicleClassLabel: null, confirmAtShop: true, listCents: 0, discountCents: 0, coveredCents: 0, dueCents: 0 },
+    // a guest's price at the size, from the price book, as a real booking answers it
+    pricing: await guestPricingOf(tx, l, b),
   }
 }

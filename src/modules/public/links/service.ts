@@ -694,7 +694,9 @@ export async function startMembership(
       linkAudit(r),
     )
   } catch (e) {
-    if (e instanceof AppError && e.code === 'MEMBERSHIP_EXISTS') throw new AppError('LINK_ALREADY_MEMBER', { cause: e })
+    // a household member shares a membership already: the page says so in the same words
+    if (e instanceof AppError && (e.code === 'MEMBERSHIP_EXISTS' || e.code === 'MEMBERSHIP_HOUSEHOLD_TAKEN'))
+      throw new AppError('LINK_ALREADY_MEMBER', { cause: e })
     if (e instanceof AppError && e.code === 'MEMBERSHIP_CHECKOUT_UNAVAILABLE') throw new AppError('LINK_CHECKOUT_UNAVAILABLE', { cause: e })
     if (e instanceof AppError && e.code === 'VALIDATION_FAILED' && e.errors?.some((x) => x.path === 'planClass'))
       throw bad('planClass', 'Pick one of the vehicle sizes.')

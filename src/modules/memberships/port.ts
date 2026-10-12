@@ -8,7 +8,7 @@ import type { MembershipInfo, MembershipPort, MembershipRef, UpgradeCandidacy } 
 import { actorFromAuth } from '../payments/actor.js'
 import { PaymentsService } from '../payments/commands.js'
 import { defaultPorts } from '../payments/ports.js'
-import { autoApplyMembershipCredit } from './apply.js'
+import { autoApplyMembershipCredit, resettleMembershipVisit } from './apply.js'
 import { loadMemberContext } from '../catalog/price-book.js'
 import { creditSummaries, eligibleInclusion } from './credits.js'
 import { restoreClosureCredit } from './emergency.js'
@@ -97,6 +97,16 @@ export const dbMembershipPort: MembershipPort = {
       { actor: actorFromAuth(actor.auth), audit: actor.audit, idempotencyKey: null },
     )
     return r
+  },
+
+  resettleCredit(tx, c, actor, appointmentId) {
+    const payments = new PaymentsService({ clock: c.clock, newId: c.newId, ports: defaultPorts() })
+    return resettleMembershipVisit(
+      tx,
+      { locationId: c.locationId, clock: c.clock, newId: c.newId, payments, invoices: c.ports.invoices },
+      { appointmentId },
+      { actor: actorFromAuth(actor.auth), audit: actor.audit, idempotencyKey: null },
+    )
   },
 
   pricingFor: (db, c) => loadMemberContext(db, c.locationId, c.customerId),

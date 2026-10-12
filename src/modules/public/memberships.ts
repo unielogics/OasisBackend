@@ -23,6 +23,7 @@ import { phoneOrThrow, resolveMemberToken } from './otp.js'
 import '../identity/problems.js'
 import './problems.js'
 import { publicTierOf, type PublicTier } from './tiers.js'
+import { sharedMembershipId } from '../memberships/household.js'
 import { resolvePlanClass } from '../memberships/plan-class.js'
 
 /** The tier as it is sold: its key and the name the membership is sold under (memberships.plan_label). */
@@ -96,18 +97,12 @@ export async function chargeJoinLimits(d: PublicDeps, r: PublicRequest, phone: s
   await enforceLimits(d.app.db, d.app.clock, publicLimitChecks('membership', r.ip, phone))
 }
 
-export async function joinWeb(
-  tx: Tx,
-  d: PublicDeps,
-  loc: PublicLocation,
-  r: PublicRequest,
-  input: WebJoinInput,
-): Promise<WebJoinResult> {
-  const phone = phoneOrThrow(input.phone)
-  const { clock, newId } = d.app
-  const now = clock.now()
-  const dctx = { locationId: loc.id, clock, newId }
-  await ensurePlans(tx, dctx)
+/**
+ * The tier and size a website join names (422 on a tier that is not sold, a size that is not a size of the shop's, 422
+ * TIER_CLASS_UNPRICED on a size named without a price): the real join and the honeypot's answer (which writes nothing else) share it.
+ */
+export async function joinTierOf(tx: Tx, d: PublicDeps, loc: PublicLocation, input: Pick<WebJoinInput, 'tier' | 'planClass'>) {
+  await ensurePlans(tx, { locationId: loc.id, clock: d.app.clock, newId: d.app.newId })
   const plan = publicTierOf(await loadPlans(tx, loc.id), input.tier)
   const spec: TierSpec = { key: input.tier, label: plan?.name ?? input.tier }
   if (!plan)
@@ -119,6 +114,21 @@ export async function joinWeb(
   const size = await resolvePlanClass(tx, loc.id, plan.id, { requested: input.planClass, requirePrice: input.planClass !== undefined, path: 'body.planClass' })
   const sizeLabel = (await tx.selectFrom('vehicle_classes').select('label').where('location_id', '=', loc.id).where('key', '=', size.classKey).executeTakeFirst())?.label ?? null
   const sized = { planClass: size.classKey, planClassLabel: sizeLabel, monthlyCents: size.monthlyCents }
+  return { plan, spec, size, sizeLabel, sized }
+}
+
+export async function joinWeb(
+  tx: Tx,
+  d: PublicDeps,
+  loc: PublicLocation,
+  r: PublicRequest,
+  input: WebJoinInput,
+): Promise<WebJoinResult> {
+  const phone = phoneOrThrow(input.phone)
+  const { clock, newId } = d.app
+  const now = clock.now()
+  const dctx = { locationId: loc.id, clock, newId }
+  const { plan, spec, size, sizeLabel, sized } = await joinTierOf(tx, d, loc, input)
 
   const verified = input.memberToken ? await resolveMemberToken(tx, loc, input.memberToken, now) : null
   if (verified && verified.phoneE164 !== phone) throw new AppError('PUBLIC_TOKEN_PHONE_MISMATCH')
@@ -185,7 +195,8 @@ export async function joinWeb(
     .where('customer_id', '=', customer.id)
     .where('status', 'in', ['pending', 'active', 'past_due', 'paused'])
     .executeTakeFirst()
-  if (live) throw new AppError('PUBLIC_ALREADY_MEMBER')
+  // a household member is a member through the membership they share (ADR 0170)
+  if (live || (await sharedMembershipId(tx, customer.id))) throw new AppError('PUBLIC_ALREADY_MEMBER')
 
   const product = await membershipProductFor(tx, loc.id, d.app.env.SQSP_PRODUCT_MAP, plan.key, plan.legacyKey)
   const id = newId()

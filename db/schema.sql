@@ -4565,6 +4565,12 @@ CREATE INDEX membership_checkouts_expiry_idx ON public.membership_checkouts USIN
 CREATE INDEX membership_checkouts_order_idx ON public.membership_checkouts USING btree (matched_order_id) WHERE (matched_order_id IS NOT NULL);
 
 --
+-- Name: membership_credit_events_appointment_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX membership_credit_events_appointment_idx ON public.membership_credit_events USING btree (appointment_id) WHERE (appointment_id IS NOT NULL);
+
+--
 -- Name: membership_credit_events_cycle_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5007,12 +5013,6 @@ CREATE UNIQUE INDEX uq_bay_occupied ON public.appointments USING btree (bay_id) 
 --
 
 CREATE UNIQUE INDEX uq_closures_date_live ON public.closures USING btree (location_id, date) WHERE (deleted_at IS NULL);
-
---
--- Name: uq_credit_redeem_appointment; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX uq_credit_redeem_appointment ON public.membership_credit_events USING btree (appointment_id, COALESCE(inclusion_id, rule_id)) WHERE ((kind = 'redeem'::text) AND (appointment_id IS NOT NULL));
 
 --
 -- Name: uq_customers_phone; Type: INDEX; Schema: public; Owner: -

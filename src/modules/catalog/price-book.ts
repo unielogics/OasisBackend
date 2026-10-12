@@ -292,8 +292,9 @@ export interface VisitQuote {
 }
 
 /**
- * A whole visit (the package, then the add-ons in order) at a size; each covered line spends one of the cycle's credits, and an
- * inclusion covers at most one line of a visit (wave Q2: one redeem per inclusion and visit, `redeem:<appointment>:<inclusion>`).
+ * A whole visit (the package, then the add-ons in order) at a size; each covered line spends one of the cycle's credits. An inclusion
+ * covers every line of the visit it names while it can (every_visit and unlimited ones always; per_cycle ones while credits last):
+ * "Wax and rain repellent every wash" covers both add-ons (ADR 0170 wave Q2a, one redeem per covered line).
  */
 export function quoteVisit(
   book: PriceBook,
@@ -302,7 +303,7 @@ export function quoteVisit(
 ): VisitQuote {
   const used = new Map<string, number>()
   const lines = [visit.packageId, ...visit.addonIds].map((serviceId) => {
-    const inc = member ? coveringInclusion({ ...member, inclusions: member.inclusions.filter((i) => !used.has(i.id)) }, serviceId, used) : null
+    const inc = member ? coveringInclusion(member, serviceId, used) : null
     if (inc) used.set(inc.id, (used.get(inc.id) ?? 0) + 1)
     return priceLine(book, { serviceId }, visit.classKey, member, { inclusion: inc })
   })

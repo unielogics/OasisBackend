@@ -17,7 +17,8 @@ import { reassignNumber } from '../identity/rebind.js'
 import { staleRecord } from '../identity/stale.js'
 import { loadPlans } from '../memberships/plans.js'
 import { listVehicleClasses, requireVehicleClass } from '../catalog/vehicle-classes.js'
-import type { PricingView } from '../scheduling/visit-pricing.js'
+import { loadPriceBook, quoteVisit } from '../catalog/price-book.js'
+import { pricingView, type PricingView } from '../scheduling/visit-pricing.js'
 import { logActivity } from '../scheduling/appointments.js'
 import { createAppointment } from '../scheduling/booking.js'
 import { engineInput, evaluateStart, loadDayData } from '../scheduling/availability-loader.js'
@@ -189,15 +190,8 @@ export async function chargeBookingLimits(d: PublicDeps, r: PublicRequest, phone
   await enforceLimits(d.app.db, d.app.clock, publicLimitChecks('booking', r.ip, phone))
 }
 
-export async function createWebBooking(
-  tx: Tx,
-  d: PublicDeps,
-  loc: PublicLocation,
-  r: PublicRequest,
-  input: WebBookingInput,
-): Promise<WebBookingResult> {
-  const phone = phoneOrThrow(input.phone)
-  const now = d.app.clock.now()
+/** The package, add-ons and size a website booking names (422 on what the catalog does not have). */
+async function webVisitOf(tx: Tx, loc: PublicLocation, input: Pick<WebBookingInput, 'serviceKey' | 'addonKeys' | 'vehicleClass' | 'vehicle'>) {
   const services = await loadBoardServices(tx, loc.id)
   const pkg = services.packages.find((p) => p.key === input.serviceKey)
   if (!pkg) throw bad('serviceKey', 'Pick a wash from the catalog.')
@@ -212,6 +206,36 @@ export async function createWebBooking(
   const vehicleClass = input.vehicleClass
     ? (await requireVehicleClass(tx, loc.id, input.vehicleClass, { active: true, path: 'body.vehicleClass' })).key
     : classOfLabel(input.vehicle?.label, sizes)
+  return { pkg, addons, sizes, vehicleClass }
+}
+
+/**
+ * What a guest's booking of this visit would cost (the honeypot's answer reads like a real one: the same validation, the same
+ * price book; nothing is written).
+ */
+export async function guestPricingOf(
+  tx: Tx,
+  loc: PublicLocation,
+  input: Pick<WebBookingInput, 'serviceKey' | 'addonKeys' | 'vehicleClass' | 'vehicle'>,
+): Promise<WebPricing> {
+  const { pkg, addons, vehicleClass } = await webVisitOf(tx, loc, input)
+  const book = await loadPriceBook(tx, loc.id)
+  const quote = quoteVisit(book, { packageId: pkg.id, addonIds: addons.map((a) => a.id), classKey: vehicleClass }, null)
+  return webPricingOf(
+    pricingView({ book, member: null, classKey: vehicleClass, classLabel: vehicleClass ? (book.labels.get(vehicleClass) ?? null) : null, quote }),
+  )
+}
+
+export async function createWebBooking(
+  tx: Tx,
+  d: PublicDeps,
+  loc: PublicLocation,
+  r: PublicRequest,
+  input: WebBookingInput,
+): Promise<WebBookingResult> {
+  const phone = phoneOrThrow(input.phone)
+  const now = d.app.clock.now()
+  const { pkg, addons, sizes, vehicleClass } = await webVisitOf(tx, loc, input)
   const verified = input.memberToken ? await resolveMemberToken(tx, loc, input.memberToken, now) : null
   if (verified && verified.phoneE164 !== phone) throw new AppError('PUBLIC_TOKEN_PHONE_MISMATCH')
 

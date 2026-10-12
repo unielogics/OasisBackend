@@ -150,7 +150,7 @@ interface SummaryRow extends InvoiceCalcRow {
 export const lineClassLabel = (basis: PriceBasis, invoiceLabel: string | null): string | null =>
   basis === 'class' || basis === 'estimated' ? invoiceLabel : null
 
-/** The covered lines of these invoices: each membership redeem with the adjust it wrote (ADR 0170). */
+/** The covered lines of these invoices: each membership redeem with the adjust it wrote, unless a change of the visit gave it back (ADR 0170). */
 export async function coverageOf(db: Executor, invoiceIds: readonly string[]): Promise<Map<string, CoverageLine[]>> {
   const out = new Map<string, CoverageLine[]>()
   if (invoiceIds.length === 0) return out
@@ -170,6 +170,9 @@ export async function coverageOf(db: Executor, invoiceIds: readonly string[]): P
     left join services s on s.id = ce.service_id
     left join vehicle_classes vc on vc.location_id = e.location_id and vc.key = ce.plan_class
     where ce.kind = 'redeem' and e.invoice_id = any(${invoiceIds as string[]}::uuid[])
+      -- a redeem given back because the visit changed (its restore carries the reversing adjust) covers nothing any more
+      and not exists (select 1 from membership_credit_events x
+                      where x.idempotency_key = 'restore:' || ce.id::text and x.ledger_event_id is not null)
     order by e.seq`.execute(db)
   for (const row of r.rows) {
     const covered = row.covered_cents ?? -row.amount_cents

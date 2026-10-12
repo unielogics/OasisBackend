@@ -115,8 +115,9 @@ only for a location without any tier, so a tier or inclusion staff deleted never
 
 ## Wave Q2a: sizes on every booking path, the size change, and membership coverage
 
-Built on branch `ws/q2-booking` (no migration: the Q1a columns are written now). Code: `scheduling/{visit-pricing,sizing}.ts`
-(new), `scheduling/{booking,addons,invoicing}.ts`, `memberships/{apply,plan-class,service,port,emergency,checkouts}.ts`,
+Built on branch `ws/q2-booking` (the Q1a columns are written now; one migration, `20261014300000_redeem_per_line.sql`, from the
+review below). Code: `scheduling/{visit-pricing,sizing}.ts` (new), `scheduling/{booking,addons,invoicing}.ts`,
+`memberships/{apply,plan-class,service,port,emergency,checkouts,household}.ts`,
 `public/{bookings,members,memberships}.ts`, `public/links/service.ts`, `assistant/{tools/actions,actions/handler}.ts`,
 `standing/series.ts`, `payments/{gateway,detail}.ts`, `customers/{service,http/routes}.ts`. API: api-spec 20.2a, 23.2, 24.3,
 26.2-26.4, 28.
@@ -136,25 +137,33 @@ Built on branch `ws/q2-booking` (no migration: the Q1a columns are written now).
    `booking_confirmed_web` and `action_booked`, and its Spanish); a service with one price for every size asks nothing.
 4. **The size at the shop**: `PUT /appointments/:id/vehicle-class` reprices the package and the live add-ons for the client, stamps
    `class_confirmed_at`, records the size on the car (staff), audits and publishes; 409 `PRICE_CHANGE_OVERPAID` (the gateway's
-   `ADDON_REMOVE_OVERPAID` reworded) refuses a change that would overpay. A visit already covered keeps its coverage: its own redeems
-   count as credits still there. `POST /appointments/quote` previews with the same rules and writes nothing.
+   `ADDON_REMOVE_OVERPAID` reworded) refuses a change that would overpay. A visit already covered is settled again at the new size
+   (item 6): its own redeems count as credits still there. `POST /appointments/quote` previews with the same rules and writes nothing.
 5. **The website** (`vehicleClass`, and the label fix): a `vehicle.label` that names a size (a label or key of the shop's, or the
    old "Sedan / Coupe" → compact_car, "SUV / Crossover" → compact_suv, "Truck / Van" → truck, the `vehicle_type` backfill's map) is
    the size and never a car. A guest's size prices the visit and never reaches someone else's record (the `linkOnly` rule); member
    prices only with a member token for the record (an unverified member's number is a guest). The answers add `pricing`.
 6. **Settling a visit** (`settleMembershipVisit`, replacing the single-credit `evaluate`/`redeem`): the holder's or a household
    member's ACTIVE membership, locked (appointment → membership → invoice, the order everywhere); `quoteVisit` assigns the inclusions
-   (an inclusion covers **one line of a visit**: `quoteVisit` now never gives one inclusion two lines, so the key
-   `redeem:<appointment>:<inclusion>` is unique); the lines are repriced **from their booked regular price** (a price edit between
+   (an inclusion covers **every line of the visit it names** while it can: every_visit and unlimited ones always, per_cycle ones while
+   credits last; one redeem per covered line, keyed `redeem:<appointment>:<inclusion>`, then `…:<n>` for the inclusion's n-th line or
+   replacement); the lines are repriced **from their booked regular price** (a price edit between
    booking and completion never changes a booked visit), covered lines at the regular price, others at the member price; then one
    adjust + one redeem per covered line, each capped at what is left of the subtotal. Explicit apply, completion (auto, under the
    savepoint; a business skip keeps the repricing, any error rolls it back, the completion never fails) and the closure restore (one
-   `restore` and one `protect` per redeem) all work per line. Arrival does not settle (the design's "optionally at arrival" is left out:
+   `restore` and one `protect` per redeem) all work per line. **The coverage follows the visit**: a settled visit that changes (the size
+   set at the shop, an add-on added or removed: `MembershipPort.resettleCredit`, called before the invoice sync) is settled again with
+   its own credits counted as still there; a redeem whose line is gone, is no longer covered, or changed price or plan size is given
+   back (a reversing system adjust and a `restore` keyed `restore:<redeem>`, `ledger_event_id` = that adjust, in the redeem's own cycle)
+   and each covered line without a redeem gets one (a replacement keeps the cycle it replaces); activity "Membership coverage updated ·
+   $40 → $60"; the invoice's `coverage` lists the redeems in force only. An apply with nothing new to cover answers
+   `MEMBERSHIP_CREDIT_APPLIED`. Arrival does not settle (the design's "optionally at arrival" is left out:
    the completion and the button are enough).
 7. **Households**: `membershipOfCustomer` / `activeMembership` / the port's `forAppointments` and `upgradeCandidates` see a live
    household member as the member; `POST /memberships/:id/household {customerId}` and `DELETE …/household/:customerId` (cli.member,
    audited); a client who holds a live membership, or shares another, cannot be added (409 `MEMBERSHIP_HOUSEHOLD_TAKEN`), nor be given
-   one of their own while they share one; the stale-record rule applies as for a manual membership. No cap on household members
+   one of their own while they share one: staff (409 `MEMBERSHIP_HOUSEHOLD_TAKEN`), a personal link's membership start (the same code
+   from `openCheckoutIntent`, `LINK_ALREADY_MEMBER` on the page) and the verified website join (`PUBLIC_ALREADY_MEMBER`); the stale-record rule applies as for a manual membership. No cap on household members
    (plan decision 2). `GET /customers/:id/membership` of a household member answers the shared membership with `sharedFrom`.
 8. **planClass** everywhere a membership is made: staff create/patch, the website join and the link's `membership/start`
    (`openCheckoutIntent` stores it on the membership and the checkout); absent, the tier's cheapest priced size, else the smallest
@@ -166,12 +175,21 @@ Built on branch `ws/q2-booking` (no migration: the Q1a columns are written now).
    rows); the invoice summaries (`summariesByAppointment`) and the link page's `InvoiceView` the same. `calcInvoice` /
    `invoice_calc_of` and the integrity check are unchanged.
 
+**Review fixes (2026-10-12).** An independent review of the package found that a visit settled once never followed later changes:
+a size confirmed after completion left a Large SUV plan's member owing $21.40 (F1), an included add-on added after completion was
+charged the regular price uncovered (F2), and re-applying was refused. Item 6's re-settlement fixes both. One inclusion naming two
+add-ons covered only the first (F4): an inclusion now covers every line it names, so the per-inclusion unique index
+`uq_credit_redeem_appointment` is dropped (migration `20261014300000_redeem_per_line.sql`; the settlement runs under the appointment
+row lock and the unique idempotency key names each redeem). A household member could open a membership of their own through a link
+checkout or the verified website join (F3): both refuse now (item 7). The honeypot's answers carry the same size, label and price as
+a real answer (F6: `joinTierOf` and `guestPricingOf`, nothing written).
+
 ## What the next waves add
 
 * **Q2 (booking paths, built in wave Q2a above):** every booking path takes a size (`createAppointment` `vehicleId`/`vehicleClass`), snapshots the price
   lines (`list_price_cents`, `discount_bp`, `price_basis`, the size label), `PUT /appointments/:id/vehicle-class` (reprice, refused
   when it would overpay), `POST /appointments/quote`, `settleMembershipVisit` (one redeem + adjust per covered line, the covered
-  amount capped at the plan size; the per-inclusion unique index is already in place), household routes, `planClass` on joins and
+  amount capped at the plan size; a redeem per covered line, settled again when the visit changes), household routes, `planClass` on joins and
   manual memberships, the invoice DTO coverage fields, the website's "Sedan / Coupe" label bug.
 * **Q3:** the website catalog v2 and join flow (size picker, tier prices; a tier with no current price is not sold online: v2,
   the join route and the assistant's links leave it out, which v1 `plans` and `POST /public/memberships/join` do not do yet), the assistant's facts-v4, memberships billed as Square
