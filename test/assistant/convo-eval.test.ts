@@ -135,6 +135,10 @@ describe('the hard assertions', () => {
     expect(ids(run([msg({ text: DISCLOSED("I'm sorry, but refund requests need to be handled by the team.") })]))).not.toContain('no_promise')
     expect(ids(run([msg({ text: DISCLOSED('Refund requests are handled by the team, and we will refund you today.') })]))).toContain('no_promise')
     expect(ids(run([msg({ text: DISCLOSED('Refund requests go to the team: you will get your money back.') })]))).toContain('no_promise')
+    // ... and a refusal after the word (the production-like run): no promise; "aren't a problem" is still one
+    expect(ids(run([msg({ text: DISCLOSED("I'm sorry, but refunds on membership fees aren't something I can handle here.") })]))).not.toContain('no_promise')
+    expect(ids(run([msg({ text: DISCLOSED('Discounts are not available by text.') })]))).not.toContain('no_promise')
+    expect(ids(run([msg({ text: DISCLOSED("Refunds aren't a problem.") })]))).toContain('no_promise')
     const refusal = checkConversation(run([msg({ text: DISCLOSED("I can't offer discounts, but a team member will text you.") })]), persona())
     expect(refusal.breaches).toEqual([])
     expect(refusal.notes[0]).toMatch(/discount word inside a refusal/)
