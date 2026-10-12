@@ -1,6 +1,7 @@
 // An in-chat booking takes the size of the car the client names (ADR 0170, wave Q2): propose_booking stores the vehicle's id and size;
 // the confirmed booking books that car by its id (no duplicate of a car without a plate) and prices the visit at its size. With no
-// car named, the visit is priced at the smallest size and the confirmation says the exact price is confirmed at the shop.
+// car named, the visit is priced at the smallest size and the confirmation says the exact price is confirmed at the shop. Facts-v4
+// (wave Q3d): the model passes the size the client said (vehicleClass, a size key of the facts); a size staff set on the car wins.
 import { describe, expect, it } from 'vitest'
 import { SIM_DEVICE_KEY } from '../../db/seeds/messaging.js'
 import type { AnyAssistantTool, ToolOutcome } from '../../src/modules/assistant/contract.js'
@@ -62,7 +63,7 @@ async function washCells(): Promise<void> {
     await w.t.db.insertInto('service_class_prices').values({ service_id: s.id, location_id: w.locationId, class_key: cls, price_cents: cents }).execute()
 }
 
-const BOOK = { serviceKey: 'express-hand-wash', addonKeys: [], date: '2026-06-15', startMin: 600 }
+const BOOK = { serviceKey: 'express-hand-wash', addonKeys: [], date: '2026-06-15', startMin: 600, vehicleClass: null }
 const bookedText = async () =>
   (await w.t.db.selectFrom('messages').select(['template_key', 'body']).where('customer_id', '=', maria().id).where('template_key', '=', 'action_booked').executeTakeFirstOrThrow()).body
 
@@ -99,5 +100,57 @@ describe('an in-chat booking and the car’s size', () => {
     const a = await w.t.db.selectFrom('appointments').select(['vehicle_class', 'price_cents', 'price_basis']).where('customer_id', '=', maria().id).executeTakeFirstOrThrow()
     expect(a).toEqual({ vehicle_class: null, price_cents: 4000, price_basis: 'unknown_class' })
     expect(await bookedText()).toMatch(/booking fee due at the shop\. We.ll confirm the exact price at the shop\. See you then!$/)
+  })
+
+  it('the size the client said (vehicleClass) prices the visit; a size key the shop does not have is refused', async () => {
+    await washCells()
+    const probe = await trustedMaria()
+    expect(await run('propose_booking', probe, { ...BOOK, vehicle: null, vehicleClass: 'minivan' })).toMatchObject({ ok: false, error: 'invalid' })
+    expect(await run('propose_booking', probe, { ...BOOK, vehicle: null, vehicleClass: 'large_suv' })).toMatchObject({ ok: true })
+    const action = await w.t.db.selectFrom('assistant_pending_actions').select('payload').orderBy('created_at', 'desc').executeTakeFirstOrThrow()
+    expect(action.payload).toMatchObject({ vehicleId: null, vehicleClass: 'large_suv' })
+    await reply(maria().phone, await lastCode(maria().phone), maria().id)
+    const a = await w.t.db.selectFrom('appointments').select(['vehicle_class', 'price_cents', 'price_basis']).where('customer_id', '=', maria().id).executeTakeFirstOrThrow()
+    expect(a).toEqual({ vehicle_class: 'large_suv', price_cents: 6000, price_basis: 'class' })
+    expect(await bookedText()).not.toContain('exact price')
+  })
+
+  it('a size staff set on the car wins over what the client says; the client’s size updates a car the assistant sized', async () => {
+    await washCells()
+    const staffCar = w.newId()
+    const aiCar = w.newId()
+    await w.t.db
+      .insertInto('vehicles')
+      .values([
+        { id: staffCar, customer_id: maria().id, year: null, make: 'Mini', model: 'Cooper', color: null, plate: null, deleted_at: null, vehicle_class: 'compact_car', vehicle_class_source: 'staff' },
+        { id: aiCar, customer_id: maria().id, year: null, make: 'Kia', model: 'Sorento', color: null, plate: null, deleted_at: null, vehicle_class: 'compact_car', vehicle_class_source: 'ai' },
+      ])
+      .execute()
+    const probe = await trustedMaria()
+    expect(await run('propose_booking', probe, { ...BOOK, vehicle: 'the Cooper', vehicleClass: 'large_suv' })).toMatchObject({ ok: true })
+    let action = await w.t.db.selectFrom('assistant_pending_actions').select('payload').orderBy('created_at', 'desc').executeTakeFirstOrThrow()
+    expect(action.payload).toMatchObject({ vehicleId: staffCar, vehicleClass: 'compact_car' })
+    await reply(maria().phone, await lastCode(maria().phone), maria().id)
+    expect(await w.t.db.selectFrom('appointments').select(['vehicle_class', 'price_cents']).where('vehicle_id', '=', staffCar).executeTakeFirstOrThrow()).toEqual({
+      vehicle_class: 'compact_car',
+      price_cents: 4000,
+    })
+    w.clock.advance(60_000)
+    const probe2 = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'trusted' })
+    expect(await run('propose_booking', probe2, { ...BOOK, startMin: 720, vehicle: 'the Sorento', vehicleClass: 'large_suv' })).toMatchObject({ ok: true })
+    action = await w.t.db.selectFrom('assistant_pending_actions').select('payload').orderBy('created_at', 'desc').executeTakeFirstOrThrow()
+    expect(action.payload).toMatchObject({ vehicleId: aiCar, vehicleClass: 'large_suv' })
+    await reply(maria().phone, await lastCode(maria().phone), maria().id)
+    expect(await w.t.db.selectFrom('appointments').select(['vehicle_class', 'price_cents']).where('vehicle_id', '=', aiCar).executeTakeFirstOrThrow()).toEqual({
+      vehicle_class: 'large_suv',
+      price_cents: 6000,
+    })
+    const cars = await w.t.db.selectFrom('vehicles').select(['id', 'vehicle_class', 'vehicle_class_source']).where('id', 'in', [staffCar, aiCar]).execute()
+    expect(cars).toEqual(
+      expect.arrayContaining([
+        { id: staffCar, vehicle_class: 'compact_car', vehicle_class_source: 'staff' },
+        { id: aiCar, vehicle_class: 'large_suv', vehicle_class_source: 'ai' },
+      ]),
+    )
   })
 })

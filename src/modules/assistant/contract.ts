@@ -13,8 +13,9 @@
 //     ctx.identity (server side); their inputs never name a client, a phone or an id. Appointments are refs A1..A3 (ctx.refs), links
 //     are placeholders "{link1}" (ctx.addLink).
 //   - Pricing is not the AI's task, and the model never writes an amount (output guard v4, design section 3c): a tool hands it no
-//     dollar figure, only the placeholder of each priced thing ({price:<key>}, {price:tint:<vehicle>:<film>}, {plan:<key>}, {fee},
-//     {balance}; the keys facts.ts placeholderValues renders), and the server renders STARTING prices, plan prices, the fee and the
+//     dollar figure, only the placeholder of each priced thing ({price:<key>}, {price:<key>:<size>}, {plan:<key>},
+//     {plan:<key>:<size>}, {perks:<key>}, {fee}, {balance}, and {price:tint:<size>:<film>} for one more release; facts-v4, the keys
+//     facts.ts placeholderValues renders), and the server renders STARTING prices, plan prices, the fee and the
 //     balance from the current facts after the guard, never a total, a combination or a discount. {balance} renders get_balance's
 //     data.openBalanceCents when present, else its first amountsCents (the total), only in a turn where get_balance succeeded.
 //   - Everything stays off by default: with AI_ENABLED=false, assistant.enabled=false, AI_ACTIONS_ENABLED=false or
@@ -28,7 +29,6 @@ import type { Db, Tx } from '../../platform/db.js'
 import type { NewId } from '../../platform/ids.js'
 import type { JobDefinition } from '../../platform/jobs.js'
 import type { Logger } from '../../platform/logging.js'
-import type { VipInclusion } from '../catalog/schema.js'
 import type { IdentityQueue } from '../identity/deps.js'
 import type { ClientLinkKind } from '../identity/schema.js'
 import type { PublicTier } from '../public/tiers.js'
@@ -174,10 +174,29 @@ export interface ShopFactsCategory {
   label: string
 }
 
+/** A vehicle size of the shop (facts-v4, ADR 0170): what the assistant asks a new client and prices by. Active sizes, smallest first. */
+export interface ShopFactsSize {
+  /** The size key set_my_vehicle and propose_booking take (compact_car, large_suv, ...). */
+  key: string
+  /** "Compact car" (Settings → Vehicle sizes). */
+  label: string
+}
+
+/** An item's regular price at one size (a size without a price is not listed: "priced at the shop"). */
+export interface ShopFactsItemPrice {
+  class: string
+  classLabel: string
+  cents: number
+  /** The top of a range (tint), never stated. */
+  maxCents: number | null
+  /** The member price at the lowest % off of the tiers sold online (whole dollars, half up). */
+  memberCents: number
+}
+
 /**
- * A package or add-on of the Settings catalog (one entry per public catalog key; quote-only items included with null prices).
- * The member and guest prices are STARTING prices (catalog/pricing.ts effectivePrices; a tint package: its film's lowest): the
- * only service prices the assistant may state, always introduced by "starts at" / "from" / "starting at".
+ * A package or add-on of the Settings catalog (one entry per public catalog key; quote-only items included without prices), built
+ * from GET /public/catalog/v2 (facts-v4). The prices are by vehicle size; the assistant states them only through placeholders,
+ * always as STARTING prices ("starts at").
  */
 export interface ShopFactsItem {
   /** The public catalog key (the slug check_availability and propose_booking take as serviceKey / addonKeys). */
@@ -190,48 +209,59 @@ export interface ShopFactsItem {
   description: string | null
   /** Minutes the visit takes (packages); null for add-ons and quote-only items. */
   durationMin: number | null
-  /** Starting price for members; null for a quote-only item. */
+  /** The sizes that have a price, in size order (empty: priced by its base price alone, or quote-only). */
+  prices: ShopFactsItemPrice[]
+  /** The starting price (the lowest over the sizes, else the base price); null for a quote-only item. */
+  fromCents: number | null
+  /** The size of the starting price ("Compact car"); null without prices by size. */
+  fromClassLabel: string | null
+  /** The member starting price; null for a quote-only item. */
   memberFromCents: number | null
-  /** Starting price for everyone else; null for a quote-only item. */
-  guestFromCents: number | null
-  vipInclusion: VipInclusion
-  /** "2× / mo" when vipInclusion is allowance. */
-  vipNote: string | null
+  /** The tiers sold online whose inclusions name this item. */
+  includedIn: { tier: string; tierLabel: string; mode: 'per_cycle' | 'every_visit'; perCycle: number | null }[]
   /** Priced per vehicle by the team: the AI offers "text us a photo for a quote", never a price. */
   quoteOnly: boolean
-  /** The tint film whose matrix rows price this package, or null. */
+  /** The tint film (catalog.tint_films key) of a tint package, or null; its sizes read as {price:tint:<size>:<film>} too. */
   tintFilm: string | null
-}
-
-/** A tint matrix row (setting catalog.tint_matrix) as "from" prices only (the max of the range is never stated). */
-export interface ShopFactsTintRow {
-  /** sedan_coupe | suv_crossover | truck_van (the vehicle type keys of the matrix; set_my_vehicle's type). */
-  vehicle: string
-  vehicleLabel: string
-  film: string
-  filmLabel: string
-  /** The film's VLT options (%). */
-  vlt: number[]
-  memberFromCents: number
-  guestFromCents: number
 }
 
 export interface ShopFactsCatalog {
   categories: ShopFactsCategory[]
+  /** The active vehicle sizes, smallest first. */
+  sizes: ShopFactsSize[]
   /** Active items listed online, ordered by category sort then item sort. */
   items: ShopFactsItem[]
-  tint: ShopFactsTintRow[]
+  /** The tint films by key (label, VLT shades), for the tint items. */
+  tintFilms: { key: string; label: string; vlt: number[] }[]
   lines: FactLine[]
 }
 
-/** A membership plan the website sells (Gold, VIP). */
+/** What a tier includes (an inclusion), by the names of the items it covers. */
+export interface ShopFactsInclusion {
+  /** The public names of the listed items it covers. */
+  services: string[]
+  mode: 'per_cycle' | 'every_visit'
+  /** per_cycle: visits a month (null: unlimited); null for every_visit. */
+  perCycle: number | null
+}
+
+/** A membership tier the shop sells online (active, public and with a current price: plan decision 3). */
 export interface ShopFactsPlan {
-  /** The website tier (gold | vip). */
+  /** The tier key (gold, vip, ...). */
   key: PublicTier
-  /** "Gold" / "VIP" (membership_plans.public_label). */
+  /** "Gold" / "VIP" (the tier's name). */
   label: string
-  /** The monthly price, when Settings has one (null: the AI says the team confirms it). */
-  monthlyPriceCents: number | null
+  /** The monthly price at each size that has one, in size order. */
+  prices: { class: string; classLabel: string; monthlyCents: number }[]
+  /** The starting monthly price and its size. */
+  fromCents: number
+  fromClassLabel: string
+  /** The % off every line the membership does not cover, in basis points. */
+  memberDiscountBp: number
+  /** Members get the VIP booking rules. */
+  vipBooking: boolean
+  inclusions: ShopFactsInclusion[]
+  /** The perks text from Settings (as saved). */
   perks: string[]
 }
 
@@ -450,8 +480,9 @@ export interface ToolInputs {
   list_my_appointments: Record<string, never>
   get_balance: Record<string, never>
   set_my_name: { fullName: string }
+  /** size: a size key of SHOP FACTS (ShopFactsSize.key, facts-v4), checked against them. */
   set_my_vehicle: {
-    type: 'sedan_coupe' | 'suv_crossover' | 'truck_van'
+    size: string
     make: string
     model: string
     year: number | null
@@ -460,7 +491,8 @@ export interface ToolInputs {
   /** Category keys. */
   note_interest: { categories: string[] }
   /** startMin: minutes from midnight (business time zone). vehicle: the client's own vehicle as they named it ("the Civic"). */
-  propose_booking: { serviceKey: string; addonKeys: string[]; date: BizDate; startMin: number; vehicle: string | null }
+  /** vehicleClass: the size key of the car (ShopFactsSize.key) when known; a size staff set on the car named wins. */
+  propose_booking: { serviceKey: string; addonKeys: string[]; date: BizDate; startMin: number; vehicle: string | null; vehicleClass: string | null }
   propose_reschedule: { appointmentRef: AppointmentRefLabel; date: BizDate; startMin: number }
   propose_cancel: { appointmentRef: AppointmentRefLabel; reason: string }
   /** appointmentRef: for pay (that visit's invoice) or calendar (reschedule that visit); tier: for membership. */

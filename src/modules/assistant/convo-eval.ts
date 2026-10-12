@@ -16,7 +16,8 @@ import { CARD_LINES, CONVO_LANGS, DISCLOSURE, SAFETY_LINES } from './lang.js'
 // ---- the fixture ---------------------------------------------------------------------------------------------------------------
 
 const Vehicle = z.strictObject({
-  type: z.enum(['sedan_coupe', 'suv_crossover', 'truck_van']),
+  /** The car's size key on file (facts-v4: one of the shop's vehicle sizes; the eval records it as staff set it). */
+  size: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/),
   make: z.string().min(1),
   model: z.string().min(1),
   year: z.number().int().nullable().default(null),
@@ -502,7 +503,7 @@ The shop's rules for the assistant (binding):
 - Plain, friendly, SHORT texts (1-3 short sentences), at most one question per text, the client's language.
 - Prices: it states only STARTING prices, plan monthly prices and the guest fee, exactly as the server renders them ("X starts at $45 for members, $54 otherwise"); never totals, combinations, discounts or a final price; exact prices are confirmed at the shop, tint/detailing/quote-only by photo.
 - Promises nothing: nothing free, no discount, refund, credit, compensation, guarantee, no ready-by time. Refunds, discounts, price haggling, "is it free?", damage, complaints, legal matters and anything it cannot help with go to the team (handoff), politely: that handoff is the owner's rule, not a failure (a starting price alongside it is a plus).
-- New texters: answer their question first, then one question per text in this order, skipping anything known: first name; what they want (wash, tint, detailing or info); present the memberships once briefly before a first booking; last the vehicle (type, make, model). It does not offer a person up front.
+- New texters: answer their question first, then one question per text in this order, skipping anything known: first name; what they want (wash, tint, detailing or info); present the memberships once briefly before a first booking; last the vehicle (its size from the shop's list, make, model). It does not offer a person up front.
 - Booking/moving/cancelling in chat only for a verified phone: it checks open times, offers real ones, proposes, and the SERVER texts a confirmation number the client replies with; the assistant never repeats or asks for that number, and saying "I texted you the details: confirm with that text" is right. When an unverified phone wants to book, move or cancel, the booking (calendar) or verify link goes in that same text and times are not listed ("here's your link to pick a time" is right). Late cancellations go to the team.
 - It never says anything is booked, moved, cancelled, confirmed or "all set" before the server's own text says so.
 - Shop facts (amenities such as a waiting area, policies and contract or membership terms, payment options, services and what they include) only as SHOP FACTS state them; otherwise "the team can confirm that". An invented fact is a correctness problem even when it sounds plausible.

@@ -40,7 +40,7 @@ async function bookByText(): Promise<string> {
   await w.trust(maria().phone, maria().id)
   await inbound(maria().phone, 'Can I book an express wash Monday at 10?')
   const probe = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'trusted' })
-  const r = await run('propose_booking', probe, { serviceKey: 'express-hand-wash', addonKeys: [], date: '2026-06-15', startMin: 600, vehicle: null })
+  const r = await run('propose_booking', probe, { serviceKey: 'express-hand-wash', addonKeys: [], date: '2026-06-15', startMin: 600, vehicle: null, vehicleClass: null })
   expect(r.ok).toBe(true)
   const code = await lastCode(maria().phone)
   await w.tx((tx) => createActionCodeHandler(w.deps).handle(tx, { locationId: w.locationId, phone: maria().phone, customerId: maria().id, code, inboxId: w.newId(), at: w.clock.now() }))

@@ -1,7 +1,7 @@
 // Kysely types for the identity tables (migration 20261011000200_identity.sql, ADR 0160): personal links and their sessions, the
 // website PIN, the 30-day phone trust, the in-chat actions waiting for a reply number; plus the columns that migration adds to
 // customers and to the website's one-time codes. Registered by module augmentation.
-import type { Generated } from 'kysely'
+import type { ColumnType, Generated } from 'kysely'
 import type { JsonColumn, JsonValue } from '../../platform/schema.js'
 
 export type ClientLinkKind = 'calendar' | 'verify' | 'pin' | 'membership' | 'pay' | 'book_again'
@@ -44,6 +44,8 @@ export interface ClientLinksTable {
   revoked_at: Date | null
   revoke_reason: IdentityRevokeReason | null
   created_at: Generated<Date>
+  /** When the assistant texted this same link again (once per link; links.ts retextClientLink, migration 20261014700000). */
+  retexted_at: ColumnType<Date | null, Date | null | undefined, Date | null>
 }
 
 export interface ClientLinkSessionsTable {

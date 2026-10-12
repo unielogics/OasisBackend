@@ -9,28 +9,26 @@ import { listVehicles, updateCustomer, upsertVehicleByPlate } from '../../custom
 import { STATUS_PHRASE } from '../../scheduling/appointments.js'
 import { TOOL_MIN_TRUST, type AssistantTool, type ToolInputs } from '../contract.js'
 import { isProvisionalClient } from '../welcome/provisional.js'
-import { VEHICLE_TYPES, type VehicleType } from '../welcome/schema.js'
-import { tintPlaceholder } from '../facts.js'
+import type { VehicleType } from '../welcome/schema.js'
+import { planPlaceholder, pricePlaceholder } from '../facts.js'
 import '../welcome/schema.js'
 import { fail, json, ok, shortDate } from './common.js'
 
-/** The vehicle size (ADR 0170, migration 20261014100000) a set_my_vehicle type maps to until facts-v4 (wave Q3d) names sizes. */
-export const SIZE_OF_TYPE: Readonly<Record<VehicleType, string>> = {
-  sedan_coupe: 'compact_car',
-  suv_crossover: 'compact_suv',
-  truck_van: 'truck',
+/**
+ * The old vehicle type (vehicles.vehicle_type, kept for one release by ADR 0170) a default size stands for: the reverse of the
+ * migration's backfill (sedan_coupe -> compact_car, suv_crossover -> compact_suv, truck_van -> truck), so a car saved by text still
+ * reads the same to anything that has not moved to sizes yet. A size the shop added has none.
+ */
+export const TYPE_OF_SIZE: Readonly<Record<string, VehicleType>> = {
+  compact_car: 'sedan_coupe',
+  large_car: 'sedan_coupe',
+  compact_suv: 'suv_crossover',
+  large_suv: 'suv_crossover',
+  truck: 'truck_van',
 }
 
-/**
- * The tint rows of a vehicle class. set_my_vehicle's types (sedan_coupe | suv_crossover | truck_van, vehicles.vehicle_type)
- * are the price classes; the tint rows are keyed by vehicle size since ADR 0170 (compact_car, compact_suv, truck: the type's
- * size), and by the old matrix's own keys before ("sedan", "suv", "truck"), so a class matches its size, its own key or the key of
- * its first word.
- */
-export function tintRowsFor<R extends { vehicle: string }>(tint: readonly R[], type: VehicleType): R[] {
-  const keys = new Set([SIZE_OF_TYPE[type], type, type.split('_')[0]!])
-  return tint.filter((t) => keys.has(t.vehicle))
-}
+/** The most package price keys set_my_vehicle hands back (the plans' follow them). */
+const MAX_SIZE_KEYS = 10
 
 /** Vehicles a client may have added by text in all (the record is theirs; a flood of vehicles is not). */
 export const MAX_VEHICLES = 6
@@ -200,9 +198,9 @@ const word = z.string().min(1).max(40)
 export const setMyVehicle: AssistantTool<ToolInputs['set_my_vehicle']> = {
   name: 'set_my_vehicle',
   description:
-    'Adds the client’s vehicle to their own record: type (sedan_coupe, suv_crossover or truck_van: the tint price class), make, model, and year and color when they said them (else null).',
+    'Adds the client’s vehicle to their own record: size (a size key from SHOP FACTS "Vehicle sizes", as the client said it: never guess), make, model, and year and color when they said them (else null). Returns the price keys for that size.',
   input: z.strictObject({
-    type: z.enum(VEHICLE_TYPES as unknown as ['sedan_coupe', 'suv_crossover', 'truck_van']),
+    size: z.string().min(1).max(32),
     make: word,
     model: word,
     year: z.number().int().min(1950).max(2100).nullable(),
@@ -212,6 +210,13 @@ export const setMyVehicle: AssistantTool<ToolInputs['set_my_vehicle']> = {
   async run(ctx, input) {
     const customerId = ctx.identity.customerId
     if (!customerId) return fail('not_allowed', 'There is no client record for this number yet.')
+    // facts-v4: the size is one of the shop's sizes (Settings → Vehicle sizes), checked against the facts the model read
+    const sizes = ctx.facts.catalog.sizes
+    const size = sizes.find((x) => x.key === input.size.trim().toLowerCase())
+    if (!size)
+      return fail('invalid', 'Use a size key from SHOP FACTS. Ask the client which size their car is if they did not say.', {
+        detail: json({ sizes }),
+      })
     const text = /^[\p{L}\p{N}][\p{L}\p{N} .'’&/+-]*$/u
     const make = input.make.replace(/\s+/g, ' ').trim()
     const model = input.model.replace(/\s+/g, ' ').trim()
@@ -237,32 +242,44 @@ export const setMyVehicle: AssistantTool<ToolInputs['set_my_vehicle']> = {
         if (e instanceof AppError && e.code === 'VALIDATION_FAILED') return fail('invalid', 'That vehicle could not be saved.')
         throw e
       }
-      await tx
+      const legacyType = TYPE_OF_SIZE[size.key]
+      const saved = await tx
         .updateTable('vehicles')
         .set({
-          vehicle_type: input.type,
-          // the size the type maps to (ADR 0170), unless staff set one
-          vehicle_class: sql<string>`case when vehicle_class_source = 'staff' then vehicle_class else ${SIZE_OF_TYPE[input.type]} end`,
+          ...(legacyType ? { vehicle_type: legacyType } : {}),
+          // the size the client said (ADR 0170: source ai), never over a size staff set
+          vehicle_class: sql<string>`case when vehicle_class_source = 'staff' then vehicle_class else ${size.key} end`,
           vehicle_class_source: sql<'staff' | 'ai'>`case when vehicle_class_source = 'staff' then 'staff' else 'ai' end`,
           ...(same && input.year !== null && same.year === null ? { year: input.year } : {}),
           ...(same && color && !same.color ? { color } : {}),
         })
         .where('id', '=', vehicleId)
         .where('customer_id', '=', customerId)
-        .execute()
+        .returning(['vehicle_class', 'vehicle_class_source'])
+        .executeTakeFirst()
       await ctx.audit(tx, same ? 'assistant.vehicle.updated' : 'assistant.vehicle.added', {
         entityType: 'vehicle',
         entityId: vehicleId,
-        after: { customerId, type: input.type, year: input.year, make, model, color },
+        after: { customerId, size: size.key, year: input.year, make, model, color },
       })
-      const rows = tintRowsFor(ctx.facts.catalog.tint, input.type)
+      // the size the car is priced at: staff's when they set one (the client's word does not replace it)
+      const kept = saved?.vehicle_class_source === 'staff' && saved.vehicle_class !== size.key ? sizes.find((x) => x.key === saved.vehicle_class) : undefined
+      const at = kept ?? size
+      const priceKeys = [
+        ...ctx.facts.catalog.items
+          .filter((i) => i.kind === 'package' && !i.quoteOnly)
+          .slice(0, MAX_SIZE_KEYS)
+          .map((i) => ({ name: i.name, priceKey: pricePlaceholder(i.key, at.key) })),
+        ...ctx.facts.plans.map((p) => ({ name: `${p.label} membership`, priceKey: planPlaceholder(p.key, at.key) })),
+      ]
       return ok({
         saved: true,
         vehicle: [input.year, make, model].filter((x) => x !== null).join(' '),
-        type: input.type,
-        tintClass: rows[0]?.vehicleLabel ?? null,
-        // the tint prices for their vehicle class, as placeholders (the model never writes an amount)
-        tintPriceKeys: rows.map((r) => ({ film: r.filmLabel, priceKey: tintPlaceholder(r.vehicle, r.film) })),
+        size: at.label,
+        sizeKey: at.key,
+        ...(kept ? { note: `The team already set this car as ${kept.label}; prices follow that size.` } : {}),
+        // the prices for their car's size, as placeholders (the model never writes an amount); a size without a price reads "priced at the shop"
+        priceKeys,
       })
     })
   },

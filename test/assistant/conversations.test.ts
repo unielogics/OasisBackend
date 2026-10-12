@@ -31,7 +31,7 @@ const w = useWorld({
 const NEWCOMER = '+13055550198'
 
 beforeAll(async () => {
-  // the website's catalog (Signature Hand Wash starts at $45 for members, $54 otherwise; Gold $99, VIP $169 a month)
+  // the website's catalog (Signature Hand Wash starts at $54 (sedan/coupe), $45 for members; Gold $99, VIP $169 a month: facts-v4)
   await runSeed({ db: w.t.db, clock: w.clock, profile: 'website-catalog' })
   await seedLegacyWebsitePrices(w.t.db, w.clock, (await w.t.db.selectFrom('locations').select('id').executeTakeFirstOrThrow()).id)
 })
@@ -116,7 +116,7 @@ const tools: AnyAssistantTool[] = [
     description: 'The membership plans.',
     input: z.strictObject({}) as never,
     minTrust: 'unknown',
-    run: async (ctx) => ({ ok: true, data: { plans: ctx.facts.plans.map((p) => ({ label: p.label, monthlyPriceCents: p.monthlyPriceCents })) } }),
+    run: async (ctx) => ({ ok: true, data: { plans: ctx.facts.plans.map((p) => ({ label: p.label, fromCents: p.fromCents })) } }),
   },
   {
     name: 'set_my_name',
@@ -151,7 +151,7 @@ const tools: AnyAssistantTool[] = [
   {
     name: 'set_my_vehicle',
     description: 'Saves the client’s vehicle.',
-    input: z.strictObject({ type: z.enum(['sedan_coupe', 'suv_crossover', 'truck_van']), make: z.string(), model: z.string(), year: z.number().int().nullable(), color: z.string().nullable() }) as never,
+    input: z.strictObject({ size: z.string(), make: z.string(), model: z.string(), year: z.number().int().nullable(), color: z.string().nullable() }) as never,
     minTrust: 'caller',
     run: async (ctx, input) => {
       const v = input as { make: string; model: string }
@@ -249,7 +249,7 @@ describe('the welcome flow (owner 2026-10-11): name, then intent, then membershi
       simText('Great choice. Do you want to book a wash this week?'),
       simToolUse('get_membership_info', {}),
       simText('Before you book: {plan:gold}. {plan:vip}. Both come with member prices on everything. Want to hear more?'),
-      simToolUse('set_my_vehicle', { type: 'suv_crossover', make: 'Honda', model: 'CR-V', year: null, color: null }),
+      simToolUse('set_my_vehicle', { size: 'compact_suv', make: 'Honda', model: 'CR-V', year: null, color: null }),
       simText('Got it, a Honda CR-V. Which day works for you?'),
       simText('Here you go.'),
     ]
@@ -262,7 +262,7 @@ describe('the welcome flow (owner 2026-10-11): name, then intent, then membershi
     const [first] = await aiTexts(NEWCOMER)
     expect(first).toMatchObject({ sender_kind: 'ai', klass: 'ai_reply' })
     expect(first!.body).toBe(
-      "Oasis Auto Spa's automated assistant here. Hi there! Signature Hand Wash starts at $45 for members, $54 otherwise. What's your first name? Reply STOP to opt out.",
+      "Oasis Auto Spa's automated assistant here. Hi there! Signature Hand Wash starts at $54 (sedan/coupe), $45 for members. What's your first name? Reply STOP to opt out.",
     )
     expect(first!.body).not.toMatch(/AGENT/)
 
@@ -290,7 +290,7 @@ describe('the welcome flow (owner 2026-10-11): name, then intent, then membershi
     expect(texts).toHaveLength(6)
     // the disclosure only once, one question per text
     expect(texts.filter((t) => t.body.includes('automated assistant'))).toHaveLength(1)
-    expect(texts.some((t) => t.body.includes('Before you book: Gold is $99 a month. VIP is $169 a month. Both come with member prices on everything.'))).toBe(true)
+    expect(texts.some((t) => t.body.includes('Before you book: Gold starts at $99 a month (sedan/coupe). VIP starts at $169 a month (sedan/coupe). Both come with member prices on everything.'))).toBe(true)
     // every reply was judged once, rendered, and passed
     expect(a.judge.requests).toHaveLength(6)
     for (const t of texts) expect((t.body.match(/\?/g) ?? []).length, t.body).toBeLessThanOrEqual(1)
@@ -307,7 +307,7 @@ describe('the pricing rule in a turn (design sections 3b and 3c: amounts are ser
     // the model was told the key, never the figure
     expect(systemText(a.provider.requests[0]!)).toContain('{price:signature-hand-wash}')
     expect(a.provider.requests[0]!.system[1]!.text).not.toMatch(/\$\s?\d/)
-    expect((await aiTexts(maria()))[0]!.body).toContain('Signature Hand Wash starts at $45 for members, $54 otherwise.')
+    expect((await aiTexts(maria()))[0]!.body).toContain('Signature Hand Wash starts at $54 (sedan/coupe), $45 for members.')
   })
 
   it('renders {plan:..} and {fee} from the current facts', async () => {
@@ -315,7 +315,7 @@ describe('the pricing rule in a turn (design sections 3b and 3c: amounts are ser
     const a = assistant([simText('{plan:gold}. Without it: {fee}.')])
     await inbound(maria(), 'Is Gold worth it?')
     expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
-    expect((await aiTexts(maria()))[0]!.body).toContain('Gold is $99 a month. Without it: Guests pay a $30 booking fee.')
+    expect((await aiTexts(maria()))[0]!.body).toContain('Gold starts at $99 a month (sedan/coupe). Without it: Guests pay a $30 booking fee.')
   })
 
   it('a placeholder attached to another noun gets one rewrite; then the server isolates it (design 3c, layer 1; W4 live eval)', async () => {
@@ -326,7 +326,7 @@ describe('the pricing rule in a turn (design sections 3b and 3c: amounts are ser
     // "Your total" is dropped: the rendering names its own subject, so nothing is tied to the wrong noun; no third model call
     const texts = await aiTexts(maria())
     expect(texts.map((t) => t.klass)).toEqual(['ai_reply'])
-    expect(texts[0]!.body).toMatch(/Interior Detail starts at \$149/i)
+    expect(texts[0]!.body).toMatch(/Interior Detail starts at \$179 \(sedan\/coupe\), \$149 for members/i)
     expect(texts[0]!.body).not.toMatch(/total/i)
     expect(a.provider.requests).toHaveLength(2)
   })
@@ -339,7 +339,7 @@ describe('the pricing rule in a turn (design sections 3b and 3c: amounts are ser
   })
 
   it('a model-written amount (even the right one) gets one rewrite; the placeholder version goes out', async () => {
-    const a = assistant([simText('Signature Hand Wash starts at $45 for members, $54 otherwise.'), simText('{price:signature-hand-wash}.')])
+    const a = assistant([simText('Signature Hand Wash starts at $54 (sedan/coupe), $45 for members.'), simText('{price:signature-hand-wash}.')])
     await inbound(maria(), 'What would a wash cost me?')
     expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
     expect(a.provider.requests).toHaveLength(2)
@@ -348,7 +348,7 @@ describe('the pricing rule in a turn (design sections 3b and 3c: amounts are ser
     expect(instruction).toContain('Remove these from the text: \\"$\\"')
     const texts = await aiTexts(maria())
     expect(texts).toHaveLength(1)
-    expect(texts[0]!.body).toContain('Signature Hand Wash starts at $45 for members, $54 otherwise.')
+    expect(texts[0]!.body).toContain('Signature Hand Wash starts at $54 (sedan/coupe), $45 for members.')
   })
 
   it('a model-written amount twice, the second without a sign: the judge refuses it, the fallback goes out, staff take over', async () => {
@@ -448,7 +448,7 @@ describe('the policy judge in a turn (design 3c, layer 3)', () => {
     )
     await inbound(maria(), 'Price for a wash?')
     expect(await a.turn(maria())).toMatchObject({ status: 'replied', handoff: false })
-    expect((await aiTexts(maria()))[0]!.body).toContain('Signature Hand Wash starts at $45 for members, $54 otherwise. The team confirms the exact price at the shop.')
+    expect((await aiTexts(maria()))[0]!.body).toContain('Signature Hand Wash starts at $54 (sedan/coupe), $45 for members. The team confirms the exact price at the shop.')
     // the rewrite call carries the category's hint, never the judge's own words
     const instruction = JSON.stringify(a.provider.requests[1]!.messages.at(-1))
     expect(instruction).toContain(JUDGE_HINTS.price.slice(0, 60))
@@ -456,7 +456,7 @@ describe('the policy judge in a turn (design 3c, layer 3)', () => {
     // the judge read the rendered reply both times, the server's segments marked trusted
     expect(a.judge.requests).toHaveLength(2)
     expect(JSON.stringify(a.judge.requests[0]!.messages)).toContain('OK: 54 for the wash.')
-    expect(unkeyed(JSON.stringify(a.judge.requests[1]!.messages))).toContain(`${TRUSTED_OPEN}Signature Hand Wash starts at $45 for members, $54 otherwise${TRUSTED_CLOSE}`)
+    expect(unkeyed(JSON.stringify(a.judge.requests[1]!.messages))).toContain(`${TRUSTED_OPEN}Signature Hand Wash starts at $54 (sedan/coupe), $45 for members${TRUSTED_CLOSE}`)
     // both verdicts are stored for review, as tool calls that are no progress
     const rows = await w.t.db.selectFrom('assistant_tool_calls').select(['tool', 'outcome', 'error', 'output', 'input']).where('tool', '=', 'policy_judge').orderBy('seq').execute()
     expect(rows.map((r) => [r.outcome, r.error])).toEqual([

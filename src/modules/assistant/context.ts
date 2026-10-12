@@ -291,13 +291,19 @@ export async function loadTurnContext(
     }
     const rows = await db
       .selectFrom('vehicles')
-      .select(['year', 'make', 'model', 'color'])
+      .select(['year', 'make', 'model', 'color', 'vehicle_class'])
       .where('customer_id', '=', customerId)
       .where('deleted_at', 'is', null)
       .orderBy('created_at')
       .limit(3)
       .execute()
-    vehicles = rows.map((v) => [v.year, v.make, v.model].filter((x) => x !== null && String(x).trim() !== '').join(' ') + (v.color ? `, ${v.color}` : ''))
+    // the car's size key (facts-v4): what propose_booking's vehicleClass takes and what {price:<key>:<size>} prices
+    vehicles = rows.map(
+      (v) =>
+        [v.year, v.make, v.model].filter((x) => x !== null && String(x).trim() !== '').join(' ') +
+        (v.color ? `, ${v.color}` : '') +
+        (v.vehicle_class ? ` (size ${v.vehicle_class})` : ''),
+    )
     vehicleNames = rows.flatMap((v) => vehicleLiterals(v))
     hasAppointments =
       (await db.selectFrom('appointments').select('id').where('customer_id', '=', customerId).limit(1).executeTakeFirst()) !== undefined

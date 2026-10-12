@@ -5,7 +5,7 @@ import { z } from 'zod/v4'
 import { transaction, type Tx } from '../../../platform/db.js'
 import { AppError } from '../../../platform/errors.js'
 import { cancelPendingActions } from '../../identity/pending-actions.js'
-import { issueClientLink } from '../../identity/links.js'
+import { issueClientLink, linkTokenKey, retextClientLink, type IssuedLink } from '../../identity/links.js'
 import { PgOptOutRepository } from '../../messaging/db/optout-repo.js'
 import { loadCustomerTarget, strangerRecipient } from '../../messaging/db/recipients.js'
 import { noteLeadInterest, openLead } from '../../leads/service.js'
@@ -46,7 +46,7 @@ class LinkRefused extends Error {
 export const sendLink: AssistantTool<ToolInputs['send_link']> = {
   name: 'send_link',
   description:
-    'Texts a secure personal link to the client’s own number and returns a placeholder like {link1} to put in your reply exactly as given. calendar: book or change visits online (appointmentRef to change that visit); verify: confirm it is them (needed before you can book, move or cancel by text); pin: set their website PIN; membership: join a plan (tier gold or vip); pay: pay an open invoice (appointmentRef of that visit, or null for the latest). At most 3 links a day.',
+    'Texts a secure personal link to the client’s own number and returns a placeholder like {link1} to put in your reply exactly as given. calendar: book or change visits online (appointmentRef to change that visit); verify: confirm it is them (needed before you can book, move or cancel by text); pin: set their website PIN; membership: join a plan (tier: a plan key from SHOP FACTS memberships); pay: pay an open invoice (appointmentRef of that visit, or null for the latest). At most 3 links a day. When the client cannot find a link texted earlier, call it again for that kind: the server texts the same link again when it can.',
   input: z.strictObject({
     kind: z.enum(LINK_KINDS),
     appointmentRef: z.enum(['A1', 'A2', 'A3']).nullable(),
@@ -58,9 +58,10 @@ export const sendLink: AssistantTool<ToolInputs['send_link']> = {
 
 /**
  * send_link's work: issues the personal link to the number that is texting, registers it with the turn ({linkN}) and says how to
- * use it. check_availability calls it too (W4b X4: an unverified booking gets the calendar link in the same reply).
+ * use it. check_availability calls it too (W4b X4: an unverified booking gets the calendar link in the same reply), without the
+ * re-text (`retext: false`: a link of the hour is pointed to, not texted again; only send_link re-texts, when the client asks).
  */
-export async function issueLinkOutcome(ctx: ToolContext, input: ToolInputs['send_link']) {
+export async function issueLinkOutcome(ctx: ToolContext, input: ToolInputs['send_link'], o: { retext?: boolean } = {}) {
   if (!ctx.env.PUBLIC_LINKS_ENABLED)
     return fail(
       'unavailable',
@@ -78,7 +79,10 @@ export async function issueLinkOutcome(ctx: ToolContext, input: ToolInputs['send
     (!client || !atLeast(id.trust, 'caller'))
   )
     return fail('not_allowed', 'That link is only for a client on file; send a verify link first.')
-  if (input.kind === 'membership' && !input.tier) return fail('invalid', 'Say which plan: tier gold or vip.')
+  if (input.kind === 'membership' && !input.tier) return fail('invalid', 'Say which plan: tier, a plan key from SHOP FACTS memberships.')
+  // a tier with no current price is not sold online (plan decision 3): only the plans of SHOP FACTS (facts-v4) get a link
+  if (input.kind === 'membership' && !ctx.facts.plans.some((p) => p.key === input.tier))
+    return fail('unavailable', 'That plan cannot be started by link right now; a team member can help.')
   try {
     const issued = await transaction(ctx.db, async (tx) => {
       let appointmentId: string | null = null
@@ -109,6 +113,8 @@ export async function issueLinkOutcome(ctx: ToolContext, input: ToolInputs['send
           newId: ctx.newId,
           now: ctx.now,
           ...(ctx.env.PUBLIC_SITE_URL ? { siteUrl: ctx.env.PUBLIC_SITE_URL } : {}),
+          // a token the server can derive again (re-texting the same link, below)
+          tokenKey: linkTokenKey(ctx.env),
         },
         {
           locationId: id.locationId,
@@ -142,6 +148,20 @@ export async function issueLinkOutcome(ctx: ToolContext, input: ToolInputs['send
     })
   } catch (e) {
     if (e instanceof LinkRefused) return e.outcome
+    // one link of a kind an hour (W4 leftover): a client who cannot find the link texted earlier gets the SAME link again (no new
+    // token; once per link; counted in the day's links), not a handoff
+    if (e instanceof AppError && e.code === 'IDENTITY_LINK_LIMIT' && e.meta?.limit === 'kind_hour' && o.retext !== false) {
+      const again = await retext(ctx, input)
+      if (again) {
+        const placeholder = ctx.addLink(again.url, { kind: again.kind, expiresAt: again.expiresAt })
+        return ok({
+          placeholder,
+          kind: input.kind,
+          resent: true,
+          instruction: `This is the same link texted earlier, sent again. Put ${placeholder} in your reply exactly once ("Here it is again: ${placeholder}"); it is replaced by the secure link. Never write a URL yourself, never mention a limit.`,
+        })
+      }
+    }
     if (e instanceof AppError && e.code === 'IDENTITY_LINK_LIMIT')
       return fail(
         'rate_limited',
@@ -164,6 +184,35 @@ export async function issueLinkOutcome(ctx: ToolContext, input: ToolInputs['send
       (e.code === 'VALIDATION_FAILED' || e.code === 'NOT_FOUND' || e.code === 'IDENTITY_NO_PHONE')
     )
       return fail('not_found', 'There is nothing that link could be for.')
+    throw e
+  }
+}
+
+/**
+ * The same link again (identity/links.ts retextClientLink) in its own transaction, audited; null when there is none to re-text (no
+ * key, none live, already re-texted, issued before re-texting) or the day's links are used up.
+ */
+async function retext(ctx: ToolContext, input: ToolInputs['send_link']): Promise<IssuedLink | null> {
+  const tokenKey = linkTokenKey(ctx.env)
+  if (!tokenKey) return null
+  try {
+    return await transaction(ctx.db, async (tx) => {
+      const appointmentId = input.appointmentRef && input.kind === 'calendar' ? ((await ownAppointment(tx, ctx, input.appointmentRef))?.id ?? null) : null
+      const again = await retextClientLink(
+        tx,
+        { now: ctx.now, tokenKey, ...(ctx.env.PUBLIC_SITE_URL ? { siteUrl: ctx.env.PUBLIC_SITE_URL } : {}) },
+        { locationId: ctx.identity.locationId, phone: ctx.identity.phone, kind: input.kind, appointmentId },
+      )
+      if (!again) return null
+      await ctx.audit(tx, 'assistant.link.resent', {
+        entityType: ctx.identity.customerId ? 'customer' : 'lead',
+        entityId: ctx.identity.customerId,
+        after: { kind: input.kind, expiresAt: again.expiresAt.toISOString() },
+      })
+      return again
+    })
+  } catch (e) {
+    if (e instanceof AppError && e.code === 'IDENTITY_LINK_LIMIT') return null
     throw e
   }
 }

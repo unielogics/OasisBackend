@@ -831,12 +831,24 @@ export function actionClaims(text: string): string[] {
 const CLOCK = '(?:\\b\\d{1,2}(?::[0-5]\\d)?\\s*(?:a\\.?\\s?m\\b\\.?|p\\.?\\s?m\\b\\.?)|\\b\\d{1,2}:[0-5]\\d\\b|\\bnoon\\b|\\bmidday\\b|\\bmediodia\\b|\\ba\\s+las\\s+\\d{1,2}\\b)'
 const DAYWORD =
   '\\b(?:(?:mon|tues?|wed(?:nes)?|thu(?:rs?)?|fri|sat(?:ur)?|sun)(?:day)?s?|today|tonight|tomorrow|weekend|morning|afternoon|evening|lunes|martes|miercoles|jueves|viernes|sabado|domingo|hoy|manana|tarde|noche)\\b'
-/** Words that say a time or a day is open: "11 AM is open", "3 PM should work", "Friday morning has openings", "hay espacio". */
+/**
+ * Words that say a time or a day is open: "11 AM is open", "3 PM should work", "Friday morning has openings", "hay espacio", and
+ * "9 AM Friday looks good" / "sounds good" (W4 leftover: the judge alone caught it).
+ */
 const OPEN_WORDS =
-  /\b(?:open(?:ings?)?|available|availability|free|works?|work|room|spots?|slots?|disponibles?|libres?|espacio|lugar|cupo)\b/i
+  /\b(?:open(?:ings?)?|available|availability|free|works?|work|room|spots?|slots?|(?:looks?|sounds?)\s+(?:good|great|perfect|fine)|disponibles?|libres?|espacio|lugar|cupo)\b/i
 /** A sentence that only says what the client can do, gives hours, refuses, asks or is conditional: no claim. */
 const AVAIL_EXCEPT =
   /\b(?:if|once|after|when|whenever|unless|until|not|no|never|none|nothing|closed?|closes|pick|choose|select|link|page|calendar|hours|you\s+can|you\s+could|let\s+me|i\s+can|we\s+can|check|whatever|whichever|which|any|si|cuando|una\s+vez|elige|escoge|enlace|horario|cerrad[oa]|n't)\b|\bwe(?:'re|\s+are)?\s+open\b|\bopens?\s+(?:at|from|until|till)\b|\bopen\s+(?:from|until|till)\b|\d\s*(?:a\.?m\.?|p\.?m\.?)?\s*(?:to|-|until|till|a)\s*\d/i
+/** A sentence about picking on the link, the page or the calendar: "pick 3 PM on the link", "the link lets you pick a Friday afternoon time". */
+const PICK_LINK = /\b(?:pick|picking|choose|choosing|select|selecting|link|page|calendar|elige|escoge|selecciona|enlace|calendario)\b/i
+/** Opening hours in a sentence ("we're open 8 AM to 6 PM", "open from 8"): no time named for the client. */
+const HOURS = /\bwe(?:'re|\s+are)?\s+open\b|\bopens?\s+(?:at|from|until|till)\b|\bopen\s+(?:from|until|till)\b|\bhours\b|\bhorario\b|\d\s*(?:a\.?m\.?|p\.?m\.?)?\s*(?:to|-|until|till|a)\s*\d/i
+/** The client's own visit named in the sentence ("your wash on Friday at 3 PM", "you have ... at 3 PM"): its time is no claim. */
+const OWN_VISIT =
+  /\byour\s+(?:[\w-]+\s+){0,3}(?:visit|appointment|wash|detail|booking|tint|service|cita|lavado|reserva)\b|\byou(?:'re|\s+are)\s+(?:booked|scheduled)\b|\byou\s+have\b|\b(?:currently|now)\s+(?:booked|scheduled|set)\b|\btu\s+(?:cita|reserva|lavado)\b|\btienes\b/i
+/** A part of the day ("Friday afternoon", "por la tarde"): the guard's own list, beside DAYWORD's days. */
+const PART_OF_DAY = /\b(?:morning|afternoon|evening|tonight|manana|tarde|noche)\b/i
 const VERIFIED_CLAIM =
   /\b(?:you(?:'re|\s+are|'ve\s+been|\s+have\s+been|\s+were)|your\s+(?:phone|number)\s+(?:is|has\s+been|was))\s+(?:now\s+|all\s+|fully\s+|successfully\s+|already\s+)*verified\b|\bverification\s+(?:is\s+|was\s+)?(?:done|complete|completed|went\s+through|worked)\b|\b(?:ya\s+)?(?:estas|quedaste|fuiste|esta)\s+verificad[oa]\b|\bthanks\s+for\s+verifying\b/i
 const VERIFIED_EXCEPT = /\b(?:if|once|after|when|whenever|until|before|as\s+soon\s+as|not|si|cuando|una\s+vez|hasta|despues)\b|n't\b/i
@@ -845,7 +857,10 @@ const VERIFIED_EXCEPT = /\b(?:if|once|after|when|whenever|until|before|as\s+soon
  * W4 final check L6 (X4 still open: "11 AM is open for both!" and "3 PM should work" to unverified phones with no lookup, "Great,
  * you're verified Chloe!" with no verify link): what an unverified phone's reply may not claim. `o.availability` set: a clock time
  * named with an open word (the phone is given no times), and a day or part of a day named so unless `dayChecked`; `o.verified`
- * false: "you're verified". Questions, conditionals, refusals, hours ("we're open 8 to 6") and what the client can pick are skipped.
+ * false: "you're verified". Questions, conditionals, refusals, hours ("we're open 8 to 6") and what the client can pick are skipped,
+ * EXCEPT (W4 leftover, wave Q3d: the guard and the judge's rule (g) say the same thing) a sentence about picking on the link that
+ * names a clock time, or a part of the day without a check ("pick 3 PM on the link", "the link lets you pick a Friday afternoon
+ * time"): the phone was given no times, so naming one there reads as saying it is open; "pick a time on the link" is fine.
  */
 export function unverifiedClaims(text: string, o: { availability?: { dayChecked: boolean } | null; verified?: boolean }): string[] {
   const out: string[] = []
@@ -858,9 +873,21 @@ export function unverifiedClaims(text: string, o: { availability?: { dayChecked:
       if (m && !VERIFIED_EXCEPT.test(s.slice(0, m.index).replace(NEGATION_IDIOMS, ' '))) out.push(m[0].trim())
     }
     if (!o.availability) continue
+    const time = new RegExp(CLOCK, 'i').exec(s)
+    const pick = PICK_LINK.exec(s)
+    if (pick && !HOURS.test(s) && !OWN_VISIT.test(s)) {
+      if (time) {
+        out.push(`${time[0].trim()} … ${pick[0]}`)
+        continue
+      }
+      const part = PART_OF_DAY.exec(s)
+      if (part && !o.availability.dayChecked) {
+        out.push(`${part[0]} … ${pick[0]}`)
+        continue
+      }
+    }
     const open = OPEN_WORDS.exec(s)
     if (!open || AVAIL_EXCEPT.test(s.replace(NEGATION_IDIOMS, ' '))) continue
-    const time = new RegExp(CLOCK, 'i').exec(s)
     if (time) {
       out.push(`${time[0].trim()} … ${open[0]}`)
       continue
@@ -927,7 +954,7 @@ export function guardReply(i: GuardInput): GuardVerdict {
 export const PROBLEM_HINTS: Record<GuardProblem, string> = {
   empty: 'The reply was empty: write the text for the client.',
   unknown_placeholder:
-    'Use only these placeholders, exactly: {price:<key>} or {price:tint:<vehicle>:<film>} with a key from SHOP FACTS, {plan:<key>}, {perks:<key>}, {fee}, {balance} (only after get_balance in this turn), {confirm} (only after a proposal in this turn) and {linkN} exactly as send_link returned it.',
+    'Use only these placeholders, exactly: {price:<key>} or {price:<key>:<size key>} with an item key and a size key from SHOP FACTS, {plan:<key>} or {plan:<key>:<size key>} with a plan key from SHOP FACTS memberships, {perks:<key>}, {fee}, {balance} (only after get_balance in this turn), {confirm} (only after a proposal in this turn) and {linkN} exactly as send_link returned it.',
   placement:
     'Write each price placeholder as its own sentence, with nothing attached to it: "{price:<key>}." The server writes the whole sentence, the service name included ("Signature Hand Wash starts at ..."). Never put a name, "plus", "and", "total" or another placeholder right before or after it.',
   money:
@@ -940,7 +967,7 @@ export const PROBLEM_HINTS: Record<GuardProblem, string> = {
   too_long: `Keep it under ${MAX_REPLY_CHARS - 20} characters.`,
   meta: 'Write only the text the client reads, to them: never a note about "the client", your reasoning, a correction of your own draft or a rule about how to write.',
   unverified_claim:
-    'This phone is not verified and the server gave you no open times: never name a time, a day or a part of a day as open, available or working (the booking link shows the open times), and never say they are verified (they are not). Point them to the booking link, or to the verify link to book by text.',
+    'This phone is not verified and the server gave you no open times: never name a time, a day or a part of a day as open, available, working or good (the booking link shows the open times), not even in a sentence about the link ("pick a time on the link", never "pick 3 PM on the link" or "pick a Friday afternoon time"), and never say they are verified (they are not). Point them to the booking link, or to the verify link to book by text.',
   action_claim:
     'Nothing was booked, moved or cancelled by the server: never say it is booked, confirmed, moved, cancelled, reserved, done or "all set". To book or change it, give the booking link (send_link) or, for a verified phone, propose it and write "{confirm}."; a visit the client already has reads "you have <service> on <day> at <time>".',
 }

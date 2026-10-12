@@ -171,7 +171,9 @@ export function recordLine(tool: string, outcome: ToolOutcome): string | null {
     case 'set_my_vehicle':
       return `saved the client's vehicle ${quoted(d.vehicle)}`
     case 'send_link':
-      return `texted the client a ${str(d.kind) ?? 'personal'} link`
+      return d.resent === true
+        ? `texted the client again the same ${str(d.kind) ?? 'personal'} link it texted earlier`
+        : `texted the client a ${str(d.kind) ?? 'personal'} link`
     case 'propose_booking':
     case 'propose_reschedule':
     case 'propose_cancel':

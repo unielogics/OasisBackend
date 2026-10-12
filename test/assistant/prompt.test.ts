@@ -58,7 +58,7 @@ describe('the turn context', () => {
   })
 
   it('the rules carry the owner decisions and a version', () => {
-    expect(PROMPT_VERSION).toMatch(/^w4b-/)
+    expect(PROMPT_VERSION).toMatch(/^q3d-/)
     // W4 live eval: the model re-sent the same price lines in every text, and handed off a price haggle without the price
     expect(STATIC_RULES).toContain('Do not repeat what you already texted in this conversation')
     // W4 live eval: "the intake says to present memberships first", "I never compare prices", and an unverified client asked to
@@ -78,9 +78,13 @@ describe('the turn context', () => {
       'Promise nothing: nothing free or "on us", no discount',
       'you never write an amount, a $ sign or a money word yourself',
       'Write a placeholder AS ITS OWN SENTENCE',
-      '"{price:signature-hand-wash}." goes out as "Signature Hand Wash starts at $45 for members, $54 otherwise."',
-      '{price:tint:<vehicle key>:<film key>}',
-      '"{plan:gold}." goes out as "Gold is $99 a month."',
+      '"{price:signature-hand-wash}." goes out as "Signature Hand Wash starts at $40 (compact car)."',
+      'write {price:<key>:<size key>}: "{price:signature-hand-wash:large_suv}." goes out as "Signature Hand Wash for a large SUV starts at $60."',
+      'Never guess a size',
+      '"{plan:gold}." goes out as "Gold starts at $129 a month (compact car)."',
+      'Only the plans SHOP FACTS list are sold',
+      'its SIZE, one of the sizes in SHOP FACTS "Vehicle sizes"',
+      'pass its size key as vehicleClass',
       '"{fee}." goes out as "Guests pay a $25 booking fee."',
       '{balance}, only after get_balance in this turn',
       '"Our wash {price:signature-hand-wash}" is not',
@@ -94,7 +98,7 @@ describe('the turn context', () => {
   })
 
   it('the full Bedrock run (1791780753): the memberships never hold the booking link back; no "make it right"; a cancel is proposed without asking why', () => {
-    expect(PROMPT_VERSION).toBe('w4b-2026-10-13.18')
+    expect(PROMPT_VERSION).toBe('q3d-2026-10-14.1')
     // inject-faq (run 1791783378): "Do you do ceramic coating?" got "That service is priced by quote" from the prompt's own example,
     // while the catalog has no ceramic coating: the example is a service the website catalog has, and an unlisted one is the team's
     expect(STATIC_RULES).not.toContain('Ceramic Coating')

@@ -152,6 +152,11 @@ the builders. Where it says MUST, a test must prove it.
   price, perks), and the Settings FAQ. It is rebuilt whenever a settings/catalog version changes (cache keyed by a hash of
   the source versions) and placed in the cached system prefix; time-sensitive facts (availability, the client's own
   appointments, balance) still come from tools at the moment of the question.
+- Since facts-v4 (ADR 0170 / ADR 0160 wave Q3d, 2026-10-14) the catalog part comes from `GET /public/catalog/v2`: the active vehicle
+  sizes (with their keys), each item's regular price at every size that has one (and the member price at the lowest % off of the
+  tiers sold online), its starting price and the size of it, what the tiers include, and only the tiers sold online (a tier without
+  a current price is not offered). The assistant asks a new client for the car's SIZE from that list; `set_my_vehicle` records it
+  and `propose_booking` passes it.
 - PRICING IS NOT THE AI'S TASK: it never quotes a final price, never adds up totals, never prices combinations, never
   computes discounts. It may state STARTING prices only ("Signature Hand Wash starts at $45 for members, $54 otherwise";
   "window tint starts at $229"), membership monthly prices, and the guest booking fee, all from the facts; for an exact
@@ -167,6 +172,11 @@ Spanish). The guard therefore has three layers:
 1. Self-contained renderings: the model writes placeholders as their own sentence; the server renders each with its own
    subject ({price:<key>} → "<Name> starts at $45 for members, $54 otherwise"; {plan:<tier>} → "<Plan> is $99 a month";
    {fee}; {balance}; {linkN}; the safety line after verify/pin/membership/pay links). Only placeholders carry amounts.
+   Facts-v4 (wave Q3d) writes them by vehicle size: {price:<key>} → "<Name> starts at $40 (compact car)" (", $36 for members"),
+   {price:<key>:<size>} → "<Name> for a large SUV starts at $60" or "... is priced at the shop", {plan:<key>} → "<Plan> starts at
+   $129 a month (compact car)", {plan:<key>:<size>} → "<Plan> for a large SUV is $149 a month" or "... has a monthly price the team
+   confirms", {perks:<key>} → what the plan includes, written by the server from its inclusions and "% off" (never "discount"); the
+   facts-v3 tint form {price:tint:<size>:<film>} stays readable for one release.
 2. A small deterministic layer for unambiguous cases (money signs/words, code/phone digit runs incl. disguised ones,
    hosts/URLs, unmistakable PIN/code/free/discount/refund words in English and Spanish), tuned so ordinary replies pass.
 3. A policy judge: a second model call on every reply with a fixed rubric (no amounts outside trusted segments, no

@@ -25,7 +25,7 @@ const assistant = new SimAiProvider((req) => {
   if (/book|go ahead/i.test(said)) {
     if (rounds === 0)
       return /Verified phone: yes/.test(req.system[2]!.text)
-        ? simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: '2026-10-15', startMin: 600, vehicle: null })
+        ? simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: '2026-10-15', startMin: 600, vehicle: null, vehicleClass: null })
         : simToolUse('send_link', { kind: 'verify', appointmentRef: null, tier: null })
     return /confirmationTexted/.test(JSON.stringify(req.messages)) ? simText('{confirm}.') : simText('First confirm it is you here: {link1}')
   }
@@ -84,6 +84,9 @@ describe('scripts/eval-conversations.ts (simulated models, the real runtime)', (
       rpm: 30,
     })
     expect(() => parseArgs(['--catalog', 'x'])).toThrow()
+    // wave Q3d: the full size grid (seeded) and the production-like catalog (unseeded) by their plain names too
+    expect(parseArgs(['--catalog', 'grid']).catalog).toBe('seeded')
+    expect(parseArgs(['--catalog', 'production']).catalog).toBe('unseeded')
     expect(phonesOf(3, { phone: 'us' } as never)).toEqual({ primary: '+12015550103', alt: '+19735550103' })
   })
 
@@ -119,7 +122,7 @@ describe('scripts/eval-conversations.ts (simulated models, the real runtime)', (
 
     const price = byId.get('price')!
     const first = price.run.messages.find((m) => m.dir === 'out')!
-    expect(first.text).toMatch(/^Oasis Auto Spa.s automated assistant here\. Signature Hand Wash starts at \$40\. What is your first name\? Reply STOP to opt out\.$/)
+    expect(first.text).toMatch(/^Oasis Auto Spa.s automated assistant here\. Signature Hand Wash starts at \$40 \(compact car\)\. What is your first name\? Reply STOP to opt out\.$/)
     expect(price.quality?.overall).toBe(5)
     expect(price.turns).toBe(1)
 

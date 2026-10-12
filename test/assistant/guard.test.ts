@@ -138,13 +138,13 @@ describe('(a) adversarial rows of the deterministic layer are blocked', () => {
 
 describe('(1) self-contained renderings: each placeholder its own clause (c)', () => {
   it('renders each placeholder with its own subject', () => {
-    expect(g('{price:signature-hand-wash}.')).toMatchObject({ kind: 'ok', rendered: 'Signature Hand Wash starts at $45 for members, $54 otherwise.' })
+    expect(g('{price:signature-hand-wash}.')).toMatchObject({ kind: 'ok', rendered: 'Signature Hand Wash starts at $40 (compact car), $36 for members.' })
     expect(g('{price:ceramic-coating}.')).toMatchObject({ kind: 'ok', rendered: 'Ceramic Coating is priced by quote - text us a photo.' })
-    expect(g('{price:tint:sedan:carbon}.')).toMatchObject({ kind: 'ok', rendered: 'Carbon tint for a sedan/coupe starts at $229 for members, $279 otherwise.' })
-    expect(g('{plan:gold}. {plan:vip}.')).toMatchObject({ kind: 'ok', rendered: 'Gold is $99 a month. VIP is $169 a month.' })
+    expect(g('{price:tint:sedan:carbon}.')).toMatchObject({ kind: 'ok', rendered: 'Carbon tint for a compact car starts at $275, $248 for members.' })
+    expect(g('{plan:gold}. {plan:vip}.')).toMatchObject({ kind: 'ok', rendered: 'Gold starts at $129 a month (compact car). VIP starts at $199 a month (compact car).' })
     expect(g('{fee}.')).toMatchObject({ kind: 'ok', rendered: 'Guests pay a $25 booking fee.' })
     expect(g('{balance}.', { balance: true })).toMatchObject({ kind: 'ok', rendered: 'Your open balance is $12.50.' })
-    expect(renderPlaceholders('{plan:gold}. {link1}', values)).toBe('Gold is $99 a month. {link1}')
+    expect(renderPlaceholders('{plan:gold}. {link1}', values)).toBe('Gold starts at $129 a month (compact car). {link1}')
   })
 
   it('a placeholder may start the text or follow . ! ? ; : a spaced dash or a line break, and end it or be followed by . ! ? ; : , or a dash', () => {
@@ -161,7 +161,7 @@ describe('(1) self-contained renderings: each placeholder its own clause (c)', (
     ])
       expect(g(ok), ok).toMatchObject({ kind: 'ok' })
     expect(g('Here you go:\n{price:signature-hand-wash}\n{price:exterior-hand-wash}')).toMatchObject({
-      rendered: 'Here you go: Signature Hand Wash starts at $45 for members, $54 otherwise. Exterior Hand Wash starts at $32 for members, $38 otherwise',
+      rendered: 'Here you go: Signature Hand Wash starts at $40 (compact car), $36 for members. Exterior Hand Wash starts at $35 (compact car), $32 for members',
     })
   })
 
@@ -480,7 +480,7 @@ describe('(3) the judge view: server segments are trusted', () => {
     if (v.kind !== 'ok') return
     expect(v.segments).toEqual([
       { text: 'Hi! ', trusted: false },
-      { text: 'Signature Hand Wash starts at $45 for members, $54 otherwise', trusted: true },
+      { text: 'Signature Hand Wash starts at $40 (compact car), $36 for members', trusted: true },
       { text: '. Call ', trusted: false },
       { text: '(201) 598-6304', trusted: true },
       { text: ' or visit ', trusted: false },

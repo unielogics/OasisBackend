@@ -153,13 +153,14 @@ async function propose(
 export const proposeBooking: AssistantTool<ToolInputs['propose_booking']> = {
   name: 'propose_booking',
   description:
-    'Proposes a booking for the verified client: serviceKey (a package from list_services), addonKeys (add-on keys, or []), date (YYYY-MM-DD), startMin (from check_availability), vehicle (the client’s own vehicle as they named it, or null: a vehicle is never needed, so never ask for one before proposing). The server texts them a confirmation number; nothing is booked until they reply with it.',
+    'Proposes a booking for the verified client: serviceKey (a package from list_services), addonKeys (add-on keys, or []), date (YYYY-MM-DD), startMin (from check_availability), vehicle (the client’s own vehicle as they named it, or null: a vehicle is never needed, so never ask for one before proposing), vehicleClass (the car’s size key from SHOP FACTS when the client said it or a vehicle on file has it, else null: the visit is then priced at the starting price and the size is confirmed at the shop). The server texts them a confirmation number; nothing is booked until they reply with it.',
   input: z.strictObject({
     serviceKey: z.string().min(1).max(80),
     addonKeys: z.array(z.string().min(1).max(80)).max(6),
     date: z.string().regex(BIZ_DATE),
     startMin: StartMin,
     vehicle: z.string().max(60).nullable(),
+    vehicleClass: z.string().max(32).nullable(),
   }),
   minTrust: TOOL_MIN_TRUST.propose_booking,
   action: true,
@@ -179,8 +180,15 @@ export const proposeBooking: AssistantTool<ToolInputs['propose_booking']> = {
     }
     if ((await aiBookingsAhead(ctx.db, customerId, ctx.now)) >= MAX_AI_BOOKINGS_AHEAD)
       return fail('rate_limited', `This client already has ${MAX_AI_BOOKINGS_AHEAD} upcoming visits booked by text; more go through the team or the booking link.`)
+    // facts-v4: the size the client said, one of the shop's sizes (Settings → Vehicle sizes)
+    let said: string | null = null
+    if (input.vehicleClass !== null) {
+      const size = ctx.facts.catalog.sizes.find((x) => x.key === input.vehicleClass!.trim().toLowerCase())
+      if (!size) return fail('invalid', 'Use a size key from SHOP FACTS for vehicleClass, or null.', { detail: json({ sizes: ctx.facts.catalog.sizes }) })
+      said = size.key
+    }
     let vehicleId: string | null = null
-    let vehicleClass: string | null = null
+    let vehicleClass: string | null = said
     if (input.vehicle) {
       const words = input.vehicle.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 1 && w !== 'the' && w !== 'my')
       const vehicles = await listVehicles(ctx.db, customerId)
@@ -191,8 +199,10 @@ export const proposeBooking: AssistantTool<ToolInputs['propose_booking']> = {
       if (match.length !== 1)
         return fail('invalid', match.length === 0 ? 'That vehicle is not on the client’s record. Save it with set_my_vehicle first, or pass null.' : 'Several vehicles match; name it more precisely.')
       vehicleId = match[0]!.id
-      // the car on file supplies the size the visit is priced at (ADR 0170)
-      vehicleClass = match[0]!.vehicleClass
+      // the size the visit is priced at (ADR 0170): a size staff set on the car wins over what the client says; else the size the
+      // client said, else the car's size on file
+      const car = match[0]!
+      vehicleClass = car.vehicleClassSource === 'staff' && car.vehicleClass ? car.vehicleClass : (said ?? car.vehicleClass)
     }
     const vip = await vipFor(ctx)
     const v = await slotVerdict(ctx.db, {

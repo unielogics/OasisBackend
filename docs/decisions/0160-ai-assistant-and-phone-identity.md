@@ -1244,3 +1244,56 @@ first reply, x2-amenity-waiting-wifi said "The team can confirm the waiting area
 and sent a verify link for "3pm is good", sim-spanish-detail had no judge error. Left for review: book-untrusted-verify gets a calendar
 link where the persona expects a verify link; new-hi-books-wash once presented the plans without the booking link the client asked
 for; the judge still fails some passable sign-offs ("See you Saturday!" after a proposal) and day claims, which the one rewrite fixes.
+
+### Wave Q3d: facts-v4 (prices by vehicle size) and the W4 leftovers
+
+ADR 0170 made every price a price per vehicle size; this wave gives the assistant the same model (design q-design-pricing §10) and
+closes the W4 last check's blockers (`_reports/w4-last-check.json`). Prompt `q3d-2026-10-14.1`, facts `facts-v4`.
+
+- **Facts-v4** (`facts.ts`, `contract.ts`): the facts read `GET /public/catalog/v2` (ADR 0170 wave Q3d). They carry the active
+  vehicle sizes (`catalog.sizes`, a "Vehicle sizes" section with their keys), every item's prices at the sizes that have one
+  (`prices[{class, classLabel, cents, maxCents, memberCents}]`, `fromCents`, `fromClassLabel`, `memberFromCents`, `includedIn`; the
+  tint films beside them, so facts-v3's tint rows are gone), and the tiers SOLD ONLINE: a tier without a current price is not a
+  plan of the facts (plan decision 3), so the assistant neither prices nor links it (`send_link {membership}` answers `unavailable`).
+  A plan carries its prices by size, `fromCents`/`fromClassLabel`, `memberDiscountBp`, `vipBooking`, its inclusions (by the names
+  of the listed items they cover) and the shop's perks. The VIP section says which tiers carry the VIP booking rules (the old
+  per-service "VIP includes" lines went with the vipInclusion field). The memberships section says a plan is priced at one size and
+  a larger car is covered up to that size's price, the difference paid at the shop. The fingerprint already covered the new tables.
+- **Placeholders** (`placeholderValues`, English and Spanish): `{price:<key>}` "Signature Hand Wash starts at $40 (compact car)"
+  (", $36 for members" when a tier's % off makes it lower); `{price:<key>:<size>}` "Signature Hand Wash for a large SUV starts at
+  $60", or "... is priced at the shop" for a size without a price of its own (an item without prices by size: its base price at
+  every size); `{plan:<key>}` "Gold starts at $129 a month (compact car)"; `{plan:<key>:<size>}` "Gold for a large SUV is $149 a
+  month", or "... has a monthly price the team confirms"; `{perks:<key>}` written by the server from the tier's inclusions ("Signature
+  Hand Wash (4 a month)", "Hand wax with every visit", "(unlimited)"), its "% off other services and add-ons" and the shop's perks,
+  at most 220 characters, every part outside `PERK_PROMISE` ("% off", never "discount"; Spanish "% menos"); `{price:tint:<size>:<film>}`
+  stays readable for one release (from the tint packages' cells). Only active sizes and listed items have placeholders: anything
+  else is `unknown_placeholder`.
+- **Tools**: `set_my_vehicle` takes `size` (a size key of the facts, checked against them; the old types are refused with the
+  shop's sizes to ask from), records it on the car as `vehicle_class` with source `ai` (never over a staff size: then the staff
+  size stands and the answer says so), keeps the old `vehicle_type` for the default sizes (one release), and answers the price keys
+  of that size (the washes, then the plans). `propose_booking` takes `vehicleClass` (the size the client said, or null); a size staff
+  set on the car named wins, else the size said, else the car's; the reply-number handler books with it while that size is on and
+  records it on the car as the assistant's. `list_services` and `get_membership_info` give each item and plan its `sizePriceKeys`
+  (the sizes with a price) besides the starting `priceKey`. The turn context shows each vehicle's size key.
+- **Prompt**: the intake's last step asks for the car's SIZE from the facts' list (then make and model; still one question per
+  text, order name → intent → memberships → vehicle); a shop that sells no plan online skips the memberships step; the price rules
+  name the size placeholders and "never guess a size".
+- **L6, the guard and the judge say the same thing** (W4 last check, medium): `unverifiedClaims` flags a clock time, or a part of
+  the day without an availability check on the record, named in a sentence about picking on the link, the page or the calendar
+  ("pick 3:00 PM on Friday on the link", "the link lets you pick a Friday afternoon time"): a deterministic rewrite before the judge.
+  Hours ("we're open 8 AM to 6 PM, pick any time on the link") and the client's own visit ("your wash is Friday at 3 PM; use the link
+  to move it") are no claim; "pick a time on the link" is fine. Rule (g) now says the same (a time named on the link is a claim;
+  "pick a time on the link" is not) and so do both rewrite hints. `OPEN_WORDS` adds "looks/sounds good (great, perfect, fine)".
+- **A link the client cannot find is texted again** (W4 last check, low; migration `20261014700000_link_retext.sql`): a link the
+  assistant issues takes a token derived from its id (HMAC under a key derived from `PIN_PEPPER`, `identity/links.ts linkTokenFor`;
+  still only its hash is stored). When `send_link` hits the one-of-a-kind-an-hour limit, the server texts the SAME link again
+  (`retextClientLink`: the newest live, openable link of that kind the assistant texted this number, never re-texted; for a calendar
+  link of one visit, that visit's or a general one): no new token, no new row, `retexted_at` set, audited `assistant.link.resent`,
+  and the re-text counts as one of the day's three links. The model is told "the same link texted earlier, sent again"; the judge's
+  record reads "texted the client again the same calendar link it texted earlier". Once per link; past that (or the day's limit,
+  or a link issued before this change) the old answer stands (point to it; if they cannot find it, a team member texts it).
+  check_availability never re-texts (it points to the link of the hour).
+- **Evals**: the guard sets' renderings are facts-v4's; the probes set adds V01-V20 (prices by size: 10 ordinary replies with the
+  size placeholders, 10 adversarial ones). The conversation eval's personas name their cars by size, and `--catalog` runs the full
+  grid (`seeded`/`grid`) or the production-like catalog (`unseeded`/`production`: the dashboard design catalog with `pricing-defaults`
+  only: Express Hand Wash $40 at Compact car, Gold $129 a month, VIP unpriced).

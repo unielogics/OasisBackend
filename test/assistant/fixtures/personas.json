@@ -108,7 +108,7 @@
       "id": "price-signature",
       "category": "price",
       "description": "A client on file asks the price of the Signature wash.",
-      "client": { "name": "Maria Delgado", "vehicles": [{ "type": "sedan_coupe", "make": "Toyota", "model": "Camry", "year": 2019 }] },
+      "client": { "name": "Maria Delgado", "vehicles": [{ "size": "large_car", "make": "Toyota", "model": "Camry", "year": 2019 }] },
       "steps": [{ "text": "How much is the signature wash?" }, { "text": "And the exterior only one?" }],
       "expect": { "handoff": false },
       "unseeded": true
@@ -117,7 +117,7 @@
       "id": "price-tint-ceramic-sedan",
       "category": "price",
       "description": "A client asks the price to tint a sedan with ceramic film.",
-      "client": { "name": "Kevin Shah", "vehicles": [{ "type": "sedan_coupe", "make": "Honda", "model": "Accord", "year": 2020 }] },
+      "client": { "name": "Kevin Shah", "vehicles": [{ "size": "compact_car", "make": "Honda", "model": "Accord", "year": 2020 }] },
       "steps": [{ "text": "How much to tint my Accord with ceramic?" }, { "text": "Is that for all windows?" }],
       "expect": { "handoff": false },
       "unseeded": true
@@ -161,7 +161,7 @@
       "id": "member-washes-left",
       "category": "membership",
       "description": "A Gold member asks how many washes are left this month.",
-      "client": { "name": "Priya Nair", "membership": "gold", "vehicles": [{ "type": "suv_crossover", "make": "Subaru", "model": "Outback", "year": 2022 }] },
+      "client": { "name": "Priya Nair", "membership": "gold", "vehicles": [{ "size": "compact_suv", "make": "Subaru", "model": "Outback", "year": 2022 }] },
       "steps": [{ "text": "How many washes do I have left this month?" }],
       "expect": { "handoff": false }
     },
@@ -227,7 +227,7 @@
       "id": "book-trusted-thursday",
       "category": "booking_trusted",
       "description": "A verified client books a Signature wash Thursday morning and confirms with the reply number.",
-      "client": { "name": "Jonathan Franco", "trusted": true, "vehicles": [{ "type": "sedan_coupe", "make": "BMW", "model": "330i", "year": 2021 }] },
+      "client": { "name": "Jonathan Franco", "trusted": true, "vehicles": [{ "size": "compact_car", "make": "BMW", "model": "330i", "year": 2021 }] },
       "steps": [
         { "text": "Can I book a Signature wash tomorrow morning?" },
         { "text": "10am works" },
@@ -241,7 +241,7 @@
       "id": "book-trusted-addon",
       "category": "booking_trusted",
       "description": "A verified client books an Exterior wash with hand wax Friday afternoon.",
-      "client": { "name": "Marcus Lee", "trusted": true, "vehicles": [{ "type": "truck_van", "make": "Ram", "model": "1500", "year": 2020 }] },
+      "client": { "name": "Marcus Lee", "trusted": true, "vehicles": [{ "size": "truck", "make": "Ram", "model": "1500", "year": 2020 }] },
       "steps": [
         { "text": "Book me an exterior wash with hand wax Friday at 2pm for the Ram" },
         { "text": "{{code}}" }
@@ -263,7 +263,7 @@
       "id": "book-untrusted-verify",
       "category": "booking_untrusted",
       "description": "A client on file with an unverified phone asks to book: verify link, verifies, books by reply number.",
-      "client": { "name": "Chloe Martin", "vehicles": [{ "type": "suv_crossover", "make": "Mazda", "model": "CX-5", "year": 2023 }] },
+      "client": { "name": "Chloe Martin", "vehicles": [{ "size": "compact_suv", "make": "Mazda", "model": "CX-5", "year": 2023 }] },
       "steps": [
         { "text": "I'd like to book a signature wash this Saturday at 11am" },
         { "verify": true },
@@ -337,7 +337,7 @@
       "id": "complaint-damage",
       "category": "complaint",
       "description": "A client says the shop scratched their door and asks who pays.",
-      "client": { "name": "Gary Walsh", "vehicles": [{ "type": "sedan_coupe", "make": "Audi", "model": "A4", "year": 2022 }] },
+      "client": { "name": "Gary Walsh", "vehicles": [{ "size": "compact_car", "make": "Audi", "model": "A4", "year": 2022 }] },
       "steps": [{ "text": "You guys scratched my driver door yesterday. Who is paying for this??" }, { "text": "I want this fixed at your cost" }],
       "expect": { "handoff": true }
     },
@@ -581,7 +581,7 @@
       "id": "sim-tint-shopper",
       "category": "price",
       "description": "A price shopper comparing tint prices across shops for a Tesla Model Y.",
-      "client": { "name": "Priscilla Adams", "vehicles": [{ "type": "suv_crossover", "make": "Tesla", "model": "Model Y", "year": 2023 }] },
+      "client": { "name": "Priscilla Adams", "vehicles": [{ "size": "compact_suv", "make": "Tesla", "model": "Model Y", "year": 2023 }] },
       "simulate": { "goal": "Find out what ceramic tint for your Model Y would cost exactly, push for an exact out-the-door price, then say you'll think about it.", "maxTurns": 5 },
       "expect": { "handoff": null }
     },

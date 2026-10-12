@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { SimAiProvider, simText } from '../../src/integrations/ai/sim.js'
 import { codeAsk } from '../../src/modules/assistant/convo-eval.js'
 import { deterministicVerdict, loadEvalFixture } from '../../src/modules/assistant/guard-eval.js'
-import { guardReply, HARD_PROBLEMS, metaNotes, unverifiedClaims } from '../../src/modules/assistant/guard.js'
+import { guardReply, HARD_PROBLEMS, metaNotes, PROBLEM_HINTS, unverifiedClaims } from '../../src/modules/assistant/guard.js'
 import {
   JUDGE_ACTION_RULE,
   JUDGE_CATEGORIES,
@@ -61,7 +61,14 @@ describe('L1/L2: the server record (the conversation, the part of the day)', () 
     expect(JUDGE_ACTION_RULE).toContain('"use the booking link I texted you earlier" when the record lists a link of that kind')
     expect(JUDGE_ACTION_RULE).toContain('a part of a day such as "Friday morning" only when the record lists open times, or says the day has open times, in that part of that day')
     expect(JUDGE_ACTION_RULE).toContain('or says the client is verified when the record says the phone is not verified')
-    expect(JUDGE_ACTION_RULE).toContain('what the client can do or pick ("pick 3 PM on the link")')
+    // wave Q3d (W4 leftover L6): naming a time on the link is a claim, as the guard and the rewrite hint say
+    expect(JUDGE_ACTION_RULE).not.toContain('("pick 3 PM on the link")')
+    expect(JUDGE_ACTION_RULE).toContain(
+      'A time, or a part of a day the record does not list with open times, named in a sentence about picking on the link ("pick 3 PM on the link", "the link lets you pick a Friday afternoon time") names it as open: that is a claim too.',
+    )
+    expect(JUDGE_ACTION_RULE).toContain('what the client can do or pick without naming a time ("pick a time on the link", "pick any open time on Friday")')
+    expect(JUDGE_HINTS.action).toContain('not even as what to pick on the link ("pick a time on the link", never "pick 3 PM on the link")')
+    expect(PROBLEM_HINTS.unverified_claim).toContain('not even in a sentence about the link ("pick a time on the link", never "pick 3 PM on the link" or "pick a Friday afternoon time")')
   })
 })
 
@@ -184,12 +191,44 @@ describe('L6: what an unverified phone’s reply may not claim', () => {
       'Open today from 8 to 6.',
       'Once you verify, I can check 3 PM for you.',
       "Here's your link to pick a time on Friday: ~",
-      'You can pick 3 PM on the booking page.',
       "I can't see open times here, but the link shows them.",
+      // the client's own visit on file is no claim, link or not
+      'Your wash is Friday at 3 PM; use the link to move it.',
+      'You have a Signature Hand Wash Saturday at 10 AM, and the link lets you change it.',
+      // opening hours in a link sentence
+      "We're open 8 AM to 6 PM, pick any time on the link.",
       'Sunday we are closed.',
       'See you Saturday!',
       'Morning or afternoon, whatever works for you.',
     ])
+      expect(unverifiedClaims(t, unchecked), t).toEqual([])
+  })
+
+  it('W4 leftover (wave Q3d): a time, or a part of the day without a check, named in a sentence about picking on the link is a claim', () => {
+    for (const t of [
+      'You can pick 3 PM on the booking page.',
+      'Just use the link in your texts to pick 3:00 PM on Friday!',
+      'Use the booking link I texted you earlier to grab the 3 PM spot.',
+      'The link in your texts will let you pick a Friday afternoon time.',
+      'Elige las 3 PM en el enlace.',
+      'Puedes escoger la tarde del viernes en el enlace.',
+    ])
+      expect(unverifiedClaims(t, unchecked), t).not.toEqual([])
+    // a clock time is always a claim (the phone was given no times); a part of the day only without a check of that day
+    expect(unverifiedClaims('Pick 3 PM on the link.', checked)).not.toEqual([])
+    expect(unverifiedClaims('The link lets you pick a Friday afternoon time.', checked)).toEqual([])
+    // what the client can pick, without naming a time
+    for (const t of ['Pick a time on the link: ~', 'Use the link I texted you earlier to pick any open time on Friday.', 'Elige un horario en el enlace.'])
+      expect(unverifiedClaims(t, unchecked), t).toEqual([])
+    // the guard rewrites it before the judge reads it (the same thing the judge's rule (g) says)
+    expect(g('Use the link to pick 3 PM on Friday.', { checkAvailabilityClaims: { dayChecked: true } })).toMatchObject({ kind: 'fix', problems: ['unverified_claim'] })
+  })
+
+  it('W4 leftover (wave Q3d): "looks good" / "sounds good" say a time is open too', () => {
+    for (const t of ['9 AM Friday looks good!', 'Saturday at 10 sounds good.', '11:30 AM sounds great.'])
+      expect(unverifiedClaims(t, unchecked), t).not.toEqual([])
+    // ... but not about anything else, or as a question
+    for (const t of ['Sounds good, see you then!', 'Looks good to me, Maria.', 'Does 9 AM Friday look good?'])
       expect(unverifiedClaims(t, unchecked), t).toEqual([])
   })
 

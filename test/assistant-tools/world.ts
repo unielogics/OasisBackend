@@ -20,7 +20,7 @@ import {
 import { loadAppointmentRefs } from '../../src/modules/assistant/tools/refs.js'
 import { grantTrust } from '../../src/modules/identity/trust.js'
 import type { ClientLinkKind } from '../../src/modules/identity/schema.js'
-import { loadPublicCatalog } from '../../src/modules/public/catalog.js'
+import { loadPublicCatalogV2 } from '../../src/modules/public/catalog.js'
 import type { Actor, SchedulingCtx } from '../../src/modules/scheduling/context.js'
 import { toBizDate } from '../../src/platform/time.js'
 import { STRANGER, useWorld, type World } from '../messaging-db/world.js'
@@ -55,10 +55,11 @@ export function aiActorOf(locationId: string): Actor {
   }
 }
 
-/** Shop facts from the public catalog (the catalog part is what the tools read; the rest is plain filler). */
+/** Shop facts from the public catalog v2 (facts-v4: the catalog part is what the tools read; the rest is plain filler). */
 export async function testFacts(w: World): Promise<ShopFacts> {
   const now = w.clock.now()
-  const cat = await loadPublicCatalog(w.t.db, w.locationId, now)
+  const cat = await loadPublicCatalogV2(w.t.db, w.locationId, now)
+  const label = (key: string): string => cat.vehicleClasses.find((c) => c.key === key)?.label ?? key
   const today = toBizDate(now, 'America/New_York')
   return {
     version: 'test',
@@ -79,34 +80,22 @@ export async function testFacts(w: World): Promise<ShopFacts> {
     automaticTexts: { reminderOffsetsMin: [1440, 120], confirmRequest: true, categoryPrep: {}, statusTexts: { checkedIn: true, runningLate: true, ready: true, pickedUp: true }, lines: [] },
     catalog: {
       categories: cat.categories.map((c) => ({ key: c.key, label: c.label })),
+      sizes: cat.vehicleClasses.map((c) => ({ key: c.key, label: c.label })),
       items: [
-        ...cat.services.map((s) => ({
+        ...[...cat.services.map((s) => ({ s, kind: 'package' as const })), ...cat.addons.map((s) => ({ s, kind: 'addon' as const }))].map(({ s, kind }) => ({
           key: s.key,
           name: s.name,
-          kind: 'package' as const,
+          kind,
           category: s.category,
           description: s.description,
-          durationMin: s.durationMin,
-          memberFromCents: s.memberPriceCents,
-          guestFromCents: s.guestPriceCents,
-          vipInclusion: s.vipInclusion,
-          vipNote: s.vipNote,
+          durationMin: 'durationMin' in s ? s.durationMin : null,
+          prices: s.prices.map((p) => ({ class: p.class, classLabel: label(p.class), cents: p.cents, maxCents: p.maxCents, memberCents: p.memberCents })),
+          fromCents: s.fromCents,
+          fromClassLabel: s.fromClass ? label(s.fromClass) : null,
+          memberFromCents: s.memberFromCents,
+          includedIn: [],
           quoteOnly: false,
-          tintFilm: s.tintFilm,
-        })),
-        ...cat.addons.map((s) => ({
-          key: s.key,
-          name: s.name,
-          kind: 'addon' as const,
-          category: s.category,
-          description: s.description,
-          durationMin: null,
-          memberFromCents: s.memberPriceCents,
-          guestFromCents: s.guestPriceCents,
-          vipInclusion: s.vipInclusion,
-          vipNote: s.vipNote,
-          quoteOnly: false,
-          tintFilm: null,
+          tintFilm: 'tintFilm' in s ? (s.tintFilm?.key ?? null) : null,
         })),
         ...cat.quotes.map((q) => ({
           key: q.key,
@@ -115,22 +104,42 @@ export async function testFacts(w: World): Promise<ShopFacts> {
           category: q.category,
           description: q.description,
           durationMin: null,
+          prices: [],
+          fromCents: null,
+          fromClassLabel: null,
           memberFromCents: null,
-          guestFromCents: null,
-          vipInclusion: 'none' as const,
-          vipNote: null,
+          includedIn: [],
           quoteOnly: true,
           tintFilm: null,
         })),
       ],
-      tint: [
-        { vehicle: 'sedan_coupe', vehicleLabel: 'Sedan / coupe', film: 'ceramic', filmLabel: 'Ceramic', vlt: [5, 20, 35], memberFromCents: 22900, guestFromCents: 27500 },
-      ],
+      tintFilms: [],
       lines: [],
     },
+    // the tiers sold online (facts-v4: priced ones only); the design world prices none, so the two the tests sell are written here
     plans: [
-      { key: 'gold', label: 'Gold', monthlyPriceCents: 9900, perks: ['4 hand washes a month'] },
-      { key: 'vip', label: 'VIP', monthlyPriceCents: 16900, perks: ['Everything in Gold'] },
+      {
+        key: 'gold',
+        label: 'Gold',
+        prices: [{ class: 'compact_car', classLabel: 'Compact car', monthlyCents: 9900 }],
+        fromCents: 9900,
+        fromClassLabel: 'Compact car',
+        memberDiscountBp: 0,
+        vipBooking: false,
+        inclusions: [],
+        perks: ['4 hand washes a month'],
+      },
+      {
+        key: 'vip',
+        label: 'VIP',
+        prices: [{ class: 'compact_car', classLabel: 'Compact car', monthlyCents: 16900 }],
+        fromCents: 16900,
+        fromClassLabel: 'Compact car',
+        memberDiscountBp: 0,
+        vipBooking: true,
+        inclusions: [],
+        perks: ['Everything in Gold'],
+      },
     ],
     faq: [{ q: 'Do you take walk-ins?', a: 'Yes, when a bay is free.' }],
   }
