@@ -65,6 +65,7 @@ export function useSquareMembers(h: LinksHarness, vars: Record<string, string> =
       SMS_ALLOWLIST: [PHONES.maria, PHONES.liam, PHONES.stranger, PHONES.other].join(','),
       SMS_DISPATCH_MODE: 'off',
       PUBLIC_SITE_URL: 'https://site.example.test',
+      SQUARE_MEMBERSHIPS_ENABLED: 'true',
       ...vars,
     })
     configureSquareRuntime({ env, api: () => sim.api })

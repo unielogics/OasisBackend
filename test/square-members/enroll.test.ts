@@ -7,15 +7,15 @@ import { sqKey } from '../../src/integrations/square/keys.js'
 import { runEnrollmentJobs } from '../../src/modules/memberships/square/enroll.js'
 import { addHouseholdMember } from '../../src/modules/memberships/service.js'
 import { configureSquareRuntime } from '../../src/modules/square/runtime.js'
-import { useSquareMembers } from './rig.js'
+import { DAY, useSquareMembers } from './rig.js'
 import { PHONES, useLinksHarness } from '../public-links/harness.js'
 
 const h = useLinksHarness()
 const rigOf = useSquareMembers(h)
 const MIN = 60_000
 
-const enrollments = () => h.db.selectFrom('square_enrollments').selectAll().orderBy('started_at').execute()
-const membershipsOf = (customerId: string) => h.db.selectFrom('memberships').selectAll().where('customer_id', '=', customerId).orderBy('created_at').execute()
+const enrollments = () => h.db.selectFrom('square_enrollments').selectAll().orderBy('started_at').orderBy('id').execute()
+const membershipsOf = (customerId: string) => h.db.selectFrom('memberships').selectAll().where('customer_id', '=', customerId).orderBy('created_at').orderBy('id').execute()
 
 describe('POST membership/subscribe', () => {
   it('saves the card with the consent, makes the subscription from today, and is active once the first invoice is paid', async () => {
@@ -206,6 +206,127 @@ describe('square.enrollments.resume', () => {
     expect(await h.db.selectFrom('notifications').select('kind').where('kind', '=', 'membership.first_payment_failed').execute()).not.toEqual([])
     // the delivered invoice event again (a duplicate) changes nothing
     expect(await r.resume()).toMatchObject({ cleaned: 0 })
+  })
+
+  it('a retry on the same page after a failed first payment is a membership of its own: the old one is closed and cleaned up, the new one bills', async () => {
+    const r = rigOf()
+    await r.price('gold', 'compact_car', 12900)
+    r.sim.store.firstInvoiceDelayMs = 60 * MIN
+    const p = await r.page()
+    await r.subscribe(p.session)
+    const e1 = (await enrollments())[0]!
+    r.sim.store.billNow(e1.square_subscription_id!, 'failed')
+    await r.drain()
+    // the client tries another card on the same page before the job cleaned the first attempt up
+    const again = await r.subscribe(p.session)
+    expect(again.status, JSON.stringify(again.body)).toBe(202)
+    const e2 = (await enrollments())[1]!
+    expect(e2).toMatchObject({ state: 'subscribed' })
+    expect(e2.membership_id).not.toBe(e1.membership_id)
+    expect(e2.square_subscription_id).not.toBe(e1.square_subscription_id)
+    let [old, cur] = await membershipsOf(p.customerId)
+    expect(old).toMatchObject({ id: e1.membership_id, status: 'canceled', cancel_reason: 'first_payment_failed', square_subscription_id: e1.square_subscription_id })
+    expect(cur).toMatchObject({ id: e2.membership_id, status: 'pending', square_subscription_id: e2.square_subscription_id, card_id: e2.card_id })
+    r.sim.store.billNow(e2.square_subscription_id!, 'paid')
+    await r.drain()
+    // the job cleans the first attempt up at Square and touches nothing of the new membership
+    expect(await r.resume()).toMatchObject({ cleaned: 1, cardsMoved: 0 })
+    expect(r.sim.store.subscriptions.get(e1.square_subscription_id!)!.canceled_date).toBeTruthy()
+    expect(r.sim.store.subscriptions.get(e2.square_subscription_id!)!.card_id).toBe((await h.db.selectFrom('customer_cards').select('square_card_id').where('id', '=', e2.card_id!).executeTakeFirstOrThrow()).square_card_id)
+    expect(await h.db.selectFrom('customer_cards').select('state').where('id', '=', e1.card_id!).executeTakeFirstOrThrow()).toEqual({ state: 'disabled' })
+    expect(await r.status(p.session)).toMatchObject({ status: 'active', membershipRef: again.body.membershipRef })
+    // a month later: the old subscription has ended, the new one renews, the membership stays active
+    await r.advance(32 * DAY)
+    const notes = await r.drain()
+    ;[old, cur] = await membershipsOf(p.customerId)
+    expect(cur, notes.join('\n')).toMatchObject({ status: 'active', square_subscription_id: e2.square_subscription_id, paid_order_count: 2 })
+    expect(old).toMatchObject({ status: 'canceled' })
+    expect(await h.db.selectFrom('notifications').select('kind').where('kind', '=', 'membership.square_paid_canceled').execute()).toEqual([])
+  })
+
+  it('memberships off answers 409; a retry right after Square refused the subscription survives the cleanup of the refused attempt', async () => {
+    const r = rigOf()
+    await r.price('gold', 'compact_car', 12900)
+    r.sim.store.firstInvoiceDelayMs = 60 * MIN
+    const p = await r.page()
+    // memberships on Square not switched on yet (writes on for links, deposits and refunds only): nothing is written
+    configureSquareRuntime({ env: { ...r.env, SQUARE_MEMBERSHIPS_ENABLED: false }, api: () => r.sim.api })
+    expect((await r.subscribe(p.session)).body).toMatchObject({ status: 409, code: 'LINK_CHECKOUT_UNAVAILABLE' })
+    expect(await enrollments()).toEqual([])
+    configureSquareRuntime({ env: r.env, api: () => r.sim.api })
+    r.sim.sim.injectFault({ status: 400, times: 1, path: '/v2/subscriptions', method: 'POST' })
+    expect((await r.subscribe(p.session)).body).toMatchObject({ status: 409, code: 'LINK_CHECKOUT_UNAVAILABLE' })
+    const ok = await r.subscribe(p.session)
+    expect(ok.status, JSON.stringify(ok.body)).toBe(202)
+    const [e1, e2] = await enrollments()
+    expect(e1).toMatchObject({ state: 'failed', failure_code: 'subscription_refused', cleanup: 'pending' })
+    expect(e2).toMatchObject({ state: 'subscribed' })
+    // the job runs before Square bills the new attempt's first invoice
+    expect(await r.resume()).toMatchObject({ cleaned: 1 })
+    const ms = await membershipsOf(p.customerId)
+    expect(ms.map((m) => [m.id, m.status])).toEqual([
+      [e1!.membership_id, 'canceled'],
+      [e2!.membership_id, 'pending'],
+    ])
+    r.sim.store.billNow(e2!.square_subscription_id!, 'paid')
+    await r.drain()
+    expect((await membershipsOf(p.customerId))[1]).toMatchObject({ status: 'active', square_subscription_id: e2!.square_subscription_id })
+    expect((await enrollments())[1]).toMatchObject({ state: 'active' })
+    expect(await r.status(p.session)).toMatchObject({ status: 'active' })
+  })
+
+  it('the cleanup of a failed attempt never closes a membership a newer attempt is using', async () => {
+    const r = rigOf()
+    await r.price('gold', 'compact_car', 12900)
+    r.sim.store.firstInvoiceDelayMs = 3 * 60 * MIN
+    const p = await r.page()
+    await r.subscribe(p.session)
+    const live = (await enrollments())[0]!
+    // an older attempt of the same membership that still owes its cleanup (e.g. a submit that was superseded while in flight)
+    const t0 = new Date(live.started_at.getTime() - MIN)
+    await h.db
+      .insertInto('square_enrollments')
+      .values({
+        ...live,
+        id: h.newId(),
+        state: 'failed',
+        failure_code: 'subscription_refused',
+        failure_detail: 'Square refused the subscription',
+        cleanup: 'pending',
+        card_id: null,
+        consent_id: null,
+        square_subscription_id: null,
+        started_at: t0,
+        created_at: t0,
+        updated_at: t0,
+      })
+      .execute()
+    expect(await r.resume()).toMatchObject({ cleaned: 1 })
+    expect((await membershipsOf(p.customerId))[0]).toMatchObject({ id: live.membership_id, status: 'pending' })
+    r.sim.store.billNow(live.square_subscription_id!, 'paid')
+    await r.drain()
+    expect((await membershipsOf(p.customerId))[0]).toMatchObject({ status: 'active' })
+  })
+
+  it('reads Square once before abandoning a subscribed attempt older than an hour: a first invoice already paid makes it active', async () => {
+    const r = rigOf()
+    await r.price('gold', 'compact_car', 12900)
+    const p = await r.page()
+    await r.subscribe(p.session)
+    const e = (await enrollments())[0]!
+    // neither the events nor the job ran for an hour
+    await r.advance(61 * MIN)
+    expect(await r.resume()).toMatchObject({ abandoned: 0, cleaned: 0 })
+    expect((await enrollments())[0]).toMatchObject({ state: 'active' })
+    expect((await membershipsOf(p.customerId))[0]).toMatchObject({ status: 'active', paid_order_count: 1 })
+    expect(r.sim.store.subscriptions.get(e.square_subscription_id!)!.canceled_date).toBeFalsy()
+    // Square not answering: the attempt is kept for the next run, nothing is canceled
+    const q = await r.page({ phone: PHONES.liam, name: 'Liam Ortiz' })
+    r.sim.store.firstInvoiceDelayMs = 3 * 60 * MIN
+    await r.subscribe(q.session)
+    await r.advance(61 * MIN)
+    r.sim.sim.injectFault({ status: 500, times: 100, path: '/v2/subscriptions/', method: 'GET' })
+    expect(await r.resume()).toMatchObject({ abandoned: 0, cleaned: 0 })
   })
 
   it('does nothing with Square writes off (the default)', async () => {

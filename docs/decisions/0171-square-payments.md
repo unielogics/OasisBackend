@@ -193,7 +193,8 @@ reconcile do nothing, and the hook verifies nothing (no key) and answers 401.
 ## Memberships on Square (wave Q3b, built)
 
 The design's Phase 5 (sections 5.1 to 5.7) with the plan's amendments. Off by default: nothing is synced or enrolled while
-`SQUARE_WRITES_ENABLED=false`; the website and the membership page keep the Squarespace flow while `PAYMENT_PROCESSOR=squarespace`; the
+`SQUARE_WRITES_ENABLED=false` or `SQUARE_MEMBERSHIPS_ENABLED=false` (the second switch keeps memberships the last stage of turning writes
+on, after links, deposits, refunds, saved cards and fees: plan rollout step 4); the website and the membership page keep the Squarespace flow while `PAYMENT_PROCESSOR=squarespace`; the
 `#/m` page is closed while `PUBLIC_LINKS_ENABLED=false`. Details: `docs/integrations/square.md` section 12, api-spec 30.11.
 
 - **Migration** `20261014600000_square_memberships.sql`: `memberships.source` gains `square`; the membership mirrors its subscription
@@ -208,25 +209,36 @@ The design's Phase 5 (sections 5.1 to 5.7) with the plan's amendments. Off by de
   SUBSCRIPTION_PLAN_VARIATION per current price row, keys from our ids and content (`ct_`); a new price is a new variation; a variation
   is never changed in place nor deleted while used; a superseded price nobody used is retired. Jobs `square.catalog.sync` (every 5
   minutes, so a save is at Square within minutes; the design's "after a save" trigger, without touching the catalog routes),
-  `square.catalog.drift` (nightly: reported, never overwritten), and `POST /integrations/square/catalog/sync` (`set.billing`).
+  `square.catalog.drift` (nightly: reported, never overwritten), and `POST /integrations/square/catalog/sync` (`set.billing`). A failure
+  stays on the row; the managers are told once per set of failures (`notifications.source_ref` from a hash of them), again a day later
+  while it lasts, not on every 5-minute retry.
 - **Enrollment** (`enroll.ts`, routes `membership/subscribe` and `membership/status`): the membership page's guards, the household rule,
   a synced price, a deliverable-looking email (example and test domains refused: Square deactivates a subscription whose email
   bounces), the consent `membership_billing`; `ensureSquareCustomer` with the email, `saveCardOnFile` (`cd_<enrollment>`),
   CreateSubscription (`sb_<enrollment>`, today in the shop's time zone). Active only when the first invoice is paid. The job
-  `square.enrollments.resume` resumes with the same keys within an hour, abandons after it and cleans up at Square; a failed first
-  payment cancels at Square and texts a new membership page. The website join texts the membership page under Square; the
+  `square.enrollments.resume` resumes with the same keys within an hour, reads a subscribed attempt back once more before abandoning
+  it (kept while Square does not answer, so a first invoice already charged is applied, never canceled unseen) and cleans up at
+  Square; a failed first payment cancels at Square and texts a new membership page. **One membership per subscription**: a retry on
+  the same page reuses the pending membership only when no earlier attempt left anything at Square; otherwise that membership is
+  closed in the new attempt's first transaction (the job still cleans its attempt up) and the retry gets a membership of its own, so
+  the old subscription's events and cleanup never touch the new one. The cleanup never cancels a membership a newer attempt is using,
+  and an attempt a newer submit superseded while it waited for Square stops at its next step (a card it saved is disabled by the
+  cleanup). The website join texts the membership page under Square; the
   Squarespace checkout (`membership/start`, `checkCheckoutUrl`, the product map) is used only while Squarespace is the processor.
 - **Billing by events** (`billing.ts`, installed as the `invoice` and `subscription` ingest handlers): the paid cycle applied once per
   invoice (shop-local midnights from the due date to `charged_through_date`), `grantCycleCredits` once per paid cycle, Square's status
   mapped, a swap that took effect followed; the subscription invoice's payment is a `membership` payment in the mirror, never matched
-  to an Oasis invoice; `syncMemberships` skips Square memberships.
+  to an Oasis invoice; `syncMemberships` skips Square memberships. A card-on-file payment of a client with a Square membership whose
+  invoice event has not arrived yet is never auto-matched to a visit invoice: it waits in the payments queue until the invoice event
+  takes it out as a membership payment (or staff decide).
 - **Failure policy** (D10; setting `memberships.billing_policy {graceDays: 7, cancelDays: 21}`, job `membership.billing`): day 0 in
   grace with the card page texted and Square's invoice page texted and emailed, staff told; day 7 past due; day 21 CancelSubscription and
   CancelInvoice, the membership canceled `payment_failed`; any payment restores. No day-3 retry (CreatePayment cannot pay the invoice's
   order). A card saved on the card page for membership billing is put on the subscription by the resume job.
 - **Staff actions** (`actions.ts`, `cli.member`; the Square call in the prepare hook): pause, resume (or undo a pause to come), cancel at
   the period end and its undo, change tier or size (SwapPlan at the next billing date) and its undo, text the card link, refund the last
-  payment (`pay.refund`, `rf_<invoice>`). A patch of a Square membership changes only auto-apply and the note (409
+  payment (`pay.refund`, `rf_<invoice>`; the row keeps Square's `refund_status` from the `refund.*` events, and a refund Square fails
+  or rejects is cleared and the managers told, so staff can refund again with a new key). A patch of a Square membership changes only auto-apply and the note (409
   `MEMBERSHIP_BILLED_BY_SQUARE`).
 - **Move members** (D9, `moves.ts`): `POST /catalog/tiers/:key/move-members {notice}` (`set.billing`) tells every member billed at an older
   price (text and email) and schedules the move; `square.plans.swap` sends per-subscription SwapPlan after the notice (BulkSwapPlan is not

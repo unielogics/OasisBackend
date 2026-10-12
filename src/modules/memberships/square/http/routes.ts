@@ -163,7 +163,7 @@ export function registerSquareMembershipRoutes(app: AppInstance): void {
         tags: [TAG],
         summary: 'Refund the last payment of a Square membership',
         description:
-          'RefundPayment of the latest paid subscription invoice, in full, with the key rf_<invoice> (a repeat answers the same refund). The membership is not changed (cancel it separately). 409 `MEMBERSHIP_BILLING_STATE` when there is nothing (left) to refund; 409 `SQUARE_WRITES_OFF`; 503 `SQUARE_UNAVAILABLE`. Idempotency-Key required. Audited `membership.billing.refund`.',
+          'RefundPayment of the latest paid subscription invoice, in full, with the key rf_<invoice> (a repeat answers the same refund; after a refund Square failed or rejected, a new key). The membership is not changed (cancel it separately). A refund Square later fails or rejects is cleared by its refund event and the managers are told. 409 `MEMBERSHIP_BILLING_STATE` when there is nothing (left) to refund or Square refused it at once; 409 `SQUARE_WRITES_OFF`; 503 `SQUARE_UNAVAILABLE`. Idempotency-Key required. Audited `membership.billing.refund`.',
         params: IdParams,
         body: Empty,
         response: { 200: Result.extend({ refund: z.object({ amountCents: z.number().int(), status: z.string() }) }) },
@@ -209,7 +209,7 @@ export function registerSquareMembershipRoutes(app: AppInstance): void {
         tags: ['square'],
         summary: 'Sync the membership prices to Square now',
         description:
-          'Runs the catalog sync the job `square.catalog.sync` runs every 5 minutes: a Square plan per tier, a STATIC MONTHLY plan variation per current tier price (a price edit is a new variation; members keep theirs), a superseded price nobody used retired. `status: skipped` while SQUARE_WRITES_ENABLED is false. Failures are kept on the rows (`squareState: failed`) and the managers are told. Audited `square.catalog.sync`.',
+          'Runs the catalog sync the job `square.catalog.sync` runs every 5 minutes: a Square plan per tier, a STATIC MONTHLY plan variation per current tier price (a price edit is a new variation; members keep theirs), a superseded price nobody used retired. `status: skipped` while SQUARE_WRITES_ENABLED or SQUARE_MEMBERSHIPS_ENABLED is false. Failures are kept on the rows (`squareState: failed`) and the managers are told once per set of failures (again a day later while it lasts). Audited `square.catalog.sync`.',
         body: Empty,
         response: {
           200: z.object({

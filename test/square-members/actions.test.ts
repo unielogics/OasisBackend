@@ -106,6 +106,41 @@ describe('billing actions', () => {
     expect(await h.db.selectFrom('ledger_events').select('id').where('type', '=', 'refund').execute()).toEqual([])
   })
 
+  it('a refund Square fails later is cleared: staff are told and can refund again with a new key', async () => {
+    const r = rigOf()
+    const m = await r.member()
+    const rf = await billing(m.membershipId, 'refund-last', {}, { 'idempotency-key': 'refund-last-key-0101' })
+    expect(rf.status, JSON.stringify(rf.body)).toBe(200)
+    await r.drain()
+    const inv0 = await h.db.selectFrom('square_subscription_invoices').selectAll().executeTakeFirstOrThrow()
+    expect(inv0).toMatchObject({ refunded_cents: 12900, refund_status: 'PENDING' })
+    const first = inv0.square_refund_id!
+    r.sim.store.failRefund(first, 'FAILED')
+    const notes = await r.drain()
+    expect(notes.join('\n')).toMatch(/membership refund failed: cleared, staff told/)
+    expect(await h.db.selectFrom('square_subscription_invoices').selectAll().executeTakeFirstOrThrow()).toMatchObject({
+      refunded_cents: 0,
+      refunded_at: null,
+      refund_status: 'FAILED',
+      square_refund_id: first,
+    })
+    expect(await h.db.selectFrom('notifications').select('kind').where('kind', '=', 'membership.refund_failed').execute()).not.toEqual([])
+    // the failure again (a duplicate delivery) changes nothing; a new try is a new refund
+    const failedEvent = r.sim.store.events.find((e) => e.type === 'refund.updated' && e.data.id === first)!
+    expect(await r.replay(failedEvent)).toMatch(/already cleared/)
+    const again = await billing(m.membershipId, 'refund-last', {}, { 'idempotency-key': 'refund-last-key-0102' })
+    expect(again.status, JSON.stringify(again.body)).toBe(200)
+    expect(r.sim.store.refunds.size).toBe(2)
+    expect(r.sim.sim.log.filter((x) => x.path === '/v2/refunds').at(-1)!.idempotencyKey).toBe(sqKey('rf', `membership-invoice:${inv0.id}:after:${first}`))
+    // Square completes it: the row says so, and nothing reaches the ledger
+    await r.advance(10_000)
+    await r.drain()
+    const done = await h.db.selectFrom('square_subscription_invoices').selectAll().executeTakeFirstOrThrow()
+    expect(done).toMatchObject({ refunded_cents: 12900, refund_status: 'COMPLETED' })
+    expect(done.square_refund_id).not.toBe(first)
+    expect(await h.db.selectFrom('ledger_events').select('id').where('type', '=', 'refund').execute()).toEqual([])
+  })
+
   it('refuse: a membership Square does not bill, watch-only, a missing permission', async () => {
     const r = rigOf()
     const m = await r.member()

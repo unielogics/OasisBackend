@@ -1,6 +1,7 @@
 // The jobs of the memberships billed by Square (ADR 0171 wave Q3b) through the real worker, twice each: with the defaults (Square
-// writes off, Squarespace the processor) every one completes and changes nothing; with writes on the catalog sync makes the tier
-// price's variation once and its second run leaves the database (and Square) as the first did.
+// writes off, Squarespace the processor) every one completes and changes nothing, and so with writes on but memberships on Square
+// off; with both on the catalog sync makes the tier price's variation once and its second run leaves the database (and Square) as
+// the first did.
 import { afterEach, describe, expect, it } from 'vitest'
 import { sql } from 'kysely'
 import { loadEnv } from '../../src/config/env.js'
@@ -67,8 +68,17 @@ describe('the Square membership jobs, twice each through the real worker', () =>
     expect(sim.sim.log).toEqual([])
   })
 
-  it('square.catalog.sync with writes on: the price becomes a variation once; the second run changes nothing', async () => {
+  it('with writes on but memberships on Square off (an earlier rollout stage): no membership price reaches Square', async () => {
     const { sim } = await arrange(coreVars)
+    const before = await snapshot()
+    const w = await h.start({ definitions: squareMembershipJobs as never })
+    for (const name of NAMES) await run(w, name)
+    expect(await snapshot()).toEqual(before)
+    expect(sim.sim.log).toEqual([])
+  })
+
+  it('square.catalog.sync with writes and memberships on: the price becomes a variation once; the second run changes nothing', async () => {
+    const { sim } = await arrange({ ...coreVars, SQUARE_MEMBERSHIPS_ENABLED: 'true' })
     const w = await h.start({ definitions: squareMembershipJobs as never })
     await run(w, 'square.catalog.sync')
     const first = await snapshot()

@@ -292,6 +292,8 @@ export async function prepareRefundLast(x: SquareSteps, membershipId: string): P
     .executeTakeFirst()
   if (!inv || inv.paid_cents <= 0) throw new AppError('MEMBERSHIP_BILLING_STATE', { detail: 'There is no membership payment to refund.' })
   if (inv.refunded_cents > 0) throw new AppError('MEMBERSHIP_BILLING_STATE', { detail: 'The last membership payment was refunded already.' })
+  // after a refund Square failed or rejected (its id is kept), a new try is a new refund: a key of its own
+  const keyOf = inv.square_refund_id ? `membership-invoice:${inv.id}:after:${inv.square_refund_id}` : `membership-invoice:${inv.id}`
   try {
     let paymentId = inv.square_payment_id
     if (!paymentId && inv.square_order_id) {
@@ -299,11 +301,13 @@ export async function prepareRefundLast(x: SquareSteps, membershipId: string): P
       paymentId = order.tenders?.find((t) => t.payment_id)?.payment_id ?? null
     }
     if (!paymentId) throw new AppError('MEMBERSHIP_BILLING_STATE', { detail: 'Square has no payment for the last invoice yet.' })
-    const refund = await x.api.refunds.refund(sqKey('rf', `membership-invoice:${inv.id}`), {
+    const refund = await x.api.refunds.refund(sqKey('rf', keyOf), {
       payment_id: paymentId,
       amount_money: usd(inv.paid_cents),
       reason: 'Membership refund',
     })
+    if (refund.status === 'FAILED' || refund.status === 'REJECTED')
+      throw new AppError('MEMBERSHIP_BILLING_STATE', { detail: 'Square did not refund the payment. Nothing was refunded; check the payment in Square.' })
     return { membershipId: m.id, invoiceRowId: inv.id, amountCents: inv.paid_cents, squareRefundId: refund.id, status: refund.status }
   } catch (e) {
     if (e instanceof AppError) throw e
@@ -312,11 +316,14 @@ export async function prepareRefundLast(x: SquareSteps, membershipId: string): P
   }
 }
 
+const refundStatusOf = (s: string): 'PENDING' | 'COMPLETED' | 'FAILED' | 'REJECTED' =>
+  s === 'COMPLETED' || s === 'FAILED' || s === 'REJECTED' ? s : 'PENDING'
+
 export async function recordRefundLast(tx: Tx, x: Pick<SquareSteps, 'clock' | 'locationId'>, p: PreparedRefund, actor: StaffActor): Promise<MembershipRow> {
   const now = x.clock.now()
   await tx
     .updateTable('square_subscription_invoices')
-    .set({ refunded_cents: p.amountCents, square_refund_id: p.squareRefundId, refunded_at: now, updated_at: now })
+    .set({ refunded_cents: p.amountCents, square_refund_id: p.squareRefundId, refunded_at: now, refund_status: refundStatusOf(p.status), updated_at: now })
     .where('id', '=', p.invoiceRowId)
     .where('refunded_cents', '=', 0)
     .execute()

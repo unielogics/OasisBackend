@@ -7,8 +7,17 @@
 //   - the email Square bills to must look deliverable: Square deactivates a subscription whose customer email it cannot deliver to
 //     (an example.com address did, within seconds, in the sandbox), so reserved and test domains are refused up front.
 import { DateTime } from 'luxon'
+import type { Env } from '../../../config/env.js'
 import type { WireSubscription, WireSubscriptionAction } from '../../../integrations/square/wire.js'
 import type { MembershipStatus } from '../schema.js'
+
+/**
+ * Memberships on Square are switched on (the last stage of turning Square writes on): the catalog sync sends the tier prices and the
+ * membership page joins with a card. Square memberships that already exist are billed, cleaned up and changed whatever this says.
+ */
+export function squareMembershipsOn(env: Pick<Env, 'SQUARE_WRITES_ENABLED' | 'SQUARE_MEMBERSHIPS_ENABLED'>): boolean {
+  return env.SQUARE_WRITES_ENABLED && env.SQUARE_MEMBERSHIPS_ENABLED
+}
 
 /** The shop-local midnight that starts a date (yyyy-mm-dd). */
 export function shopMidnight(date: string, tz: string): Date {

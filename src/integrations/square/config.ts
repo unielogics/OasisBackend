@@ -42,6 +42,11 @@ export const squareEnvShape = {
   SQUARE_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(8).default(4),
   /** false = observe-only: webhooks, catch-up, mirror and matching; no call that changes anything at Square (ADR 0171 D11). */
   SQUARE_WRITES_ENABLED: bool.default('false'),
+  /**
+   * Memberships billed by Square, the last stage of turning writes on (plan rollout 4, ADR 0171 wave Q3b): the tier prices are synced
+   * to Square's catalog and the membership page can join with a card. Needs SQUARE_WRITES_ENABLED; off by default.
+   */
+  SQUARE_MEMBERSHIPS_ENABLED: bool.default('false'),
   /** The Point of Sale app switch from the dashboard (iPad). Production only. */
   SQUARE_POS_API_ENABLED: bool.default('false'),
   /** Seconds a counter payment waits before auto-matching (a subscription event or a POS callback may explain it first). */

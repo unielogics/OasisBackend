@@ -6,7 +6,9 @@
 //   - POST /integrations/square/catalog/sync (set.billing): "Sync to Square" now.
 // The Square calls run one at a time OUTSIDE any transaction, each with a key derived from our own row ids and the object's content
 // (ct_<...>): a run that stopped after Square answered and before our row was written sends the same request again and gets the same
-// object. Each answer is then written in its own short transaction. Nothing runs while SQUARE_WRITES_ENABLED is false.
+// object. Each answer is then written in its own short transaction. Nothing runs while SQUARE_WRITES_ENABLED or
+// SQUARE_MEMBERSHIPS_ENABLED is false.
+import { createHash } from 'node:crypto'
 import type { Env } from '../../../config/env.js'
 import type { SquareApi } from '../../../integrations/ports/square.js'
 import { SquareApiError, SquareWritesDisabled } from '../../../integrations/square/errors.js'
@@ -21,6 +23,7 @@ import { maskText } from '../../../platform/logging.js'
 import { notifyManagers } from '../../messaging/notify.js'
 import type { SquareLogger } from '../../square/ingest.js'
 import { squareWritesOn } from '../../square/links.js'
+import { squareMembershipsOn } from './policy.js'
 import { planCatalogChanges, remoteOf, type CatalogAction, type CatalogPriceRow, type CatalogTier, type RemoteCatalog } from './catalog-plan.js'
 import '../schema.js'
 import './schema.js'
@@ -29,7 +32,7 @@ export interface CatalogSyncDeps {
   db: Db
   clock: Clock
   newId: NewId
-  env: Pick<Env, 'SQUARE_WRITES_ENABLED'>
+  env: Pick<Env, 'SQUARE_WRITES_ENABLED' | 'SQUARE_MEMBERSHIPS_ENABLED'>
   api: SquareApi
   logger?: SquareLogger
 }
@@ -286,13 +289,18 @@ async function record(deps: CatalogSyncDeps, locationId: string, done: readonly 
   return failures
 }
 
+/** The same sync failures are told to the managers again after this long (the job retries every 5 minutes meanwhile). */
+export const FAILURE_REMINDER_MS = 24 * 60 * 60_000
+
 /**
  * Syncs one location's tier prices to Square (see the header). `drift` also reads Square's catalog back. Skipped (nothing read or
- * sent) while Square writes are off. A failure is kept on the row (square_state failed, square_error) and the managers are told
- * once per run; the next run tries a failed row again.
+ * sent) while Square writes or memberships on Square are off. A failure is kept on the row (square_state failed, square_error) and the managers are told
+ * once per set of failures (again a day later while it lasts); the next run tries a failed row again.
  */
 export async function runCatalogSync(deps: CatalogSyncDeps, locationId: string, o: { drift?: boolean } = {}): Promise<CatalogSyncReport> {
   if (!squareWritesOn(deps.env)) return empty('skipped', 'Square writes are off (SQUARE_WRITES_ENABLED=false)')
+  // the last stage of the rollout: links, deposits and refunds can write to Square before any membership price is sent
+  if (!squareMembershipsOn(deps.env)) return empty('skipped', 'Memberships on Square are off (SQUARE_MEMBERSHIPS_ENABLED=false)')
   const state = await loadCatalogState(deps.db, locationId)
   const remote = o.drift ? await readRemoteCatalog(deps.api) : undefined
   const actions = planCatalogChanges(state.tiers, state.rows, remote)
@@ -302,8 +310,19 @@ export async function runCatalogSync(deps: CatalogSyncDeps, locationId: string, 
   const failures = await record(deps, locationId, done, report)
   if (failures.length > 0) {
     deps.logger?.warn({ square: { catalog: report } }, 'square catalog sync: some prices are not synced')
-    await transaction(deps.db, (tx) =>
-      notifyManagers(
+    // the job retries every 5 minutes: the same failures are news once, then again only a day later (a reminder)
+    const sourceRef = `square.catalog_sync_failed:${createHash('sha256').update([...failures].sort().join('\n')).digest('hex').slice(0, 32)}`
+    await transaction(deps.db, async (tx) => {
+      const told = await tx
+        .selectFrom('notifications')
+        .select('id')
+        .where('location_id', '=', locationId)
+        .where('source_ref', '=', sourceRef)
+        .where('created_at', '>', new Date(deps.clock.now().getTime() - FAILURE_REMINDER_MS))
+        .limit(1)
+        .executeTakeFirst()
+      if (told) return
+      await notifyManagers(
         tx,
         {
           locationId,
@@ -312,10 +331,11 @@ export async function runCatalogSync(deps: CatalogSyncDeps, locationId: string, 
           body: `Some membership prices could not be set up at Square, so those sizes can’t be joined online yet: ${failures.slice(0, 5).join('; ')}${failures.length > 5 ? ` (and ${failures.length - 5} more)` : ''}. Settings → Memberships → Sync to Square tries again.`,
           entityType: 'integration',
           entityId: 'square',
+          sourceRef,
         },
         { newId: deps.newId, clock: deps.clock },
-      ),
-    )
+      )
+    })
   }
   return report
 }

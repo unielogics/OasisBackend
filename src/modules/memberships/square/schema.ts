@@ -68,6 +68,7 @@ export interface SquareSubscriptionInvoicesTable {
   refunded_cents: Generated<number>
   square_refund_id: string | null
   refunded_at: Date | null
+  refund_status: 'PENDING' | 'COMPLETED' | 'FAILED' | 'REJECTED' | null
   created_at: Generated<Date>
   updated_at: Generated<Date>
 }

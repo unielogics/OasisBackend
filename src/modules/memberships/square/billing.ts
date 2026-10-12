@@ -5,6 +5,7 @@
 //                   was waiting for its first payment; a failed charge starts the failure policy (day 0: in grace, the client texted
 //                   a card link, staff told) or, for a first payment, fails the enrollment (the job cancels at Square and texts a new
 //                   membership page);
+//   refund.*        a membership refund staff made: the invoice row follows Square's status (failed or rejected: cleared, staff told);
 //   subscription.*  Square's status as the membership's (PAUSED paused, CANCELED or DEACTIVATED canceled, ACTIVE again after a
 //                   pause), what Square scheduled for the next billing date (cancel, pause, a plan swap), and a plan swap that took
 //                   effect (the membership follows the variation it is billed at: tier, size and price row).
@@ -20,6 +21,7 @@ import type { Executor, Tx } from '../../../platform/db.js'
 import { createIdGenerator, type NewId } from '../../../platform/ids.js'
 import { getSetting } from '../../../platform/settings.js'
 import { notifyManagers } from '../../messaging/notify.js'
+import type { SquareRefundFacts } from '../../square/facts.js'
 import type { IngestOutcome, SquareIngestContext } from '../../square/ingest.js'
 import { grantCycleCredits } from '../credits.js'
 import { loadPlans } from '../plans.js'
@@ -83,6 +85,7 @@ export async function membershipForSubscription(
           .where('square_customer_id', '=', sub.customer_id)
           .where('square_variation_id', '=', sub.plan_variation_id)
           .orderBy('started_at', 'desc')
+          .orderBy('id', 'desc')
           .forUpdate()
           .executeTakeFirst()
       : undefined)
@@ -219,6 +222,7 @@ const enrollmentOf = (tx: Executor, membershipId: string) =>
     .selectAll()
     .where('membership_id', '=', membershipId)
     .orderBy('started_at', 'desc')
+    .orderBy('id', 'desc')
     .forUpdate()
     .executeTakeFirst()
 
@@ -326,6 +330,7 @@ export async function billingEmailOf(db: Executor, membershipId: string): Promis
     .where('membership_id', '=', membershipId)
     .where('state', '=', 'active')
     .orderBy('started_at', 'desc')
+    .orderBy('id', 'desc')
     .executeTakeFirst()
   return e?.email ?? null
 }
@@ -438,6 +443,60 @@ export async function ingestSubscriptionInvoice(ctx: SquareIngestContext, inv: W
   if (ctx.event.type === 'invoice.scheduled_charge_failed' && !row.failed_at)
     return { status: 'processed', note: await applyFailed(ctx.tx, d, m, row, inv) }
   return { status: 'processed', note: `invoice ${inv.status.toLowerCase()}` }
+}
+
+/**
+ * refund.* of a membership payment staff refunded ("Refund last payment"): the invoice row follows Square's status. A refund Square
+ * failed or rejected is cleared (refunded_cents back to 0, the money never left) and the managers are told; staff can refund again.
+ * Undefined for a refund that is not a membership refund (the payments ingest takes it).
+ */
+export async function ingestMembershipRefund(ctx: SquareIngestContext, rf: SquareRefundFacts): Promise<IngestOutcome | undefined> {
+  const tx = ctx.tx
+  const row = await tx
+    .selectFrom('square_subscription_invoices')
+    .selectAll()
+    .where('location_id', '=', ctx.locationId)
+    .where('square_refund_id', '=', rf.refundId)
+    .forUpdate()
+    .executeTakeFirst()
+  if (!row) return undefined
+  const d = depsOf(ctx)
+  const now = d.clock.now()
+  if (rf.status === 'FAILED' || rf.status === 'REJECTED') {
+    if (row.refunded_cents === 0) return { status: 'processed', note: 'membership refund failed: already cleared' }
+    await tx
+      .updateTable('square_subscription_invoices')
+      .set({ refunded_cents: 0, refunded_at: null, refund_status: rf.status, updated_at: now })
+      .where('id', '=', row.id)
+      .execute()
+    const m = await tx.selectFrom('memberships').select(['id', 'customer_id', 'plan_label']).where('id', '=', row.membership_id).executeTakeFirstOrThrow()
+    const cust = await tx.selectFrom('customers').select('full_name').where('id', '=', m.customer_id).executeTakeFirst()
+    await audit.record(tx, {
+      locationId: d.locationId,
+      action: 'membership.billing.refund_failed',
+      entityType: 'membership',
+      entityId: m.id,
+      after: { invoice: row.square_invoice_id, squareRefundId: rf.refundId, status: rf.status, amountCents: rf.amountCents },
+      ctx: SQUARE_AUDIT,
+    })
+    await notifyManagers(
+      tx,
+      {
+        locationId: d.locationId,
+        kind: 'membership.refund_failed',
+        title: `Membership refund did not go through: ${cust?.full_name ?? 'a member'}`,
+        body: `Square could not refund the last ${m.plan_label} payment of ${cust?.full_name ?? 'a member'}, so nothing was refunded. You can try "Refund last payment" again, or refund it in Square.`,
+        entityType: 'membership',
+        entityId: m.id,
+      },
+      { newId: d.newId, clock: d.clock },
+    )
+    return { status: 'processed', note: `membership refund ${rf.status.toLowerCase()}: cleared, staff told` }
+  }
+  const status = rf.status === 'COMPLETED' ? 'COMPLETED' : 'PENDING'
+  if (row.refund_status !== status && row.refunded_cents > 0)
+    await tx.updateTable('square_subscription_invoices').set({ refund_status: status, updated_at: now }).where('id', '=', row.id).execute()
+  return { status: 'processed', note: `membership refund ${status.toLowerCase()}` }
 }
 
 /** subscription.* (see the header). */

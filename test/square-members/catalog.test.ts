@@ -109,6 +109,32 @@ describe('the catalog sync', () => {
     expect((await rows()).find((x) => x.class_key === 'truck')!.square_state).toBe('synced')
   })
 
+  it('a price Square keeps refusing tells the managers once, again only when the reason changes or a day later', async () => {
+    const r = rigOf()
+    await r.price('gold', 'compact_car', 12900)
+    await r.price('gold', 'truck', 15900, { sync: false })
+    const told = async () => (await h.db.selectFrom('notifications').select('body').where('kind', '=', 'square.catalog_sync_failed').execute()).length
+    r.sim.sim.injectFault({ status: 400, times: 1000, path: '/v2/catalog/object', method: 'POST' })
+    expect(await runCatalogSync(r.steps(), h.locationId)).toMatchObject({ failed: 1 })
+    const once = await told()
+    expect(once).toBeGreaterThan(0)
+    // the 5-minute job keeps trying: nothing new in the inbox
+    for (let i = 0; i < 3; i++) {
+      h.advance(5 * 60_000)
+      expect(await runCatalogSync(r.steps(), h.locationId)).toMatchObject({ failed: 1 })
+    }
+    expect(await told()).toBe(once)
+    // another reason is news
+    await r.price('gold', 'large_suv', 17900, { sync: false })
+    h.advance(5 * 60_000)
+    expect(await runCatalogSync(r.steps(), h.locationId)).toMatchObject({ failed: 2 })
+    expect(await told()).toBe(2 * once)
+    // a day later the same failure is a reminder
+    h.advance(24 * 60 * 60_000)
+    await runCatalogSync(r.steps(), h.locationId)
+    expect(await told()).toBe(3 * once)
+  })
+
   it('the drift check reports a price changed at Square and makes a deleted, unused one again', async () => {
     const r = rigOf()
     await r.price('gold', 'compact_car', 12900)

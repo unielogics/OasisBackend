@@ -3,20 +3,22 @@
 // membership is active only once Square's first invoice is paid (billing.ts); the page polls GET /membership/status.
 //
 //   POST /public/links/membership/subscribe
-//     checks first (nothing written): Square is the processor and writes are on, the email looks deliverable (Square deactivates a
-//     subscription whose email bounces), the consent wording is the current one;
+//     checks first (nothing written): Square is the processor, writes and memberships on Square are on (SQUARE_MEMBERSHIPS_ENABLED),
+//     the email looks deliverable (Square deactivates a subscription whose email bounces), the consent wording is the current one;
 //     transaction 1: the membership page's guards (requireKind membership, requireFresh, the client proven, no PIN-reset hold), the
 //     tier and size priced AND synced to Square, the client holds no live membership and shares none (household rule), one
-//     completion of the link, the vehicles, a pending membership (source square; a pending one is reused) and an enrollment
-//     (started). An attempt already past its card (card_saved, subscribed) is answered as it stands, nothing sent twice;
+//     completion of the link, the vehicles, a pending membership (source square; a pending one is reused unless an earlier attempt
+//     left something at Square: that one is closed and the job cleans it up, so each subscription has a membership of its own) and
+//     an enrollment (started). An attempt already past its card (card_saved, subscribed) is answered as it stands, nothing sent
+//     twice; an attempt a newer submit superseded while it waited for Square stops at its next step;
 //     then, on the pool: ensureSquareCustomer with the email (customer_ready), saveCardOnFile with the consent membership_billing
 //     and key cd_<enrollment> (card_saved), CreateSubscription with key sb_<enrollment>, today in the shop's time zone;
 //     transaction 2: the ids (subscribed).
 //   square.enrollments.resume (every 5 minutes, runEnrollmentJobs): an attempt younger than an hour is taken on with the same keys
-//     (CreateSubscription after a lost answer; the first invoice read back when its event is late); an older one is abandoned. A
-//     failed or abandoned attempt that left something at Square is cleaned up there (the subscription canceled, its open invoice
-//     canceled, the card disabled), its membership canceled, and after a first payment that failed the client is texted a new
-//     membership page. A pending membership whose last attempt failed an hour ago is closed. A member who saved a newer card for
+//     (CreateSubscription after a lost answer; the first invoice read back when its event is late); an older one is read back once
+//     more and then abandoned (kept while Square does not answer). A failed or abandoned attempt that left something at Square is
+//     cleaned up there (the subscription canceled, its open invoice canceled, the card disabled), its membership canceled unless a
+//     newer attempt uses it, and after a first payment that failed the client is texted a new membership page. A pending membership whose last attempt failed an hour ago is closed. A member who saved a newer card for
 //     their membership (the card page) has it put on the subscription (Square then retries a failed invoice with it).
 import { sql } from 'kysely'
 import type { SquareApi } from '../../../integrations/ports/square.js'
@@ -55,8 +57,8 @@ import { loadPlans, planByKey } from '../plans.js'
 import { locationTz } from '../view.js'
 import { ingestSquareSubscription, ingestSubscriptionInvoice, linkSubscription } from './billing.js'
 import { sendJoinRetry } from './notify.js'
-import { deliverableEmail, shopDate } from './policy.js'
-import { LIVE_ENROLLMENT_STATES, type EnrollmentFailure } from './schema.js'
+import { deliverableEmail, shopDate, squareMembershipsOn } from './policy.js'
+import { LIVE_ENROLLMENT_STATES, type EnrollmentFailure, type EnrollmentState } from './schema.js'
 import type { SquareSteps } from './steps.js'
 import '../../square/problems.js'
 import '../../public/links/problems.js'
@@ -121,6 +123,7 @@ export async function enrollmentStatus(db: Executor, s: SessionView): Promise<En
     .where('customer_id', '=', s.customerId)
     .where('link_id', '=', s.link.id)
     .orderBy('started_at', 'desc')
+    .orderBy('id', 'desc')
     .executeTakeFirst()
   return e ? { status: statusOfState(e.state), membershipRef: memberRefOf(e.membership_id) } : { status: 'none', membershipRef: null }
 }
@@ -177,7 +180,7 @@ async function startEnrollment(tx: Tx, d: LinkDeps, s: SessionView, r: LinkReque
     .execute()
   // the household rule: a client who holds a live membership or shares one as a household member joins nothing else
   if (live.some((m) => m.status !== 'pending') || (await sharedMembershipId(tx, customerId))) throw new AppError('LINK_ALREADY_MEMBER')
-  const pending = live.find((m) => m.status === 'pending')
+  let pending = live.find((m) => m.status === 'pending')
   if (pending) {
     const enr = await tx
       .selectFrom('square_enrollments')
@@ -196,6 +199,34 @@ async function startEnrollment(tx: Tx, d: LinkDeps, s: SessionView, r: LinkReque
         .set({ state: 'abandoned', failure_code: 'superseded', failure_detail: 'Replaced by a new attempt', finished_at: now, updated_at: now })
         .where('id', '=', enr.id)
         .execute()
+    // an earlier attempt that left something at Square (a subscription, a card the cleanup still has to disable) keeps its own
+    // membership: that one is closed here and the job finishes its cleanup at Square; this attempt starts a membership of its own,
+    // so the old subscription's events and the cleanup never touch the new one
+    const owing = await tx
+      .selectFrom('square_enrollments')
+      .select(['failure_code'])
+      .where('membership_id', '=', pending.id)
+      .where('cleanup', '=', 'pending')
+      .orderBy('started_at', 'desc')
+      .orderBy('id', 'desc')
+      .executeTakeFirst()
+    if (pending.square_subscription_id || owing) {
+      const reason = owing?.failure_code === 'first_payment_failed' ? 'first_payment_failed' : 'enrollment_failed'
+      await tx
+        .updateTable('memberships')
+        .set((eb) => ({ status: 'canceled', canceled_at: now, cancel_reason: reason, updated_at: now, version: eb('version', '+', 1) }))
+        .where('id', '=', pending.id)
+        .execute()
+      await audit.record(tx, {
+        locationId: loc.id,
+        action: 'membership.square.enroll_replaced',
+        entityType: 'membership',
+        entityId: pending.id,
+        after: { reason, subscription: pending.square_subscription_id },
+        ctx: linkAudit(r),
+      })
+      pending = undefined
+    }
   }
   await consumeLink(tx, s.link.id, now)
   for (const v of input.vehicles ?? []) {
@@ -296,6 +327,22 @@ async function setEnrollment(db: Db, now: Date, id: string, set: Record<string, 
   })
 }
 
+/**
+ * Moves an attempt one step forward only from the state it is expected in. False when it is no longer there: a newer submit on the
+ * same page superseded it while this one was waiting for Square (the newer one goes on; this one stops).
+ */
+async function advanceEnrollment(db: Db, now: Date, id: string, from: EnrollmentState, set: Record<string, unknown>): Promise<boolean> {
+  return transaction(db, async (tx) => {
+    const r = await tx
+      .updateTable('square_enrollments')
+      .set({ ...(set as object), updated_at: now })
+      .where('id', '=', id)
+      .where('state', '=', from)
+      .executeTakeFirst()
+    return Number(r.numUpdatedRows) > 0
+  })
+}
+
 async function failEnrollment(db: Db, now: Date, id: string, code: EnrollmentFailure, detail: string, cleanup: 'none' | 'pending' = 'none'): Promise<void> {
   await transaction(db, async (tx) => {
     const e = await tx.selectFrom('square_enrollments').select('state').where('id', '=', id).forUpdate().executeTakeFirstOrThrow()
@@ -342,13 +389,13 @@ async function subscribeStep(
 /**
  * POST membership/subscribe (see the header). Answers {status: pending} once the subscription exists or the attempt stands (the page
  * polls), 422 CARD_DECLINED with the reason the client may read, 409 LINK_ALREADY_MEMBER, 409 LINK_CHECKOUT_UNAVAILABLE (the size is
- * not sold online yet, Square watch-only), 503 SQUARE_UNAVAILABLE (Square did not answer: try again).
+ * not sold online yet, Square watch-only or memberships on Square off), 503 SQUARE_UNAVAILABLE (Square did not answer: try again).
  */
 export async function subscribeOnLink(d: LinkDeps, sessionOf: SessionOf, r: LinkRequest & { userAgent?: string | null }, input: SubscribeInput, log?: SquareLogger): Promise<EnrollmentStatusView> {
   const env = squareEnv()
   // the Squarespace checkout (membership/start) is the membership page's action until the cutover
   if (!squareProcessor(env)) throw new AppError('LINK_ACTION_NOT_READY')
-  if (!squareWritesOn(env)) throw new AppError('LINK_CHECKOUT_UNAVAILABLE')
+  if (!squareWritesOn(env) || !squareMembershipsOn(env)) throw new AppError('LINK_CHECKOUT_UNAVAILABLE')
   const email = deliverableEmail(input.email)
   if (!email.ok) throw bad('email', email.message)
   // the wording the page showed must be the current one, before anything is written or sent
@@ -366,7 +413,9 @@ export async function subscribeOnLink(d: LinkDeps, sessionOf: SessionOf, r: Link
     await failEnrollment(db, x.clock.now(), first.enrollmentId, 'square_unavailable', 'Square did not set up the customer')
     throw e instanceof AppError ? e : squareProblem(e)
   }
-  await setEnrollment(db, x.clock.now(), first.enrollmentId, { state: 'customer_ready', square_customer_id: squareCustomerId })
+  // superseded by a newer submit on the page while Square answered: that one goes on (the page polls)
+  if (!(await advanceEnrollment(db, x.clock.now(), first.enrollmentId, 'started', { state: 'customer_ready', square_customer_id: squareCustomerId })))
+    return { status: 'pending', membershipRef: ref }
   // the card, with the client's consent to the monthly payment (cd_<enrollment>)
   let card
   try {
@@ -394,7 +443,11 @@ export async function subscribeOnLink(d: LinkDeps, sessionOf: SessionOf, r: Link
     await failEnrollment(db, x.clock.now(), first.enrollmentId, code, e instanceof AppError ? e.detail : 'Square did not save the card')
     throw e
   }
-  await setEnrollment(db, x.clock.now(), first.enrollmentId, { state: 'card_saved', card_id: card.cardId, consent_id: card.consentId })
+  if (!(await advanceEnrollment(db, x.clock.now(), first.enrollmentId, 'customer_ready', { state: 'card_saved', card_id: card.cardId, consent_id: card.consentId }))) {
+    // superseded while the card was being saved: the card is left to the cleanup (disabled at Square), nothing is subscribed
+    await setEnrollment(db, x.clock.now(), first.enrollmentId, { card_id: card.cardId, consent_id: card.consentId, cleanup: 'pending' })
+    return { status: 'pending', membershipRef: ref }
+  }
   const out = await subscribeStep(x, {
     id: first.enrollmentId,
     squareCustomerId,
@@ -464,7 +517,15 @@ async function cleanUp(x: SquareSteps, enrollmentId: string): Promise<boolean> {
     if (enr.cleanup !== 'pending') return false
     await tx.updateTable('square_enrollments').set({ cleanup: 'done', updated_at: now }).where('id', '=', enr.id).execute()
     const m = await tx.selectFrom('memberships').selectAll().where('id', '=', enr.membership_id).forUpdate().executeTakeFirstOrThrow()
-    if (m.status === 'pending') {
+    // a newer attempt on the same membership is under way or done: the membership is its, not this failed attempt's
+    const newer = await tx
+      .selectFrom('square_enrollments')
+      .select('id')
+      .where('membership_id', '=', m.id)
+      .where('id', '<>', enr.id)
+      .where('state', 'in', [...LIVE_ENROLLMENT_STATES, 'active'])
+      .executeTakeFirst()
+    if (m.status === 'pending' && !newer) {
       const reason = enr.failure_code === 'first_payment_failed' ? 'first_payment_failed' : 'enrollment_failed'
       await tx
         .updateTable('memberships')
@@ -584,15 +645,25 @@ export async function runEnrollmentJobs(x: SquareSteps): Promise<EnrollmentJobRe
   // older than an hour and not done: abandoned (what it left at Square is cleaned up below)
   const stale = await x.db
     .selectFrom('square_enrollments')
-    .select(['id', 'card_id', 'square_subscription_id'])
+    .select(['id', 'state', 'card_id', 'square_subscription_id'])
     .where('location_id', '=', x.locationId)
     .where('state', 'in', [...LIVE_ENROLLMENT_STATES])
     .where('started_at', '<=', cutoff)
     .execute()
   for (const s of stale) {
-    await transaction(x.db, async (tx) => {
+    // a subscription Square made: read it once more (an invoice it already charged makes the attempt active instead); while Square
+    // does not answer the attempt is kept for the next run, so a paid first invoice is never canceled unseen
+    if (s.state === 'subscribed' && s.square_subscription_id)
+      try {
+        await pollSubscription(x, s.square_subscription_id)
+        report.polled++
+      } catch (err) {
+        x.logger?.warn({ enrollment: s.id, err: err instanceof Error ? err.message : String(err) }, 'square: reading an enrollment before abandoning it failed')
+        if (err instanceof SquareNetworkError || (err instanceof SquareApiError && err.retryable) || !(err instanceof SquareApiError)) continue
+      }
+    const abandoned = await transaction(x.db, async (tx) => {
       const e = await tx.selectFrom('square_enrollments').select('state').where('id', '=', s.id).forUpdate().executeTakeFirstOrThrow()
-      if (!(LIVE_ENROLLMENT_STATES as readonly string[]).includes(e.state)) return
+      if (!(LIVE_ENROLLMENT_STATES as readonly string[]).includes(e.state)) return false
       await tx
         .updateTable('square_enrollments')
         .set({
@@ -605,8 +676,9 @@ export async function runEnrollmentJobs(x: SquareSteps): Promise<EnrollmentJobRe
         })
         .where('id', '=', s.id)
         .execute()
+      return true
     })
-    report.abandoned++
+    if (abandoned) report.abandoned++
   }
   const dirty = await x.db.selectFrom('square_enrollments').select('id').where('location_id', '=', x.locationId).where('cleanup', '=', 'pending').execute()
   for (const c of dirty) {

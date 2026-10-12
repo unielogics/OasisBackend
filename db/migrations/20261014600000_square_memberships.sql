@@ -154,6 +154,9 @@ create table square_subscription_invoices (
   refunded_cents integer not null default 0 check (refunded_cents >= 0),
   square_refund_id text check (square_refund_id is null or length(square_refund_id) <= 64),
   refunded_at timestamptz,
+  -- Square's status of that refund, kept current by its refund.* events: one FAILED or REJECTED sets refunded_cents back to 0 (the
+  -- money never left) and keeps its id, so staff can refund again with a new key
+  refund_status text check (refund_status is null or refund_status in ('PENDING', 'COMPLETED', 'FAILED', 'REJECTED')),
   created_at timestamptz not null default app_now(),
   updated_at timestamptz not null default app_now(),
   check (period_end is null or period_start is null or period_end > period_start),

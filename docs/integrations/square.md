@@ -2,8 +2,8 @@
 
 Status: **foundation (wave Q1b), core (wave Q2b) and memberships (wave Q3b, section 12) built**, verified against the Square sandbox
 on 2026-10-12 (`pnpm verify:square`, section 7). Off by default: nothing reaches Square until `SQUARE_PROVIDER=live`, nothing is
-created or changed at Square until `SQUARE_WRITES_ENABLED=true`, and links, deposits, refunds and memberships stay on Squarespace until
-`PAYMENT_PROCESSOR=square`.
+created or changed at Square until `SQUARE_WRITES_ENABLED=true` (memberships also need `SQUARE_MEMBERSHIPS_ENABLED=true`), and links,
+deposits, refunds and memberships stay on Squarespace until `PAYMENT_PROCESSOR=square`.
 Decision record: [ADR 0171](../decisions/0171-square-payments.md).
 
 Square will take every payment: payment links, the booking deposit, memberships (Square subscriptions), counter payments from the
@@ -50,6 +50,7 @@ API. Cards on file (Q3a) and memberships (Q3b) come next.
 | `SQUARE_API_BASE` | | Host override for a `pnpm sim:square` simulator. |
 | `SQUARE_TIMEOUT_MS`, `SQUARE_MAX_ATTEMPTS` | `15000`, `4` | Per request. |
 | `SQUARE_WRITES_ENABLED` | `false` | Observe-only when false (section 6). |
+| `SQUARE_MEMBERSHIPS_ENABLED` | `false` | Memberships billed by Square (section 12): the catalog sync and joining with a card. The last stage of turning writes on; needs `SQUARE_WRITES_ENABLED`. |
 | `SQUARE_POS_API_ENABLED` | `false` | The POS app switch (production only). |
 | `SQUARE_MATCH_DELAY_SECONDS` | `90` | How long a counter payment waits before matching (wave Q2b). |
 | `SQUARE_POS_AUTOMATCH` | `evidence` | `evidence`: counter payments are recorded only on strong evidence (plan decision 5). `amount`: also when the amount alone matches exactly one open invoice of the day (the owner's call). |
@@ -292,8 +293,10 @@ or by the webhook (rule R2).
 
 ## 12. Memberships billed by Square (wave Q3b)
 
-Everything below needs `SQUARE_WRITES_ENABLED=true`; enrollment also `PAYMENT_PROCESSOR=square` and `PUBLIC_LINKS_ENABLED=true` (the
-`#/m` page). With the defaults no job does anything and no membership is billed by Square.
+Everything below needs `SQUARE_WRITES_ENABLED=true`; the catalog sync and enrollment also `SQUARE_MEMBERSHIPS_ENABLED=true` (so links,
+deposits and refunds can write to Square first), enrollment also `PAYMENT_PROCESSOR=square` and `PUBLIC_LINKS_ENABLED=true` (the `#/m`
+page). Square memberships that already exist keep being billed, cleaned up and changed by staff whatever `SQUARE_MEMBERSHIPS_ENABLED`
+says. With the defaults no job does anything and no membership is billed by Square.
 
 ### 12.1 The catalog
 
@@ -306,7 +309,9 @@ deleted while a membership or an enrollment names its row; a superseded price no
 keeps it, because a subscription used it, the reason stays on the row and it is not tried again). The nightly drift check reads
 Square's plans back: a price changed at Square, or a variation deleted there while members use it, marks the row `failed` with the
 reason and tells the managers (nothing is overwritten); a deleted variation nobody uses is made again; a tier renamed in Oasis renames
-its plan. Settings shows each price's `squareState`; "Sync to Square" is `POST /api/v1/integrations/square/catalog/sync`.
+its plan. Settings shows each price's `squareState`; "Sync to Square" is `POST /api/v1/integrations/square/catalog/sync`. A failure
+tells the managers once per set of failures (`square.catalog_sync_failed`), again a day later while it lasts, not on every 5-minute
+retry.
 
 ### 12.2 Joining on the `#/m` page
 
@@ -319,8 +324,11 @@ the card (`cd_<enrollment>`, consent `membership_billing`) and the subscription 
 time zone). The membership is `pending` until Square's first invoice is paid (about 10 s in the sandbox), then `active`. The attempt is
 a state machine in `square_enrollments` (started, customer_ready, card_saved, subscribed, active; failed or abandoned):
 `square.enrollments.resume` repeats a step after a lost answer with the same key (only from `card_saved` on: the card's one-time token
-is never stored), reads a late first invoice back, abandons an attempt older than an hour, and cleans up what a failed one left at
-Square (CancelSubscription, CancelInvoice, DisableCard with reason `membership_failed`). A first payment Square could not take ends the
+is never stored), reads a late first invoice back, abandons an attempt older than an hour (a subscribed one is read back once more
+first, and kept while Square does not answer), and cleans up what a failed one left at Square (CancelSubscription, CancelInvoice,
+DisableCard with reason `membership_failed`). Each subscription has a membership of its own: a retry on the same page reuses the
+pending membership only if no earlier attempt left anything at Square; otherwise that one is closed (`canceled`, the cleanup still
+runs) and the retry starts a new one. The cleanup never cancels a membership a newer attempt is using. A first payment Square could not take ends the
 attempt the same way and texts the client a new membership page. A website join (`POST /public/memberships`) with Square as the
 processor texts the client their membership page.
 
@@ -332,7 +340,9 @@ date to the subscription's `charged_through_date` in shop-local midnights, the m
 credits granted (`grantCycleCredits`, once per cycle however often the events arrive). PAUSED is `paused`; CANCELED and DEACTIVATED are
 `canceled`; scheduled actions show as `billing.cancelAt`, `billing.pauseAt`; a plan swap that took effect moves the membership to the
 price row of its new variation. The payment of a subscription invoice is a `membership` payment in the mirror (ignored by the counter
-matcher; Square sends `payment.*` before `invoice.payment_made`, and the counter delay covers the gap). `syncMemberships` (Squarespace)
+matcher; Square sends `payment.*` before `invoice.payment_made`, and the counter delay covers the gap). When the invoice event is later
+than the delay, a card-on-file payment of a client with a Square membership is not auto-matched: it waits in the payments queue
+(`unmatched`) and the invoice event takes it out as a membership payment. `syncMemberships` (Squarespace)
 skips Square memberships.
 
 ### 12.4 A failed renewal (plan decision 7)
@@ -352,7 +362,8 @@ changed) restores the membership. Oasis never retries the charge itself: CreateP
 ### 12.5 Staff actions and price moves
 
 `POST /api/v1/memberships/:id/billing/{pause, resume, cancel, cancel/undo, change, change/undo, card-link, refund-last}` (api-spec
-30.11). SwapPlan, Pause and Cancel take effect at the next billing date (section 8); undo removes the scheduled action
+30.11). Refund last payment keeps Square's `refund_status` (`refund.*` events); a refund Square fails or rejects is cleared (nothing was
+refunded), the managers are told (`membership.refund_failed`), and a new try uses a new key. SwapPlan, Pause and Cancel take effect at the next billing date (section 8); undo removes the scheduled action
 (DeleteSubscriptionAction); a paused membership resumes at once. A patch of a Square membership changes only auto-apply and the note.
 "Move members" (`POST /api/v1/catalog/tiers/:key/move-members {notice}`) tells every member billed at an older price of their size (text
 and email, `notice` days, default 30) and schedules the move; `square.plans.swap` then sends SwapPlan (per subscription: BulkSwapPlan
@@ -360,7 +371,7 @@ would also move anyone Oasis did not notify), and Square swaps at the next billi
 
 ### 12.6 Rollout
 
-1. Writes on (catalog sync and memberships are the last stage of ADR 0171's rollout): the sync makes every priced tier's plan and
+1. `SQUARE_MEMBERSHIPS_ENABLED=true` with writes on (catalog sync and memberships are the last stage of ADR 0171's rollout): the sync makes every priced tier's plan and
    variations; check Settings shows them synced and `pnpm verify:square` SQR-13/SQR-14 pass against the sandbox.
 2. `PAYMENT_PROCESSOR=square` with personal links open: `#/m` pages join with a card; staff use the billing actions.
 3. Watch the managers' notifications (`square.catalog_sync_failed`, `membership.payment_failed`, `membership.first_payment_failed`,

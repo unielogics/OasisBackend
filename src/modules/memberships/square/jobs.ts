@@ -1,6 +1,7 @@
 // Jobs of the memberships billed by Square (ADR 0171 wave Q3b), registered in src/platform/job-registry.ts and described in
 // src/platform/jobs-catalog.ts:
-//   square.catalog.sync        every 5 minutes: tier prices a save left pending become Square plan variations (catalog-sync.ts)
+//   square.catalog.sync        every 5 minutes: tier prices a save left pending become Square plan variations (catalog-sync.ts;
+//                              also needs SQUARE_MEMBERSHIPS_ENABLED, the last rollout stage)
 //   square.catalog.drift       nightly: the same, plus Square's catalog read back and compared (drift reported, never overwritten)
 //   square.enrollments.resume  every 5 minutes: membership page attempts taken on with the same keys, abandoned after an hour and
 //                              cleaned up at Square, stale pending memberships closed, a newer saved card put on the subscription

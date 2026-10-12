@@ -28,6 +28,20 @@ const grants = (membershipId: string) =>
   h.db.selectFrom('membership_credit_events').select(['cycle_start', 'qty', 'actor']).where('membership_id', '=', membershipId).where('kind', '=', 'grant').orderBy('cycle_start').execute()
 
 describe('paid cycles', () => {
+  it('a renewal payment whose invoice event is late never goes to the counter matcher; the invoice event then takes it out', async () => {
+    const r = rigOf()
+    const m = await r.member()
+    const n0 = r.sim.store.events.length
+    await r.advance(31 * DAY)
+    // only the payment's events arrive (the invoice's are late): with no subscription invoice row it would be a counter payment
+    for (const e of r.sim.store.events.slice(n0).filter((x) => x.type.startsWith('payment.'))) await r.replay(e)
+    const latest = () => h.db.selectFrom('square_payments').select(['classification', 'match_state', 'variance', 'invoice_id']).orderBy('square_created_at', 'desc').executeTakeFirstOrThrow()
+    expect(await latest()).toMatchObject({ classification: 'counter', match_state: 'unmatched', invoice_id: null, variance: { reason: expect.stringMatching(/Square membership/) } })
+    await r.drain()
+    expect(await latest()).toMatchObject({ classification: 'membership', match_state: 'ignored', invoice_id: null })
+    expect(await r.membership(m.membershipId)).toMatchObject({ status: 'active', paid_order_count: 2 })
+  })
+
   it('apply once: the period from the due date to the charged-through date, the cycle’s credits granted once, however often the events come', async () => {
     await goldIncludesWashes()
     const r = rigOf()
