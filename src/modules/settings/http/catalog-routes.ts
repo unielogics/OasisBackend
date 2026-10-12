@@ -115,7 +115,14 @@ const TierPriceView = z.object({
   monthlyCents: Cents,
   priceVersion: z.number().int(),
   effectiveFrom: z.iso.datetime(),
-  squareState: z.enum(['pending', 'synced', 'failed', 'retired']).optional().describe('Staff with set.services only; retired: a superseded price deleted at Square (never a current one)'),
+  squareState: z
+    .enum(['pending', 'synced', 'failed', 'retired'])
+    .optional()
+    .describe(
+      'Staff with set.services only. The real state of the price at Square (wave Q3b syncs it): pending (not synced yet; always while SQUARE_MEMBERSHIPS_ENABLED is off), synced (a plan variation exists), failed (the last sync failed: see squareError; the next sync tries again), retired (a superseded price deleted at Square; never a current one)',
+    ),
+  squareError: z.string().nullable().optional().describe('Staff with set.services only: why the last sync failed (plain words); null unless failed'),
+  squareSyncedAt: z.iso.datetime().nullable().optional().describe('Staff with set.services only: when it was last synced to Square'),
 })
 
 export const TierView = z.object({
@@ -243,7 +250,7 @@ export const tierView = (t: Tier, admin: boolean): z.infer<typeof TierView> => (
     monthlyCents: p.monthlyCents,
     priceVersion: p.priceVersion,
     effectiveFrom: p.effectiveFrom.toISOString(),
-    ...(admin ? { squareState: p.squareState } : {}),
+    ...(admin ? { squareState: p.squareState, squareError: p.squareError, squareSyncedAt: p.squareSyncedAt?.toISOString() ?? null } : {}),
   })),
   fromMonthlyCents: t.fromMonthlyCents,
   sold: t.sold,

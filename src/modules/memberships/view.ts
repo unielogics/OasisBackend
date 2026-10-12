@@ -5,6 +5,7 @@ import type { Selectable } from 'kysely'
 import { DateTime } from 'luxon'
 import type { Executor } from '../../platform/db.js'
 import { getSetting } from '../../platform/settings.js'
+import { cardLabel } from '../payments/repository.js'
 import { liveCheckouts } from './checkouts.js'
 import { creditSummaries, type CreditSummary } from './credits.js'
 import { loadPlans, type Plan } from './plans.js'
@@ -87,12 +88,32 @@ export interface SquareBillingView {
   cancelOn: string | null
   /** The monthly price billed (the tier price row of the membership). */
   monthlyCents: number | null
-  card: { brand: string | null; last4: string | null; expMonth: number | null; expYear: number | null; state: string } | null
+  /** The size the plan is priced at ("Compact car"; the same as the view's planClassLabel). */
+  planClassLabel: string | null
+  /**
+   * The shop-local date Square charges next (the end of the paid period); null when no charge is due on a known date: not active at
+   * Square, not an active membership, a failed renewal (see failedAt and lastFailed), or a cancel or pause scheduled on or before it.
+   */
+  nextChargeOn: string | null
+  card: { brand: string | null; last4: string | null; label: string; expMonth: number | null; expYear: number | null; state: string } | null
   /** What Square has scheduled for the next billing date. */
   cancelAt: string | null
   pauseAt: string | null
-  change: { kind: 'change' | 'move'; planKey: string; planClass: string; monthlyCents: number; effectiveDate: string | null; swapAfter: string | null } | null
+  change: {
+    kind: 'change' | 'move'
+    planKey: string
+    planName: string | null
+    planClass: string
+    planClassLabel: string | null
+    monthlyCents: number
+    effectiveDate: string | null
+    swapAfter: string | null
+  } | null
   lastInvoice: { status: string; amountCents: number; dueDate: string | null; paidAt: string | null; refundedCents: number; payUrl: string | null } | null
+  /** The newest invoice Square was paid for. */
+  lastPaid: { amountCents: number; paidAt: string; dueDate: string | null; refundedCents: number } | null
+  /** The newest invoice Square could not charge (it may have been paid since: compare with lastPaid and status). */
+  lastFailed: { amountCents: number; failedAt: string; dueDate: string | null; paid: boolean; payUrl: string | null } | null
   /** The latest enrollment of a membership that has not started: where it stands. */
   enrollment: { state: string; failure: string | null } | null
 }
@@ -115,7 +136,7 @@ export async function viewsOf(
   const counts = await visitCounts(db, c.locationId, [...new Set(rows.map((r) => r.customer_id))], c.now)
   const checkouts = await liveCheckouts(db, rows.map((r) => r.id))
   const sizes = await db.selectFrom('vehicle_classes').select(['key', 'label']).where('location_id', '=', c.locationId).execute()
-  const billing = await squareBilling(db, c, rows)
+  const billing = await squareBilling(db, c, rows, { plans, sizes })
   const household = await db
     .selectFrom('membership_household as h')
     .innerJoin('customers as cu', 'cu.id', 'h.customer_id')
@@ -190,7 +211,12 @@ export async function viewsOf(
 }
 
 /** The Square billing blocks of the rows billed by Square (batched reads). */
-async function squareBilling(db: Executor, c: { locationId: string; tz: string }, rows: readonly MembershipRow[]): Promise<Map<string, SquareBillingView>> {
+async function squareBilling(
+  db: Executor,
+  c: { locationId: string; tz: string },
+  rows: readonly MembershipRow[],
+  names: { plans: readonly Plan[]; sizes: readonly { key: string; label: string }[] },
+): Promise<Map<string, SquareBillingView>> {
   const out = new Map<string, SquareBillingView>()
   const sq = rows.filter((r) => r.source === 'square')
   if (sq.length === 0) return out
@@ -202,7 +228,7 @@ async function squareBilling(db: Executor, c: { locationId: string; tz: string }
     cardIds.length ? db.selectFrom('customer_cards').select(['id', 'brand', 'last4', 'exp_month', 'exp_year', 'state']).where('id', 'in', cardIds).execute() : [],
     db
       .selectFrom('square_subscription_invoices')
-      .select(['membership_id', 'status', 'amount_cents', 'due_date', 'paid_at', 'refunded_cents', 'public_url', 'created_at'])
+      .select(['membership_id', 'status', 'amount_cents', 'due_date', 'paid_at', 'failed_at', 'refunded_cents', 'public_url', 'created_at'])
       .where('membership_id', 'in', ids)
       .orderBy('created_at', 'desc')
       .execute(),
@@ -210,11 +236,22 @@ async function squareBilling(db: Executor, c: { locationId: string; tz: string }
     getSetting(db, c.locationId, 'memberships.billing_policy'),
   ])
   const day = (d: Date, plus: number) => DateTime.fromJSDate(d, { zone: c.tz }).plus({ days: plus }).toFormat('yyyy-MM-dd')
+  const sizeLabel = (key: string) => names.sizes.find((x) => x.key === key)?.label ?? null
+  const newest = (a: Date | null, b: Date | null) => (b?.getTime() ?? 0) - (a?.getTime() ?? 0)
   for (const r of sq) {
     const card = cards.find((x) => x.id === r.card_id)
-    const inv = invoices.find((x) => x.membership_id === r.id)
+    const mine = invoices.filter((x) => x.membership_id === r.id)
+    const inv = mine[0]
+    const paid = mine.filter((x) => x.paid_at).sort((a, b) => newest(a.paid_at, b.paid_at))[0]
+    const failed = mine.filter((x) => x.failed_at).sort((a, b) => newest(a.failed_at, b.failed_at))[0]
     const enr = enrollments.find((x) => x.membership_id === r.id)
     const ch = r.scheduled_change
+    const periodEnd = r.current_period_end ? day(r.current_period_end, 0) : null
+    const stops = [r.cancel_effective_at, r.pause_effective_at].filter((x): x is string => !!x)
+    const nextChargeOn =
+      periodEnd && r.square_status === 'ACTIVE' && r.status === 'active' && r.billing_status === 'ok' && !stops.some((x) => x <= periodEnd)
+        ? periodEnd
+        : null
     out.set(r.id, {
       status: r.billing_status,
       squareStatus: r.square_status,
@@ -223,14 +260,33 @@ async function squareBilling(db: Executor, c: { locationId: string; tz: string }
       pastDueOn: r.payment_failed_at ? day(r.payment_failed_at, policy.value.graceDays) : null,
       cancelOn: r.payment_failed_at ? day(r.payment_failed_at, policy.value.cancelDays) : null,
       monthlyCents: prices.find((p) => p.id === r.tier_price_id)?.monthly_cents ?? null,
-      card: card ? { brand: card.brand, last4: card.last4, expMonth: card.exp_month, expYear: card.exp_year, state: card.state } : null,
+      planClassLabel: sizeLabel(r.plan_class),
+      nextChargeOn,
+      card: card
+        ? { brand: card.brand, last4: card.last4, label: cardLabel(card.brand, card.last4).label, expMonth: card.exp_month, expYear: card.exp_year, state: card.state }
+        : null,
       cancelAt: r.cancel_effective_at,
       pauseAt: r.pause_effective_at,
       change: ch
-        ? { kind: ch.kind, planKey: ch.planKey, planClass: ch.planClass, monthlyCents: ch.monthlyCents, effectiveDate: ch.effectiveDate, swapAfter: ch.swapAfter ?? null }
+        ? {
+            kind: ch.kind,
+            planKey: ch.planKey,
+            planName: names.plans.find((p) => p.key === ch.planKey)?.name ?? null,
+            planClass: ch.planClass,
+            planClassLabel: sizeLabel(ch.planClass),
+            monthlyCents: ch.monthlyCents,
+            effectiveDate: ch.effectiveDate,
+            swapAfter: ch.swapAfter ?? null,
+          }
         : null,
       lastInvoice: inv
         ? { status: inv.status, amountCents: inv.amount_cents, dueDate: inv.due_date, paidAt: inv.paid_at?.toISOString() ?? null, refundedCents: inv.refunded_cents, payUrl: inv.public_url }
+        : null,
+      lastPaid: paid?.paid_at
+        ? { amountCents: paid.amount_cents, paidAt: paid.paid_at.toISOString(), dueDate: paid.due_date, refundedCents: paid.refunded_cents }
+        : null,
+      lastFailed: failed?.failed_at
+        ? { amountCents: failed.amount_cents, failedAt: failed.failed_at.toISOString(), dueDate: failed.due_date, paid: failed.paid_at !== null, payUrl: failed.public_url }
         : null,
       enrollment: r.status === 'pending' && enr ? { state: enr.state, failure: enr.failure_code } : null,
     })

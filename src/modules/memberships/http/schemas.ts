@@ -38,8 +38,21 @@ export const SquareBillingView = z.object({
   pastDueOn: isoDate.nullable(),
   cancelOn: isoDate.nullable(),
   monthlyCents: z.number().int().nullable().describe('The monthly price billed (grandfathered until Move members)'),
+  planClassLabel: z.string().nullable().describe('The size the plan is priced at ("Compact car")'),
+  nextChargeOn: isoDate
+    .nullable()
+    .describe(
+      'The shop-local date Square charges next (the end of the paid period); null when no charge is due on a known date: not ACTIVE at Square, not an active membership, a failed renewal, or a cancel or pause on or before it',
+    ),
   card: z
-    .object({ brand: z.string().nullable(), last4: z.string().nullable(), expMonth: z.number().int().nullable(), expYear: z.number().int().nullable(), state: z.string() })
+    .object({
+      brand: z.string().nullable(),
+      last4: z.string().nullable(),
+      label: z.string().describe('"Visa ••4242"'),
+      expMonth: z.number().int().nullable(),
+      expYear: z.number().int().nullable(),
+      state: z.string(),
+    })
     .nullable(),
   cancelAt: isoDate.nullable().describe('Square ends the membership on this date (cancel at period end; undo while scheduled)'),
   pauseAt: isoDate.nullable().describe('Square pauses the membership on this date (the next billing date)'),
@@ -47,7 +60,9 @@ export const SquareBillingView = z.object({
     .object({
       kind: z.enum(['change', 'move']),
       planKey: z.string(),
+      planName: z.string().nullable().describe('The tier’s name'),
       planClass: z.string(),
+      planClassLabel: z.string().nullable(),
       monthlyCents: z.number().int(),
       effectiveDate: z.string().nullable(),
       swapAfter: z.string().nullable(),
@@ -64,6 +79,20 @@ export const SquareBillingView = z.object({
       payUrl: z.string().nullable().describe('Square’s own page for the invoice'),
     })
     .nullable(),
+  lastPaid: z
+    .object({ amountCents: z.number().int(), paidAt: z.string(), dueDate: isoDate.nullable(), refundedCents: z.number().int() })
+    .nullable()
+    .describe('The newest invoice Square was paid for'),
+  lastFailed: z
+    .object({
+      amountCents: z.number().int(),
+      failedAt: z.string(),
+      dueDate: isoDate.nullable(),
+      paid: z.boolean().describe('Paid since (by the card link or Square’s page)'),
+      payUrl: z.string().nullable(),
+    })
+    .nullable()
+    .describe('The newest invoice Square could not charge'),
   enrollment: z.object({ state: z.string(), failure: z.string().nullable() }).nullable().describe('A membership that has not started: its latest enrollment'),
 })
 
