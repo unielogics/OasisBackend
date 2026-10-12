@@ -226,16 +226,22 @@ export const squareExternalAlerts: ExternalAlertSource = {
         appointmentId: x.appointment_id,
         priority: 0,
       })
-    // only the invoices Square paid lately are computed (the board reads this on every refresh)
+    // only the invoices Square paid lately are computed (the board reads this on every refresh); a no-show or late-cancel fee charged
+    // on a saved card (wave Q3a) sits on the canceled invoice on top of what the visit cost: it is not an overpayment
     const over = await sql<{ id: string; invoice_no: number; client_name: string; overpaid: string | number; appointment_id: string | null }>`
       with sq as (
         select distinct e.invoice_id from ledger_events e
         where e.location_id = ${ctx.locationId} and e.processor = 'square' and e.type = 'pay' and e.occurred_at >= ${since}
+      ), o as (
+        select i.id, i.invoice_no, i.client_name, i.appointment_id,
+          c.overpaid - coalesce((select sum(q.amount_cents) from square_charges q
+            where q.invoice_id = i.id and q.state = 'charged' and q.purpose in ('no_show_fee', 'late_cancel_fee')), 0) as overpaid
+        from sq join invoices i on i.id = sq.invoice_id cross join lateral invoice_calc_of(i.id) c
+        where c.overpaid > 0
       )
-      select i.id, i.invoice_no, i.client_name, c.overpaid, i.appointment_id
-      from sq join invoices i on i.id = sq.invoice_id cross join lateral invoice_calc_of(i.id) c
-      where c.overpaid > 0
-      order by i.invoice_no desc limit 20`.execute(db)
+      select id, invoice_no, client_name, overpaid, appointment_id from o
+      where overpaid > 0
+      order by invoice_no desc limit 20`.execute(db)
     for (const o of over.rows)
       out.push({
         key: `square_overpaid:${o.id}`,

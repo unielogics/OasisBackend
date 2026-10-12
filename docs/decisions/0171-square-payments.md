@@ -193,7 +193,9 @@ reconcile do nothing, and the hook verifies nothing (no key) and answers 401.
 ## Cards on file and fees (wave Q3a, built)
 
 - **Migration** `20261014500100_card_charges.sql`: `square_charges.attempted_at` (the current attempt, for the job), `decline_code`,
-  `reason` ("No-show fee", "Late-cancel fee", "Balance"); `customer_cards.expiry_notice_for` (the expiry the nightly job texted about);
+  `reason` ("No-show fee", "Late-cancel fee", "Balance"), `request_key` (the staff request of the current attempt: the user and the
+  request's Idempotency-Key; the same request after its stored answer was lost finds its charge, never a second one);
+  `customer_cards.expiry_notice_for` (the expiry the nightly job texted about);
   a unique index: one open fee per visit and purpose (proposed, charging, unknown, declined).
 - **The card page** (`src/modules/public/links/http/card-routes.ts`, the declared routes now built): `POST /public/links/cards`
   (Idempotency-Key, the key the link's) on a card link page with a fresh PIN or code, the client proven and no PIN-reset hold; limits 10
@@ -222,7 +224,8 @@ reconcile do nothing, and the hook verifies nothing (no key) and answers 401.
   cancel inside the free window, on the client's newest card whose consent covers it, when fees are on and Square is the processor; not
   when staff chose to refund the deposit. The answer's `settlement.cardFee` and an activity line name it. Charged: a payment on the
   canceled invoice (canceled, kept) and the text `card_fee_charged`; waived: audited with the reason; a reopened visit waives its open fee
-  (409 `CARD_CHARGE_IN_PROGRESS` while an attempt waits for Square).
+  (409 `CARD_CHARGE_IN_PROGRESS` while an attempt waits for Square). A charged fee on top of what the visit cost is not an overpayment
+  for the "Overpaid via Square" alert.
 - **Lifecycle** (`src/modules/square/card-events.ts`, design 4.4): the `card` and `customer` ingest handlers (the card handler now gets
   `null` when Square no longer has the card); the nightly job `square.cards.nightly` (membership cards expiring within 30 days: a card
   link, once per expiry; deleted clients' cards: DisableCard, reason `customer_deleted`). A Square customer deleted at Square unlinks the

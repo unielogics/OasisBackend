@@ -412,6 +412,47 @@ export interface BalanceChargeInput {
   cardId: string
   amountCents: number
   actor: SquareActor
+  /**
+   * The staff request (the user and its Idempotency-Key): the same request coming again after its stored answer was lost finds its
+   * charge (charged: answered as is; waiting: its state; declined: a new attempt) instead of charging a second time.
+   */
+  requestKey?: string | null
+}
+
+const outcomeOf = (r: Pick<ChargeRow, 'id' | 'state' | 'invoice_id' | 'error'>): ChargeOutcome => ({ chargeId: r.id, state: r.state, invoiceId: r.invoice_id, error: r.error })
+
+/** A new attempt of a declined charge: a new key (Square answers a key's first result), `charging` again. */
+async function retryAttempt(tx: Tx, d: Pick<CardChargeDeps, 'clock'>, r: ChargeRow, i: { actor: SquareActor; requestKey?: string | null; cardId?: string; consentId?: string }): Promise<void> {
+  const now = d.clock.now()
+  const attempts = r.attempts + 1
+  await tx
+    .updateTable('square_charges')
+    .set({
+      state: 'charging',
+      attempts,
+      // the first attempt keeps ch_<id>; each new attempt gets its own key
+      idempotency_key: attempts === 1 ? r.idempotency_key : sqKey('ch', `${r.id}:${attempts}`),
+      ...(i.cardId ? { card_id: i.cardId } : {}),
+      ...(i.consentId ? { consent_id: i.consentId } : {}),
+      decided_by: i.actor.name,
+      decided_by_user_id: i.actor.userId ?? null,
+      decided_at: now,
+      attempted_at: now,
+      request_key: i.requestKey ?? null,
+      error: null,
+      decline_code: null,
+      updated_at: now,
+    })
+    .where('id', '=', r.id)
+    .execute()
+  await audit.record(tx, {
+    locationId: r.location_id,
+    action: 'card.charge_started',
+    entityType: 'square_charge',
+    entityId: r.id,
+    after: { purpose: r.purpose, amountCents: r.amount_cents, invoiceId: r.invoice_id, appointmentId: r.appointment_id, cardId: i.cardId ?? r.card_id, attempt: attempts },
+    ctx: auditCtx(i.actor),
+  })
 }
 
 /**
@@ -423,8 +464,26 @@ export interface BalanceChargeInput {
 export async function chargeBalance(d: CardChargeDeps, i: BalanceChargeInput): Promise<ChargeOutcome> {
   if (!cardsOn(d.env)) throw new AppError('CARD_PAYMENTS_OFF')
   if (!squareWritesOn(d.env)) throw new AppError('SQUARE_WRITES_OFF')
-  const chargeId = await transaction(d.db, async (tx) => {
+  const claimed = await transaction(d.db, async (tx): Promise<{ chargeId: string; done?: ChargeOutcome }> => {
     const inv = await lockInvoice(tx, d.locationId, i.invoiceId)
+    if (i.requestKey) {
+      // the same request again (its stored answer was lost): its charge, never a second one
+      const mine = await tx
+        .selectFrom('square_charges')
+        .selectAll()
+        .where('location_id', '=', d.locationId)
+        .where('request_key', '=', i.requestKey)
+        .forUpdate()
+        .executeTakeFirst()
+      if (mine) {
+        if (mine.invoice_id !== inv.id || mine.purpose !== 'balance' || mine.amount_cents !== i.amountCents) throw new AppError('IDEMPOTENCY_MISMATCH')
+        if (mine.state !== 'declined') return { chargeId: mine.id, done: outcomeOf(mine) }
+        const again = await usableCard(tx, { locationId: d.locationId, customerId: inv.customer_id, purpose: 'balance', now: d.clock.now(), cardId: i.cardId })
+        if (!again) throw new AppError('CARD_NOT_USABLE')
+        await retryAttempt(tx, d, mine, { actor: i.actor, requestKey: i.requestKey, cardId: again.card.id, consentId: again.consentId })
+        return { chargeId: mine.id }
+      }
+    }
     if (inv.canceled_at) throw new AppError('PAY_NOTHING_TO_COLLECT', { detail: 'A canceled invoice has nothing to pay' })
     const calc = await calcOf(tx, inv.id)
     if (calc.balance <= 0) throw new AppError('PAY_NOTHING_TO_COLLECT')
@@ -462,6 +521,7 @@ export async function chargeBalance(d: CardChargeDeps, i: BalanceChargeInput): P
         decided_at: now,
         attempted_at: now,
         reason: REASONS.balance,
+        request_key: i.requestKey ?? null,
         created_at: now,
         updated_at: now,
       })
@@ -474,10 +534,11 @@ export async function chargeBalance(d: CardChargeDeps, i: BalanceChargeInput): P
       after: { purpose: 'balance', amountCents: i.amountCents, invoiceId: inv.id, cardId: usable.card.id, consentId: usable.consentId },
       ctx: auditCtx(i.actor),
     })
-    return id
+    return { chargeId: id }
   })
+  if (claimed.done) return claimed.done
   // the invoice lock is released: Square is called on the pool
-  return runAttempt(d, chargeId)
+  return runAttempt(d, claimed.chargeId)
 }
 
 // ---- fees: charge or waive what the cancel or no-show proposed ----------------------------------------------------------------
@@ -504,47 +565,22 @@ async function feeRow(tx: Tx, locationId: string, appointmentId: string, chargeI
  */
 export async function chargeFee(
   d: CardChargeDeps,
-  i: { appointmentId: string; chargeId: string; cardId?: string | null; actor: SquareActor },
+  i: { appointmentId: string; chargeId: string; cardId?: string | null; actor: SquareActor; requestKey?: string | null },
 ): Promise<ChargeOutcome> {
   if (!cardsOn(d.env)) throw new AppError('CARD_PAYMENTS_OFF')
   if (!squareWritesOn(d.env)) throw new AppError('SQUARE_WRITES_OFF')
-  await transaction(d.db, async (tx) => {
+  const done = await transaction(d.db, async (tx): Promise<ChargeOutcome | null> => {
     const r = await feeRow(tx, d.locationId, i.appointmentId, i.chargeId)
+    // the same request again (its stored answer was lost): what that attempt came to
+    if (i.requestKey && r.request_key === i.requestKey && r.state !== 'declined') return outcomeOf(r)
     if (r.state === 'charging' || r.state === 'unknown') throw new AppError('CARD_CHARGE_IN_PROGRESS')
     if (r.state !== 'proposed' && r.state !== 'declined') throw new AppError('CARD_CHARGE_DECIDED')
-    const now = d.clock.now()
-    const usable = await usableCard(tx, { locationId: d.locationId, customerId: r.customer_id, purpose: r.purpose, now, cardId: i.cardId ?? r.card_id })
+    const usable = await usableCard(tx, { locationId: d.locationId, customerId: r.customer_id, purpose: r.purpose, now: d.clock.now(), cardId: i.cardId ?? r.card_id })
     if (!usable) throw new AppError('CARD_NOT_USABLE')
-    const attempts = r.attempts + 1
-    await tx
-      .updateTable('square_charges')
-      .set({
-        state: 'charging',
-        card_id: usable.card.id,
-        consent_id: usable.consentId,
-        attempts,
-        // the first attempt keeps ch_<id>; each new attempt after a decline gets its own key (Square answers a key's first result)
-        idempotency_key: attempts === 1 ? r.idempotency_key : sqKey('ch', `${r.id}:${attempts}`),
-        decided_by: i.actor.name,
-        decided_by_user_id: i.actor.userId ?? null,
-        decided_at: now,
-        attempted_at: now,
-        error: null,
-        decline_code: null,
-        updated_at: now,
-      })
-      .where('id', '=', r.id)
-      .execute()
-    await audit.record(tx, {
-      locationId: d.locationId,
-      action: 'card.charge_started',
-      entityType: 'square_charge',
-      entityId: r.id,
-      after: { purpose: r.purpose, amountCents: r.amount_cents, appointmentId: i.appointmentId, cardId: usable.card.id, attempt: attempts },
-      ctx: auditCtx(i.actor),
-    })
+    await retryAttempt(tx, d, r, { actor: i.actor, requestKey: i.requestKey, cardId: usable.card.id, consentId: usable.consentId })
+    return null
   })
-  return runAttempt(d, i.chargeId)
+  return done ?? runAttempt(d, i.chargeId)
 }
 
 /** Staff waive a proposed or declined fee (audited `card.fee_waived`, an activity line). 409 CARD_CHARGE_DECIDED / IN_PROGRESS. */

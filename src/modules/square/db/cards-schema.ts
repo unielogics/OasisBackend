@@ -109,6 +109,8 @@ export interface SquareChargesTable {
   decline_code: string | null
   /** What the charge is for, as the ledger and the client's text say it ("No-show fee", "Balance"). */
   reason: string | null
+  /** The staff request (user and Idempotency-Key) that started the current attempt. */
+  request_key: string | null
   created_at: Generated<Date>
   updated_at: Generated<Date>
 }

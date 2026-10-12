@@ -2882,6 +2882,7 @@ CREATE TABLE public.square_charges (
     attempted_at timestamp with time zone,
     decline_code text,
     reason text,
+    request_key text,
     CONSTRAINT square_charges_amount_cents_check CHECK ((amount_cents > 0)),
     CONSTRAINT square_charges_attempts_check CHECK ((attempts >= 0)),
     CONSTRAINT square_charges_check CHECK (((state <> 'charged'::text) OR (square_payment_id IS NOT NULL))),
@@ -2891,6 +2892,7 @@ CREATE TABLE public.square_charges (
     CONSTRAINT square_charges_idempotency_key_check CHECK ((length(idempotency_key) <= 45)),
     CONSTRAINT square_charges_purpose_check CHECK ((purpose = ANY (ARRAY['no_show_fee'::text, 'late_cancel_fee'::text, 'balance'::text]))),
     CONSTRAINT square_charges_reason_check CHECK (((reason IS NULL) OR (length(reason) <= 120))),
+    CONSTRAINT square_charges_request_key_check CHECK (((request_key IS NULL) OR (length(request_key) <= 300))),
     CONSTRAINT square_charges_state_check CHECK ((state = ANY (ARRAY['proposed'::text, 'charging'::text, 'charged'::text, 'declined'::text, 'unknown'::text, 'waived'::text])))
 );
 
@@ -5428,6 +5430,12 @@ CREATE UNIQUE INDEX square_charges_open_fee_idx ON public.square_charges USING b
 --
 
 CREATE INDEX square_charges_open_idx ON public.square_charges USING btree (location_id, created_at) WHERE (state = ANY (ARRAY['proposed'::text, 'charging'::text, 'unknown'::text]));
+
+--
+-- Name: square_charges_request_key_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX square_charges_request_key_idx ON public.square_charges USING btree (location_id, request_key) WHERE (request_key IS NOT NULL);
 
 --
 -- Name: square_payments_invoice_idx; Type: INDEX; Schema: public; Owner: -

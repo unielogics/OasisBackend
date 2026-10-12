@@ -150,6 +150,11 @@ export function registerSquareCardRoutes(app: AppInstance, w: SquareCardRoutesWi
     const c = await db.selectFrom('customers').select(['id', 'merged_into']).where('id', '=', id).executeTakeFirst()
     if (!c || c.merged_into) throw new AppError('NOT_FOUND', { detail: 'That client does not exist' })
   }
+  /** The staff request a charge attempt belongs to: the user and the request's Idempotency-Key. */
+  const requestKeyOf = (req: FastifyRequest): string | null => {
+    const key = req.headers['idempotency-key']
+    return typeof key === 'string' ? `${auth(req).userId}:${key}`.slice(0, 300) : null
+  }
   /** What a charge attempt answered, as the route says it: charged 201, unknown 202, declined 422 CARD_DECLINED (key released). */
   const settled = (o: ChargeOutcome): ChargeOutcome => {
     if (o.state === 'declined')
@@ -330,7 +335,9 @@ export function registerSquareCardRoutes(app: AppInstance, w: SquareCardRoutesWi
       prepare: async (req) => {
         const { id } = req.params as z.infer<typeof IdParams>
         const b = req.body as z.infer<typeof BalanceBody>
-        return settled(await chargeBalance(deps(req), { invoiceId: id, cardId: b.cardId, amountCents: b.amountCents, actor: actorOf(req, 'pay.collect') }))
+        return settled(
+          await chargeBalance(deps(req), { invoiceId: id, cardId: b.cardId, amountCents: b.amountCents, actor: actorOf(req, 'pay.collect'), requestKey: requestKeyOf(req) }),
+        )
       },
     }) as never,
   )
@@ -380,7 +387,7 @@ export function registerSquareCardRoutes(app: AppInstance, w: SquareCardRoutesWi
       prepare: async (req) => {
         const { id, chargeId } = req.params as z.infer<typeof ChargeParams>
         const b = req.body as z.infer<typeof FeeChargeBody>
-        return settled(await chargeFee(deps(req), { appointmentId: id, chargeId, cardId: b.cardId ?? null, actor: actorOf(req, 'pay.collect') }))
+        return settled(await chargeFee(deps(req), { appointmentId: id, chargeId, cardId: b.cardId ?? null, actor: actorOf(req, 'pay.collect'), requestKey: requestKeyOf(req) }))
       },
     }) as never,
   )

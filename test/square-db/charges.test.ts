@@ -12,6 +12,7 @@ import { SquareNetworkError, squareErrorFrom } from '../../src/integrations/squa
 import { sqKey } from '../../src/integrations/square/keys.js'
 import { saveCardOnFile } from '../../src/modules/square/cards.js'
 import { resolveCharges } from '../../src/modules/square/charges.js'
+import { squareExternalAlerts } from '../../src/modules/square/db/alerts.js'
 import type { CardPurpose } from '../../src/modules/square/consents.js'
 import { paymentFacts } from '../../src/modules/square/facts.js'
 import { decideSquarePayment, lockPayment } from '../../src/modules/square/payments.js'
@@ -140,6 +141,26 @@ describe('a balance on a saved card (POST /invoices/:id/card-charges)', () => {
     expect((await ledgerOf(m, a.invoiceId)).filter((e) => e.type === 'pay')).toHaveLength(1)
   })
 
+  it('a retry of the same request after the answer was lost (the key released) never charges twice', async () => {
+    const maria = await m.customer('Maria Delgado')
+    const card = await saveCard(maria)
+    const a = await m.book('Maria Delgado', 'Express Hand Wash')
+    const balance = await balanceOf(a.invoiceId)
+    const key = idemKey()
+    // half the balance, so a second charge of the same amount would still fit
+    const half = Math.floor(balance / 2)
+    const first = await chargeCard(a.invoiceId, { cardId: card.cardId, amountCents: half }, key)
+    expect(first.statusCode, first.body).toBe(201)
+    // the stored answer is lost (as when the command's transaction fails after the charge): the same request comes again
+    await m.h.t.db.deleteFrom('idempotency_keys').execute()
+    const again = await chargeCard(a.invoiceId, { cardId: card.cardId, amountCents: half }, key)
+    expect(again.statusCode, again.body).toBe(201)
+    expect((again.json() as Json).charge.id).toBe((first.json() as Json).charge.id)
+    expect(sq.sim.store.payments.size).toBe(1)
+    expect(await charges()).toHaveLength(1)
+    expect(await balanceOf(a.invoiceId)).toBe(balance - half)
+  })
+
   it('never calls Square while the invoice is locked', async () => {
     const maria = await m.customer('Maria Delgado')
     const card = await saveCard(maria)
@@ -211,7 +232,10 @@ describe('a balance on a saved card (POST /invoices/:id/card-charges)', () => {
     sq = square()
     const again = await chargeCard(a.invoiceId, { cardId: card.cardId, amountCents: balance }, key)
     expect(again.statusCode, again.body).toBe(201)
-    expect((await charges()).map((c) => c.state)).toEqual(['declined', 'charged'])
+    // the same request's charge, a new attempt with a new key
+    const [row] = await charges()
+    expect(row).toMatchObject({ state: 'charged', attempts: 2, idempotency_key: sqKey('ch', `${row!.id}:2`) })
+    expect(await charges()).toHaveLength(1)
   })
 
   it('Square not answering leaves the charge unknown (202); the job re-sends the same key and records it once', async () => {
@@ -349,8 +373,13 @@ describe('no-show and late-cancel fees (fees.card_on_file)', () => {
     expect(sq.sim.store.payments.size).toBe(0) // proposed, never charged
     expect(await activityOf(m, a.appointmentId)).toEqual(expect.arrayContaining(['No-show fee proposed · $15.00 on Visa ••5858 (charge or waive it)']))
     expect(await feeCharges(a.appointmentId)).toEqual([expect.objectContaining({ id: fee.chargeId, state: 'proposed', amountCents: 1500, reason: 'No-show fee', card: expect.objectContaining({ id: card.cardId }) })])
-    const charged = await m.send(m.superS(), 'POST', `/appointments/${a.appointmentId}/fee-charges/${fee.chargeId}/charge`, {}, idemKey())
+    const chargeKey = idemKey()
+    const charged = await m.send(m.superS(), 'POST', `/appointments/${a.appointmentId}/fee-charges/${fee.chargeId}/charge`, {}, chargeKey)
     expect(charged.statusCode, charged.body).toBe(201)
+    // the same request after its stored answer was lost: the same charge, nothing charged again
+    await m.h.t.db.deleteFrom('idempotency_keys').execute()
+    const lost = await m.send(m.superS(), 'POST', `/appointments/${a.appointmentId}/fee-charges/${fee.chargeId}/charge`, {}, chargeKey)
+    expect(lost.statusCode, lost.body).toBe(201)
     expect((charged.json() as Json).charge).toMatchObject({ state: 'charged', amountCents: 1500 })
     const ledger = await ledgerOf(m, a.invoiceId)
     expect(ledger.at(-1)).toMatchObject({ type: 'pay', amount_cents: 1500, reason: 'No-show fee', source: 'square', processor_state: 'confirmed' })
@@ -363,6 +392,22 @@ describe('no-show and late-cancel fees (fees.card_on_file)', () => {
     expect(again.statusCode).toBe(409)
     expect((again.json() as Json).code).toBe('CARD_CHARGE_DECIDED')
     expect(sq.sim.store.payments.size).toBe(1)
+  })
+
+  it('a fee larger than the visit is not an overpayment for the alerts', async () => {
+    const maria = await m.customer('Maria Delgado')
+    await saveCard(maria)
+    await setFees({ enabled: true, noShowCents: 9000, lateCancelCents: 0 })
+    const a = await m.book('Maria Delgado', 'Express Hand Wash')
+    await recordPayment(m, a.invoiceId, 2500, { state: 'confirmed' })
+    m.h.clock.set(noShowAt)
+    const fee = ((await noShow(a.appointmentId)).json() as Json).settlement.cardFee
+    expect(fee.amountCents).toBe(6500)
+    expect((await m.send(m.superS(), 'POST', `/appointments/${a.appointmentId}/fee-charges/${fee.chargeId}/charge`, {}, idemKey())).statusCode).toBe(201)
+    const calc = (await sql<{ overpaid: string }>`select overpaid from invoice_calc_of(${a.invoiceId}::uuid)`.execute(m.h.t.db)).rows[0]!
+    expect(Number(calc.overpaid)).toBeGreaterThan(0)
+    const alerts = await squareExternalAlerts.list(m.h.t.db, { locationId: m.locationId(), now: m.h.clock.now(), manager: true })
+    expect(alerts.filter((x) => x.kind === 'square_overpaid')).toEqual([])
   })
 
   it('nothing is proposed when the kept deposit covers the fee, without a card whose consent covers it, or before the cutover', async () => {

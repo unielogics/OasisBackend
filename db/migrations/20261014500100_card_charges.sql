@@ -4,6 +4,8 @@
 --                 the same key while it is younger than 23 hours; a staff retry after a decline starts a new attempt with a new key)
 --   decline_code  Square's code for a declined attempt (GENERIC_DECLINE, CVV_FAILURE, ...); `error` keeps the plain words staff see
 --   reason        what the charge is for, as the ledger and the client's text say it ("No-show fee", "Balance")
+--   request_key   the staff request that started the current attempt (the user and the request's Idempotency-Key): the same request
+--                 coming again after its stored answer was lost finds its charge instead of charging a second time
 -- customer_cards.expiry_notice_for: the expiry ("2026-11") the nightly job square.cards.nightly last texted a card link about, for a
 -- card paying a membership (one text per card and expiry).
 -- One open fee per visit and purpose: a second cancel or no-show of the same visit (after a reopen) never proposes a second fee
@@ -14,6 +16,8 @@
 alter table square_charges add column attempted_at timestamptz;
 alter table square_charges add column decline_code text check (decline_code is null or length(decline_code) <= 64);
 alter table square_charges add column reason text check (reason is null or length(reason) <= 120);
+alter table square_charges add column request_key text check (request_key is null or length(request_key) <= 300);
+create unique index square_charges_request_key_idx on square_charges (location_id, request_key) where request_key is not null;
 
 alter table customer_cards add column expiry_notice_for text check (expiry_notice_for is null or expiry_notice_for ~ '^[0-9]{4}-[0-9]{2}$');
 
