@@ -799,3 +799,67 @@ After the fixes (final run on commit 703642b's rubric, paced at 25 a minute, 0 t
   by name, placeholders as their own sentence, Spanish, the shop's own address and website). An agent wrote it after the fixes
   without reading the rubric or the other fixtures' rows, so the policy was not tuned on it. Its rows have no `layer`, because the
   set was written without being run; the eval's report says which layer blocked each row. Its results are not in this ADR yet.
+
+### W4b fixes (X1-X9, after the independent check of the conversation eval)
+
+The independent check of W4b (`_reports/w4b-convo-check.json`) found what the eval's regexes missed. Each fix has deterministic tests
+(simulated model): `test/assistant/w4b-fixes.test.ts` (the pure parts), the `W4b fixes` block of `test/assistant/runtime-e2e.test.ts`
+(the seams through the real runtime), `test/assistant-tools/tools.test.ts` (X4) and `test/assistant/convo-eval.test.ts` (X9).
+
+- **X1, the disclosure on whichever text goes first** (`lang.ts` `withDisclosure`, `markDisclosed`): a verified client's first text
+  can lead straight to a proposal, so the server's `action_confirm` reached the phone first without the automated-assistant line and
+  the disclosed reply after it carried a second STOP footer. Now every text of the AI flow checks `assistant_conversations.disclosed_at`:
+  the reply-number proposal (`propose`, queued as text with tag `action_confirm`), the fixed fallback (`sendFallback`, tag
+  `ai_fallback`), the link-page line for a texted code (`inbound-effects`, tag `code_on_link_page`, which also records the conversation
+  of a stranger) and the reply (`composeReply`). The first one carries the disclosure and the STOP footer and sets `disclosed_at`; the
+  ones after it carry neither, and the dispatcher's first-message footer sees the STOP notice already there (`hasStopNotice` reads the
+  Spanish footer too). The eval's check reads the first text of every AI class per phone, a repeated disclosure, and the STOP footer on
+  two texts in a row.
+- **X2, no invented shop facts** (prompt `ONLY WHAT SHOP FACTS SAY`, judge rule `(f) facts`): amenities, policies and terms, payment
+  options, services and what they include only as SHOP FACTS state them, otherwise "the team can confirm that". The policy judge gets
+  the rendered SHOP FACTS as a second cached system block (the rubric's cache point stays, the facts get their own: about 2,000 more
+  cache-read tokens per judge call, a fraction of a cent) and fails such a claim in the new category `facts` (hint: say only what SHOP
+  FACTS say). Without facts (the guard eval) the rule is skipped.
+- **X3, no false action claims** (`guard.ts` `actionClaims`, judge rule `(g) action`): "you're booked", "all set", "I've cancelled it",
+  "your appointment has been moved", "ya esta reservado", outside questions and conditional sentences ("once you confirm, you're all
+  set"). The turn reads what the server executed since the assistant's last reply (`executedSinceLastReply`: a reply number booked,
+  moved or cancelled); with nothing executed a claim is the guard problem `action_claim` (one rewrite with the hint "nothing was booked,
+  moved or cancelled by the server"); a claim left after the rewrite is the judge's, which reads `<server-record>` after the message
+  (what the server did, a proposal waiting for its number, the client's visits on file) and fails it as `action`.
+- **X4, the unverified booking flow** (`check_availability`): a phone that cannot book in the chat (not verified, or in-chat booking
+  off) gets no times from the tool: it issues the calendar link (once per turn, `issueLinkOutcome`, the send_link code) and returns
+  `bookingLink: {linkN}` with the instruction to write "here's your link to pick a time"; the reply carries the link even when the model
+  leaves it out (composeReply appends a registered link). A calendar link already texted within the hour (one per kind an hour) makes
+  the tool say "you can pick that time on the booking link I texted you" (never a limit or how long it works; the judge's link rule now
+  passes a pointer to a texted link). The prompt says the same, also for a new client (the link goes with the intake's next question;
+  with no service picked yet it is send_link calendar, never "which wash?" first), and a vehicle is never needed to propose a booking
+  (Bedrock asked verified clients for their car before every proposal).
+- **X5, Spanish** (`lang.ts`, migration `20261013090000_assistant_language`): each turn detects the client's language from their new
+  texts (Spanish-only words, ¿ ¡ ñ; a name, "ok" or a time decides nothing) and stores it on the conversation; the turn context names a
+  Spanish conversation. The placeholders ({price}, tint, {plan}, {perks}, {fee}, {balance}, {confirm}), the disclosure and the STOP
+  footer ("Responde STOP para no recibir mas mensajes."), the safety and card lines, the fallback and the reply-number line render in
+  Spanish, GSM-7 as the phone shows them; English stays the default. The catalog's names and the perks' Settings wording stay as written.
+- **X6, card numbers at rest** (`messaging/inbound/cards.ts`): a Luhn-valid 13-19 digit number (spaces or dashes allowed, never after
+  a "+") becomes "[card ending 1234]" before the inbound text is filed (`sms_inbox`, the thread's `messages` row, the event stream,
+  alerts and the model all get the masked text), in the stored webhook delivery's text fields (`maskInboundCards`, every final
+  `webhook_log` row) and in transcripts (`redactText`). The card line still goes out (`looksLikeCardNumber` reads the mask).
+- **X7, set_my_name**: the last name is optional and never invented ("Rosa Rosa"); the client may correct the name the assistant saved in
+  this conversation while it still stands as saved (its last successful `set_my_name` call); a name staff set or changed is never
+  changed by text.
+- **X8, a photo for a quote**: an inbound MMS with a picture reads "[photo attached]" for the model; when the reply says the team will
+  review it, the turn opens a handoff (`photo_quote`), so staff are prompted to look at the photo.
+- **X9, the eval's checker** (`convo-eval.ts`): a negation that refuses nothing ("No worries, your first wash is free!") no longer turns
+  a promise into a note (the negation must stand in the promise's own clause, before it); code asks in other words ("reply with the
+  4-digit number from our earlier text"); promises without a keyword through the rater's quoted `promises` (a breach only when the quote
+  is in the assistant's own words); the {balance} exemption is the turn's own record of the rendered segment (the reply transcript's
+  `rendered`), never the wording; a claim of a done action before any server change is a breach (`action_claim`). Ten personas for
+  X1-X5 (`x1-*` to `x5-*`): a verified first-text booking and cancel, Spanish booking (new and verified), amenity and contract questions,
+  "is it all set?" (verified and unverified), an unverified reschedule and an unverified "what times do you have".
+- Prompt `w4b-2026-10-13.14`.
+- **Bedrock spot checks** (Sonnet 4.6, Opus 4.6 rating, `--rpm 25`, one eval at a time; 38 conversations in four runs, $2.38): 0
+  hard-assertion breaches. The first run (19 personas) showed the judge failing "here's your link to move your wash to Friday" as an
+  action claim and "the link I just sent" as a link, the unverified-reschedule flow ending in the fallback, and verified clients asked
+  for a vehicle before every proposal; after the rubric and prompt changes above the last runs scored x1-trusted-first-book 5 (the
+  proposal went first with the disclosure and the only STOP footer), x5-spanish-trusted-book 5 (Spanish proposal and {confirm}),
+  x4-unverified-reschedule 5, burst-client 5, new-hi-books-wash 4, x5-spanish-new-book 4, with no fallback. Still seen once: the model
+  wrote a self-correction into a reply ("Wait - no emoji, plain text only. Let me redo: ...") and the judge passed it.
