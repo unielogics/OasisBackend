@@ -33,7 +33,16 @@ describe('GET /system/integrations', () => {
     const res = await status({})
     expect(res.statusCode).toBe(200)
     const body = res.json()
-    expect(body.integrations.map((r: Row) => r.key)).toEqual(['email', 'storage', 'sms', 'squarespace', 'ai'])
+    expect(body.integrations.map((r: Row) => r.key)).toEqual(['email', 'storage', 'sms', 'squarespace', 'square', 'ai'])
+    expect(by(body, 'square')).toMatchObject({ provider: 'sim', live: false, configured: false })
+    expect(by(body, 'square').missing.slice(0, 6)).toEqual([
+      'SQUARE_PROVIDER=live',
+      'SQUARE_ACCESS_TOKEN',
+      'SQUARE_LOCATION_ID',
+      'SQUARE_APPLICATION_ID',
+      'SQUARE_WEBHOOK_SIGNATURE_KEY',
+      'SQUARE_WEBHOOK_URL',
+    ])
     expect(by(body, 'email')).toMatchObject({ provider: 'sim', live: false, configured: false, missing: ['EMAIL_PROVIDER=ses', 'SES_FROM_ADDRESS'] })
     expect(by(body, 'storage')).toMatchObject({ provider: 'fs', live: false, configured: false, missing: ['STORAGE_PROVIDER=s3', 'S3_BUCKET'] })
     expect(by(body, 'sms').missing).toEqual([

@@ -282,6 +282,35 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
     tests: 'test/payments-sync-db/pgboss.test.ts, test/jobs/registry.test.ts',
     status: 'existing',
   },
+  'square.event.process': {
+    owner: 'square',
+    purpose:
+      'Processes one Square event claimed in webhook_log (provider square, key event_id): re-fetches its object by id (payment, refund, invoice, subscription, card, customer; amounts in the payload are never trusted), ignores another merchant or location, and runs the ingest handler under an advisory lock per object. This wave the handlers only log (ADR 0171); later waves record payments, refunds, cards and memberships.',
+    idempotency:
+      'The webhook_log row is claimed once per event id (by the hook or the catch-up) and closed processed or ignored; a processed or ignored row is skipped; the handlers are keyed on Square ids.',
+    clock: 'Injected clock for the row times.',
+    enqueuedBy: 'POST /hooks/square after signature verification (singleton key = the event id)',
+    tests: 'test/square-db/hook.test.ts, test/square-db/jobs.test.ts, test/jobs/matrix-square.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'square.events.catchup': {
+    owner: 'square',
+    purpose:
+      'Every 10 minutes while SQUARE_PROVIDER=live with a token and location: SearchEvents from the watermark minus 10 minutes (never more than 28 days back; the first run reads the last day), each event claimed in the same webhook_log as the hook and processed at once; a failed event holds the watermark back; a watermark older than 27 days is an alert in square_state and the status row.',
+    idempotency: 'webhook_log unique (square, event_id): an event the webhook already claimed is skipped (a failed one is run again).',
+    clock: 'Injected clock for the window and the watermark.',
+    tests: 'test/square-db/jobs.test.ts, test/square-db/sim-socket.test.ts, test/jobs/matrix-square.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'square.reconcile': {
+    owner: 'square',
+    purpose:
+      'Nightly 03:45 while SQUARE_PROVIDER=live: lists the payments and refunds of the last 72 hours at our location and keeps the counts (by status, source and product) in square_state; this wave records only (the matcher, link sweep and subscription drift come with Q2b and Q3b).',
+    idempotency: 'Read-only towards Square; overwrites the last summary.',
+    clock: 'Injected clock for the 72-hour window.',
+    tests: 'test/square-db/jobs.test.ts, test/jobs/matrix-square.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
   'membership.cycle': {
     owner: 'memberships',
     purpose:

@@ -1,4 +1,4 @@
-// GET /api/v1/system/integrations: for each outside service (email, photo storage, SMS, Squarespace, the AI model) which provider the process
+// GET /api/v1/system/integrations: for each outside service (email, photo storage, SMS, Squarespace, Square, the AI model) which provider the process
 // runs, whether it is configured for live use, exactly which settings are missing, and the last success and last error the
 // database knows about. Nothing secret leaves: credentials are reported by source only, error text is masked and truncated.
 import { sql } from 'kysely'
@@ -17,11 +17,12 @@ import '../messaging/schema.js'
 import '../payments-sync/db/schema.js'
 import '../../platform/jobs-schema.js'
 import '../assistant/schema.js'
+import { squareStatus } from '../square/status.js'
 
 const iso = z.iso.datetime({ offset: true })
 
 export const IntegrationStatus = z.object({
-  key: z.enum(['email', 'storage', 'sms', 'squarespace', 'ai']),
+  key: z.enum(['email', 'storage', 'sms', 'squarespace', 'square', 'ai']),
   label: z.string(),
   provider: z.string(),
   /** The provider talks to the real service (not a simulator). */
@@ -375,6 +376,7 @@ export async function integrationsStatus(db: Executor, env: Env, now: Date, loca
       await storageStatus(db, env),
       await smsStatus(db, env),
       await squarespaceStatus(db, env),
+      await squareStatus(db, env, now),
       await aiStatus(db, env, now, locationId),
     ],
   }
@@ -389,7 +391,7 @@ export function registerIntegrationRoutes(app: AppInstance): void {
         tags: ['system'],
         summary: 'Outside services: provider, configured or not, missing settings, last success and last error',
         description:
-          'One row per integration (email, storage, sms, squarespace, ai). `missing` names exactly what must be set (environment variables, or a step such as registering a tablet) before the integration works live; `warnings` are recommended settings and conditions. Secrets are never returned: AWS credentials appear only as their source (`environment`, `profile`, `shared-credentials-file`, `instance-role`, `none`) and error texts are masked.',
+          'One row per integration (email, storage, sms, squarespace, square, ai). `missing` names exactly what must be set (environment variables, or a step such as registering a tablet) before the integration works live; `warnings` are recommended settings and conditions. Secrets are never returned: AWS credentials appear only as their source (`environment`, `profile`, `shared-credentials-file`, `instance-role`, `none`) and error texts are masked.',
         response: { 200: IntegrationsResponse },
       },
     },

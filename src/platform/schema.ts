@@ -78,7 +78,7 @@ export interface AuditLogTable {
 
 export interface WebhookLogTable {
   id: string
-  provider: 'squarespace' | 'smsgate' | 'ses'
+  provider: 'squarespace' | 'smsgate' | 'ses' | 'square'
   external_id: string
   headers: JsonColumn<Record<string, string>>
   body: string | null
