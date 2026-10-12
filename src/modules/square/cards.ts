@@ -101,8 +101,6 @@ export interface DisableCardInput {
   reason?: 'customer_deleted' | 'membership_failed'
   /** The staff member's name for revoked_by (staff only). */
   actorName?: string | null
-  /** Why, when not the client's or staff's own removal: the client was deleted (the nightly job). */
-  reason?: 'customer_deleted'
   audit?: AuditContext
 }
 
