@@ -238,6 +238,71 @@ describe('a balance on a saved card (POST /invoices/:id/card-charges)', () => {
     expect(await charges()).toHaveLength(1)
   })
 
+  describe('the same key sent again after a decline is checked like a new charge', () => {
+    /** A full-balance charge declined under `key`; then the card accepts again. */
+    async function declinedFirst() {
+      const maria = await m.customer('Maria Delgado')
+      const card = await saveCard(maria)
+      const a = await m.book('Maria Delgado', 'Express Hand Wash')
+      const balance = await balanceOf(a.invoiceId)
+      sq = square({}, declining)
+      const key = idemKey()
+      const r = await chargeCard(a.invoiceId, { cardId: card.cardId, amountCents: balance }, key)
+      expect(r.statusCode).toBe(422)
+      sq = square()
+      return { card, a, balance, key }
+    }
+
+    it('the balance paid meanwhile: nothing left to charge, the card is not charged', async () => {
+      const { card, a, balance, key } = await declinedFirst()
+      await recordPayment(m, a.invoiceId, balance, { kind: 'cash', deposit: false })
+      expect(await balanceOf(a.invoiceId)).toBe(0)
+      const again = await chargeCard(a.invoiceId, { cardId: card.cardId, amountCents: balance }, key)
+      expect(again.statusCode, again.body).toBe(422)
+      expect((again.json() as Json).code).toBe('PAY_NOTHING_TO_COLLECT')
+      expect(sq.sim.store.payments.size).toBe(0)
+      expect(await charges()).toEqual([expect.objectContaining({ state: 'declined', attempts: 1 })])
+      expect(await balanceOf(a.invoiceId)).toBe(0)
+    })
+
+    it('part of the balance paid meanwhile: the old amount is now above the balance (PAY_AMOUNT_INVALID)', async () => {
+      const { card, a, balance, key } = await declinedFirst()
+      await recordPayment(m, a.invoiceId, 1000, { kind: 'cash', deposit: false })
+      const again = await chargeCard(a.invoiceId, { cardId: card.cardId, amountCents: balance }, key)
+      expect(again.statusCode, again.body).toBe(422)
+      expect((again.json() as Json).code).toBe('PAY_AMOUNT_INVALID')
+      expect(sq.sim.store.payments.size).toBe(0)
+      expect(await charges()).toEqual([expect.objectContaining({ state: 'declined', attempts: 1 })])
+    })
+
+    it('the visit canceled meanwhile: nothing to collect on the canceled invoice', async () => {
+      const { card, a, balance, key } = await declinedFirst()
+      const c = await m.send(m.superS(), 'POST', `/appointments/${a.appointmentId}/cancel`, { reason: 'Customer called' }, idemKey())
+      expect(c.statusCode, c.body).toBe(200)
+      expect((await m.h.t.db.selectFrom('invoices').select('canceled_at').where('id', '=', a.invoiceId).executeTakeFirstOrThrow()).canceled_at).not.toBeNull()
+      const again = await chargeCard(a.invoiceId, { cardId: card.cardId, amountCents: balance }, key)
+      expect(again.statusCode, again.body).toBe(422)
+      expect((again.json() as Json).code).toBe('PAY_NOTHING_TO_COLLECT')
+      expect(sq.sim.store.payments.size).toBe(0)
+      expect(await charges()).toEqual([expect.objectContaining({ state: 'declined', attempts: 1 })])
+    })
+
+    it('another charge on the invoice still waiting for Square: 409 CARD_CHARGE_IN_PROGRESS, one Square payment', async () => {
+      const { card, a, balance, key } = await declinedFirst()
+      const lost = square({}, answerLost)
+      sq = lost
+      const other = await chargeCard(a.invoiceId, { cardId: card.cardId, amountCents: balance })
+      expect(other.statusCode, other.body).toBe(202)
+      expect(lost.sim.store.payments.size).toBe(1)
+      sq = square()
+      const again = await chargeCard(a.invoiceId, { cardId: card.cardId, amountCents: balance }, key)
+      expect(again.statusCode, again.body).toBe(409)
+      expect((again.json() as Json).code).toBe('CARD_CHARGE_IN_PROGRESS')
+      expect(sq.sim.store.payments.size).toBe(1)
+      expect((await charges()).map((c) => `${c.state}:${c.attempts}`).sort()).toEqual(['declined:1', 'unknown:1'])
+    })
+  })
+
   it('Square not answering leaves the charge unknown (202); the job re-sends the same key and records it once', async () => {
     const maria = await m.customer('Maria Delgado')
     const card = await saveCard(maria)

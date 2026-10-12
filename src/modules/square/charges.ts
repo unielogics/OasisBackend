@@ -422,7 +422,7 @@ export interface BalanceChargeInput {
   actor: SquareActor
   /**
    * The staff request (the user and its Idempotency-Key): the same request coming again after its stored answer was lost finds its
-   * charge (charged: answered as is; waiting: its state; declined: a new attempt) instead of charging a second time.
+   * charge (charged: answered as is; waiting: its state; declined: a new attempt, checked like a new charge) instead of charging a second time.
    */
   requestKey?: string | null
 }
@@ -474,8 +474,9 @@ export async function chargeBalance(d: CardChargeDeps, i: BalanceChargeInput): P
   if (!squareWritesOn(d.env)) throw new AppError('SQUARE_WRITES_OFF')
   const claimed = await transaction(d.db, async (tx): Promise<{ chargeId: string; done?: ChargeOutcome }> => {
     const inv = await lockInvoice(tx, d.locationId, i.invoiceId)
+    // the same request again (its stored answer was lost): its charge, never a second one
+    let declined: ChargeRow | null = null
     if (i.requestKey) {
-      // the same request again (its stored answer was lost): its charge, never a second one
       const mine = await tx
         .selectFrom('square_charges')
         .selectAll()
@@ -486,10 +487,8 @@ export async function chargeBalance(d: CardChargeDeps, i: BalanceChargeInput): P
       if (mine) {
         if (mine.invoice_id !== inv.id || mine.purpose !== 'balance' || mine.amount_cents !== i.amountCents) throw new AppError('IDEMPOTENCY_MISMATCH')
         if (mine.state !== 'declined') return { chargeId: mine.id, done: outcomeOf(mine) }
-        const again = await usableCard(tx, { locationId: d.locationId, customerId: inv.customer_id, purpose: 'balance', now: d.clock.now(), cardId: i.cardId })
-        if (!again) throw new AppError('CARD_NOT_USABLE')
-        await retryAttempt(tx, d, mine, { actor: i.actor, requestKey: i.requestKey, cardId: again.card.id, consentId: again.consentId })
-        return { chargeId: mine.id }
+        // declined: a new attempt, checked like a new charge (the invoice may have been paid, canceled or charged meanwhile)
+        declined = mine
       }
     }
     if (inv.canceled_at) throw new AppError('PAY_NOTHING_TO_COLLECT', { detail: 'A canceled invoice has nothing to pay' })
@@ -507,6 +506,10 @@ export async function chargeBalance(d: CardChargeDeps, i: BalanceChargeInput): P
     const now = d.clock.now()
     const usable = await usableCard(tx, { locationId: d.locationId, customerId: inv.customer_id, purpose: 'balance', now, cardId: i.cardId })
     if (!usable) throw new AppError('CARD_NOT_USABLE')
+    if (declined) {
+      await retryAttempt(tx, d, declined, { actor: i.actor, requestKey: i.requestKey, cardId: usable.card.id, consentId: usable.consentId })
+      return { chargeId: declined.id }
+    }
     const id = d.newId()
     await tx
       .insertInto('square_charges')

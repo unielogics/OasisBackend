@@ -318,7 +318,9 @@ CreatePayment (`source_id` the card, `customer_id` its Square customer, `autocom
 `INV-20640 · No-show fee`) is sent in the idempotency `prepare` hook, never while the invoice is locked, with the key `ch_<charge id>`
 (`ch_<charge id:attempt>` for a new attempt after a decline). The payment is recorded through `SquareLedgerOps` (rule `charge`, the
 ledger reason "Balance" / "No-show fee" / "Late-cancel fee", in the name of the staff member who confirmed it). A decline answers 422
-`CARD_DECLINED` with the plain reason and keeps the charge `declined`. No answer leaves it `unknown` (202): `square.charges.resolve`
+`CARD_DECLINED` with the plain reason and keeps the charge `declined`. The same balance request sent again after a decline is a new
+attempt on that charge, checked like a new charge first (the invoice not canceled, the amount still within the balance, no other
+charge waiting for Square), so a card is never charged for money no longer owed. No answer leaves it `unknown` (202): `square.charges.resolve`
 asks again within 23 hours (GetPayment when the payment id is known, otherwise the same request with the same key: Square answers the
 payment it made, or makes it once); after 10 minutes without an answer staff see the alert "Saved-card charge not confirmed". The
 webhook of the payment finds the charge by its `reference_id` and records it the same way, so

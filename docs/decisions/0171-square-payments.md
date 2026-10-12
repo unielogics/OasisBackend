@@ -215,7 +215,9 @@ reconcile do nothing, and the hook verifies nothing (no key) and answers 401.
   the invoice lock for a balance), CreatePayment runs in the idempotency `prepare` hook on the pool (never inside `lockInvoice`) with key
   `ch_<id>` (`ch_<id:attempt>` after a decline), and a second transaction records the answer: `charged` through `SquareLedgerOps`
   (rule `charge`, ledger reason, in the confirming staff member's name), `declined` (422 `CARD_DECLINED`, the plain reason in `detail`;
-  the key is released), or `unknown` (202; the job `square.charges.resolve` re-sends the same request with the same key within 23 hours,
+  the key is released; the same request sent again is a new attempt on the same charge, checked like a new one: canceled or paid
+  meanwhile 422 `PAY_NOTHING_TO_COLLECT`, above the balance now 422 `PAY_AMOUNT_INVALID`, another charge waiting 409
+  `CARD_CHARGE_IN_PROGRESS`), or `unknown` (202; the job `square.charges.resolve` re-sends the same request with the same key within 23 hours,
   or GetPayment when the payment id is known; after 10 minutes the alert `square_charge_unknown` "Saved-card charge not confirmed"). The classifier's `charge` rule (a payment whose `reference_id` is a waiting charge, or
   whose id a charge holds) records a charge's payment from the webhook the same way; a payment is recorded once whichever path comes
   first.
