@@ -220,6 +220,26 @@ server {
         proxy_pass http://oasis_api;
     }
 
+    # the catalog by vehicle size (ADR 0170 wave Q3d): the same treatment as v1 (its own exact location: the prefix below would
+    # neither cache it nor keep it GET only)
+    location = /api/v1/public/catalog/v2 {
+        limit_except GET { deny all; }
+        limit_req zone=oasis_api burst=20 nodelay;
+        include @NGINX_DIR@/oasis/proxy.conf;
+        proxy_set_header Cookie "";
+        proxy_hide_header Set-Cookie;
+        proxy_ignore_headers Set-Cookie;
+        proxy_cache oasis_public;
+        proxy_cache_key "$scheme$host$uri";
+        proxy_cache_valid 200 60s;
+        proxy_cache_lock on;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Cache-Status $upstream_cache_status always;
+        proxy_pass http://oasis_api;
+    }
+
     # --- personal links (ADR 0160): the API of the link pages (#/c, #/m, #/p, #/pin, #/v on the website) ---
     # Never cached by anyone: the answers carry a client's first name, visits and invoice and the page's bearer session, so nginx
     # caches nothing here and replaces whatever Cache-Control the API sends with no-store on every answer, its own errors included.

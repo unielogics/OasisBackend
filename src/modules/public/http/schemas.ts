@@ -70,7 +70,7 @@ export const BoardView = z.object({
 })
 
 /** The public catalog's answer (defined beside its loader, src/modules/public/catalog.ts). */
-export { PublicCatalogView as CatalogView } from '../catalog.js'
+export { PublicCatalogView as CatalogView, PublicCatalogV2View as CatalogV2View } from '../catalog.js'
 
 export const OtpBody = z.object({ phone: Phone }).strict()
 export const OtpRequested = z.object({ challengeId: z.string(), expiresInSec: z.number().int() })

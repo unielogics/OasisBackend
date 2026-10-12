@@ -167,7 +167,8 @@ describe('install.sh --site-domain: the rendered website', () => {
 
     // the three read-only API answers: exact locations, GET only, proxied with the shared proxy settings, the API rate zone, the
     // cache, and no cookie either way
-    for (const name of ['hours', 'availability', 'catalog']) {
+    // the catalog by vehicle size (catalog/v2, ADR 0170 wave Q3d) has the same exact location and treatment as v1
+    for (const name of ['hours', 'availability', 'catalog', 'catalog/v2']) {
       const uri = `/api/v1/public/${name}`
       const l = at(uri)
       expect(`${l.modifier} ${l.pattern}`, uri).toBe(`= ${uri}`)
@@ -186,7 +187,7 @@ describe('install.sh --site-domain: the rendered website', () => {
       expect(find(l.body, 'proxy_cache_lock')[0]!.args, uri).toEqual(['on'])
       // the hours and the open times are stale only while one request refreshes them, never because the API is down (W2 review
       // leftover: an outage must not freeze yesterday's hours or a board of taken times); the catalog may outlive an outage
-      if (name === 'catalog')
+      if (name.startsWith('catalog'))
         expect(find(l.body, 'proxy_cache_use_stale')[0]!.args, uri).toEqual(
           expect.arrayContaining(['error', 'timeout', 'updating', 'http_502', 'http_503']),
         )
@@ -286,7 +287,8 @@ describe('install.sh --site-domain: the rendered website', () => {
         apexLocs().flatMap((l) => l.body),
         'proxy_pass',
       ).map((p) => p.args[0]),
-    ).toEqual(['http://oasis_api', 'http://oasis_api', 'http://oasis_api', 'http://oasis_api', 'http://oasis_api'])
+      // hours, availability, catalog, catalog/v2 (wave Q3d), links, the rest of the public prefix: all to the API
+    ).toEqual(['http://oasis_api', 'http://oasis_api', 'http://oasis_api', 'http://oasis_api', 'http://oasis_api', 'http://oasis_api'])
   })
 
   it('shares the TLS file with the dashboard, defines the cache and zones it uses, and every include exists', () => {
@@ -859,7 +861,7 @@ describe.skipIf(!NGINX)('the website in a real nginx', () => {
 
     // the board and the catalog: the same treatment, cached per URL
     hits.length = 0
-    for (const uri of ['/api/v1/public/availability?days=5', '/api/v1/public/catalog']) {
+    for (const uri of ['/api/v1/public/availability?days=5', '/api/v1/public/catalog', '/api/v1/public/catalog/v2']) {
       const miss = await get(`${site}${uri}`, ['-H', 'Cookie: oasis_sid=visitor-cookie'])
       expect(miss.status, uri).toBe(200)
       expect(miss.header('x-cache-status'), uri).toEqual(['MISS'])
@@ -868,17 +870,26 @@ describe.skipIf(!NGINX)('the website in a real nginx', () => {
       const hit = await get(`${site}${uri}`)
       expect(hit.header('x-cache-status'), uri).toEqual(['HIT'])
     }
-    expect(hits).toEqual(['GET /api/v1/public/availability?days=5 cookie=none', 'GET /api/v1/public/catalog cookie=none'])
+    expect(hits).toEqual([
+      'GET /api/v1/public/availability?days=5 cookie=none',
+      'GET /api/v1/public/catalog cookie=none',
+      'GET /api/v1/public/catalog/v2 cookie=none',
+    ])
     // the board's key is its two parameters: add-ons, junk and order do not make a new entry; another day count does
-    for (const uri of ['/api/v1/public/availability?days=5&addons=wax%2Cclay', '/api/v1/public/availability?days=5&cb=1', '/api/v1/public/catalog?v=2'])
+    for (const uri of [
+      '/api/v1/public/availability?days=5&addons=wax%2Cclay',
+      '/api/v1/public/availability?days=5&cb=1',
+      '/api/v1/public/catalog?v=2',
+      '/api/v1/public/catalog/v2?cb=1',
+    ])
       expect((await get(`${site}${uri}`)).header('x-cache-status'), uri).toEqual(['HIT'])
     expect((await get(`${site}/api/v1/public/availability?days=6`)).header('x-cache-status')).toEqual(['MISS'])
-    expect(hits).toHaveLength(3)
+    expect(hits).toHaveLength(4)
     // the cached routes take no POST
     const postHours = await get(`${site}/api/v1/public/hours`, ['-X', 'POST', '-d', '{}'])
     expect(postHours.status).toBe(403)
     once(postHours, 'POST hours')
-    expect(hits).toHaveLength(3)
+    expect(hits).toHaveLength(4)
 
     // the writes: passed through as they are (method, path, body, Idempotency-Key), never cached, no cookie either way
     hits.length = 0

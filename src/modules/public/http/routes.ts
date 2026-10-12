@@ -15,7 +15,7 @@ import { fmtT, wallToInstant } from '../../../platform/time.js'
 import { MS_PER_MIN } from '../../scheduling/availability.js'
 import { BOARD_DEFAULT_DAYS, loadBoard } from '../availability-loader.js'
 import { bookingRefOf, chargeBookingLimits, createWebBooking, dollars, guestPricingOf } from '../bookings.js'
-import { loadPublicCatalog } from '../catalog.js'
+import { loadPublicCatalog, loadPublicCatalogV2 } from '../catalog.js'
 import { publicLocation, type PublicDeps, type PublicLocation, type PublicRequest } from '../deps.js'
 import { chargeJoinLimits, joinTierOf, joinWeb, memberRefOf } from '../memberships.js'
 import { phoneOrThrow, requestOtp, verifyOtp } from '../otp.js'
@@ -26,6 +26,7 @@ import {
   BoardView,
   BookingBody,
   BookingResult,
+  CatalogV2View,
   CatalogView,
   MembershipBody,
   MembershipResult,
@@ -125,6 +126,32 @@ export function registerPublicRoutes(d: PublicDeps): void {
       const l = await loc()
       void reply.header('Cache-Control', `public, max-age=${PUBLIC_MAX_AGE}`)
       return loadPublicCatalog(app.db, l.id, app.clock.now())
+    },
+  )
+
+  app.get(
+    '/public/catalog/v2',
+    {
+      config: {
+        access: access.public('The website’s catalog by vehicle size from Settings: sizes, prices per size with member prices, the tiers sold online'),
+        rateLimit: { max: 60, timeWindow: '1 minute' },
+      },
+      preValidation: canonicalQuery({}),
+      schema: {
+        tags: TAGS,
+        operationId: 'getPublicCatalogV2',
+        summary: 'The catalog by vehicle size (ADR 0170): prices per size with member prices, and the tiers sold online with their prices per size',
+        description:
+          'No session. `version` 2. The active sizes (`vehicleClasses`, smallest first); the active categories; the packages (`services`) and `addons` listed online (active, `visibleOnline`, category active, not quote-only; an item without any price, no price by size and a $0 base price, is left out) with `prices` only at the sizes that HAVE one (`cents`, `maxCents` for a range, `memberCents`/`memberMaxCents` = the price less `memberDisplay.discountBp`, rounded half up to whole dollars), the starting price (`fromCents` at `fromClass`, `memberFromCents`), a tint package’s film (`tintFilm`) and the tiers that include it (`includedIn`); the quote-only items (`quotes`, no price); the booking fee and how a guest pays it (`guestFeeCollect`); and the tiers sold online: active, public and WITH a current price (a tier without one is not listed), each with its monthly price per size, `fromMonthlyCents`/`fromClass`, perks, `memberDiscountBp`, `vipBooking`, `householdCars` and `inclusions` by item key. `memberDisplay.discountBp` is the lowest % off of those tiers (0 without any). No ids, versions, Square ids or checkout URLs. GET /public/catalog (v1) is unchanged. ' +
+          `\`Cache-Control: public, max-age=${PUBLIC_MAX_AGE}\`; 60 requests a minute per address.`,
+        querystring: NoQuery,
+        response: { 200: CatalogV2View },
+      },
+    },
+    async (_req, reply) => {
+      const l = await loc()
+      void reply.header('Cache-Control', `public, max-age=${PUBLIC_MAX_AGE}`)
+      return loadPublicCatalogV2(app.db, l.id, app.clock.now())
     },
   )
 

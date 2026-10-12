@@ -11,6 +11,7 @@ const EXPECTED: [string, string, 'required' | undefined][] = [
   ['GET', '/api/v1/public/hours', undefined],
   ['GET', '/api/v1/public/availability', undefined],
   ['GET', '/api/v1/public/catalog', undefined],
+  ['GET', '/api/v1/public/catalog/v2', undefined],
   ['POST', '/api/v1/public/otp', undefined],
   ['POST', '/api/v1/public/otp/verify', undefined],
   ['POST', '/api/v1/public/bookings', 'required'],
@@ -51,7 +52,7 @@ describe('the public website API contract', () => {
   })
 
   it('answers every public route without a session and with a bogus cookie alike, and sets no cookie', async () => {
-    for (const url of ['public/hours', 'public/availability', 'public/catalog']) {
+    for (const url of ['public/hours', 'public/availability', 'public/catalog', 'public/catalog/v2']) {
       const a = await h.get(url)
       const b = await h.get(url, { headers: { cookie: 'oasis_sid=not-a-session' } })
       expect(a.statusCode, url).toBe(200)
