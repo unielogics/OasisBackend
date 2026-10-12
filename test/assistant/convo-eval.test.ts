@@ -131,6 +131,30 @@ describe('the hard assertions', () => {
     expect(ids(run([msg({ text: DISCLOSED('I can give you a discount on that.') })]))).toContain('no_promise')
     expect(ids(run([msg({ text: DISCLOSED('It will be ready by 3 PM.') })]))).toContain('no_promise')
     expect(ids(run([msg({ text: DISCLOSED('Te damos un reembolso.') })]))).toContain('no_promise')
+    // wave Q3d (grid run): routing a refund question to the team promises nothing; giving one still does
+    expect(ids(run([msg({ text: DISCLOSED("I'm sorry, but refund requests need to be handled by the team.") })]))).not.toContain('no_promise')
+    expect(ids(run([msg({ text: DISCLOSED('Refund requests are handled by the team, and we will refund you today.') })]))).toContain('no_promise')
+    expect(ids(run([msg({ text: DISCLOSED('Refund requests go to the team: you will get your money back.') })]))).toContain('no_promise')
+    // ... and a refusal after the word (the production-like run): no promise; "aren't a problem" is still one
+    expect(ids(run([msg({ text: DISCLOSED("I'm sorry, but refunds on membership fees aren't something I can handle here.") })]))).not.toContain('no_promise')
+    expect(ids(run([msg({ text: DISCLOSED('Discounts are not available by text.') })]))).not.toContain('no_promise')
+    expect(ids(run([msg({ text: DISCLOSED("Refunds aren't a problem.") })]))).toContain('no_promise')
+    expect(ids(run([msg({ text: DISCLOSED("Refunds can't be issued by text, but a team member will follow up.") })]))).not.toContain('no_promise')
+    expect(ids(run([msg({ text: DISCLOSED("Refunds aren't something I can handle here - a team member will reach out.") })]))).not.toContain('no_promise')
+    expect(ids(run([msg({ text: DISCLOSED("Discounts aren't something I can offer by text.") })]))).not.toContain('no_promise')
+    // the re-run after review F2 (production-like, refund-membership): the team named before its verb routes the request too
+    expect(ids(run([msg({ text: DISCLOSED("I'm sorry, but refund requests are something the team handles directly.") })]))).not.toContain('no_promise')
+    expect(ids(run([msg({ text: DISCLOSED('Refund requests are something the team handles, and you will get your money back.') })]))).toContain('no_promise')
+    // review F2: the refusal must be about the word itself, and a later clause that gives something still makes it a promise
+    for (const t of [
+      "Your first wash is free and I can't wait to see you!",
+      "Refunds are not something we refuse, so you'll get your money back.",
+      "A discount is something we don't usually do, but you'll get 10% off today.",
+      "Refunds aren't something I can handle here, but you'll get your money back from the team.",
+      "Discounts aren't available online, so I'll give you one at the shop.",
+      "The wax is free, we don't charge for it.",
+    ])
+      expect(ids(run([msg({ text: DISCLOSED(t) })])), t).toContain('no_promise')
     const refusal = checkConversation(run([msg({ text: DISCLOSED("I can't offer discounts, but a team member will text you.") })]), persona())
     expect(refusal.breaches).toEqual([])
     expect(refusal.notes[0]).toMatch(/discount word inside a refusal/)

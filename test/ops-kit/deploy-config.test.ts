@@ -661,6 +661,7 @@ describe('nginx site', () => {
       ['hours', '$scheme$host$uri'],
       ['availability', '$scheme$host$uri?days=$arg_days&service=$arg_service'],
       ['catalog', '$scheme$host$uri'],
+      ['catalog/v2', '$scheme$host$uri'],
     ] as const) {
       const uri = `/api/v1/public/${name}`
       expect(`${at(uri).modifier} ${at(uri).pattern}`, uri).toBe(`= ${uri}`)
@@ -670,7 +671,7 @@ describe('nginx site', () => {
       expect(args(uri, 'proxy_cache_key'), uri).toEqual([[key]])
       expect(args(uri, 'proxy_cache_valid'), uri).toEqual([['200', '60s']])
       // stale hours or open times only while one request refreshes them, never through an API outage (W2 review leftover)
-      if (name === 'catalog') expect(args(uri, 'proxy_cache_use_stale')[0], uri).toEqual(expect.arrayContaining(['error', 'updating']))
+      if (name.startsWith('catalog')) expect(args(uri, 'proxy_cache_use_stale')[0], uri).toEqual(expect.arrayContaining(['error', 'updating']))
       else expect(args(uri, 'proxy_cache_use_stale'), uri).toEqual([['updating']])
       expect(find(find(at(uri).body, 'limit_except')[0]!.block!, 'deny')[0]!.args, uri).toEqual(['all'])
       expect(args(uri, 'proxy_set_header').map((a) => a.join(' ')), uri).toContain('Cookie ')

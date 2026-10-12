@@ -32,7 +32,7 @@ describe('public writes closed', () => {
   })
 
   it('keeps hours, availability and the catalog readable', async () => {
-    for (const path of ['public/hours', 'public/availability', 'public/catalog'])
+    for (const path of ['public/hours', 'public/availability', 'public/catalog', 'public/catalog/v2'])
       expect((await h.get(path)).statusCode, path).toBe(200)
   })
 })

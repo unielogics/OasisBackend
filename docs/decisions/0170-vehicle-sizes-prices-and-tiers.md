@@ -1,6 +1,7 @@
 # 0170 Prices by vehicle size, a computed member price, and editable membership tiers
 Status: accepted (2026-10-12, the owner's plan "Square payments + prices by vehicle size + editable membership tiers", decisions 1-9;
-built in wave Q1a, the pricing core). Wave Q2 adds the booking paths, Q3 the website, the assistant and Square billing (below).
+built in wave Q1a, the pricing core). Wave Q2 adds the booking paths, Q3 the website, the assistant and Square billing (below; the
+public catalog v2 and the assistant's facts by size are wave Q3d).
 
 The owner wants prices **per vehicle size** (compact car, large car, compact SUV, large SUV, truck), every service, tier, inclusion
 and member % off editable in Settings without code, a **household** membership priced at a chosen size (a larger car is covered up to
@@ -96,9 +97,8 @@ member/guest prices or the VIP fields.
 
 The public `GET /public/catalog` (v1) keeps its shape and is built from the new data: starting prices (the member one at the lowest
 % off of the public tiers that have a price), the tint packages' cells in the matrix shape, the active public tiers as `plans`; an
-item with no price at all (no cell, $0 base) is left out rather than stated as $0. The assistant's shop facts read it unchanged
-(their cache fingerprint now covers the new tables; `set_my_vehicle` also records the size its type maps to); the full per-size
-facts (`facts-v4`) are wave Q3d's.
+item with no price at all (no cell, $0 base) is left out rather than stated as $0. Until wave Q3d the assistant's shop facts read
+it (their cache fingerprint covers the new tables); since Q3d they read `GET /public/catalog/v2` (facts-v4, below).
 
 ## Seeds
 
@@ -187,6 +187,36 @@ row lock and the unique idempotency key names each redeem). A household member c
 checkout or the verified website join (F3): both refuse now (item 7). The honeypot's answers carry the same size, label and price as
 a real answer (F6: `joinTierOf` and `guestPricingOf`, nothing written).
 
+## Wave Q3d: the public catalog v2 and the assistant's facts by size
+
+Built on branch `ws/q3-catalog` (no pricing migration; the W4 leftover's `20261014700000_link_retext.sql` is ADR 0160's). Code:
+`public/catalog.ts` (`loadPublicCatalogV2`, `PublicCatalogV2View`), `public/http/routes.ts`, `deploy/nginx/oasis{,-site}.conf.template`;
+the assistant's side is ADR 0160 "Wave Q3d". API: api-spec 26.1.
+
+1. **`GET /public/catalog/v2`** (design §9, exactly its shape): `version 2`, the active sizes, the categories, `memberDisplay.discountBp`
+   (the lowest % off of the tiers it lists), every listed package and add-on with `prices` **only at the sizes that have one**
+   (`cents`, `maxCents`, `memberCents`/`memberMaxCents` = `memberCents()` at that %, half up to whole dollars), `fromCents`/`fromClass`
+   (`fromPrice`), `memberFromCents`, a tint package's film and the tiers that include it; the quote-only items; the booking fee and
+   `guestFeeCollect` (`counter`/`link`, as a booking answer words it); and the tiers sold online. **A tier without a current price at
+   an active size is not listed** (plan decision 3; the Q1a review's deferred F4): it is not in `tiers`, its % off does not count in
+   `memberDisplay`, and nothing `includedIn` names it. An item with no cell and a $0 base price is left out, as in v1; an item with a
+   base price and no cell has `prices: []` and `fromClass: null`. No ids, versions, price versions, Square ids or states, checkout URLs
+   or tags (`test/catalog-settings/catalog-v2.test.ts` walks every key). One addition to §9's shape (review F4): each tier inclusion row
+   carries `group`, the inclusion's number in the tier (1, 2, ...; only inclusions covering a listed item), so one inclusion of 4 a
+   month over two items (4 in all) reads apart from two inclusions of 4 a month (4 each); the facts group by it and write a shared
+   allowance as "Signature Hand Wash or Interior (4 a month in all)".
+2. **v1 is unchanged** (the website keeps reading it until wave Q3c switches; v1 `plans` still lists an unpriced public tier with
+   `priceCents: null`, as before).
+3. **Cache and limits as v1**: `canonicalQuery({})` (a query is 422), `Cache-Control: public, max-age=60`, 60 a minute per address;
+   nginx has an exact `location = /api/v1/public/catalog/v2` on both hosts with v1's treatment (GET only, the API zone, the
+   `oasis_public` cache under `$scheme$host$uri`, stale on error, no cookie either way): the `^~ /api/v1/public/` prefix would
+   neither cache it nor keep it GET only. Ops-kit tests cover both templates (structure, and the live nginx cache on the website's host).
+4. **The assistant's facts read v2** (facts-v4): the sizes, every item's prices by size, the tiers sold online with their prices by
+   size, % off and inclusions; a tier without a price is not offered by the assistant either (no `{plan:<key>}`, `send_link
+   {membership}` refused). `set_my_vehicle` records a size key of the facts (source `ai`, never over a staff size) and
+   `propose_booking` passes `vehicleClass` (a staff size on the car wins, also one set between the proposal and the reply number; the
+   reply-number handler books it while the size is still on).
+
 ## What the next waves add
 
 * **Q2 (booking paths, built in wave Q2a above):** every booking path takes a size (`createAppointment` `vehicleId`/`vehicleClass`), snapshots the price
@@ -194,8 +224,9 @@ a real answer (F6: `joinTierOf` and `guestPricingOf`, nothing written).
   when it would overpay), `POST /appointments/quote`, `settleMembershipVisit` (one redeem + adjust per covered line, the covered
   amount capped at the plan size; a redeem per covered line, settled again when the visit changes), household routes, `planClass` on joins and
   manual memberships, the invoice DTO coverage fields, the website's "Sedan / Coupe" label bug.
-* **Q3:** the website catalog v2 and join flow (size picker, tier prices; a tier with no current price is not sold online: v2,
-  the join route and the assistant's links leave it out, which v1 `plans` and `POST /public/memberships/join` do not do yet), the assistant's facts-v4, memberships billed as Square
-  subscriptions (each `membership_tier_prices` row a plan variation; "Move members").
+* **Q3:** the website catalog v2 (built in wave Q3d above) and join flow (size picker, tier prices; a tier with no current price is
+  not sold online: v2 and the assistant's links leave it out (wave Q3d), which v1 `plans` and `POST /public/memberships/join` do not
+  do yet: the join route is wave Q3c's), the assistant's facts-v4 (wave Q3d), memberships billed as Square subscriptions (each
+  `membership_tier_prices` row a plan variation; "Move members").
 * **Later:** a migration drops `vehicles.vehicle_type`, the member/guest/VIP columns, `plan_credit_rules`, `catalog.tint_matrix`
   and `catalog.guest_markup_pct`.

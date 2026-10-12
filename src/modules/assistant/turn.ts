@@ -443,7 +443,8 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
   const declinedPlans = loaded.membership === null && declinesPlans(snap.lines.filter((l) => l.who === 'client').map((l) => l.text))
   const turnContext = {
     ...loaded,
-    ...(declinedPlans && loaded.intake === 'memberships' ? { intake: loaded.vehicles.length > 0 ? null : ('vehicle' as const) } : {}),
+    // ... and so does a shop that sells no plan online (facts-v4: a tier without a price is not sold)
+    ...((declinedPlans || facts.plans.length === 0) && loaded.intake === 'memberships' ? { intake: loaded.vehicles.length > 0 ? null : ('vehicle' as const) } : {}),
     language: lang,
     ...(asksForFree(freshClient) ? { asksFree: true } : {}),
     ...(declinedPlans ? { declinedPlans: true } : {}),

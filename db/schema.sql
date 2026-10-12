@@ -927,6 +927,7 @@ CREATE TABLE public.client_links (
     revoked_at timestamp with time zone,
     revoke_reason text,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    retexted_at timestamp with time zone,
     CONSTRAINT client_links_check CHECK ((uses <= max_uses)),
     CONSTRAINT client_links_check1 CHECK (((revoked_at IS NULL) = (revoke_reason IS NULL))),
     CONSTRAINT client_links_customer_check CHECK (((customer_id IS NOT NULL) OR (kind = ANY (ARRAY['calendar'::text, 'book_again'::text])))),
@@ -941,6 +942,7 @@ CREATE TABLE public.client_links (
     CONSTRAINT client_links_phone_version_check CHECK ((phone_version >= 0)),
     CONSTRAINT client_links_pin_version_check CHECK ((pin_version >= 0)),
     CONSTRAINT client_links_plan_key_check CHECK (((plan_key IS NULL) OR (plan_key ~ '^[a-z][a-z0-9_]{0,31}$'::text))),
+    CONSTRAINT client_links_retexted_check CHECK (((retexted_at IS NULL) OR (retexted_at >= created_at))),
     CONSTRAINT client_links_revoke_reason_check CHECK (((revoke_reason IS NULL) OR (revoke_reason = ANY (ARRAY['phone_change'::text, 'pin_set'::text, 'pin_reset'::text, 'pin_cleared'::text, 'merge'::text, 'opt_out'::text, 'staff'::text, 'epoch'::text, 'superseded'::text])))),
     CONSTRAINT client_links_token_hash_check CHECK ((token_hash ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT client_links_uses_check CHECK ((uses >= 0))

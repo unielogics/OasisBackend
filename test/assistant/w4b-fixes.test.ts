@@ -100,40 +100,56 @@ describe('X5: the conversation language', () => {
   it('the placeholders render in Spanish for a Spanish conversation', () => {
     const facts = {
       catalog: {
+        sizes: [
+          { key: 'compact_car', label: 'Compact car' },
+          { key: 'large_suv', label: 'Large SUV' },
+        ],
         items: [
           {
             key: 'sig',
             name: 'Signature Hand Wash',
             kind: 'package',
             quoteOnly: false,
+            prices: [{ class: 'compact_car', classLabel: 'Compact car', cents: 5400, maxCents: null, memberCents: 4500 }],
+            fromCents: 5400,
+            fromClassLabel: 'Compact car',
             memberFromCents: 4500,
-            guestFromCents: 5400,
+            tintFilm: null,
+          },
+          {
+            key: 'carbon',
+            name: 'Carbon window tint',
+            kind: 'package',
+            quoteOnly: false,
+            prices: [{ class: 'compact_car', classLabel: 'Compact car', cents: 27900, maxCents: 33500, memberCents: 22900 }],
+            fromCents: 27900,
+            fromClassLabel: 'Compact car',
+            memberFromCents: 22900,
+            tintFilm: 'carbon',
           },
           {
             key: 'cer',
             name: 'Ceramic Coating',
             kind: 'package',
             quoteOnly: true,
+            prices: [],
+            fromCents: null,
+            fromClassLabel: null,
             memberFromCents: null,
-            guestFromCents: null,
+            tintFilm: null,
           },
         ],
-        tint: [
-          {
-            vehicle: 'sedan',
-            film: 'carbon',
-            vehicleLabel: 'Sedan / Coupe',
-            filmLabel: 'Carbon',
-            memberFromCents: 22900,
-            guestFromCents: 27900,
-          },
-        ],
+        tintFilms: [{ key: 'carbon', label: 'Carbon', vlt: [5, 20] }],
       },
       plans: [
         {
           key: 'gold',
           label: 'Gold',
-          monthlyPriceCents: 9900,
+          prices: [{ class: 'compact_car', classLabel: 'Compact car', monthlyCents: 9900 }],
+          fromCents: 9900,
+          fromClassLabel: 'Compact car',
+          memberDiscountBp: 1000,
+          inclusions: [{ services: ['Signature Hand Wash'], mode: 'per_cycle', perCycle: 4 }],
           perks: ['4 hand washes a month', 'No booking fees'],
         },
       ],
@@ -141,21 +157,27 @@ describe('X5: the conversation language', () => {
     } as unknown as ShopFacts
     const es = placeholderValues(facts, { lang: 'es', balanceCents: 1250, confirmTexted: true })
     expect(Object.fromEntries(es)).toEqual({
-      '{price:sig}': 'Signature Hand Wash: desde $45 para miembros, $54 para los demas',
+      '{price:sig}': 'Signature Hand Wash: desde $54 (Compact car), $45 para miembros',
+      '{price:sig:compact_car}': 'Signature Hand Wash para Compact car: desde $54, $45 para miembros',
+      '{price:sig:large_suv}': 'Signature Hand Wash para Large SUV: el precio se confirma en el local',
+      '{price:carbon}': 'Carbon window tint: desde $279 (Compact car), $229 para miembros',
+      '{price:carbon:compact_car}': 'Carbon window tint para Compact car: desde $279, $229 para miembros',
+      '{price:carbon:large_suv}': 'Carbon window tint para Large SUV: el precio se confirma en el local',
+      '{price:tint:compact_car:carbon}': 'Polarizado Carbon para Compact car: desde $279, $229 para miembros',
       '{price:cer}': 'Ceramic Coating: precio por cotizacion - envianos una foto',
-      '{price:tint:sedan:carbon}':
-        'Polarizado Carbon para Sedan/Coupe: desde $229 para miembros, $279 para los demas',
-      '{plan:gold}': 'Gold cuesta $99 al mes',
-      '{perks:gold}': 'Gold incluye: 4 hand washes a month; no booking fees',
+      '{plan:gold}': 'Gold: desde $99 al mes (Compact car)',
+      '{plan:gold:compact_car}': 'Gold para Compact car: $99 al mes',
+      '{plan:gold:large_suv}': 'Gold para Large SUV: el equipo confirma el precio mensual',
+      '{perks:gold}': 'Gold incluye: Signature Hand Wash (4 al mes); 10% menos en otros servicios y extras; 4 hand washes a month; no booking fees',
       '{fee}': 'Quienes no son miembros pagan una tarifa de reserva de $25',
       '{balance}': 'Tu saldo pendiente es $12.50',
       '{confirm}': 'Te acabo de enviar los detalles para confirmar',
     })
     for (const v of es.values()) expect(isGsm7(v), v).toBe(true)
     // English stays the default
-    expect(placeholderValues(facts).get('{price:sig}')).toBe(
-      'Signature Hand Wash starts at $45 for members, $54 otherwise',
-    )
+    expect(placeholderValues(facts).get('{price:sig}')).toBe('Signature Hand Wash starts at $54 (compact car), $45 for members')
+    expect(placeholderValues(facts).get('{price:sig:large_suv}')).toBe('Signature Hand Wash for a large SUV is priced at the shop')
+    expect(placeholderValues(facts).get('{plan:gold:large_suv}')).toBe('Gold for a large SUV has a monthly price the team confirms')
   })
 
   it('the turn context names a Spanish conversation; the prompt says the server writes its parts in the client’s language', () => {
@@ -179,7 +201,7 @@ describe('X5: the conversation language', () => {
     expect(STATIC_RULES).toContain(
       'the server writes its own parts (prices, the disclosure, the security lines) in that language too',
     )
-    expect(PROMPT_VERSION).toMatch(/^w4b-2026-10-13\.\d+$/)
+    expect(PROMPT_VERSION).toMatch(/^q3d-2026-10-14\.\d+$/)
   })
 })
 

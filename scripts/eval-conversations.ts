@@ -3,8 +3,12 @@
 // conversation marker, AssistantRuntime.respond: the turn, the tool registry, the shop facts, the output guard v4 and the policy judge,
 // the reply-number handler, the leads), against a fresh schema in the LOCAL TEST database (DATABASE_URL_TEST of .env), with the
 // simulated SMS device (every outbound text is captured as the phone would show it) and a frozen clock moved between texts.
-// Settings as production will have them: the `catalog` seed (+ `website-catalog` and `pricing-defaults` for the seeded run: Signature
-// Hand Wash from $40, Gold $129 a month, ADR 0170; the current production state without them), assistant.enabled, stage everyone, actions on. The AI_* switches on, PUBLIC_LINKS_ENABLED on.
+// Settings as production will have them, on one of two catalogs (ADR 0170, wave Q3d): `seeded` (alias `grid`) = the website catalog
+// with a FULL size grid (`catalog` + `website-catalog` + `pricing-defaults`, then every wash, add-on, tint and detail priced at every
+// size, Gold and VIP priced at every size, Gold 10% off with 4 Signature Hand Washes a month, VIP with unlimited Signature washes and
+// Hand wax every visit); `unseeded` (alias `production`) = the production-like state: the dashboard design's catalog with
+// `pricing-defaults` only (the cheapest wash, Express Hand Wash, $40 at Compact car, Gold $129 a month at Compact car, VIP unpriced so
+// not sold, every other cell empty). assistant.enabled, stage everyone, actions on. The AI_* switches on, PUBLIC_LINKS_ENABLED on.
 //
 // AI_PROVIDER=bedrock calls the assistant and its policy judge (AI_BEDROCK_MODEL_ID, default Sonnet 4.6), the client simulator (the
 // same model) and the quality judge (Opus 4.6) on Bedrock with the default credential chain. On oasis-app run it with the operator
@@ -13,8 +17,9 @@
 //     AI_BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-4-6 pnpm eval:conversations --budget-usd 12 --json out.json
 // AI_PROVIDER=sim (the default) never reaches AWS (the suite's harness test).
 //
-// Options: --personas <path>, --only id,id, --category c,c, --catalog seeded|unseeded|both (unseeded runs the personas marked
-// `unseeded`, or every --only one), --concurrency <n> (default 2: one schema per worker), --budget-usd <n> (default 25: no new
+// Options: --personas <path>, --only id,id, --category c,c, --catalog seeded|unseeded|both|grid|production (both: every persona on
+// the grid and the personas marked `unseeded`, or every --only one, on the production-like catalog; unseeded/production alone: every
+// selected persona on it), --concurrency <n> (default 2: one schema per worker), --budget-usd <n> (default 25: no new
 // conversation starts once the spend, the eval's own calls included, reaches it), --no-quality, --json <path> (every result and
 // transcript), --transcripts <path> (markdown transcripts), --rpm <n> (calls a minute to the assistant's model, default 40: the
 // account's quota is 50 and shared with every other eval: run one at a time). Prints one row per persona and the totals against
@@ -26,6 +31,8 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { sql } from 'kysely'
 import { runSeed } from '../db/seeds/index.js'
+import { putClassPrices } from '../src/modules/catalog/class-prices.js'
+import { putTier, putTierPrices, requireTier } from '../src/modules/catalog/tiers.js'
 import { SIM_DEVICE_KEY, SIM_WEBHOOK_SECRET } from '../db/seeds/messaging.js'
 import { loadEnv, type Env } from '../src/config/env.js'
 import { schedulingPortsFor } from '../src/composition.js'
@@ -53,6 +60,7 @@ import { placeholderValues, renderShopFacts } from '../src/modules/assistant/fac
 import { parseVerdict } from '../src/modules/assistant/judge.js'
 import { INTAKE_LINES } from '../src/modules/assistant/prompt.js'
 import { AssistantRuntime } from '../src/modules/assistant/runtime.js'
+import { TYPE_OF_SIZE } from '../src/modules/assistant/tools/account.js'
 import { grantTrust } from '../src/modules/identity/trust.js'
 import { grantCycleCredits } from '../src/modules/memberships/credits.js'
 import { ensurePlans, loadPlans } from '../src/modules/memberships/plans.js'
@@ -68,7 +76,11 @@ import { performance } from 'node:perf_hooks'
 
 export const DEFAULT_PERSONAS = 'test/assistant/fixtures/personas.json'
 const SEEDED_PROFILES = 'people,catalog,website-catalog,pricing-defaults,messaging'
-const UNSEEDED_PROFILES = 'people,catalog,messaging'
+const UNSEEDED_PROFILES = 'people,catalog,pricing-defaults,messaging'
+/** The full grid's size steps over a service's Compact car price (whole dollars), smallest size first. */
+const GRID_STEPS = [1, 1.15, 1.25, 1.4, 1.5]
+/** Gold and VIP at every size on the full grid. */
+const GRID_TIERS: Record<string, number[]> = { gold: [12900, 13900, 14900, 15900, 16900], vip: [19900, 20900, 21900, 22900, 23900] }
 /** The shop's numbers as the runtime e2e uses them (the texting line is where the clients text to). */
 const BUSINESS_PHONE = '+12015986304'
 const BUSINESS_TEXT_NUMBER = '+18623885827'
@@ -140,8 +152,9 @@ export function parseArgs(argv: readonly string[]): EvalConversationsOptions {
     else if (a === '--category') o.categories = value().split(',').map((x) => x.trim()).filter(Boolean)
     else if (a === '--catalog') {
       const v = value()
-      if (v !== 'seeded' && v !== 'unseeded' && v !== 'both') throw new Error('--catalog is seeded, unseeded or both')
-      o.catalog = v
+      if (v !== 'seeded' && v !== 'unseeded' && v !== 'both' && v !== 'grid' && v !== 'production')
+        throw new Error('--catalog is seeded (grid), unseeded (production) or both')
+      o.catalog = v === 'grid' ? 'seeded' : v === 'production' ? 'unseeded' : v
     } else if (a === '--concurrency') o.concurrency = Math.max(1, Math.min(6, Number.parseInt(value(), 10) || 1))
     else if (a === '--budget-usd') o.budgetUsd = Math.max(0, Number(value()) || 0)
     else if (a === '--no-quality') o.quality = false
@@ -225,7 +238,7 @@ class EvalWorld {
   }
 
   /** A fresh shop for one persona: every table emptied, the seeds of the catalog run, the assistant's settings on. */
-  async reset(o: { profiles: string; startAt: string; faq: Array<{ q: string; a: string }> }): Promise<void> {
+  async reset(o: { profiles: string; startAt: string; faq: Array<{ q: string; a: string }>; grid?: boolean }): Promise<void> {
     await this.rt?.idle()
     for (let attempt = 1; ; attempt++) {
       try {
@@ -246,10 +259,73 @@ class EvalWorld {
     await this.setting('assistant.enabled', true)
     await this.setting('assistant.stage', 'everyone')
     await this.setting('assistant.actions_enabled', true)
+    if (o.grid) await this.fillGrid()
     if (o.faq.length > 0) {
       const current = (await this.db.selectFrom('settings').select('value').where('location_id', '=', this.locationId).where('key', '=', 'assistant.faq').executeTakeFirst())?.value
       await this.setting('assistant.faq', [...(Array.isArray(current) ? current : []), ...o.faq])
     }
+  }
+
+  /**
+   * The full grid (the seeded run): every active, listed, priced-by-us service at every active size (its Compact car price, else its
+   * base price, else $40, times GRID_STEPS; a tint package a range up to 20% more), Gold and VIP at every size, Gold 10% off with 4
+   * Signature Hand Washes a month, VIP unlimited Signature washes and Hand wax with every visit.
+   */
+  async fillGrid(): Promise<void> {
+    const loc = this.locationId
+    const newId = this.newId
+    const now = this.clock.now()
+    await this.db.transaction().execute(async (tx) => {
+      const classes = await tx.selectFrom('vehicle_classes').select('key').where('location_id', '=', loc).where('active', '=', true).orderBy('sort').execute()
+      const services = await tx
+        .selectFrom('services')
+        .select(['id', 'name', 'price_cents', 'version', 'category'])
+        .where('location_id', '=', loc)
+        .where('active', '=', true)
+        .where('quote_only', '=', false)
+        .execute()
+      const cells = await tx.selectFrom('service_class_prices').select(['service_id', 'class_key', 'price_cents']).where('location_id', '=', loc).execute()
+      const rows = services.map((x) => {
+        const base = cells.find((c) => c.service_id === x.id && c.class_key === classes[0]?.key)?.price_cents ?? (x.price_cents > 0 ? x.price_cents : 4000)
+        return {
+          serviceId: x.id,
+          version: x.version,
+          cells: classes.map((c, i) => {
+            const cents = Math.round((base * (GRID_STEPS[i] ?? GRID_STEPS.at(-1)!)) / 100) * 100
+            return { class: c.key, cents, maxCents: x.category === 'tint' ? Math.round((cents * 1.2) / 100) * 100 : null }
+          }),
+        }
+      })
+      if (rows.length > 0) await putClassPrices(tx, { locationId: loc, userId: null, rows })
+      const named = async (name: string) =>
+        (await tx.selectFrom('services').select('id').where('location_id', '=', loc).where('name', '=', name).where('active', '=', true).executeTakeFirst())?.id
+      const sig = await named('Signature Hand Wash')
+      const wax = await named('Hand wax')
+      for (const [key, prices] of Object.entries(GRID_TIERS)) {
+        const tier = await requireTier(tx, loc, key)
+        const inclusions =
+          key === 'gold'
+            ? sig
+              ? [{ label: 'Signature washes', mode: 'per_cycle' as const, perCycle: 4, autoApply: true, serviceIds: [sig] }]
+              : tier.inclusions
+            : [
+                ...(sig ? [{ label: 'Signature washes', mode: 'per_cycle' as const, perCycle: null, autoApply: true, serviceIds: [sig] }] : []),
+                ...(wax ? [{ label: 'Wax every wash', mode: 'every_visit' as const, perCycle: null, autoApply: true, serviceIds: [wax] }] : []),
+              ]
+        await putTier(tx, { newId }, {
+          locationId: loc,
+          key,
+          expectedVersion: tier.version,
+          fields: { ...tier, active: true, public: true, memberDiscountBp: key === 'gold' ? 1000 : tier.memberDiscountBp, inclusions },
+        })
+        const fresh = await requireTier(tx, loc, key)
+        await putTierPrices(tx, { newId, now }, {
+          locationId: loc,
+          userId: null,
+          rows: [{ tierKey: key, priceVersion: fresh.priceVersion, cells: classes.map((c, i) => ({ class: c.key, monthlyCents: prices[i] ?? prices.at(-1)! })) }],
+        })
+      }
+    })
   }
 
   async setting(key: string, value: unknown): Promise<void> {
@@ -308,8 +384,12 @@ async function setupClient(w: EvalWorld, p: Persona, phone: string): Promise<str
       created_at: new Date(now.getTime() - 90 * 86_400_000),
     } as never)
     .execute()
+  // the car's size on file, as staff set it at the shop (facts-v4); the old vehicle type beside it (kept for one release)
   for (const v of c.vehicles)
-    await w.db.insertInto('vehicles').values({ id: w.newId(), customer_id: id, make: v.make, model: v.model, year: v.year, vehicle_type: v.type } as never).execute()
+    await w.db
+      .insertInto('vehicles')
+      .values({ id: w.newId(), customer_id: id, make: v.make, model: v.model, year: v.year, vehicle_class: v.size, vehicle_class_source: 'staff', vehicle_type: TYPE_OF_SIZE[v.size] ?? null } as never)
+      .execute()
   if (c.membership) {
     const d = { locationId: w.locationId, clock: w.clock, newId: w.newId }
     await ensurePlans(w.db, d)
@@ -406,7 +486,7 @@ async function runPersona(
   o: { index: number; catalog: 'seeded' | 'unseeded'; startAt: string; envBase: Record<string, string>; providers: EvalProviders; tally: Tally; simPrices: AiPrices; gate: RpmGate },
 ): Promise<{ run: ConversationRun; factsText: string; evalCostMicros: number }> {
   const phones = phonesOf(o.index, persona)
-  await w.reset({ profiles: o.catalog === 'seeded' ? SEEDED_PROFILES : UNSEEDED_PROFILES, startAt: persona.startAt ?? o.startAt, faq: persona.faq })
+  await w.reset({ profiles: o.catalog === 'seeded' ? SEEDED_PROFILES : UNSEEDED_PROFILES, grid: o.catalog === 'seeded', startAt: persona.startAt ?? o.startAt, faq: persona.faq })
   const env = loadEnv({ ...o.envBase, SMS_ALLOWLIST: [phones.primary, phones.alt].join(',') })
   const rt = w.runtime(env)
   const art = new AssistantRuntime({ db: w.db, clock: w.clock, newId: w.newId, env, messaging: rt, provider: o.providers.assistant, judgeProvider: o.providers.judge })
@@ -767,7 +847,7 @@ export async function evalConversations(argv: readonly string[], deps: EvalDeps 
   for (const [index, persona] of fixture.personas.entries()) {
     if (!selected.includes(persona)) continue
     if (o.catalog !== 'unseeded') jobs.push({ persona, index, catalog: 'seeded' })
-    if (o.catalog !== 'seeded' && (persona.unseeded || o.only !== null)) jobs.push({ persona, index, catalog: 'unseeded' })
+    if (o.catalog === 'unseeded' || (o.catalog === 'both' && (persona.unseeded || o.only !== null))) jobs.push({ persona, index, catalog: 'unseeded' })
   }
   if (jobs.length === 0) throw new Error('no persona selected')
   log(`eval-conversations: ${jobs.length} conversations, provider ${env0.AI_PROVIDER} (${env0.AI_BEDROCK_MODEL_ID}), quality ${providers.quality ? QUALITY_MODEL : 'off'}, budget $${o.budgetUsd}, ${o.rpm} calls a minute, cwd ${process.cwd()}`)

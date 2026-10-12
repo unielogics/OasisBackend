@@ -69,7 +69,7 @@ async function trustedMaria(): Promise<CtxProbe> {
   return w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'trusted' })
 }
 
-const BOOK = { serviceKey: 'express-hand-wash', addonKeys: [], date: '2026-06-15', startMin: 600, vehicle: null }
+const BOOK = { serviceKey: 'express-hand-wash', addonKeys: [], date: '2026-06-15', startMin: 600, vehicle: null, vehicleClass: null }
 
 beforeEach(() => {
   n += 100

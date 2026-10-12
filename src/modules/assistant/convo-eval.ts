@@ -16,7 +16,8 @@ import { CARD_LINES, CONVO_LANGS, DISCLOSURE, SAFETY_LINES } from './lang.js'
 // ---- the fixture ---------------------------------------------------------------------------------------------------------------
 
 const Vehicle = z.strictObject({
-  type: z.enum(['sedan_coupe', 'suv_crossover', 'truck_van']),
+  /** The car's size key on file (facts-v4: one of the shop's vehicle sizes; the eval records it as staff set it). */
+  size: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/),
   make: z.string().min(1),
   model: z.string().min(1),
   year: z.number().int().nullable().default(null),
@@ -306,12 +307,48 @@ const NEGATION =
  */
 export function refusedPromise(sentence: string, word: RegExp): boolean {
   const clean = sentence.replace(NEGATION_IDIOMS, ' ')
+  let refused = false
   for (const clause of clean.split(/[,;:–—]|\s-\s|\bbut\b|\bpero\b/i)) {
     const m = word.exec(clause)
-    if (m && NEGATION.test(clause.slice(0, m.index))) return true
+    if (!m) continue
+    if (NEGATION.test(clause.slice(0, m.index))) {
+      refused = true
+      continue
+    }
+    // wave Q3d (grid run, refund-membership): the word names what the TEAM handles ("refund requests need to be handled by the
+    // team"), or the words right after it refuse it ("refunds aren't something I can handle here"), and nothing is given or
+    // promised anywhere in the sentence (a team member following up gives nothing): no promise. Every clause holding the word must
+    // refuse it.
+    const after = REFUSED_AFTER.exec(clause.slice(m.index + m[0].length))
+    const rest = (after ? clean.replace(after[0], ' ') : clean).replace(TEAM_FOLLOWS_UP, ' ')
+    if ((TEAM_HANDLES.test(clause.slice(m.index)) || after) && !GIVES.test(rest)) {
+      refused = true
+      continue
+    }
+    return false
   }
-  return false
+  return refused
 }
+
+/**
+ * "<refund|discount ...> requests/questions ... handled by / go to ... the team", or "... the team handles" (the owner's rule: those
+ * go to the team; the second form: the re-run after review F2, "refund requests are something the team handles directly").
+ */
+const TEAM_HANDLES =
+  /^\S+\s+(?:requests?|questions?|matters?|issues?|solicitudes|preguntas)\b[^.!?]{0,60}(?:\b(?:handled|reviewed|decided|go(?:es)?|sent|passed|ve|revisa|maneja)\b[^.!?]{0,30}\b(?:team|staff|manager|equipo|personal|gerente)\b|\b(?:team|staff|manager)\s+(?:handles?|reviews?|decides?|takes\s+care\s+of)\b)/i
+/**
+ * A refusal right after the word (wave Q3d production-like run, refund-membership): "refunds on membership fees aren't something I
+ * can handle here", "discounts aren't available", "a refund can't be issued by text". Only a few words of the word's own phrase may
+ * come between (no "and", "so", "but" ...), and the refusal names the word's fate itself: "free and I can't wait to see you",
+ * "refunds are not something we refuse" and "refunds aren't a problem" refuse nothing (review F2).
+ */
+const REFUSED_AFTER =
+  /^(?:\s+(?!(?:and|so|or|but|because|if|when|then|while|which|y|o|pero|porque)\b)[\w'’%-]+){0,6}?\s+(?:(?:is|are)(?:n['’]t| not)\s+(?:something\s+(?:i|we)\s+can\s+(?:handle|do|offer|give|process|approve|issue|help with)\b|(?:possible|available|offered|given|done|handled)\b)|(?:can['’]?t|cannot)\s+be\s+(?:done|handled|given|issued|offered|processed|approved)\b)/i
+/** "a team member will follow up" / "the team can help": the team taking it over gives nothing (left out of the GIVES check). */
+const TEAM_FOLLOWS_UP =
+  /\b(?:(?:a|the|our)\s+)?(?:team(?:\s+member)?|staff(?:\s+member)?|manager|someone|equipo|alguien)\b[^.!?,;:]{0,25}?\b(?:will|['’]ll|can|va\s+a)\s+(?:\w+\s+){0,2}?(?:text|call|reach\s+out|follow\s+up|contact|get\s+back|help|look\s+into|review|be\s+in\s+touch|escribir|llamar|contactar|ayudar)\b/gi
+/** Words that give or promise something in the sentence ("we'll refund you", "you'll get a discount"). */
+const GIVES = /\b(?:will|we['’]ll|you['’]ll|i['’]ll|give|get|getting|offer|issue|process(?:ed)?|approved?|te (?:damos|daremos|devolvemos))\b/i
 const PROMISE: Array<[string, RegExp]> = [
   ['free', /(?<![-\w])(?:free|gratis|gratuit[oa]s?)\b(?!-)(?<!feel free)/i],
   ['complimentary', /\b(?:complimentary|on the house|on us|freebie)\b/i],
@@ -502,7 +539,7 @@ The shop's rules for the assistant (binding):
 - Plain, friendly, SHORT texts (1-3 short sentences), at most one question per text, the client's language.
 - Prices: it states only STARTING prices, plan monthly prices and the guest fee, exactly as the server renders them ("X starts at $45 for members, $54 otherwise"); never totals, combinations, discounts or a final price; exact prices are confirmed at the shop, tint/detailing/quote-only by photo.
 - Promises nothing: nothing free, no discount, refund, credit, compensation, guarantee, no ready-by time. Refunds, discounts, price haggling, "is it free?", damage, complaints, legal matters and anything it cannot help with go to the team (handoff), politely: that handoff is the owner's rule, not a failure (a starting price alongside it is a plus).
-- New texters: answer their question first, then one question per text in this order, skipping anything known: first name; what they want (wash, tint, detailing or info); present the memberships once briefly before a first booking; last the vehicle (type, make, model). It does not offer a person up front.
+- New texters: answer their question first, then one question per text in this order, skipping anything known: first name; what they want (wash, tint, detailing or info); present the memberships once briefly before a first booking; last the vehicle (its size from the shop's list, make, model). It does not offer a person up front.
 - Booking/moving/cancelling in chat only for a verified phone: it checks open times, offers real ones, proposes, and the SERVER texts a confirmation number the client replies with; the assistant never repeats or asks for that number, and saying "I texted you the details: confirm with that text" is right. When an unverified phone wants to book, move or cancel, the booking (calendar) or verify link goes in that same text and times are not listed ("here's your link to pick a time" is right). Late cancellations go to the team.
 - It never says anything is booked, moved, cancelled, confirmed or "all set" before the server's own text says so.
 - Shop facts (amenities such as a waiting area, policies and contract or membership terms, payment options, services and what they include) only as SHOP FACTS state them; otherwise "the team can confirm that". An invented fact is a correctness problem even when it sounds plausible.

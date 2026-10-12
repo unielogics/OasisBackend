@@ -3,6 +3,13 @@
 // It is bound to its kind, the client, the number, the appointment / invoice / plan it is for, and to the client's PIN version,
 // phone version and the links epoch at issue time: a PIN change, a phone change or an epoch bump kills it without touching the row.
 // Opening (the exchange for a session) uses nothing; a completion (a booking, a verification, a checkout started) consumes one use.
+//
+// Re-texting (ADR 0160, wave Q3d, W4 leftover L7b): a link the ASSISTANT issues takes its token from an HMAC of the link's id under a
+// key derived from PIN_PEPPER (linkTokenFor), still never stored; so when a client cannot find a link it texted and send_link is at
+// its one-of-a-kind-an-hour limit, the server can text the SAME link again (retextClientLink: no new token, once per link, and
+// counted in the day's 3 links) instead of handing the chat to the team. Staff and system links keep a random token.
+import { createHmac } from 'node:crypto'
+import { decodePinPepper } from '../../config/env.js'
 import { advisoryXactLock, type Executor, type Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
 import type { NewId } from '../../platform/ids.js'
@@ -54,6 +61,18 @@ export function linkUrl(kind: ClientLinkKind, token: string, siteUrl: string = D
   return `${siteUrl.replace(/\/+$/, '')}/#/${LINK_POLICY[kind].path}/${token}`
 }
 
+/**
+ * The key the assistant's link tokens are derived with: an HMAC of PIN_PEPPER under its own label (the pepper itself never keys
+ * two things). Null without a pepper (the link then gets a random token and cannot be re-texted).
+ */
+export function linkTokenKey(env: { PIN_PEPPER?: string | undefined }): Buffer | null {
+  const pepper = env.PIN_PEPPER ? decodePinPepper(env.PIN_PEPPER) : null
+  return pepper ? createHmac('sha256', pepper).update('oasis-client-link-token-key:v1').digest() : null
+}
+
+/** A re-textable link's token: HMAC-SHA256(key, "client-link:<id>"), base64url (43 characters, the shape of a random one). */
+export const linkTokenFor = (key: Buffer, linkId: string): string => createHmac('sha256', key).update(`client-link:${linkId}`).digest('base64url')
+
 export interface IssueLinkInput {
   locationId: string
   kind: ClientLinkKind
@@ -88,7 +107,7 @@ export interface IssuedLink {
  */
 export async function issueClientLink(
   tx: Tx,
-  deps: { newId: NewId; now: Date; siteUrl?: string },
+  deps: { newId: NewId; now: Date; siteUrl?: string; tokenKey?: Buffer | null },
   input: IssueLinkInput,
 ): Promise<IssuedLink> {
   const { now } = deps
@@ -154,7 +173,8 @@ export async function issueClientLink(
   const expiresAt = input.expiresAt && input.expiresAt.getTime() < latest.getTime() ? input.expiresAt : latest
   if (expiresAt.getTime() <= now.getTime()) throw new AppError('VALIDATION_FAILED', { detail: 'The link would already be expired' })
   const id = deps.newId()
-  const token = newToken()
+  // the assistant's links: a token derived from the id (re-textable, retextClientLink); every other link: a random one
+  const token = deps.tokenKey && input.issuedBy === 'assistant' ? linkTokenFor(deps.tokenKey, id) : newToken()
   await tx
     .insertInto('client_links')
     .values({
@@ -183,21 +203,84 @@ export async function issueClientLink(
 }
 
 async function enforceAssistantLimits(tx: Tx, locationId: string, phone: string, kind: ClientLinkKind, now: Date): Promise<void> {
-  const r = await tx
-    .selectFrom('client_links')
-    .select((eb) => [
-      eb.fn.countAll<string>().as('day'),
-      eb.fn.count<string>(sql`case when kind = ${kind} and created_at > ${new Date(now.getTime() - HOUR)} then 1 end`).as('kind_hour'),
-    ])
-    .where('location_id', '=', locationId)
-    .where('phone_e164', '=', phone)
-    .where('issued_by', '=', 'assistant')
-    .where('created_at', '>', new Date(now.getTime() - DAY))
-    .executeTakeFirstOrThrow()
-  if (Number(r.kind_hour) >= ASSISTANT_LINK_LIMITS.perKindPerHour)
+  const r = await assistantLinkCounts(tx, locationId, phone, kind, now)
+  if (r.kindHour >= ASSISTANT_LINK_LIMITS.perKindPerHour)
     throw new AppError('IDENTITY_LINK_LIMIT', { params: { what: 'this kind of link in the last hour' }, meta: { limit: 'kind_hour' } })
-  if (Number(r.day) >= ASSISTANT_LINK_LIMITS.perDay)
+  if (r.day >= ASSISTANT_LINK_LIMITS.perDay)
     throw new AppError('IDENTITY_LINK_LIMIT', { params: { what: `${ASSISTANT_LINK_LIMITS.perDay} links today` }, meta: { limit: 'day' } })
+}
+
+/** The assistant's links to a number: texted in the last day (each new link and each re-text counts), and of this kind in the last hour. */
+async function assistantLinkCounts(tx: Tx, locationId: string, phone: string, kind: ClientLinkKind, now: Date): Promise<{ day: number; kindHour: number }> {
+  const dayAgo = new Date(now.getTime() - DAY)
+  const r = await sql<{ day_new: string; day_re: string; kind_hour: string }>`
+    select count(*) filter (where created_at > ${dayAgo}) as day_new,
+           count(*) filter (where retexted_at > ${dayAgo}) as day_re,
+           count(*) filter (where kind = ${kind} and created_at > ${new Date(now.getTime() - HOUR)}) as kind_hour
+    from client_links
+    where location_id = ${locationId} and phone_e164 = ${phone} and issued_by = 'assistant'
+      and (created_at > ${dayAgo} or retexted_at > ${dayAgo})`.execute(tx)
+  const row = r.rows[0]
+  return { day: Number(row?.day_new ?? 0) + Number(row?.day_re ?? 0), kindHour: Number(row?.kind_hour ?? 0) }
+}
+
+/**
+ * Texts the SAME link again (W4 leftover: a client who cannot find the calendar link while send_link is at its hourly limit): the
+ * newest live link of this kind the assistant texted this number and bound to exactly what is asked for now (the same visit or
+ * none, the same invoice, the same plan: a Gold link is never texted again for VIP, nor invoice A's pay link for invoice B), still
+ * openable (linkDeadReason), never re-texted before, and whose token the key re-derives (a link from before re-texting, or issued
+ * without the key, cannot be). The re-text counts as one of the day's links: past the day's limit it throws IDENTITY_LINK_LIMIT.
+ * Returns null when there is no such link. Nothing new is stored but the re-text's time.
+ */
+export async function retextClientLink(
+  tx: Tx,
+  deps: { now: Date; siteUrl?: string; tokenKey: Buffer },
+  input: {
+    locationId: string
+    phone: string
+    kind: ClientLinkKind
+    /** The binding asked for (null or absent = none): the link's own must be the same, column for column. */
+    appointmentId?: string | null
+    invoiceId?: string | null
+    planKey?: string | null
+  },
+): Promise<IssuedLink | null> {
+  const { now } = deps
+  await advisoryXactLock(tx, `client-links:${input.locationId}:${input.phone}`)
+  const rows = await tx
+    .selectFrom('client_links')
+    .selectAll()
+    .where('location_id', '=', input.locationId)
+    .where('phone_e164', '=', input.phone)
+    .where('kind', '=', input.kind)
+    .where('issued_by', '=', 'assistant')
+    .where('revoked_at', 'is', null)
+    .where('consumed_at', 'is', null)
+    .where('retexted_at', 'is', null)
+    .where('expires_at', '>', now)
+    .where(sql<boolean>`appointment_id is not distinct from ${input.appointmentId ?? null}::uuid`)
+    .where(sql<boolean>`invoice_id is not distinct from ${input.invoiceId ?? null}::uuid`)
+    .where(sql<boolean>`plan_key is not distinct from ${input.planKey ?? null}::text`)
+    .orderBy('created_at', 'desc')
+    .limit(1)
+    .execute()
+  const row = rows[0]
+  if (!row) return null
+  const token = linkTokenFor(deps.tokenKey, row.id)
+  if (hashToken(token) !== row.token_hash) return null
+  if ((await linkDeadReason(tx, row, now, 'open')) !== null) return null
+  if ((await assistantLinkCounts(tx, input.locationId, input.phone, input.kind, now)).day >= ASSISTANT_LINK_LIMITS.perDay)
+    throw new AppError('IDENTITY_LINK_LIMIT', { params: { what: `${ASSISTANT_LINK_LIMITS.perDay} links today` }, meta: { limit: 'day' } })
+  await tx.updateTable('client_links').set({ retexted_at: now }).where('id', '=', row.id).execute()
+  return {
+    id: row.id,
+    token,
+    url: linkUrl(row.kind, token, deps.siteUrl),
+    kind: row.kind,
+    phone: row.phone_e164,
+    expiresAt: row.expires_at,
+    maxUses: row.max_uses,
+  }
 }
 
 export type LinkRow = Selectable<ClientLinksTable>

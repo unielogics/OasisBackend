@@ -140,39 +140,43 @@ function assistant(steps: Step[], judge: SimStep[] | SimResponder = passAll) {
 
 describe('seam 1: prices reach the model only as placeholders, and every placeholder a tool hands out renders', () => {
   it('a price question: list_services gives priceKeys (no amount), the model writes them, the server renders the facts wording', async () => {
-    const a = assistant([simToolUse('list_services', { category: 'tint' }), simText('{price:tint:suv:carbon}. {price:tint:suv:ceramic}. The team confirms the exact price at the shop.')])
+    const a = assistant([
+      simToolUse('list_services', { category: 'tint' }),
+      simText('{price:carbon-window-tint:suv}. {price:ceramic-window-tint:suv}. The team confirms the exact price at the shop.'),
+    ])
     await inbound(maria(), 'How much is window tint for my SUV?')
     expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
-    // the tool result the model read: placeholders, no cents, no dollar sign
+    // the tool result the model read: placeholders by size (facts-v4), no cents, no dollar sign
     const result = JSON.stringify(toolResultsOf(a.provider.requests[1]!))
-    expect(result).toContain('"priceKey":"{price:tint:suv:carbon}"')
+    expect(result).toContain('"priceKey":"{price:carbon-window-tint:suv}"')
     expect(result).toContain('"priceKey":"{price:ceramic-window-tint}"')
     expect(result).not.toMatch(/Cents|\$\d/)
     const values = placeholderValues(await a.facts())
     const [reply] = await outTexts(maria())
-    expect(reply!.body).toContain(`${values.get('{price:tint:suv:carbon}')}. ${values.get('{price:tint:suv:ceramic}')}.`)
-    expect(reply!.body).toMatch(/Carbon tint for an SUV\/crossover starts at \$269 for members, \$\d+(\.\d\d)? otherwise\./)
+    expect(reply!.body).toContain(`${values.get('{price:carbon-window-tint:suv}')}. ${values.get('{price:ceramic-window-tint:suv}')}.`)
+    expect(reply!.body).toMatch(/Carbon window tint for an SUV\/crossover starts at \$323, \$269 for members\./)
     // one model call per step: no rewrite was needed
     expect(a.provider.requests).toHaveLength(2)
     // the judge read the rendered price as the server's own segment
     expect(a.judge.requests).toHaveLength(1)
-    expect(unkeyed(JSON.stringify(a.judge.requests[0]!.messages))).toContain(`${TRUSTED_OPEN}${values.get('{price:tint:suv:carbon}')}${TRUSTED_CLOSE}`)
+    expect(unkeyed(JSON.stringify(a.judge.requests[0]!.messages))).toContain(`${TRUSTED_OPEN}${values.get('{price:carbon-window-tint:suv}')}${TRUSTED_CLOSE}`)
   })
 
-  it('a membership question: get_membership_info gives {plan:<tier>}, rendered "Gold is $99 a month"', async () => {
+  it('a membership question: get_membership_info gives {plan:<tier>}, rendered "Gold starts at $99 a month (sedan/coupe)"', async () => {
     const a = assistant([simToolUse('get_membership_info', {}), simText('{plan:gold}. {plan:vip}. Want me to text you a link to join?')])
     await inbound(maria(), 'What do the memberships cost?')
     expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
     const result = JSON.stringify(toolResultsOf(a.provider.requests[1]!))
     expect(result).toContain('"priceKey":"{plan:gold}"')
     expect(result).not.toMatch(/Cents|\$\d/)
-    expect((await outTexts(maria()))[0]!.body).toContain('Gold is $99 a month. VIP is $169 a month. Want me to text you a link to join?')
+    expect((await outTexts(maria()))[0]!.body).toContain('Gold starts at $99 a month (sedan/coupe). VIP starts at $169 a month (sedan/coupe). Want me to text you a link to join?')
   })
 
   it('every placeholder list_services, get_membership_info, get_business_info, get_balance and set_my_vehicle hand out is one placeholderValues renders', async () => {
     const handedOut = new Set<string>()
     const collect = (req: AiConverseRequest): SimStep => {
-      for (const m of JSON.stringify(toolResultsOf(req)).matchAll(/\{(?:price|plan|perks|fee|balance)[^{}"]*\}/g)) handedOut.add(m[0])
+      // the rules' generic forms ("{price:<key>:<size key>}") are not placeholders handed out
+      for (const m of JSON.stringify(toolResultsOf(req)).matchAll(/\{(?:price|plan|perks|fee|balance)[^{}"<]*\}/g)) handedOut.add(m[0])
       return simText('{fee}. {balance}. {price:signature-hand-wash}.')
     }
     const a = assistant([
@@ -181,7 +185,7 @@ describe('seam 1: prices reach the model only as placeholders, and every placeho
       simToolUse('get_business_info', { topic: 'fee' }),
       { content: [
         { type: 'toolUse', id: 'b', name: 'get_balance', input: {} },
-        { type: 'toolUse', id: 'v', name: 'set_my_vehicle', input: { type: 'truck_van', make: 'Ford', model: 'Transit', year: null, color: null } },
+        { type: 'toolUse', id: 'v', name: 'set_my_vehicle', input: { size: 'truck', make: 'Ford', model: 'Transit', year: null, color: null } },
       ] },
       collect,
     ])
@@ -189,13 +193,22 @@ describe('seam 1: prices reach the model only as placeholders, and every placeho
     expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
     const facts = await a.facts()
     const values = placeholderValues(facts, { balanceCents: 0 })
-    // every catalog item, every tint row, every plan, the fee and the balance were handed out ...
-    const expected = [...values.keys()]
-    expect([...handedOut].sort()).toEqual(expected.sort())
-    // ... and set_my_vehicle named the tint prices of its class (the matrix keys its vehicles "truck", the class is truck_van)
-    const vehicle = toolResultsOf(a.provider.requests.at(-1)!)['v'] as { tintClass: string; tintPriceKeys: { priceKey: string }[] }
-    expect(vehicle.tintClass).toBe('Truck / Van')
-    expect(vehicle.tintPriceKeys.map((k) => k.priceKey)).toEqual(['{price:tint:truck:carbon}', '{price:tint:truck:ceramic}'])
+    // every placeholder handed out renders ...
+    expect([...handedOut].filter((p) => !values.has(p))).toEqual([])
+    // ... and every catalog item's starting price, every priced size, every plan (and its sizes), the fee and the balance were handed out
+    const expected = [
+      ...facts.catalog.items.flatMap((i) => [`{price:${i.key}}`, ...i.prices.map((p) => `{price:${i.key}:${p.class}}`)]),
+      ...facts.plans.flatMap((p) => [`{plan:${p.key}}`, `{perks:${p.key}}`, ...p.prices.map((x) => `{plan:${p.key}:${x.class}}`)]),
+      '{fee}',
+      '{balance}',
+    ]
+    expect(expected.filter((p) => !handedOut.has(p))).toEqual([])
+    // ... and set_my_vehicle named the prices of the car's size (facts-v4): the packages and the plans at a truck
+    const vehicle = toolResultsOf(a.provider.requests.at(-1)!)['v'] as { size: string; sizeKey: string; priceKeys: { priceKey: string }[] }
+    expect(vehicle).toMatchObject({ size: 'Truck / Van', sizeKey: 'truck' })
+    expect(vehicle.priceKeys.map((k) => k.priceKey)).toEqual(
+      expect.arrayContaining(['{price:signature-hand-wash:truck}', '{price:carbon-window-tint:truck}', '{plan:gold:truck}', '{plan:vip:truck}']),
+    )
     const body = (await outTexts(maria()))[0]!.body
     expect(body).toContain(`Guests pay a $25 booking fee. Your open balance is $0. ${values.get('{price:signature-hand-wash}')}.`)
     expect(JSON.stringify(a.provider.requests)).not.toMatch(/Cents/)
@@ -219,15 +232,15 @@ describe('the welcome flow, verification and an in-chat booking, one conversatio
       // turn 4: "Not now"
       simText('No problem. What do you drive: a sedan or coupe, an SUV or crossover, or a truck or van, and which make and model?'),
       // turn 5: "An SUV, a Honda CR-V. Monday morning?"
-      simToolUse('set_my_vehicle', { type: 'suv_crossover', make: 'Honda', model: 'CR-V', year: null, color: null }),
+      simToolUse('set_my_vehicle', { size: 'suv', make: 'Honda', model: 'CR-V', year: null, color: null }),
       simToolUse('check_availability', { serviceKey: 'signature-hand-wash', date: MONDAY, partOfDay: 'morning' }),
-      simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: TEN_AM, vehicle: 'the CR-V' }),
+      simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: TEN_AM, vehicle: 'the CR-V', vehicleClass: null }),
       simToolUse('send_link', { kind: 'verify', appointmentRef: null, tier: null }),
       simText(
         'Monday morning has openings. Here is your link to pick a time: {link1} Or confirm it is you to book by text: {link2}',
       ),
       // turn 6 (verified on the link page): "Done. Monday 10 please"
-      simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: TEN_AM, vehicle: 'the CR-V' }),
+      simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: TEN_AM, vehicle: 'the CR-V', vehicleClass: null }),
       (req) => {
         const result = JSON.stringify(toolResultsOf(req))
         // the tool tells the model to point at the server's text, never to ask for a number (the judge would fail that)
@@ -281,10 +294,10 @@ describe('the welcome flow, verification and an in-chat booking, one conversatio
     expect(
       await w.t.db
         .selectFrom('vehicles')
-        .select(['make', 'model', 'vehicle_type'])
+        .select(['make', 'model', 'vehicle_class', 'vehicle_class_source'])
         .where('customer_id', '=', client.id)
         .execute(),
-    ).toEqual([{ make: 'Honda', model: 'CR-V', vehicle_type: 'suv_crossover' }])
+    ).toEqual([{ make: 'Honda', model: 'CR-V', vehicle_class: 'suv', vehicle_class_source: 'ai' }])
     const availability = JSON.stringify(toolResultsOf(a.provider.requests.at(-1)!))
     expect(availability).not.toContain('"startMin"')
     expect(availability).toContain('"bookingLink":"{link1}"')
@@ -357,7 +370,7 @@ describe('the untrusted ask, the handoff, the staff reply, STOP and opt-out', ()
   it('a client on file asks to book without a verified phone: needs_verification, then a verify link with the safety line', async () => {
     await setting('assistant.actions_enabled', true)
     const a = assistant([
-      simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: 600, vehicle: null }),
+      simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: 600, vehicle: null, vehicleClass: null }),
       simToolUse('send_link', { kind: 'verify', appointmentRef: null, tier: null }),
       simText('Happy to! First confirm it is you here: {link1}'),
     ])
@@ -409,7 +422,7 @@ describe('the untrusted ask, the handoff, the staff reply, STOP and opt-out', ()
     await w.tx((tx) => grantTrust(tx, { locationId: w.locationId, phone: maria(), customerId: w.customer('Maria Delgado').id, verifiedBy: 'code', now: w.clock.now() }))
     const a = assistant([
       simToolUse('handoff_to_staff', { reason: 'client_asked', summary: 'Wants a person, and a wash Monday.' }),
-      simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: TEN_AM, vehicle: null }),
+      simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: TEN_AM, vehicle: null, vehicleClass: null }),
       simText('A team member will text you back shortly.'),
     ])
     await inbound(maria(), 'Can a person book me Monday at 10?')
@@ -556,8 +569,8 @@ describe('W4 live eval: what the eval on Bedrock found in these seams', () => {
     await inbound(maria(), 'What do I get with Gold?')
     expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
     const values = placeholderValues(await a.facts())
-    expect((await outTexts(maria()))[0]!.body).toContain(`Gold is $99 a month. ${values.get('{perks:gold}')}. Want a link to join?`)
-    expect(values.get('{perks:gold}')).toContain('no booking fees')
+    expect((await outTexts(maria()))[0]!.body).toContain(`Gold starts at $99 a month (sedan/coupe). ${values.get('{perks:gold}')}. Want a link to join?`)
+    expect(values.get('{perks:gold}')).toContain('4 hand washes a month')
     // the judge read the perks as the server's own part: its <own-text> has only the model's words
     const judged = JSON.stringify(a.judge.requests[0]!.messages)
     expect(judged).toContain('<own-text>\\n…. …. Want a link to join?\\n</own-text>')
@@ -586,7 +599,7 @@ describe('W4 live eval: what the eval on Bedrock found in these seams', () => {
     await setting('assistant.actions_enabled', true)
     await w.tx((tx) => grantTrust(tx, { locationId: w.locationId, phone: maria(), customerId: w.customer('Maria Delgado').id, verifiedBy: 'pin', now: w.clock.now() }))
     const a = assistant([
-      simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: TEN_AM, vehicle: null }),
+      simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: TEN_AM, vehicle: null, vehicleClass: null }),
       simText('{confirm}. As a guest, {fee}.'),
       simText('{confirm}. As a guest, {fee}.'),
     ])
@@ -629,6 +642,7 @@ describe('W4b fixes (the conversation eval and its independent check)', () => {
         date: MONDAY,
         startMin: TEN_AM,
         vehicle: null,
+        vehicleClass: null,
       }),
       simText('{confirm}.'),
     ])
@@ -687,7 +701,7 @@ describe('W4b fixes (the conversation eval and its independent check)', () => {
     expect((await conversationOf(NEWCOMER))!.language).toBe('es')
     const [first] = await outTexts(NEWCOMER)
     expect(first!.body).toBe(
-      'Asistente automatizado de Oasis Auto Spa. ¡Hola! Signature Hand Wash: desde $45 para miembros, $54 para los demas. Quienes no son miembros pagan una tarifa de reserva de $25. ¿Como te llamas? Responde STOP para no recibir mas mensajes.',
+      'Asistente automatizado de Oasis Auto Spa. ¡Hola! Signature Hand Wash: desde $54 (Sedan / Coupe), $45 para miembros. Quienes no son miembros pagan una tarifa de reserva de $25. ¿Como te llamas? Responde STOP para no recibir mas mensajes.',
     )
     expect(STOPS(first!.body)).toBe(1)
     w.clock.advance(60_000)
@@ -698,7 +712,7 @@ describe('W4b fixes (the conversation eval and its independent check)', () => {
     expect(link.body).toBe(`Confirma que eres tu aqui: [private link] ${SAFETY_LINES.es}`)
     // the judge read the Spanish renderings as the server's own
     expect(unkeyed(JSON.stringify(a.judge.requests[0]!.messages))).toContain(
-      `${TRUSTED_OPEN}Signature Hand Wash: desde $45 para miembros, $54 para los demas${TRUSTED_CLOSE}`,
+      `${TRUSTED_OPEN}Signature Hand Wash: desde $54 (Sedan / Coupe), $45 para miembros${TRUSTED_CLOSE}`,
     )
   })
 
@@ -720,6 +734,7 @@ describe('W4b fixes (the conversation eval and its independent check)', () => {
         date: MONDAY,
         startMin: TEN_AM,
         vehicle: null,
+        vehicleClass: null,
       }),
       simText('{confirm}.'),
     ])
@@ -802,6 +817,7 @@ describe('W4b fixes (the conversation eval and its independent check)', () => {
         date: MONDAY,
         startMin: TEN_AM,
         vehicle: null,
+        vehicleClass: null,
       }),
       simText('{confirm}.'),
       // turn 4: "great, is it all set?" after the reply number booked it
@@ -840,7 +856,7 @@ describe('W4b fixes (the conversation eval and its independent check)', () => {
     const failAction = simText('{"reason":"says the visit is set before it is booked","category":"action","ok":false}')
     const a = assistant(
       [
-        simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: TEN_AM, vehicle: null }),
+        simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: TEN_AM, vehicle: null, vehicleClass: null }),
         simText('{confirm}. See you Monday at 10!'),
         simText('{confirm}. See you then!'),
       ],
@@ -998,7 +1014,7 @@ describe('guard polish after W4b-fix (the W4a fresh set and the W4b-fix check)',
     const a = assistant([simText('{price:signature-hand-wash} Want me to book it?')])
     await inbound(maria(), 'How much is the signature wash?')
     expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
-    expect((await outTexts(maria())).at(-1)!.body).toContain('otherwise. Want me to book it?')
+    expect((await outTexts(maria())).at(-1)!.body).toContain('$45 for members. Want me to book it?')
     expect(a.provider.requests).toHaveLength(1)
   })
 
@@ -1006,7 +1022,7 @@ describe('guard polish after W4b-fix (the W4a fresh set and the W4b-fix check)',
     await setting('assistant.actions_enabled', true)
     await trustMaria()
     const a = assistant([
-      simToolUse('set_my_vehicle', { type: 'suv_crossover', make: 'Honda', model: 'Pilot', year: 2019, color: null }),
+      simToolUse('set_my_vehicle', { size: 'suv', make: 'Honda', model: 'Pilot', year: 2019, color: null }),
       simToolUse('check_availability', { serviceKey: 'signature-hand-wash', date: MONDAY, partOfDay: 'morning' }),
       simText('Saved your 2019 Honda Pilot. Monday morning has openings, want 10:00 AM?'),
     ])
@@ -1062,7 +1078,7 @@ describe('guard polish after W4b-fix (the W4a fresh set and the W4b-fix check)',
     await setting('assistant.actions_enabled', true)
     await trustMaria()
     const a = assistant([
-      simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: TEN_AM, vehicle: null }),
+      simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: TEN_AM, vehicle: null, vehicleClass: null }),
       simText('{confirm}.'),
     ])
     await inbound(maria(), 'Hola, quiero reservar un lavado el lunes a las 10 por favor')
@@ -1088,7 +1104,7 @@ describe('W4 final-check fixes (L1-L7: the record covers the conversation, unver
 
   it('L1: a link texted in an earlier turn and what that turn saved are on the record: "use the link I texted you earlier" is true', async () => {
     const a = assistant([
-      simToolUse('set_my_vehicle', { type: 'suv_crossover', make: 'Honda', model: 'Pilot', year: 2019, color: null }),
+      simToolUse('set_my_vehicle', { size: 'suv', make: 'Honda', model: 'Pilot', year: 2019, color: null }),
       simToolUse('send_link', { kind: 'calendar', appointmentRef: null, tier: null }),
       simText("Saved your Honda Pilot. Here's your link to book: {link1}"),
       // the next turn: no new link (one calendar link an hour); the model points to the one texted
@@ -1114,7 +1130,7 @@ describe('W4 final-check fixes (L1-L7: the record covers the conversation, unver
     await setting('assistant.actions_enabled', true)
     await trustMaria()
     const a = assistant([
-      simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: TEN_AM, vehicle: null }),
+      simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: TEN_AM, vehicle: null, vehicleClass: null }),
       simText('{confirm}.'),
       simText('It is Signature Hand Wash on Monday at 10:00 AM: just reply with the number I texted.'),
     ])
@@ -1232,3 +1248,64 @@ describe('W4 final-check fixes (L1-L7: the record covers the conversation, unver
   })
 })
 
+
+describe('wave Q3d: the W4 leftovers (the guard and the judge say the same thing; a link the client cannot find is texted again)', () => {
+  const recordOf = (req: AiConverseRequest): string => {
+    const t = (req.messages[0]!.content[0] as { text: string }).text
+    return t.slice(t.indexOf('<server-record>'))
+  }
+  const urlOf = async (messageId: string): Promise<string> => /https:\/\/\S+/.exec((await outboxOf(messageId)).body)![0]
+
+  it('L6: "pick 3:00 PM on the link" to an unverified phone is rewritten by the guard before the judge reads it', async () => {
+    const a = assistant([
+      simText('Just use the link in your texts to pick 3:00 PM on Friday!'),
+      (req) => {
+        expect(JSON.stringify(req.messages.at(-1))).toContain(PROBLEM_HINTS.unverified_claim.slice(0, 60))
+        return simText('Just use the link in your texts to pick any open time on Friday.')
+      },
+    ])
+    await inbound(maria(), '3pm is good')
+    expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
+    expect((await outTexts(maria())).at(-1)!.body).toContain('Just use the link in your texts to pick any open time on Friday.')
+    expect(a.provider.requests).toHaveLength(2)
+    // the judge read only the rewritten text: no fallback, no handoff
+    expect(a.judge.requests).toHaveLength(1)
+    expect(await handoffAlerts()).toEqual([])
+  })
+
+  it('L6: "9 AM Friday looks good!" to an unverified phone is rewritten too', async () => {
+    const a = assistant([simText('9 AM Friday looks good!'), simText("Here's where you pick a time: the booking link I texted you.")])
+    await inbound(maria(), 'what about 9am friday?')
+    expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
+    expect(a.provider.requests).toHaveLength(2)
+    expect((await outTexts(maria())).at(-1)!.body).not.toContain('9 AM')
+  })
+
+  it('a client who cannot find the calendar link gets the SAME link again (no new token), not a handoff', async () => {
+    const a = assistant([
+      simToolUse('send_link', { kind: 'calendar', appointmentRef: null, tier: null }),
+      simText("Here's your link to book: {link1}"),
+      simToolUse('send_link', { kind: 'calendar', appointmentRef: null, tier: null }),
+      (req) => {
+        const result = JSON.stringify(toolResultsOf(req))
+        expect(result).toContain('"resent":true')
+        expect(result).toContain('same link texted earlier')
+        return simText('Here it is again: {link1}')
+      },
+    ])
+    await inbound(maria(), 'can I book a wash?')
+    expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
+    const first = (await outTexts(maria())).at(-1)!
+    w.clock.advance(10 * 60_000)
+    await inbound(maria(), "I can't find the link")
+    expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
+    const second = (await outTexts(maria())).at(-1)!
+    expect(second.id).not.toBe(first.id)
+    expect(second).toMatchObject({ klass: 'personal_link', body: 'Here it is again: [private link]' })
+    expect(await urlOf(second.id)).toBe(await urlOf(first.id))
+    const links = await w.t.db.selectFrom('client_links').select(['kind', 'retexted_at']).execute()
+    expect(links).toEqual([{ kind: 'calendar', retexted_at: w.clock.now() }])
+    expect(await handoffAlerts()).toEqual([])
+    expect(recordOf(a.judge.requests.at(-1)!)).toContain('texted the client again the same calendar link it texted earlier')
+  })
+})

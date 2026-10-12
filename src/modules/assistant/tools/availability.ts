@@ -149,7 +149,7 @@ async function linkInsteadOfTimes(
   }
   let placeholder = issuedLinks.get(ctx) ?? null
   if (!placeholder) {
-    const link = await issueLinkOutcome(ctx, { kind: 'calendar', appointmentRef: null, tier: null })
+    const link = await issueLinkOutcome(ctx, { kind: 'calendar', appointmentRef: null, tier: null }, { retext: false })
     // a booking link went to this number within the hour (one per kind an hour): they pick the time on that one
     if (!link.ok && link.error === 'rate_limited')
       return ok(json({ ...day, bookingLink: null, linkAlreadyTexted: true, instruction: LINK_TEXTED_RULE }))

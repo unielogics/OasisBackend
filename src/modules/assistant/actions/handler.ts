@@ -200,10 +200,33 @@ async function execute(tx: Tx, deps: AssistantDeps, input: ActionCodeInput, acti
     const vehicle = p.vehicleId
       ? await tx
           .selectFrom('vehicles')
-          .select(['id', 'vehicle_class'])
+          .select(['id', 'vehicle_class', 'vehicle_class_source'])
           .where('id', '=', p.vehicleId)
           .where('customer_id', '=', customer.id)
           .where('deleted_at', 'is', null)
+          .executeTakeFirst()
+      : undefined
+    // a size staff set on the car wins, also one set after the proposal (the visit is then priced at the car's size); while it is
+    // still a size the shop has on
+    const staffSize =
+      vehicle?.vehicle_class_source === 'staff' && vehicle.vehicle_class
+        ? await tx
+            .selectFrom('vehicle_classes')
+            .select('key')
+            .where('location_id', '=', loc)
+            .where('key', '=', vehicle.vehicle_class)
+            .where('active', '=', true)
+            .executeTakeFirst()
+        : undefined
+    // else the size of the proposal (facts-v4: the size the client said, or the car's), while it is still a size the shop has on;
+    // the car records it as the assistant's (never over a size staff set: recordVehicleClass)
+    const size = p.vehicleClass && !staffSize
+      ? await tx
+          .selectFrom('vehicle_classes')
+          .select('key')
+          .where('location_id', '=', loc)
+          .where('key', '=', p.vehicleClass)
+          .where('active', '=', true)
           .executeTakeFirst()
       : undefined
     // a trust granted by the client's own PIN makes the visit proof of them for the stale-record rule (a code's never does)
@@ -212,6 +235,7 @@ async function execute(tx: Tx, deps: AssistantDeps, input: ActionCodeInput, acti
       bookedWithPin: trust.trusted && trust.verifiedBy === 'pin',
       customer: { id: customer.id },
       vehicleId: vehicle?.id ?? null,
+      ...(size ? { vehicleClass: size.key, recordClassAs: 'ai' as const } : {}),
       serviceId: pkg.id,
       addonIds: addons.map((a) => a!.id),
       start: wallToInstant(p.date, p.startMin, tz),

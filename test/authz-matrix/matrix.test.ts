@@ -31,6 +31,8 @@ const PUBLIC_ROUTES = new Set([
   // per-address limits); every POST carries the website's own abuse controls instead of a session
   'GET /api/v1/public/availability',
   'GET /api/v1/public/catalog',
+  // the catalog by vehicle size (ADR 0170 wave Q3d): the same public facts by size, still no ids, versions or Square fields
+  'GET /api/v1/public/catalog/v2',
   'POST /api/v1/public/otp',
   'POST /api/v1/public/otp/verify',
   'POST /api/v1/public/bookings',

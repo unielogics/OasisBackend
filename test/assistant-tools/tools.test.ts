@@ -5,12 +5,12 @@
 import { describe, expect, it } from 'vitest'
 import { sql } from 'kysely'
 import { TOOL_MIN_TRUST, type AnyAssistantTool, type ToolOutcome } from '../../src/modules/assistant/contract.js'
-import { tintRowsFor } from '../../src/modules/assistant/tools/account.js'
 import { vipFor } from '../../src/modules/assistant/tools/availability.js'
 import { privilegesOf } from '../../src/modules/assistant/tools/common.js'
 import { createToolRegistry } from '../../src/modules/assistant/tools/index.js'
 import { createNewTexters } from '../../src/modules/assistant/welcome/new-texters.js'
 import { hashToken } from '../../src/modules/auth/tokens.js'
+import { ensurePlans } from '../../src/modules/memberships/plans.js'
 import { STRANGER, useToolWorld } from './world.js'
 
 const w = useToolWorld()
@@ -89,14 +89,18 @@ describe('public facts: business info, services (starting prices only), membersh
     const { ctx } = await w.ctx({ customerId: null, phone: STRANGER, trust: 'unknown' })
     const d = data(await run('list_services', ctx, { category: null }))
     expect(d.priceRule).toMatch(/Never write an amount/)
-    expect(d.priceRule).toMatch(/STARTING prices/)
-    const items = d.items as { key: string; priceKey: string; quoteOnly: boolean; kind: string }[]
+    expect(d.priceRule).toMatch(/STARTING price/)
+    expect(d.sizeRule).toMatch(/Prices depend on the vehicle size/)
+    expect(d.sizes).toEqual(w.facts.catalog.sizes)
+    const items = d.items as { key: string; priceKey: string; quoteOnly: boolean; kind: string; sizePriceKeys: { sizeKey: string; priceKey: string }[] }[]
     const express = items.find((i) => i.key === 'express-hand-wash')!
     expect(express).toMatchObject({ priceKey: '{price:express-hand-wash}', kind: 'package' })
+    // facts-v4: the placeholder of each size that has a price of its own
+    const fact = w.facts.catalog.items.find((i) => i.key === 'express-hand-wash')!
+    expect(express.sizePriceKeys).toEqual(fact.prices.map((p) => ({ size: p.classLabel, sizeKey: p.class, priceKey: `{price:express-hand-wash:${p.class}}` })))
     // no amount reaches the model: a model-written amount is refused by the output guard
     expect(JSON.stringify(d)).not.toMatch(/Cents|\$\d|"total|"discount/i)
     for (const i of items) expect(i.priceKey).toBe(`{price:${i.key}}`)
-    expect(d.tint).toEqual([{ vehicle: 'Sedan / coupe', vehicleKey: 'sedan_coupe', film: 'Ceramic', filmKey: 'ceramic', vlt: [5, 20, 35], priceKey: '{price:tint:sedan_coupe:ceramic}' }])
     const washOnly = data(await run('list_services', ctx, { category: 'wash' }))
     expect((washOnly.items as { category: string }[]).every((i) => i.category === 'wash')).toBe(true)
     expect(await run('list_services', ctx, { category: 'nope' })).toMatchObject({ ok: false, error: 'invalid' })
@@ -106,8 +110,24 @@ describe('public facts: business info, services (starting prices only), membersh
     const stranger = await w.ctx({ customerId: null, phone: STRANGER, trust: 'unknown' })
     const s = data(await run('get_membership_info', stranger.ctx, {}))
     expect(s.plans).toEqual([
-      { tier: 'gold', label: 'Gold', priceKey: '{plan:gold}', perksKey: '{perks:gold}', perks: ['4 hand washes a month'] },
-      { tier: 'vip', label: 'VIP', priceKey: '{plan:vip}', perksKey: '{perks:vip}', perks: ['Everything in Gold'] },
+      {
+        tier: 'gold',
+        label: 'Gold',
+        priceKey: '{plan:gold}',
+        sizePriceKeys: [{ size: 'Compact car', sizeKey: 'compact_car', priceKey: '{plan:gold:compact_car}' }],
+        perksKey: '{perks:gold}',
+        vipBooking: false,
+        perks: ['4 hand washes a month'],
+      },
+      {
+        tier: 'vip',
+        label: 'VIP',
+        priceKey: '{plan:vip}',
+        sizePriceKeys: [{ size: 'Compact car', sizeKey: 'compact_car', priceKey: '{plan:vip:compact_car}' }],
+        perksKey: '{perks:vip}',
+        vipBooking: true,
+        perks: ['Everything in Gold'],
+      },
     ])
     // the perks go out only server-written (W4 live eval: the judge failed them in the model's own words)
     expect(s.perksRule).toMatch(/Never describe a plan.s perks in your own words/)
@@ -307,26 +327,59 @@ describe('the client’s own record', () => {
     expect(named).toEqual([{ action: 'assistant.client.named', actor_name: 'Oasis AI (SMS)' }])
   })
 
-  it('set_my_vehicle adds a vehicle with its tint class to the caller’s own record only', async () => {
+  it('set_my_vehicle adds a vehicle with the size the client said (a size key of the facts) to the caller’s own record only', async () => {
     const { ctx } = await w.ctx({ customerId: david().id, phone: david().phone, trust: 'caller' })
     const before = await w.t.db.selectFrom('vehicles').select('id').where('customer_id', '=', david().id).execute()
-    const r = await run('set_my_vehicle', ctx, { type: 'suv_crossover', make: 'Honda', model: 'CR-V', year: 2022, color: 'Blue' })
-    expect(r).toMatchObject({ ok: true, data: { saved: true, vehicle: '2022 Honda CR-V', type: 'suv_crossover' } })
-    const rows = await w.t.db.selectFrom('vehicles').select(['make', 'model', 'year', 'color', 'vehicle_type', 'customer_id']).where('customer_id', '=', david().id).execute()
+    const r = await run('set_my_vehicle', ctx, { size: 'compact_suv', make: 'Honda', model: 'CR-V', year: 2022, color: 'Blue' })
+    expect(r).toMatchObject({ ok: true, data: { saved: true, vehicle: '2022 Honda CR-V', size: 'Compact SUV', sizeKey: 'compact_suv' } })
+    // the price keys of that size (facts-v4): the washes and the plans, as placeholders only
+    const keys = (data(r).priceKeys as { name: string; priceKey: string }[]).map((k) => k.priceKey)
+    expect(keys).toContain('{price:express-hand-wash:compact_suv}')
+    expect(keys).toContain('{plan:gold:compact_suv}')
+    expect(JSON.stringify(r)).not.toMatch(/Cents|\$\d/)
+    const cols = ['make', 'model', 'year', 'color', 'vehicle_type', 'vehicle_class', 'vehicle_class_source', 'customer_id'] as const
+    const rows = await w.t.db.selectFrom('vehicles').select([...cols]).where('customer_id', '=', david().id).execute()
     expect(rows).toHaveLength(before.length + 1)
-    expect(rows).toContainEqual({ make: 'Honda', model: 'CR-V', year: 2022, color: 'Blue', vehicle_type: 'suv_crossover', customer_id: david().id })
-    // the same vehicle again: no second row
-    await run('set_my_vehicle', ctx, { type: 'suv_crossover', make: 'honda', model: 'cr-v', year: null, color: null })
+    expect(rows).toContainEqual({
+      make: 'Honda',
+      model: 'CR-V',
+      year: 2022,
+      color: 'Blue',
+      vehicle_type: 'suv_crossover',
+      vehicle_class: 'compact_suv',
+      vehicle_class_source: 'ai',
+      customer_id: david().id,
+    })
+    // the same vehicle again: no second row; a new size the client gives is recorded
+    await run('set_my_vehicle', ctx, { size: 'large_suv', make: 'honda', model: 'cr-v', year: null, color: null })
     expect(await w.t.db.selectFrom('vehicles').select('id').where('customer_id', '=', david().id).execute()).toHaveLength(before.length + 1)
-    expect(await run('set_my_vehicle', ctx, { type: 'truck_van', make: '<script>', model: 'x', year: null, color: null })).toMatchObject({ ok: false, error: 'invalid' })
-    expect(() => tool('set_my_vehicle').input.parse({ type: 'boat', make: 'a', model: 'b', year: null, color: null })).toThrow()
+    expect(await w.t.db.selectFrom('vehicles').select('vehicle_class').where('customer_id', '=', david().id).where('model', '=', 'CR-V').executeTakeFirstOrThrow()).toEqual({
+      vehicle_class: 'large_suv',
+    })
+    expect(await run('set_my_vehicle', ctx, { size: 'truck', make: '<script>', model: 'x', year: null, color: null })).toMatchObject({ ok: false, error: 'invalid' })
+    // a size the shop does not have (the old vehicle types included) is refused, with the shop's sizes to ask from
+    for (const size of ['boat', 'suv_crossover', 'sedan_coupe']) {
+      const bad = await run('set_my_vehicle', ctx, { size, make: 'Honda', model: 'Fit', year: null, color: null })
+      expect(bad, size).toMatchObject({ ok: false, error: 'invalid', detail: { sizes: w.facts.catalog.sizes } })
+    }
+    expect(() => tool('set_my_vehicle').input.parse({ type: 'suv_crossover', make: 'a', model: 'b', year: null, color: null })).toThrow()
   })
 
-  it('a vehicle class finds its tint rows whether the matrix keys it "suv" (the website’s matrix) or "suv_crossover"', () => {
-    const rows = [{ vehicle: 'sedan' }, { vehicle: 'suv' }, { vehicle: 'truck' }, { vehicle: 'suv_crossover' }]
-    expect(tintRowsFor(rows, 'suv_crossover')).toEqual([{ vehicle: 'suv' }, { vehicle: 'suv_crossover' }])
-    expect(tintRowsFor(rows, 'truck_van')).toEqual([{ vehicle: 'truck' }])
-    expect(tintRowsFor([{ vehicle: 'coupe' }], 'sedan_coupe')).toEqual([])
+  it('set_my_vehicle never replaces a size staff set: the car keeps it and the price keys follow it', async () => {
+    const { ctx } = await w.ctx({ customerId: david().id, phone: david().phone, trust: 'caller' })
+    const car = w.newId()
+    await w.t.db
+      .insertInto('vehicles')
+      .values({ id: car, customer_id: david().id, year: 2020, make: 'Ford', model: 'Expedition', color: null, plate: null, deleted_at: null, vehicle_class: 'large_suv', vehicle_class_source: 'staff' })
+      .execute()
+    const r = await run('set_my_vehicle', ctx, { size: 'compact_car', make: 'Ford', model: 'Expedition', year: 2020, color: null })
+    expect(r).toMatchObject({ ok: true, data: { size: 'Large SUV', sizeKey: 'large_suv' } })
+    expect(String(data(r).note)).toContain('Large SUV')
+    expect((data(r).priceKeys as { priceKey: string }[]).every((k) => k.priceKey.endsWith(':large_suv}'))).toBe(true)
+    expect(await w.t.db.selectFrom('vehicles').select(['vehicle_class', 'vehicle_class_source']).where('id', '=', car).executeTakeFirstOrThrow()).toEqual({
+      vehicle_class: 'large_suv',
+      vehicle_class_source: 'staff',
+    })
   })
 })
 
@@ -355,9 +408,19 @@ describe('send_link', () => {
     expect(row).toEqual({ kind: 'verify', phone_e164: maria().phone, customer_id: maria().id, issued_by: 'assistant', token_hash: hashToken(url.split('/').pop()!) })
   })
 
-  it('keeps its limits: one of a kind an hour, three a day', async () => {
+  it('keeps its limits: one of a kind an hour (the same link texted again once instead), three a day counting the re-text', async () => {
     const probe = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'caller' })
     expect(await run('send_link', probe.ctx, { kind: 'calendar', appointmentRef: null, tier: null })).toMatchObject({ ok: true })
+    // the client cannot find it (W4 leftover): within the hour, the SAME link is texted again (no new token, no new row), not a handoff
+    const again = await run('send_link', probe.ctx, { kind: 'calendar', appointmentRef: null, tier: null })
+    expect(again).toMatchObject({ ok: true, data: { placeholder: '{link2}', kind: 'calendar', resent: true } })
+    expect(String(data(again).instruction)).toMatch(/same link texted earlier/)
+    expect(probe.links.map((l) => l.url)).toEqual([probe.links[0]!.url, probe.links[0]!.url])
+    expect(probe.handoffs).toEqual([])
+    const rows = await w.t.db.selectFrom('client_links').select(['id', 'retexted_at']).execute()
+    expect(rows).toEqual([{ id: expect.any(String), retexted_at: w.clock.now() }])
+    expect(await w.t.db.selectFrom('audit_log').select('action').where('action', '=', 'assistant.link.resent').execute()).toHaveLength(1)
+    // once per link: a third ask within the hour is the limit
     const limited = await run('send_link', probe.ctx, { kind: 'calendar', appointmentRef: null, tier: null })
     expect(limited).toMatchObject({ ok: false, error: 'rate_limited' })
     // the model points to the link already texted and never tells the client about a limit (W4 live eval)
@@ -365,16 +428,56 @@ describe('send_link', () => {
     // full Bedrock run 1791780753: "It's good for 3 days so no rush!" and "scroll up" to a client who could not find the link
     expect(JSON.stringify(limited)).toContain('never tell them how long it works')
     expect(JSON.stringify(limited)).toContain('If they say they cannot find it, say a team member will text it to them and call handoff_to_staff')
+    // the re-text counted: calendar + re-text + verify are the day's three
     expect(await run('send_link', probe.ctx, { kind: 'verify', appointmentRef: null, tier: null })).toMatchObject({ ok: true })
-    expect(await run('send_link', probe.ctx, { kind: 'pin', appointmentRef: null, tier: null })).toMatchObject({ ok: true })
+    expect(await run('send_link', probe.ctx, { kind: 'pin', appointmentRef: null, tier: null })).toMatchObject({ ok: false, error: 'rate_limited' })
     w.clock.advance(61 * 60_000)
     const later = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'caller' })
     expect(await run('send_link', later.ctx, { kind: 'calendar', appointmentRef: null, tier: null })).toMatchObject({ ok: false, error: 'rate_limited' })
-    expect(await w.t.db.selectFrom('client_links').select('id').execute()).toHaveLength(3)
+    expect(await w.t.db.selectFrom('client_links').select('id').execute()).toHaveLength(2)
   })
 
-  it('a membership link needs the plan the tier sells to be set up', async () => {
+  it('re-texts only a link it can: not a used-up, revoked or random-token one, and never from check_availability', async () => {
     const probe = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'caller' })
+    expect(await run('send_link', probe.ctx, { kind: 'calendar', appointmentRef: null, tier: null })).toMatchObject({ ok: true })
+    // a link whose token was not derived (issued before re-texting, or by staff) cannot be texted again
+    await w.t.db.updateTable('client_links').set({ token_hash: hashToken('x'.repeat(43)) }).execute()
+    expect(await run('send_link', probe.ctx, { kind: 'calendar', appointmentRef: null, tier: null })).toMatchObject({ ok: false, error: 'rate_limited' })
+    await w.t.db.deleteFrom('client_links').execute()
+    expect(await run('send_link', probe.ctx, { kind: 'verify', appointmentRef: null, tier: null })).toMatchObject({ ok: true })
+    await w.t.db.updateTable('client_links').set({ revoked_at: w.clock.now(), revoke_reason: 'staff' }).execute()
+    expect(await run('send_link', probe.ctx, { kind: 'verify', appointmentRef: null, tier: null })).toMatchObject({ ok: false, error: 'rate_limited' })
+    expect(await w.t.db.selectFrom('client_links').select('retexted_at').execute()).toEqual([{ retexted_at: null }])
+  })
+
+  it('re-texts only the same plan’s link: a VIP link asked for within the hour of a Gold one is not the Gold link again', async () => {
+    await ensurePlans(w.t.db, { locationId: w.locationId, clock: w.clock, newId: w.newId })
+    const before = await w.t.db.selectFrom('membership_plans').select(['key', 'public', 'active']).where('key', 'in', ['gold', 'vip']).execute()
+    expect(before.map((p) => p.key).sort()).toEqual(['gold', 'vip'])
+    await w.t.db.updateTable('membership_plans').set({ public: true, active: true }).where('key', 'in', ['gold', 'vip']).execute()
+    try {
+      const probe = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'caller' })
+      expect(await run('send_link', probe.ctx, { kind: 'membership', appointmentRef: null, tier: 'gold' })).toMatchObject({ ok: true })
+      // verifier probe (F1): this re-texted the Gold link as "the same link texted earlier"
+      const vip = await run('send_link', probe.ctx, { kind: 'membership', appointmentRef: null, tier: 'vip' })
+      expect(vip).toMatchObject({ ok: false, error: 'rate_limited' })
+      expect(probe.links).toHaveLength(1)
+      expect(await w.t.db.selectFrom('client_links').select(['plan_key', 'retexted_at']).execute()).toEqual([{ plan_key: 'gold', retexted_at: null }])
+      // the same plan again: the Gold link, texted again
+      expect(await run('send_link', probe.ctx, { kind: 'membership', appointmentRef: null, tier: 'gold' })).toMatchObject({ ok: true, data: { resent: true } })
+      expect(probe.links.map((l) => l.url)).toEqual([probe.links[0]!.url, probe.links[0]!.url])
+    } finally {
+      for (const p of before) await w.t.db.updateTable('membership_plans').set({ public: p.public, active: p.active }).where('key', '=', p.key).execute()
+    }
+  })
+
+  it('a membership link only for a plan sold online (facts-v4: a tier with a price), and only once the plan is set up', async () => {
+    const probe = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'caller' })
+    // a tier not among the facts' plans (no current price: plan decision 3) gets no link
+    expect(await run('send_link', probe.ctx, { kind: 'membership', appointmentRef: null, tier: 'essential' })).toMatchObject({ ok: false, error: 'unavailable' })
+    const unpriced = { ...probe.ctx, facts: { ...probe.ctx.facts, plans: probe.ctx.facts.plans.filter((p) => p.key !== 'gold') } }
+    expect(await run('send_link', unpriced, { kind: 'membership', appointmentRef: null, tier: 'gold' })).toMatchObject({ ok: false, error: 'unavailable' })
+    expect(await w.t.db.selectFrom('client_links').select('id').execute()).toEqual([])
     const hasPlan = await w.t.db.selectFrom('membership_plans').select('id').where('key', '=', 'gold').executeTakeFirst()
     const r = await run('send_link', probe.ctx, { kind: 'membership', appointmentRef: null, tier: 'gold' })
     expect(r).toMatchObject(hasPlan ? { ok: true } : { ok: false, error: 'unavailable' })

@@ -39,9 +39,9 @@ const hard = (text: string): boolean => {
 describe('P1: the fresh set’s design-induced false blocks', () => {
   it('a placeholder followed by a sentence without its full stop: the server writes the stop (no rewrite)', () => {
     for (const [id, out] of [
-      ['F125', "Here's the pricing. Signature Hand Wash starts at $45 for members, $54 otherwise. Want me to book it?"],
+      ['F125', "Here's the pricing. Signature Hand Wash starts at $40 (compact car), $36 for members. Want me to book it?"],
       ['F128', 'Guests pay a $25 booking fee. Would you like to go ahead with the booking?'],
-      ['F127', 'Gold is $99 a month. VIP is $169 a month. Would you like to hear the perks of each?'],
+      ['F127', 'Gold starts at $129 a month (compact car). VIP starts at $199 a month (compact car). Would you like to hear the perks of each?'],
     ] as const) {
       const row = fresh.rows.find((r) => r.id === id)!
       expect(g(row.text), id).toMatchObject({ kind: 'ok', rendered: out })
