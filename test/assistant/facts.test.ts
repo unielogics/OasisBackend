@@ -141,10 +141,9 @@ describe('the shop facts document', () => {
         shopNumbers: [f.contact.textingNumber, f.contact.callingNumber],
       })
     const signature = f.catalog.items.find((i) => i.name === 'Signature Hand Wash')!
-    expect(guard('Sure, we can offer a discount on your next wash.')).toMatchObject({ kind: 'fix', problems: ['promise_words'], words: ['discount'] })
-    expect(guard('We can give you a discount next time.')).toMatchObject({ kind: 'fix', problems: ['promise_words'] })
-    // the owner's own perk wording is no excuse either: the prompt tells the model to say it another way
-    expect(guard('VIP adds priority booking and a same-day guarantee.')).toMatchObject({ kind: 'fix', problems: ['promise_words'], words: ['guarantee'] })
+    // promises are the policy judge's (W4a F2: no promise word list): the deterministic layer passes them, the judge reads them
+    // (conversations.test.ts: a discount the judge fails gets one rewrite, then the fallback)
+    expect(guard('Sure, we can offer a discount on your next wash.')).toMatchObject({ kind: 'ok' })
     expect(guard(`Sure! {price:${signature.key}}.`)).toMatchObject({
       kind: 'ok',
       rendered: 'Sure! Signature Hand Wash starts at $45 for members, $54 otherwise.',

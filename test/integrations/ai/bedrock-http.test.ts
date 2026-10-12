@@ -1,6 +1,6 @@
 // BedrockProvider over real HTTP (scripts/verify-live/sim-bedrock.ts): the real AWS SDK serialises the Converse request, signs it,
 // retries and parses the errors, so this proves what goes on the wire: the same bytes for the same request (prompt caching), the
-// reasoning blocks back exactly as they came, two attempts in all for throttling and outages, one for a fatal error.
+// reasoning blocks back exactly as they came, one attempt for every error (no SDK retry: the turn retries once itself, W4a F3).
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { BedrockProvider, createBedrockClient } from '../../../src/integrations/ai/index.js'
 import type { AiConverseRequest } from '../../../src/integrations/ports/ai.js'
@@ -162,10 +162,10 @@ describe('on the wire', () => {
     expect(r).toMatchObject({ stopReason: 'refused', rawStopReason: 'refusal', message: { content: [] } })
   })
 
-  it('throttling and outages get exactly one SDK retry (two attempts), fatal errors none', async () => {
+  it('no SDK retry (one attempt; the turn retries throttling, timeouts and outages once itself, W4a F3)', async () => {
     for (const [scenario, kind, attempts] of [
-      ['throttled', 'throttled', 2],
-      ['unavailable', 'unavailable', 2],
+      ['throttled', 'throttled', 1],
+      ['unavailable', 'unavailable', 1],
       ['access_denied', 'access_denied', 1],
       ['model_access', 'access_denied', 1],
       ['invalid_model', 'invalid_request', 1],

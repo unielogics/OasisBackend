@@ -9,7 +9,8 @@
 //     pnpm eval:guard --json guard-eval-results.json
 // (W4a: 286 judge calls, one per row the deterministic layer passes, ~1,050 cached rubric tokens + ~60 input and ~33 output tokens
 // each: about $0.31 on Sonnet 4.6 list prices, ten minutes at 30 a minute). Also --fixture test/assistant/fixtures/
-// guard-eval-w4-probes.json (Spanish, quoting the client, injections) and guard-eval-w4-heldout.json (the held-out set).
+// guard-eval-w4-probes.json (Spanish, quoting the client, injections), guard-eval-w4-heldout.json (the held-out set) and
+// guard-eval-w4-fresh.json (written blind after the W4a fixes).
 //
 // Options: --fixture <path> (default test/assistant/fixtures/guard-eval.json), --concurrency <n> (default 4), --cat A,B,...,
 // --source v3-probe|earlier-rounds|v4-placement, --limit <n>, --no-judge (the deterministic layer only), --json <path> (every row's

@@ -58,7 +58,9 @@ export type TranscriptEntry =
   | { kind: 'message'; message: AiMessage; stopReason?: string; usage?: Record<string, number> }
   | { kind: 'tools'; round: number; calls: { tool: string; outcome: string; error?: string }[] }
   | { kind: 'guard'; verdict: string; problems?: string[]; words?: string[] }
-  | { kind: 'judge'; verdict: 'pass' | 'fail' | 'error'; category?: string; reason?: string; error?: string; model: string | null; latencyMs: number }
+  | { kind: 'judge'; verdict: 'pass' | 'fail' | 'error'; category?: string; reason?: string; error?: string; model: string | null; latencyMs: number; attempts?: number }
+  /** W4a fix F3: a throttled or timed-out model or judge call retried once (waitMs), or not retried for lack of time (skipped). */
+  | { kind: 'retry'; call: 'model' | 'judge'; error: string; waitMs?: number; skipped?: 'deadline' }
   | { kind: 'error'; error: string }
   | { kind: 'reply'; text: string; klass: string }
   | { kind: 'handoff'; reason: string }

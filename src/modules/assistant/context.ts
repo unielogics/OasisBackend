@@ -217,7 +217,7 @@ export async function loadConversation(
 
 /**
  * How a reply may name a vehicle on file: "2021 Tesla Model 3", "Tesla Model 3", and the model alone when it has a letter ("Model 3",
- * "C300", "F-150"; never a bare "911"). The guard skips them in the secret and promise word lists only: they are client-entered, so
+ * "C300", "F-150"; never a bare "911"). The guard skips them in the secret request check only: they are client-entered, so
  * the money, digit and host rules still read them and the judge never trusts them.
  */
 export function vehicleLiterals(v: { year: number | null; make: string | null; model: string | null }): string[] {

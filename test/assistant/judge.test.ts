@@ -48,6 +48,10 @@ describe('the judge request', () => {
     expect(JUDGE_RUBRIC.startsWith(POLICY_JUDGE_HEADER)).toBe(true)
     for (const part of ['(a) price:', '(b) promise:', '(c) secret:', '(d) link_or_phone:', '(e) other:', 'in any language', 'Decide by MEANING', '⟦K⟧ and ⟦/K⟧'])
       expect(JUDGE_RUBRIC).toContain(part)
+    // W4a F1: a quote the assistant's own words accept, confirm, acknowledge or repeat as a fact is its own statement
+    expect(JUDGE_RUBRIC).toContain("Quoting the client is allowed only while the assistant's own words do not take the quote over")
+    expect(JUDGE_RUBRIC).toContain('accepts, confirms, acknowledges or agrees to them or repeats them as a fact')
+    expect(JUDGE_RUBRIC).toMatch(/"Noted", "Got it", "Sure", "OK", "Understood", "Yes"/)
     // the reason comes first (the judge explains, then decides: verdict-first answers flipped and wrote a second object, W4a)
     expect(JUDGE_RUBRIC).toContain('{"reason":"<what the assistant\'s own text says or asks, at most 120 characters>","category":"none","ok":true}')
     expect(parseVerdict('{"reason":"a greeting","category":"none","ok":true}')).toEqual({ ok: true, category: 'none', reason: 'a greeting' })

@@ -227,6 +227,8 @@ function assistant(script: SimStep[] | SimResponder, cfg: Partial<AssistantConfi
     },
     cfg,
   })
+  // the one retry of a throttled or timed-out call (F3) waits 800-1500 ms in production; a few ms here
+  rt.turnDeps.retryBackoffMs = () => 5
   const turn = async (phone: string) => {
     const c = await conversationOf(phone)
     if (!c) return { status: 'none' as const }
@@ -388,24 +390,24 @@ describe('the pricing rule in a turn (design sections 3b and 3c: amounts are ser
     expect((await notifications()).some((x) => x.kind === 'assistant.handoff')).toBe(true)
   })
 
-  it('{balance} renders the balance get_balance returned this turn; refund words get one rewrite, then the fallback and a person (B)', async () => {
-    const a = assistant([simToolUse('get_balance', {}), simText('{balance}.'), simText('We can refund that for you.'), simText('Sure, a refund is fine.')])
+  it('{balance} renders the balance get_balance returned this turn; a refund the judge fails gets one rewrite, then the fallback and a person (B)', async () => {
+    // promises are the judge's (W4a F2: no promise word list): the deterministic layer passes "refund", the judge fails it twice
+    const a = assistant([simToolUse('get_balance', {}), simText('{balance}.'), simText('We can refund that for you.'), simText('Sure, a refund is fine.')], {}, [pass(), fail('promise'), fail('promise')])
     await inbound(maria(), 'What do I owe?')
     expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
     expect((await aiTexts(maria()))[0]!.body).toContain('Your open balance is $12.50.')
     w.clock.advance(70_000)
     await inbound(maria(), 'Can I get my money back?')
-    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'policy_words' })
+    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'policy_judge' })
     const instruction = JSON.stringify(a.provider.requests.at(-1)!.messages.at(-1))
-    expect(instruction).toContain('Rephrase without promising anything free, discounts, refunds, coupons or guarantees')
-    expect(instruction).toContain('Remove these from the text: \\"refund\\"')
+    expect(instruction).toContain(JUDGE_HINTS.promise.slice(0, 60))
     expect((await aiTexts(maria())).map((t) => t.klass)).toEqual(['ai_reply', 'ai_fallback'])
   })
 
-  it("a discount is never excused by the facts' own rules (\"never offer a discount\"): rewrite, then the fallback (F1)", async () => {
-    const a = assistant([simText('Sure, we can offer a discount on your next wash.'), simText('Yes, a discount on your next wash.')])
+  it("a discount is never excused by the facts' own rules (\"never offer a discount\"): the judge fails it, rewrite, then the fallback (F1)", async () => {
+    const a = assistant([simText('Sure, we can offer a discount on your next wash.'), simText('Yes, a discount on your next wash.')], {}, [fail('promise'), fail('promise')])
     await inbound(maria(), 'Any deals for me this week?')
-    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'policy_words' })
+    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'policy_judge' })
     expect(systemText(a.provider.requests[0]!)).toContain('never offer a discount')
     expect(a.provider.requests).toHaveLength(2)
     const texts = await aiTexts(maria())
@@ -413,8 +415,8 @@ describe('the pricing rule in a turn (design sections 3b and 3c: amounts are ser
     expect(texts[0]!.body).not.toContain('discount')
   })
 
-  it('a promise word the rewrite removes goes out rewritten, with no handoff ("free times" -> "open times") (B)', async () => {
-    const a = assistant([simText('We have free times at 2 PM and 4 PM today.'), simText('We have open times at 2 PM and 4 PM today.')])
+  it('a promise the judge fails and the rewrite removes goes out rewritten, with no handoff ("free times" -> "open times") (B)', async () => {
+    const a = assistant([simText('We have free times at 2 PM and 4 PM today.'), simText('We have open times at 2 PM and 4 PM today.')], {}, [fail('promise'), pass()])
     await inbound(maria(), 'Any time today?')
     expect(await a.turn(maria())).toMatchObject({ status: 'replied', handoff: false })
     expect(a.provider.requests).toHaveLength(2)
@@ -422,12 +424,12 @@ describe('the pricing rule in a turn (design sections 3b and 3c: amounts are ser
     expect((await conversationOf(maria()))!.handoff_state).not.toBe('open')
   })
 
-  it('a reply that mentions a PIN or a code is never sent, with or without a link (F3, N1, A)', async () => {
+  it('a reply that asks for a PIN is never sent, with or without a link (F3, N1, A)', async () => {
     const a = assistant([simText("Don't forget to text me your PIN."), simText('Send us, when you can, your PIN.')])
     await inbound(maria(), 'I want to see my visits')
     expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'guard' })
     expect(a.provider.requests).toHaveLength(2)
-    expect(JSON.stringify(a.provider.requests[1]!.messages.at(-1))).toContain('Write nothing about PINs, codes')
+    expect(JSON.stringify(a.provider.requests[1]!.messages.at(-1))).toContain('Never ask the client for a PIN, a code')
     const texts = await aiTexts(maria())
     expect(texts.map((t) => t.klass)).toEqual(['ai_fallback'])
   })
@@ -480,23 +482,54 @@ describe('the policy judge in a turn (design 3c, layer 3)', () => {
     expect((await w.t.db.selectFrom('assistant_turns').select(['status', 'error']).executeTakeFirstOrThrow())).toEqual({ status: 'handed_off', error: 'judge:promise' })
   })
 
-  const closed: Array<[string, SimStep, string]> = [
-    ['a timeout (8 s in production)', pass({}), 'judge:timeout'],
-    ['a provider error', { error: 'unavailable' }, 'judge:ai:unavailable'],
-    ['an answer that is not the JSON', simText('Looks fine to me.'), 'judge:unparseable'],
-    ['a cut answer', simText('{"ok":tr', { stopReason: 'max_tokens' }), 'judge:stop:max_tokens'],
+  // [what, the judge's answer (twice when retryable), the turn's error, judge calls]: a timeout, the quota or an outage is retried
+  // once (F3), then fails closed; an answer that is not the verdict fails closed at once
+  const closed: Array<[string, SimStep, string, number]> = [
+    ['a timeout (8 s in production), twice', { ...pass({}), delayMs: 2000 }, 'judge:timeout', 2],
+    ['a throttled call, twice', { error: 'throttled' }, 'judge:ai:throttled', 2],
+    ['a provider error, twice', { error: 'unavailable' }, 'judge:ai:unavailable', 2],
+    ['an answer that is not the JSON', simText('Looks fine to me.'), 'judge:unparseable', 1],
+    ['a cut answer', simText('{"ok":tr', { stopReason: 'max_tokens' }), 'judge:stop:max_tokens', 1],
   ]
-  for (const [what, step, error] of closed) {
+  for (const [what, step, error, calls] of closed) {
     it(`the judge fails closed on ${what}: no reply, the fallback and a handoff`, async () => {
-      const slow = what.startsWith('a timeout') ? { ...step, delayMs: 2000 } : step
-      const a = assistant([simText('We open at 8 AM.')], { judge: { ...assistantConfig(w.env).judge, timeoutMs: 100 } }, [slow])
+      const a = assistant([simText('We open at 8 AM.')], { judge: { ...assistantConfig(w.env).judge, timeoutMs: 100 } }, [step, step, pass()])
       await inbound(maria(), 'When do you open?')
       expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'judge_error' })
+      expect(a.judge.requests).toHaveLength(calls)
       expect((await aiTexts(maria())).map((t) => t.klass)).toEqual(['ai_fallback'])
       expect((await w.t.db.selectFrom('assistant_turns').select('error').executeTakeFirstOrThrow()).error).toBe(error)
       expect(await conversationOf(maria())).toMatchObject({ handoff_state: 'open', handoff_reason: 'judge_error' })
     })
   }
+
+  for (const [what, first] of [
+    ['throttled', { error: 'throttled' }],
+    ['timed-out', { ...pass({}), delayMs: 2000 }],
+  ] as Array<[string, SimStep]>)
+    it(`a ${what} judge call is retried once after a short wait (F3): the reply goes out; counted in the transcript`, async () => {
+      const a = assistant([simText('We open at 8 AM.')], { judge: { ...assistantConfig(w.env).judge, timeoutMs: 100 } }, [first, pass()])
+      await inbound(maria(), 'When do you open?')
+      expect(await a.turn(maria())).toMatchObject({ status: 'replied', handoff: false })
+      expect(a.judge.requests).toHaveLength(2)
+      const t = await w.t.db.selectFrom('assistant_turns').select('transcript').executeTakeFirstOrThrow()
+      const entries = t.transcript as unknown as Array<{ kind: string; call?: string; error?: string; waitMs?: number; verdict?: string; attempts?: number }>
+      expect(entries.filter((e) => e.kind === 'retry')).toEqual([{ kind: 'retry', call: 'judge', error: 'error' in first ? 'ai:throttled' : 'timeout', waitMs: 5 }])
+      expect(entries.filter((e) => e.kind === 'judge')).toMatchObject([{ verdict: 'pass', attempts: 2 }])
+      const [row] = await w.t.db.selectFrom('assistant_tool_calls').select(['outcome', 'input']).where('tool', '=', 'policy_judge').execute()
+      expect(row).toMatchObject({ outcome: 'ok', input: { attempts: 2 } })
+    })
+
+  it('no judge retry when the turn deadline leaves no room: it fails closed at once (F3)', async () => {
+    const a = assistant([simText('We open at 8 AM.')], { turnDeadlineMs: 5000 }, [{ error: 'throttled' }, pass()])
+    a.rt.turnDeps.retryBackoffMs = () => 2500
+    await inbound(maria(), 'When do you open?')
+    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'judge_error' })
+    expect(a.judge.requests).toHaveLength(1)
+    const t = await w.t.db.selectFrom('assistant_turns').select(['transcript', 'error']).executeTakeFirstOrThrow()
+    expect(t.error).toBe('judge:ai:throttled')
+    expect((t.transcript as unknown as Array<{ kind: string }>).filter((e) => e.kind === 'retry')).toEqual([{ kind: 'retry', call: 'judge', error: 'ai:throttled', skipped: 'deadline' }])
+  })
 
   it("the judge reads the rubric and the rendered reply only: never the client's phone, an id, a token or a URL", async () => {
     const a = assistant([simToolUse('send_link', { kind: 'pin', appointmentRef: null, tier: null }), simText('Hi Maria! {price:signature-hand-wash}. Your page: {link1}')])
@@ -580,28 +613,36 @@ describe('links and the safety line (A, D)', () => {
     expect(a.provider.requests).toHaveLength(2)
   })
 
-  it('the model writing the safety line itself is a mention like any other: one rewrite, then the server line once', async () => {
-    const a = assistant([
-      simToolUse('send_link', { kind: 'pin', appointmentRef: null, tier: null }),
-      simText(`Here is your secure link: {link1} ${SAFETY_LINE} Actually, just text it to me here instead.`),
-      simText('Here is your secure link: {link1}'),
-    ])
+  it('the model writing the safety line itself is the judge\'s (a mention, W4a F2): one rewrite, then the server line once', async () => {
+    const a = assistant(
+      [
+        simToolUse('send_link', { kind: 'pin', appointmentRef: null, tier: null }),
+        simText(`Here is your secure link: {link1} ${SAFETY_LINE} Actually, just text it to me here instead.`),
+        simText('Here is your secure link: {link1}'),
+      ],
+      {},
+      [fail('secret'), pass()],
+    )
     await inbound(maria(), 'I forgot my pin')
     expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
     expect(a.provider.requests).toHaveLength(3)
-    expect(JSON.stringify(a.provider.requests[2]!.messages.at(-1))).toContain('do not write a security reminder')
+    expect(JSON.stringify(a.provider.requests[2]!.messages.at(-1))).toContain(JUDGE_HINTS.secret.slice(0, 60))
     const [m] = await aiTexts(maria())
     expect(m!.body).toContain(`Here is your secure link: [private link] ${SAFETY_LINE}`)
     expect(m!.body.split(SAFETY_LINE)).toHaveLength(2)
     expect(m!.body).not.toContain('text it to me')
   })
 
-  it('a PIN link with the model writing about the PIN itself: one rewrite, then the server line', async () => {
-    const a = assistant([
-      simToolUse('send_link', { kind: 'verify', appointmentRef: null, tier: null }),
-      simText('Enter your PIN on the secure page: {link1}'),
-      simText('Here is your secure link: {link1}'),
-    ])
+  it('a PIN link with the model writing about the PIN itself (the judge\'s, W4a F2): one rewrite, then the server line', async () => {
+    const a = assistant(
+      [
+        simToolUse('send_link', { kind: 'verify', appointmentRef: null, tier: null }),
+        simText('Enter your PIN on the secure page: {link1}'),
+        simText('Here is your secure link: {link1}'),
+      ],
+      {},
+      [fail('secret'), pass()],
+    )
     await inbound(maria(), 'can I book in the chat?')
     expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
     const [m] = await aiTexts(maria())
@@ -689,10 +730,12 @@ describe('failures become the fallback and a handoff (design section 3)', () => 
   ]
   for (const [what, step] of cases) {
     it(`${what}: the fixed fallback text, the handoff, the alert`, async () => {
-      const a = assistant([step], { callTimeoutMs: 100 })
+      // the same answer twice: an outage or a timeout is retried once (F3), the rest is not
+      const a = assistant([step, step], { callTimeoutMs: 100 })
       await inbound(maria(), 'Are you open today?')
       const r = await a.turn(maria())
       expect(r).toMatchObject({ status: 'handed_off', reason: 'fallback' })
+      expect(a.provider.requests).toHaveLength(what === 'a Bedrock error' || what === 'a timeout' ? 2 : 1)
       const texts = await aiTexts(maria())
       expect(texts.map((t) => t.klass)).toEqual(['ai_fallback'])
       expect(texts[0]!.body).toMatch(/^Thanks - a team member will text you back shortly\./)
@@ -704,8 +747,28 @@ describe('failures become the fallback and a handoff (design section 3)', () => 
     })
   }
 
+  it('a throttled model call is retried once after a short wait (F3): the turn replies; the retry is in the transcript', async () => {
+    const a = assistant([{ error: 'throttled' }, simText('We are open until 6 PM today.')])
+    await inbound(maria(), 'Are you open today?')
+    expect(await a.turn(maria())).toMatchObject({ status: 'replied', handoff: false })
+    expect(a.provider.requests).toHaveLength(2)
+    expect(a.provider.requests[1]).toEqual(a.provider.requests[0])
+    const t = await w.t.db.selectFrom('assistant_turns').select(['status', 'transcript']).executeTakeFirstOrThrow()
+    expect(t.status).toBe('replied')
+    expect((t.transcript as unknown as Array<{ kind: string }>).filter((e) => e.kind === 'retry')).toEqual([{ kind: 'retry', call: 'model', error: 'ai:throttled', waitMs: 5 }])
+  })
+
+  it('a model call throttled twice: no third call, the fallback and a handoff (F3)', async () => {
+    const a = assistant([{ error: 'throttled' }, { error: 'throttled' }, simText('never sent')])
+    await inbound(maria(), 'Are you open today?')
+    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'fallback' })
+    expect(a.provider.requests).toHaveLength(2)
+    expect((await w.t.db.selectFrom('assistant_turns').select('error').executeTakeFirstOrThrow()).error).toBe('ai:throttled')
+    expect((await aiTexts(maria())).map((t) => t.klass)).toEqual(['ai_fallback'])
+  })
+
   it('at most one fallback text per conversation every 2 hours', async () => {
-    const a = assistant([{ error: 'throttled' }, { error: 'throttled' }])
+    const a = assistant([{ error: 'throttled' }, { error: 'throttled' }, { error: 'throttled' }, { error: 'throttled' }])
     await inbound(maria(), 'hello?')
     await a.turn(maria())
     // staff resolve the handoff without texting (the conversation is the AI's again)

@@ -27,9 +27,10 @@ export interface EvalRow {
   /**
    * v3-probe: the review's 232 + 81; earlier-rounds: the v2/v3 review tables; v4-placement: the v3 placeholder forms; w4-probe: the
    * W4a probes (Spanish, quoting the client, injections; guard-eval-w4-probes.json); w4-heldout: the W4a held-out set, written after
-   * the rubric was tuned (guard-eval-w4-heldout.json).
+   * the rubric was tuned (guard-eval-w4-heldout.json); w4-fresh: 120 + 120 written after the W4a fixes by an agent that never read
+   * the rubric or the other fixtures' rows (guard-eval-w4-fresh.json).
    */
-  source: 'v3-probe' | 'earlier-rounds' | 'v4-placement' | 'w4-probe' | 'w4-heldout'
+  source: 'v3-probe' | 'earlier-rounds' | 'v4-placement' | 'w4-probe' | 'w4-heldout' | 'w4-fresh'
   cat: EvalCategory
   kind: 'adversarial' | 'ordinary'
   expect: 'block' | 'pass'
@@ -40,7 +41,7 @@ export interface EvalRow {
   policy?: JudgeCategory
   /** {balance} is allowed in this row (get_balance ran in the turn). */
   balance?: boolean
-  /** The client's own vehicles on file for this row (client-entered: skipped by the secret and promise word lists only). */
+  /** The client's own vehicles on file for this row (client-entered: skipped by the secret request check only). */
   names?: string[]
   /** The phone number of an M row (also checked against maskForModel and redactText). */
   phone?: string
@@ -59,7 +60,7 @@ export interface EvalContext {
   address: string
   /** Server-owned literals: catalog and plan names with digits (never client-entered text). */
   literals: string[]
-  /** The client's first name and vehicles on file: skipped by the secret and promise word lists only. */
+  /** The client's first name and vehicles on file: skipped by the secret request check only. */
   names: string[]
 }
 
