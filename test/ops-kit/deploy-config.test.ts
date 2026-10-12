@@ -9,6 +9,7 @@ import { SECRET_KEYS, secretKeyProblems } from '../../src/config/secrets-source.
 import { invalidValues, parseDotenv } from '../../scripts/secrets-push.js'
 import { emailEnvShape } from '../../src/integrations/email/config.js'
 import { storageEnvShape } from '../../src/integrations/storage/config.js'
+import { WORKER_SHUTDOWN_TIMEOUT_MS } from '../../src/worker.js'
 import {
   DEPLOY,
   REPO,
@@ -237,6 +238,12 @@ describe('systemd units', () => {
       expect(unit(`${n}.service`).Unit!.After, n).toEqual(['network-online.target'])
       expect(unit(`${n}.service`).Unit!.Wants, n).toEqual(['network-online.target'])
     }
+  })
+
+  it('stop the worker no sooner than its job drain allows, so a deploy never kills it mid-drain', () => {
+    // killed mid-drain, the jobs it held stay active until they expire and a periodic tick (retryLimit 0) dead-letters: 2026-10-11
+    const stopMs = Number(unit('oasis-worker.service').Service!.TimeoutStopSec![0]) * 1000
+    expect(stopMs).toBeGreaterThanOrEqual(WORKER_SHUTDOWN_TIMEOUT_MS + 10_000)
   })
 
   it('never pull in a local PostgreSQL (production uses Aurora); --local-db adds it as a drop-in, and a later run keeps it', async () => {

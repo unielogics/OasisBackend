@@ -14,10 +14,13 @@ import { createIdGenerator } from './platform/ids.js'
 import { createLogger, type Logger } from './platform/logging.js'
 
 /**
- * A graceful stop gives running handlers this long (sms.dispatch holds its window for about 55 s); whatever is still running
- * is failed back to the queue and retried. Give the service manager a stop timeout above it.
+ * A graceful stop gives running handlers this long; whatever is still running is handed back to the queue as a retry. Handlers
+ * are told to wrap up (sms.dispatch ends its 55 s window after the current tick), so a stop normally takes seconds. The
+ * service manager's stop timeout must stay above it with room for the hand-back (deploy/systemd/oasis-worker.service,
+ * TimeoutStopSec=45, checked by test/ops-kit/deploy-config.test.ts): a worker killed mid-drain leaves its jobs active until
+ * they expire, and a periodic tick then dead-letters.
  */
-export const WORKER_SHUTDOWN_TIMEOUT_MS = 60_000
+export const WORKER_SHUTDOWN_TIMEOUT_MS = 30_000
 
 export interface WorkerOptions {
   env: Env

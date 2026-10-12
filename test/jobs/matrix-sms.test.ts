@@ -1,5 +1,6 @@
 // sms.dispatch through the real worker: the production handler holds the leader lock and ticks for its 55 second window,
-// sends what is queued exactly once, and a second run (queued while no new text exists) sends nothing.
+// sends what is queued exactly once, and a second run (queued while no new text exists) sends nothing. A worker stopped
+// mid-window (a deploy) ends the run after its current tick, so the run completes instead of dead-lettering.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { sql } from 'kysely'
 import { jobRuntime, runDispatchWindow, smsDispatchJob } from '../../src/modules/messaging/jobs/index.js'
@@ -76,4 +77,55 @@ describe('sms.dispatch', () => {
     expect(await outbox()).toEqual(sent)
     expect(await usage()).toBe(1)
   }, 240_000)
+
+  it('a worker stopped mid-window (a deploy) ends the run after its tick: completed, no dead letter, no staff notice', async () => {
+    await w.rt.pollHealthAll()
+    await w.tx((tx) =>
+      w.rt.queue.enqueue(tx, {
+        customerId: w.customer('Maria Delgado').id,
+        appointmentId: null,
+        purpose: 'matrix',
+        templateKey: 'booking_thanks',
+        vars: { first: 'Maria' },
+      }),
+    )
+    // the production definition (retryLimit 0, 55 s window), the worker's own drain budget and its default dead-letter hook,
+    // which notifies the managers this world has
+    const schema = h.newSchema()
+    const worker = await h.start({ schema, definitions: [smsDispatchJob] as never })
+    await worker.jobs.enqueue('sms.dispatch', {})
+    // mid-window: the run is active and has already sent the queued text
+    await h.waitFor(
+      async () =>
+        (await outbox()).every((r) => r.state !== 'pending') &&
+        (await h.states(schema, 'sms.dispatch')).includes('active'),
+      30_000,
+    )
+
+    const began = Date.now()
+    await worker.stop()
+    // one tick (500 ms here), not the rest of the 55 s window: systemd kills the worker 45 s after SIGTERM
+    expect(Date.now() - began).toBeLessThan(5_000)
+    expect(await h.states(schema, 'sms.dispatch')).toEqual(['completed'])
+    expect(await h.rows(schema, 'sms.dispatch.dead')).toEqual([])
+    expect(
+      await w.t.db.selectFrom('notifications').select('id').where('kind', '=', 'job.failed').execute(),
+    ).toEqual([])
+    expect(
+      await w.t.db
+        .selectFrom('job_runs')
+        .select(['last_outcome', 'failures'])
+        .where('name', '=', 'sms.dispatch')
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ last_outcome: 'completed', failures: 0 })
+    expect(h.logs.some((l) => String(l.msg).includes('handed back'))).toBe(false)
+
+    // the next worker's run starts at once (a run left active would hold the stately queue until it expired, minutes later)
+    const next = await h.start({ schema, definitions: [smsDispatchJob] as never })
+    await next.jobs.enqueue('sms.dispatch', {})
+    await h.waitFor(async () => (await h.states(schema, 'sms.dispatch')).includes('active'), 10_000)
+    await next.stop()
+    expect(await h.states(schema, 'sms.dispatch')).toEqual(['completed', 'completed'])
+    expect(await h.rows(schema, 'sms.dispatch.dead')).toEqual([])
+  }, 120_000)
 })
