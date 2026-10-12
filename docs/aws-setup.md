@@ -291,11 +291,20 @@ assistant on: `AI_PROVIDER=bedrock` and `AI_ENABLED=true` are set in the staged 
    The output guard's policy judge (ADR 0160, design 3c) is one more call on every reply. It runs on `AI_GUARD_MODEL_ID` (unset:
    the same model), and its cost is in the same budget. A judge model other than `AI_BEDROCK_MODEL_ID` is priced at its list prices.
    It cannot be turned off in production: `AI_GUARD_JUDGE=false` with `AI_ENABLED=true` fails env validation at boot.
-   **Before any rollout (W4)**, measure the guard against Bedrock from the operator's machine. The command makes about 285 small
-   judge calls, roughly one US dollar on Sonnet 4.6:
-   `AWS_PROFILE=<operator> AI_PROVIDER=bedrock AI_BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-4-6 pnpm eval:guard --concurrency 4 --json guard-eval-results.json`.
-   It prints recall per category, the false-block rate of the ordinary replies, the judge's errors (a turn fails closed on them),
-   its tokens, cost and latency.
+   **Before any rollout, and after every change to the judge's rubric, request or model**, measure the guard against Bedrock from
+   the operator's machine (never from the instance role; a test-server run has no AWS):
+   `AWS_PROFILE=<operator> AWS_EC2_METADATA_DISABLED=true AWS_REGION=us-east-1 AI_PROVIDER=bedrock AI_BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-4-6 pnpm eval:guard --json guard-eval-results.json`.
+   It makes 286 judge calls (one per row the deterministic layer passes) and prints recall per category, the judge's own recall on
+   what the deterministic layer let through, the false-block rate of the ordinary replies, the judge's errors (a turn fails closed
+   on them), its tokens (the rubric's cache reads must not be 0), cost and p50/p95 latency. W4a measured about $0.31 and ten
+   minutes per run on Sonnet 4.6 list prices. Run it again with `--fixture test/assistant/fixtures/guard-eval-w4-probes.json`
+   (Spanish, quoting the client, injections) and `--fixture test/assistant/fixtures/guard-eval-w4-heldout.json` (a held-out set
+   never used for tuning: when the rubric changes, write a new one AFTER the change). The run paces itself at `--rpm 30` and stops
+   at `--budget-usd 2` (exit 3). **Quota**: the account's Bedrock quota for Sonnet 4.6 is 50 requests a minute (cross-region; see
+   `aws service-quotas list-service-quotas --service-code bedrock`), shared by the assistant's model calls, its judge calls (one per
+   reply, two after a rewrite) and any eval. An unpaced first W4a run had 208 of 286 calls throttled; a throttled judge call is a judge error and
+   the reply fails closed (fallback + handoff), so ask AWS for more requests a minute before the rollout's volume grows. The eval
+   retries throttled calls (`--throttle-retries 3`) and counts them, so its numbers are the judge's own.
 7. **An AWS Budgets alarm** as the account-level backstop (the app's own daily budget is the hard stop). Claude on Bedrock is billed
    partly through AWS Marketplace, so a whole-account cost budget catches it where a Bedrock-only filter might not. The first two
    budgets are free:

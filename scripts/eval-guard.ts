@@ -5,13 +5,15 @@
 //
 // AI_PROVIDER=sim (the default) never reaches AWS: the simulator passes every reply, so the numbers are the deterministic layer's.
 // W4 runs it against Bedrock with the operator's profile, for example:
-//   AWS_PROFILE=<operator> AI_PROVIDER=bedrock AI_BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-4-6 pnpm eval:guard --concurrency 4
-// (about 285 judge calls, one per row the deterministic layers pass, of ~750 input and ~40 output tokens each: about one US
-// dollar on Sonnet 4.6 list prices).
+//   AWS_PROFILE=<operator> AWS_EC2_METADATA_DISABLED=true AI_PROVIDER=bedrock AI_BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-4-6 \
+//     pnpm eval:guard --json guard-eval-results.json
+// (W4a: 286 judge calls, one per row the deterministic layer passes, ~1,050 cached rubric tokens + ~60 input and ~33 output tokens
+// each: about $0.31 on Sonnet 4.6 list prices, ten minutes at 30 a minute). Also --fixture test/assistant/fixtures/
+// guard-eval-w4-probes.json (Spanish, quoting the client, injections) and guard-eval-w4-heldout.json (the held-out set).
 //
 // Options: --fixture <path> (default test/assistant/fixtures/guard-eval.json), --concurrency <n> (default 4), --cat A,B,...,
 // --source v3-probe|earlier-rounds|v4-placement, --limit <n>, --no-judge (the deterministic layer only), --json <path> (every row's
-// result), --rpm <n> (judge calls started a minute; default 40 on Bedrock, below the account's quota of 50 a minute: a throttled
+// result), --rpm <n> (judge calls started a minute; default 30 on Bedrock, below the account's quota of 50 a minute: a throttled
 // call is a judge error), --throttle-retries <n> (default 3 on Bedrock: the quota is the account's, shared with everything else; the
 // report counts the retries), --budget-usd <x> (default 2: no judge call starts once the run's cost reaches it; the report says
 // STOPPED). Exit 0 when it ran (the numbers are for people to read), 2 on a usage or settings error, 3 when the spend limit stopped
@@ -33,7 +35,7 @@ export interface EvalGuardOptions {
   limit: number | null
   judge: boolean
   json: string | null
-  /** Judge calls started per minute; null = 40 on Bedrock (the account's Sonnet 4.6 quota is 50), unpaced otherwise. */
+  /** Judge calls started per minute; null = 30 on Bedrock (the account's Sonnet 4.6 quota is 50), unpaced otherwise. */
   rpm: number | null
   /** The run's spend limit in US dollars (the judge's cost); no call starts once it is reached. */
   budgetUsd: number
@@ -44,7 +46,7 @@ export interface EvalGuardOptions {
 /** The default spend limit of one run (a full run on Sonnet 4.6 costs about $0.80). */
 export const DEFAULT_BUDGET_USD = 2
 /** The default pace on Bedrock, below the account's quota of 50 requests a minute (Sonnet 4.6, cross-region). */
-export const DEFAULT_BEDROCK_RPM = 40
+export const DEFAULT_BEDROCK_RPM = 30
 
 export function parseArgs(argv: readonly string[]): EvalGuardOptions {
   const o: EvalGuardOptions = { fixture: DEFAULT_FIXTURE, concurrency: 4, cats: null, source: null, limit: null, judge: true, json: null, rpm: null, budgetUsd: DEFAULT_BUDGET_USD, throttleRetries: null }
