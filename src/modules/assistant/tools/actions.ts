@@ -15,9 +15,9 @@ import type { JsonValue } from '../../../platform/schema.js'
 import { loadCustomerTarget } from '../../messaging/db/recipients.js'
 import { loadBoardServices } from '../../public/availability-loader.js'
 import { TOOL_MIN_TRUST, type AssistantTool, type ToolContext, type ToolInputs, type ToolOutcome } from '../contract.js'
-import { actionSummary, cancelBlockOf, serviceWithAddons, type BookPayload, type CancelPayload, type ReschedulePayload } from '../actions/plan.js'
+import { cancelBlockOf, serviceWithAddons, type BookPayload, type CancelPayload, type ReschedulePayload } from '../actions/plan.js'
 import { bookablePackage, vipFor } from './availability.js'
-import { actionConfirmText, conversationVoice, markDisclosed, withDisclosure } from '../lang.js'
+import { actionConfirmText, actionSummaryIn, conversationVoice, markDisclosed, whenIn, withDisclosure } from '../lang.js'
 import {
   aiBookingsAhead,
   BIZ_DATE,
@@ -186,6 +186,7 @@ export const proposeBooking: AssistantTool<ToolInputs['propose_booking']> = {
     })
     if (!v.ok) return slotFailure(v)
     const today = toBizDate(ctx.now, ctx.scheduling.tz)
+    const { lang } = await conversationVoice(ctx.db, ctx.conversationId)
     const service = serviceWithAddons(found.item.name, addons.map((a) => a.name))
     const payload: BookPayload = {
       serviceKey: found.item.key,
@@ -195,7 +196,8 @@ export const proposeBooking: AssistantTool<ToolInputs['propose_booking']> = {
       startMin: input.startMin,
       vehicleId,
     }
-    return propose(ctx, { kind: 'book', summary: actionSummary({ kind: 'book', service, when: whenWords(input.date, input.startMin, today) }), payload, appointmentId: null })
+    // guard polish after W4b-fix (P3): the summary and its date in the conversation's language ("vie 16 oct, 11:00 a. m.")
+    return propose(ctx, { kind: 'book', summary: actionSummaryIn(lang, { kind: 'book', service, when: whenIn(lang, input.date, input.startMin, today) }), payload, appointmentId: null })
   },
 }
 
@@ -231,9 +233,10 @@ export const proposeReschedule: AssistantTool<ToolInputs['propose_reschedule']> 
     const today = toBizDate(ctx.now, tz)
     if (toBizDate(a.start, tz) === input.date && minutesOfDay(a.start, tz) === input.startMin) return fail('invalid', 'That is already the time of that visit.')
     const payload: ReschedulePayload = { appointmentId: a.id, serviceName: a.serviceName, date: input.date, startMin: input.startMin }
+    const { lang } = await conversationVoice(ctx.db, ctx.conversationId)
     return propose(ctx, {
       kind: 'reschedule',
-      summary: actionSummary({ kind: 'reschedule', service: a.serviceName, when: whenWords(input.date, input.startMin, today) }),
+      summary: actionSummaryIn(lang, { kind: 'reschedule', service: a.serviceName, when: whenIn(lang, input.date, input.startMin, today) }),
       payload,
       appointmentId: a.id,
     })
@@ -266,6 +269,8 @@ export const proposeCancel: AssistantTool<ToolInputs['propose_cancel']> = {
         `The client asked by text to cancel their ${a.serviceName} ${when} (${block === 'late' ? 'inside the free-cancellation window' : 'money is held on the visit'}). Reason: ${input.reason.slice(0, 120)}`,
       )
     const payload: CancelPayload = { appointmentId: a.id, serviceName: a.serviceName, reason: input.reason.replace(/\s+/g, ' ').trim().slice(0, 200) }
-    return propose(ctx, { kind: 'cancel', summary: actionSummary({ kind: 'cancel', service: a.serviceName, when }), payload, appointmentId: a.id })
+    const { lang } = await conversationVoice(ctx.db, ctx.conversationId)
+    const summary = actionSummaryIn(lang, { kind: 'cancel', service: a.serviceName, when: lang === 'en' ? when : whenIn(lang, toBizDate(a.start, tz), minutesOfDay(a.start, tz), today) })
+    return propose(ctx, { kind: 'cancel', summary, payload, appointmentId: a.id })
   },
 }

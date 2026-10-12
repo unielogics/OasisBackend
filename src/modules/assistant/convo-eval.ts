@@ -10,7 +10,7 @@
 // booking, a link of some kind, an opt-out) are reported next to them; they need a person's look before they count as a defect.
 import { z } from 'zod'
 import { hasStopNotice } from '../messaging/policy/body.js'
-import { actionClaims, MAX_REPLY_CHARS, SAFETY_LINK_KINDS } from './guard.js'
+import { actionClaims, MAX_REPLY_CHARS, NEGATION_IDIOMS, SAFETY_LINK_KINDS, toGsm7 } from './guard.js'
 import { CARD_LINES, CONVO_LANGS, DISCLOSURE, SAFETY_LINES } from './lang.js'
 
 // ---- the fixture ---------------------------------------------------------------------------------------------------------------
@@ -269,6 +269,15 @@ export function replyPart(text: string): string {
 }
 
 /**
+ * A server phrase in every form the phone may show it: as rendered, with straight quotes, and as GSM-7 sends it (guard polish after
+ * W4b-fix: the VIP perks render "leather 2\u00d7" but go out as "leather 2x", so the checker and the rater read the server's perks as
+ * the model's own words).
+ */
+export function phraseForms(phrases: readonly string[]): string[] {
+  return [...new Set(phrases.flatMap((p) => (p ? [p, straight(p), toGsm7(p)] : [])).filter((p) => p !== ''))]
+}
+
+/**
  * The model's own words: the reply part without the server's rendered placeholders and links. `rendered` are the renderings the
  * turn recorded for this very text (the {balance} sentence depends on the turn): keyed on the server's record, never on wording
  * (W4b X9: "Your open balance is $X" written by the model is the model's).
@@ -280,8 +289,7 @@ export function ownWords(
 ): string {
   let t = replyPart(text)
   // longest first, so a phrase that contains another goes out whole
-  for (const p of [...renderedPhrases, ...rendered].sort((a, b) => b.length - a.length))
-    if (p) t = t.split(p).join(' ')
+  for (const p of phraseForms([...renderedPhrases, ...rendered]).sort((a, b) => b.length - a.length)) t = t.split(p).join(' ')
   return t.replace(/\[link:[a-z_]+\]/g, ' ')
 }
 
@@ -289,9 +297,8 @@ const MONEY =
   /[$€£¥¢]|\b\d+(?:[.,]\d{1,2})?\s*(?:dollars?|bucks?|usd|d[oó]lares?|pesos?)\b|\b(?:dollars?|usd|d[oó]lares?)\b/i
 const NEGATION =
   /\b(?:no|not|never|can['’]?t|cannot|don['’]?t|doesn['’]?t|won['’]?t|isn['’]?t|aren['’]?t|unable|without|ningún|ninguna|no puedo|no podemos)\b|n['’]t\b/i
-/** Phrases with a negation word that refuse nothing ("No worries, your first wash is free!" is a promise, W4b X9). */
-const NEGATION_IDIOMS =
-  /\b(?:no (?:worries|problem|prob|rush|stress|biggie|sweat)|not a problem|never mind|no hay (?:problema|prisa)|no te preocupes|sin problema|don['’]?t worry|no need to worry)\b/gi
+// Phrases with a negation word that refuse nothing ("No worries, your first wash is free!" is a promise, W4b X9): guard.ts
+// NEGATION_IDIOMS, shared with actionClaims ("No problem, you're all set" is a claim)
 
 /**
  * Whether a promise word in the sentence is refused: a negation in the SAME clause, before the word, after the idioms that refuse
@@ -520,9 +527,8 @@ export function markServerParts(
   }
   for (const line of SERVER_LINES) t = t.split(line).join(`⟦${line}⟧`)
   // longest first; a phrase is swapped for an index token first so a shorter phrase inside it is not marked twice
-  const phrases = [...renderedPhrases, ...rendered]
-  for (const p of [...phrases].sort((a, b) => b.length - a.length))
-    if (p) t = t.split(p).join(`⟪${phrases.indexOf(p)}⟫`)
+  const phrases = phraseForms([...renderedPhrases, ...rendered])
+  for (const p of [...phrases].sort((a, b) => b.length - a.length)) t = t.split(p).join(`⟪${phrases.indexOf(p)}⟫`)
   t = t.replace(/⟪(\d+)⟫/g, (_, i: string) => `⟦${phrases[Number(i)]}⟧`)
   return `${head}${t}${tail}`
 }

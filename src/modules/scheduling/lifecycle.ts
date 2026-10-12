@@ -780,14 +780,15 @@ export async function reopenAppointment(
 
 /**
  * Moves a booked, confirmed or arrived job to a new start, possibly on another day. The full slot validation applies
- * (excluding the job itself); the client is told by SMS and the invoice date follows.
+ * (excluding the job itself); the client is told by SMS (unless `notify` is false: the caller texts its own notice, as the
+ * assistant's reply-number handler does in a Spanish conversation) and the invoice date follows.
  */
 export async function rescheduleAppointment(
   tx: Tx,
   c: SchedulingCtx,
   actor: Actor,
   id: string,
-  o: { start: Date; override?: OverrideRequest | null },
+  o: { start: Date; override?: OverrideRequest | null; notify?: boolean },
 ): Promise<CommandResult> {
   const a = await lockAppointment(tx, c.locationId, id)
   if (a.status === 'cleaning' || a.status === 'completed') throw new AppError('CANT_MOVE_JOB')
@@ -814,15 +815,18 @@ export async function rescheduleAppointment(
   const fresh = await reload(tx, c, a.id)
   const invoice = await ensureInvoiceFor(tx, c, fresh, actor)
   const label = whenLabel(o.start, c.clock.now(), c.tz)
-  const sent = await queue(tx, c, a, customer, {
-    templateKey: 'reschedule',
-    vars: { time: label },
-    purpose: 'reschedule',
-  })
+  const notify = o.notify ?? true
+  const sent = notify
+    ? await queue(tx, c, a, customer, {
+        templateKey: 'reschedule',
+        vars: { time: label },
+        purpose: 'reschedule',
+      })
+    : null
   await logActivity(tx, c, {
     appointmentId: a.id,
-    text: withDelivery(`Rescheduled to ${label}`, sent),
-    channels: ['internal', 'sms'],
+    text: sent ? withDelivery(`Rescheduled to ${label}`, sent) : `Rescheduled to ${label}`,
+    channels: notify ? ['internal', 'sms'] : ['internal'],
     actor,
     meta: { from: a.scheduledStart.toISOString(), to: o.start.toISOString() },
   })

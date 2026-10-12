@@ -6,6 +6,7 @@ import type { AiContentBlock, AiJson, AiJsonObject, AiToolSpec } from '../../int
 import type { Db } from '../../platform/db.js'
 import type { NewId } from '../../platform/ids.js'
 import type { AnyAssistantTool, HandoffRequest, ToolContext, ToolOutcome, ToolRegistry, TurnTrust } from './contract.js'
+import { oneLine } from './facts.js'
 import { redactJson } from './transcript.js'
 import './schema.js'
 
@@ -44,6 +45,11 @@ export interface ToolRoundResult {
   /** A propose_* call texted its reply number in this round: the {confirm} placeholder may be used (facts.ts CONFIRM_PLACEHOLDER). */
   confirmTexted: boolean
   handoff: HandoffRequest | null
+  /**
+   * What the server did and returned in this round, in words, for the policy judge's server record (guard polish after W4b-fix: the
+   * judge failed "guarde tu Honda Pilot", a vehicle the server had just saved, as a false claim): see recordLine.
+   */
+  record: string[]
   /** Records for the transcript. */
   calls: { tool: string; outcome: 'ok' | 'error' | 'denied'; error?: string }[]
 }
@@ -69,7 +75,7 @@ export async function runToolRound(
   d: ToolRunnerDeps,
   o: { registry: ToolRegistry; ctx: ToolContext; uses: readonly ToolUse[]; round: number; seq: number; actionsEnabled: boolean },
 ): Promise<ToolRoundResult & { seq: number }> {
-  const out: ToolRoundResult = { results: [], balanceCents: null, confirmTexted: false, handoff: null, calls: [] }
+  const out: ToolRoundResult = { results: [], balanceCents: null, confirmTexted: false, handoff: null, record: [], calls: [] }
   let seq = o.seq
   for (const u of o.uses) {
     seq += 1
@@ -117,6 +123,8 @@ export async function runToolRound(
         : errorResult(u, { error: outcome.error, message: outcome.message, ...(outcome.detail ? { detail: outcome.detail } : {}) }),
     )
     out.calls.push({ tool: u.name, outcome: rowOutcome, ...(rowError ? { error: rowError } : {}) })
+    const line = recordLine(u.name, outcome)
+    if (line) out.record.push(line)
     await d.db
       .insertInto('assistant_tool_calls')
       .values({
@@ -135,4 +143,53 @@ export async function runToolRound(
       .execute()
   }
   return { ...out, seq }
+}
+
+const str = (x: unknown): string | null => (typeof x === 'string' && x.trim() !== '' ? oneLine(x, 60) : null)
+const quoted = (x: unknown): string => `"${(str(x) ?? '').replace(/"/g, "'")}"`
+
+/**
+ * One tool call as the policy judge's server record reads it (what the server did or returned; null for a lookup the record has
+ * elsewhere or that says nothing to check): a saved name or vehicle, a link texted, a proposal texted, the open times returned (or
+ * that none were given to this phone), a handoff; a refused action as "not done". Client-entered words are quoted and cut.
+ */
+export function recordLine(tool: string, outcome: ToolOutcome): string | null {
+  if (!outcome.ok) {
+    if (['set_my_name', 'set_my_vehicle', 'send_link', 'propose_booking', 'propose_reschedule', 'propose_cancel'].includes(tool))
+      return `${tool}: not done (${outcome.error})`
+    if (tool === 'check_availability') return 'check_availability: no open times returned'
+    return null
+  }
+  const d = outcome.data as Record<string, unknown>
+  switch (tool) {
+    case 'set_my_name':
+      return `saved the client's first name ${quoted(d.firstName)}`
+    case 'set_my_vehicle':
+      return `saved the client's vehicle ${quoted(d.vehicle)}`
+    case 'send_link':
+      return `texted the client a ${str(d.kind) ?? 'personal'} link`
+    case 'propose_booking':
+    case 'propose_reschedule':
+    case 'propose_cancel':
+      return `texted the client a proposal to confirm with its reply number (nothing done until they confirm): ${str(d.summary) ?? tool}`
+    case 'handoff_to_staff':
+      return 'handed the chat to a team member'
+    case 'note_interest':
+      return 'noted what the client is interested in'
+    case 'check_availability': {
+      const what = `${str(d.service) ?? 'the service'} on ${str(d.dateLabel) ?? str(d.date) ?? 'that day'}`
+      if ('bookingLink' in d) {
+        const link = typeof d.bookingLink === 'string' ? '; texted the client a calendar link to pick a time' : d.linkAlreadyTexted ? '; the calendar link texted earlier is where they pick a time' : ''
+        return `open times for ${what}: none given to this phone (it picks a time on the booking page)${link}`
+      }
+      const times = Array.isArray(d.times) ? d.times.map((t) => str((t as { time?: unknown }).time)).filter((t): t is string => t !== null) : []
+      if (times.length > 0) return `open times for ${what}: ${times.join(', ')}${typeof d.moreTimes === 'number' && d.moreTimes > 0 ? ` (and ${d.moreTimes} later)` : ''}`
+      const next = Array.isArray(d.nextOpenDates)
+        ? d.nextOpenDates.map((n) => { const x = n as { dateLabel?: unknown; firstTime?: unknown }; return `${str(x.dateLabel) ?? '?'} from ${str(x.firstTime) ?? '?'}` })
+        : []
+      return `open times for ${what}: none${d.closed ? ' (closed)' : ''}${next.length > 0 ? `; next open: ${next.join(', ')}` : ''}`
+    }
+    default:
+      return null
+  }
 }

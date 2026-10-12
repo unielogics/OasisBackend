@@ -6,6 +6,7 @@
 // them), so what is tested is what the phone shows.
 import { sql } from 'kysely'
 import type { Executor, Tx } from '../../platform/db.js'
+import { addDays, fmtT } from '../../platform/time.js'
 import './schema.js'
 
 export const CONVO_LANGS = ['en', 'es'] as const
@@ -49,9 +50,136 @@ export const CONFIRM_WORDS_BY_LANG: Record<ConvoLang, string> = {
 
 /** The action_confirm text: "<summary>. Reply 4821 to confirm." ({code} is the secretVar). */
 export function actionConfirmText(summary: string, lang: ConvoLang): string {
-  return lang === 'es'
-    ? `${summary}. Responde {code} para confirmar.`
-    : `${summary}. Reply {code} to confirm.`
+  // a Spanish summary may end with the full stop of "a. m." (P3)
+  const s = summary.endsWith('.') ? summary : `${summary}.`
+  return lang === 'es' ? `${s} Responde {code} para confirmar.` : `${s} Reply {code} to confirm.`
+}
+
+// ---- dates, times and the server's other texts in Spanish (guard polish after W4b-fix, P3) ------------------------------------------
+
+const ES_DAYS = ['dom', 'lun', 'mar', 'mie', 'jue', 'vie', 'sab'] as const
+const ES_MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'] as const
+
+/** "11:00 a. m.", "1:30 p. m." (Spanish clock; GSM-7). */
+export function timeEs(startMin: number): string {
+  const m = ((Math.round(startMin) % 1440) + 1440) % 1440
+  const h = Math.floor(m / 60)
+  return `${h % 12 || 12}:${String(m % 60).padStart(2, '0')} ${h < 12 ? 'a. m.' : 'p. m.'}`
+}
+
+/** "vie 16 oct" for 2026-10-16 (no accent GSM-7 lacks: "mie", "sab"). */
+export function shortDateEs(date: string): string {
+  const [y, mo, d] = date.split('-').map(Number) as [number, number, number]
+  const day = new Date(Date.UTC(y, mo - 1, d)).getUTCDay()
+  return `${ES_DAYS[day]} ${d} ${ES_MONTHS[mo - 1]}`
+}
+
+/**
+ * A visit's day and time in the conversation's language: "today at 10:00 AM", "tomorrow at 9:00 AM", "Fri Oct 16 at 11:00 AM";
+ * "hoy a las 10:00 a. m.", "mañana a las 9:00 a. m.", "vie 16 oct, 11:00 a. m." (a la 1:00 p. m.).
+ */
+export function whenIn(lang: ConvoLang, date: string, startMin: number, today: string): string {
+  if (lang === 'en') {
+    const day = date === today ? 'today' : date === addDays(today, 1) ? 'tomorrow' : shortDateEn(date)
+    return `${day} at ${fmtT(startMin)}`
+  }
+  const t = timeEs(startMin)
+  const at = t.startsWith('1:') ? 'a la' : 'a las'
+  if (date === today) return `hoy ${at} ${t}`
+  if (date === addDays(today, 1)) return `mañana ${at} ${t}`
+  return `${shortDateEs(date)}, ${t}`
+}
+
+const EN_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
+const EN_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const
+/** "Fri Oct 16" (as tools/common.ts shortDate writes it). */
+function shortDateEn(date: string): string {
+  const [y, mo, d] = date.split('-').map(Number) as [number, number, number]
+  return `${EN_DAYS[new Date(Date.UTC(y, mo - 1, d)).getUTCDay()]} ${EN_MONTHS[mo - 1]} ${d}`
+}
+
+/** A sentence end after a "when" that may already end with the full stop of "a. m." / "p. m.". */
+const stop = (s: string): string => (s.endsWith('.') ? s : `${s}.`)
+
+/** A "when" from whenIn with its article for a Spanish sentence: "el vie 16 oct, ..." / "hoy a las ..." (no article). */
+const withArticleEs = (when: string): string => (/^(?:hoy|mañana)\b/.test(when) ? when : `el ${when}`)
+
+/** The action_confirm summary in the conversation's language (the confirm line adds "Reply 4821 to confirm." after it). */
+export function actionSummaryIn(
+  lang: ConvoLang,
+  a: { kind: 'book' | 'reschedule' | 'cancel'; service: string; when: string },
+): string {
+  let s: string
+  if (lang === 'es')
+    s =
+      a.kind === 'book'
+        ? `${a.service}, ${a.when}`
+        : a.kind === 'reschedule'
+          ? `Mover tu ${a.service} para ${withArticleEs(a.when)}`
+          : `Cancelar tu ${a.service} ${/^(?:hoy|mañana)\b/.test(a.when) ? `de ${a.when}` : `del ${a.when}`}`
+  else
+    s =
+      a.kind === 'book'
+        ? `${a.service}, ${a.when}`
+        : a.kind === 'reschedule'
+          ? `Move your ${a.service} to ${a.when}`
+          : `Cancel your ${a.service} ${a.when.startsWith('today') || a.when.startsWith('tomorrow') ? '' : 'on '}${a.when}`
+  return s.length > 140 ? `${s.slice(0, 137)}...` : s
+}
+
+/** The reasons a confirmed action can fail with (actions/handler.ts), in Spanish; anything else reads as the last one. */
+const FAILED_REASONS_ES: Record<string, string> = {
+  'that time was just taken.': 'esa hora se acaba de ocupar.',
+  'that time has passed.': 'esa hora ya paso.',
+  'that service is no longer offered online.': 'ese servicio ya no se ofrece en linea.',
+  'one of those add-ons is no longer offered online.': 'uno de esos extras ya no se ofrece en linea.',
+  'that visit is not on your record any more.': 'esa cita ya no esta en tu registro.',
+  'that visit can no longer be changed by text.': 'esa cita ya no se puede cambiar por mensaje.',
+  'that visit can no longer be canceled by text.': 'esa cita ya no se puede cancelar por mensaje.',
+  'it is now too close to the visit (or money is held on it) to cancel by text.':
+    'ya falta muy poco para la cita (o hay un pago en ella) para cancelarla por mensaje.',
+  'this number is no longer the one on your record.': 'este numero ya no es el de tu registro.',
+}
+const FAILED_REASON_ES_OTHER = 'algo de nuestro lado no funciono.'
+
+/**
+ * The server's own texts of the reply-number flow in Spanish (the English ones are the templates of messaging/templates/registry.ts,
+ * which stay English): the booking confirmation, the moved and cancelled acks, the wrong, locked or expired reply number, verify
+ * again, failed, paused; the link-page line and the opt-out confirmation. GSM-7 as the phone shows them.
+ */
+export function serverTextEs(key: string, vars: Record<string, string | undefined> = {}): string | null {
+  switch (key) {
+    case 'action_booked':
+      return [
+        `Reservado: ${vars.service}, ${stop(vars.when ?? '')}`,
+        vars.member ? 'Los miembros nunca pagan tarifa de reserva.' : vars.fee ? `Tarifa de reserva de ${vars.fee}, se paga ${vars.how === 'by payment link' ? 'con el enlace de pago' : 'en el local'}.` : null,
+        '¡Te esperamos!',
+      ]
+        .filter((x) => x !== null)
+        .join(' ')
+    case 'reschedule':
+      return `Tu cita se movio para ${stop(withArticleEs(vars.when ?? ''))} Responde si no te funciona.`
+    case 'cancel':
+      return `Tu cita en Oasis Auto Spa ${/^(?:hoy|mañana)\b/.test(vars.when ?? '') ? `de ${vars.when}` : `del ${vars.when}`} fue cancelada. Responde aqui si tienes preguntas.`
+    case 'action_code_wrong':
+      return 'Ese numero no coincide. Responde con el numero de 4 digitos de nuestro ultimo mensaje.'
+    case 'action_code_locked':
+      return 'Ese numero no coincidio, asi que cancelamos esa solicitud para proteger tu cuenta. Responde aqui y empezamos de nuevo.'
+    case 'action_code_expired':
+      return 'Ese numero de confirmacion ya vencio. Responde aqui y lo preparamos de nuevo.'
+    case 'action_needs_verify':
+      return 'Por tu seguridad necesitamos confirmar otra vez que eres tu antes de cambiar tu reserva. Responde aqui y te enviamos un enlace seguro.'
+    case 'action_failed':
+      return `Lo sentimos, no pudimos completarlo: ${FAILED_REASONS_ES[vars.reason ?? ''] ?? FAILED_REASON_ES_OTHER} Responde aqui y lo resolvemos.`
+    case 'action_unavailable':
+      return 'Ahora no podemos confirmar cambios por mensaje. Un miembro del equipo te escribira pronto.'
+    case 'code_on_link_page':
+      return 'Por tu seguridad, los codigos solo se ingresan en tu pagina segura, nunca por mensaje. Responde aqui si necesitas un enlace nuevo.'
+    case 'opt_out_confirm':
+      return 'Ya no recibiras mensajes de Oasis Auto Spa. Responde START para volver a suscribirte.'
+    default:
+      return null
+  }
 }
 
 /** A text with the disclosure before it and the STOP footer after it. */

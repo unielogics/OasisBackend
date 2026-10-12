@@ -52,12 +52,14 @@ import {
   looksLikeCardNumber,
   MAX_REPLY_CHARS,
   SAFETY_LINK_KINDS,
+  withoutQuestions,
   type GuardProblem,
   type ReplySegment,
 } from './guard.js'
 import {
   CARD_LINES,
   detectLanguage,
+  FALLBACK_TEXTS,
   isConvoLang,
   SAFETY_LINES,
   storeLanguage,
@@ -68,7 +70,7 @@ import { whenWords } from './tools/common.js'
 import { JUDGE_HINTS, runJudge } from './judge.js'
 import { HANDOFF_SUMMARIES, markUnanswered, openTurnHandoff, recipientOf, sendFallback, type ConversationRef, type HandoffDeps } from './handoff.js'
 import type { AssistantGate, AssistantInbox } from './ports.js'
-import { judgeRewriteInstruction, PROMPT_VERSION, REPLY_NOW_TEXT, STATIC_RULES, renderConversation, renderTurnContext, rewriteInstruction } from './prompt.js'
+import { asksForFree, judgeRewriteInstruction, PROMPT_VERSION, REPLY_NOW_TEXT, STATIC_RULES, renderConversation, renderTurnContext, rewriteInstruction } from './prompt.js'
 import { NON_PROGRESS_TOOLS, offeredTools, runToolRound, toolSpecs } from './tool-runner.js'
 import { redactText, Transcript } from './transcript.js'
 import './schema.js'
@@ -419,7 +421,8 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     windowMs: d.cfg.historyWindowMs,
   })
   // the client's language (W4b X5): what their new texts are written in, else what the conversation was in (English by default)
-  const detected = detectLanguage(snap.lines.filter((l) => l.fresh && l.who === 'client').map((l) => l.text))
+  const freshClient = snap.lines.filter((l) => l.fresh && l.who === 'client').map((l) => l.text)
+  const detected = detectLanguage(freshClient)
   const lang: ConvoLang = detected ?? (isConvoLang(claim.conv.language) ? claim.conv.language : 'en')
   if (detected) await storeLanguage(d.db, conv.id, detected)
   const turnContext = {
@@ -433,6 +436,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
       tz,
     })),
     language: lang,
+    ...(asksForFree(freshClient) ? { asksFree: true } : {}),
   }
   const contextText = renderTurnContext(turnContext)
   const tools = offeredTools(d.registry, actionsEnabled)
@@ -479,6 +483,8 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
   let toolHandoff: HandoffRequest | null = null
   let balanceCents: number | null = null
   let confirmTexted = false
+  /** What the server did and returned in this turn's tool rounds, for the judge's server record (tool-runner.ts recordLine). */
+  const toolRecord: string[] = []
   const ctx: ToolContext = {
     db: d.db,
     clock: d.clock,
@@ -595,6 +601,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
           seq = r.seq
           if (r.balanceCents !== null) balanceCents = r.balanceCents
           if (r.confirmTexted) confirmTexted = true
+          toolRecord.push(...r.record)
           toolHandoff ??= r.handoff
           transcript.add({ kind: 'tools', round: rounds, calls: r.calls })
           // the client opted out in words (opt_out sent the confirmation): nothing more is written to that number, not even a reply
@@ -652,6 +659,11 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
             'In this turn the server texted the client a proposal to confirm with its reply number: nothing is done until they confirm it.',
           ]
         : []),
+      // guard polish after W4b-fix: the tool results of this turn (a saved vehicle is no false claim; open times only as returned)
+      `What the server did and returned in this turn: ${toolRecord.length > 0 ? toolRecord.join('; ') : 'nothing'}.`,
+      ...(toolRecord.some((l) => l.startsWith('open times for ') && !l.includes(': none'))
+        ? []
+        : ['Open times the server returned in this turn: none (no day or time may be named as open or available).']),
       `The client's visits on file: ${turnContext.appointments.length > 0 ? turnContext.appointments.map((a) => a.label).join('; ') : 'none'}.`,
       // the membership the model reads in its turn context ("Gold, active, 2 washes left this cycle"): a count from it is no invented fact
       `The client's membership: ${turnContext.membership ?? 'none'}.`,
@@ -844,6 +856,13 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
         summary:
           'The client texted a photo; the assistant told them the team will review it. Look at the photo in Messages and reply.',
       }
+    // guard polish after W4b-fix (P5): a text that hands the chat to the team never ends with a question; the assistant goes silent
+    // after it, so a question would never be answered ("Someone will text you back shortly! What's your first name?")
+    if (toolHandoff && reply.includes('?')) {
+      const kept = withoutQuestions(reply)
+      transcript.add({ kind: 'guard', verdict: 'handoff_no_question', problems: ['questions'] })
+      reply = kept ?? FALLBACK_TEXTS[lang]
+    }
     const rendered = [...values.entries()]
       .filter(([k]) => !k.startsWith('{link') && replyRaw.includes(k))
       .map(([, v]) => v)

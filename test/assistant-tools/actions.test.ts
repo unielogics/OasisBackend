@@ -320,3 +320,59 @@ describe('propose_reschedule and propose_cancel', () => {
     expect(await run('propose_cancel', probe, { appointmentRef: 'A1', reason: 'x' })).toMatchObject({ ok: false, error: 'not_found' })
   })
 })
+
+describe('guard polish after W4b-fix (P3): a Spanish conversation gets every server text of the flow in Spanish', () => {
+  const spanish = (phone: string) => sql`update assistant_conversations set language = 'es' where phone_e164 = ${phone}`.execute(w.t.db)
+  const lastCodeEs = async (phone: string): Promise<string> => {
+    const r = await w.t.db.selectFrom('sms_outbox').select('body').where('to_e164', '=', phone).where('klass', '=', 'action_confirm').orderBy('queued_at', 'desc').executeTakeFirstOrThrow()
+    return /Responde (\d{4}) para confirmar/.exec(r.body)![1]!
+  }
+
+  it('booking: the summary with the Spanish date, then the Spanish confirmation (tagged action_booked), no English text', async () => {
+    const probe = await trustedMaria()
+    await spanish(maria().phone)
+    const r = await run('propose_booking', probe, BOOK)
+    expect(r).toMatchObject({ ok: true, data: { summary: 'Express Hand Wash, lun 15 jun, 10:00 a. m.' } })
+    const confirm = (await aiTexts(maria().id)).find((m) => m.klass === 'action_confirm')!
+    expect(confirm.body).toBe('Asistente automatizado de Oasis Auto Spa. Express Hand Wash, lun 15 jun, 10:00 a. m. Responde [code] para confirmar. Responde STOP para no recibir mas mensajes.')
+    await reply(maria().phone, await lastCodeEs(maria().phone), maria().id)
+    const booked = (await aiTexts(maria().id)).at(-1)!
+    expect(booked).toMatchObject({ template_key: 'action_booked', klass: 'ai_reply', sender_kind: 'ai' })
+    expect(booked.body).toMatch(/^Reservado: Express Hand Wash, lun 15 jun, 10:00 a\. m\. (?:Tarifa de reserva de \$\d+(?:\.\d\d)?, se paga (?:en el local|con el enlace de pago)\. |Los miembros nunca pagan tarifa de reserva\. )?¡Te esperamos!$/)
+  })
+
+  it('reschedule and cancel: the Spanish ack instead of the English scheduling text', async () => {
+    const appt = await w.appointment({ customer: 'Maria Delgado', at: '2026-06-16T09:00:00-04:00' })
+    const probe = await trustedMaria()
+    await spanish(maria().phone)
+    expect(await run('propose_reschedule', probe, { appointmentRef: 'A1', date: '2026-06-17', startMin: 660 })).toMatchObject({
+      ok: true,
+      data: { summary: 'Mover tu Express Hand Wash para el mie 17 jun, 11:00 a. m.' },
+    })
+    await reply(maria().phone, await lastCodeEs(maria().phone), maria().id)
+    expect((await w.t.db.selectFrom('appointments').select('scheduled_start').where('id', '=', appt).executeTakeFirstOrThrow()).scheduled_start).toEqual(new Date('2026-06-17T11:00:00-04:00'))
+    let texts = await aiTexts(maria().id)
+    expect(texts.at(-1)).toMatchObject({ template_key: 'reschedule', klass: 'ai_reply', body: 'Tu cita se movio para el mie 17 jun, 11:00 a. m. Responde si no te funciona.' })
+    expect(texts.some((m) => /has been moved/.test(m.body))).toBe(false)
+    w.clock.advance(MIN)
+    await inbound(maria().phone, 'mejor cancela por favor')
+    expect(await run('propose_cancel', probe, { appointmentRef: 'A1', reason: 'viaje' })).toMatchObject({ ok: true, data: { summary: 'Cancelar tu Express Hand Wash del mie 17 jun, 11:00 a. m.' } })
+    await reply(maria().phone, await lastCodeEs(maria().phone), maria().id)
+    expect((await w.t.db.selectFrom('appointments').select('status').where('id', '=', appt).executeTakeFirstOrThrow()).status).toBe('canceled')
+    texts = await aiTexts(maria().id)
+    expect(texts.at(-1)).toMatchObject({ template_key: 'cancel', klass: 'ai_reply', body: 'Tu cita en Oasis Auto Spa del mie 17 jun, 11:00 a. m. fue cancelada. Responde aqui si tienes preguntas.' })
+    expect(texts.some((m) => /has been canceled/.test(m.body))).toBe(false)
+  })
+
+  it('a wrong or expired reply number and a failed action answer in Spanish; English conversations keep the templates', async () => {
+    const probe = await trustedMaria()
+    await spanish(maria().phone)
+    await run('propose_booking', probe, BOOK)
+    const wrong = String((Number(await lastCodeEs(maria().phone)) + 1) % 10_000).padStart(4, '0')
+    await reply(maria().phone, wrong, maria().id)
+    expect((await aiTexts(maria().id)).at(-1)).toMatchObject({ template_key: 'action_code_wrong', body: 'Ese numero no coincide. Responde con el numero de 4 digitos de nuestro ultimo mensaje.' })
+    await sql`update assistant_conversations set language = 'en' where phone_e164 = ${maria().phone}`.execute(w.t.db)
+    await reply(maria().phone, wrong, maria().id)
+    expect((await aiTexts(maria().id)).at(-1)).toMatchObject({ template_key: 'action_code_wrong', body: "That number doesn't match. Please reply with the 4-digit number from our last text." })
+  })
+})

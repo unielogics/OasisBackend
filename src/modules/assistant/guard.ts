@@ -11,7 +11,8 @@
 //       "Guests pay a $25 booking fee", {balance} "Your open balance is $12.50". A placeholder must stand as its own clause: it starts
 //       the text or follows . ! ? ; : a spaced dash or a line break, and it ends the text or is followed by . ! ? ; : , or a spaced
 //       dash (`placement`), so it cannot be attached to another noun ("Window tint {price:signature-hand-wash}"), added up ("{price:a}
-//       plus {price:b}") or called a total. {linkN} placeholders are links, not amounts, and may stand anywhere. Anything else in
+//       plus {price:b}") or called a total. A placeholder followed by a new sentence without its full stop ("{fee} Want to
+//       book?") gets the full stop from the server (punctuatePlaceholders). {linkN} placeholders are links, not amounts, and may stand anywhere. Anything else in
 //       braces is `unknown_placeholder`.
 //   (2) A SMALL, PRECISE DETERMINISTIC LAYER on the model's raw text (placeholders out). It must not block ordinary replies, so it
 //       holds only the unambiguous cases; meaning (paraphrases, slang, other languages) is the judge's:
@@ -29,10 +30,10 @@
 //         Drive, Garfield, New Jersey 07026") are out first. Client-entered text (a vehicle, a name) is never out;
 //       - `url`: anything host-shaped (v3's host skeleton: "[.]", " dot ", spaced letters, "name,com"; now also "period com",
 //         "point com", "punto com", "-dot-", ";com", " : com", "<word> com slash"), an IP, http/hxxp/www/"://"; only {linkN} and the
-//         shop's own host as plain text (no path, not even after a space) pass;
+//         shop's own host as plain text (no path, not even after a space; "https://" or "http://" and a trailing slash allowed) pass;
 //       - `secret`: only an unambiguous REQUEST for an account or card secret (W4a fix F2): a request verb (send, reply, text,
 //         tell, type, give, share, read, provide, confirm; envía, manda, dime, dame, escribe, responde...), "what is your", "cuál es
-//         tu" or "need your", then, in the same clause, a PIN, passcode, password, OTP, CVV, a card number or details, a
+//         tu" or "need your" (never right after a negation: "don't send card numbers by text" protects), then, in the same clause, a PIN, passcode, password, OTP, CVV, a card number or details, a
 //         verification/security/one-time code, "the/your code", "the 6 digits", "the digits on your card" (contraseña, clave,
 //         código but not código postal/promocional, número de tu tarjeta); on the plain text and a skeleton (accents stripped,
 //         look-alikes mapped, spaced-out letters joined). The shop's own sending ("we'll text you a code") is not a request. A
@@ -199,6 +200,12 @@ export function cutAtSentence(text: string, max = MAX_REPLY_CHARS): string {
   return `${text.slice(0, max - 3).replace(/\s+\S*$/, '')}...`
 }
 
+/** The text without its questions (each sentence that ends with "?"), or null when nothing else is left. */
+export function withoutQuestions(text: string): string | null {
+  const kept = sentencesOf(text).filter((s) => !/\?\s*$/.test(s))
+  return kept.length > 0 ? kept.join(' ') : null
+}
+
 /** The text up to and including its first question mark. */
 export function cutAfterFirstQuestion(text: string): string {
   const i = text.indexOf('?')
@@ -242,6 +249,29 @@ export function isolatePlaceholders(text: string, values: ReadonlyMap<string, st
       return own.map((p) => `${p}.`).join(' ')
     })
     .join(' ')
+}
+
+/** What may start the next sentence right after a placeholder: a capital letter, ¿ or ¡, or another placeholder. */
+const NEXT_SENTENCE = /^\s+(?:[\p{Lu}¿¡]|\{[^{}]{1,120}\})/u
+
+/**
+ * A placeholder followed by a new sentence without its full stop ("{price:signature-hand-wash} Want me to book it?", "{plan:gold}
+ * {plan:vip} Would you like ...", "{balance} You can pay it at the shop."): the server writes the full stop instead of rejecting the
+ * reply (guard polish after W4b-fix, W4a fresh set: 11 of its 120 ordinary rows were refused for it). Only a known amount
+ * placeholder, only before a capital letter, ¿, ¡ or another placeholder: "{price:a} plus {price:b}" and "Our wash {price:a}" stay
+ * misplaced (the words before a placeholder are never touched).
+ */
+export function punctuatePlaceholders(text: string, values: ReadonlyMap<string, string>): string {
+  return text.replace(BRACED, (p: string, at: number) => {
+    if (!values.has(p) || LINK_PLACEHOLDER.test(p)) return p
+    const rest = text.slice(at + p.length)
+    const next = NEXT_SENTENCE.exec(rest)
+    if (!next) return p
+    // a following brace counts only when it is a placeholder the server knows
+    const brace = /\{[^{}]{1,120}\}$/.exec(next[0])
+    if (brace && !values.has(brace[0])) return p
+    return `${p}.`
+  })
 }
 
 /** The amount placeholders of a text that do not stand as their own clause ("Window tint {price:signature-hand-wash}"). */
@@ -407,8 +437,20 @@ const SECRET_NOUN = [
   '(?:numero|datos|digitos)\\s+de\\s+(?:tu|su|la)\\s+tarjeta',
   `${DIGIT_COUNT}\\s+digitos`,
 ].join('|')
+/**
+ * A PROTECTIVE reminder is no request (guard polish after W4b-fix, W4a fresh set: "Please don't send card numbers or codes by text."
+ * and "Nunca te pediremos tu codigo por mensaje." were blocked): a negation right before the request verb ("don't send", "never
+ * share", "do not text", "no envie", "nunca compartas"; "ever" or a Spanish pronoun may stand between) or "we never ask you to"
+ * before it. Only right before: "Don't forget to send your PIN", "Don't wait, send your code" and "No, text me the code" still block.
+ * The judge reads the rest ("don't send it to anyone but me" is a request in other words).
+ */
+const PROTECTIVE_NEG = "(?:don'?t|do\\s+not|never|no|nunca|jamas)\\s+(?:ever\\s+|(?:nos|me|te|le|les)\\s+)?"
+const PROTECTIVE_ASK = "(?:never|won'?t|will\\s+not|don'?t|do\\s+not|nunca)\\s+(?:ever\\s+)?(?:ask|request)\\s+(?:you\\s+)?(?:to\\s+)?"
+const NOT_PROTECTIVE = `(?<!(?:^|[^\\p{L}'])(?:${PROTECTIVE_NEG}|${PROTECTIVE_ASK}))`
+/** "... your PIN, please" counts only when no protective negation and verb stand before it in the clause. */
+const NO_PROTECTIVE_VERB_BEFORE = `(?<!(?:^|[^\\p{L}'])${PROTECTIVE_NEG}(?:${REQUEST_VERB_EN}|${REQUEST_VERB_ES})(?![\\p{L}\\p{N}])[^.!?;]{0,80})`
 const SECRET_REQUEST = new RegExp(
-  `(?<![\\p{L}\\p{N}])(?:(?:${SHOP_SUBJECT}${REQUEST_VERB_EN}|${REQUEST_VERB_ES}|${REQUEST_ASK})(?![\\p{L}\\p{N}])[^.!?;]{1,60}?(?<![\\p{L}\\p{N}])(?:${SECRET_NOUN})|(?:${SECRET_NOUN})[\\s,]+(?:please|pls|plz|por\\s+favor))(?![\\p{L}\\p{N}])`,
+  `(?<![\\p{L}\\p{N}])(?:${NOT_PROTECTIVE}(?:${SHOP_SUBJECT}${REQUEST_VERB_EN}|${REQUEST_VERB_ES}|${REQUEST_ASK})(?![\\p{L}\\p{N}])[^.!?;]{1,60}?(?<![\\p{L}\\p{N}])(?:${SECRET_NOUN})|${NO_PROTECTIVE_VERB_BEFORE}(?:${SECRET_NOUN})[\\s,]+(?:please|pls|plz|por\\s+favor))(?![\\p{L}\\p{N}])`,
   'gu',
 )
 
@@ -433,11 +475,18 @@ export const hostOf = (url: string): string =>
     .replace(/^www\./i, '')
     .toLowerCase()
 
-/** The pattern of the shop's own host where it stands exactly, as text (no subdomain, no path or port, not even after a space). */
+/**
+ * The pattern of the shop's own host where it stands exactly, as text: no subdomain, no path or port, not even after a space; it may be
+ * written with "https://" or "http://" and a trailing slash (W4a fresh set: "You can see the full menu at
+ * https://oasisautospanj.com." was blocked). "hxxp", "www.", another scheme, a user part, a path or a port still block.
+ */
 function ownHostPattern(website: string): RegExp | null {
   const own = hostOf(website)
   if (!own) return null
-  return new RegExp(`(?<![\\p{L}\\p{N}.-])${escapeRe(own)}(?![\\p{L}\\p{N}-]|\\.[\\p{L}\\p{N}]|[/:?#]\\S|\\s+/)`, 'giu')
+  return new RegExp(
+    `(?<![\\p{L}\\p{N}./-])(?:https?:\\/\\/)?${escapeRe(own)}\\/?(?![\\p{L}\\p{N}/-]|\\.[\\p{L}\\p{N}]|[:?#@]\\S|\\s+\\/)`,
+    'giu',
+  )
 }
 
 /** The text without the shop's own host where it stands exactly, as text. */
@@ -701,10 +750,20 @@ const CLAIM_ES = new RegExp(
   [
     '\\b(?:esta|estas|estan|queda|quedo|quedaste|quedas|ya\\s+esta|fue|ha\\s+sido|tienes)\\s+(?:todo\\s+|ya\\s+)?(?:reservad[oa]s?|agendad[oa]s?|confirmad[oa]s?|cancelad[oa]s?|programad[oa]s?|movid[oa]s?|cambiad[oa]s?|list[oa]s?)\\b',
     '\\bte\\s+(?:reserve|agende|cancele|movi|confirme|cambie|anote)\\b',
+    // "Ya quedaste para el viernes", "tu cita queda para el lunes" (never "queda en": where the shop is)
+    '\\b(?:quedaste|quedas|ya\\s+quedo|ya\\s+queda)\\s+(?:para|el|agendad[oa]|reservad[oa])\\b',
+    '\\b(?:tu|su)\\s+(?:cita|reserva|lavado|visita)\\s+(?:queda|quedo)\\s+(?:para|el)\\b',
     '\\btodo\\s+listo\\b',
   ].join('|'),
   'i',
 )
+/**
+ * Phrases with a negation word that negate nothing ("No problem, you're all set", "No worries, your first wash is free!"): taken out
+ * before a negation decides anything, here (actionClaims) and in the conversation eval's checker (convo-eval.ts refusedPromise).
+ */
+export const NEGATION_IDIOMS =
+  /\b(?:no (?:worries|worry|problem|problemo|prob|probs|rush|stress|biggie|sweat|doubt)|not a problem|never mind|nevermind|no hay (?:problema|prisa|lio)|no te preocupes|no se preocupe|sin problema|don['’]?t worry|no need to worry)\b/gi
+
 /** A sentence that only says what will happen, what is not done yet or asks: no claim ("Nothing is booked until you confirm"). */
 const CLAIM_EXCEPT =
   /\b(?:until|once|after|before|when|whenever|if|unless|not|never|nothing|no|yet|cannot|can't|won't|will|would|could|can|should|be|to\s+get|want|like|need|let|hasta|cuando|una\s+vez|antes|todavia|aun|nada|quieres|puedes|para)\b|n't\b|'ll\b|\bsi\s+(?!,)/i
@@ -736,8 +795,9 @@ export function actionClaims(text: string): string[] {
     if (s.trim().endsWith('?')) continue
     const m = CLAIM_EN.exec(s) ?? CLAIM_ES.exec(s)
     if (!m) continue
-    // only the words before the claim decide whether it is conditional ("Once you confirm, you're all set" is no claim)
-    if (CLAIM_EXCEPT.test(s.slice(0, m.index))) continue
+    // only the words before the claim decide whether it is conditional ("Once you confirm, you're all set" is no claim); an idiom
+    // that negates nothing ("No problem, you're all set") is no condition (the eval's check found actionClaims skipped it)
+    if (CLAIM_EXCEPT.test(s.slice(0, m.index).replace(NEGATION_IDIOMS, ' '))) continue
     out.push(m[0].trim())
   }
   return out
@@ -746,7 +806,7 @@ export function actionClaims(text: string): string[] {
 export function guardReply(i: GuardInput): GuardVerdict {
   const max = i.maxChars ?? MAX_REPLY_CHARS
   const values = i.values ?? new Map<string, string>()
-  const text = toGsm7(stripMarkdown(foldInput(i.text)))
+  const text = punctuatePlaceholders(toGsm7(stripMarkdown(foldInput(i.text))), values)
   if (text.length === 0) return { kind: 'fix', text, rendered: text, problems: ['empty'], words: [] }
   const problems: GuardProblem[] = []
   const words: string[] = []

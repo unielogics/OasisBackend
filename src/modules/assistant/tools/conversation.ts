@@ -12,6 +12,7 @@ import { tierSpec } from '../../public/tiers.js'
 import { noteLeadInterest, openLead } from '../../leads/service.js'
 import { TOOL_MIN_TRUST, type AssistantTool, type ToolContext, type ToolInputs } from '../contract.js'
 import { atLeast, fail, json, ok, ownAppointment, withHandoff } from './common.js'
+import { conversationVoice, serverTextEs } from '../lang.js'
 
 export const noteInterest: AssistantTool<ToolInputs['note_interest']> = {
   name: 'note_interest',
@@ -193,12 +194,14 @@ export const optOut: AssistantTool<ToolInputs['opt_out']> = {
       if (!already) {
         const target = id.customerId ? await loadCustomerTarget(tx, id.locationId, id.customerId) : null
         const recipient = target?.recipient ?? (await strangerRecipient(tx, id.locationId, id.phone))
+        // a Spanish conversation gets the Spanish confirmation (guard polish after W4b-fix, P3)
+        const es = (await conversationVoice(tx, ctx.conversationId)).lang === 'es' ? serverTextEs('opt_out_confirm') : null
         await ctx.queue.enqueueFor(tx, {
           locationId: id.locationId,
           customerId: id.customerId,
           recipient,
           appointmentId: null,
-          templateKey: 'opt_out_confirm',
+          ...(es ? { text: es, klass: 'opt_out_confirm' as const, tag: 'opt_out_confirm' } : { templateKey: 'opt_out_confirm' }),
           purpose: 'inbound-reply',
           senderKind: 'system',
           dedupeKey: `assistant-opt-out:${ctx.turnId}`,

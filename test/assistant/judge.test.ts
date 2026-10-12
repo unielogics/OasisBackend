@@ -62,7 +62,7 @@ describe('the judge request', () => {
     // full Bedrock run 1791783378: the membership count from the record failed as a fact; "Once verified, I can get you set for
     // tomorrow at 9 AM" failed as a done action
     expect(JUDGE_RUBRIC).toContain("the client's own visits, membership and record")
-    expect(JUDGE_RUBRIC).toContain('or what happens or can be done once they verify or confirm ("once you verify, I can book 9 AM for you")')
+    expect(JUDGE_RUBRIC).toContain('what happens or can be done once they verify or confirm ("once you verify, I can book 9 AM for you")')
     // Bedrock gets the temperature and the cache point after the rubric
     const input = toConverseInput(req, { modelId: 'us.anthropic.claude-sonnet-4-6' })
     expect(input.inferenceConfig).toEqual({ maxTokens: 120, temperature: 0, stopSequences: ['}\n'] })

@@ -5,7 +5,7 @@ import { oneLine } from './facts.js'
 import { MAX_REPLY_CHARS, PROBLEM_HINTS, type GuardProblem } from './guard.js'
 
 /** Recorded on every turn (assistant_turns.prompt_version); bump it with any wording change below. */
-export const PROMPT_VERSION = 'w4b-2026-10-13.16'
+export const PROMPT_VERSION = 'w4b-2026-10-13.17'
 
 export const STATIC_RULES = `You are the automated text-message (SMS) assistant of the car wash and auto spa described in SHOP FACTS. You answer the people who text the shop's number, any time of day.
 
@@ -41,7 +41,8 @@ NUMBERS
 PROMISES
 - Promise nothing: nothing free or "on us", no discount, deal, sale, refund, credit or coupon, no guarantee or warranty, no paying for damage, no time by which a car will be ready. Even when SHOP FACTS use such a word (a perk, a description, an FAQ answer), say it another way. "Feel free" and "spot-free" are fine.
 - For availability say "open times" or "openings", never "free times" or "free slots".
-- If the client asks about refunds, discounts, free services, guarantees, damage, insurance or legal matters, or when the car will be ready, hand the chat to the team with handoff_to_staff, with one short friendly line (when they asked about a service's price, its {price:<key>} sentence too).
+- If the client asks about refunds, discounts, free services, guarantees, damage, insurance or legal matters, or when the car will be ready, hand the chat to the team with handoff_to_staff, with one short friendly line (when they asked about a service's price, its {price:<key>} sentence too). When they ask for something free ("confirm my free wash", "is it free?"), first say plainly that you can't confirm anything free ("I can't confirm a free wash, but a team member will text you back."): never answer with only a link.
+- When you hand the chat to the team, end your text with a statement, never a question: you stay silent until a team member replies.
 - With a complaint, say only that you are sorry and a team member will text them back: never that the team will fix it, make it right, make up for it or take care of it.
 - Every reply is checked by the shop's policy check before it is sent; a reply that breaks these rules is not sent.
 
@@ -51,7 +52,7 @@ LINKS, CODES AND PRIVACY
 - Never write a phone number other than the shop's own numbers in SHOP FACTS; never mention a client's phone number, an internal id or a confirmation number.
 
 BOOKING
-- Check open times with check_availability before offering a time; offer at most three.
+- Check open times with check_availability before offering a time; offer at most three. Name a day or time as open or available ONLY when check_availability returned it in this turn; for a phone that cannot book in the chat it returns no times, so never name one ("Saturday at 9 AM should be available" is wrong): the booking link shows them.
 - Booking, moving or cancelling in the chat works only when the turn context says the phone is verified and in-chat booking is on: then use propose_booking, propose_reschedule or propose_cancel, and the server texts the client how to confirm; in your reply write "{confirm}." (the server writes "I just texted you the details with how to confirm.").
 - Never say anything is booked, moved, cancelled, confirmed, reserved or "all set" unless the server did it (its own text "You're booked: ..." is in the conversation): a proposal is not done until the client confirms it. Never mention that confirmation number or any code.
 - Otherwise (phone not verified, or in-chat booking off), as soon as they want to book, move or cancel, the link goes in that same text, even when the day or the time is still open and even for a new client (ask the intake's next question in the same text): call check_availability (it gives no times but a booking link placeholder such as {link1}; when they have not picked a service yet, send_link calendar instead: the page lets them pick the service and the time, so never hold the link back to ask which service) and write it as "here's your link to pick a time: {link1}" (or send_link verify when they want to book by text). Never list or offer specific times, never ask them to pick a time in the chat, and never say you will book or move it yourself.
@@ -115,6 +116,18 @@ export interface TurnContextData {
   intake: IntakeStep
   /** The client's language (W4b X5; English when not given). */
   language?: 'en' | 'es'
+  /** The client's new texts ask for something free (asksForFree): a clear no, then the team (guard polish after W4b-fix, P5). */
+  asksFree?: boolean
+}
+
+/** "free" meaning available, or an idiom ("are you free Saturday?", "free slots", "feel free", "spot-free"): not a request for anything free. */
+const FREE_AVAILABILITY =
+  /\bfree\s+(?:time|times|slot|slots|bay|bays|opening|openings|spot|spots|day|days|today|tomorrow|tonight|this|that|on|at|now|right\s+now|later|anytime)\b|\b(?:are|r|you|u|anyone|anybody|someone|bays?|slots?|spots?|openings?|times?)\s+(?:is\s+|are\s+)?free\b|\bfeel\s+free\b|\bfree\s+of\b/gi
+const FREE_WORD = /(?<![-\p{L}\p{N}])(?:free|gratis|gratuit[oa]s?|complimentary|on the house|de gratis|sin costo|no charge)(?![-\p{L}\p{N}])/iu
+
+/** Whether the client's new texts ask for something free ("confirm my free wash", "is the wax free?", "es gratis?"). */
+export function asksForFree(texts: readonly string[]): boolean {
+  return texts.some((t) => FREE_WORD.test(t.replace(FREE_AVAILABILITY, ' ')))
 }
 
 /** The turn context block (not cached: it changes with every turn). */
@@ -136,6 +149,10 @@ export function renderTurnContext(c: TurnContextData): string {
     lines.push('Their appointments:', ...(c.appointments.length > 0 ? c.appointments.map((a) => `- ${a.ref}: ${a.label}`) : ['- none']))
   }
   if (c.intake) lines.push(`Intake: ${INTAKE_LINES[c.intake]}.`)
+  if (c.asksFree)
+    lines.push(
+      'Free: the client asks for something free. Say plainly that you can\'t confirm or offer anything free, then hand the chat to the team with handoff_to_staff (a statement, no question); never answer with only a link.',
+    )
   if (c.language === 'es') lines.push('Language: Spanish (write your text in Spanish).')
   return lines.join('\n')
 }

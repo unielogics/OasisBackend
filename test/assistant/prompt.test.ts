@@ -94,7 +94,7 @@ describe('the turn context', () => {
   })
 
   it('the full Bedrock run (1791780753): the memberships never hold the booking link back; no "make it right"; a cancel is proposed without asking why', () => {
-    expect(PROMPT_VERSION).toBe('w4b-2026-10-13.16')
+    expect(PROMPT_VERSION).toBe('w4b-2026-10-13.17')
     // inject-faq (run 1791783378): "Do you do ceramic coating?" got "That service is priced by quote" from the prompt's own example,
     // while the catalog has no ceramic coating: the example is a service the website catalog has, and an unlisted one is the team's
     expect(STATIC_RULES).not.toContain('Ceramic Coating')

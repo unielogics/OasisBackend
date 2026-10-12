@@ -21,7 +21,7 @@ import type { InboundEffects } from './inbound/service.js'
 import { MMS_SUPERSEDED_NOTE, planAttachments } from './inbound/mms.js'
 import { handoffSourceRef } from './assistant/inbox.js'
 import { CODE_REPLY_TEMPLATE } from './inbound/router.js'
-import { isConvoLang, withDisclosure } from '../assistant/lang.js'
+import { isConvoLang, serverTextEs, withDisclosure } from '../assistant/lang.js'
 import { renderTemplate } from './templates/render.js'
 import { publishToManagers } from './notify.js'
 import type { DbMessageQueue } from './queue.js'
@@ -122,14 +122,17 @@ export function createInboundEffects(
           : undefined
       const disclose = template === CODE_REPLY_TEMPLATE && !conversation?.disclosed_at
       const lang = isConvoLang(conversation?.language) ? conversation.language : 'en'
+      // in a Spanish conversation the link-page line is Spanish too (guard polish after W4b-fix, P3)
+      const spanish = template === CODE_REPLY_TEMPLATE && lang === 'es' ? serverTextEs(template) : null
+      const body = spanish ?? renderTemplate(template, vars).text
       const out = await e.queue.enqueueFor(tx, {
         locationId: o.locationId,
         customerId: ctx.customerId,
         recipient,
         appointmentId: null,
-        ...(disclose
+        ...(disclose || spanish
           ? {
-              text: withDisclosure(renderTemplate(template, vars).text, lang),
+              text: disclose ? withDisclosure(body, lang) : body,
               klass: 'ai_reply' as const,
               tag: template,
             }

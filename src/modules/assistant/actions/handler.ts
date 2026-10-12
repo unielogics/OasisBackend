@@ -13,7 +13,7 @@
 import type { Tx } from '../../../platform/db.js'
 import * as audit from '../../../platform/audit.js'
 import { getSetting } from '../../../platform/settings.js'
-import { fmtT, toBizDate, wallToInstant } from '../../../platform/time.js'
+import { fmtT, minutesOfDay, toBizDate, wallToInstant } from '../../../platform/time.js'
 import { findPendingAction, cancelPendingActions, completePendingAction, confirmPendingAction, failPendingAction, type ConfirmedAction } from '../../identity/pending-actions.js'
 import { markLeadBooked } from '../../leads/service.js'
 import { loadCustomerTarget } from '../../messaging/db/recipients.js'
@@ -24,11 +24,13 @@ import { cancelAppointment, rescheduleAppointment } from '../../scheduling/lifec
 import type { ActionCodeHandler, ActionCodeInput } from '../ports.js'
 import type { AssistantDeps, CreateActionCodeHandler } from '../contract.js'
 import { usd } from '../facts.js'
+import { isConvoLang, serverTextEs, whenIn, type ConvoLang } from '../lang.js'
 import { actionsOn, assistantOn } from '../tools/switches.js'
 import { aiBookingsAhead, dayWord, inSavepoint, MAX_AI_BOOKINGS_AHEAD, plainSchedulingError, privilegesOf, slotVerdict, windowDaysFor } from '../tools/common.js'
 import { BookPayload, CancelPayload, cancelBlockOf, ReschedulePayload } from './plan.js'
 
-type Reply = { templateKey: string; vars?: Record<string, string> } | null
+/** The answer: a template (English) and, for a Spanish conversation, its Spanish text (lang.ts serverTextEs), sent as ai_reply with the template key as its tag. */
+type Reply = { templateKey: string; vars?: Record<string, string>; es?: string | null } | null
 
 class ActionRefused extends Error {
   constructor(readonly reason: string) {
@@ -76,7 +78,7 @@ export const createActionCodeHandler: CreateActionCodeHandler = (deps): ActionCo
           const reason = e instanceof ActionRefused ? e.reason : plainSchedulingError(e)
           if (reason === null) throw e
           await failPendingAction(tx, action.id, { error: reason, now: at })
-          await answer(tx, deps, input, action.customerId, { templateKey: 'action_failed', vars: { reason: capitalize(reason) } })
+          await answer(tx, deps, input, action.customerId, { templateKey: 'action_failed', vars: { reason: capitalize(reason) }, es: serverTextEs('action_failed', { reason }) })
           return
         }
         await answer(tx, deps, input, action.customerId, reply)
@@ -88,6 +90,17 @@ export const createActionCodeHandler: CreateActionCodeHandler = (deps): ActionCo
 
 const capitalize = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)
 
+/** The language of the number's assistant conversation (English when there is none). */
+async function phoneLanguage(tx: Tx, locationId: string, phone: string): Promise<ConvoLang> {
+  const c = await tx
+    .selectFrom('assistant_conversations')
+    .select('language')
+    .where('location_id', '=', locationId)
+    .where('phone_e164', '=', phone)
+    .executeTakeFirst()
+  return isConvoLang(c?.language) ? c.language : 'en'
+}
+
 /** The client's answer: ai_reply's rules (an answer to their text), the "Oasis AI" label, once per received text. */
 async function answer(tx: Tx, deps: AssistantDeps, input: ActionCodeInput, customerId: string | null, reply: Reply): Promise<void> {
   if (!reply) return
@@ -95,13 +108,15 @@ async function answer(tx: Tx, deps: AssistantDeps, input: ActionCodeInput, custo
   if (!id) return
   const target = await loadCustomerTarget(tx, input.locationId, id)
   if (!target || target.recipient.phone !== input.phone) return
+  // guard polish after W4b-fix (P3): a Spanish conversation gets the Spanish text (the English template otherwise)
+  const lang = await phoneLanguage(tx, input.locationId, input.phone)
+  const es = lang === 'es' ? (reply.es ?? serverTextEs(reply.templateKey, reply.vars ?? {})) : null
   const out = await deps.queue.enqueueFor(tx, {
     locationId: input.locationId,
     customerId: id,
     recipient: target.recipient,
     appointmentId: null,
-    templateKey: reply.templateKey,
-    ...(reply.vars ? { vars: reply.vars } : {}),
+    ...(es ? { text: es, klass: 'ai_reply' as const, tag: reply.templateKey } : { templateKey: reply.templateKey, ...(reply.vars ? { vars: reply.vars } : {}) }),
     purpose: 'assistant-action',
     senderKind: 'ai',
     dedupeKey: `assistant-action-reply:${input.inboxId}`,
@@ -189,6 +204,7 @@ async function execute(tx: Tx, deps: AssistantDeps, input: ActionCodeInput, acti
       after: { pendingActionId: action.id, serviceKey: p.serviceKey, date: p.date, startMin: p.startMin },
       ctx: actor.audit,
     })
+    const extra: Record<string, string> = priv.member ? { member: 'yes' } : dueCents > 0 ? { fee: usd(dueCents), how } : {}
     return {
       templateKey: 'action_booked',
       vars: {
@@ -196,8 +212,9 @@ async function execute(tx: Tx, deps: AssistantDeps, input: ActionCodeInput, acti
         when: dayWord(p.date, today),
         time: fmtT(p.startMin),
         // the fee written the way the {fee} placeholder writes it in the same conversation (facts.ts usd: "$25", "$25.50")
-        ...(priv.member ? { member: 'yes' } : dueCents > 0 ? { fee: usd(dueCents), how } : {}),
+        ...extra,
       },
+      es: serverTextEs('action_booked', { service: p.serviceName, when: whenIn('es', p.date, p.startMin, today), ...extra }),
     }
   }
 
@@ -221,8 +238,10 @@ async function execute(tx: Tx, deps: AssistantDeps, input: ActionCodeInput, acti
       excludeAppointmentId: a.id,
     })
     if (!v.ok) throw new ActionRefused(v.problem === 'past' ? 'that time has passed.' : 'that time was just taken.')
-    // rescheduleAppointment texts the client the new time (the reschedule template): that text is the confirmation
-    await rescheduleAppointment(tx, sched, actor, a.id, { start: wallToInstant(p.date, p.startMin, tz) })
+    // rescheduleAppointment texts the client the new time (the reschedule template): that text is the confirmation; a Spanish
+    // conversation gets the Spanish ack below instead (P3)
+    const es = (await phoneLanguage(tx, loc, input.phone)) === 'es'
+    await rescheduleAppointment(tx, sched, actor, a.id, { start: wallToInstant(p.date, p.startMin, tz), ...(es ? { notify: false } : {}) })
     await logActivity(tx, sched, { appointmentId: a.id, text: 'Moved by text with Oasis AI · confirmed with the reply number', channels: ['system'], actor })
     await completePendingAction(tx, action.id, { appointmentId: a.id })
     await audit.record(tx, {
@@ -234,7 +253,7 @@ async function execute(tx: Tx, deps: AssistantDeps, input: ActionCodeInput, acti
       after: { pendingActionId: action.id, date: p.date, startMin: p.startMin },
       ctx: actor.audit,
     })
-    return null
+    return es ? { templateKey: 'reschedule', es: serverTextEs('reschedule', { when: whenIn('es', p.date, p.startMin, today) }) } : null
   }
 
   const p = CancelPayload.parse(action.payload)
@@ -244,8 +263,11 @@ async function execute(tx: Tx, deps: AssistantDeps, input: ActionCodeInput, acti
     throw new ActionRefused('that visit can no longer be canceled by text.')
   if (await cancelBlockOf(tx, { locationId: loc, appointmentId: a.id, start: a.scheduledStart, now }))
     throw new ActionRefused('it is now too close to the visit (or money is held on it) to cancel by text.')
-  // cancelAppointment with notify texts the cancellation notice: that text is the confirmation
-  await cancelAppointment(tx, sched, actor, a.id, { reason: `Canceled by the client by text (Oasis AI): ${p.reason}`, notify: true, deposit: 'policy' })
+  // cancelAppointment with notify texts the cancellation notice: that text is the confirmation; a Spanish conversation gets the
+  // Spanish ack below instead (P3; a cancel by text never has money held on it, so the notice has no deposit sentence to lose)
+  const es = (await phoneLanguage(tx, loc, input.phone)) === 'es'
+  const whenEs = whenIn('es', toBizDate(a.scheduledStart, tz), minutesOfDay(a.scheduledStart, tz), today)
+  await cancelAppointment(tx, sched, actor, a.id, { reason: `Canceled by the client by text (Oasis AI): ${p.reason}`, notify: !es, deposit: 'policy' })
   await completePendingAction(tx, action.id, { appointmentId: a.id })
   await audit.record(tx, {
     locationId: loc,
@@ -255,5 +277,5 @@ async function execute(tx: Tx, deps: AssistantDeps, input: ActionCodeInput, acti
     after: { pendingActionId: action.id, reason: p.reason },
     ctx: actor.audit,
   })
-  return null
+  return es ? { templateKey: 'cancel', es: serverTextEs('cancel', { when: whenEs }) } : null
 }
