@@ -304,6 +304,30 @@ on, after links, deposits, refunds, saved cards and fees: plan rollout step 4); 
   unpaid or scheduled invoice" (as for a paid one): callers read the invoice first. The sandbox location's time zone is UTC (the shop's
   is America/New_York): Oasis sends the shop's own zone with every subscription and computes periods in it.
 
+## Dashboard data (wave Q3 dashapi, built)
+
+Read models and three settings routes the dashboard needs before the cutover (api-spec 30.13); no migration, no job, no new switch,
+nothing changes with the defaults (every Square tender off while `PAYMENT_PROCESSOR=squarespace`).
+
+- **One answer for every role** (dashboard review Q2c F3): the invoice summary (file, board `pay`, command answers) and the invoice
+  detail carry `processing {processor, squarePosAppSwitch, squareTenders {reader, link, savedCard}}`, decided by
+  `square/tenders.ts`: reader = Square the processor (observe-only too: the matcher confirms the entry), link = Square and writes on,
+  savedCard = Square, writes on, an open invoice and the newest active, unexpired card whose live consent covers balances (the card the
+  charge route picks without a `cardId`). The card query runs only when saved cards can be charged; its clock is the database's
+  `app_now()` when the caller has none (the summary seam has no clock).
+- **The deposit state** (`payments/deposit-view.ts`, pure `depositViewOf` + batched facts): requested / link_sent / link_expired / paid
+  on an open visit; refund_pending / refunded / kept on a canceled one (Q2c N1: a refund waiting for approval is no longer read as
+  kept). "Paid" counts only payments flagged as deposits (a part payment is not a deposit request); a canceled visit counts all money
+  paid, as the cancellation settlement does. The link's URL is never exposed.
+- **Receipts**: `receiptNumber` / `receiptUrl` on the ledger rows of Square payments, from the `square_payments` mirror; the URL only on
+  Square's receipt hosts over https (anything else null), so a forged or odd URL in a mirrored payment never becomes a link.
+- **Settings, Billing & integrations**: `GET /settings/billing` gathers the panel; new PUTs only where none existed (link tipping,
+  renewal policy, price-change notice), each with its own version, audited and announced like every setting. The booking fee and its
+  collect mode stay on `PUT /catalog/guest-fee` (`set.services`), the card fees on `PUT /settings/card-fees`. The processor switches
+  are read only (they are deploy-time environment).
+- **Memberships**: the billing block adds the plan size label, the next charge date, the card label, the last paid and last failed
+  invoice and the names of a scheduled change; the tier price grid adds each price's `squareError` and `squareSyncedAt`.
+
 ## Sandbox findings (2026-10-12, `pnpm verify:square --secret oasis/sandbox/square`, 10 PASS)
 
 Recorded in `docs/integrations/square.md` section 8; the ones that change later waves:
@@ -355,6 +379,7 @@ Recorded in `docs/integrations/square.md` section 8; the ones that change later 
 | Q3 shared (built) | Migration `20261014500000_square_cards.sql` (`square_customer_links`, `customer_cards`, `card_consents`, `square_charges`, link kind `card`), `ensureSquareCustomer`, the consent wording, `saveCardOnFile` / `disableCard`, the declared (stub) card and Square membership link routes (section "The cards foundation"). |
 | Q3a (built) | Migration `20261014500100_card_charges.sql`; the card page routes and `LinkState.cards`/`cardSetup`; the staff card routes; saved-card charges (balance, fees) with `square.charges.resolve`; the fee proposal in `settleClosed` and `fees.card_on_file`; the `card` and `customer` handlers and `square.cards.nightly`; the site CSP with Square's SDK hosts (section "Cards on file and fees"). The site's card component and `#/k` page are the site package's. |
 | Q3b (built) | Memberships on Square (section "Memberships on Square"): migration `20261014600000_square_memberships.sql`; catalog sync of the tier x size prices, enrollment with resume, billing webhooks (`invoice` and `subscription` handlers), the failure policy (D10), staff actions, Move members (D9); `verify:square` SQR-13 and SQR-14. |
+| Q3 dashapi (built) | The read models and settings routes the dashboard needs (section "Dashboard data"; api-spec 30.13). |
 | Q3c, Q3e | The website's v2 catalog, join and pay pages; the dashboard's billing block, saved cards and Settings, Billing & integrations (Square status and Test connection). |
 | Q4 | The adversarial money and security review, and a sandbox end-to-end run on a disposable stack. |
 
