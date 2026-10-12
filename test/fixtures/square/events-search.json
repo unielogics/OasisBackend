@@ -1,0 +1,879 @@
+{
+  "method": "POST",
+  "path": "/v2/events",
+  "status": 200,
+  "body": {
+    "events": [
+      {
+        "merchant_id": "ID0002",
+        "location_id": "ID0001",
+        "type": "invoice.payment_made",
+        "event_id": "ID0068",
+        "created_at": "2026-10-12T13:38:51Z",
+        "data": {
+          "type": "invoice",
+          "id": "ID0069",
+          "object": {
+            "invoice": {
+              "accepted_payment_methods": {
+                "bank_account": false,
+                "buy_now_pay_later": false,
+                "card": true,
+                "cash_app_pay": true,
+                "square_gift_card": false
+              },
+              "created_at": "2026-10-12T13:38:49Z",
+              "delivery_method": "EMAIL",
+              "id": "ID0069",
+              "invoice_number": "ID0070",
+              "location_id": "ID0001",
+              "order_id": "ID0071",
+              "payment_requests": [
+                {
+                  "automatic_payment_source": "CARD_ON_FILE",
+                  "card_id": "ID0072",
+                  "computed_amount_money": {
+                    "amount": 100,
+                    "currency": "USD"
+                  },
+                  "due_date": "2026-10-12",
+                  "request_type": "BALANCE",
+                  "tipping_enabled": false,
+                  "total_completed_amount_money": {
+                    "amount": 100,
+                    "currency": "USD"
+                  },
+                  "uid": "ID0073"
+                }
+              ],
+              "primary_recipient": {
+                "customer_id": "ID0074",
+                "email_address": "verify@example.com",
+                "family_name": "Sub",
+                "given_name": "Probe"
+              },
+              "public_url": "https://app.squareupsandbox.com/scrubbed",
+              "status": "PAID",
+              "store_payment_method_enabled": true,
+              "subscription_id": "ID0075",
+              "timezone": "UTC",
+              "title": "Probe all_items v Subscription",
+              "updated_at": "2026-10-12T13:38:50Z",
+              "version": 2
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "type": "payment.updated",
+        "event_id": "ID0076",
+        "created_at": "2026-10-12T13:38:51Z",
+        "data": {
+          "type": "payment",
+          "id": "ID0077",
+          "object": {
+            "payment": {
+              "amount_money": {
+                "amount": 100,
+                "currency": "USD"
+              },
+              "application_details": {
+                "application_id": "ID0078",
+                "square_product": "OTHER"
+              },
+              "approved_money": {
+                "amount": 100,
+                "currency": "USD"
+              },
+              "buyer_email_address": "verify@example.com",
+              "card_details": {
+                "avs_status": "AVS_ACCEPTED",
+                "card": {
+                  "bin": "ID0007",
+                  "card_brand": "VISA",
+                  "card_type": "CREDIT",
+                  "exp_month": 10,
+                  "exp_year": 2028,
+                  "fingerprint": "ID0006",
+                  "last_4": "5858",
+                  "prepaid_type": "NOT_PREPAID"
+                },
+                "card_payment_timeline": {
+                  "authorized_at": "2026-10-12T13:38:49.967Z",
+                  "captured_at": "2026-10-12T13:38:50.078Z"
+                },
+                "cvv_status": "CVV_NOT_CHECKED",
+                "entry_method": "ON_FILE",
+                "statement_description": "SQ *DEFAULT TEST ACCOUNT",
+                "status": "CAPTURED"
+              },
+              "created_at": "2026-10-12T13:38:49.842Z",
+              "customer_id": "ID0074",
+              "delay_action": "CANCEL",
+              "delay_duration": "PT168H",
+              "delayed_until": "2026-10-19T13:38:49.842Z",
+              "id": "ID0077",
+              "location_id": "ID0001",
+              "order_id": "ID0071",
+              "receipt_number": "ID0079",
+              "receipt_url": "https://squareupsandbox.com/scrubbed",
+              "risk_evaluation": {
+                "created_at": "2026-10-12T13:38:49.967Z",
+                "risk_level": "NORMAL"
+              },
+              "source_type": "CARD",
+              "status": "COMPLETED",
+              "total_money": {
+                "amount": 100,
+                "currency": "USD"
+              },
+              "updated_at": "2026-10-12T13:38:51.333Z",
+              "version": 2
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "type": "subscription.created",
+        "event_id": "ID0080",
+        "created_at": "2026-10-12T13:38:58Z",
+        "data": {
+          "type": "subscription",
+          "id": "ID0081",
+          "object": {
+            "subscription": {
+              "card_id": "ID0072",
+              "created_at": "2026-10-12T09:38:57-04:00",
+              "customer_id": "ID0074",
+              "id": "ID0081",
+              "location_id": "ID0001",
+              "plan_variation_id": "ID0082",
+              "source": {
+                "application_id": "ID0012",
+                "application_name": "Sandbox for APPLICATION_ID",
+                "name": "Sandbox for APPLICATION_ID"
+              },
+              "start_date": "2026-10-12",
+              "status": "ACTIVE",
+              "tenant": "BUYER",
+              "timezone": "America/New_York",
+              "version": 1
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "type": "subscription.updated",
+        "event_id": "ID0083",
+        "created_at": "2026-10-12T13:38:59Z",
+        "data": {
+          "type": "subscription",
+          "id": "ID0075",
+          "object": {
+            "subscription": {
+              "billing_end_date": "2026-11-12",
+              "canceled_date": "2026-11-12",
+              "card_id": "ID0072",
+              "charged_through_date": "2026-11-12",
+              "created_at": "2026-10-12T13:38:46Z",
+              "customer_id": "ID0074",
+              "id": "ID0075",
+              "invoice_ids": [
+                "ID0069"
+              ],
+              "location_id": "ID0001",
+              "monthly_billing_anchor_date": 12,
+              "plan_variation_id": "ID0084",
+              "source": {
+                "application_id": "ID0012",
+                "application_name": "Sandbox for APPLICATION_ID",
+                "name": "Sandbox for APPLICATION_ID"
+              },
+              "start_date": "2026-10-12",
+              "status": "ACTIVE",
+              "tenant": "BUYER",
+              "timezone": "UTC",
+              "version": 1
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "type": "catalog.version.updated",
+        "event_id": "ID0085",
+        "created_at": "2026-10-12T13:38:59Z",
+        "data": {
+          "type": "catalog_version",
+          "object": {
+            "catalog_version": {
+              "updated_at": "2026-10-12T13:38:57.214Z"
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "type": "order.created",
+        "event_id": "ID0086",
+        "created_at": "2026-10-12T13:39:00Z",
+        "data": {
+          "type": "order_created",
+          "id": "ID0087",
+          "object": {
+            "order_created": {
+              "created_at": "2026-10-12T13:39:00.420Z",
+              "location_id": "ID0001",
+              "order_id": "ID0087",
+              "state": "OPEN",
+              "version": 1
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "type": "order.updated",
+        "event_id": "ID0088",
+        "created_at": "2026-10-12T13:39:00Z",
+        "data": {
+          "type": "order_updated",
+          "id": "ID0087",
+          "object": {
+            "order_updated": {
+              "created_at": "2026-10-12T13:39:00.420Z",
+              "location_id": "ID0001",
+              "order_id": "ID0087",
+              "state": "OPEN",
+              "updated_at": "2026-10-12T13:39:00.885Z",
+              "version": 2
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "location_id": "ID0001",
+        "type": "invoice.updated",
+        "event_id": "ID0089",
+        "created_at": "2026-10-12T13:39:01Z",
+        "data": {
+          "type": "invoice",
+          "id": "ID0090",
+          "object": {
+            "invoice": {
+              "accepted_payment_methods": {
+                "bank_account": false,
+                "buy_now_pay_later": false,
+                "card": true,
+                "cash_app_pay": true,
+                "square_gift_card": false
+              },
+              "created_at": "2026-10-12T13:39:01Z",
+              "delivery_method": "EMAIL",
+              "id": "ID0090",
+              "invoice_number": "ID0091",
+              "location_id": "ID0001",
+              "order_id": "ID0087",
+              "payment_requests": [
+                {
+                  "automatic_payment_source": "CARD_ON_FILE",
+                  "card_id": "ID0072",
+                  "computed_amount_money": {
+                    "amount": 100,
+                    "currency": "USD"
+                  },
+                  "due_date": "2026-10-12",
+                  "request_type": "BALANCE",
+                  "tipping_enabled": false,
+                  "total_completed_amount_money": {
+                    "amount": 0,
+                    "currency": "USD"
+                  },
+                  "uid": "ID0092"
+                }
+              ],
+              "primary_recipient": {
+                "customer_id": "ID0074",
+                "email_address": "verify@example.com",
+                "family_name": "Sub",
+                "given_name": "Probe"
+              },
+              "status": "DRAFT",
+              "store_payment_method_enabled": true,
+              "subscription_id": "ID0081",
+              "timezone": "UTC",
+              "title": "Probe ny-tz v Subscription",
+              "updated_at": "2026-10-12T13:39:01Z",
+              "version": 1
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "type": "payment.created",
+        "event_id": "ID0095",
+        "created_at": "2026-10-12T13:39:01Z",
+        "data": {
+          "type": "payment",
+          "id": "ID0096",
+          "object": {
+            "payment": {
+              "amount_money": {
+                "amount": 100,
+                "currency": "USD"
+              },
+              "application_details": {
+                "application_id": "ID0078",
+                "square_product": "OTHER"
+              },
+              "approved_money": {
+                "amount": 100,
+                "currency": "USD"
+              },
+              "buyer_email_address": "verify@example.com",
+              "capabilities": [
+                "EDIT_AMOUNT_UP",
+                "EDIT_AMOUNT_DOWN",
+                "EDIT_TIP_AMOUNT_UP",
+                "EDIT_TIP_AMOUNT_DOWN"
+              ],
+              "card_details": {
+                "avs_status": "AVS_ACCEPTED",
+                "card": {
+                  "bin": "ID0007",
+                  "card_brand": "VISA",
+                  "card_type": "CREDIT",
+                  "exp_month": 10,
+                  "exp_year": 2028,
+                  "fingerprint": "ID0006",
+                  "last_4": "5858",
+                  "prepaid_type": "NOT_PREPAID"
+                },
+                "card_payment_timeline": {
+                  "authorized_at": "2026-10-12T13:39:01.759Z"
+                },
+                "cvv_status": "CVV_NOT_CHECKED",
+                "entry_method": "ON_FILE",
+                "statement_description": "SQ *DEFAULT TEST ACCOUNT",
+                "status": "AUTHORIZED"
+              },
+              "created_at": "2026-10-12T13:39:01.631Z",
+              "customer_id": "ID0074",
+              "delay_action": "CANCEL",
+              "delay_duration": "PT168H",
+              "delayed_until": "2026-10-19T13:39:01.631Z",
+              "id": "ID0096",
+              "location_id": "ID0001",
+              "order_id": "ID0087",
+              "receipt_number": "ID0097",
+              "risk_evaluation": {
+                "created_at": "2026-10-12T13:39:01.759Z",
+                "risk_level": "NORMAL"
+              },
+              "source_type": "CARD",
+              "status": "APPROVED",
+              "total_money": {
+                "amount": 100,
+                "currency": "USD"
+              },
+              "updated_at": "2026-10-12T13:39:01.759Z",
+              "version": 1
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "location_id": "ID0001",
+        "type": "invoice.created",
+        "event_id": "ID0099",
+        "created_at": "2026-10-12T13:39:01Z",
+        "data": {
+          "type": "invoice",
+          "id": "ID0090",
+          "object": {
+            "invoice": {
+              "accepted_payment_methods": {
+                "bank_account": false,
+                "buy_now_pay_later": false,
+                "card": true,
+                "cash_app_pay": true,
+                "square_gift_card": false
+              },
+              "created_at": "2026-10-12T13:39:01Z",
+              "delivery_method": "EMAIL",
+              "id": "ID0090",
+              "invoice_number": "ID0091",
+              "location_id": "ID0001",
+              "order_id": "ID0087",
+              "payment_requests": [
+                {
+                  "automatic_payment_source": "CARD_ON_FILE",
+                  "card_id": "ID0072",
+                  "computed_amount_money": {
+                    "amount": 100,
+                    "currency": "USD"
+                  },
+                  "due_date": "2026-10-12",
+                  "request_type": "BALANCE",
+                  "tipping_enabled": false,
+                  "total_completed_amount_money": {
+                    "amount": 0,
+                    "currency": "USD"
+                  },
+                  "uid": "ID0092"
+                }
+              ],
+              "primary_recipient": {
+                "customer_id": "ID0074",
+                "email_address": "verify@example.com",
+                "family_name": "Sub",
+                "given_name": "Probe"
+              },
+              "status": "DRAFT",
+              "store_payment_method_enabled": true,
+              "subscription_id": "ID0081",
+              "timezone": "UTC",
+              "title": "Probe ny-tz v Subscription",
+              "updated_at": "2026-10-12T13:39:01Z",
+              "version": 0
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "location_id": "ID0001",
+        "type": "invoice.published",
+        "event_id": "ID0101",
+        "created_at": "2026-10-12T13:39:02Z",
+        "data": {
+          "type": "invoice",
+          "id": "ID0090",
+          "object": {
+            "invoice": {
+              "accepted_payment_methods": {
+                "bank_account": false,
+                "buy_now_pay_later": false,
+                "card": true,
+                "cash_app_pay": true,
+                "square_gift_card": false
+              },
+              "created_at": "2026-10-12T13:39:01Z",
+              "delivery_method": "EMAIL",
+              "id": "ID0090",
+              "invoice_number": "ID0091",
+              "location_id": "ID0001",
+              "order_id": "ID0087",
+              "payment_requests": [
+                {
+                  "automatic_payment_source": "CARD_ON_FILE",
+                  "card_id": "ID0072",
+                  "computed_amount_money": {
+                    "amount": 100,
+                    "currency": "USD"
+                  },
+                  "due_date": "2026-10-12",
+                  "request_type": "BALANCE",
+                  "tipping_enabled": false,
+                  "total_completed_amount_money": {
+                    "amount": 100,
+                    "currency": "USD"
+                  },
+                  "uid": "ID0092"
+                }
+              ],
+              "primary_recipient": {
+                "customer_id": "ID0074",
+                "email_address": "verify@example.com",
+                "family_name": "Sub",
+                "given_name": "Probe"
+              },
+              "public_url": "https://app.squareupsandbox.com/scrubbed",
+              "status": "PAID",
+              "store_payment_method_enabled": true,
+              "subscription_id": "ID0081",
+              "timezone": "UTC",
+              "title": "Probe ny-tz v Subscription",
+              "updated_at": "2026-10-12T13:39:01Z",
+              "version": 2
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "type": "payment.updated",
+        "event_id": "ID0102",
+        "created_at": "2026-10-12T13:39:02Z",
+        "data": {
+          "type": "payment",
+          "id": "ID0096",
+          "object": {
+            "payment": {
+              "amount_money": {
+                "amount": 100,
+                "currency": "USD"
+              },
+              "application_details": {
+                "application_id": "ID0078",
+                "square_product": "OTHER"
+              },
+              "approved_money": {
+                "amount": 100,
+                "currency": "USD"
+              },
+              "buyer_email_address": "verify@example.com",
+              "card_details": {
+                "avs_status": "AVS_ACCEPTED",
+                "card": {
+                  "bin": "ID0007",
+                  "card_brand": "VISA",
+                  "card_type": "CREDIT",
+                  "exp_month": 10,
+                  "exp_year": 2028,
+                  "fingerprint": "ID0006",
+                  "last_4": "5858",
+                  "prepaid_type": "NOT_PREPAID"
+                },
+                "card_payment_timeline": {
+                  "authorized_at": "2026-10-12T13:39:01.759Z",
+                  "captured_at": "2026-10-12T13:39:01.883Z"
+                },
+                "cvv_status": "CVV_NOT_CHECKED",
+                "entry_method": "ON_FILE",
+                "statement_description": "SQ *DEFAULT TEST ACCOUNT",
+                "status": "CAPTURED"
+              },
+              "created_at": "2026-10-12T13:39:01.631Z",
+              "customer_id": "ID0074",
+              "delay_action": "CANCEL",
+              "delay_duration": "PT168H",
+              "delayed_until": "2026-10-19T13:39:01.631Z",
+              "id": "ID0096",
+              "location_id": "ID0001",
+              "order_id": "ID0087",
+              "receipt_number": "ID0097",
+              "receipt_url": "https://squareupsandbox.com/scrubbed",
+              "risk_evaluation": {
+                "created_at": "2026-10-12T13:39:01.759Z",
+                "risk_level": "NORMAL"
+              },
+              "source_type": "CARD",
+              "status": "COMPLETED",
+              "total_money": {
+                "amount": 100,
+                "currency": "USD"
+              },
+              "updated_at": "2026-10-12T13:39:02.611Z",
+              "version": 2
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "type": "subscription.updated",
+        "event_id": "ID0103",
+        "created_at": "2026-10-12T13:39:08Z",
+        "data": {
+          "type": "subscription",
+          "id": "ID0081",
+          "object": {
+            "subscription": {
+              "billing_end_date": "2026-11-12",
+              "canceled_date": "2026-11-12",
+              "card_id": "ID0072",
+              "charged_through_date": "2026-11-12",
+              "created_at": "2026-10-12T09:38:57-04:00",
+              "customer_id": "ID0074",
+              "id": "ID0081",
+              "invoice_ids": [
+                "ID0090"
+              ],
+              "location_id": "ID0001",
+              "monthly_billing_anchor_date": 12,
+              "plan_variation_id": "ID0082",
+              "source": {
+                "application_id": "ID0012",
+                "application_name": "Sandbox for APPLICATION_ID",
+                "name": "Sandbox for APPLICATION_ID"
+              },
+              "start_date": "2026-10-12",
+              "status": "ACTIVE",
+              "tenant": "BUYER",
+              "timezone": "America/New_York",
+              "version": 1
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "location_id": "ID0001",
+        "type": "invoice.payment_made",
+        "event_id": "ID0109",
+        "created_at": "2026-10-12T13:39:11Z",
+        "data": {
+          "type": "invoice",
+          "id": "ID0090",
+          "object": {
+            "invoice": {
+              "accepted_payment_methods": {
+                "bank_account": false,
+                "buy_now_pay_later": false,
+                "card": true,
+                "cash_app_pay": true,
+                "square_gift_card": false
+              },
+              "created_at": "2026-10-12T13:39:01Z",
+              "delivery_method": "EMAIL",
+              "id": "ID0090",
+              "invoice_number": "ID0091",
+              "location_id": "ID0001",
+              "order_id": "ID0087",
+              "payment_requests": [
+                {
+                  "automatic_payment_source": "CARD_ON_FILE",
+                  "card_id": "ID0072",
+                  "computed_amount_money": {
+                    "amount": 100,
+                    "currency": "USD"
+                  },
+                  "due_date": "2026-10-12",
+                  "request_type": "BALANCE",
+                  "tipping_enabled": false,
+                  "total_completed_amount_money": {
+                    "amount": 100,
+                    "currency": "USD"
+                  },
+                  "uid": "ID0092"
+                }
+              ],
+              "primary_recipient": {
+                "customer_id": "ID0074",
+                "email_address": "verify@example.com",
+                "family_name": "Sub",
+                "given_name": "Probe"
+              },
+              "public_url": "https://app.squareupsandbox.com/scrubbed",
+              "status": "PAID",
+              "store_payment_method_enabled": true,
+              "subscription_id": "ID0081",
+              "timezone": "UTC",
+              "title": "Probe ny-tz v Subscription",
+              "updated_at": "2026-10-12T13:39:01Z",
+              "version": 2
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "type": "card.disabled",
+        "event_id": "ID0114",
+        "created_at": "2026-10-12T13:39:20Z",
+        "data": {
+          "type": "card",
+          "id": "ID0072",
+          "object": {
+            "card": {
+              "billing_address": {
+                "postal_code": "94103"
+              },
+              "bin": "ID0007",
+              "card_brand": "VISA",
+              "card_type": "CREDIT",
+              "created_at": "2026-10-12T13:38:33Z",
+              "customer_id": "ID0074",
+              "disabled_at": "2026-10-12T13:39:20Z",
+              "enabled": false,
+              "exp_month": 10,
+              "exp_year": 2028,
+              "fingerprint": "ID0006",
+              "hsa_fsa": false,
+              "id": "ID0072",
+              "last_4": "5858",
+              "merchant_id": "ID0002",
+              "prepaid_type": "NOT_PREPAID",
+              "version": 2
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "type": "customer.deleted",
+        "event_id": "ID0115",
+        "created_at": "2026-10-12T13:39:21Z",
+        "data": {
+          "type": "customer",
+          "id": "ID0074",
+          "deleted": true,
+          "object": {
+            "customer": {
+              "creation_source": "THIRD_PARTY",
+              "email_address": "verify@example.com",
+              "family_name": "Sub",
+              "given_name": "Probe",
+              "id": "ID0074",
+              "preferences": {
+                "email_unsubscribed": false
+              },
+              "reference_id": "ID0116",
+              "version": 1
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "type": "card.created",
+        "event_id": "ID0122",
+        "created_at": "2026-10-12T13:39:53Z",
+        "data": {
+          "type": "card",
+          "id": "ID0005",
+          "object": {
+            "card": {
+              "billing_address": {
+                "postal_code": "94103"
+              },
+              "bin": "ID0007",
+              "card_brand": "VISA",
+              "card_type": "CREDIT",
+              "cardholder_name": "Verify Run",
+              "created_at": "2026-10-12T13:39:53Z",
+              "customer_id": "ID0003",
+              "enabled": true,
+              "exp_month": 10,
+              "exp_year": 2028,
+              "fingerprint": "ID0006",
+              "hsa_fsa": false,
+              "id": "ID0005",
+              "last_4": "5858",
+              "merchant_id": "ID0002",
+              "prepaid_type": "NOT_PREPAID",
+              "reference_id": "ID0004",
+              "version": 1
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "type": "customer.created",
+        "event_id": "ID0123",
+        "created_at": "2026-10-12T13:39:53Z",
+        "data": {
+          "type": "customer",
+          "id": "ID0003",
+          "object": {
+            "customer": {
+              "created_at": "2026-10-12T13:39:52.877Z",
+              "creation_source": "THIRD_PARTY",
+              "email_address": "verify@example.com",
+              "family_name": "Run",
+              "given_name": "Verify",
+              "id": "ID0003",
+              "note": "Created by pnpm verify:square; safe to delete",
+              "preferences": {
+                "email_unsubscribed": false
+              },
+              "reference_id": "ID0004",
+              "updated_at": "2026-10-12T13:39:52Z",
+              "version": 0
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "type": "refund.created",
+        "event_id": "ID0146",
+        "created_at": "2026-10-12T13:39:58Z",
+        "data": {
+          "type": "refund",
+          "id": "ID0027",
+          "object": {
+            "refund": {
+              "amount_money": {
+                "amount": 100,
+                "currency": "USD"
+              },
+              "created_at": "2026-10-12T13:39:58.652Z",
+              "destination_type": "CARD",
+              "id": "ID0027",
+              "location_id": "ID0001",
+              "order_id": "ID0028",
+              "payment_id": "ID0023",
+              "reason": "ID0004 refund",
+              "status": "PENDING",
+              "updated_at": "2026-10-12T13:39:58.701Z",
+              "version": 4
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "type": "refund.updated",
+        "event_id": "ID0151",
+        "created_at": "2026-10-12T13:40:02Z",
+        "data": {
+          "type": "refund",
+          "id": "ID0027",
+          "object": {
+            "refund": {
+              "amount_money": {
+                "amount": 100,
+                "currency": "USD"
+              },
+              "created_at": "2026-10-12T13:39:58.652Z",
+              "destination_type": "CARD",
+              "id": "ID0027",
+              "location_id": "ID0001",
+              "order_id": "ID0028",
+              "payment_id": "ID0023",
+              "reason": "ID0004 refund",
+              "status": "COMPLETED",
+              "updated_at": "2026-10-12T13:40:02.048Z",
+              "version": 5
+            }
+          }
+        }
+      },
+      {
+        "merchant_id": "ID0002",
+        "type": "order.fulfillment.updated",
+        "event_id": "ID0152",
+        "created_at": "2026-10-12T13:40:03Z",
+        "data": {
+          "type": "order_fulfillment_updated",
+          "id": "ID0031",
+          "object": {
+            "order_fulfillment_updated": {
+              "created_at": "2026-10-12T13:40:03.858Z",
+              "fulfillment_update": [
+                {
+                  "fulfillment_uid": "ID0034",
+                  "new_state": "PROPOSED"
+                }
+              ],
+              "location_id": "ID0001",
+              "order_id": "ID0031",
+              "state": "DRAFT",
+              "updated_at": "2026-10-12T13:40:03.858Z",
+              "version": 1
+            }
+          }
+        }
+      }
+    ]
+  }
+}

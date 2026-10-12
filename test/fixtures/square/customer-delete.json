@@ -1,0 +1,6 @@
+{
+  "method": "DELETE",
+  "path": "/v2/customers/ID0003",
+  "status": 200,
+  "body": {}
+}

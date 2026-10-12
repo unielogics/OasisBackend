@@ -1,0 +1,15 @@
+{
+  "method": "POST",
+  "path": "/v2/cards",
+  "status": 400,
+  "body": {
+    "errors": [
+      {
+        "category": "INVALID_REQUEST_ERROR",
+        "code": "INVALID_CARD_DATA",
+        "detail": "Invalid card data.",
+        "field": "source_id"
+      }
+    ]
+  }
+}

@@ -32,7 +32,9 @@
     "seed": "tsx db/seeds/index.ts",
     "sim:aws": "tsx scripts/verify-live/sim-aws.ts",
     "sim:smsgate": "tsx scripts/sim-smsgate.ts",
+    "sim:square": "tsx scripts/sim-square.ts",
     "sim:squarespace": "tsx scripts/sim-squarespace.ts",
+    "square:webhooks": "tsx scripts/square-webhooks.ts",
     "start": "node dist/server.js",
     "start:worker": "node dist/worker.js",
     "test": "vitest run --passWithNoTests",
@@ -49,6 +51,7 @@
     "verify:all": "tsx scripts/verify-live/all.ts",
     "verify:aws": "tsx scripts/verify-live/aws.ts",
     "verify:smsgate": "tsx scripts/verify-live/smsgate.ts",
+    "verify:square": "tsx scripts/verify-live/square.ts",
     "verify:squarespace": "tsx scripts/verify-live/squarespace.ts"
   },
   "pnpm": {

@@ -1,0 +1,22 @@
+{
+  "method": "GET",
+  "path": "/v2/online-checkout/payment-links/ID0030",
+  "status": 200,
+  "body": {
+    "payment_link": {
+      "id": "ID0030",
+      "version": 1,
+      "order_id": "ID0031",
+      "checkout_options": {
+        "allow_tipping": false,
+        "ask_for_shipping_address": false,
+        "enable_coupon": false,
+        "enable_loyalty": false
+      },
+      "url": "https://sandbox.square.link/scrubbed",
+      "long_url": "https://merchant/scrubbed",
+      "created_at": "2026-10-12T13:40:03Z",
+      "payment_note": "ID0004 INV-00000"
+    }
+  }
+}

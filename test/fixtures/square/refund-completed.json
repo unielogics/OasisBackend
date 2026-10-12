@@ -1,0 +1,22 @@
+{
+  "method": "GET",
+  "path": "/v2/refunds/ID0027",
+  "status": 200,
+  "body": {
+    "refund": {
+      "id": "ID0027",
+      "status": "COMPLETED",
+      "amount_money": {
+        "amount": 100,
+        "currency": "USD"
+      },
+      "payment_id": "ID0023",
+      "order_id": "ID0028",
+      "created_at": "2026-10-12T13:39:58.652Z",
+      "updated_at": "2026-10-12T13:40:02.105Z",
+      "location_id": "ID0001",
+      "reason": "ID0004 refund",
+      "destination_type": "CARD"
+    }
+  }
+}

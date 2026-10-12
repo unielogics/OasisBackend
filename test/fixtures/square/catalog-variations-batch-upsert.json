@@ -1,0 +1,81 @@
+{
+  "method": "POST",
+  "path": "/v2/catalog/batch-upsert",
+  "status": 200,
+  "body": {
+    "objects": [
+      {
+        "type": "SUBSCRIPTION_PLAN_VARIATION",
+        "id": "ID0044",
+        "updated_at": "2026-10-12T13:40:17.737Z",
+        "created_at": "2026-10-12T13:40:17.737Z",
+        "version": 1791812417737,
+        "is_deleted": false,
+        "present_at_all_locations": true,
+        "subscription_plan_variation_data": {
+          "name": "Verify monthly 1 ID0004",
+          "phases": [
+            {
+              "uid": "ID0045",
+              "cadence": "MONTHLY",
+              "ordinal": 0,
+              "pricing": {
+                "type": "STATIC",
+                "price": {
+                  "amount": 100,
+                  "currency": "USD"
+                },
+                "price_money": {
+                  "amount": 100,
+                  "currency": "USD"
+                }
+              }
+            }
+          ],
+          "subscription_plan_id": "ID0042"
+        }
+      },
+      {
+        "type": "SUBSCRIPTION_PLAN_VARIATION",
+        "id": "ID0046",
+        "updated_at": "2026-10-12T13:40:17.737Z",
+        "created_at": "2026-10-12T13:40:17.737Z",
+        "version": 1791812417737,
+        "is_deleted": false,
+        "present_at_all_locations": true,
+        "subscription_plan_variation_data": {
+          "name": "Verify monthly 2 ID0004",
+          "phases": [
+            {
+              "uid": "ID0047",
+              "cadence": "MONTHLY",
+              "ordinal": 0,
+              "pricing": {
+                "type": "STATIC",
+                "price": {
+                  "amount": 200,
+                  "currency": "USD"
+                },
+                "price_money": {
+                  "amount": 200,
+                  "currency": "USD"
+                }
+              }
+            }
+          ],
+          "subscription_plan_id": "ID0042"
+        }
+      }
+    ],
+    "id_mappings": [
+      {
+        "client_object_id": "ID0048",
+        "object_id": "ID0044"
+      },
+      {
+        "client_object_id": "ID0049",
+        "object_id": "ID0046"
+      }
+    ]
+  }
+}

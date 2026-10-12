@@ -1,0 +1,69 @@
+{
+  "method": "POST",
+  "path": "/v2/payments",
+  "status": 403,
+  "body": {
+    "errors": [
+      {
+        "code": "FORBIDDEN",
+        "detail": "The order `ID0063` is owned by another application.",
+        "category": "AUTHENTICATION_ERROR"
+      }
+    ],
+    "payment": {
+      "id": "ID0066",
+      "created_at": "2026-10-12T13:40:44.626Z",
+      "updated_at": "2026-10-12T13:40:44.808Z",
+      "amount_money": {
+        "amount": 200,
+        "currency": "USD"
+      },
+      "status": "CANCELED",
+      "delay_duration": "PT168H",
+      "source_type": "CARD",
+      "card_details": {
+        "status": "VOIDED",
+        "card": {
+          "card_brand": "VISA",
+          "last_4": "5858",
+          "exp_month": 10,
+          "exp_year": 2028,
+          "fingerprint": "ID0006",
+          "card_type": "CREDIT",
+          "prepaid_type": "NOT_PREPAID",
+          "bin": "ID0007"
+        },
+        "entry_method": "ON_FILE",
+        "cvv_status": "CVV_NOT_CHECKED",
+        "avs_status": "AVS_ACCEPTED",
+        "statement_description": "SQ *DEFAULT TEST ACCOUNT",
+        "card_payment_timeline": {
+          "authorized_at": "2026-10-12T13:40:44.753Z",
+          "voided_at": "2026-10-12T13:40:44.808Z"
+        }
+      },
+      "location_id": "ID0001",
+      "order_id": "ID0063",
+      "risk_evaluation": {
+        "created_at": "2026-10-12T13:40:44.753Z",
+        "risk_level": "NORMAL"
+      },
+      "customer_id": "ID0003",
+      "total_money": {
+        "amount": 200,
+        "currency": "USD"
+      },
+      "approved_money": {
+        "amount": 200,
+        "currency": "USD"
+      },
+      "delay_action": "CANCEL",
+      "delayed_until": "2026-10-19T13:40:44.626Z",
+      "application_details": {
+        "square_product": "ECOMMERCE_API",
+        "application_id": "ID0012"
+      },
+      "version_token": "ID0067"
+    }
+  }
+}
