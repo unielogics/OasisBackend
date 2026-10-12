@@ -513,6 +513,15 @@ export const BALANCE_PLACEHOLDER = '{balance}'
 export const CONFIRM_PLACEHOLDER = '{confirm}'
 export const CONFIRM_WORDS = CONFIRM_WORDS_BY_LANG.en
 
+/** What a plan itself includes (its inclusions and its % off), as the facts state it beside the shop's perks text. */
+const planIncludes = (p: ShopFactsPlan): string => {
+  const parts = [
+    ...p.inclusions.map((i) => inclusionWords(i)),
+    ...(p.memberDiscountBp > 0 ? [`${percentWords(p.memberDiscountBp)} off other services and add-ons`] : []),
+  ]
+  return parts.length > 0 ? ` The plan includes: ${parts.join('; ')}.` : ''
+}
+
 const includedWords = (it: ShopFactsItem): string => {
   if (it.includedIn.length === 0) return ''
   const parts = it.includedIn.map((i) => `${i.tierLabel} (${i.mode === 'every_visit' ? 'every visit' : i.perCycle === null ? 'unlimited' : `${i.perCycle} a month`})`)
@@ -599,7 +608,7 @@ export const renderShopFacts: RenderShopFacts = (f) => {
           'A membership is priced at one vehicle size: a larger car is covered up to the price of that size and the difference is paid at the shop.',
           ...f.plans.map(
           (p) =>
-            `${p.label} (key ${p.key}): ${planPlaceholder(p.key)}.${perksWords(p) ? ` ${perksPlaceholder(p.key)}.` : ''} Sizes with a price: ${p.prices.map((x) => x.classLabel).join(', ')}.${p.vipBooking ? ' Comes with the VIP booking rules.' : ''}${p.perks.length > 0 ? ` Perks: ${p.perks.join('; ')}.` : ''}`,
+            `${p.label} (key ${p.key}): ${planPlaceholder(p.key)}.${perksWords(p) ? ` ${perksPlaceholder(p.key)}.` : ''} Sizes with a price: ${p.prices.map((x) => x.classLabel).join(', ')}.${p.vipBooking ? ' Comes with the VIP booking rules.' : ''}${p.perks.length > 0 ? ` Perks: ${p.perks.join('; ')}.` : ''}${planIncludes(p)}`,
           ),
         ],
   )

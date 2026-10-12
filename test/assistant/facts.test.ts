@@ -107,6 +107,8 @@ describe('the shop facts document', () => {
     expect(text).toContain('Gold (key gold): {plan:gold}. {perks:gold}. Sizes with a price: Sedan / Coupe. Perks: 4 hand washes a month')
     expect(text).toContain('VIP (key vip): {plan:vip}. {perks:vip}. Sizes with a price: Sedan / Coupe. Comes with the VIP booking rules.')
     expect(text).toContain('a larger car is covered up to the price of that size and the difference is paid at the shop')
+    // what the plan itself includes, stated beside the shop's perks (the judge reads the facts: rule (f))
+    expect(text).toMatch(/Gold \(key gold\): [^\n]*The plan includes: [^\n]*16\.67% off other services and add-ons\./)
     const quote = f.catalog.items.find((i) => i.quoteOnly)!
     expect(text).toContain(`quote only, {price:${quote.key}}`)
     expect(text).not.toMatch(/\$\s?\d/)
