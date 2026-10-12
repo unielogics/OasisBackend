@@ -67,6 +67,8 @@ import { listVehicleClasses, requireVehicleClass } from '../../catalog/vehicle-c
 import { coverageOf, lineClassLabel } from '../../payments/gateway.js'
 import { activeMembership } from '../members.js'
 import { feeHow, requestDepositLink } from '../../square/deposits.js'
+import { CARD_PAGE_KINDS, cardSetupOf, pageCards, type CardSetup, type PageCard } from '../../square/card-page.js'
+import { squareEnv } from '../../square/runtime.js'
 import { memberRefOf } from '../memberships.js'
 import { tierKeyOf, type PublicTier } from '../tiers.js'
 import './problems.js'
@@ -186,6 +188,10 @@ export interface LinkState {
   invoice: InvoiceView | null
   /** A membership link's plan. */
   plan: PlanView | null
+  /** The client's active saved cards (ADR 0171 D7): verified card and membership pages of a proven client only. */
+  cards: PageCard[] | null
+  /** What a card or membership page needs to take a card (the consent wording, Square's SDK settings); null when cards are off. */
+  cardSetup: CardSetup | null
 }
 
 /** The state a page is shown: what the session and the number's trust allow, and nothing about the record the rules hide. */
@@ -228,6 +234,8 @@ export async function linkState(db: Executor, s: SessionView, now: Date): Promis
     appointments: verified && known && customer ? await upcomingOf(db, loc, customer.id, s.link.appointmentId, now) : null,
     invoice: s.link.kind === 'pay' && s.link.invoiceId && known ? await invoiceView(db, s.link.invoiceId) : null,
     plan: s.link.kind === 'membership' && s.link.planKey ? await planView(db, loc.id, s.link.planKey) : null,
+    cards: verified && known && customer && CARD_PAGE_KINDS.includes(s.link.kind) ? await pageCards(db, loc.id, customer.id) : null,
+    cardSetup: cardSetupOf(squareEnv(), s.link.kind),
   }
 }
 

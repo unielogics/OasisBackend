@@ -4,7 +4,8 @@
 import { loadEnv, type Env } from '../../config/env.js'
 import type { SquareApi } from '../../integrations/ports/square.js'
 import { squareApiFor, type SquareApiOptions } from '../../integrations/square/factory.js'
-import type { Db } from '../../platform/db.js'
+import type { Db, Tx } from '../../platform/db.js'
+import type { EnqueueArgs, EnqueueOutcome } from '../messaging/queue.js'
 import type { PaymentMessenger } from '../payments/messenger.js'
 import { defaultPorts } from '../payments/ports.js'
 import { squareCoreIngest } from './handlers.js'
@@ -16,11 +17,19 @@ export interface SquareRuntimeOverrides {
   api?: (env: Env, o?: SquareApiOptions) => SquareApi
   /** The ingest handlers (default: the core handlers of wave Q2b). */
   ingest?: SquareIngest
+  /** The messaging queue the card texts go through (tests; production: configureSquareQueue). */
+  queue?: SquareQueue
+}
+
+/** The part of the messaging queue (DbMessageQueue) the card texts use: the card link, a fee charged. */
+export interface SquareQueue {
+  enqueueFor(tx: Tx, a: EnqueueArgs): Promise<EnqueueOutcome>
 }
 
 let overrides: SquareRuntimeOverrides = {}
 let cachedEnv: Env | undefined
 let messengerFor: ((db: Db) => PaymentMessenger) | undefined
+let queueFor: (() => SquareQueue) | undefined
 
 export function configureSquareRuntime(o: SquareRuntimeOverrides): void {
   overrides = o
@@ -36,6 +45,18 @@ export function configureSquareMessenger(fn: ((db: Db) => PaymentMessenger) | un
 
 export function squareMessenger(db: Db): PaymentMessenger {
   return messengerFor ? messengerFor(db) : defaultPorts().messenger
+}
+
+/**
+ * How the jobs and the webhook text a card link or a charged fee (wave Q3a): the process's messaging queue, wired at boot (server and
+ * worker, composition.ts configureProductionSquare). Unwired (and no test override), those texts are skipped and logged.
+ */
+export function configureSquareQueue(fn: (() => SquareQueue) | undefined): void {
+  queueFor = fn
+}
+
+export function squareQueue(): SquareQueue | undefined {
+  return overrides.queue ?? queueFor?.()
 }
 
 export function squareEnv(): Env {

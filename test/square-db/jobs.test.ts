@@ -39,7 +39,7 @@ describe('Square jobs', () => {
       refund: async (c, r) => (calls.push({ kind: 'refund', id: r.id }), noopSquareIngest.refund(c, r)),
       invoice: async (c, i) => (calls.push({ kind: 'invoice', id: i.id }), noopSquareIngest.invoice(c, i)),
       subscription: async (c, s) => (calls.push({ kind: 'subscription', id: s.id }), noopSquareIngest.subscription(c, s)),
-      card: async (c, k) => (calls.push({ kind: 'card', id: k.id }), noopSquareIngest.card(c, k)),
+      card: async (c, k, id) => (calls.push({ kind: 'card', id: k?.id ?? id }), noopSquareIngest.card(c, k, id)),
       customer: async (c, k, id) => (calls.push({ kind: 'customer', id }), noopSquareIngest.customer(c, k, id)),
     }
     const d: SquareEventDeps = { db: t.db, clock, logger, env: e, api: sim.api, ingest, newId }

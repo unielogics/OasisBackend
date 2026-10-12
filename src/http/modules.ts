@@ -13,7 +13,7 @@ import { ledgerRevenueSource } from '../modules/payments/revenue.js'
 import { membershipsModule } from '../modules/memberships/module.js'
 import { dbMembershipPort } from '../modules/memberships/port.js'
 import { squarespaceHookModule, squarespaceModule } from '../modules/payments-sync/http/module.js'
-import { squareHookModule, squareModule } from '../modules/square/http/module.js'
+import { createSquareModule, squareHookModule } from '../modules/square/http/module.js'
 import { createPublicModule } from '../modules/public/module.js'
 import { createPublicLinksModule, type PublicLinksWiring } from '../modules/public/links/module.js'
 import { createSchedulingModule } from '../modules/scheduling/module.js'
@@ -76,6 +76,9 @@ export const publicLinksWiring = (deps: AppDeps): PublicLinksWiring => ({
   },
 })
 export const publicLinksModule: ApiModule = createPublicLinksModule(publicLinksWiring)
+
+/** Square (ADR 0171); the card link and the fee texts go through the messaging queue (wave Q3a). */
+export const squareModule: ApiModule = createSquareModule((deps) => ({ queue: runtimeOf(deps).queue }))
 
 export const apiModules: ApiModule[] = [
   authModule,

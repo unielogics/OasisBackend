@@ -41,6 +41,8 @@ export interface CustomerCardsTable {
   created_via: CustomerCardCreatedVia
   disabled_at: Date | null
   disabled_reason: CustomerCardDisabledReason | null
+  /** The expiry ("2026-11") the nightly job last texted a card link about (20261014500100_card_charges.sql). */
+  expiry_notice_for: string | null
   created_at: Generated<Date>
   updated_at: Generated<Date>
 }
@@ -101,6 +103,12 @@ export interface SquareChargesTable {
   decided_at: Date | null
   charged_at: Date | null
   waive_reason: string | null
+  /** When the current CreatePayment attempt started (20261014500100_card_charges.sql). */
+  attempted_at: Date | null
+  /** Square's code for a declined attempt. */
+  decline_code: string | null
+  /** What the charge is for, as the ledger and the client's text say it ("No-show fee", "Balance"). */
+  reason: string | null
   created_at: Generated<Date>
   updated_at: Generated<Date>
 }

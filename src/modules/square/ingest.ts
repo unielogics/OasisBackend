@@ -39,7 +39,8 @@ export interface SquareIngest {
   refund(ctx: SquareIngestContext, refund: WireRefund): Promise<IngestOutcome>
   invoice(ctx: SquareIngestContext, invoice: WireInvoice): Promise<IngestOutcome>
   subscription(ctx: SquareIngestContext, subscription: WireSubscription): Promise<IngestOutcome>
-  card(ctx: SquareIngestContext, card: WireCard): Promise<IngestOutcome>
+  /** null when Square no longer has the card (a forgotten card may be gone). */
+  card(ctx: SquareIngestContext, card: WireCard | null, cardId: string): Promise<IngestOutcome>
   /** null when the customer was deleted at Square. */
   customer(ctx: SquareIngestContext, customer: WireCustomer | null, customerId: string): Promise<IngestOutcome>
 }
@@ -60,7 +61,7 @@ export const noopSquareIngest: SquareIngest = {
   refund: stub('refund', 'wave Q2b'),
   invoice: stub('invoice', 'wave Q3b'),
   subscription: stub('subscription', 'wave Q3b'),
-  card: stub('card', 'wave Q3a'),
+  card: (ctx, c) => stub('card', 'wave Q3a')(ctx, c),
   customer: (ctx, c) => stub('customer', 'wave Q3a')(ctx, c),
 }
 
@@ -81,7 +82,7 @@ type Fetched =
   | { kind: 'refund'; obj: WireRefund }
   | { kind: 'invoice'; obj: WireInvoice }
   | { kind: 'subscription'; obj: WireSubscription }
-  | { kind: 'card'; obj: WireCard }
+  | { kind: 'card'; obj: WireCard | null }
   | { kind: 'customer'; obj: WireCustomer | null }
 
 async function fetchObject(api: SquareApi, kind: SquareObjectKind, id: string, deleted: boolean): Promise<Fetched> {
@@ -111,6 +112,7 @@ export async function processSquareEvent(d: ProcessDeps, event: WireEvent): Prom
     fetched = await fetchObject(d.api, c.kind, c.objectId, c.deleted)
   } catch (e) {
     if (e instanceof SquareNotFound && c.kind === 'customer') fetched = { kind: 'customer', obj: null }
+    else if (e instanceof SquareNotFound && c.kind === 'card') fetched = { kind: 'card', obj: null }
     else if (e instanceof SquareNotFound) return { status: 'ignored', note: `${c.kind} ${c.objectId} no longer exists at Square` }
     else throw e
   }
@@ -130,7 +132,7 @@ export async function processSquareEvent(d: ProcessDeps, event: WireEvent): Prom
       case 'subscription':
         return d.ingest.subscription(ctx, fetched.obj)
       case 'card':
-        return d.ingest.card(ctx, fetched.obj)
+        return d.ingest.card(ctx, fetched.obj, c.objectId)
       case 'customer':
         return d.ingest.customer(ctx, fetched.obj, c.objectId)
     }

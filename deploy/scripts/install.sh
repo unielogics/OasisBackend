@@ -29,7 +29,10 @@
 #                          with the same options once they do. Releases come from site-deploy.sh (docs/runbook.md, "The public website")
 #   --site-root DIR        where the website's releases live (default /var/www/site; nginx serves DIR/current)
 #   --site-tls-cert FILE --site-tls-key FILE    with --tls files: the website's certificate (apex and www)
-#   --site-csp POLICY      the website's Content-Security-Policy (default: self only, no inline script; docs/deployment.md)
+#   --site-csp POLICY      the website's Content-Security-Policy (default: self only, no inline script, plus the hosts of Square's Web
+#                          Payments SDK that the personal link pages load to take a card; docs/deployment.md). Replaces the whole policy
+#   --square-env production|sandbox    which Square the default policy lets the card form talk to (default production; sandbox for a
+#                          staging host whose API runs with SQUARE_ENVIRONMENT=sandbox). Not with --site-csp
 #   --site-marker TEXT     text every deployed index.html must contain (default "Oasis Auto Spa"); the health checks look for it
 #   --dry-run              print everything it would do, change nothing
 #   --no-system            write files only: no users, packages, chown, systemctl or nginx reload (for staging directories)
@@ -76,7 +79,8 @@ SITE_DOMAIN=""
 SITE_ROOT_ARG=/var/www/site
 SITE_TLS_CERT=""
 SITE_TLS_KEY=""
-SITE_CSP="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'; upgrade-insecure-requests"
+SITE_CSP=""
+SQUARE_ENV=""
 SITE_MARKER="Oasis Auto Spa"
 
 while (($#)); do
@@ -106,6 +110,7 @@ while (($#)); do
     --site-tls-cert) SITE_TLS_CERT=$2; shift 2 ;;
     --site-tls-key) SITE_TLS_KEY=$2; shift 2 ;;
     --site-csp) SITE_CSP=$2; shift 2 ;;
+    --square-env) SQUARE_ENV=$2; shift 2 ;;
     --site-marker) SITE_MARKER=$2; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --no-system) NO_SYSTEM=1; shift ;;
@@ -133,6 +138,24 @@ else
   TLS_KEY="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
   [[ -n "$EMAIL" ]] || warn "no --email: certbot will register without a contact address"
 fi
+# The website's default policy (ADR 0145): its own files only, no inline script, no framing of it; plus Square's Web Payments SDK
+# (ADR 0171 D12, wave Q3a), which only the personal link pages load to take a card: the SDK's script, styles and fonts, its card
+# iframe, and the hosts it posts the card to. Square's own list (developer.squareup.com, Web Payments SDK, Content Security Policy).
+# Cards only: Permissions-Policy keeps payment=() (no Apple Pay or Google Pay through the browser's Payment Request API).
+[[ -z "$SQUARE_ENV" || "$SQUARE_ENV" == production || "$SQUARE_ENV" == sandbox ]] || die "--square-env must be production or sandbox"
+[[ -z "$SQUARE_ENV" || -z "$SITE_CSP" ]] || die "--square-env picks the Square hosts of the default policy; with --site-csp write them into your policy instead"
+site_csp_for() {
+  local web connect
+  if [[ "$1" == sandbox ]]; then
+    web="https://sandbox.web.squarecdn.com"
+    connect="https://sandbox.web.squarecdn.com https://pci-connect.squareupsandbox.com https://o160250.ingest.sentry.io"
+  else
+    web="https://web.squarecdn.com"
+    connect="https://web.squarecdn.com https://pci-connect.squareup.com https://o160250.ingest.sentry.io"
+  fi
+  printf "%s" "default-src 'none'; script-src 'self' $web; style-src 'self' 'unsafe-inline' $web; img-src 'self' data:; font-src 'self' https://square-fonts-production-f.squarecdn.com https://d1g145x70srn7h.cloudfront.net; connect-src 'self' $connect; frame-src $web; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'; upgrade-insecure-requests"
+}
+[[ -n "$SITE_CSP" ]] || SITE_CSP=$(site_csp_for "${SQUARE_ENV:-production}")
 if [[ -n "$SITE_DOMAIN" ]]; then
   [[ "$SITE_DOMAIN" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]] || die "--site-domain $SITE_DOMAIN is not a host name"
   [[ "${SITE_DOMAIN,,}" != www.* ]] || die "--site-domain is the bare domain (www is implied): ${SITE_DOMAIN#www.}"

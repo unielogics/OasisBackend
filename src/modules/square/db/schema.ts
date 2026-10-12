@@ -50,7 +50,7 @@ export type SquareClassification = 'link' | 'charge' | 'membership' | 'pos_inten
 export type SquareMatchState = 'pending' | 'matched' | 'unmatched' | 'ignored'
 export type SquareIgnoreReason = 'not_oasis_sale' | 'duplicate' | 'test' | 'other'
 /** R1 invoice number, R2 POS intent, R3 awaiting entry, R4 identity and balance, R4a amount only (opt-in), and the others. */
-export type SquareMatchRule = 'R1' | 'R2' | 'R3' | 'R4' | 'R4a' | 'link' | 'cash_entry' | 'manual' | 'reassign'
+export type SquareMatchRule = 'R1' | 'R2' | 'R3' | 'R4' | 'R4a' | 'link' | 'cash_entry' | 'manual' | 'reassign' | 'charge'
 
 /** One candidate invoice of an unmatched payment, best first. */
 export interface SquareCandidate {

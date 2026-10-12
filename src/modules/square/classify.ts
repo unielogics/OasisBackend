@@ -37,8 +37,10 @@ export interface ClassifyContext {
   inLedger: boolean
   /** The payment link whose Square order this payment paid. */
   link: LinkRef | null
-  /** One of our card-on-file charges (wave Q3a; always false before it). */
+  /** One of our card-on-file charges (wave Q3a): by its payment id, or its reference_id (the charge's id). */
   charge: boolean
+  /** That charge's id (square_charges). */
+  chargeId?: string | null
   /** A membership's subscription invoice (wave Q3b; always false before it). */
   membership: boolean
   /** The POS intent this payment answers (by the callback's order id or the code in its note). */

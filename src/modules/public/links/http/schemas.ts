@@ -67,6 +67,35 @@ export const PlanView = z.object({
   perks: z.array(z.string()),
 })
 
+const CARD_PURPOSE = z.enum(['membership_billing', 'no_show_fee', 'late_cancel_fee', 'balance'])
+
+export const SavedCardView = z.object({
+  id: z.string().uuid(),
+  brand: z.string().nullable().describe('VISA, MASTERCARD, AMERICAN_EXPRESS, ... as Square names it'),
+  last4: z.string().nullable(),
+  expMonth: z.number().int().nullable(),
+  expYear: z.number().int().nullable(),
+  purposes: z.array(CARD_PURPOSE).describe('What the client agreed the card may be charged for (live consents)'),
+})
+
+export const CardSetupView = z.object({
+  consent: z.object({
+    version: z.string().describe('Send it back as consentVersion'),
+    text: z.string().describe('The wording; {purposes} is replaced by the ticked purposes, joined as "a, b and c"'),
+    purposes: z.array(z.object({ key: CARD_PURPOSE, words: z.string() })).describe('Every purpose in the order the text lists them'),
+    checkedByDefault: z.boolean().describe('Always false: the box starts unchecked'),
+  }),
+  square: z
+    .object({
+      applicationId: z.string(),
+      locationId: z.string(),
+      environment: z.enum(['sandbox', 'production']),
+      sdkUrl: z.string().describe('Square’s Web Payments SDK, loaded only on this page'),
+    })
+    .nullable()
+    .describe('Square’s Web Payments SDK settings (no secret); null when Square is not configured'),
+})
+
 export const LinkStateView = z.object({
   kind: z.enum(['calendar', 'verify', 'pin', 'membership', 'pay', 'book_again', 'card']),
   expiresAt: iso.describe('The session’s hard end (one hour after the exchange)'),
@@ -86,6 +115,8 @@ export const LinkStateView = z.object({
   appointments: z.array(AppointmentView).nullable().describe('The client’s upcoming visits; null until the page is verified'),
   invoice: InvoiceView.nullable(),
   plan: PlanView.nullable(),
+  cards: z.array(SavedCardView).nullable().describe('The client’s active saved cards (ADR 0171 D7); card and membership pages, verified, the client proven; null otherwise'),
+  cardSetup: CardSetupView.nullable().describe('What a card or membership page needs to take a card; null when saved cards are off'),
 })
 
 export const ExchangeResult = LinkStateView.extend({

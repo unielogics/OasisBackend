@@ -116,6 +116,8 @@ export function stateDto(s: LinkState): z.infer<typeof LinkStateView> {
     appointments: s.appointments,
     invoice: s.invoice,
     plan: s.plan,
+    cards: s.cards,
+    cardSetup: s.cardSetup,
   }
 }
 

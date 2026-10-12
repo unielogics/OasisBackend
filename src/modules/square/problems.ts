@@ -74,6 +74,42 @@ registerProblems({
     title: 'Card not found',
     detail: 'That card is not on file.',
   },
+  // wave Q3a: saving cards on the card page, charging them after a staff member confirms
+  CARD_SAVE_LOCKED: {
+    status: 429,
+    title: 'Try again tomorrow',
+    detail: 'Too many cards were declined on this number today. Try again tomorrow, or pay at the shop.',
+  },
+  CARD_PAYMENTS_OFF: {
+    status: 409,
+    title: 'Saved cards are off',
+    detail: 'Saved cards are not turned on yet. Take the payment another way.',
+  },
+  CARD_LINK_UNAVAILABLE: {
+    status: 409,
+    title: 'Card links are off',
+    detail: 'Personal links are not turned on yet, so a card link can’t be texted.',
+  },
+  CARD_NOT_USABLE: {
+    status: 422,
+    title: 'Card can’t be used for this',
+    detail: 'This card is removed or expired, or the client did not agree to this kind of charge.',
+  },
+  CARD_CHARGE_IN_PROGRESS: {
+    status: 409,
+    title: 'A charge is still going',
+    detail: 'A charge on a saved card for this invoice is still waiting for Square. Wait a minute and check again.',
+  },
+  CARD_CHARGE_DECIDED: {
+    status: 409,
+    title: 'Already handled',
+    detail: 'This fee was already charged or waived.',
+  },
+  CARD_CHARGE_NOT_FOUND: {
+    status: 404,
+    title: 'Charge not found',
+    detail: 'That charge does not exist.',
+  },
   SQUARE_POS_INTENT_UNKNOWN: {
     status: 404,
     title: 'Unknown Square POS request',

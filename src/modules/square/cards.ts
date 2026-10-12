@@ -98,6 +98,8 @@ export interface DisableCardInput {
   by: 'client' | 'staff'
   /** The staff member's name for revoked_by (staff only). */
   actorName?: string | null
+  /** Why, when not the client's or staff's own removal: the client was deleted (the nightly job). */
+  reason?: 'customer_deleted'
   audit?: AuditContext
 }
 
@@ -296,8 +298,8 @@ export async function disableCard(deps: SquareCardDeps, input: DisableCardInput)
   }
 
   const now = deps.clock.now()
-  const disabledReason: CustomerCardDisabledReason = input.by === 'client' ? 'client_removed' : 'staff_removed'
-  const revokeReason: CardConsentRevokeReason = input.by === 'client' ? 'client_removed' : 'staff_removed'
+  const disabledReason: CustomerCardDisabledReason = input.reason ?? (input.by === 'client' ? 'client_removed' : 'staff_removed')
+  const revokeReason: CardConsentRevokeReason = input.reason ?? (input.by === 'client' ? 'client_removed' : 'staff_removed')
   const revokedBy = input.by === 'client' ? 'client' : `staff${input.actorName ? `: ${input.actorName}` : ''}`.slice(0, 120)
   return transaction(deps.db, async (tx) => {
     const row = await tx

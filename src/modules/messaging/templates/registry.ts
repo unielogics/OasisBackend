@@ -356,15 +356,27 @@ export const TEMPLATES = {
     editable: false,
     source: 'new: book-again link (ADR 0160)',
   }),
+  // {why}: the nightly job and the card webhook say why a card paying a membership needs replacing ("Your Visa ••4242 expires soon.")
   personal_link_card: t({
     key: 'personal_link_card',
     label: 'Card link',
     klass: 'personal_link',
-    body: 'Save a card with Oasis Auto Spa on this secure page: {link} It expires in 24 hours.',
+    body: '{#why}{why} {/why}Save a card with Oasis Auto Spa on this secure page: {link} It expires in 24 hours.',
     required: ['link'],
-    optional: ['first'],
+    optional: ['first', 'why'],
     editable: false,
     source: 'new: save a card with Square, fresh PIN or code on the page (ADR 0171 D7)',
+  }),
+  // A no-show or late-cancel fee a staff member charged on the client's saved card (ADR 0171 D7, wave Q3a): a receipt of the charge.
+  card_fee_charged: t({
+    key: 'card_fee_charged',
+    label: 'Fee charged to a saved card',
+    klass: 'receipt',
+    body: 'Oasis Auto Spa charged {amount} to your saved {card} for the {fee}. Questions? Just reply to this text.',
+    required: ['amount', 'card', 'fee'],
+    optional: [],
+    editable: false,
+    source: 'new: fee charged on a saved card after staff confirm (ADR 0171 D7)',
   }),
   // The picked-up thank-you (status texts, wave W3d). {receipt} is "Paid in full: $54.00." when nothing is owed and no receipt text
   // went in the last 2 hours. The variant with the book-again link is picked_up_link: a personal link is a secret (only its hash is

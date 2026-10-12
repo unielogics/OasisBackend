@@ -451,6 +451,16 @@ export const Settlement = z.object({
     }),
   ),
   rule: z.string().describe('Why: the lead time against the free-cancellation window, or the staff choice'),
+  cardFee: z
+    .object({
+      chargeId: z.string(),
+      purpose: z.enum(['no_show_fee', 'late_cancel_fee']),
+      amountCents: z.number().int(),
+      cardLabel: z.string().describe('"Visa ••4242"'),
+    })
+    .nullable()
+    .optional()
+    .describe('A no-show or late-cancel fee beyond the deposit kept, PROPOSED on the client’s saved card (ADR 0171 D7): charge or waive it (POST /appointments/:id/fee-charges/:chargeId/charge | waive). Only with fees.card_on_file on and Square the processor.'),
 })
 
 export const CommandResult = z.object({

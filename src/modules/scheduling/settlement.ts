@@ -24,6 +24,7 @@ import {
 } from './cancellation.js'
 import './problems.js'
 import type { DepositSettlement, SettleRequest } from './ports.js'
+import { waiveFeesOnReopen } from '../square/fees.js'
 
 export const POLICY_REASON = 'Cancellation policy'
 export const NO_SHOW_REASON = 'No-show policy'
@@ -124,6 +125,8 @@ export function createDbDepositSettlement(d: { clock: Clock; newId: NewId }): De
         .forUpdate()
         .executeTakeFirst()
       if (!inv?.canceled_at) return
+      // an open fee on a saved card (ADR 0171 D7) is waived: the visit is back on (409 while Square has not answered a charge)
+      await waiveFeesOnReopen(tx, { clock: d.clock, locationId: req.locationId }, req.appointmentId, req.audit)
       const refunds = await tx
         .selectFrom('ledger_events')
         .select('id')

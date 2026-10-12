@@ -6,8 +6,11 @@
 //   square.links.sweep     every minute: Square links that no longer match what is owed canceled and deleted at Square (wave Q2b)
 //   square.deposit-link    every minute: a booking's deposit request becomes a texted quick-pay link (wave Q2b)
 //   square.refunds.submit  every minute: card refunds through the Square API, the refund row being the outbox (wave Q2b)
+//   square.charges.resolve every minute: saved-card charges Square did not answer, re-sent with the same key (wave Q3a)
+//   square.cards.nightly   nightly 04:20: card links for membership cards about to expire; deleted clients' cards disabled (wave Q3a)
 // With the defaults nothing happens: the catch-up and the reconcile need SQUARE_PROVIDER=live; nothing reaches the matcher without
-// them; links, deposits and refunds need PAYMENT_PROCESSOR=square and SQUARE_WRITES_ENABLED=true (none exist before).
+// them; links, deposits and refunds need PAYMENT_PROCESSOR=square and SQUARE_WRITES_ENABLED=true (none exist before); no card is
+// saved or charged before personal links, Square writes and PAYMENT_PROCESSOR=square are all on.
 import type { JobContext, JobDefinition } from '../../../platform/jobs.js'
 import { createIdGenerator } from '../../../platform/ids.js'
 import { getDefaultLocation } from '../../../platform/locations.js'
@@ -18,7 +21,9 @@ import { sweepSquareLinks } from '../links.js'
 import { runSquareMatching } from '../match-runner.js'
 import { runSquareReconcile } from '../reconcile.js'
 import { runSquareRefunds } from '../refunds.js'
-import { squareApi, squareEnv, squareIngest } from '../runtime.js'
+import { squareApi, squareEnv, squareIngest, squareQueue } from '../runtime.js'
+import { resolveCharges } from '../charges.js'
+import { runCardNightly } from '../card-events.js'
 
 function deps(ctx: JobContext): SquareEventDeps {
   const env = squareEnv()
@@ -130,6 +135,34 @@ export const squareRefundsJob: JobDefinition = {
   },
 }
 
+export const squareChargesResolveJob: JobDefinition = {
+  name: 'square.charges.resolve',
+  policy: 'stately',
+  cron: '* * * * *',
+  retryLimit: 0,
+  expireInSeconds: 5 * 60,
+  async handler(ctx) {
+    const d = await located(ctx)
+    if (!d) return
+    const r = await resolveCharges({ ...d, queue: squareQueue() })
+    if (r.considered > 0) ctx.logger.info({ square: r }, 'square.charges.resolve done')
+  },
+}
+
+export const squareCardsNightlyJob: JobDefinition = {
+  name: 'square.cards.nightly',
+  policy: 'stately',
+  cron: '20 4 * * *',
+  retryLimit: 1,
+  expireInSeconds: 30 * 60,
+  async handler(ctx) {
+    const d = await located(ctx)
+    if (!d) return
+    const r = await runCardNightly({ ...d, queue: squareQueue() })
+    if (r.disabled + r.disableFailed + r.texted + r.notTexted > 0) ctx.logger.info({ square: r }, 'square.cards.nightly done')
+  },
+}
+
 export const squareJobs = [
   squareEventJob,
   squareCatchupJob,
@@ -138,4 +171,6 @@ export const squareJobs = [
   squareLinksSweepJob,
   squareDepositLinkJob,
   squareRefundsJob,
+  squareChargesResolveJob,
+  squareCardsNightlyJob,
 ] as const

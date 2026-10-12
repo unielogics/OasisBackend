@@ -10,7 +10,7 @@ import { MessagingRuntime, runtimeFor, type LoggerLike } from './modules/messagi
 import { combineExternalAlerts, sqspCardHints, sqspExternalAlertsWith, sqspUnmatched } from './modules/payments-sync/db/queries.js'
 import { processorCardHints, squareExternalAlerts, squareReconciliation } from './modules/square/db/alerts.js'
 import { squareSendsRefunds } from './modules/square/links.js'
-import { configureSquareMessenger, squareEnv } from './modules/square/runtime.js'
+import { configureSquareMessenger, configureSquareQueue, squareEnv } from './modules/square/runtime.js'
 import { createGatewayFor } from './modules/payments/module.js'
 import { createPaymentMessenger, type PaymentMessenger } from './modules/payments/messenger.js'
 import { defaultPorts as defaultPaymentsPorts, linkHostsFromEnv, type PaymentsPorts } from './modules/payments/ports.js'
@@ -141,10 +141,12 @@ export function productionPaymentsPorts(): Partial<PaymentsPorts> {
 
 /**
  * The Square jobs text payment links (a booking's deposit link) through this process's messaging queue (server and worker). Until
- * this runs, they use the payments module's default messenger (the dev outbox outside production).
+ * this runs, they use the payments module's default messenger (the dev outbox outside production). The card texts (a card link when a
+ * card paying a membership expires or is removed at Square, a fee charged) go through the same queue (wave Q3a).
  */
 export function configureProductionSquare(deps: MessagingDeps): void {
   configureSquareMessenger(() => paymentMessengerFor(messagingRuntimeFor(deps)))
+  configureSquareQueue(() => messagingRuntimeFor(deps).queue)
 }
 
 /**

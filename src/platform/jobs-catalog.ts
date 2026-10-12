@@ -285,7 +285,7 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
   'square.event.process': {
     owner: 'square',
     purpose:
-      'Processes one Square event claimed in webhook_log (provider square, key event_id): re-fetches its object by id (payment, refund, invoice, subscription, card, customer; amounts in the payload are never trusted), ignores another merchant or location, and runs the ingest handler under an advisory lock per object (ADR 0171). Payments (wave Q2b): the mirror row, the classification, a link payment recorded at once, a counter payment matched after SQUARE_MATCH_DELAY_SECONDS; refunds: the refund legs moved, a refund made in the Square app attached or recorded for review. Invoices, subscriptions, cards and customers only log until waves Q3a and Q3b.',
+      'Processes one Square event claimed in webhook_log (provider square, key event_id): re-fetches its object by id (payment, refund, invoice, subscription, card, customer; amounts in the payload are never trusted), ignores another merchant or location, and runs the ingest handler under an advisory lock per object (ADR 0171). Payments (wave Q2b): the mirror row, the classification, a link payment recorded at once, a counter payment matched after SQUARE_MATCH_DELAY_SECONDS; refunds: the refund legs moved, a refund made in the Square app attached or recorded for review. Cards (wave Q3a): an automatic update copied onto the saved card, a card disabled or forgotten at Square closed with its consents (a membership card: the client texted a card link); customer.deleted closes that Square customer’s cards; a saved-card charge’s payment recorded on its invoice. Invoices and subscriptions only log until wave Q3b.',
     idempotency:
       'The webhook_log row is claimed once per event id (by the hook or the catch-up) and closed processed or ignored; a processed or ignored row is skipped; a payment is decided once (advisory lock square:payment:<id>, the mirror row, ledger keys square:pay:<id> and square:tip:<id>, and no second live pay of one Square payment), a refund once (its leg, or key square:refund:<id>).',
     clock: 'Injected clock for the row times.',
@@ -346,6 +346,24 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
     idempotency: 'Legs are planned once per refund under the invoice lock; each leg is sent with its own key rf_<leg id> (a retry answers the same refund) and moves only forward (to_submit -> pending -> completed | failed | rejected).',
     clock: 'Injected clock.',
     tests: 'test/square-db/refunds.test.ts, test/jobs/matrix-square.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'square.charges.resolve': {
+    owner: 'square',
+    purpose:
+      'Every minute while SQUARE_WRITES_ENABLED (wave Q3a, ADR 0171 D7): saved-card charges Square did not answer (state unknown, or charging for more than 5 minutes after their process died) are asked again: GetPayment when the payment id is known, otherwise the SAME CreatePayment with the SAME key (ch_<charge id>, or ch_<charge id:attempt> after a decline), so Square answers the payment it made or makes it once; the answer is recorded (charged through SquareLedgerOps, declined with its reason). Attempts older than 23 hours are left to the webhook and the staff. Nothing exists before a staff member confirms a charge.',
+    idempotency: 'The same request with the same idempotency key (Square answers a key’s first result); recording takes the advisory lock square:payment:<id> and the ledger key square:pay:<id>, and a charge already charged is left alone.',
+    clock: 'Injected clock against square_charges.attempted_at.',
+    tests: 'test/square-db/charges.test.ts, test/jobs/matrix-square.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'square.cards.nightly': {
+    owner: 'square',
+    purpose:
+      'Nightly 04:20 (wave Q3a, ADR 0171 D7): the active saved cards of deleted clients are disabled at Square (DisableCard; consents revoked customer_deleted; tried again the next night when Square does not answer or is watch-only); every active card paying a membership whose expiry month ends within 30 days gets a card link texted (template personal_link_card "Your Visa ending in 4242 on file for your membership expires soon. ...", only while personal links are on). Nothing to do with the defaults (no saved cards).',
+    idempotency: 'A disabled card is no longer active; the expiry text is sent once per card and expiry (customer_cards.expiry_notice_for, message dedupe key card-expiring:<card>:<yyyy-mm>).',
+    clock: 'Injected clock: the expiry month against now plus 30 days (UTC).',
+    tests: 'test/square-db/card-lifecycle.test.ts, test/jobs/matrix-square.test.ts, test/jobs/registry.test.ts',
     status: 'built',
   },
   'membership.cycle': {

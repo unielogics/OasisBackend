@@ -21,6 +21,8 @@ import { SquareLedgerOps, SquareStaleDecision, payKey, type SquareActor } from '
 import { planSquarePayment, rankCandidates, type Identity, type MatchContext, type MatchEntry, type MatchInvoice } from './matcher.js'
 import { AppError } from '../../platform/errors.js'
 import type { Selectable } from 'kysely'
+import { chargeOfPayment, recordChargePayment } from './charges.js'
+import { squareQueue } from './runtime.js'
 
 export type MirrorRow = Selectable<SquarePaymentsTable>
 
@@ -113,12 +115,14 @@ async function intentOf(tx: Tx, d: SquarePaymentDeps, f: SquarePaymentFacts): Pr
 export async function classifyContextFor(tx: Tx, d: SquarePaymentDeps, f: SquarePaymentFacts, ops: SquareLedgerOps): Promise<ClassifyContext> {
   const keyed = await tx.selectFrom('ledger_events').select('id').where('idempotency_key', '=', payKey(f.paymentId)).executeTakeFirst()
   const live = keyed ? true : !!(await ops.livePayOf(tx, f.paymentId))
+  const chargeId = await chargeOfPayment(tx, d.locationId, f)
   return {
     squareLocationId: squareLocationId(d.env as Env),
     inLedger: live,
     link: await linkOf(tx, d, f.orderId),
-    // card-on-file charges (wave Q3a) and subscription invoices (wave Q3b) do not exist yet
-    charge: false,
+    // a card-on-file charge (wave Q3a); subscription invoices (wave Q3b) do not exist yet
+    charge: chargeId !== null,
+    chargeId,
     membership: false,
     posIntent: await intentOf(tx, d, f),
   }
@@ -287,9 +291,15 @@ export async function decideSquarePayment(tx: Tx, d: SquarePaymentDeps, f: Squar
       })
       return 'matched'
     }
-    case 'charge':
+    case 'charge': {
+      // a saved-card charge (wave Q3a): recorded on the charge's invoice in the name of the staff member who confirmed it
+      await setClass('charge')
+      if (!ctx.chargeId) return 'pending'
+      await recordChargePayment(tx, { ...d, queue: squareQueue() }, ctx.chargeId, f)
+      return 'matched'
+    }
     case 'membership':
-      // not reachable before waves Q3a / Q3b
+      // not reachable before wave Q3b
       await setClass(c.kind)
       return 'pending'
     case 'pos_intent':

@@ -112,6 +112,19 @@ export const settingDefs = {
   },
   // Square payment links (ADR 0171 D5): whether Square's checkout asks for a tip. Off by default.
   'payments.link_tipping': { schema: z.boolean(), default: false },
+  // No-show and late-cancel fees on a saved card (ADR 0171 D7, wave Q3a): off until the owner sets the amounts. When on (and Square is
+  // the processor), a no-show or a cancel inside the free window PROPOSES a charge for the fee beyond the deposit kept, on the
+  // client's saved card whose consent covers it; a staff member charges or waives it. Nothing is charged on its own.
+  'fees.card_on_file': {
+    schema: z
+      .object({
+        enabled: z.boolean(),
+        noShowCents: z.number().int().min(0).max(100_000),
+        lateCancelCents: z.number().int().min(0).max(100_000),
+      })
+      .strict(),
+    default: { enabled: false, noShowCents: 0, lateCancelCents: 0 },
+  },
   // Standing (recurring) appointments and the waitlist: schema, endpoints and jobs exist, nothing runs until this is turned on
   // (and the matching VIP toggle in Settings is on). No UI yet (ADR 0086).
   'features.standing_waitlist': { schema: z.boolean(), default: false },

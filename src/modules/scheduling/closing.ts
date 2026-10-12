@@ -13,11 +13,19 @@ import {
 import type { Actor, SchedulingCtx } from './context.js'
 import type { AppointmentRecord } from './appointments.js'
 import type { SettlementMode } from './ports.js'
+import { proposeCardFee, proposalLine, type FeeProposal } from '../square/fees.js'
+import { squareEnv } from '../square/runtime.js'
+import { actorName } from './context.js'
 
 export interface Settlement extends SettlementView {
   policy: SettlementMode
   /** The sentence that explains the decision ("Canceled 47h ahead · free cancellation up to 24h before · refunded in full"). */
   rule: string
+  /**
+   * A no-show or late-cancel fee on the client's saved card, PROPOSED beyond the deposit kept (ADR 0171 D7, wave Q3a): staff charge
+   * or waive it (POST /appointments/:id/fee-charges/:chargeId/charge | waive). null when fees are off or nothing is due.
+   */
+  cardFee?: FeeProposal | null
 }
 
 export const policyOf = async (tx: Tx, c: SchedulingCtx): Promise<CancellationPolicy> =>
@@ -53,12 +61,30 @@ export async function settleClosed(
     idempotencyKey: `${o.kind}:${a.id}:v${a.version}`,
   })
   if (!view) return null
-  return { ...view, policy: o.mode, rule: text }
+  // a fee beyond the deposit kept, proposed on a saved card (never charged here): fees.card_on_file, Square the processor
+  const cardFee = await proposeCardFee(
+    tx,
+    { clock: c.clock, newId: c.newId, env: squareEnv() },
+    {
+      locationId: c.locationId,
+      appointmentId: a.id,
+      customerId: a.customerId,
+      kind: o.kind,
+      late: leadMin < policy.freeCancelHours * 60,
+      retainedCents: view.retainedCents,
+      mode: o.mode,
+      actorName: actorName(actor),
+      audit: actor.audit,
+    },
+  )
+  return { ...view, policy: o.mode, rule: text, cardFee }
 }
 
 /** Activity lines for a settlement; the kept share names who decided. */
-export const settlementLog = (s: Settlement, kind: SettlementKind): string[] =>
-  activityLines(
+export const settlementLog = (s: Settlement, kind: SettlementKind): string[] => [
+  ...activityLines(
     s,
     s.policy === 'policy' ? (kind === 'no_show' ? 'no-show policy' : 'cancellation policy') : 'set by staff',
-  )
+  ),
+  ...(s.cardFee ? [proposalLine(s.cardFee)] : []),
+]

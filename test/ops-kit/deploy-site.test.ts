@@ -36,6 +36,14 @@ import {
 } from './deploy-helpers.js'
 import { useStage } from './deploy-stage.js'
 
+/** The website's default policy with Square's Web Payments SDK hosts (ADR 0171 D12): production, and the sandbox (--square-env). */
+const squareCsp = (web: string, connect: string): string =>
+  `default-src 'none'; script-src 'self' ${web}; style-src 'self' 'unsafe-inline' ${web}; img-src 'self' data:; font-src 'self' https://square-fonts-production-f.squarecdn.com https://d1g145x70srn7h.cloudfront.net; connect-src 'self' ${connect}; frame-src ${web}; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'; upgrade-insecure-requests`
+const SQUARE_CSP = {
+  production: squareCsp('https://web.squarecdn.com', 'https://web.squarecdn.com https://pci-connect.squareup.com https://o160250.ingest.sentry.io'),
+  sandbox: squareCsp('https://sandbox.web.squarecdn.com', 'https://sandbox.web.squarecdn.com https://pci-connect.squareupsandbox.com https://o160250.ingest.sentry.io'),
+}
+
 const SITE = 'example.com'
 const SITE_CERT = '/etc/ssl/site/fullchain.pem'
 const SITE_KEY = '/etc/ssl/site/privkey.pem'
@@ -363,9 +371,8 @@ describe('install.sh --site-domain: the rendered website', () => {
     const headers = Object.fromEntries(
       find(conf('oasis/site-headers.conf'), 'add_header').map((h) => [h.args[0], h.args[1]]),
     )
-    expect(headers['Content-Security-Policy']).toBe(
-      "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'; upgrade-insecure-requests",
-    )
+    // self only, no inline script, no framing of the site; plus Square's Web Payments SDK (production hosts) for the card pages
+    expect(headers['Content-Security-Policy']).toBe(SQUARE_CSP.production)
     expect(headers['Referrer-Policy']).toBe('strict-origin-when-cross-origin')
     expect(headers['X-Frame-Options']).toBe('DENY')
     expect(headers['Cross-Origin-Opener-Policy']).toBe('same-origin')
@@ -436,6 +443,30 @@ describe('install.sh --site-domain: the rendered website', () => {
     expect(readText(path.join(root, 'releases/bootstrap/REVISION'))).toMatch(/^site=bootstrap\n/)
     for (const f of ['index.html', '404.html', 'REVISION'])
       expect((statSync(path.join(root, 'releases/bootstrap', f)).mode & 0o777).toString(8), f).toBe('644')
+  })
+
+  it('--square-env sandbox puts Square’s sandbox hosts in the default policy; payment=() stays; a bad value or one with --site-csp is refused', async () => {
+    const t = tempDir('oasis-site-square-')
+    cleanups.push(t.cleanup)
+    const env = { OASIS_ROOT_PREFIX: t.dir }
+    const r = await sh(script('install.sh'), [...BASE_ARGS, ...SITE_ARGS, '--square-env', 'sandbox'], env)
+    expect(r.code, r.out).toBe(0)
+    const headers = Object.fromEntries(
+      find(parseNginx(readText(path.join(t.dir, 'etc/nginx/oasis/site-headers.conf'))), 'add_header').map((h) => [h.args[0], h.args[1]]),
+    )
+    expect(headers['Content-Security-Policy']).toBe(SQUARE_CSP.sandbox)
+    expect(headers['Content-Security-Policy']).not.toMatch(/https:\/\/web\.squarecdn\.com|pci-connect\.squareup\.com/)
+    expect(headers['Permissions-Policy']).toBe('camera=(), microphone=(), geolocation=(), payment=(), usb=()')
+    // production is the default and can be named
+    const prod = await sh(script('install.sh'), [...BASE_ARGS, ...SITE_ARGS, '--square-env', 'production'], env)
+    expect(prod.code, prod.out).toBe(0)
+    expect(readText(path.join(t.dir, 'etc/nginx/oasis/site-headers.conf'))).toContain(SQUARE_CSP.production)
+    const bad = await sh(script('install.sh'), [...BASE_ARGS, ...SITE_ARGS, '--square-env', 'staging'], env)
+    expect(bad.code).not.toBe(0)
+    expect(bad.out).toMatch(/--square-env must be production or sandbox/)
+    const both = await sh(script('install.sh'), [...BASE_ARGS, ...SITE_ARGS, '--square-env', 'sandbox', '--site-csp', "default-src 'self'"], env)
+    expect(both.code).not.toBe(0)
+    expect(both.out).toMatch(/--square-env picks the Square hosts of the default policy/)
   })
 
   it('--site-csp and --site-marker change only what they name; a re-run leaves a deployed current alone', async () => {

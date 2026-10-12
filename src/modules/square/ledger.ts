@@ -173,6 +173,8 @@ export class SquareLedgerOps {
       actor?: SquareActor
       key?: string
       variance?: Record<string, unknown> | null
+      /** The ledger row's reason (a saved-card charge: "No-show fee", "Late-cancel fee", "Balance"). */
+      reason?: string | null
     },
   ): Promise<{ eventId: string; invoiceId: string; tipEventId: string | null; created: boolean }> {
     const actor = i.actor ?? SQUARE_ACTOR
@@ -198,6 +200,7 @@ export class SquareLedgerOps {
       brand: m.brand,
       last4: m.last4,
       deposit: i.deposit ?? false,
+      ...(i.reason ? { reason: i.reason } : {}),
       actor_user_id: actor.userId ?? null,
       actor_employee_id: actor.employeeId ?? null,
       actor_name: actor.manual ? actor.name : 'Square',
