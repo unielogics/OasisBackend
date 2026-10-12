@@ -4,63 +4,13 @@
 import type { NotificationDedupe } from '../../../integrations/squarespace/webhook.js'
 import type { Db } from '../../../platform/db.js'
 import type { NewId } from '../../../platform/ids.js'
+import { DbWebhookLog } from '../../../platform/webhook-log.js'
 import type { SecretBox } from './secrets.js'
 
-export class DbNotificationDedupe implements NotificationDedupe {
-  constructor(
-    private readonly db: Db,
-    private readonly newId: NewId,
-  ) {}
-
-  async claim(notificationId: string, now: Date): Promise<boolean> {
-    const r = await this.db
-      .insertInto('webhook_log')
-      .values({
-        id: this.newId(),
-        provider: 'squarespace',
-        external_id: notificationId,
-        headers: '{}',
-        body: null,
-        signature_valid: true,
-        received_at: now,
-        status: 'received',
-      })
-      .onConflict((oc) => oc.columns(['provider', 'external_id']).doNothing())
-      .returning('id')
-      .executeTakeFirst()
-    return r !== undefined
-  }
-
-  async release(notificationId: string): Promise<void> {
-    await this.db
-      .deleteFrom('webhook_log')
-      .where('provider', '=', 'squarespace')
-      .where('external_id', '=', notificationId)
-      .execute()
-  }
-
-  /** Keep what arrived (headers without the signature, raw body) for the 90-day trail. */
-  async record(notificationId: string, headers: Record<string, string>, body: string): Promise<void> {
-    await this.db
-      .updateTable('webhook_log')
-      .set({ headers: JSON.stringify(headers), body })
-      .where('provider', '=', 'squarespace')
-      .where('external_id', '=', notificationId)
-      .execute()
-  }
-
-  async finish(
-    notificationId: string,
-    status: 'processed' | 'ignored' | 'failed',
-    now: Date,
-    error?: string,
-  ): Promise<void> {
-    await this.db
-      .updateTable('webhook_log')
-      .set({ status, processed_at: now, error: error ?? null })
-      .where('provider', '=', 'squarespace')
-      .where('external_id', '=', notificationId)
-      .execute()
+/** The Squarespace face of the platform webhook log (src/platform/webhook-log.ts): provider 'squarespace', keyed on the notification id. */
+export class DbNotificationDedupe extends DbWebhookLog implements NotificationDedupe {
+  constructor(db: Db, newId: NewId) {
+    super(db, newId, 'squarespace')
   }
 }
 

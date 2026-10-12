@@ -1,0 +1,6 @@
+{
+  "method": "PUT",
+  "path": "/v2/events/enable",
+  "status": 200,
+  "body": {}
+}

@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/v2/subscriptions/ID0050/cancel",
+  "status": 400,
+  "body": {
+    "errors": [
+      {
+        "code": "BAD_REQUEST",
+        "detail": "The provided subscription `ID0050` already has a pending cancel date of `2026-11-12`.",
+        "category": "INVALID_REQUEST_ERROR"
+      }
+    ]
+  }
+}

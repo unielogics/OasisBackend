@@ -646,6 +646,8 @@ describe('nginx site', () => {
     expect(where('/api/v1/auth/logout')).toBe('^~ /api/')
     expect(where('/hooks/squarespace')).toBe('= /hooks/squarespace')
     expect(proxied('/hooks/squarespace')).toBe('http://oasis_api')
+    expect(where('/hooks/square')).toBe('= /hooks/square')
+    expect(proxied('/hooks/square')).toBe('http://oasis_api')
     expect(where('/hooks/ses')).toBe('= /hooks/ses')
     expect(where('/healthz')).toBe('= /healthz')
     expect(where('/readyz')).toBe('= /readyz')
@@ -712,6 +714,8 @@ describe('nginx site', () => {
       '/hooks/smsgate/',
       '/hooks/unknown',
       '/hooks/squarespace/extra',
+      '/hooks/square/extra',
+      '/hooks/squares',
       '/dev-storage/files/x',
     ]) {
       const l = matchLocation(locs, uri)!
@@ -770,13 +774,17 @@ describe('nginx site', () => {
     expect(find(expandIncludes(l.body, reader), 'proxy_http_version')[0]!.args).toEqual(['1.1'])
   })
 
-  it('takes Squarespace webhooks by POST only with a 1 MB body limit', () => {
-    const l = httpsLocs().find((x) => x.pattern === '/hooks/squarespace')!
-    expect(find(l.body, 'client_max_body_size')[0]!.args).toEqual(['1m'])
-    const except = find(l.body, 'limit_except')[0]!
-    expect(except.args).toEqual(['POST'])
-    expect(find(except.block!, 'deny')[0]!.args).toEqual(['all'])
-    expect(find(l.body, 'limit_req')[0]!.args[0]).toBe('zone=oasis_hooks')
+  it('takes Squarespace and Square webhooks by POST only with a 1 MB body limit in the hooks zone', () => {
+    for (const pattern of ['/hooks/squarespace', '/hooks/square']) {
+      const l = httpsLocs().find((x) => x.pattern === pattern)!
+      expect(l.modifier, pattern).toBe('=')
+      expect(find(l.body, 'client_max_body_size')[0]!.args, pattern).toEqual(['1m'])
+      const except = find(l.body, 'limit_except')[0]!
+      expect(except.args, pattern).toEqual(['POST'])
+      expect(find(except.block!, 'deny')[0]!.args, pattern).toEqual(['all'])
+      expect(find(l.body, 'limit_req')[0]!.args[0], pattern).toBe('zone=oasis_hooks')
+      expect(find(l.body, 'proxy_pass')[0]!.args[0], pattern).toBe('http://oasis_api')
+    }
   })
 
   it('limits sign-in attempts, keeps readiness and the OpenAPI document to this host, and defines every zone it uses', () => {

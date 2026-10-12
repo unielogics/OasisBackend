@@ -6,6 +6,7 @@ import { membershipJobs } from '../modules/memberships/jobs.js'
 import { messagingJobs } from '../modules/messaging/jobs/index.js'
 import { remindersJob, reviewRequestJob } from '../modules/messaging/jobs/reminders.js'
 import { sqspJobs } from '../modules/payments-sync/jobs/index.js'
+import { squareJobs } from '../modules/square/jobs/index.js'
 import { paymentsLagScanJob } from '../modules/payments/jobs.js'
 import { creditExpireJob } from '../modules/payments/jobs-credit.js'
 import { ledgerIntegrityJob } from '../modules/payments/jobs-integrity.js'
@@ -36,6 +37,7 @@ export const jobDefinitions: readonly JobDefinition<never>[] = [
   ...statusTextJobs,
   vipHoldReleaseJob,
   ...sqspJobs,
+  ...squareJobs,
   ...membershipJobs,
   ...standingJobs,
   ...leadJobs,

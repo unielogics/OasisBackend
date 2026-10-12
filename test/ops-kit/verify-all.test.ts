@@ -33,7 +33,7 @@ const run = async (argv: string[], env: Record<string, string | undefined> = {})
 const today = new Date().toISOString().slice(0, 10)
 
 describe('verify:all', () => {
-  it('runs the four integrations against the simulators, writes a report for each plus a summary, and exits 0', async () => {
+  it('runs the five integrations against the simulators, writes a report for each plus a summary, and exits 0', async () => {
     const r = await run([
       '--sim',
       '--days',
@@ -56,6 +56,8 @@ describe('verify:all', () => {
         `${today}-aws.md`,
         `${today}-smsgate.json`,
         `${today}-smsgate.md`,
+        `${today}-square.json`,
+        `${today}-square.md`,
         `${today}-squarespace-product-map.proposed.json`,
         `${today}-squarespace.json`,
         `${today}-squarespace.md`,
@@ -63,12 +65,14 @@ describe('verify:all', () => {
     )
     expect(r.out).toMatch(/smsgate\s+exit 0/)
     expect(r.out).toMatch(/squarespace\s+exit 0/)
+    expect(r.out).toMatch(/square\s+exit 0/)
     expect(r.out).toMatch(/aws\s+exit 0/)
     expect(r.out).toMatch(/ai\s+exit 0/)
     const summary = readFileSync(path.join(r.outDir, `${today}-all.md`), 'utf8')
     expect(summary).toContain('| smsgate | 0 |')
     expect(r.json('aws').items.find((i) => i.id === 'AWS-06')!.status).toBe('PASS')
     expect(r.json('smsgate').items.find((i) => i.id === 'SG-B4')!.status).toBe('PASS')
+    expect(r.json('square').summary).toMatchObject({ fail: 0, pass: 10 })
   })
 
   it('--to is split by shape: a phone number for the tablet, an address for SES', async () => {
@@ -97,6 +101,7 @@ describe('verify:all', () => {
       /smsgate\s+exit 2\s+not configured: SMSGATE_DEVICE_URL, SMSGATE_USERNAME, SMSGATE_PASSWORD, SMSGATE_WEBHOOK_SECRET/,
     )
     expect(r.out).toMatch(/squarespace\s+exit 2\s+not configured: SQSP_API_KEY/)
+    expect(r.out).toMatch(/square\s+exit 2\s+not configured: SQUARE_ACCESS_TOKEN/)
     expect(r.out).toMatch(
       /aws\s+exit 2\s+not configured: AWS_ACCESS_KEY_ID \+ AWS_SECRET_ACCESS_KEY, SES_FROM_ADDRESS, S3_BUCKET/,
     )
@@ -120,7 +125,7 @@ describe('verify:all', () => {
   it('--help and a bad option', async () => {
     const h = await run(['--help'])
     expect(h.code).toBe(0)
-    expect(h.out).toContain('verify:smsgate, verify:squarespace, verify:aws and verify:ai')
+    expect(h.out).toContain('verify:smsgate, verify:squarespace, verify:square, verify:aws and verify:ai')
     const bad = await run(['--sim', '--frobnicate'])
     expect(bad.code).toBe(2)
     expect(existsSync(path.join(bad.outDir, `${today}-all.md`))).toBe(false)

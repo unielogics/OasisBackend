@@ -368,6 +368,8 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/api/v1/integrations/sms/devices/:id/health` | set.billing |  |
 | POST | `/api/v1/integrations/sms/devices/:id/register-webhooks` | set.billing |  |
 | POST | `/api/v1/integrations/sms/devices/:id/test` | set.billing |  |
+| GET | `/api/v1/integrations/square` | set.billing | pay.reports |  |
+| POST | `/api/v1/integrations/square/test` | set.billing |  |
 | POST | `/api/v1/integrations/squarespace/alerts/:id/resolve` | set.billing |  |
 | DELETE | `/api/v1/integrations/squarespace/connection` | set.billing |  |
 | PUT | `/api/v1/integrations/squarespace/connection` | set.billing |  |
@@ -491,6 +493,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/dev-storage/*` | public |  |
 | POST | `/dev-storage/*` | public |  |
 | POST | `/hooks/ses` | webhook:ses |  |
+| POST | `/hooks/square` | webhook:square |  |
 | POST | `/hooks/squarespace` | webhook:squarespace |  |
 <!-- openapi:end -->
 
@@ -1946,3 +1949,63 @@ New SMS templates (class `ai_reply`, not editable, never staff-sendable): `actio
 Tests: `test/assistant-tools/*.test.ts`, `test/leads/*.test.ts`, the authz matrix and the contact sweep (the route registry);
 `test/assistant/runtime-e2e.test.ts` runs the tools, the welcome flow, the reply number, the leads and the status texts through the
 real turn, guard and judge (ADR 0160, W3 integration).
+
+## 30. Square foundation (ADR 0171, wave Q1b)
+
+Everything here is off by default (`SQUARE_PROVIDER=sim`: an in-process simulator answers, nothing reaches Square). The routes and
+jobs that move money come with waves Q2b to Q3b (ADR 0171, "What the later waves add").
+
+### 30.1 `POST /hooks/square` (webhook, public through nginx: POST only, zone `oasis_hooks`, 1 MB)
+
+| Case | Answer |
+|---|---|
+| `x-square-hmacsha256-signature` is not base64 HMAC-SHA256(key, `SQUARE_WEBHOOK_URL` + raw body) for the current key or `SQUARE_WEBHOOK_SIGNATURE_KEY_PREVIOUS`; no key or URL configured | `401 WEBHOOK_SIGNATURE_INVALID`, nothing kept |
+| Signed, but not a Square event envelope (`merchant_id`, `type`, `event_id`, `created_at`, `data.type`) | `400 MALFORMED_REQUEST` |
+| An event of a merchant other than the one Test connection learned (in the configured Square environment) | `200 {status: "ignored"}`, nothing kept |
+| An `event_id` already in `webhook_log` (provider `square`; a Square retry, a replay, or the catch-up was first) | `200 {status: "duplicate"}` |
+| Accepted: claimed in `webhook_log` (body, headers without the signature), `square_state.last_webhook_at` set, `square.event.process {eventId}` queued (singleton key = the event id) | `200 {status: "accepted"}` |
+| The queue refuses the job | the claim is released; `503 SERVICE_UNAVAILABLE` (Square's retry is accepted) |
+| No queue (single process) | processed inline; a failure releases the claim and answers `503` |
+
+The job re-fetches the object (payment, refund, invoice, subscription, card, customer) by id, ignores another location, and runs the
+ingest handler (this wave: log only) under an advisory lock per object; the row is closed `processed`, or `ignored` with the reason in
+`error`, or `failed` (retried 5 times, 30 s apart).
+
+### 30.2 `GET /api/v1/integrations/square` (`set.billing` or `pay.reports`)
+
+`{status, eventTypes, lastTest, catchup, reconcile}`: `status` is the `square` row of `GET /system/integrations` (below); `eventTypes`
+the 18 types our webhook subscription must carry; `lastTest` the last Test connection (`ok`, `at`, `checks`); `catchup` the Events API
+watermark, last run and events read; `reconcile` the counts of the last nightly read (payments and refunds of 72 hours by status, source
+and product), or `null`. Never a token or a signature key.
+
+### 30.3 `POST /api/v1/integrations/square/test` (`set.billing`, audited `square.test_connection`)
+
+Body `{}`. Calls ListLocations, EnableEvents and ListWebhookSubscriptions (against the simulator with `SQUARE_PROVIDER=sim`) and answers
+`200 {ok, environment: sandbox|production|sim, locationId, merchantId, webhookSubscriptionId, checks[], testedAt}` with one check each:
+
+| `key` | Passes when |
+|---|---|
+| `token` | ListLocations answers (a 401 reads "Square refused the access token") |
+| `location` | `SQUARE_LOCATION_ID` is among them, `ACTIVE`, in `USD`, with `CREDIT_CARD_PROCESSING` |
+| `events` | EnableEvents succeeded (the 10-minute catch-up can read) |
+| `webhook` | a subscription for exactly `SQUARE_WEBHOOK_URL` exists, is enabled and carries every event type (`pnpm square:webhooks --apply` fixes it) |
+
+A failing check is still `200` with `ok: false` and a plain reason. The merchant id, the location, `events_enabled_at` and the verified
+subscription are kept in `square_state` for the configured Square environment (sim, sandbox or production); the hook drops events of
+any other merchant from then on. A row learned in another environment counts as none (switching environment starts it afresh).
+
+### 30.4 `GET /api/v1/system/integrations`: the `square` row
+
+`provider` `sim|live`; `missing`: `SQUARE_PROVIDER=live`, each of `SQUARE_ACCESS_TOKEN`, `SQUARE_LOCATION_ID`, `SQUARE_APPLICATION_ID`,
+`SQUARE_WEBHOOK_SIGNATURE_KEY`, `SQUARE_WEBHOOK_URL` that is unset, and "Events API not enabled" until Test connection enabled it;
+`warnings`: no verified webhook subscription (live), the sandbox, observe-only, Squarespace still the processor, the simulator, a host
+override, the POS switch outside production, a catch-up that has not run for 30 minutes (live), a watermark older than 27 days, no
+webhook in 24 hours while the catch-up found events. `details`: environment, location, merchant, API version, writes, processor, POS
+switch, `token` and `webhookKey` as `set`/`not set`, events enabled, subscription verified, last webhook, catch-up and reconcile times,
+the last test result; `unmatched`, `failedRefunds` and `pendingEnrollments` are `null` until waves Q2b and Q3b fill them.
+
+### 30.5 Jobs and environment
+
+`square.event.process` (queue), `square.events.catchup` (every 10 minutes) and `square.reconcile` (03:45) are in `docs/jobs.md`; the
+variables in `docs/integrations/square.md` section 2. Scripts: `pnpm sim:square`, `pnpm square:webhooks [--apply|--rotate-key]`,
+`pnpm verify:square` (also in `pnpm verify:all` and `verify.sh square`).

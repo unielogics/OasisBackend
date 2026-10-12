@@ -1,0 +1,35 @@
+{
+  "method": "POST",
+  "path": "/v2/subscriptions/ID0050/swap-plan",
+  "status": 200,
+  "body": {
+    "subscription": {
+      "id": "ID0050",
+      "location_id": "ID0001",
+      "customer_id": "ID0003",
+      "start_date": "2026-10-12",
+      "charged_through_date": "2026-11-12",
+      "status": "ACTIVE",
+      "invoice_ids": [
+        "ID0051"
+      ],
+      "version": 1,
+      "created_at": "2026-10-12T13:40:18Z",
+      "card_id": "ID0005",
+      "timezone": "UTC",
+      "source": {
+        "name": "Sandbox for APPLICATION_ID"
+      },
+      "monthly_billing_anchor_date": 12,
+      "plan_variation_id": "ID0044"
+    },
+    "actions": [
+      {
+        "id": "ID0055",
+        "type": "SWAP_PLAN",
+        "effective_date": "2026-11-12",
+        "new_plan_variation_id": "ID0046"
+      }
+    ]
+  }
+}

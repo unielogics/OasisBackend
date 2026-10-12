@@ -2740,6 +2740,35 @@ CREATE TABLE public.sqsp_webhook_subscriptions (
 );
 
 --
+-- Name: square_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.square_state (
+    location_id uuid NOT NULL,
+    environment text NOT NULL,
+    square_location_id text,
+    merchant_id text,
+    events_enabled_at timestamp with time zone,
+    webhook_subscription_id text,
+    webhook_checked_at timestamp with time zone,
+    last_webhook_at timestamp with time zone,
+    watermark timestamp with time zone,
+    last_catchup_at timestamp with time zone,
+    last_catchup_events integer DEFAULT 0 NOT NULL,
+    last_catchup_claimed_at timestamp with time zone,
+    last_reconcile_at timestamp with time zone,
+    last_reconcile jsonb,
+    last_test_at timestamp with time zone,
+    last_test jsonb,
+    last_error text,
+    last_error_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT square_state_environment_check CHECK ((environment = ANY (ARRAY['sandbox'::text, 'production'::text, 'sim'::text]))),
+    CONSTRAINT square_state_last_catchup_events_check CHECK ((last_catchup_events >= 0))
+);
+
+--
 -- Name: standing_occurrences; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2981,7 +3010,7 @@ CREATE TABLE public.webhook_log (
     processed_at timestamp with time zone,
     status text DEFAULT 'received'::text NOT NULL,
     error text,
-    CONSTRAINT webhook_log_provider_check CHECK ((provider = ANY (ARRAY['squarespace'::text, 'smsgate'::text, 'ses'::text]))),
+    CONSTRAINT webhook_log_provider_check CHECK ((provider = ANY (ARRAY['squarespace'::text, 'smsgate'::text, 'ses'::text, 'square'::text]))),
     CONSTRAINT webhook_log_status_check CHECK ((status = ANY (ARRAY['received'::text, 'processed'::text, 'ignored'::text, 'failed'::text, 'unparsed'::text])))
 );
 
@@ -3948,6 +3977,13 @@ ALTER TABLE ONLY public.sqsp_webhook_subscriptions
 
 ALTER TABLE ONLY public.sqsp_webhook_subscriptions
     ADD CONSTRAINT sqsp_webhook_subscriptions_pkey PRIMARY KEY (id);
+
+--
+-- Name: square_state square_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_state
+    ADD CONSTRAINT square_state_pkey PRIMARY KEY (location_id);
 
 --
 -- Name: standing_occurrences standing_occurrences_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -6718,6 +6754,13 @@ ALTER TABLE ONLY public.sqsp_transactions
 
 ALTER TABLE ONLY public.sqsp_webhook_subscriptions
     ADD CONSTRAINT sqsp_webhook_subscriptions_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: square_state square_state_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_state
+    ADD CONSTRAINT square_state_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 -- Name: standing_occurrences standing_occurrences_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

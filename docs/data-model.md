@@ -45,6 +45,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261014100000_vehicle_classes_and_prices.sql` | vehicle sizes (`vehicle_classes`, the five defaults for every location) and prices by size (`service_class_prices`) backfilled from today's guest prices and tint matrix; `catalog.tint_films`; `vehicles.vehicle_class` / `vehicle_class_source` from `vehicle_type` (ADR 0170) |
 | `20261014100100_membership_tiers.sql` | editable tiers: slug keys (premium -> gold, executive -> vip, old key in `legacy_key`, cascaded to links and checkouts), `member_discount_bp`, `public`, `vip_booking`, `max_vehicles`, `price_version`; `membership_tier_prices` (append-only, guard trigger); `membership_inclusions` + `membership_inclusion_services` from `plan_credit_rules` (same ids); credit events gain `inclusion_id` and the coverage columns, one redeem per appointment and inclusion; `memberships.plan_class` (required) and `tier_price_id`; `membership_household`; `membership_checkouts.plan_class` (ADR 0170) |
 | `20261014100200_class_price_snapshots.sql` | the size snapshot of a visit (written from wave Q2): `appointments.vehicle_class`, `vehicle_class_label`, `class_confirmed_at`, `list_price_cents`, `discount_bp`, `price_basis`; the same per add-on and invoice line; `invoices.vehicle_class_label` (ADR 0170) |
+| `20261014200000_square_foundation.sql` | Square foundation (ADR 0171, wave Q1b): `webhook_log.provider` gains `square` (deliveries and Events API catch-up, deduplicated on Square's `event_id`), and `square_state` (merchant, events enabled, webhook subscription, catch-up watermark, last reconcile and test) |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -63,7 +64,7 @@ module augmentation (`declare module '../../platform/schema.js'`) in each module
 | `realtime_events`   | The durable SSE log (`bigserial` id used as `Last-Event-ID`): `channel` (ops, payments, messages, settings, notifications), `type`, `payload`, `target_user_id`. An insert trigger NOTIFYs listeners on commit.                       |
 | `realtime_state`    | One row: `purged_through`, the highest purged event id, so a stale `Last-Event-ID` is told to resync.                                                                                                                                 |
 | `audit_log`         | Insert-only (trigger): actor, roles, `view_as_role_id`, `action`, entity, `before`/`after`, request id, idempotency key, ip. Kept forever.                                                                                            |
-| `webhook_log`       | One row per received webhook, unique `(provider, external_id)`; `signature_valid`, `status received\|processed\|ignored\|failed\|unparsed` (`unparsed`: a signed SMS Gate delivery Oasis does not handle or could not read, body cut to 4 KB, purged after 7 days; ADR 0151). |
+| `webhook_log`       | One row per received webhook, unique `(provider, external_id)`; `provider squarespace\|smsgate\|ses\|square` (Square: keyed on the event id, shared by `/hooks/square` and the Events API catch-up, ADR 0171); `signature_valid`, `status received\|processed\|ignored\|failed\|unparsed` (`unparsed`: a signed SMS Gate delivery Oasis does not handle or could not read, body cut to 4 KB, purged after 7 days; ADR 0151). |
 | `notifications`     | The bell: per employee or role target, `kind` (emergency, arrival, ...), `title`, `body`, entity, `read_at`.                                                                                                                          |
 | `schema_migrations` | The migration runner's record: `name`, `checksum`, `applied_at`. An applied migration is never edited.                                                                                                                                |
 
@@ -347,6 +348,19 @@ Columns added to existing tables:
 | `appointment_addons.list_price_cents`, `.discount_bp`, `.price_basis`                                             | the same per add-on                                                                                                                            |
 | `invoice_items.list_cents`, `.discount_bp`, `.price_basis`; `invoices.vehicle_class_label`                          | the regular price of a line at the size (null, or at least `price_cents`), the member % off and the basis; the size on the invoice           |
 
+## Square (migration `20261014200000_square_foundation.sql`, ADR 0171)
+
+The foundation only: nothing here moves money. The ledger columns (`ledger_events.processor`, `processor_order_id`), the Square
+payment mirror, the refund legs and the POS intents come with the core wave (Q2b); saved cards and consents with Q3a; subscriptions
+with Q3b.
+
+| Table          | Purpose                                                                                                                                         |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `square_state` | One row per location, describing ONE Square `environment` (`sandbox\|production\|sim`): read only when it is the configured one, and a save from another environment resets every learned column it does not set. `square_location_id`; `merchant_id` learned by Test connection (a webhook of any other merchant is ignored); `events_enabled_at`; the verified `webhook_subscription_id` and when it was checked; `last_webhook_at`; the catch-up `watermark` (created_at of the newest event read, and after a complete run with no failure at least the run time minus 10 minutes; the next run reads from 10 minutes before it, never more than 28 days back), `last_catchup_at`, `last_catchup_events`, `last_catchup_claimed_at` (an event no webhook had delivered); `last_reconcile` (jsonb counts of the last 72 hours) and its time; `last_test` (jsonb checks) and its time; `last_error` and its time |
+
+Square deliveries and catch-up events share `webhook_log` (provider `square`, `external_id` = Square's `event_id`): whichever claims the
+event first processes it; the raw body and the headers without the signature are kept for the 90-day trail.
+
 ## Foreign keys
 
 `domain_links` added the keys from the domain tables to `employees` and `users`. Two columns stay plain `uuid` on purpose, and a
@@ -416,6 +430,7 @@ Operations design day re-anchored on **today** in the business time zone with th
 
 <!-- schema-reference:start -->
 Generated from `db/schema.sql` by `pnpm data-model` (112 tables, 1 view, 14 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (107 tables, 1 view, 12 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -2343,6 +2358,33 @@ Primary key `(id)`. Unique `(location_id, sqsp_txn_id)`. `(location_id)` referen
 | `last_delivery_at` | timestamp with time zone | yes |  |
 
 Primary key `(id)`. Unique `(location_id, sqsp_subscription_id)`. `(location_id)` references `locations(id)` on delete cascade. 1 check constraint.
+
+#### `square_state`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `location_id` | uuid | no |  |
+| `environment` | text | no |  |
+| `square_location_id` | text | yes |  |
+| `merchant_id` | text | yes |  |
+| `events_enabled_at` | timestamp with time zone | yes |  |
+| `webhook_subscription_id` | text | yes |  |
+| `webhook_checked_at` | timestamp with time zone | yes |  |
+| `last_webhook_at` | timestamp with time zone | yes |  |
+| `watermark` | timestamp with time zone | yes |  |
+| `last_catchup_at` | timestamp with time zone | yes |  |
+| `last_catchup_events` | integer | no | `0` |
+| `last_catchup_claimed_at` | timestamp with time zone | yes |  |
+| `last_reconcile_at` | timestamp with time zone | yes |  |
+| `last_reconcile` | jsonb | yes |  |
+| `last_test_at` | timestamp with time zone | yes |  |
+| `last_test` | jsonb | yes |  |
+| `last_error` | text | yes |  |
+| `last_error_at` | timestamp with time zone | yes |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(location_id)`. `(location_id)` references `locations(id)` on delete cascade. 2 check constraints.
 
 #### `standing_occurrences`
 

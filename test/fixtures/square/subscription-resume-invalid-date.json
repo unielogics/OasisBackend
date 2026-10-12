@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/v2/subscriptions/ID0050/resume",
+  "status": 400,
+  "body": {
+    "errors": [
+      {
+        "code": "INVALID_DATE",
+        "detail": "The subscription has a scheduled pause date of `2026-11-12`, a resume request must have a date after it.",
+        "category": "INVALID_REQUEST_ERROR"
+      }
+    ]
+  }
+}

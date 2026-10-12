@@ -8,6 +8,7 @@
 #   /api/v1/public/links/ the personal-link pages' API (ADR 0160): never cached (no-store), no cookies, the oasis_public_links
 #                         zone, 4k bodies; the same location as on the website's host
 #   /hooks/squarespace    Squarespace webhook (signed, public), 1 MB body limit, POST only
+#   /hooks/square         Square webhook (signed: HMAC over the registered URL and the body, ADR 0171), 1 MB, POST only
 #   /hooks/ses            Amazon SNS feedback (signed, public)
 #   /hooks/*              everything else, including /hooks/smsgate, answers 404 here. The SMS Gate webhook is served only on
 #                         the tailnet (tailscale-serve.sh -> the API's second listener).
@@ -96,6 +97,16 @@ server {
 
     # --- webhooks ---
     location = /hooks/squarespace {
+        limit_except POST {
+            deny all;
+        }
+        limit_req zone=oasis_hooks burst=40 nodelay;
+        client_max_body_size 1m;
+        include @NGINX_DIR@/oasis/proxy.conf;
+        proxy_pass http://oasis_api;
+    }
+
+    location = /hooks/square {
         limit_except POST {
             deny all;
         }

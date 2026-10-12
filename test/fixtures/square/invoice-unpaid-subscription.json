@@ -1,0 +1,57 @@
+{
+  "method": "GET",
+  "path": "/v2/invoices/ID0062",
+  "status": 200,
+  "body": {
+    "invoice": {
+      "id": "ID0062",
+      "version": 1,
+      "location_id": "ID0001",
+      "order_id": "ID0063",
+      "payment_requests": [
+        {
+          "uid": "ID0064",
+          "request_type": "BALANCE",
+          "due_date": "2026-10-12",
+          "tipping_enabled": false,
+          "computed_amount_money": {
+            "amount": 200,
+            "currency": "USD"
+          },
+          "total_completed_amount_money": {
+            "amount": 0,
+            "currency": "USD"
+          },
+          "automatic_payment_source": "NONE"
+        }
+      ],
+      "primary_recipient": {
+        "customer_id": "ID0003",
+        "given_name": "Verify",
+        "family_name": "Run",
+        "email_address": "verify@example.com"
+      },
+      "invoice_number": "ID0065",
+      "title": "Verify monthly 2 ID0004 Subscription",
+      "public_url": "https://app.squareupsandbox.com/scrubbed",
+      "next_payment_amount_money": {
+        "amount": 200,
+        "currency": "USD"
+      },
+      "status": "UNPAID",
+      "timezone": "UTC",
+      "created_at": "2026-10-12T13:40:42Z",
+      "updated_at": "2026-10-12T13:40:44Z",
+      "accepted_payment_methods": {
+        "card": true,
+        "square_gift_card": false,
+        "bank_account": false,
+        "buy_now_pay_later": false,
+        "cash_app_pay": true
+      },
+      "delivery_method": "EMAIL",
+      "subscription_id": "ID0061",
+      "store_payment_method_enabled": true
+    }
+  }
+}

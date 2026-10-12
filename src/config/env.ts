@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { aiEnvShape } from '../integrations/ai/env.js'
 import { CLAUDE_BEDROCK_MODELS, findClaudeModel } from '../integrations/ai/models.js'
 import { emailEnvShape } from '../integrations/email/env.js'
+import { squareEnvIssues, squareEnvShape } from '../integrations/square/config.js'
 import { squarespaceEnvSchema } from '../integrations/squarespace/config.js'
 import { storageEnvShape } from '../integrations/storage/env.js'
 import { secretKeysOf } from './secret-provenance.js'
@@ -159,6 +160,8 @@ export const envSchema = z
     HOOKS_HOST: z.string().default('127.0.0.1'), // the tailnet-facing hooks listener (src/server.ts)
     HOOKS_PORT: z.coerce.number().int().min(0).default(3002), // 0 disables the second listener
 
+    ...squareEnvShape, // SQUARE_* and PAYMENT_PROCESSOR (ADR 0171): sim, observe-only and Squarespace by default
+
     // Payment links may only point at these hosts (comma separated, exact or subdomain); default squarespace.com.
     PAYMENT_LINK_HOSTS: z.string().optional(),
 
@@ -279,6 +282,7 @@ export const envSchema = z
       e.AWS_ACCESS_KEY_ID ? 'AWS_SECRET_ACCESS_KEY' : 'AWS_ACCESS_KEY_ID',
       'AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY go together',
     )
+    squareEnvIssues(e, need)
   })
 
 export type Env = z.infer<typeof envSchema>

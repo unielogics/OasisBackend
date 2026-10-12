@@ -54,6 +54,11 @@ export function hmacSha256Hex(secret: string, data: string | Buffer): string {
   return createHmac('sha256', secret).update(data).digest('hex')
 }
 
+/** Base64 HMAC-SHA256 (Square: x-square-hmacsha256-signature over the notification URL plus the raw body). */
+export function hmacSha256Base64(secret: string, data: string | Buffer): string {
+  return createHmac('sha256', secret).update(data).digest('base64')
+}
+
 /** Constant-time comparison of two hex/base64 strings of any length. */
 export function safeEqual(a: string, b: string): boolean {
   const ba = Buffer.from(a)

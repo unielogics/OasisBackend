@@ -1,4 +1,4 @@
-// pnpm verify:all  -  runs smsgate, squarespace, aws and ai one after the other with the same flags where they apply, writes each
+// pnpm verify:all  -  runs smsgate, squarespace, square, aws and ai one after the other with the same flags where they apply, writes each
 // integration's own report plus docs/live-verification/<date>-all.md, and exits with the worst result:
 // 1 if any integration has a FAIL, else 2 if any could not start for lack of configuration, else 0.
 import { applySecretEnvironment } from '../../src/config/secrets-source.js'
@@ -24,10 +24,12 @@ import { SMSGATE_OPTIONS, runSmsGate } from './smsgate.js'
 import { SQUARESPACE_OPTIONS, runSquarespace } from './squarespace.js'
 import { AWS_OPTIONS, runAws } from './aws.js'
 import { AI_OPTIONS, runAi } from './ai.js'
+import { SQUARE_OPTIONS, runSquare } from './square.js'
 
 const SUITES = [
   { name: 'smsgate', run: runSmsGate, known: SMSGATE_OPTIONS },
   { name: 'squarespace', run: runSquarespace, known: SQUARESPACE_OPTIONS },
+  { name: 'square', run: runSquare, known: SQUARE_OPTIONS },
   { name: 'aws', run: runAws, known: AWS_OPTIONS },
   { name: 'ai', run: runAi, known: AI_OPTIONS },
 ] as const
@@ -42,10 +44,10 @@ const union = (pick: 'flags' | 'options'): string[] => [
 
 export const HELP = `pnpm verify:all [options]
 
-Runs verify:smsgate, verify:squarespace, verify:aws and verify:ai in turn. Every option of the four scripts is accepted and handed to the
+Runs verify:smsgate, verify:squarespace, verify:square, verify:aws and verify:ai in turn. Every option of the five scripts is accepted and handed to the
 ones that know it (--sim, --send, --to, --watch, --days ...). --to is used for the SMS number when it looks like a phone number and
 for the email recipient when it looks like an email address; pass --sms-to and --email-to to give both.
-  --only-integration smsgate|squarespace|aws|ai   run just one
+  --only-integration smsgate|squarespace|square|aws|ai   run just one
 Exit code: 1 if any integration has a FAIL, else 2 if any could not start for lack of configuration, else 0.
 Reports: docs/live-verification/<date>-<integration>.md and .json, plus <date>-all.md.
 `
