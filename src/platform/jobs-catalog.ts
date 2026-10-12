@@ -369,6 +369,53 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
     tests: 'test/memberships/checkouts.test.ts, test/jobs/matrix-sqsp.test.ts, test/jobs/registry.test.ts',
     status: 'built',
   },
+  'square.catalog.sync': {
+    owner: 'memberships',
+    purpose:
+      'Every 5 minutes while SQUARE_WRITES_ENABLED: the tier prices a save left pending become Square plan variations (one SUBSCRIPTION_PLAN per tier, one STATIC MONTHLY SUBSCRIPTION_PLAN_VARIATION per price row; a price edit is a new row, so a new variation; ADR 0171 wave Q3b); a superseded price nobody used is retired at Square. A failure is kept on the row and the managers are told. Skipped with the defaults.',
+    idempotency:
+      'Only rows still pending or failed are sent; each create carries a key derived from the row id and its content (ct_), so a run that stopped after Square answered gets the same object back; a variation with subscriptions is never deleted.',
+    clock: 'Injected clock (square_synced_at).',
+    tests: 'test/square-members/catalog.test.ts, test/square-members/catalog-plan.test.ts, test/jobs/matrix-square-members.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'square.catalog.drift': {
+    owner: 'memberships',
+    purpose:
+      'Nightly while SQUARE_WRITES_ENABLED: the catalog sync plus Square\'s subscription plans read back and compared with the tier prices; a variation priced differently or deleted at Square while members use it is marked failed and reported (never overwritten), one nobody uses is made again, a renamed tier renames its plan. Skipped with the defaults.',
+    idempotency: 'Read-and-compare; the writes are the catalog sync\'s (keyed) and row states that a second run leaves as they are.',
+    clock: 'Injected clock.',
+    tests: 'test/square-members/catalog.test.ts, test/jobs/matrix-square-members.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'square.enrollments.resume': {
+    owner: 'memberships',
+    purpose:
+      'Every 5 minutes while SQUARE_WRITES_ENABLED: membership-page enrollments younger than an hour are taken on with the same keys (CreateSubscription sb_<enrollment> after a lost answer; the subscription and first invoice read back when an event is late); older ones are abandoned; a failed or abandoned one is cleaned up at Square (subscription canceled, open invoice canceled, card disabled) and its membership canceled (after a failed first payment the client is texted a new membership page); pending Square memberships with no attempt for an hour are closed; a member who saved a newer card for membership billing has it put on the subscription. Skipped with the defaults.',
+    idempotency:
+      'Every Square create repeats its own key; cancels and disables count "already done" answers as done; each row moves forward only, under a row lock re-checked in its transaction; texts carry dedupe keys.',
+    clock: 'Injected clock (the one-hour window).',
+    tests: 'test/square-members/enroll.test.ts, test/jobs/matrix-square-members.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'membership.billing': {
+    owner: 'memberships',
+    purpose:
+      'Daily 09:30 (shop time): the failure policy of memberships billed by Square (ADR 0171 D10, setting memberships.billing_policy {graceDays 7, cancelDays 21}): a client the invoice event could not tell is texted the card link; on day 7 the membership is past due (perks off); on day 21 the subscription and its open invoice are canceled at Square (writes on) and the membership canceled payment_failed. Finds nothing with the defaults.',
+    idempotency: 'Each step is guarded by the membership state re-checked under a row lock; the notice has a dedupe key; Square cancels count "already" answers as done.',
+    clock: 'Injected clock; shop-local calendar days.',
+    tests: 'test/square-members/billing.test.ts, test/jobs/matrix-square-members.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'square.plans.swap': {
+    owner: 'memberships',
+    purpose:
+      'Daily 10:15 while SQUARE_WRITES_ENABLED: "Move members" price moves whose notice has run (ADR 0171 D9) send SwapPlan to the tier\'s current price at the size (an earlier scheduled swap removed first); Square swaps at the next billing date and the subscription event moves the membership. Skipped with the defaults.',
+    idempotency: 'A move is sent once (its effective date is recorded); a repeat replaces the scheduled swap with the same one.',
+    clock: 'Injected clock (the notice end).',
+    tests: 'test/square-members/actions.test.ts, test/jobs/matrix-square-members.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
   'standing.materialize': {
     owner: 'standing',
     purpose:

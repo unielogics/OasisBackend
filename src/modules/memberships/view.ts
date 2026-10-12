@@ -4,11 +4,14 @@
 import type { Selectable } from 'kysely'
 import { DateTime } from 'luxon'
 import type { Executor } from '../../platform/db.js'
+import { getSetting } from '../../platform/settings.js'
 import { liveCheckouts } from './checkouts.js'
 import { creditSummaries, type CreditSummary } from './credits.js'
 import { loadPlans, type Plan } from './plans.js'
 import { memberMonths, retentionOf, visitCounts, type Retention } from './retention.js'
 import type { MembershipsTable, MembershipSource, MembershipStatus } from './schema.js'
+import './square/schema.js'
+import '../square/db/cards-schema.js'
 
 export type MembershipRow = Selectable<MembershipsTable>
 
@@ -66,7 +69,32 @@ export interface MembershipView {
     expiresAt: string
     order: { id: string; number: string; createdOn: string } | null
   } | null
+  /** How Square bills it (source square, ADR 0171 wave Q3b); null for any other membership. */
+  billing: SquareBillingView | null
   version: number
+}
+
+export interface SquareBillingView {
+  /** ok, or failed since failedAt: in grace until pastDueOn (perks on), past due until cancelOn, then canceled (plan decision 7). */
+  status: 'ok' | 'failed'
+  /** Square's own status of the subscription (ACTIVE, PAUSED, CANCELED, DEACTIVATED, PENDING). */
+  squareStatus: string | null
+  failedAt: string | null
+  /** The client was texted the card link (and emailed Square's invoice page). */
+  notifiedAt: string | null
+  /** Shop-local dates of the failure policy for a failed renewal. */
+  pastDueOn: string | null
+  cancelOn: string | null
+  /** The monthly price billed (the tier price row of the membership). */
+  monthlyCents: number | null
+  card: { brand: string | null; last4: string | null; expMonth: number | null; expYear: number | null; state: string } | null
+  /** What Square has scheduled for the next billing date. */
+  cancelAt: string | null
+  pauseAt: string | null
+  change: { kind: 'change' | 'move'; planKey: string; planClass: string; monthlyCents: number; effectiveDate: string | null; swapAfter: string | null } | null
+  lastInvoice: { status: string; amountCents: number; dueDate: string | null; paidAt: string | null; refundedCents: number; payUrl: string | null } | null
+  /** The latest enrollment of a membership that has not started: where it stands. */
+  enrollment: { state: string; failure: string | null } | null
 }
 
 export const renewLabelOf = (d: Date, tz: string): string =>
@@ -87,6 +115,7 @@ export async function viewsOf(
   const counts = await visitCounts(db, c.locationId, [...new Set(rows.map((r) => r.customer_id))], c.now)
   const checkouts = await liveCheckouts(db, rows.map((r) => r.id))
   const sizes = await db.selectFrom('vehicle_classes').select(['key', 'label']).where('location_id', '=', c.locationId).execute()
+  const billing = await squareBilling(db, c, rows)
   const household = await db
     .selectFrom('membership_household as h')
     .innerJoin('customers as cu', 'cu.id', 'h.customer_id')
@@ -154,9 +183,59 @@ export async function viewsOf(
             order: co.order ? { id: co.order.id, number: co.order.number, createdOn: co.order.createdOn } : null,
           }
         : null,
+      billing: billing.get(r.id) ?? null,
       version: r.version,
     }
   })
+}
+
+/** The Square billing blocks of the rows billed by Square (batched reads). */
+async function squareBilling(db: Executor, c: { locationId: string; tz: string }, rows: readonly MembershipRow[]): Promise<Map<string, SquareBillingView>> {
+  const out = new Map<string, SquareBillingView>()
+  const sq = rows.filter((r) => r.source === 'square')
+  if (sq.length === 0) return out
+  const ids = sq.map((r) => r.id)
+  const priceIds = sq.map((r) => r.tier_price_id).filter((x): x is string => !!x)
+  const cardIds = sq.map((r) => r.card_id).filter((x): x is string => !!x)
+  const [prices, cards, invoices, enrollments, policy] = await Promise.all([
+    priceIds.length ? db.selectFrom('membership_tier_prices').select(['id', 'monthly_cents']).where('id', 'in', priceIds).execute() : [],
+    cardIds.length ? db.selectFrom('customer_cards').select(['id', 'brand', 'last4', 'exp_month', 'exp_year', 'state']).where('id', 'in', cardIds).execute() : [],
+    db
+      .selectFrom('square_subscription_invoices')
+      .select(['membership_id', 'status', 'amount_cents', 'due_date', 'paid_at', 'refunded_cents', 'public_url', 'created_at'])
+      .where('membership_id', 'in', ids)
+      .orderBy('created_at', 'desc')
+      .execute(),
+    db.selectFrom('square_enrollments').select(['membership_id', 'state', 'failure_code', 'started_at']).where('membership_id', 'in', ids).orderBy('started_at', 'desc').execute(),
+    getSetting(db, c.locationId, 'memberships.billing_policy'),
+  ])
+  const day = (d: Date, plus: number) => DateTime.fromJSDate(d, { zone: c.tz }).plus({ days: plus }).toFormat('yyyy-MM-dd')
+  for (const r of sq) {
+    const card = cards.find((x) => x.id === r.card_id)
+    const inv = invoices.find((x) => x.membership_id === r.id)
+    const enr = enrollments.find((x) => x.membership_id === r.id)
+    const ch = r.scheduled_change
+    out.set(r.id, {
+      status: r.billing_status,
+      squareStatus: r.square_status,
+      failedAt: r.payment_failed_at?.toISOString() ?? null,
+      notifiedAt: r.failure_notified_at?.toISOString() ?? null,
+      pastDueOn: r.payment_failed_at ? day(r.payment_failed_at, policy.value.graceDays) : null,
+      cancelOn: r.payment_failed_at ? day(r.payment_failed_at, policy.value.cancelDays) : null,
+      monthlyCents: prices.find((p) => p.id === r.tier_price_id)?.monthly_cents ?? null,
+      card: card ? { brand: card.brand, last4: card.last4, expMonth: card.exp_month, expYear: card.exp_year, state: card.state } : null,
+      cancelAt: r.cancel_effective_at,
+      pauseAt: r.pause_effective_at,
+      change: ch
+        ? { kind: ch.kind, planKey: ch.planKey, planClass: ch.planClass, monthlyCents: ch.monthlyCents, effectiveDate: ch.effectiveDate, swapAfter: ch.swapAfter ?? null }
+        : null,
+      lastInvoice: inv
+        ? { status: inv.status, amountCents: inv.amount_cents, dueDate: inv.due_date, paidAt: inv.paid_at?.toISOString() ?? null, refundedCents: inv.refunded_cents, payUrl: inv.public_url }
+        : null,
+      enrollment: r.status === 'pending' && enr ? { state: enr.state, failure: enr.failure_code } : null,
+    })
+  }
+  return out
 }
 
 export async function locationTz(db: Executor, locationId: string): Promise<string> {

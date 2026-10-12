@@ -65,6 +65,12 @@ export const PlanView = z.object({
   name: z.string(),
   monthlyPriceCents: z.number().int().nullable(),
   perks: z.array(z.string()),
+  billing: z
+    .enum(['square', 'squarespace'])
+    .describe('square: the page joins with a card here (membership/subscribe, ADR 0171 wave Q3b); squarespace: the checkout (membership/start)'),
+  prices: z
+    .array(z.object({ class: z.string(), label: z.string(), monthlyCents: z.number().int(), joinable: z.boolean() }))
+    .describe('The tier’s monthly price at each size it is sold at; joinable: set up at Square (always true for squarespace)'),
 })
 
 export const LinkStateView = z.object({

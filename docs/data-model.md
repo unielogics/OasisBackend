@@ -49,6 +49,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261014300000_redeem_per_line.sql` | membership coverage per line (ADR 0170, wave Q2a review): drops `uq_credit_redeem_appointment` (an inclusion may cover several lines of a visit, and a line changed after settlement is given back and redeemed again; the idempotency key names each redeem) and indexes `membership_credit_events (appointment_id)` |
 | `20261014400000_square_core.sql` | Square core (ADR 0171, wave Q2b): `ledger_events.source` gains `square`, `processor` (`squarespace\|square`, backfilled for Squarespace rows) and `processor_order_id`; the guard trigger re-created (both mutable; `method`, `brand`, `last4` only on the move awaiting -> confirmed); `invoice_calc_of` leaves a refund the processor reported failed out of `refunded` and `ref_orig`; `payment_links` gain the Square columns, kinds `square_order\|square_quick_pay`, state `pending`, `origin`, a nullable `url`; `square_payments` (mirror and match), `square_refund_legs`, `square_pos_intents` |
 | `20261014500000_square_cards.sql` | Cards on file, the shared foundation of waves Q3a and Q3b (ADR 0171 D7): `client_links.kind` gains `card` (#/k); `square_customer_links` (one Square customer per client and location), `customer_cards` (Square's card id, brand, last 4, expiry, postal, fingerprint, `state active\|disabled\|forgotten\|expired`, `created_via`), `card_consents` (purposes, versioned text with its SHA-256 and snapshot, time, IP, browser, link and page; append-only except the revoke columns, guard trigger `card_consents_guard`), `square_charges` (fees and balances on a saved card, `proposed` until staff confirm) |
+| `20261014600000_square_memberships.sql` | Memberships on Square (ADR 0171, wave Q3b): `memberships.source` gains `square`; the membership's Square subscription, customer and card (`card_id`), `square_status`, `billing_status ok\|failed` with `payment_failed_at` and `failure_notified_at`, what Square scheduled (`cancel_effective_at`, `pause_effective_at`, `scheduled_change` jsonb, `swap_undone_variations`); `membership_tier_prices.square_state` gains `retired`, plus `square_error`, the variation id unique (the guard re-created with `square_error` mutable); `square_enrollments` (the membership page's attempt, a resumable state machine) and `square_subscription_invoices`; card and consent end reason `membership_failed` |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -335,7 +336,7 @@ off (computed, never stored); a covered line is covered up to the price at the m
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `vehicle_classes`               | pk `(location_id, key)` (slug, never changes): `label` (40, unique per location in the API), `sort` (size order, smallest first), `active`, `version`. Defaults compact_car, large_car, compact_suv, large_suv, truck (seeded for existing locations; `ensureDomainDefaults` for new ones). |
 | `service_class_prices`          | pk `(service_id, class_key)`: the regular `price_cents` (0 to $100,000) of a service at a size, `max_cents` (null, or at least the price: a range), `updated_at`, `updated_by`; fk `(location_id, class_key)` to `vehicle_classes`. A missing row = not set. |
-| `membership_tier_prices`        | Append-only (guard trigger: only `superseded_at`, once, and the `square_*` fields change; deleted only with its tier): a tier's `monthly_cents` at a size from `effective_from`; one current row (`superseded_at` null) per tier and size (partial unique); `price_version`; `square_variation_id`, `square_state pending\|synced\|failed`, `square_synced_at` (wave Q3b); `created_by`. |
+| `membership_tier_prices`        | Append-only (guard trigger: only `superseded_at`, once, and the `square_*` fields change; deleted only with its tier): a tier's `monthly_cents` at a size from `effective_from`; one current row (`superseded_at` null) per tier and size (partial unique); `price_version`; `square_variation_id` (unique: each row is one Square plan variation, the variation history), `square_state pending\|synced\|failed\|retired`, `square_synced_at`, `square_error` (wave Q3b); `created_by`. |
 | `membership_inclusions`         | What a tier includes: `label`, `mode per_cycle\|every_visit`, `per_cycle` (null = unlimited; always null for every_visit), `auto_apply` (default true; the design tiers' false), `sort`, `active`. Made from `plan_credit_rules` with the same ids. |
 | `membership_inclusion_services` | pk `(inclusion_id, service_id)`: the services an inclusion covers.                                                                                                                                                             |
 | `membership_household`          | The other customers a membership covers (the holder is `memberships.customer_id`): `membership_id`, `customer_id` (one live household per customer: partial unique where `removed_at` is null), `added_at`, `added_by`, `removed_at`. Written by `POST` / `DELETE /memberships/:id/household` (wave Q2a); the holder or a live household member is priced and covered as the member, and the credits are shared. |
@@ -371,6 +372,9 @@ and Q3b (subscriptions).
 | `customer_cards` | A card saved with Square (`src/modules/square/cards.ts` saveCardOnFile, CreateCard key `cd_<attempt>`): the client, their Square customer, `square_card_id` (unique), `brand`, `last4`, `exp_month`, `exp_year`, `card_type`, `postal`, `fingerprint` (never a card number), `state active\|disabled\|forgotten\|expired` (`disabled_at` set exactly when not active, with `disabled_reason`), `created_via card_link\|membership_link\|staff\|square` |
 | `card_consents` | The client's OK to charge a saved card, one row per acceptance: `purposes` (a non-empty subset of `membership_billing`, `no_show_fee`, `late_cancel_fee`, `balance`), `text_version`, `text_sha256` and `text_snapshot` (the exact wording shown, `src/modules/square/consents.ts`), `accepted_at`, `ip`, `user_agent`, `link_id` (no foreign key: links are purged, the consent is kept), `session_hash` (the page's session token hash); `revoked_at`, `revoked_by`, `revoke_reason` set together, once. Append-only (trigger `card_consents_guard`: no delete, no other change) |
 | `square_charges` | A charge on a saved card: `purpose no_show_fee\|late_cancel_fee\|balance`, `amount_cents`, `state proposed\|charging\|charged\|declined\|unknown\|waived` (charged only after staff confirm: any other state than proposed has `decided_at`; charged has the Square payment id), `idempotency_key` (`ch_<id>`, unique), the invoice and/or appointment, the card and consent, `square_payment_id` (unique), the `ledger_event_id` it was recorded as, `error`, `attempts`, who proposed and decided |
+
+| `square_enrollments` | One attempt to join on a membership page with a card (wave Q3b, `src/modules/memberships/square/enroll.ts`): the client, the pending membership, the link, tier, price row, `plan_class`, the Square `square_variation_id` and `monthly_cents` it joins at, the `email` Square bills to, `state started\|customer_ready\|card_saved\|subscribed\|active\|failed\|abandoned` (one live per membership), the Square customer, the saved card and consent, `square_subscription_id` (unique), `start_date`, `failure_code`, `failure_detail`, `cleanup none\|pending\|done` (what a failed attempt still owes at Square), `attempts`, times. Square keys from the row id: `cd_<id>`, `sb_<id>` |
+| `square_subscription_invoices` | Every invoice Square makes for a membership's subscription (wave Q3b, `billing.ts`): `square_invoice_id` (unique), the subscription and order, `status`, `amount_cents`, `paid_cents`, `due_date`, the paid `period_start`/`period_end`, Square's `public_url`, `paid_at`, `applied_at` (the cycle applied once: period moved, credits granted), `failed_at` (the failure policy), `canceled_at`, `square_payment_id`, `refunded_cents` with `square_refund_id` and `refunded_at` (staff "Refund last payment") |
 
 Square deliveries and catch-up events share `webhook_log` (provider `square`, `external_id` = Square's `event_id`): whichever claims the
 event first processes it; the raw body and the headers without the signature are kept for the 90-day trail.
@@ -443,7 +447,7 @@ Operations design day re-anchored on **today** in the business time zone with th
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (120 tables, 1 view, 15 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (122 tables, 1 view, 15 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -1544,8 +1548,9 @@ Primary key `(id)`. Unique `(location_id, key)`. `(location_id)` references `loc
 | `square_synced_at` | timestamp with time zone | yes |  |
 | `created_by` | uuid | yes |  |
 | `created_at` | timestamp with time zone | no | `app_now()` |
+| `square_error` | text | yes |  |
 
-Primary key `(id)`. `(location_id, class_key)` references `vehicle_classes(location_id, key)`. `(location_id)` references `locations(id)` on delete cascade. `(plan_id)` references `membership_plans(id)` on delete cascade. 5 check constraints. Index `membership_tier_prices_plan_idx` `(plan_id, class_key, effective_from)`. Unique index `uq_membership_tier_prices_current` `(plan_id, class_key)` where `superseded_at IS NULL`. Trigger: `membership_tier_prices_guard`.
+Primary key `(id)`. `(location_id, class_key)` references `vehicle_classes(location_id, key)`. `(location_id)` references `locations(id)` on delete cascade. `(plan_id)` references `membership_plans(id)` on delete cascade. 6 check constraints. Index `membership_tier_prices_plan_idx` `(plan_id, class_key, effective_from)`. Unique index `uq_membership_tier_prices_current` `(plan_id, class_key)` where `superseded_at IS NULL`. Unique index `uq_membership_tier_prices_square_variation` `(square_variation_id)` where `square_variation_id IS NOT NULL`. Trigger: `membership_tier_prices_guard`.
 
 #### `memberships`
 
@@ -1580,8 +1585,20 @@ Primary key `(id)`. `(location_id, class_key)` references `vehicle_classes(locat
 | `updated_at` | timestamp with time zone | no | `app_now()` |
 | `plan_class` | text | no |  |
 | `tier_price_id` | uuid | yes |  |
+| `square_subscription_id` | text | yes |  |
+| `square_customer_id` | text | yes |  |
+| `card_id` | uuid | yes |  |
+| `square_status` | text | yes |  |
+| `billing_status` | text | no | `'ok'::text` |
+| `payment_failed_at` | timestamp with time zone | yes |  |
+| `failure_notified_at` | timestamp with time zone | yes |  |
+| `cancel_effective_at` | date | yes |  |
+| `pause_effective_at` | date | yes |  |
+| `scheduled_change` | jsonb | yes |  |
+| `swap_undone_variations` | text[] | no | `'{}'::text[]` |
+| `square_synced_at` | timestamp with time zone | yes |  |
 
-Primary key `(id)`. Unique `(id, customer_id)`. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. `(location_id, plan_class)` references `vehicle_classes(location_id, key)`. `(plan_id)` references `membership_plans(id)`. `(tier_price_id)` references `membership_tier_prices(id)`. 4 check constraints. Index `memberships_plan_idx` `(plan_id)`. Index `memberships_status_idx` `(location_id, status)`. Unique index `uq_memberships_customer_live` `(customer_id)` where `status = ANY (ARRAY['pending'::text, 'active'::text, 'past_due'::text, 'paused'::text])`. Trigger: `memberships_default_plan_class`.
+Primary key `(id)`. Unique `(id, customer_id)`. `(card_id)` references `customer_cards(id)`. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. `(location_id, plan_class)` references `vehicle_classes(location_id, key)`. `(plan_id)` references `membership_plans(id)`. `(tier_price_id)` references `membership_tier_prices(id)`. 11 check constraints. Index `memberships_billing_failed_idx` `(location_id, payment_failed_at)` where `billing_status = 'failed'::text`. Index `memberships_plan_idx` `(plan_id)`. Index `memberships_status_idx` `(location_id, status)`. Unique index `uq_memberships_customer_live` `(customer_id)` where `status = ANY (ARRAY['pending'::text, 'active'::text, 'past_due'::text, 'paused'::text])`. Unique index `uq_memberships_square_subscription` `(square_subscription_id)` where `square_subscription_id IS NOT NULL`. Trigger: `memberships_default_plan_class`.
 
 #### `message_threads`
 
@@ -2476,6 +2493,39 @@ Primary key `(id)`. Unique `(idempotency_key)`. Unique `(square_payment_id)`. `(
 
 Primary key `(id)`. Unique `(location_id, customer_id)`. Unique `(location_id, square_customer_id)`. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. 2 check constraints.
 
+#### `square_enrollments`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `customer_id` | uuid | no |  |
+| `membership_id` | uuid | no |  |
+| `link_id` | uuid | yes |  |
+| `plan_id` | uuid | no |  |
+| `tier_price_id` | uuid | no |  |
+| `plan_class` | text | no |  |
+| `square_variation_id` | text | no |  |
+| `monthly_cents` | integer | no |  |
+| `email` | text | no |  |
+| `state` | text | no | `'started'::text` |
+| `square_customer_id` | text | yes |  |
+| `card_id` | uuid | yes |  |
+| `consent_id` | uuid | yes |  |
+| `square_subscription_id` | text | yes |  |
+| `start_date` | date | no |  |
+| `failure_code` | text | yes |  |
+| `failure_detail` | text | yes |  |
+| `cleanup` | text | no | `'none'::text` |
+| `attempts` | integer | no | `0` |
+| `last_attempt_at` | timestamp with time zone | yes |  |
+| `started_at` | timestamp with time zone | no |  |
+| `finished_at` | timestamp with time zone | yes |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. `(card_id)` references `customer_cards(id)`. `(consent_id)` references `card_consents(id)`. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. `(membership_id)` references `memberships(id)`. `(plan_id)` references `membership_plans(id)`. `(tier_price_id)` references `membership_tier_prices(id)`. 14 check constraints. Index `square_enrollments_membership_idx` `(membership_id, started_at)`. Index `square_enrollments_open_idx` `(location_id, state, started_at)` where `(state = ANY (ARRAY['started'::text, 'customer_ready'::text, 'card_saved'::text, 'subscribed'::text])) OR (cleanup = 'pending'::text)`. Unique index `uq_square_enrollments_live` `(membership_id)` where `state = ANY (ARRAY['started'::text, 'customer_ready'::text, 'card_saved'::text, 'subscribed'::text])`. Unique index `uq_square_enrollments_subscription` `(square_subscription_id)` where `square_subscription_id IS NOT NULL`.
+
 #### `square_payments`
 
 | Column | Type | Null | Default |
@@ -2596,6 +2646,36 @@ Primary key `(id)`. Unique `(idempotency_key)`. Unique `(square_refund_id)`. `(l
 | `updated_at` | timestamp with time zone | no | `app_now()` |
 
 Primary key `(location_id)`. `(location_id)` references `locations(id)` on delete cascade. 2 check constraints.
+
+#### `square_subscription_invoices`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `membership_id` | uuid | no |  |
+| `square_invoice_id` | text | no |  |
+| `square_subscription_id` | text | no |  |
+| `square_order_id` | text | yes |  |
+| `status` | text | no |  |
+| `amount_cents` | integer | no |  |
+| `paid_cents` | integer | no | `0` |
+| `due_date` | date | yes |  |
+| `period_start` | timestamp with time zone | yes |  |
+| `period_end` | timestamp with time zone | yes |  |
+| `public_url` | text | yes |  |
+| `paid_at` | timestamp with time zone | yes |  |
+| `applied_at` | timestamp with time zone | yes |  |
+| `failed_at` | timestamp with time zone | yes |  |
+| `canceled_at` | timestamp with time zone | yes |  |
+| `square_payment_id` | text | yes |  |
+| `refunded_cents` | integer | no | `0` |
+| `square_refund_id` | text | yes |  |
+| `refunded_at` | timestamp with time zone | yes |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. Unique `(square_invoice_id)`. `(location_id)` references `locations(id)` on delete cascade. `(membership_id)` references `memberships(id)`. 12 check constraints. Index `square_subscription_invoices_membership_idx` `(membership_id, created_at)`. Index `square_subscription_invoices_order_idx` `(square_order_id)` where `square_order_id IS NOT NULL`.
 
 #### `standing_occurrences`
 

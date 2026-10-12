@@ -32,6 +32,8 @@ export interface SquareIngestContext {
   env: Env
   locationId: string
   event: WireEvent
+  /** Objects read with the event's object, before the transaction (wave Q3b: a subscription invoice's subscription). */
+  related?: { subscription?: WireSubscription }
 }
 
 export interface SquareIngest {
@@ -79,7 +81,7 @@ export interface ProcessDeps {
 type Fetched =
   | { kind: 'payment'; obj: WirePayment }
   | { kind: 'refund'; obj: WireRefund }
-  | { kind: 'invoice'; obj: WireInvoice }
+  | { kind: 'invoice'; obj: WireInvoice; subscription?: WireSubscription }
   | { kind: 'subscription'; obj: WireSubscription }
   | { kind: 'card'; obj: WireCard }
   | { kind: 'customer'; obj: WireCustomer | null }
@@ -90,8 +92,13 @@ async function fetchObject(api: SquareApi, kind: SquareObjectKind, id: string, d
       return { kind, obj: await api.payments.get(id) }
     case 'refund':
       return { kind, obj: await api.refunds.get(id) }
-    case 'invoice':
-      return { kind, obj: await api.invoices.get(id) }
+    case 'invoice': {
+      // a subscription invoice is read with its subscription (its charged_through_date sets the paid period, wave Q3b), here on the
+      // pool and never inside the handler's transaction
+      const obj = await api.invoices.get(id)
+      const subscription = obj.subscription_id ? await api.subscriptions.retrieve(obj.subscription_id, { includeActions: true }).catch(() => undefined) : undefined
+      return { kind, obj, ...(subscription ? { subscription } : {}) }
+    }
     case 'subscription':
       return { kind, obj: await api.subscriptions.retrieve(id, { includeActions: true }) }
     case 'card':
@@ -119,7 +126,15 @@ export async function processSquareEvent(d: ProcessDeps, event: WireEvent): Prom
   if (loc && ours && loc !== ours) return { status: 'ignored', note: `${c.kind} of another location` }
   return d.db.transaction().execute(async (tx) => {
     await advisoryXactLock(tx, `square:${c.kind}:${c.objectId}`)
-    const ctx: SquareIngestContext = { tx, clock: d.clock, logger: d.logger, env: d.env, locationId: d.locationId, event }
+    const ctx: SquareIngestContext = {
+      tx,
+      clock: d.clock,
+      logger: d.logger,
+      env: d.env,
+      locationId: d.locationId,
+      event,
+      ...(fetched.kind === 'invoice' && fetched.subscription ? { related: { subscription: fetched.subscription } } : {}),
+    }
     switch (fetched.kind) {
       case 'payment':
         return d.ingest.payment(ctx, fetched.obj)

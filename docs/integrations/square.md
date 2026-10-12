@@ -1,8 +1,9 @@
 # Square integration
 
-Status: **foundation (wave Q1b) and core (wave Q2b) built**, verified against the Square sandbox on 2026-10-12 (`pnpm verify:square`,
-11 PASS with SQR-12, section 7). Off by default: nothing reaches Square until `SQUARE_PROVIDER=live`, nothing is created or changed at
-Square until `SQUARE_WRITES_ENABLED=true`, and links, deposits and refunds stay on Squarespace until `PAYMENT_PROCESSOR=square`.
+Status: **foundation (wave Q1b), core (wave Q2b) and memberships (wave Q3b, section 12) built**, verified against the Square sandbox
+on 2026-10-12 (`pnpm verify:square`, section 7). Off by default: nothing reaches Square until `SQUARE_PROVIDER=live`, nothing is
+created or changed at Square until `SQUARE_WRITES_ENABLED=true`, and links, deposits, refunds and memberships stay on Squarespace until
+`PAYMENT_PROCESSOR=square`.
 Decision record: [ADR 0171](../decisions/0171-square-payments.md).
 
 Square will take every payment: payment links, the booking deposit, memberships (Square subscriptions), counter payments from the
@@ -30,6 +31,7 @@ API. Cards on file (Q3a) and memberships (Q3b) come next.
 | Payment and deposit links, the sweep | `src/modules/square/{links,deposits,public}.ts` |
 | Refunds through the API, refund events | `src/modules/square/refunds.ts` |
 | POS app switch | `src/modules/square/pos.ts` |
+| Memberships billed by Square (Q3b): catalog sync, enrollment, billing events, failure policy, staff actions, Move members | `src/modules/memberships/square/*` (`catalog-plan.ts` pure planner, `catalog-sync.ts`, `enroll.ts`, `billing.ts`, `policy.ts`, `timeline.ts`, `actions.ts`, `moves.ts`, `notify.ts`, `jobs.ts`, `http/routes.ts`); the link routes `src/modules/public/links/http/subscribe-routes.ts` |
 | The queue routes, alerts, card hint, reconciliation | `src/modules/square/http/payment-routes.ts`, `src/modules/square/db/alerts.ts` |
 
 ## 2. Environment
@@ -85,7 +87,8 @@ into its own app secret with `pnpm secrets:push`.
   released and the answer is 503, so Square's retry is accepted. Without a queue (single process) the event is processed inline.
 - **Processing**: the job re-fetches the object by id (payment, refund, invoice, subscription, card, customer); amounts in the payload
   are never trusted. An object of another location is ignored; the handler runs under an advisory lock per object. Payments and refunds
-  are recorded (section 11); invoices, subscriptions, cards and customers only log until waves Q3a and Q3b. The row is closed
+  are recorded (section 11); invoices and subscriptions drive the memberships billed by Square (section 12); cards and customers only
+  log until wave Q3a. The row is closed
   `processed` (or `ignored` with the reason in `error`).
 
 **Event types** of our subscription (`SQUARE_EVENT_TYPES`): `payment.created`, `payment.updated`, `refund.created`, `refund.updated`,
@@ -120,6 +123,11 @@ USD and takes cards; the Events API is enabled; our subscription exists, is enab
 | `square.links.sweep` | every minute | Cancels Square links that no longer match what is owed, gives up on pending rows, deletes canceled links at Square (writes on). |
 | `square.deposit-link` | every minute, processor square, writes on | A booking's deposit request becomes a texted quick-pay link. |
 | `square.refunds.submit` | every minute, processor square, writes on | Card refunds through the API: legs planned and sent (section 11.4). |
+| `square.catalog.sync` | every 5 minutes, writes on | Tier prices a save left pending become plan variations (section 12.1). |
+| `square.catalog.drift` | nightly 04:20, writes on | The sync plus Square's catalog read back and compared (section 12.1). |
+| `square.enrollments.resume` | every 5 minutes, writes on | Membership-page attempts resumed with the same keys, abandoned after an hour, cleaned up at Square; stale pending memberships closed; a newer saved card put on the subscription (section 12.2). |
+| `membership.billing` | daily 09:30 | The failure policy: day 7 past due, day 21 canceled at Square; a client not yet told is texted (section 12.4). |
+| `square.plans.swap` | daily 10:15, writes on | "Move members" whose notice has run get their SwapPlan (section 12.5). |
 
 With `SQUARE_PROVIDER=sim` (the default) the catch-up and the reconcile do nothing and call nobody; the matcher finds nothing to match;
 the sweep, the deposit links and the refunds find nothing (no Square link or Square refund exists before `PAYMENT_PROCESSOR=square`)
@@ -184,6 +192,8 @@ pnpm verify:square --read-only           # production: reads only (a production 
 | SQR-09 | SearchEvents since the run started; every event parses and goes through our dispatcher |
 | SQR-10 | TestWebhookSubscription to `--webhook-url` (optional: needs a public URL and a subscription) |
 | SQR-11 | Cleanup: links deleted, subscriptions canceled, card disabled, customer deleted (plan variations used by a subscription stay) |
+| SQR-13 | (Q3b) Oasis's own catalog sync (planner and executor): a plan and STATIC MONTHLY variations; the same keys answer the same objects; a price edit is a new variation, the old one kept |
+| SQR-14 | (Q3b) Oasis's own subscription request (`sb_` key, start today), a deliverable email, the first invoice paid and its period; swap, pause and cancel scheduled at the next billing date and undone; CancelInvoice of an unpaid invoice |
 | SQR-12 | (Q2b) Oasis's own link builder (`balanceLines`: two lines, a "Sales tax" line at 6.625% and a "Tip" line) gives an order total of exactly the balance, paid through its order; a refund leg sent twice with its `rf_` key is one refund; one cent over what the payment can still give back is refused by the leg planner and by Square alike |
 
 Scrubbed answers of the 2026-10-12 run (ids replaced, no emails, URL paths dropped) are the fixtures in `test/fixtures/square/`; the
@@ -207,6 +217,11 @@ The design's "check in the sandbox" list, answered:
 | Refund timing | PENDING at once, COMPLETED about 4.5 s later. |
 | Catalog cleanup | A plan variation used by a subscription (even canceled) cannot be deleted (400 BAD_REQUEST). |
 | Not answerable here | 3-D Secure under `Cross-Origin-Opener-Policy: same-origin` (needs the Web Payments SDK on a page, wave Q3a); the POS note field (production only). |
+| (Q3b) The same swap after its undo | DeleteSubscriptionAction on a scheduled SWAP_PLAN, then SwapPlan to the same variation: 500 "Subscription … is locked and is not billable" (still after 6 minutes); after it every DeleteSubscriptionAction of that subscription answers 409 "Unable to lock subscription" (new Pause and Cancel are still accepted). A swap to another variation after the delete is accepted. Oasis never sends the undone swap again in the billing period. |
+| (Q3b) A change right after another | 409 CONFLICT "Unable to lock subscription" while an earlier change is still being made: sent again after a short wait. |
+| (Q3b) CancelInvoice | An UNPAID invoice of a subscription without a card: CANCELED. Again: 400 "Can only cancel an unpaid or scheduled invoice" (the same answer as for a paid invoice). |
+| (Q3b) A swap before the first payment | Applied at once (no action, the plan changes now); after it, at the next billing date. |
+| (Q3b) The sandbox location's time zone | UTC (the shop's is America/New_York): Oasis sends the shop's own zone with every subscription (`timezone`, `start_date`) and computes periods in it. |
 
 ## 9. Simulator
 
@@ -220,8 +235,8 @@ failed), card auto-update and forget, fail a refund, faults (429, 500, a dropped
 
 ## 10. What comes next
 
-See ADR 0171, "What the later waves add": cards on file and fees (Q3a); memberships on Square (Q3b); the website and dashboard (Q3c,
-Q3e); `SQSP_SYNC_MODE` (Squarespace history mode) still to build. Their shared foundation is built (ADR 0171, "The cards
+See ADR 0171, "What the later waves add": cards on file and fees (Q3a); the website and dashboard (Q3c, Q3e); `SQSP_SYNC_MODE`
+(Squarespace history mode) still to build. Memberships on Square (Q3b) are built (section 12). Their shared foundation is built (ADR 0171, "The cards
 foundation"): the client's Square customer (`cu_<client id>`, found again by `reference_id` after a crash), saving a card (`cd_<attempt>`)
 with the client's versioned consent, removing it (DisableCard), and the card link kind `card` (`#/k`).
 
@@ -274,3 +289,79 @@ Production only (`SQUARE_POS_API_ENABLED`, live production, an application id). 
 (`PUBLIC_DASHBOARD_URL/payments/square-callback`) in the Developer Dashboard first. "Open Square POS" writes the staff card entry and an
 intent whose code goes in the payment note (`INV-20640 · OAS-PI-xxxxxx`); the payment is recorded on that entry by the app's callback
 or by the webhook (rule R2).
+
+## 12. Memberships billed by Square (wave Q3b)
+
+Everything below needs `SQUARE_WRITES_ENABLED=true`; enrollment also `PAYMENT_PROCESSOR=square` and `PUBLIC_LINKS_ENABLED=true` (the
+`#/m` page). With the defaults no job does anything and no membership is billed by Square.
+
+### 12.1 The catalog
+
+`membership_tier_prices` (append-only, ADR 0170) is the plan-variation history: one SUBSCRIPTION_PLAN per tier
+(`membership_plans.square_plan_id`, named after the tier) and one SUBSCRIPTION_PLAN_VARIATION per current price row ("Gold · Compact
+car", one MONTHLY phase with a STATIC price). The pure planner (`catalog-plan.ts`) decides; the executor sends one call at a time with a
+key derived from our row and its content (`ct_`), so a run that stopped after Square answered gets the same object back. A price edit is
+a new row, so a new variation: members keep theirs (grandfathered, plan decision 8). A variation is never changed in place, and never
+deleted while a membership or an enrollment names its row; a superseded price nobody used is retired (deleted at Square; when Square
+keeps it, because a subscription used it, the reason stays on the row and it is not tried again). The nightly drift check reads
+Square's plans back: a price changed at Square, or a variation deleted there while members use it, marks the row `failed` with the
+reason and tells the managers (nothing is overwritten); a deleted variation nobody uses is made again; a tier renamed in Oasis renames
+its plan. Settings shows each price's `squareState`; "Sync to Square" is `POST /api/v1/integrations/square/catalog/sync`.
+
+### 12.2 Joining on the `#/m` page
+
+The page shows the tier's prices by size (`plan.prices`, `joinable` once synced) and, with `plan.billing: square`, takes the size, the
+email Square bills to, the card (Square's Web Payments SDK in the page) and the consent. `POST /public/links/membership/subscribe`:
+the page's guards (fresh PIN or code, the client proven, no PIN-reset hold), the household rule (no live membership held or shared), a
+synced price at the size, a deliverable-looking email (example and test domains refused: Square deactivated the subscription of an
+`example.com` customer within seconds, section 8), the current consent wording; then the client's Square customer (with the email),
+the card (`cd_<enrollment>`, consent `membership_billing`) and the subscription (`sb_<enrollment>`, `start_date` today in the shop's
+time zone). The membership is `pending` until Square's first invoice is paid (about 10 s in the sandbox), then `active`. The attempt is
+a state machine in `square_enrollments` (started, customer_ready, card_saved, subscribed, active; failed or abandoned):
+`square.enrollments.resume` repeats a step after a lost answer with the same key (only from `card_saved` on: the card's one-time token
+is never stored), reads a late first invoice back, abandons an attempt older than an hour, and cleans up what a failed one left at
+Square (CancelSubscription, CancelInvoice, DisableCard with reason `membership_failed`). A first payment Square could not take ends the
+attempt the same way and texts the client a new membership page. A website join (`POST /public/memberships`) with Square as the
+processor texts the client their membership page.
+
+### 12.3 Billing by events
+
+`invoice.*` and `subscription.*` events (re-fetched; an invoice with its subscription, read before the transaction) drive the
+membership (`billing.ts`): a PAID invoice applies its cycle once (`square_subscription_invoices.applied_at`): the period from the due
+date to the subscription's `charged_through_date` in shop-local midnights, the membership active, any failure cleared, the cycle's
+credits granted (`grantCycleCredits`, once per cycle however often the events arrive). PAUSED is `paused`; CANCELED and DEACTIVATED are
+`canceled`; scheduled actions show as `billing.cancelAt`, `billing.pauseAt`; a plan swap that took effect moves the membership to the
+price row of its new variation. The payment of a subscription invoice is a `membership` payment in the mirror (ignored by the counter
+matcher; Square sends `payment.*` before `invoice.payment_made`, and the counter delay covers the gap). `syncMemberships` (Squarespace)
+skips Square memberships.
+
+### 12.4 A failed renewal (plan decision 7)
+
+| Day | What happens |
+|---|---|
+| 0 | `invoice.scheduled_charge_failed`: `billing_status failed`, in grace (perks on); the client texted their card page (personal link `card`) and Square's invoice page, emailed Square's page; the managers told. |
+| 7 | `membership.billing`: `past_due` (perks off: the memberships port reads only active memberships). |
+| 21 | CancelSubscription and CancelInvoice at Square; the membership `canceled`, `cancel_reason payment_failed`; the managers told. |
+
+The days are the setting `memberships.billing_policy` (`{graceDays: 7, cancelDays: 21}`), counted in shop-local calendar days. A
+payment at any point (Square's own retry, the client paying Square's invoice page, Square retrying after the card on the subscription
+changed) restores the membership. Oasis never retries the charge itself: CreatePayment cannot pay a subscription invoice's order
+(section 8). A card the client saves on the card page for membership billing is put on the subscription by `square.enrollments.resume`
+(UpdateSubscription `card_id`).
+
+### 12.5 Staff actions and price moves
+
+`POST /api/v1/memberships/:id/billing/{pause, resume, cancel, cancel/undo, change, change/undo, card-link, refund-last}` (api-spec
+30.11). SwapPlan, Pause and Cancel take effect at the next billing date (section 8); undo removes the scheduled action
+(DeleteSubscriptionAction); a paused membership resumes at once. A patch of a Square membership changes only auto-apply and the note.
+"Move members" (`POST /api/v1/catalog/tiers/:key/move-members {notice}`) tells every member billed at an older price of their size (text
+and email, `notice` days, default 30) and schedules the move; `square.plans.swap` then sends SwapPlan (per subscription: BulkSwapPlan
+would also move anyone Oasis did not notify), and Square swaps at the next billing date.
+
+### 12.6 Rollout
+
+1. Writes on (catalog sync and memberships are the last stage of ADR 0171's rollout): the sync makes every priced tier's plan and
+   variations; check Settings shows them synced and `pnpm verify:square` SQR-13/SQR-14 pass against the sandbox.
+2. `PAYMENT_PROCESSOR=square` with personal links open: `#/m` pages join with a card; staff use the billing actions.
+3. Watch the managers' notifications (`square.catalog_sync_failed`, `membership.payment_failed`, `membership.first_payment_failed`,
+   `membership.canceled_unpaid`) and the status row's `pendingEnrollments`.

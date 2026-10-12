@@ -76,6 +76,17 @@ export const settingDefs = {
   'ops.late_grace_min': { schema: z.number().int().min(0).max(120), default: 10 },
   'ops.eta_visible_max_min': { schema: z.number().int().min(0).max(240), default: 30 },
   'memberships.auto_apply': { schema: z.boolean(), default: false },
+  // Memberships billed by Square (ADR 0171 wave Q3b, plan decision 7): a renewal Square could not charge keeps the perks on for
+  // graceDays (the client is texted a card link at once), then the membership is past due (perks off), and after cancelDays it is
+  // canceled at Square. Any payment restores it.
+  'memberships.billing_policy': {
+    schema: z
+      .object({ graceDays: z.number().int().min(0).max(60), cancelDays: z.number().int().min(1).max(90) })
+      .refine((p) => p.cancelDays > p.graceDays, { message: 'Cancel after the grace days end', path: ['cancelDays'] }),
+    default: { graceDays: 7, cancelDays: 21 },
+  },
+  // "Move members" (plan decision 8): members on an older tier price are told this many days before their price moves.
+  'memberships.price_change_notice_days': { schema: z.number().int().min(0).max(90), default: 30 },
   'approvals.allow_self': { schema: z.boolean(), default: false },
   'reminders.offsets_min': {
     schema: z.array(z.number().int().min(1).max(10_080)).max(5),

@@ -23,6 +23,8 @@ export type CustomerCardDisabledReason =
   | 'square_forgotten'
   | 'expired'
   | 'customer_deleted'
+  /** A Square membership enrollment that did not start (wave Q3b: first payment failed, abandoned). */
+  | 'membership_failed'
 
 export interface CustomerCardsTable {
   id: string
@@ -53,6 +55,7 @@ export type CardConsentRevokeReason =
   | 'card_expired'
   | 'replaced'
   | 'customer_deleted'
+  | 'membership_failed'
 
 export interface CardConsentsTable {
   id: string

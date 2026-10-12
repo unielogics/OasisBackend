@@ -56,6 +56,20 @@ const valid: Record<string, Record<string, string | number>> = {
     changedLabel: 'on Sat, Jun 13 at 10:36 AM',
     holdLabel: 'Tue, Jun 16 at 10:36 AM',
   },
+  membership_payment_failed: {
+    customerName: 'Maria',
+    tierName: 'Gold',
+    amountCents: 12900,
+    payUrl: 'https://app.example.com/pay-invoice/inv-1',
+    graceDays: 7,
+  },
+  membership_price_change: {
+    customerName: 'Maria',
+    tierName: 'Gold',
+    fromCents: 12900,
+    toCents: 13900,
+    dateLabel: 'Fri, Jul 10',
+  },
 }
 
 describe('template registry', () => {

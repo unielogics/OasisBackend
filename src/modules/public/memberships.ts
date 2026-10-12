@@ -2,7 +2,9 @@
 // membership in the pending state tied to the tier's Squarespace product; nothing is charged online. The person is told the
 // checkout link will be texted; staff get a notification asking them to send it (the dashboard's payment-link flow), with the
 // mapped product named, or with the fact that the product map has no product for the plan (then an open alert too). The
-// membership activates when the existing Squarespace sync sees the paid subscription order.
+// membership activates when the existing Squarespace sync sees the paid subscription order. With Square as the processor and personal
+// links open (ADR 0171 wave Q3b) the join texts the client their membership page instead (a card there, billed by Square); no
+// pending membership and no product map until they submit on it.
 import * as audit from '../../platform/audit.js'
 import type { Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
@@ -24,6 +26,10 @@ import '../identity/problems.js'
 import './problems.js'
 import { publicTierOf, type PublicTier } from './tiers.js'
 import { sharedMembershipId } from '../memberships/household.js'
+import { issueClientLink } from '../identity/links.js'
+import { loadCustomerTarget } from '../messaging/db/recipients.js'
+import { squareProcessor } from '../square/links.js'
+import { squareEnv } from '../square/runtime.js'
 import { resolvePlanClass } from '../memberships/plan-class.js'
 
 /** The tier as it is sold: its key and the name the membership is sold under (memberships.plan_label). */
@@ -197,6 +203,9 @@ export async function joinWeb(
     .executeTakeFirst()
   // a household member is a member through the membership they share (ADR 0170)
   if (live || (await sharedMembershipId(tx, customer.id))) throw new AppError('PUBLIC_ALREADY_MEMBER')
+  // Square is the processor (ADR 0171 wave Q3b): the client gets their own membership page by text, where they enter a card; no
+  // Squarespace product, no pending row until they submit there
+  if (squareJoins(d)) return { ...(await squareWebJoin(tx, d, loc, r, input, customer, plan, spec, sizeLabel, verified !== null)), ...sized }
 
   const product = await membershipProductFor(tx, loc.id, d.app.env.SQSP_PRODUCT_MAP, plan.key, plan.legacyKey)
   const id = newId()
@@ -277,6 +286,74 @@ export async function joinWeb(
     // the policy's outcome is the verified owner's to know; anyone else is told what they asked for (a STOP would show through)
     confirmationBy: verified ? (sent.queued ? 'sms' : 'none') : input.smsConsent ? 'sms' : 'none',
     ...sized,
+  }
+}
+
+/** The website join texts a membership page (Square) instead of asking staff for a Squarespace checkout link. */
+const squareJoins = (d: PublicDeps): boolean => squareProcessor(squareEnv()) && d.app.env.PUBLIC_LINKS_ENABLED
+
+async function squareWebJoin(
+  tx: Tx,
+  d: PublicDeps,
+  loc: PublicLocation,
+  r: PublicRequest,
+  input: WebJoinInput,
+  customer: CustomerRecord,
+  plan: { id: string; key: string; name: string },
+  spec: TierSpec,
+  sizeLabel: string | null,
+  verified: boolean,
+): Promise<Omit<WebJoinResult, 'planClass' | 'planClassLabel' | 'monthlyCents'>> {
+  const { clock, newId } = d.app
+  const now = clock.now()
+  const link = await issueClientLink(
+    tx,
+    { newId, now, ...(d.app.env.PUBLIC_SITE_URL ? { siteUrl: d.app.env.PUBLIC_SITE_URL } : {}) },
+    { locationId: loc.id, kind: 'membership', customerId: customer.id, planKey: plan.key, issuedBy: 'system' },
+  )
+  const target = await loadCustomerTarget(tx, loc.id, customer.id)
+  const sent = target
+    ? await d.queue.enqueueFor(tx, {
+        locationId: loc.id,
+        customerId: customer.id,
+        recipient: target.recipient,
+        appointmentId: null,
+        templateKey: 'personal_link_membership',
+        vars: { plan: spec.label },
+        secretVars: { link: link.url },
+        purpose: 'membership',
+        senderKind: 'system',
+        dedupeKey: `membership_join_web:${link.id}`,
+      })
+    : { queued: false as const }
+  await audit.record(tx, {
+    locationId: loc.id,
+    action: 'membership.web_join_square',
+    entityType: 'customer',
+    entityId: customer.id,
+    after: { plan: plan.key, tier: spec.key, clientLinkId: link.id, sms: sent.queued },
+    ctx: { actor: { name: 'Website' }, requestId: r.requestId, idempotencyKey: r.idempotencyKey ?? null, ip: r.ip },
+  })
+  const who = `${customer.fullName} (${formatPhoneDisplay(customer.phoneE164 ?? '')})`
+  await notifyManagers(
+    tx,
+    {
+      locationId: loc.id,
+      kind: 'membership.web_join',
+      title: `Website join: ${customer.fullName.trim().split(/\s+/)[0]} (${spec.label})`,
+      body: `${who} joined ${spec.label}${sizeLabel ? ` (${sizeLabel} plan)` : ''} on the website. ${sent.queued ? 'We texted them their secure membership page to enter a card' : 'Their membership page could not be texted (no consent or number): send them a membership link'}; the membership starts when Square takes the first payment.`,
+      entityType: 'customer',
+      entityId: customer.id,
+    },
+    { newId, clock },
+  )
+  return {
+    memberRef: memberRefOf(link.id),
+    status: 'pending_payment',
+    next: 'checkout_link_by_sms',
+    tier: spec.key,
+    plan: spec.label,
+    confirmationBy: verified ? (sent.queued ? 'sms' : 'none') : input.smsConsent ? 'sms' : 'none',
   }
 }
 

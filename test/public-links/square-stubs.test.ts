@@ -39,8 +39,8 @@ describe('Square routes declared for waves Q3a and Q3b', () => {
   const CALLS: ['GET' | 'POST' | 'DELETE', string, unknown][] = [
     ['POST', 'cards', { sourceId: 'cnon:card-nonce-ok', consentVersion: 'v1', purposes: ['no_show_fee'] }],
     ['DELETE', 'cards/00000000-0000-4000-8000-000000000001', undefined],
+    // wave Q3b built subscribe: before the cutover (PAYMENT_PROCESSOR=squarespace, the default) it still answers 501
     ['POST', 'membership/subscribe', { email: 'maria@example.com', sourceId: 'cnon:card-nonce-ok', consentVersion: 'v1' }],
-    ['GET', 'membership/status', undefined],
   ]
 
   it('answer 501 LINK_ACTION_NOT_READY on an open page and write nothing', async () => {

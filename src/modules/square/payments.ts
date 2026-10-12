@@ -117,9 +117,12 @@ export async function classifyContextFor(tx: Tx, d: SquarePaymentDeps, f: Square
     squareLocationId: squareLocationId(d.env as Env),
     inLedger: live,
     link: await linkOf(tx, d, f.orderId),
-    // card-on-file charges (wave Q3a) and subscription invoices (wave Q3b) do not exist yet
+    // card-on-file charges (wave Q3a) do not exist yet
     charge: false,
-    membership: false,
+    // the payment of a membership's subscription invoice (wave Q3b): its order is the invoice's (never an Oasis invoice's money)
+    membership: f.orderId
+      ? !!(await tx.selectFrom('square_subscription_invoices').select('id').where('square_order_id', '=', f.orderId).executeTakeFirst())
+      : false,
     posIntent: await intentOf(tx, d, f),
   }
 }
@@ -287,9 +290,18 @@ export async function decideSquarePayment(tx: Tx, d: SquarePaymentDeps, f: Squar
       })
       return 'matched'
     }
-    case 'charge':
     case 'membership':
-      // not reachable before waves Q3a / Q3b
+      // a membership's monthly payment (wave Q3b): Square bills it and the invoice events apply it; never matched to an invoice
+      await setClass('membership', {
+        match_state: 'ignored',
+        ignore_reason: 'other',
+        ignore_note: 'membership payment (Square subscription)',
+        decided_by: 'Square',
+        decided_at: now,
+      })
+      return 'ignored'
+    case 'charge':
+      // not reachable before wave Q3a
       await setClass(c.kind)
       return 'pending'
     case 'pos_intent':

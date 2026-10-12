@@ -10,6 +10,17 @@ import { squareCounts } from './db/alerts.js'
 import { currentSquareState } from './db/state.js'
 
 const H = 3600_000
+
+/** Membership enrollments under way (a page submitted, the first payment not taken yet), wave Q3b. */
+async function pendingEnrollments(db: Executor, locationId: string): Promise<number> {
+  const r = await db
+    .selectFrom('square_enrollments')
+    .select((eb) => eb.fn.countAll<number>().as('n'))
+    .where('location_id', '=', locationId)
+    .where('state', 'in', ['started', 'customer_ready', 'card_saved', 'subscribed'])
+    .executeTakeFirst()
+  return Number(r?.n ?? 0)
+}
 const at = (d: Date | null | undefined): string | null => (d ? d.toISOString() : null)
 const latest = (...ds: Array<Date | null | undefined>): Date | null => ds.reduce<Date | null>((m, d) => (d && (!m || d > m) ? d : m), null)
 
@@ -74,10 +85,10 @@ export async function squareStatus(db: Executor, env: Env, now: Date): Promise<I
       lastCatchupAt: at(state?.last_catchup_at),
       lastReconcileAt: at(state?.last_reconcile_at),
       lastTestOk: test ? test.ok : null,
-      // the payments to match and the card refunds Square refused (wave Q2b); enrollments come with wave Q3b
+      // the payments to match and the card refunds Square refused (wave Q2b); membership enrollments under way (wave Q3b)
       unmatched: counts.unmatched,
       failedRefunds: counts.failedRefunds,
-      pendingEnrollments: null,
+      pendingEnrollments: location ? await pendingEnrollments(db, location.id) : 0,
     },
   }
 }

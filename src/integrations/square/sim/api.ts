@@ -278,6 +278,7 @@ export class SquareSimApi {
         return ok({ subscription: s.deleteAction(dec(x[1]), dec(x[2])) })
       // invoices
       if (m === 'GET' && (x = /^\/v2\/invoices\/([^/]+)$/.exec(p))) return ok({ invoice: s.getInvoice(dec(x[1])) })
+      if (m === 'POST' && (x = /^\/v2\/invoices\/([^/]+)\/cancel$/.exec(p))) return ok({ invoice: s.cancelInvoice(dec(x[1]), body.version) })
       if (m === 'POST' && p === '/v2/invoices/search')
         return this.page('invoices', s.searchInvoices((((body.query as Obj | undefined)?.filter ?? {}) as Obj) as never), q, body)
       // events
@@ -419,6 +420,7 @@ export class SquareSimApi {
     else if (p === '/__sim/pos/refund')
       result = { refund: s.refundPayment({ payment_id: b.paymentId, amount_money: { amount: num(b.amountCents) ?? 0, currency: 'USD' }, reason: 'Refunded in the Square app' }) }
     else if ((x = /^\/__sim\/subscriptions\/([^/]+)\/bill$/.exec(p))) result = { invoice: s.billNow(dec(x[1]), b.outcome === 'failed' ? 'failed' : 'paid') }
+    else if ((x = /^\/__sim\/invoices\/([^/]+)\/pay$/.exec(p))) result = { invoice: s.payInvoice(dec(x[1]), { nonce: str(b.nonce) }) }
     else if ((x = /^\/__sim\/cards\/([^/]+)\/auto-update$/.exec(p))) result = { card: s.autoUpdateCard(dec(x[1]), { last4: str(b.last4), expYear: num(b.expYear) }) }
     else if ((x = /^\/__sim\/cards\/([^/]+)\/forget$/.exec(p))) result = { card: s.disableCard(dec(x[1]), 'forgotten') }
     else if ((x = /^\/__sim\/refunds\/([^/]+)\/fail$/.exec(p))) result = { refund: s.failRefund(dec(x[1]), b.status === 'REJECTED' ? 'REJECTED' : 'FAILED') }

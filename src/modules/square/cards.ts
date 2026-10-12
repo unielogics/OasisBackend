@@ -94,8 +94,10 @@ export interface DisableCardInput {
   cardId: string
   /** When set, the card must be this client's (404 CARD_NOT_FOUND otherwise): a page acts only on its own client's cards. */
   customerId?: string | null
-  /** Who removed it: the client (their link page) or staff. */
-  by: 'client' | 'staff'
+  /** Who removed it: the client (their link page), staff, or Oasis itself (a Square membership that did not start, wave Q3b). */
+  by: 'client' | 'staff' | 'system'
+  /** by 'system' only: why (default membership_failed). */
+  reason?: 'membership_failed'
   /** The staff member's name for revoked_by (staff only). */
   actorName?: string | null
   audit?: AuditContext
@@ -296,9 +298,12 @@ export async function disableCard(deps: SquareCardDeps, input: DisableCardInput)
   }
 
   const now = deps.clock.now()
-  const disabledReason: CustomerCardDisabledReason = input.by === 'client' ? 'client_removed' : 'staff_removed'
-  const revokeReason: CardConsentRevokeReason = input.by === 'client' ? 'client_removed' : 'staff_removed'
-  const revokedBy = input.by === 'client' ? 'client' : `staff${input.actorName ? `: ${input.actorName}` : ''}`.slice(0, 120)
+  const disabledReason: CustomerCardDisabledReason =
+    input.by === 'client' ? 'client_removed' : input.by === 'system' ? (input.reason ?? 'membership_failed') : 'staff_removed'
+  const revokeReason: CardConsentRevokeReason =
+    input.by === 'client' ? 'client_removed' : input.by === 'system' ? (input.reason ?? 'membership_failed') : 'staff_removed'
+  const revokedBy =
+    input.by === 'client' ? 'client' : input.by === 'system' ? 'system' : `staff${input.actorName ? `: ${input.actorName}` : ''}`.slice(0, 120)
   return transaction(deps.db, async (tx) => {
     const row = await tx
       .selectFrom('customer_cards')
@@ -328,7 +333,7 @@ export async function disableCard(deps: SquareCardDeps, input: DisableCardInput)
         entityId: card.id,
         before: { state: row.state },
         after: { state, customerId: row.customer_id, brand: row.brand, last4: row.last4, by: input.by, revokedConsents: revoked.map((r) => r.id) },
-        ctx: input.audit ?? { actor: { name: input.by === 'client' ? 'Client' : (input.actorName ?? 'Staff') } },
+        ctx: input.audit ?? { actor: { name: input.by === 'client' ? 'Client' : input.by === 'system' ? 'Oasis' : (input.actorName ?? 'Staff') } },
       })
     return { cardId: card.id, state, revokedConsents: revoked.length, alreadyInactive }
   })

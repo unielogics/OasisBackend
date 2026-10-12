@@ -3,7 +3,10 @@ import type { SquareClient } from '../client.js'
 import { wire } from '../wire.js'
 import { enc } from './locations.js'
 
-/** GetInvoice, SearchInvoices (read). */
+/**
+ * GetInvoice, SearchInvoices (read), CancelInvoice (wave Q3b). Square answers 400 "Can only cancel an unpaid or scheduled invoice" for a
+ * canceled or a paid one alike (sandbox 2026-10-12), so the caller reads the invoice first and cancels only an open one.
+ */
 export const invoicesApi = (c: SquareClient): SquareApi['invoices'] => ({
   get: async (id) => (await c.request({ method: 'GET', path: `/v2/invoices/${enc(id)}`, schema: wire.invoice })).invoice,
   search: async (q) => {
@@ -18,4 +21,6 @@ export const invoicesApi = (c: SquareClient): SquareApi['invoices'] => ({
     })
     return { items: r.invoices, cursor: r.cursor ?? undefined }
   },
+  cancel: async (id, version) =>
+    (await c.request({ method: 'POST', path: `/v2/invoices/${enc(id)}/cancel`, body: { version }, schema: wire.invoice })).invoice,
 })

@@ -324,6 +324,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/catalog/tiers` | set.services | optional |
 | DELETE | `/api/v1/catalog/tiers/:key` | set.services |  |
 | PUT | `/api/v1/catalog/tiers/:key` | set.services |  |
+| POST | `/api/v1/catalog/tiers/:key/move-members` | set.billing |  |
 | GET | `/api/v1/catalog/tint-matrix` | authenticated |  |
 | PUT | `/api/v1/catalog/tint-matrix` | set.services |  |
 | GET | `/api/v1/catalog/vehicle-classes` | authenticated |  |
@@ -372,6 +373,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/integrations/sms/devices/:id/register-webhooks` | set.billing |  |
 | POST | `/api/v1/integrations/sms/devices/:id/test` | set.billing |  |
 | GET | `/api/v1/integrations/square` | set.billing | pay.reports |  |
+| POST | `/api/v1/integrations/square/catalog/sync` | set.billing |  |
 | POST | `/api/v1/integrations/square/test` | set.billing |  |
 | POST | `/api/v1/integrations/squarespace/alerts/:id/resolve` | set.billing |  |
 | DELETE | `/api/v1/integrations/squarespace/connection` | set.billing |  |
@@ -410,6 +412,14 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/api/v1/memberships` | cli.member |  |
 | POST | `/api/v1/memberships` | cli.member |  |
 | PATCH | `/api/v1/memberships/:id` | cli.member |  |
+| POST | `/api/v1/memberships/:id/billing/cancel` | cli.member | optional |
+| POST | `/api/v1/memberships/:id/billing/cancel/undo` | cli.member | optional |
+| POST | `/api/v1/memberships/:id/billing/card-link` | cli.member |  |
+| POST | `/api/v1/memberships/:id/billing/change` | cli.member | optional |
+| POST | `/api/v1/memberships/:id/billing/change/undo` | cli.member | optional |
+| POST | `/api/v1/memberships/:id/billing/pause` | cli.member | optional |
+| POST | `/api/v1/memberships/:id/billing/refund-last` | pay.refund | required |
+| POST | `/api/v1/memberships/:id/billing/resume` | cli.member | optional |
 | POST | `/api/v1/memberships/:id/household` | cli.member |  |
 | DELETE | `/api/v1/memberships/:id/household/:customerId` | cli.member |  |
 | POST | `/api/v1/messages/:id/cancel` | msg.send |  |
@@ -1920,7 +1930,8 @@ The exchange (with `session` added), `GET me` and every verification step answer
   stepUp: { method: pin | code, freshUntil, canSetPinUntil },
   appointments: [ { ref, start, end, when, service, addons[], status, canReschedule } ] | null,
   invoice: { number, date, items[{name, priceCents}], subtotalCents, taxCents, tipCents, totalCents, paidCents, balanceCents } | null,
-  plan: { tier, planKey, name, monthlyPriceCents, perks[] } | null
+  plan: { tier, planKey, name, monthlyPriceCents, perks[], billing: square | squarespace,
+          prices: [ { class, label, monthlyCents, joinable } ] } | null
 }
 ```
 
@@ -1937,7 +1948,9 @@ The exchange (with `session` added), `GET me` and every verification step answer
   `canReschedule` for a booked or confirmed visit that has not started.
 * `invoice`: a payment link's invoice (ADR 0170: each item adds `listCents`, `discountBp`, `memberDiscountCents`, `classLabel`, and
   `coverage[{serviceName, coveredCents, lineCents, differenceCents, planClassLabel}]`; amounts in cents; hidden while the stale rule hides the client). `plan`: a membership link's plan
-  from the Settings catalog (public label, monthly price, perks).
+  from the Settings catalog (public label, monthly price, perks); `billing` says how the page joins (wave Q3b: `square` = a card and
+  consent on this page, `POST membership/subscribe`; `squarespace` = the checkout, `POST membership/start`), and `prices` the tier's
+  monthly price at each size it is sold at, `joinable` when that price is set up at Square (always true for squarespace).
 * All instants are ISO-8601 UTC strings.
 
 ### 28.3 Routes
@@ -1954,18 +1967,18 @@ The exchange (with `session` added), `GET me` and every verification step answer
 | `POST /public/links/pin/reset` | `{pin}` (strict) | A new PIN after a `pin_reset` code confirmed on this page in the last 10 minutes: 200 `{verified: true, ...LinkState}`; every other link, page and the old trust end, the number is trusted again, the client is emailed (when an address is on file) and the managers notified; memberships and payments wait 72 hours. 403 `IDENTITY_CODE_REQUIRED`, 409 `IDENTITY_PIN_NOT_SET`, 422 `IDENTITY_PIN_REJECTED`. |
 | `POST /public/links/bookings` (Idempotency-Key required) | `{serviceKey, addonKeys[] (≤12), date "YYYY-MM-DD", startMin, vehicle? {year?, make?, model?, color?, label?, plate?}, vehicleClass?, name?, email?, smsConsent?}` (strict) | 201 `{bookingRef, status: "booked", start, end, deposit {dueCents, how counter \| link}, confirmationBy sms \| none, service {key, name}, addons[{key, name}], when "Today · 1:00 PM", member, bayCount, pricing}`. Sizes (ADR 0170): `vehicleClass` (or a size label sent as the car, as on the website) prices the visit and is recorded on the page's client's car (source client); 422 `body.vehicleClass` before the link is used; `pricing` as on the website (section 26.3). Verified calendar or book-again pages. Books through the dashboard's `createAppointment` with channel `online` (lead time, windows, paused days, no overrides), source **`link`**, on the board's grid (422 `body.startMin` "Pick one of the times on the board."), the categories of the package and add-ons, the invoice, the `booking_confirmed_web` text ("Booked: Express Hand Wash, today at 1:00 PM. $25 booking fee due at the shop. Reply here to change it.") and the activity line "Booked on a personal link · …". The fee and VIP rules follow the page's own client (active member: no fee, `member: true`; VIP client or VIP-plan member: VIP rules), never during a reset hold. On a client's link `name` only fills a placeholder name (a real name is never replaced) and `email` only fills an empty one (never as a verified email; the email on file is never replaced from a link page, so a page trusted by the number alone cannot move the address a PIN reset's notice goes to — staff change it); on a stranger's link `name` is required (422 `body.name` "Enter your name.") and creates the client (source online; `smsConsent` their consent to the texts about the booking), or books for the number's client when one holds it (only their PIN verifies such a page once they have one: 409 `IDENTITY_PIN_REQUIRED`). A page verified by code on a record the stale-record rule holds (a stranger's link or the client's own) books a **new client** and the number moves to it (section 27.2 `bindPartyToNumber`; `name` fills the new record, a placeholder when empty; no member privileges). A booking made with the client's PIN records `booked_with_pin`. The Idempotency-Key belongs to the **link** (resolved from the session before the key is claimed): the same key and body from a re-opened page of the same link answers the stored booking with `Idempotent-Replayed: true`, and two links (behind one address or not) never share a key. 409 `IDENTITY_LINK_USED` once the link's bookings are spent; slot refusals in the website's words (409 `PUBLIC_SLOT_TAKEN`, `PUBLIC_SLOT_VIP`, `PUBLIC_SLOT_PAST`, `PUBLIC_SLOT_CLOSED`, `PUBLIC_SLOT_TOO_FAR`); 422 for an unknown service or add-on key. |
 | `POST /public/links/appointments/:ref/reschedule` | `:ref` `OAS-00042`; `{date, startMin}` (strict) | 200 `{bookingRef, status, start, end, when}`. Verified calendar pages; only the page's own client's visits (a calendar link sent for one visit: only that one), 404 `LINK_APPOINTMENT_NOT_FOUND` "We can’t find that visit. Text us and we’ll help." otherwise; a visit that started, ended or was canceled: 409 `LINK_CANT_RESCHEDULE` "This visit can’t be moved online. Text us and we’ll help.". The online rules (the page's VIP privileges included) and the grid as for a booking, then the dashboard's reschedule (the client is texted the new time). Uses nothing of the link. A stale record's visits are not found by a page verified only by code. |
-| `POST /public/links/membership/start` | `{email, planClass?, vehicles? [{car, plate?}] (≤5)}` (strict; `planClass` as in section 26.4: 422 `TIER_CLASS_UNPRICED`, stored on the membership and the checkout) | 200 `{redirectUrl, membershipRef "OAS-M-1A2B3C4D", checkoutExpiresAt}`: send the browser to `redirectUrl`, the plan's Squarespace checkout (https on squarespace.com only, checked again on the way out). Membership pages with a **fresh** step-up. A pending membership of the link's plan (reused when one is pending) and a checkout intent (W2e `openCheckoutIntent`): the typed email, the plan's product, 72 hours; the membership activates when the Squarespace sync matches the paid order to the intent. The page should say the email must be the one they pay with: it is stored only on the intent, never as the client's email or a verified email, so an email alone never links an order (design section 10); an order that matches only the intent's email but carries another phone or name waits for staff (`awaiting_match`, W4c fixes). `vehicles` are added to the client (`car` like "2021 Tesla Model 3"). One completion of the link. 409 `IDENTITY_RECORD_UNCONFIRMED` on a stale record proven only by a code, 409 `LINK_ALREADY_MEMBER` "You already have a membership. Text us to change your plan." (a live membership held, or shared as a household member), 409 `LINK_CHECKOUT_UNAVAILABLE` "Joining online isn’t open right now. Text us and we’ll help you join." (no checkout link in Settings yet), 403 `LINK_PRIVILEGES_HELD`, 422 `body.email` "Enter a valid email.". |
+| `POST /public/links/membership/start` | `{email, planClass?, vehicles? [{car, plate?}] (≤5)}` (strict; `planClass` as in section 26.4: 422 `TIER_CLASS_UNPRICED`, stored on the membership and the checkout) | 200 `{redirectUrl, membershipRef "OAS-M-1A2B3C4D", checkoutExpiresAt}`: send the browser to `redirectUrl`, the plan's Squarespace checkout (https on squarespace.com only, checked again on the way out). Membership pages with a **fresh** step-up. A pending membership of the link's plan (reused when one is pending) and a checkout intent (W2e `openCheckoutIntent`): the typed email, the plan's product, 72 hours; the membership activates when the Squarespace sync matches the paid order to the intent. The page should say the email must be the one they pay with: it is stored only on the intent, never as the client's email or a verified email, so an email alone never links an order (design section 10); an order that matches only the intent's email but carries another phone or name waits for staff (`awaiting_match`, W4c fixes). `vehicles` are added to the client (`car` like "2021 Tesla Model 3"). One completion of the link. 409 `IDENTITY_RECORD_UNCONFIRMED` on a stale record proven only by a code, 409 `LINK_ALREADY_MEMBER` "You already have a membership. Text us to change your plan." (a live membership held, or shared as a household member), 409 `LINK_CHECKOUT_UNAVAILABLE` "Joining online isn’t open right now. Text us and we’ll help you join." (no checkout link in Settings yet; also with `PAYMENT_PROCESSOR=square`, where the page joins with `membership/subscribe`), 403 `LINK_PRIVILEGES_HELD`, 422 `body.email` "Enter a valid email.". |
+| `POST /public/links/membership/subscribe` | `{email, planClass?, vehicles? [{car, plate?}] (≤5), sourceId, verificationToken?, consentVersion, cardholderName?, postalCode?}` (strict; Idempotency-Key optional, owned by the link) | (ADR 0171 D8, wave Q3b; section 30.11) With `PAYMENT_PROCESSOR=square` (else 501 `LINK_ACTION_NOT_READY`). Membership pages with a **fresh** step-up; the same guards as membership/start (403 `LINK_PRIVILEGES_HELD`, 409 `IDENTITY_RECORD_UNCONFIRMED`, 409 `LINK_ALREADY_MEMBER` for a live membership held or shared as a household member). The size must be priced (422 `TIER_CLASS_UNPRICED`) and that price set up at Square (409 `LINK_CHECKOUT_UNAVAILABLE`, also while Square is watch-only); the email must look deliverable (422 `body.email` "Use an email you check: Square sends your membership receipts there." for example and test domains: Square ends a subscription whose email bounces); the consent the page showed must be the current version (409 `CARD_CONSENT_OUTDATED`). One completion of the link; a pending membership (source `square`, reused when one is pending) and an enrollment; the client's Square customer with the email; the card saved with the consent `membership_billing` (422 `CARD_DECLINED`, the reason in `detail`); the Square subscription from today. 202 `{status: "pending", membershipRef}`: poll `membership/status`. A second submit while an attempt is past its card answers its status and sends nothing. 503 `SQUARE_UNAVAILABLE` when Square does not answer before the card is saved. Limits: 10 an hour per address, 5 a day per number (shared with membership/start). |
+| `GET /public/links/membership/status` | none | 200 `{status: none \| pending \| active \| failed, membershipRef}`: this page's own enrollment (`active` once Square's first invoice is paid; `failed`: the card refused, the first payment failed, Square ended the subscription, or not finished within an hour). Membership pages only (401 `LINK_WRONG_PURPOSE`). |
 | `POST /public/links/pay/start` | `{}` | 200 `{status: "redirect", redirectUrl}`: the payment URL staff attached to the invoice, only https on a `PAYMENT_LINK_HOSTS` host (default squarespace.com, square.link, square.site) with no user, password or port; one completion of the link. With `PAYMENT_PROCESSOR=square` (ADR 0171 D3): a Square link for exactly the current balance, reused while it is active for that amount, else made now in two transactions around the Square call (409 `CONCURRENT_UPDATE` if the balance changed during the call; 422 `PAY_NOTHING_TO_COLLECT`); `link_pending` only when Square does not answer or is watch-only. 200 `{status: "link_pending", redirectUrl: null}`: the invoice has no allowed URL; tell the client the shop will text a payment link (the managers get one `payments.link_requested` notice "Text Maria a payment link", not repeated while unread). Payment pages with a **fresh** step-up; 403 `LINK_PRIVILEGES_HELD`; 409 `IDENTITY_RECORD_UNCONFIRMED` on a stale record proven only by a code. A paid or voided invoice has already ended the page (401 `IDENTITY_SESSION_INVALID`). |
 | `POST /public/links/deposit/start` | `{bookingRef}` | (ADR 0171 D2, `PAYMENT_PROCESSOR=square`) A verified calendar or book-again page pays the deposit of one of its client's upcoming visits (booked or confirmed) whose booking asked for a deposit link (`booking.guest_fee.collect` `link`): 200 `{status: "redirect", redirectUrl, amountCents}` a Square quick-pay link for exactly the deposit (an active one reused); `paid`; `none` (no deposit link owed for that visit, or Squarespace is still the processor); `link_pending` (Square did not answer). 404 for a booking that is not the page client's. Uses no completion of the link. Limits as pay/start. |
 
-**Declared for waves Q3a and Q3b, not built yet** (ADR 0171 D7, D8; `src/modules/public/links/http/card-routes.ts` and
-`subscribe-routes.ts`, marked STUB): `POST /public/links/cards` (body `{sourceId, verificationToken?, consentVersion, purposes[]
-(membership_billing | no_show_fee | late_cancel_fee | balance, at least one), cardholderName?, postalCode?}`, strict), `DELETE
-/public/links/cards/:cardId`, `POST /public/links/membership/subscribe` (body `{email, planClass?, vehicles?, sourceId,
-verificationToken?, consentVersion, cardholderName?, postalCode?}`, strict) and `GET /public/links/membership/status`. They follow
-every rule of 28.1 (closed: the unknown-route 404) and validate their bodies (422); with personal links open they answer 501
-`LINK_ACTION_NOT_READY` "This page can’t do that yet. Text us and we’ll help." and write nothing. Their behaviour, limits and
-answers are specified by the waves that build them.
+**Declared for wave Q3a, not built yet** (ADR 0171 D7; `src/modules/public/links/http/card-routes.ts`, marked STUB): `POST
+/public/links/cards` (body `{sourceId, verificationToken?, consentVersion, purposes[] (membership_billing | no_show_fee |
+late_cancel_fee | balance, at least one), cardholderName?, postalCode?}`, strict) and `DELETE /public/links/cards/:cardId`. They
+follow every rule of 28.1 (closed: the unknown-route 404) and validate their bodies (422); with personal links open they answer 501
+`LINK_ACTION_NOT_READY` "This page can’t do that yet. Text us and we’ll help." and write nothing. The membership routes
+(`membership/subscribe`, `membership/status`) were built by wave Q3b (above, and section 30.11).
 
 ### 28.4 Flows the website builds
 
@@ -2119,7 +2132,7 @@ override, the POS switch outside production, a catch-up that has not run for 30 
 webhook in 24 hours while the catch-up found events. `details`: environment, location, merchant, API version, writes, processor, POS
 switch, `token` and `webhookKey` as `set`/`not set`, events enabled, subscription verified, last webhook, catch-up and reconcile times,
 the last test result; `unmatched` (Square payments to match) and `failedRefunds` (card refunds Square refused in the last 14 days; both
-also warnings when not zero); `pendingEnrollments` is `null` until wave Q3b.
+also warnings when not zero); `pendingEnrollments` (membership-page enrollments under way, wave Q3b).
 
 ### 30.5 Jobs and environment
 
@@ -2208,3 +2221,68 @@ No route of its own yet (the link routes are declared in section 28); the servic
   consents revoked (audit `card.disabled`); 404 `CARD_NOT_FOUND` for another client's or location's card; idempotent.
 * Nothing calls them while `PUBLIC_LINKS_ENABLED=false` (the routes are closed) and `SQUARE_WRITES_ENABLED=false` (nothing is created
   at Square).
+
+### 30.11 Memberships billed by Square (wave Q3b)
+
+Off by default: nothing is synced, enrolled or billed while `SQUARE_WRITES_ENABLED=false`, `PAYMENT_PROCESSOR=squarespace` and
+`PUBLIC_LINKS_ENABLED=false`. ADR 0171 "Memberships on Square"; `docs/integrations/square.md` section 12.
+
+**Catalog sync.** Each current tier price (`membership_tier_prices`, append-only: ADR 0170) becomes one Square
+SUBSCRIPTION_PLAN_VARIATION (one phase, MONTHLY, STATIC price) of the tier's SUBSCRIPTION_PLAN (`membership_plans.square_plan_id`); a
+price edit writes a new row, so a new variation, and the members keep the variation they are billed at until "Move members". The tier
+views of `/catalog` carry each price's `squareState` (`pending`, `synced`, `failed`, `retired` = a superseded price nobody used,
+deleted at Square). Jobs `square.catalog.sync` (every 5 minutes) and `square.catalog.drift` (nightly: Square's catalog read back,
+a difference reported, never overwritten).
+
+| Route | Access | Body | Answer |
+|---|---|---|---|
+| `POST /integrations/square/catalog/sync` | `set.billing` | `{}` | 200 `{status: done \| skipped, reason?, plansCreated, plansRenamed, variationsCreated, retired, kept, drift, recreated, failed}`; `skipped` while Square writes are off. A failure stays on the row (`squareState: failed`) and the managers are told (`square.catalog_sync_failed`). Audited `square.catalog.sync`. |
+| `POST /catalog/tiers/:key/move-members` | `set.billing` | `{notice?: 0..90}` (days, default setting `memberships.price_change_notice_days`, 30) | 200 `{tierKey, moving, skipped, swapAfter}`: every member billed by Square at an older price of their size gets a scheduled move (`billing.change.kind: move`) and a notice by text (`membership_price_change`) and email; after the notice the job `square.plans.swap` sends SwapPlan, which Square applies at the next billing date. A member with a staff change scheduled is left alone (`skipped`). 409 `TIER_PRICE_NOT_SYNCED` until the current prices are at Square; 404 for an unknown tier. Audited `catalog.tier.move_members`. |
+
+**Enrollment** on a membership page: `POST /public/links/membership/subscribe` and `GET /public/links/membership/status` (section
+28.3). The attempt (`square_enrollments`) moves `started -> customer_ready -> card_saved -> subscribed -> active` (or `failed`,
+`abandoned`); its Square keys are its own (`cd_<enrollment>` the card, `sb_<enrollment>` the subscription), so the job
+`square.enrollments.resume` (every 5 minutes) repeats a step after a lost answer and reads a late first invoice back; an attempt not
+finished within an hour is abandoned; a failed or abandoned one is cleaned up at Square (subscription and open invoice canceled, card
+disabled with reason `membership_failed`) and its membership canceled; after a first payment that failed the client is texted a new
+membership page (`membership_join_retry`). The website join (`POST /public/memberships`) with Square as the processor and personal
+links open texts the client a membership page (`personal_link_membership`) instead of asking staff for a Squarespace link (no pending
+membership until they submit there).
+
+**Billing by events.** `invoice.*` and `subscription.*` (section 30.1) drive the membership: a paid invoice applies its cycle once
+(the period from the due date to the subscription's charged-through date in shop-local midnights, the membership active, the cycle's
+credits), a failed charge starts the failure policy, Square's status maps (PAUSED paused, CANCELED or DEACTIVATED canceled), and a plan
+swap that took effect moves the membership to that price row (tier, size). The Squarespace inference leaves Square memberships alone.
+A subscription invoice's payment is mirrored as a `membership` payment (`square_payments.match_state ignored`), never matched to an
+Oasis invoice.
+
+**Failure policy** (plan decision 7; setting `memberships.billing_policy` `{graceDays: 7, cancelDays: 21}`): day 0 `billing.status
+failed`, in grace (perks on), the client texted their card page and Square's invoice page (`membership_payment_failed`) and emailed
+Square's page, the managers told (`membership.payment_failed`); day 7 (job `membership.billing`, daily 09:30) `past_due` (perks off);
+day 21 the subscription and the open invoice canceled at Square, the membership `canceled` with `cancel_reason payment_failed`. A
+payment at any point restores it. There is no Oasis retry of the charge: Square cannot be paid through the invoice's order (sandbox).
+
+**Staff actions** (`cli.member`; the Square call runs in the idempotency prepare hook, an Idempotency-Key is optional except for the
+refund). Each answers 200 `{membership}` (the membership view, section 23) and is audited `membership.billing.<action>`. 409
+`MEMBERSHIP_NOT_BILLED_BY_SQUARE` for another membership, 409 `MEMBERSHIP_BILLING_STATE` when the state does not fit, 409
+`SQUARE_WRITES_OFF`, 503 `SQUARE_UNAVAILABLE`, 404 `MEMBERSHIP_NOT_FOUND`.
+
+| Route | Body | What Square does |
+|---|---|---|
+| `POST /memberships/:id/billing/pause` | `{}` | PauseSubscription from the next billing date (`billing.pauseAt`). |
+| `POST /memberships/:id/billing/resume` | `{}` | A paused subscription resumes now; a pause still to come is removed (DeleteSubscriptionAction). |
+| `POST /memberships/:id/billing/cancel` | `{}` | CancelSubscription at the period end (`billing.cancelAt`); perks until then. |
+| `POST /memberships/:id/billing/cancel/undo` | `{}` | DeleteSubscriptionAction on the scheduled cancel. |
+| `POST /memberships/:id/billing/change` | `{planKey, planClass?}` | SwapPlan to the current price of the tier at the size (default the membership's) at the next billing date (`billing.change`); 409 `TIER_PRICE_NOT_SYNCED`. |
+| `POST /memberships/:id/billing/change/undo` | `{}` | DeleteSubscriptionAction on the scheduled swap. |
+| `POST /memberships/:id/billing/card-link` | `{}` | Nothing at Square: the client's card page (personal link `card`) texted (`personal_link_card`); 200 adds `sms: queued \| skipped`. A card saved there for membership billing is put on the subscription by `square.enrollments.resume` (Square then retries a failed payment with it). 409 `MEMBERSHIP_BILLING_STATE` while personal links are closed. |
+| `POST /memberships/:id/billing/refund-last` (`pay.refund`, Idempotency-Key required) | `{}` | RefundPayment of the latest paid subscription invoice in full (key `rf_<invoice>`); 200 adds `refund {amountCents, status}`. The membership is not changed. |
+
+`PATCH /memberships/:id` on a Square membership changes only `autoApply` and `note`; `status`, `planKey`, `planClass`, `planLabel`
+or `renewsOn` answer 409 `MEMBERSHIP_BILLED_BY_SQUARE`. The membership view gains `source: square` and `billing` (null for any other
+membership): `{status ok|failed, squareStatus, failedAt, notifiedAt, pastDueOn, cancelOn, monthlyCents, card {brand, last4, expMonth,
+expYear, state}, cancelAt, pauseAt, change {kind change|move, planKey, planClass, monthlyCents, effectiveDate, swapAfter}, lastInvoice
+{status, amountCents, dueDate, paidAt, refundedCents, payUrl}, enrollment {state, failure}}`.
+
+Jobs: `square.catalog.sync`, `square.catalog.drift`, `square.enrollments.resume`, `membership.billing`, `square.plans.swap`
+(`docs/jobs.md`). The integrations status row counts `pendingEnrollments`.

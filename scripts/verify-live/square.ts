@@ -50,6 +50,16 @@ export const SQUARE_ITEMS: readonly ItemDef[] = [
     title: "Oasis's own link builder and refund legs: a link with a tax and a tip line totals the balance exactly, paid through its order; a leg refunded with its rf_ key twice is one refund; the leg cap matches Square's",
     source: `${DOC}, check 11 (wave Q2b)`,
   },
+  {
+    id: 'SQR-13',
+    title: "Oasis's own catalog sync: the planner's plan and STATIC MONTHLY variations made by our executor; the same keys answer the same objects; a price edit is a new variation and the old one stays",
+    source: `${DOC}, check 12 (wave Q3b)`,
+  },
+  {
+    id: 'SQR-14',
+    title: "Oasis's own membership subscription: a deliverable email, CreateSubscription with sb_ from today, the first invoice paid and its period; swap, pause and cancel scheduled at the next billing date and undone; an unpaid invoice canceled",
+    source: `${DOC}, check 13 (wave Q3b)`,
+  },
 ]
 
 export const SQUARE_OPTIONS = {
@@ -80,6 +90,14 @@ export interface SquareFindings {
   cancelAgain?: string
   eventsApi?: string
   eventTypesSeen: Record<string, number>
+  /** wave Q3b */
+  membershipEmail?: string
+  membershipFirstInvoice?: string
+  membershipPeriod?: string
+  membershipSwap?: string
+  membershipPause?: string
+  membershipCancel?: string
+  membershipInvoiceCancel?: string
 }
 
 interface Config {
@@ -278,7 +296,7 @@ async function verify(ctx: RunContext, cfg: Config): Promise<Report> {
   let customer: WireCustomer | undefined
   let card: WireCard | undefined
   if (readOnly) {
-    for (const id of ['SQR-03', 'SQR-04', 'SQR-05', 'SQR-06', 'SQR-07', 'SQR-08', 'SQR-11', 'SQR-12']) report.skip(id, '--read-only: nothing is created')
+    for (const id of ['SQR-03', 'SQR-04', 'SQR-05', 'SQR-06', 'SQR-07', 'SQR-08', 'SQR-11', 'SQR-12', 'SQR-13', 'SQR-14']) report.skip(id, '--read-only: nothing is created')
   } else {
     // ---- SQR-03 customer ------------------------------------------------------------------------------------------------------
     customer = await step('SQR-03', async () => {
@@ -489,12 +507,20 @@ async function verify(ctx: RunContext, cfg: Config): Promise<Report> {
       )
     })
 
+    // ---- SQR-13/14 memberships (wave Q3b): our catalog sync and our subscription code, before SQR-07/08 ----------------------------
+    if (customer && card) await memberships(api, report, findings, { run, ref, locationId, tz, customer, card, poll, cleanup, ctx })
+    else {
+      report.skip('SQR-13', 'needs the customer and card of SQR-03/04')
+      report.skip('SQR-14', 'needs the customer and card of SQR-03/04')
+    }
+
     // ---- SQR-07/08 subscriptions ----------------------------------------------------------------------------------------------------
     if (customer && card) await subscriptions(api, report, findings, { run, ref, locationId, tz, customer, card, poll, cleanup, ctx })
     else {
       report.skip('SQR-07', 'needs the customer and card of SQR-03/04')
       report.skip('SQR-08', 'needs the customer and card of SQR-03/04')
     }
+
   }
 
   // ---- SQR-09 events ---------------------------------------------------------------------------------------------------------
@@ -717,6 +743,234 @@ async function subscriptions(
   }
   if (problems.length) report.fail('SQR-08', problems.join('; '), undefined, notes)
   else report.pass('SQR-08', notes.join(' | '))
+}
+
+/**
+ * SQR-13 and SQR-14 (wave Q3b): Oasis's own membership code against Square, without a database: the catalog planner and executor
+ * (memberships/square/catalog-plan.ts, catalog-sync.ts), the subscription request and key (enroll.ts), the paid period and the
+ * scheduled actions (policy.ts), the swap replacement (actions.ts) and CancelInvoice.
+ */
+async function memberships(
+  api: SquareApi,
+  report: Report,
+  findings: SquareFindings,
+  o: {
+    run: string
+    ref: string
+    locationId: string
+    tz: string
+    customer: WireCustomer
+    card: WireCard
+    poll: <T>(read: () => Promise<T>, done: (v: T) => boolean, limitMs?: number, everyMs?: number) => Promise<{ value: T; ms: number; done: boolean }>
+    cleanup: Array<{ what: string; run: () => Promise<unknown> }>
+    ctx: RunContext
+  },
+): Promise<void> {
+  const { planCatalogChanges } = await import('../../src/modules/memberships/square/catalog-plan.js')
+  const { executeCatalogActions } = await import('../../src/modules/memberships/square/catalog-sync.js')
+  const { createMembershipSubscription, subscriptionInput } = await import('../../src/modules/memberships/square/enroll.js')
+  const { deliverableEmail, paidPeriod, scheduledAtSquare, shopDate } = await import('../../src/modules/memberships/square/policy.js')
+  const { busyAtSquare, replaceSwap } = await import('../../src/modules/memberships/square/actions.js')
+  const { run, locationId, poll, cleanup, tz } = o
+  // ---- SQR-13 the catalog sync ----------------------------------------------------------------------------------------------------
+  const tier = { planId: `verify-tier-${run}`, key: 'verify', name: `Verify tier ${o.ref}`, active: true, squarePlanId: null as string | null }
+  const row = (id: string, cents: number, extra: Record<string, unknown> = {}) => ({
+    id: `${id}-${run}`,
+    planId: tier.planId,
+    classKey: id,
+    classLabel: id === 'compact' ? 'Compact car' : 'Truck',
+    monthlyCents: cents,
+    current: true,
+    squareVariationId: null as string | null,
+    squareState: 'pending' as const,
+    inUse: false,
+    squareError: null,
+    ...extra,
+  })
+  let oldVariation: string | undefined
+  let newVariation: string | undefined
+  try {
+    const first = planCatalogChanges([tier], [row('compact', 100), row('truck', 200)])
+    if (first.map((a) => a.kind).join(',') !== 'create_plan,create_variation,create_variation') throw new Error(`the planner gave ${first.map((a) => a.kind).join(',')}`)
+    const done = await executeCatalogActions(api, first)
+    const bad = done.filter((x) => !x.ok)
+    if (bad.length) throw new Error(`the executor failed: ${bad.map((x) => x.error).join('; ')}`)
+    const planId = done.find((x) => x.action.kind === 'create_plan')!.squareId!
+    const varIds = done.filter((x) => x.action.kind === 'create_variation').map((x) => x.squareId!)
+    cleanup.push({ what: `membership catalog ${planId}`, run: () => Promise.all([...varIds, planId].map((id) => api.catalog.delete(id).catch(() => [] as string[]))) })
+    const checks: string[] = []
+    for (const [i, id] of varIds.entries()) {
+      const v = await api.catalog.retrieve(id)
+      const phases = v.subscription_plan_variation_data?.phases ?? []
+      const price = phases[0]?.pricing?.price_money?.amount
+      if (v.type !== 'SUBSCRIPTION_PLAN_VARIATION' || phases.length !== 1 || phases[0]!.cadence !== 'MONTHLY' || phases[0]!.pricing?.type !== 'STATIC' || price !== [100, 200][i])
+        throw new Error(`variation ${i + 1}: ${JSON.stringify({ type: v.type, phases })}`)
+      if (v.subscription_plan_variation_data?.subscription_plan_id !== planId) throw new Error(`variation ${i + 1} names another plan`)
+      checks.push(`${v.subscription_plan_variation_data?.name} ${price}`)
+    }
+    // the same actions again (a run that stopped after Square answered): the same objects
+    const again = await executeCatalogActions(api, first)
+    if (again.find((x) => x.action.kind === 'create_plan')?.squareId !== planId || again.filter((x) => x.action.kind === 'create_variation').map((x) => x.squareId).join() !== varIds.join())
+      throw new Error('the same keys answered other objects')
+    // a price edit: the old row superseded (a subscription will use it), a new row; one new variation, the old one untouched
+    oldVariation = varIds[0]
+    const edit = planCatalogChanges(
+      [{ ...tier, squarePlanId: planId }],
+      [row('compact', 100, { current: false, squareVariationId: oldVariation, squareState: 'synced', inUse: true }), row('compact-2', 150)],
+    )
+    if (edit.map((a) => a.kind).join() !== 'create_variation') throw new Error(`a price edit planned ${edit.map((a) => a.kind).join()}`)
+    const made = await executeCatalogActions(api, edit)
+    newVariation = made[0]?.squareId
+    if (!made[0]?.ok || !newVariation || newVariation === oldVariation) throw new Error(`the new price: ${made[0]?.error ?? 'no variation'}`)
+    varIds.push(newVariation)
+    const old = await api.catalog.retrieve(varIds[0]!)
+    if (old.subscription_plan_variation_data?.phases?.[0]?.pricing?.price_money?.amount !== 100) throw new Error('the old variation changed')
+    report.pass('SQR-13', `plan + ${checks.join(', ')}; the same keys answered the same objects; a price edit made a new variation (150), the old one kept its price`)
+  } catch (e) {
+    report.fail('SQR-13', errText(e), fixFor(e))
+  }
+  if (!oldVariation || !newVariation) {
+    report.skip('SQR-14', 'needs the variations of SQR-13')
+    return
+  }
+  // ---- SQR-14 the subscription ------------------------------------------------------------------------------------------------------
+  const notes: string[] = []
+  const problems: string[] = []
+  try {
+    // a customer and card of its own (SQR-07/08 leave theirs with a pending cancel and an unpaid invoice), as an enrollment makes them
+    const member = await api.customers.create(sqKey('cu', `${run}:member`), {
+      given_name: 'Verify',
+      family_name: 'Member',
+      email_address: `${o.ref}-member@oasisautospanj.com`,
+      reference_id: `${o.ref}-member`,
+      note: 'Created by pnpm verify:square; safe to delete',
+    })
+    cleanup.push({ what: `customer ${member.id}`, run: () => api.customers.delete(member.id) })
+    const memberCard = await api.cards.create(sqKey('cd', `${run}:member`), { source_id: NONCE_OK, card: { customer_id: member.id, reference_id: `${o.ref}-member` } })
+    cleanup.push({ what: `card ${memberCard.id}`, run: () => api.cards.disable(memberCard.id) })
+    const email = member.email_address ?? ''
+    const ok = deliverableEmail(email)
+    findings.membershipEmail = ok.ok ? `the customer's email passes our check (domain ${email.slice(email.indexOf('@') + 1)})` : `refused: ${ok.message}`
+    if (!ok.ok) problems.push(findings.membershipEmail)
+    for (const reserved of ['someone@example.com', 'someone@shop.test']) if (deliverableEmail(reserved).ok) problems.push(`${reserved} passed our check`)
+    const today = shopDate(o.ctx.now(), tz)
+    const enrollment = randomUUID()
+    const sub = await createMembershipSubscription(
+      api,
+      enrollment,
+      subscriptionInput({ squareLocationId: locationId, variationId: oldVariation, squareCustomerId: member.id, squareCardId: memberCard.id, startDate: today, tz }),
+    )
+    cleanup.push({ what: `membership subscription ${sub.id}`, run: () => api.subscriptions.cancel(sub.id) })
+    const again = await createMembershipSubscription(
+      api,
+      enrollment,
+      subscriptionInput({ squareLocationId: locationId, variationId: oldVariation, squareCustomerId: member.id, squareCardId: memberCard.id, startDate: today, tz }),
+    )
+    if (again.id !== sub.id) problems.push('the same sb_ key made a second subscription')
+    const paid = await poll(
+      async () => {
+        const s = await api.subscriptions.retrieve(sub.id)
+        const inv = s.invoice_ids?.[0] ? await api.invoices.get(s.invoice_ids[0]) : undefined
+        return { s, inv }
+      },
+      (v) => v.inv?.status === 'PAID' || ['DEACTIVATED', 'CANCELED'].includes(v.s.status),
+    )
+    findings.membershipFirstInvoice = `subscription ${sub.status} -> ${paid.value.s.status}; first invoice ${paid.value.inv?.status ?? 'none'} after ${paid.ms} ms`
+    notes.push(findings.membershipFirstInvoice)
+    if (paid.value.inv?.status !== 'PAID') problems.push(`the first invoice was not paid: ${findings.membershipFirstInvoice}`)
+    else {
+      const s = await api.subscriptions.retrieve(sub.id)
+      const period = paidPeriod({ dueDate: paid.value.inv.payment_requests?.[0]?.due_date ?? null, startDate: s.start_date ?? null, chargedThrough: s.charged_through_date ?? null }, tz)
+      findings.membershipPeriod = `due ${paid.value.inv.payment_requests?.[0]?.due_date}, charged through ${s.charged_through_date}: ${period.start.toISOString()} -> ${period.end.toISOString()}`
+      notes.push(findings.membershipPeriod)
+      if (shopDate(period.start, tz) !== today || !s.charged_through_date || shopDate(period.end, tz) !== s.charged_through_date) problems.push(`the period: ${findings.membershipPeriod}`)
+      const next = s.charged_through_date
+      // Square answers 500 "Subscription ... is locked and is not billable. Please retry" for a while after an invoice was paid
+      // (sandbox 2026-10-12): the actions are tried again, 5 s apart, for up to 2 minutes, and how long it took is a finding
+      const t0 = o.ctx.now().getTime()
+      let lockedTries = 0
+      const unlocked = async <T>(fn: () => Promise<T>): Promise<T> => {
+        for (;;) {
+          try {
+            return await fn()
+          } catch (e) {
+            if (!busyAtSquare(e) || o.ctx.now().getTime() - t0 > 120_000) throw e
+            lockedTries++
+            await o.ctx.sleep(5000)
+          }
+        }
+      }
+      // swap at the next billing date, replaced, then undone
+      const swap = await unlocked(() => replaceSwap(api, sub.id, newVariation!))
+      if (lockedTries) notes.push(`Square was busy with the subscription: ${lockedTries} retr${lockedTries === 1 ? 'y' : 'ies'}`)
+      const swapped = scheduledAtSquare(await api.subscriptions.retrieve(sub.id, { includeActions: true }))
+      findings.membershipSwap = `SWAP_PLAN effective ${swap.action?.effective_date ?? '?'} (next billing ${next}); seen as ${JSON.stringify(swapped.swap)}`
+      if (swap.action?.effective_date !== next || swapped.swap?.variationId !== newVariation) problems.push(`swap: ${findings.membershipSwap}`)
+      await replaceSwap(api, sub.id, newVariation!) // the same swap again: kept as it is, still one
+      const one = await api.subscriptions.retrieve(sub.id, { includeActions: true })
+      if ((one.actions ?? []).filter((a) => a.type === 'SWAP_PLAN').length !== 1) problems.push('a second swap left two scheduled swaps')
+      for (const a of one.actions ?? []) if (a.type === 'SWAP_PLAN') await unlocked(() => api.subscriptions.deleteAction(sub.id, a.id))
+      notes.push(findings.membershipSwap)
+      // NOT sent here: the same SwapPlan after its undo answered 500 "locked and is not billable" and left the subscription refusing
+      // every later DeleteSubscriptionAction (409 Unable to lock) in the sandbox on 2026-10-12; Oasis never sends it (actions.ts)
+      // pause at the next billing date, undone
+      const pause = await unlocked(() => api.subscriptions.pause(sub.id, {}))
+      const paused = scheduledAtSquare(await api.subscriptions.retrieve(sub.id, { includeActions: true }))
+      findings.membershipPause = `PAUSE effective ${pause.actions.find((a) => a.type === 'PAUSE')?.effective_date ?? '?'}; status ${pause.subscription.status}; seen as pauseAt ${paused.pauseAt}`
+      if (paused.pauseAt !== next) problems.push(`pause: ${findings.membershipPause}`)
+      const withPause = await api.subscriptions.retrieve(sub.id, { includeActions: true })
+      for (const a of withPause.actions ?? []) if (a.type === 'PAUSE' || a.type === 'RESUME') await unlocked(() => api.subscriptions.deleteAction(sub.id, a.id))
+      notes.push(findings.membershipPause)
+      // cancel at the period end, undone, canceled again (cleanup)
+      const cancel = await unlocked(() => api.subscriptions.cancel(sub.id))
+      const canceled = scheduledAtSquare(await api.subscriptions.retrieve(sub.id, { includeActions: true }))
+      findings.membershipCancel = `canceled_date ${cancel?.subscription.canceled_date ?? '?'}, status ${cancel?.subscription.status ?? '?'}; seen as cancelAt ${canceled.cancelAt}`
+      if (canceled.cancelAt !== next) problems.push(`cancel: ${findings.membershipCancel}`)
+      const withCancel = await api.subscriptions.retrieve(sub.id, { includeActions: true })
+      const c = (withCancel.actions ?? []).find((a) => a.type === 'CANCEL')
+      if (c) await unlocked(() => api.subscriptions.deleteAction(sub.id, c.id))
+      const undone = scheduledAtSquare(await api.subscriptions.retrieve(sub.id, { includeActions: true }))
+      if (undone.cancelAt) problems.push(`the cancel could not be undone (cancelAt ${undone.cancelAt})`)
+      notes.push(`${findings.membershipCancel}; undone: cancelAt ${undone.cancelAt}`)
+    }
+    // CancelInvoice: an unpaid invoice of a subscription without a card (the day-21 cleanup)
+    const subB = await createMembershipSubscription(
+      api,
+      randomUUID(),
+      subscriptionInput({ squareLocationId: locationId, variationId: newVariation, squareCustomerId: member.id, squareCardId: null, startDate: today, tz }),
+    )
+    cleanup.push({ what: `membership subscription ${subB.id}`, run: () => api.subscriptions.cancel(subB.id) })
+    const unpaid = await poll(
+      async () => {
+        const s = await api.subscriptions.retrieve(subB.id)
+        return s.invoice_ids?.[0] ? await api.invoices.get(s.invoice_ids[0]) : undefined
+      },
+      (i) => !!i && i.status !== 'DRAFT',
+      60_000,
+    )
+    if (!unpaid.value) findings.membershipInvoiceCancel = 'no invoice appeared for a subscription without a card'
+    else {
+      try {
+        const canceledInv = await api.invoices.cancel(unpaid.value.id, unpaid.value.version ?? 0)
+        let repeat: string
+        try {
+          repeat = `accepted (${(await api.invoices.cancel(unpaid.value.id, canceledInv.version ?? 0)).status})`
+        } catch (e) {
+          repeat = `refused: ${codeOf(e)} (callers read the invoice first and cancel only an open one)`
+        }
+        findings.membershipInvoiceCancel = `invoice ${unpaid.value.status} -> CancelInvoice -> ${canceledInv.status}; a repeat: ${repeat}`
+        if (canceledInv.status !== 'CANCELED') problems.push(`CancelInvoice: ${findings.membershipInvoiceCancel}`)
+      } catch (e) {
+        findings.membershipInvoiceCancel = `CancelInvoice refused: ${codeOf(e)}`
+        problems.push(findings.membershipInvoiceCancel)
+      }
+    }
+    notes.push(findings.membershipInvoiceCancel ?? '')
+  } catch (e) {
+    problems.push(errText(e))
+  }
+  if (problems.length) report.fail('SQR-14', problems.join('; '), undefined, notes)
+  else report.pass('SQR-14', notes.join(' | '))
 }
 
 function codeOf(e: unknown): string {

@@ -72,7 +72,7 @@ describe('verify:all', () => {
     expect(summary).toContain('| smsgate | 0 |')
     expect(r.json('aws').items.find((i) => i.id === 'AWS-06')!.status).toBe('PASS')
     expect(r.json('smsgate').items.find((i) => i.id === 'SG-B4')!.status).toBe('PASS')
-    expect(r.json('square').summary).toMatchObject({ fail: 0, pass: 11 })
+    expect(r.json('square').summary).toMatchObject({ fail: 0, pass: 13 })
   })
 
   it('--to is split by shape: a phone number for the tablet, an address for SES', async () => {

@@ -67,6 +67,8 @@ import { listVehicleClasses, requireVehicleClass } from '../../catalog/vehicle-c
 import { coverageOf, lineClassLabel } from '../../payments/gateway.js'
 import { activeMembership } from '../members.js'
 import { feeHow, requestDepositLink } from '../../square/deposits.js'
+import { squareProcessor } from '../../square/links.js'
+import { squareEnv } from '../../square/runtime.js'
 import { memberRefOf } from '../memberships.js'
 import { tierKeyOf, type PublicTier } from '../tiers.js'
 import './problems.js'
@@ -156,6 +158,10 @@ export interface PlanView {
   name: string
   monthlyPriceCents: number | null
   perks: string[]
+  /** How the page joins (ADR 0171 wave Q3b): square = card + consent here (membership/subscribe); squarespace = the checkout (membership/start). */
+  billing: 'square' | 'squarespace'
+  /** The tier's monthly price at each size it is sold at; joinable: the price is set up at Square (always true for squarespace). */
+  prices: { class: string; label: string; monthlyCents: number; joinable: boolean }[]
 }
 
 export interface AppointmentView {
@@ -323,7 +329,26 @@ async function invoiceView(db: Executor, invoiceId: string): Promise<InvoiceView
 async function planView(db: Executor, locationId: string, planKey: string): Promise<PlanView | null> {
   const p = (await listPlanPublic(db, locationId)).find((x) => x.key === planKey)
   if (!p) return null
-  return { tier: p.websiteTier, planKey: p.key, name: p.name, monthlyPriceCents: p.monthlyPriceCents, perks: p.perks }
+  const billing = squareProcessor(squareEnv()) ? 'square' : 'squarespace'
+  const rows = await db
+    .selectFrom('membership_tier_prices as t')
+    .innerJoin('membership_plans as pl', 'pl.id', 't.plan_id')
+    .innerJoin('vehicle_classes as c', (j) => j.onRef('c.location_id', '=', 't.location_id').onRef('c.key', '=', 't.class_key'))
+    .select(['t.class_key', 'c.label', 't.monthly_cents', 't.square_state', 't.square_variation_id'])
+    .where('pl.location_id', '=', locationId)
+    .where('pl.key', '=', p.key)
+    .where('t.superseded_at', 'is', null)
+    .where('c.active', '=', true)
+    .orderBy('c.sort')
+    .orderBy('c.key')
+    .execute()
+  const prices = rows.map((r) => ({
+    class: r.class_key,
+    label: r.label,
+    monthlyCents: r.monthly_cents,
+    joinable: billing === 'squarespace' || (r.square_state === 'synced' && !!r.square_variation_id),
+  }))
+  return { tier: p.websiteTier, planKey: p.key, name: p.name, monthlyPriceCents: p.monthlyPriceCents, perks: p.perks, billing, prices }
 }
 
 // ---- rules shared by the actions ------------------------------------------------------------------------------------------------
@@ -673,6 +698,8 @@ export async function startMembership(
   const now = d.app.clock.now()
   requireFresh(s, now)
   if (!s.customerId || !s.link.planKey) throw new AppError('LINK_WRONG_PURPOSE')
+  // with Square as the processor the page joins with a card (membership/subscribe, ADR 0171 wave Q3b), never a Squarespace checkout
+  if (squareProcessor(squareEnv())) throw new AppError('LINK_CHECKOUT_UNAVAILABLE')
   // a code proves the number: on a stale record a membership waits for the client's PIN or staff (W4c fixes)
   await requireProven(tx, s, now)
   const loc = await linkLocation(tx, s.link.locationId)

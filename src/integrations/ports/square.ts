@@ -175,6 +175,8 @@ export interface SquareApi {
   invoices: {
     get(id: string): Promise<WireInvoice>
     search(q: { location_ids: string[]; customer_ids?: string[]; cursor?: string; limit?: number }): Promise<Paged<WireInvoice>>
+    /** CancelInvoice (wave Q3b: a membership canceled for non-payment stops Square's retries); an open invoice only. */
+    cancel(id: string, version: number): Promise<WireInvoice>
   }
   events: {
     search(q: EventSearchQuery): Promise<Paged<WireEvent>>

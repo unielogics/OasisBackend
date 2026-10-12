@@ -8,7 +8,7 @@ writes a report you can keep or send to someone.
 |---|---|---|
 | `pnpm verify:smsgate` | the tablet sends and receives texts, receipts come back, STOP/START/HELP/C work | the tablet set up (below), its address and login, a phone to text |
 | `pnpm verify:squarespace` | the API key works, what orders and payments look like, which products are memberships | a read-only API key |
-| `pnpm verify:square` | the Square token, location and Events API; in the sandbox: a customer, a saved card, a $1 charge and refund, a payment link, a subscription and its first invoice, pause, swap and cancel (ADR 0171) | the sandbox app (`--secret oasis/sandbox/square`), or `--read-only` with the production token |
+| `pnpm verify:square` | the Square token, location and Events API; in the sandbox: a customer, a saved card, a $1 charge and refund, a payment link, a subscription and its first invoice, pause, swap and cancel; Oasis's own membership catalog sync and subscription code (ADR 0171) | the sandbox app (`--secret oasis/sandbox/square`), or `--read-only` with the production token |
 | `pnpm verify:aws` | SES sends mail from your address, the photo bucket accepts uploads, nothing is missing from the permissions | an AWS login or an instance role, a verified sender, a bucket |
 | `pnpm verify:ai` | the app's identity can call Claude on Amazon Bedrock (one-token ping), and names IAM, model access or the account quota when it cannot | an AWS login or the instance role (`--instance-profile`) |
 | `pnpm verify:all` | all five in a row, one summary | all of the above |
@@ -284,6 +284,7 @@ pnpm verify:square --sim                    # the same checks against the simula
 ```
 
 In the sandbox it creates a customer, a card, a $1 payment and its refund, two payment links, a plan with two variations and two
+subscriptions, and (SQR-13 and SQR-14, wave Q3b) a second customer and card, Oasis's own membership plan with three variations and two
 subscriptions, all with a `verify-` reference, and cleans up what Square allows (`--keep` leaves it; a plan variation that a subscription
 used cannot be deleted). A production token is refused unless `--read-only`. `--capture DIR` keeps scrubbed copies of every answer (ids
 replaced, no emails, URL paths dropped): that is how `test/fixtures/square/` was made.
