@@ -113,9 +113,62 @@ name the wash it priced (`wash Signature Hand Wash`). If it says `wash unchanged
 the $40 was not applied: set it in Settings → Prices. `ensurePlans` creates the design's tiers (gold and vip carrying their old keys)
 only for a location without any tier, so a tier or inclusion staff deleted never comes back.
 
+## Wave Q2a: sizes on every booking path, the size change, and membership coverage
+
+Built on branch `ws/q2-booking` (no migration: the Q1a columns are written now). Code: `scheduling/{visit-pricing,sizing}.ts`
+(new), `scheduling/{booking,addons,invoicing}.ts`, `memberships/{apply,plan-class,service,port,emergency,checkouts}.ts`,
+`public/{bookings,members,memberships}.ts`, `public/links/service.ts`, `assistant/{tools/actions,actions/handler}.ts`,
+`standing/series.ts`, `payments/{gateway,detail}.ts`, `customers/{service,http/routes}.ts`. API: api-spec 20.2a, 23.2, 24.3,
+26.2-26.4, 28.
+
+1. **The size of a visit**: the size named (a size of the shop that is on; 422 otherwise), else the car's size on file (when that
+   size is on), else none (the smallest size's price, `unknown_class`). `createAppointment` takes `vehicleId` (the client's own
+   live car; the assistant and the standing series pass it, so a car without a plate is never duplicated), `vehicleClass`,
+   `recordClassAs` (the source the size is written on the car with: staff, client, ai; absent: nothing is written) and
+   `memberPricing` (false: priced as a guest). A size a client or the assistant says never replaces one staff set.
+2. **The snapshot** is the engine's (`quoteVisit` with `MembershipPort.pricingFor`): `price_cents` = the charge (the member price,
+   or the regular price on a line an inclusion will cover), `list_price_cents`, `discount_bp`, `price_basis`, the size and its
+   label, `membership_id`; the same per add-on and invoice line, the label on the invoice. An add-on added later is priced at the
+   visit's size. The item sync keys a line by its whole price (a repriced line is removed and added, so the overpaid guard applies).
+3. **Badges**: `needsSizeConfirm` (no size), `needsPriceConfirm` (the size has no price: `estimated`) until `class_confirmed_at`;
+   never on a visit booked before sizes. `confirmAtShop` (a line `unknown_class` or `estimated`) adds "We’ll confirm the exact price
+   at the shop." to the website's, the link page's and the assistant's confirmations (an optional `{confirm}` in
+   `booking_confirmed_web` and `action_booked`, and its Spanish); a service with one price for every size asks nothing.
+4. **The size at the shop**: `PUT /appointments/:id/vehicle-class` reprices the package and the live add-ons for the client, stamps
+   `class_confirmed_at`, records the size on the car (staff), audits and publishes; 409 `PRICE_CHANGE_OVERPAID` (the gateway's
+   `ADDON_REMOVE_OVERPAID` reworded) refuses a change that would overpay. A visit already covered keeps its coverage: its own redeems
+   count as credits still there. `POST /appointments/quote` previews with the same rules and writes nothing.
+5. **The website** (`vehicleClass`, and the label fix): a `vehicle.label` that names a size (a label or key of the shop's, or the
+   old "Sedan / Coupe" → compact_car, "SUV / Crossover" → compact_suv, "Truck / Van" → truck, the `vehicle_type` backfill's map) is
+   the size and never a car. A guest's size prices the visit and never reaches someone else's record (the `linkOnly` rule); member
+   prices only with a member token for the record (an unverified member's number is a guest). The answers add `pricing`.
+6. **Settling a visit** (`settleMembershipVisit`, replacing the single-credit `evaluate`/`redeem`): the holder's or a household
+   member's ACTIVE membership, locked (appointment → membership → invoice, the order everywhere); `quoteVisit` assigns the inclusions
+   (an inclusion covers **one line of a visit**: `quoteVisit` now never gives one inclusion two lines, so the key
+   `redeem:<appointment>:<inclusion>` is unique); the lines are repriced **from their booked regular price** (a price edit between
+   booking and completion never changes a booked visit), covered lines at the regular price, others at the member price; then one
+   adjust + one redeem per covered line, each capped at what is left of the subtotal. Explicit apply, completion (auto, under the
+   savepoint; a business skip keeps the repricing, any error rolls it back, the completion never fails) and the closure restore (one
+   `restore` and one `protect` per redeem) all work per line. Arrival does not settle (the design's "optionally at arrival" is left out:
+   the completion and the button are enough).
+7. **Households**: `membershipOfCustomer` / `activeMembership` / the port's `forAppointments` and `upgradeCandidates` see a live
+   household member as the member; `POST /memberships/:id/household {customerId}` and `DELETE …/household/:customerId` (cli.member,
+   audited); a client who holds a live membership, or shares another, cannot be added (409 `MEMBERSHIP_HOUSEHOLD_TAKEN`), nor be given
+   one of their own while they share one; the stale-record rule applies as for a manual membership. No cap on household members
+   (plan decision 2). `GET /customers/:id/membership` of a household member answers the shared membership with `sharedFrom`.
+8. **planClass** everywhere a membership is made: staff create/patch, the website join and the link's `membership/start`
+   (`openCheckoutIntent` stores it on the membership and the checkout); absent, the tier's cheapest priced size, else the smallest
+   size; a size named without a current tier price is refused (422 `TIER_CLASS_UNPRICED`) on the public paths only (staff may sell
+   any size; `tier_price_id` stays null there). The website join keeps today's flow otherwise (a tier without any price still
+   joins at the smallest size until wave Q3b).
+9. **Display**: invoice items carry `listCents`, `discountBp`, `memberDiscountCents`, `classLabel`; an adjustment that is a
+   membership's coverage carries `coverage {serviceName, coveredCents, lineCents, differenceCents, planClassLabel}` (from the redeem
+   rows); the invoice summaries (`summariesByAppointment`) and the link page's `InvoiceView` the same. `calcInvoice` /
+   `invoice_calc_of` and the integrity check are unchanged.
+
 ## What the next waves add
 
-* **Q2 (booking paths):** every booking path takes a size (`createAppointment` `vehicleId`/`vehicleClass`), snapshots the price
+* **Q2 (booking paths, built in wave Q2a above):** every booking path takes a size (`createAppointment` `vehicleId`/`vehicleClass`), snapshots the price
   lines (`list_price_cents`, `discount_bp`, `price_basis`, the size label), `PUT /appointments/:id/vehicle-class` (reprice, refused
   when it would overpay), `POST /appointments/quote`, `settleMembershipVisit` (one redeem + adjust per covered line, the covered
   amount capped at the plan size; the per-inclusion unique index is already in place), household routes, `planClass` on joins and
