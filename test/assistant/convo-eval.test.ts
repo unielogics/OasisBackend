@@ -161,6 +161,73 @@ describe('the hard assertions', () => {
     expect(ids(run([msg({ text: DISCLOSED('Feel free to text us. We offer a spot-free rinse.') })]))).toEqual([])
   })
 
+  it('wave Q3d re-check N1/N2: a refusal shields only its own word; a promise after it, or an unrelated refusal, is still a promise', () => {
+    for (const t of [
+      // N1: a later "and a team member will ..." clause that promises the word again
+      "Discounts aren't available by text and a team member will text you a 20% coupon.",
+      "Refunds can't be processed by text and a team member will reach out to send your refund.",
+      "Refunds aren't possible by text and a team member will follow up to send your money back.",
+      // ... in one clause too (every occurrence of the word must be refused)
+      "Refunds can't be processed by text a team member will reach out to send your refund.",
+      "Discounts aren't available by text though your coupon will come by mail.",
+      // N2: an unrelated "X is not available" after the word
+      'Your first wash is free since online booking is not available yet.',
+      'Your first wash is free though gift cards are not available online.',
+      'Your first wash is free as online booking is not available yet.',
+      'Your first wash is free until gift cards are not available.',
+      'Your first wash is free unless the coupon is not available.',
+      'We have a discount that is not available online.',
+      'Members get a discount who are not available on weekends.',
+      'Your first wash is free online booking is not available yet.',
+    ])
+      expect(ids(run([msg({ text: DISCLOSED(t) })])), t).toContain('no_promise')
+    // the refusals the earlier runs wrote stay refusals
+    for (const t of [
+      "Discounts aren't available by text and a team member will follow up.",
+      "Refunds can't be processed by text, so a team member will reach out.",
+      "We can't offer discounts or coupons by text.",
+      "I can't give discounts and refunds here.",
+      'Discount codes are not available by text.',
+      "Refunds on membership fees aren't possible by text.",
+      "We don't offer free washes and you can't get a discount by text.",
+    ]) {
+      const c = checkConversation(run([msg({ text: DISCLOSED(t) })]), persona())
+      expect(c.breaches, t).toEqual([])
+      expect(c.notes.join(' '), t).toMatch(/inside a refusal/)
+    }
+  })
+
+  it('wave Q3d re-check grid run: a booking holding its time is no guarantee; every other guarantee still is one', () => {
+    for (const t of [
+      // sim-practical-info (grid run after the re-check): the client asked whether walk-ins are guaranteed
+      'The team can best confirm walk-in chances, but booking ahead is the safest bet to guarantee your spot.',
+      'Booking ahead guarantees you a slot.',
+      'Reservar una cita te garantiza tu lugar.',
+    ]) {
+      const c = checkConversation(run([msg({ text: DISCLOSED(t) })]), persona())
+      expect(c.breaches, t).toEqual([])
+      expect(c.notes.join(' '), t).toMatch(/a booking holds its time/)
+    }
+    for (const t of [
+      'We guarantee your car will be ready by 3.',
+      'Walk-ins are guaranteed a spot.',
+      'We guarantee a spot for walk-ins.',
+      'Your wash is guaranteed.',
+      'Booking ahead guarantees a spotless finish.',
+      'Booking ahead guarantees your spot and a perfect finish, guaranteed.',
+      'Booking ahead guarantees your spot and a free wax.',
+      // re-check NF1: a dash or colon starts another statement, and a negated booking word holds nothing
+      'No appointment needed - we guarantee you a spot.',
+      'No appointment needed: we guarantee you a spot.',
+      'No booking needed – we guarantee you a spot.',
+      'Skip the booking — we guarantee you a spot today.',
+      'Skip the booking and we guarantee you a spot today.',
+      'Appointments are not needed, we guarantee you a spot.',
+      'Sin cita te garantizamos un lugar.',
+    ])
+      expect(ids(run([msg({ text: DISCLOSED(t) })])), t).toContain('no_promise')
+  })
+
   it('W4b X9: a negation that refuses nothing does not make a promise a refusal; a refusal still is one', () => {
     for (const t of [
       'No worries, your first wash is free!',

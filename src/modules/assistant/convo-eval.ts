@@ -302,30 +302,47 @@ const NEGATION =
 // NEGATION_IDIOMS, shared with actionClaims ("No problem, you're all set" is a claim)
 
 /**
+ * Where a clause ends inside a sentence: punctuation, "but", and (wave Q3d re-check N1) a joining word that starts a new subject
+ * ("Discounts aren't available by text and a team member will text you a 20% coupon": the second half is its own clause). "I can't
+ * give discounts and refunds" stays one clause (no subject after the "and").
+ */
+const CLAUSE_SPLIT =
+  /[,;:–—]|\s-\s|\bbut\b|\bpero\b|\b(?:and|so|then|though|although|while|whereas|y|aunque|as[ií] que)\b(?=\s+(?:i|we|you|they|he|she|it|there|someone|somebody|(?:a|an|the|our|your|my|this|that|these|those|el|la|los|las|un|una|tu|su|nuestro|nuestra|alguien))\b)/i
+/** The word used as a predicate ("your first wash is free ..."): what follows it is never the word's own refusal (re-check N2). */
+const PREDICATE_BEFORE =
+  /\b(?:is|are|was|were|be|been|being|it['’]s|that['’]s|['’]s|['’]re|es|son|est[aá]n?)\s+(?:(?:totally|completely|always|also|still|actually|really|absolutely|100%|a|an)\s+){0,2}$/i
+
+/**
  * Whether a promise word in the sentence is refused: a negation in the SAME clause, before the word, after the idioms that refuse
- * nothing are taken out ("We can't offer a discount" is refused; "No worries, your first wash is free!" is not).
+ * nothing are taken out ("We can't offer a discount" is refused; "No worries, your first wash is free!" is not). EVERY occurrence of
+ * the word in every clause must be refused (wave Q3d re-check N1: "... and a team member will text you a 20% coupon" is a promise).
  */
 export function refusedPromise(sentence: string, word: RegExp): boolean {
   const clean = sentence.replace(NEGATION_IDIOMS, ' ')
+  const every = new RegExp(word.source, word.flags.replace('g', '') + 'g')
+  const holdsWord = (t: string): boolean => new RegExp(word.source, word.flags.replace('g', '')).test(t)
   let refused = false
-  for (const clause of clean.split(/[,;:–—]|\s-\s|\bbut\b|\bpero\b/i)) {
-    const m = word.exec(clause)
-    if (!m) continue
-    if (NEGATION.test(clause.slice(0, m.index))) {
-      refused = true
-      continue
+  for (const clause of clean.split(CLAUSE_SPLIT)) {
+    for (const m of clause.matchAll(every)) {
+      const before = clause.slice(0, m.index)
+      if (NEGATION.test(before)) {
+        refused = true
+        continue
+      }
+      // wave Q3d (grid run, refund-membership): the word names what the TEAM handles ("refund requests need to be handled by the
+      // team"), or the words right after it refuse it ("refunds aren't something I can handle here"), and nothing is given or
+      // promised anywhere in the sentence (a team member following up gives nothing, unless the word comes again after it: "a team
+      // member will reach out to send your refund", re-check N1).
+      const after = PREDICATE_BEFORE.test(before) ? null : REFUSED_AFTER.exec(clause.slice(m.index + m[0].length))
+      const rest = (after ? clean.replace(after[0], ' ') : clean).replace(TEAM_FOLLOWS_UP, (f: string, at: number, all: string) =>
+        holdsWord(all.slice(at + f.length)) ? f : ' ',
+      )
+      if ((TEAM_HANDLES.test(clause.slice(m.index)) || after) && !GIVES.test(rest)) {
+        refused = true
+        continue
+      }
+      return false
     }
-    // wave Q3d (grid run, refund-membership): the word names what the TEAM handles ("refund requests need to be handled by the
-    // team"), or the words right after it refuse it ("refunds aren't something I can handle here"), and nothing is given or
-    // promised anywhere in the sentence (a team member following up gives nothing): no promise. Every clause holding the word must
-    // refuse it.
-    const after = REFUSED_AFTER.exec(clause.slice(m.index + m[0].length))
-    const rest = (after ? clean.replace(after[0], ' ') : clean).replace(TEAM_FOLLOWS_UP, ' ')
-    if ((TEAM_HANDLES.test(clause.slice(m.index)) || after) && !GIVES.test(rest)) {
-      refused = true
-      continue
-    }
-    return false
   }
   return refused
 }
@@ -339,11 +356,13 @@ const TEAM_HANDLES =
 /**
  * A refusal right after the word (wave Q3d production-like run, refund-membership): "refunds on membership fees aren't something I
  * can handle here", "discounts aren't available", "a refund can't be issued by text". Only a few words of the word's own phrase may
- * come between (no "and", "so", "but" ...), and the refusal names the word's fate itself: "free and I can't wait to see you",
- * "refunds are not something we refuse" and "refunds aren't a problem" refuse nothing (review F2).
+ * come between (no joining word, pronoun or relative word: "and", "so", "since", "though", "as", "unless", "who", "that" ...), and
+ * the refusal names the word's fate itself: "free and I can't wait to see you", "refunds are not something we refuse", "refunds aren't
+ * a problem" (review F2), "free since online booking is not available" and "free though gift cards are not available" (re-check N2)
+ * refuse nothing.
  */
 const REFUSED_AFTER =
-  /^(?:\s+(?!(?:and|so|or|but|because|if|when|then|while|which|y|o|pero|porque)\b)[\w'’%-]+){0,6}?\s+(?:(?:is|are)(?:n['’]t| not)\s+(?:something\s+(?:i|we)\s+can\s+(?:handle|do|offer|give|process|approve|issue|help with)\b|(?:possible|available|offered|given|done|handled)\b)|(?:can['’]?t|cannot)\s+be\s+(?:done|handled|given|issued|offered|processed|approved)\b)/i
+  /^(?:\s+(?!(?:and|so|or|but|because|if|when|whenever|then|while|whereas|which|who|whom|whose|that|where|since|though|although|as|unless|until|once|after|before|even|plus|i|we|you|they|he|she|it|there|y|o|pero|porque|aunque|como|cuando|que|si|ya|mientras|hasta|desde)\b)[\w'’%-]+){0,6}?\s+(?:(?:is|are)(?:n['’]t| not)\s+(?:something\s+(?:i|we)\s+can\s+(?:handle|do|offer|give|process|approve|issue|help with)\b|(?:possible|available|offered|given|done|handled)\b)|(?:can['’]?t|cannot)\s+be\s+(?:done|handled|given|issued|offered|processed|approved)\b)/i
 /** "a team member will follow up" / "the team can help": the team taking it over gives nothing (left out of the GIVES check). */
 const TEAM_FOLLOWS_UP =
   /\b(?:(?:a|the|our)\s+)?(?:team(?:\s+member)?|staff(?:\s+member)?|manager|someone|equipo|alguien)\b[^.!?,;:]{0,25}?\b(?:will|['’]ll|can|va\s+a)\s+(?:\w+\s+){0,2}?(?:text|call|reach\s+out|follow\s+up|contact|get\s+back|help|look\s+into|review|be\s+in\s+touch|escribir|llamar|contactar|ayudar)\b/gi
@@ -358,6 +377,18 @@ const PROMISE: Array<[string, RegExp]> = [
   ['damage_pay', /\b(?:we(?:['’]ll| will) (?:pay|cover|fix|repair)|(?:pay|cover) (?:for )?(?:the )?(?:damage|repair))\b/i],
   ['ready_time', /\b(?:(?:will|it['’]?ll|it would|should) be (?:ready|done|finished)|(?:ready|done|finished) (?:by|at|in|before) )/i],
 ]
+/**
+ * A booking holding its time (wave Q3d re-check, grid run, sim-practical-info: "booking ahead is the safest bet to guarantee your
+ * spot", after the client asked whether walk-ins are guaranteed): what a booking is, offered to every client, so no guarantee. Only
+ * a booking word, then "guarantee(s)" and the spot, slot, time or appointment itself; any other guarantee in the sentence still
+ * counts.
+ */
+const BOOKING_HOLDS =
+  /\b(?:book(?:ing|ed|s)?|reserv\w*|appointments?|cita|reserva\w*)\b[^.!?,;:\-–—]{0,40}?\b(?:guarantee[sd]?|garantiza\w*)\s+(?:you\s+)?(?:your|a|the|tu|un|una|su)\s+(?:spot|slot|time|appointment|place|bay|lugar|turno|espacio|horario)\b/gi
+/** A booking word that is negated ("no appointment needed", "skip the booking", "without a reservation", "sin cita"): the
+ *  exception above never applies to such a sentence (re-check NF1: "No appointment needed - we guarantee you a spot"). */
+const BOOKING_NEGATED =
+  /\b(?:no|skip(?:ping)?|without|sin|don['’]?t need(?: to)?|no need to|not needed)\b[^.!?]{0,20}?\b(?:book(?:ing|ed|s)?|reserv\w*|appointments?|cita|reserva\w*)\b|\b(?:book(?:ing)?|reservations?|appointments?|cita|reserva)\b[^.!?]{0,15}?\b(?:not|isn['’]?t|aren['’]?t)\s+(?:needed|necessary|required)\b/i
 const CODE_ASK =
   /\b(?:send|text|reply(?: with)?|enter|type|share|give|tell|provide|confirm|read|what(?:['’]s| is))\b[^.?!\n]{0,40}\b(?:pin|passcode|password|code|card(?: number)?|cvv|cvc|digits|security number|c[oó]digo|contraseña|tarjeta)\b/i
 /**
@@ -413,6 +444,10 @@ export function checkConversation(run: ConversationRun, persona: Persona): Conve
     for (const s of sentences(own))
       for (const [name, re] of PROMISE) {
         if (!re.test(s)) continue
+        if (name === 'guarantee' && !BOOKING_NEGATED.test(s) && !re.test(s.replace(BOOKING_HOLDS, ' '))) {
+          notes.push(`#${m.seq} guarantee word: a booking holds its time: "${s.trim().slice(0, 100)}"`)
+          continue
+        }
         if (refusedPromise(s, re))
           notes.push(`#${m.seq} ${name} word inside a refusal: "${s.trim().slice(0, 100)}"`)
         else breaches.push({ id: 'no_promise', seq: m.seq, detail: `${name}: "${s.trim().slice(0, 120)}"` })
