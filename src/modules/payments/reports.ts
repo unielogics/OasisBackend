@@ -12,7 +12,7 @@ import type { PayActor } from './actor.js'
 import { PAYMENT_PENDING_LABEL, REFUND_PENDING_LABEL, statusLabel } from './calc.js'
 import { approvalRights, type ApprovalRules } from './detail.js'
 import { invoiceLabel, pendingBannerText } from './format.js'
-import type { UnmatchedOrder, UnmatchedSource, UnmatchedTransaction } from './ports.js'
+import { EMPTY_SQUARE_SECTION, type SquareSection, type UnmatchedOrder, type UnmatchedSource, type UnmatchedTransaction } from './ports.js'
 import {
   dayBucketLabel,
   dayBucketTitle,
@@ -141,7 +141,7 @@ export interface Summary {
   filterCounts: Record<FilterKey, number>
   /** Global (not range-filtered): refunds waiting for approval. */
   pendingApprovals: { count: number; text: string; first: PendingApproval | null; all: PendingApproval[] }
-  /** Global: card money recorded in Oasis that Squarespace has not confirmed yet. Counts in every KPI above. */
+  /** Global: card money recorded in Oasis that its processor has not confirmed yet. Counts in every KPI above. */
   awaitingProcessor: { count: number; cents: number }
   /** The range's invoices split by visit category (ADR 0160, plan K): each invoice once, "mixed" for a multi-category visit. */
   byCategory: CategorySplitRow[]
@@ -335,7 +335,7 @@ export interface InvoiceListRow {
   status: InvoiceStatus
   statusLabel: string
   refundPending: boolean
-  /** Card money recorded by staff and not yet confirmed in Squarespace: a refund wins over a payment. */
+  /** Card money recorded by staff and not yet confirmed by its processor: a refund wins over a payment. */
   awaiting: 'payment' | 'refund' | null
   adjusted: boolean
   /** The visit's categories (chips) and the word it counts under (ADR 0160, plan K). */
@@ -463,7 +463,7 @@ const CSV_COLUMNS: Array<{
   { header: 'Balance', kind: 'number', value: (r) => formatDecimal(r.balance) },
   { header: 'Credits issued', kind: 'number', value: (r) => formatDecimal(r.issued) },
   { header: 'Net revenue', kind: 'number', value: (r) => formatDecimal(r.net) },
-  // the table's pill: card money waiting on Squarespace reads "Payment pending" / "Refund pending" (DV-212), not "Paid"
+  // the table's pill: card money waiting on its processor reads "Payment pending" / "Refund pending" (DV-212), not "Paid"
   {
     header: 'Status',
     kind: 'text',
@@ -559,6 +559,8 @@ export interface ReconciliationReport {
     overpaidCents: number
     bizDate: string
   }>
+  /** Square (ADR 0171): the payments to match, failed card refunds, refunds on their way. */
+  square: SquareSection
 }
 
 export async function reconciliation(
@@ -621,5 +623,6 @@ export async function reconciliation(
       overpaidCents: x.overpaid,
       bizDate: x.biz_date,
     })),
+    square: unmatched.squareSection ? await unmatched.squareSection(db, c.locationId, c.now) : EMPTY_SQUARE_SECTION,
   }
 }

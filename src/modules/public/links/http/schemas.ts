@@ -185,7 +185,20 @@ export const MembershipStartResult = z.object({
 
 export const PayStartBody = z.object({}).strict()
 
+export const DepositStartBody = z.object({ bookingRef: z.string().trim().min(5).max(16).describe('OAS-n, as the booking answered') }).strict()
+
+export const DepositStartResult = z.object({
+  status: z
+    .enum(['redirect', 'paid', 'none', 'link_pending'])
+    .describe('redirect: go to redirectUrl (Square); paid: nothing owed; none: no deposit link for that visit; link_pending: the shop will text it'),
+  redirectUrl: z.string().nullable(),
+  amountCents: z.number().int().describe('The deposit (0 when none)'),
+})
+
 export const PayStartResult = z.object({
   status: z.enum(['redirect', 'link_pending']).describe('redirect: go to redirectUrl; link_pending: the shop will text a payment link'),
-  redirectUrl: z.string().nullable().describe('The invoice’s payment URL (https on an allowed host only); null when link_pending'),
+  redirectUrl: z
+    .string()
+    .nullable()
+    .describe('The payment URL (https on an allowed host only): with Square a link for the exact balance; null when link_pending'),
 })

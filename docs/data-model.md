@@ -47,6 +47,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261014100200_class_price_snapshots.sql` | the size snapshot of a visit (written from wave Q2): `appointments.vehicle_class`, `vehicle_class_label`, `class_confirmed_at`, `list_price_cents`, `discount_bp`, `price_basis`; the same per add-on and invoice line; `invoices.vehicle_class_label` (ADR 0170) |
 | `20261014200000_square_foundation.sql` | Square foundation (ADR 0171, wave Q1b): `webhook_log.provider` gains `square` (deliveries and Events API catch-up, deduplicated on Square's `event_id`), and `square_state` (merchant, events enabled, webhook subscription, catch-up watermark, last reconcile and test) |
 | `20261014300000_redeem_per_line.sql` | membership coverage per line (ADR 0170, wave Q2a review): drops `uq_credit_redeem_appointment` (an inclusion may cover several lines of a visit, and a line changed after settlement is given back and redeemed again; the idempotency key names each redeem) and indexes `membership_credit_events (appointment_id)` |
+| `20261014400000_square_core.sql` | Square core (ADR 0171, wave Q2b): `ledger_events.source` gains `square`, `processor` (`squarespace\|square`, backfilled for Squarespace rows) and `processor_order_id`; the guard trigger re-created (both mutable; `method`, `brand`, `last4` only on the move awaiting -> confirmed); `invoice_calc_of` leaves a refund the processor reported failed out of `refunded` and `ref_orig`; `payment_links` gain the Square columns, kinds `square_order\|square_quick_pay`, state `pending`, `origin`, a nullable `url`; `square_payments` (mirror and match), `square_refund_legs`, `square_pos_intents` |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -163,12 +164,14 @@ check-in link; the plain token exists only in the response that issued it.
 | `invoice_counters`   | pk `location_id`; `next_no` (starts at 20611), incremented under a row lock in the booking transaction: gap-free.                                                                                                                                                                                                                                                     |
 | `invoices`           | One per appointment (`appointment_id` unique), `invoice_no` unique per location, label snapshots, `occurred_at`/`biz_date` (frozen by `date_frozen_at` at completion), `tax_bp`, `tip_cents`, `canceled_at` + `cancel_reason canceled\|no_show`, `payment_link_url`, `version`.                                                                                       |
 | `invoice_items`      | Price snapshots (`package` or `addon`), `position`, `appointment_addon_id`; refund-by-item claims item ids.                                                                                                                                                                                                                                                           |
-| `ledger_events`      | Append-only (trigger): `type pay\|adjust\|refund\|credit_issue\|credit_apply\|void`, `amount_cents` (adjust signed), refund `status pending\|done\|denied` and `dest card\|credit\|cash`, method fields, actor and approver fields, `source oasis\|squarespace\|system\|seed`, `processor_state na\|awaiting_processor\|confirmed\|failed`, `idempotency_key` unique. |
+| `ledger_events`      | Append-only (trigger): `type pay\|adjust\|refund\|credit_issue\|credit_apply\|void`, `amount_cents` (adjust signed), refund `status pending\|done\|denied` and `dest card\|credit\|cash`, method fields, actor and approver fields, `source oasis\|squarespace\|system\|seed\|square`, `processor_state na\|awaiting_processor\|confirmed\|failed` (a card refund the processor reported `failed` no longer counts as refunded), `processor squarespace\|square` and `processor_order_id` (ADR 0171), `idempotency_key` unique. |
 | `credit_allocations` | Append-only: which store-credit lot a `credit_apply` consumed (FIFO by expiry, skipping lots already expired).                                                                                                                                                                                                                                                        |
-| `payment_links`      | A staff-attached Squarespace checkout or invoice URL (https): `purpose balance\|deposit`, `expected_cents`, `state`, `matched_sqsp_order_id`. No ledger event until money actually arrives.                                                                                                                                                                           |
+| `payment_links`      | A staff-attached Squarespace checkout or invoice URL (https), or a Square link made for an exact amount (ADR 0171 D3: `provider square`, `kind square_order\|square_quick_pay`, `square_payment_link_id`, `square_order_id`, `invoice_version`, `origin staff\|pay_page\|booking\|deposit_page`; `state pending` until its command commits, or a booking's deposit request with no URL yet; canceled with `cancel_reason` and deleted at Square, `square_deleted_at`; `paid_square_payment_id`): `purpose balance\|deposit`, `expected_cents`, `state`, `matched_sqsp_order_id`. No ledger event until money actually arrives. |
 
 `invoice_calc_of(invoice)` and the `invoice_calc` view compute items, adjustments, tax (half-up), paid, refunded, balance, refundable
-and the status ladder in integer cents; `src/modules/payments/calc.ts` is the TypeScript twin.
+and the status ladder in integer cents; `src/modules/payments/calc.ts` is the TypeScript twin (and `jobs-integrity.ts` checks them
+against each other nightly). Since `20261014400000_square_core.sql` a done card refund whose `processor_state` is `failed` (Square
+refused it) counts neither as `refunded` nor as `ref_orig` (ADR 0171 D4); the dashboard's `src/lib/payments/cents.ts` follows.
 
 ## Messaging (migration `20261006200000_messaging.sql`)
 
@@ -349,15 +352,18 @@ Columns added to existing tables:
 | `appointment_addons.list_price_cents`, `.discount_bp`, `.price_basis`                                             | the same per add-on                                                                                                                            |
 | `invoice_items.list_cents`, `.discount_bp`, `.price_basis`; `invoices.vehicle_class_label`                          | the regular price of a line at the size (null, or at least `price_cents`), the member % off and the basis; the size on the invoice           |
 
-## Square (migration `20261014200000_square_foundation.sql`, ADR 0171)
+## Square (migrations `20261014200000_square_foundation.sql` and `20261014400000_square_core.sql`, ADR 0171)
 
-The foundation only: nothing here moves money. The ledger columns (`ledger_events.processor`, `processor_order_id`), the Square
-payment mirror, the refund legs and the POS intents come with the core wave (Q2b); saved cards and consents with Q3a; subscriptions
-with Q3b.
+The foundation (Q1b) moves no money; the core (Q2b) adds the ledger columns (`ledger_events.processor`, `processor_order_id`), the
+Square payment mirror, the refund legs and the POS intents. Saved cards and consents come with Q3a; subscriptions with Q3b.
 
 | Table          | Purpose                                                                                                                                         |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `square_state` | One row per location, describing ONE Square `environment` (`sandbox\|production\|sim`): read only when it is the configured one, and a save from another environment resets every learned column it does not set. `square_location_id`; `merchant_id` learned by Test connection (a webhook of any other merchant is ignored); `events_enabled_at`; the verified `webhook_subscription_id` and when it was checked; `last_webhook_at`; the catch-up `watermark` (created_at of the newest event read, and after a complete run with no failure at least the run time minus 10 minutes; the next run reads from 10 minutes before it, never more than 28 days back), `last_catchup_at`, `last_catchup_events`, `last_catchup_claimed_at` (an event no webhook had delivered); `last_reconcile` (jsonb counts of the last 72 hours) and its time; `last_test` (jsonb checks) and its time; `last_error` and its time |
+
+| `square_payments` | The mirror of every Square payment of our location as last re-fetched (`square_payment_id` unique; status, source type, product, order, reference, note, receipt, `amount_cents` (tip excluded), `tip_cents`, `total_cents`, `refunded_cents`, card brand and last four, Square customer, buyer email, Square times) and Oasis's decision: `classification link\|charge\|membership\|pos_intent\|counter\|ignored`, `match_state pending\|matched\|unmatched\|ignored` (matched = `invoice_id` and `event_id` set; ignored = an `ignore_reason`), `match_after` (a counter payment waits SQUARE_MATCH_DELAY_SECONDS), `tip_event_id`, `rule` (R1 to R4a, link, cash_entry, manual, reassign), `confidence`, ranked `candidates` (jsonb), `variance`, who decided and when |
+| `square_refund_legs` | One Square refund of one Square payment for one ledger refund (the refund row is the outbox): `ledger_event_id`, `square_payment_id`, `amount_cents`, `origin api\|pos` (a refund made in the Square app that Oasis attached or recorded), `idempotency_key` (rf_<leg id>) and `square_refund_id` unique, `state to_submit\|pending\|completed\|failed\|rejected`, `error`, `attempts`, times |
+| `square_pos_intents` | "Open Square POS" from the dashboard (SQUARE_POS_API_ENABLED): the invoice, the staff card entry it wrote (`ledger_event_id`), `amount_cents`, the random `callback_state` and the note `code` (OAS-PI-xxxxxx), both unique, `status open\|callback_ok\|callback_error\|matched\|expired`, the callback's transaction ids or error, the matched `square_payment_id`, `expires_at` |
 
 Square deliveries and catch-up events share `webhook_log` (provider `square`, `external_id` = Square's `event_id`): whichever claims the
 event first processes it; the raw body and the headers without the signature are kept for the 90-day trail.
@@ -430,7 +436,7 @@ Operations design day re-anchored on **today** in the business time zone with th
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (113 tables, 1 view, 14 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (116 tables, 1 view, 14 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -1303,8 +1309,10 @@ Primary key `(id)`. Unique `(location_id, phone_e164)`. `(booked_appointment_id)
 | `needs_review` | boolean | no | `false` |
 | `idempotency_key` | text | yes |  |
 | `created_at` | timestamp with time zone | no | `app_now()` |
+| `processor` | text | yes |  |
+| `processor_order_id` | text | yes |  |
 
-Primary key `(id)`. Unique `(idempotency_key)`. Unique `(seq)`. `(actor_employee_id)` references `employees(id)` on delete set null. `(actor_user_id)` references `users(id)` on delete set null. `(approved_by_employee_id)` references `employees(id)` on delete set null. `(approved_by_user_id)` references `users(id)` on delete set null. `(customer_id)` references `customers(id)`. `(denied_by_employee_id)` references `employees(id)` on delete set null. `(denied_by_user_id)` references `users(id)` on delete set null. `(invoice_id)` references `invoices(id)`. `(location_id)` references `locations(id)` on delete cascade. `(parent_event_id)` references `ledger_events(id)`. `(voids_event_id)` references `ledger_events(id)`. 19 check constraints. Index `ledger_events_awaiting_idx` `(location_id, occurred_at)` where `processor_state = 'awaiting_processor'::text`. Index `ledger_events_customer_idx` `(customer_id, type, occurred_at)`. Index `ledger_events_invoice_idx` `(invoice_id, occurred_at DESC, seq DESC)`. Index `ledger_events_pending_idx` `(location_id, occurred_at)` where `status = 'pending'::text`. Index `ledger_events_sqsp_order_idx` `(sqsp_order_id)` where `sqsp_order_id IS NOT NULL`. Trigger: `ledger_events_guard`.
+Primary key `(id)`. Unique `(idempotency_key)`. Unique `(seq)`. `(actor_employee_id)` references `employees(id)` on delete set null. `(actor_user_id)` references `users(id)` on delete set null. `(approved_by_employee_id)` references `employees(id)` on delete set null. `(approved_by_user_id)` references `users(id)` on delete set null. `(customer_id)` references `customers(id)`. `(denied_by_employee_id)` references `employees(id)` on delete set null. `(denied_by_user_id)` references `users(id)` on delete set null. `(invoice_id)` references `invoices(id)`. `(location_id)` references `locations(id)` on delete cascade. `(parent_event_id)` references `ledger_events(id)`. `(voids_event_id)` references `ledger_events(id)`. 20 check constraints. Index `ledger_events_awaiting_idx` `(location_id, occurred_at)` where `processor_state = 'awaiting_processor'::text`. Index `ledger_events_customer_idx` `(customer_id, type, occurred_at)`. Index `ledger_events_invoice_idx` `(invoice_id, occurred_at DESC, seq DESC)`. Index `ledger_events_pending_idx` `(location_id, occurred_at)` where `status = 'pending'::text`. Index `ledger_events_processor_ref_idx` `(processor, processor_ref)` where `processor_ref IS NOT NULL`. Index `ledger_events_sqsp_order_idx` `(sqsp_order_id)` where `sqsp_order_id IS NOT NULL`. Trigger: `ledger_events_guard`.
 
 #### `ledger_integrity_runs`
 
@@ -1670,7 +1678,7 @@ Primary key `(id)`. Unique `(token_hash)`. `(user_id)` references `users(id)` on
 | `invoice_id` | uuid | no |  |
 | `kind` | text | no | `'checkout'::text` |
 | `purpose` | text | no | `'balance'::text` |
-| `url` | text | no |  |
+| `url` | text | yes |  |
 | `expected_cents` | integer | no |  |
 | `created_by` | uuid | yes |  |
 | `sent_message_id` | uuid | yes |  |
@@ -1679,8 +1687,18 @@ Primary key `(id)`. Unique `(token_hash)`. `(user_id)` references `users(id)` on
 | `state` | text | no | `'active'::text` |
 | `matched_sqsp_order_id` | text | yes |  |
 | `created_at` | timestamp with time zone | no | `app_now()` |
+| `provider` | text | no | `'squarespace'::text` |
+| `origin` | text | no | `'staff'::text` |
+| `square_payment_link_id` | text | yes |  |
+| `square_order_id` | text | yes |  |
+| `square_version` | integer | yes |  |
+| `invoice_version` | integer | yes |  |
+| `canceled_at` | timestamp with time zone | yes |  |
+| `cancel_reason` | text | yes |  |
+| `square_deleted_at` | timestamp with time zone | yes |  |
+| `paid_square_payment_id` | text | yes |  |
 
-Primary key `(id)`. `(created_by)` references `users(id)` on delete set null. `(invoice_id)` references `invoices(id)`. `(location_id)` references `locations(id)` on delete cascade. 5 check constraints. Index `payment_links_active_idx` `(location_id, created_at)` where `state = 'active'::text`. Index `payment_links_invoice_idx` `(invoice_id, created_at DESC)`.
+Primary key `(id)`. Unique `(square_order_id)`. Unique `(square_payment_link_id)`. `(created_by)` references `users(id)` on delete set null. `(invoice_id)` references `invoices(id)`. `(location_id)` references `locations(id)` on delete cascade. 9 check constraints. Index `payment_links_active_idx` `(location_id, created_at)` where `state = 'active'::text`. Index `payment_links_invoice_idx` `(invoice_id, created_at DESC)`. Index `payment_links_square_open_idx` `(location_id, created_at)` where `(provider = 'square'::text) AND (state = ANY (ARRAY['pending'::text, 'active'::text]))`.
 
 #### `pending_checkin_texts`
 
@@ -2358,6 +2376,100 @@ Primary key `(id)`. Unique `(location_id, sqsp_txn_id)`. `(location_id)` referen
 | `last_delivery_at` | timestamp with time zone | yes |  |
 
 Primary key `(id)`. Unique `(location_id, sqsp_subscription_id)`. `(location_id)` references `locations(id)` on delete cascade. 1 check constraint.
+
+#### `square_payments`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `square_payment_id` | text | no |  |
+| `square_location_id` | text | yes |  |
+| `status` | text | no |  |
+| `source_type` | text | yes |  |
+| `square_product` | text | yes |  |
+| `application_id` | text | yes |  |
+| `square_order_id` | text | yes |  |
+| `reference_id` | text | yes |  |
+| `note` | text | yes |  |
+| `receipt_number` | text | yes |  |
+| `receipt_url` | text | yes |  |
+| `amount_cents` | integer | no |  |
+| `tip_cents` | integer | no | `0` |
+| `total_cents` | integer | no |  |
+| `refunded_cents` | integer | no | `0` |
+| `card_brand` | text | yes |  |
+| `last4` | text | yes |  |
+| `entry_method` | text | yes |  |
+| `square_customer_id` | text | yes |  |
+| `buyer_email` | text | yes |  |
+| `square_created_at` | timestamp with time zone | no |  |
+| `square_updated_at` | timestamp with time zone | yes |  |
+| `classification` | text | yes |  |
+| `match_state` | text | no | `'pending'::text` |
+| `match_after` | timestamp with time zone | yes |  |
+| `invoice_id` | uuid | yes |  |
+| `event_id` | uuid | yes |  |
+| `tip_event_id` | uuid | yes |  |
+| `rule` | text | yes |  |
+| `confidence` | numeric(3,2) | yes |  |
+| `candidates` | jsonb | no | `'[]'::jsonb` |
+| `variance` | jsonb | yes |  |
+| `decided_by` | text | yes |  |
+| `decided_by_user_id` | uuid | yes |  |
+| `decided_at` | timestamp with time zone | yes |  |
+| `ignore_reason` | text | yes |  |
+| `ignore_note` | text | yes |  |
+| `first_seen_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. Unique `(square_payment_id)`. `(decided_by_user_id)` references `users(id)` on delete set null. `(event_id)` references `ledger_events(id)`. `(invoice_id)` references `invoices(id)`. `(location_id)` references `locations(id)` on delete cascade. `(tip_event_id)` references `ledger_events(id)`. 10 check constraints. Index `square_payments_invoice_idx` `(invoice_id)` where `invoice_id IS NOT NULL`. Index `square_payments_open_idx` `(location_id, square_created_at)` where `match_state = ANY (ARRAY['pending'::text, 'unmatched'::text])`. Index `square_payments_order_idx` `(square_order_id)` where `square_order_id IS NOT NULL`.
+
+#### `square_pos_intents`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `invoice_id` | uuid | no |  |
+| `ledger_event_id` | uuid | yes |  |
+| `amount_cents` | integer | no |  |
+| `callback_state` | text | no |  |
+| `code` | text | no |  |
+| `note` | text | no |  |
+| `status` | text | no | `'open'::text` |
+| `transaction_id` | text | yes |  |
+| `client_transaction_id` | text | yes |  |
+| `error_code` | text | yes |  |
+| `square_payment_id` | text | yes |  |
+| `created_by` | uuid | yes |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `expires_at` | timestamp with time zone | no |  |
+| `callback_at` | timestamp with time zone | yes |  |
+
+Primary key `(id)`. Unique `(callback_state)`. Unique `(code)`. `(created_by)` references `users(id)` on delete set null. `(invoice_id)` references `invoices(id)`. `(ledger_event_id)` references `ledger_events(id)`. `(location_id)` references `locations(id)` on delete cascade. 3 check constraints. Index `square_pos_intents_open_idx` `(location_id, created_at)` where `status = ANY (ARRAY['open'::text, 'callback_ok'::text])`.
+
+#### `square_refund_legs`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `ledger_event_id` | uuid | no |  |
+| `square_payment_id` | text | no |  |
+| `amount_cents` | integer | no |  |
+| `origin` | text | no | `'api'::text` |
+| `idempotency_key` | text | yes |  |
+| `square_refund_id` | text | yes |  |
+| `state` | text | no | `'to_submit'::text` |
+| `error` | text | yes |  |
+| `attempts` | integer | no | `0` |
+| `submitted_at` | timestamp with time zone | yes |  |
+| `completed_at` | timestamp with time zone | yes |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. Unique `(idempotency_key)`. Unique `(square_refund_id)`. `(ledger_event_id)` references `ledger_events(id)`. `(location_id)` references `locations(id)` on delete cascade. 5 check constraints. Index `square_refund_legs_event_idx` `(ledger_event_id)`. Index `square_refund_legs_open_idx` `(location_id, created_at)` where `state = ANY (ARRAY['to_submit'::text, 'pending'::text])`. Index `square_refund_legs_payment_idx` `(square_payment_id)`.
 
 #### `square_state`
 

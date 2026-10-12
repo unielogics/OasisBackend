@@ -7,7 +7,9 @@ export type RefundStatus = 'pending' | 'done' | 'denied'
 export type MethodKind = 'card' | 'apple_pay' | 'cash' | 'store_credit' | 'other'
 export type RefundDest = 'card' | 'credit' | 'cash'
 export type CreditExpiry = 'none' | 'd30' | 'd90'
-export type LedgerSource = 'oasis' | 'squarespace' | 'system' | 'seed'
+export type LedgerSource = 'oasis' | 'squarespace' | 'system' | 'seed' | 'square'
+/** The processor of a card payment or refund (migration 20261014400000, ADR 0171): null for cash, credit and pre-Square rows. */
+export type PaymentProcessorName = 'squarespace' | 'square'
 export type ProcessorState = 'na' | 'awaiting_processor' | 'confirmed' | 'failed'
 export type InvoiceStatus =
   | 'paid'
@@ -117,6 +119,8 @@ export interface LedgerEventsTable {
   needs_review: Generated<boolean>
   idempotency_key: string | null
   created_at: Generated<Date>
+  processor: PaymentProcessorName | null
+  processor_order_id: string | null
 }
 
 export interface CreditAllocationsTable {
@@ -128,21 +132,46 @@ export interface CreditAllocationsTable {
   created_at: Generated<Date>
 }
 
+export type PaymentLinkKind = 'checkout' | 'invoice' | 'square_order' | 'square_quick_pay'
+export type PaymentLinkState = 'pending' | 'active' | 'paid' | 'expired' | 'canceled'
+export type PaymentLinkOrigin = 'staff' | 'pay_page' | 'booking' | 'deposit_page'
+export type PaymentLinkCancelReason =
+  | 'superseded'
+  | 'amount_changed'
+  | 'paid_elsewhere'
+  | 'invoice_canceled'
+  | 'expired'
+  | 'stale'
+  | 'square_error'
+  | 'deposit_paid'
+
 export interface PaymentLinksTable {
   id: string
   location_id: string
   invoice_id: string
-  kind: Generated<'checkout' | 'invoice'>
+  kind: Generated<PaymentLinkKind>
   purpose: Generated<'balance' | 'deposit'>
-  url: string
+  /** Null only on a Square row not created at Square yet (pending) or never created (canceled). */
+  url: string | null
   expected_cents: number
   created_by: string | null
   sent_message_id: string | null
   sent_at: Date | null
   expires_at: Date | null
-  state: Generated<'active' | 'paid' | 'expired' | 'canceled'>
+  state: Generated<PaymentLinkState>
   matched_sqsp_order_id: string | null
   created_at: Generated<Date>
+  // Square links (migration 20261014400000, ADR 0171 D3)
+  provider: Generated<'squarespace' | 'square'>
+  origin: Generated<PaymentLinkOrigin>
+  square_payment_link_id: string | null
+  square_order_id: string | null
+  square_version: number | null
+  invoice_version: number | null
+  canceled_at: Date | null
+  cancel_reason: PaymentLinkCancelReason | null
+  square_deleted_at: Date | null
+  paid_square_payment_id: string | null
 }
 
 /** One row of the invoice_calc view / invoice_calc_of(): every amount in integer cents (bigint sums parse to number). */

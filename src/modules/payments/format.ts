@@ -32,3 +32,11 @@ export function pendingBannerText(
   const noun = count === 1 ? 'refund' : 'refunds'
   return `${count} ${noun} awaiting approval — ${formatUsd(amountCents)} · ${client} · requested by ${requestedBy}`
 }
+
+/**
+ * The name a message gives the processor of a ledger event (ADR 0171, design 2.7): "Square", "Squarespace", or "the card processor"
+ * for an entry no processor has touched yet.
+ */
+export function processorName(p: 'square' | 'squarespace' | null | undefined): string {
+  return p === 'square' ? 'Square' : p === 'squarespace' ? 'Squarespace' : 'the card processor'
+}

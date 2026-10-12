@@ -6,6 +6,7 @@ import type { Executor } from '../../platform/db.js'
 import { getDefaultLocation } from '../../platform/locations.js'
 import { maskText } from '../../platform/logging.js'
 import type { IntegrationStatus } from '../system/integrations.js'
+import { squareCounts } from './db/alerts.js'
 import { currentSquareState } from './db/state.js'
 
 const H = 3600_000
@@ -41,6 +42,9 @@ export async function squareStatus(db: Executor, env: Env, now: Date): Promise<I
   )
     warnings.push('no webhook in 24 hours while the catch-up found events: check the subscription and /hooks/square')
   const test = state?.last_test ?? null
+  const counts = location ? await squareCounts(db, location.id, now) : { unmatched: 0, failedRefunds: 0 }
+  if (counts.unmatched > 0) warnings.push(`${counts.unmatched} Square payment(s) to match (Payments, Square payments to match)`)
+  if (counts.failedRefunds > 0) warnings.push(`${counts.failedRefunds} card refund(s) Square refused in the last 14 days: give the money back another way`)
   return {
     key: 'square',
     label: 'Square (payments, links, memberships, counter)',
@@ -70,9 +74,9 @@ export async function squareStatus(db: Executor, env: Env, now: Date): Promise<I
       lastCatchupAt: at(state?.last_catchup_at),
       lastReconcileAt: at(state?.last_reconcile_at),
       lastTestOk: test ? test.ok : null,
-      // counts of the waves that build them (Q2b: the payments to match and the refund legs; Q3b: enrollments)
-      unmatched: null,
-      failedRefunds: null,
+      // the payments to match and the card refunds Square refused (wave Q2b); enrollments come with wave Q3b
+      unmatched: counts.unmatched,
+      failedRefunds: counts.failedRefunds,
       pendingEnrollments: null,
     },
   }

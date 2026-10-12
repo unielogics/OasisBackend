@@ -1,6 +1,7 @@
 // Cash-basis revenue for the Operations "Revenue today" tile: money that moved in [from, to). Payments count when they
 // are recorded (staff-recorded card payments count at once, flagged awaiting_processor until Squarespace confirms),
-// voids and refunds paid back to card or cash subtract, store credit does not move money.
+// voids and refunds paid back to card or cash subtract (a card refund the processor reported failed gave nothing back), store
+// credit does not move money.
 import { sql } from 'kysely'
 import type { RevenueSource } from '../scheduling/ports.js'
 
@@ -12,6 +13,7 @@ export const ledgerRevenueSource: RevenueSource = {
           when 'void' then -e.amount_cents
           else 0 end), 0)
         - coalesce(sum(case when e.type = 'refund' and e.status = 'done' and e.dest <> 'credit'
+                              and e.processor_state <> 'failed'
                               and coalesce(e.resolved_at, e.occurred_at) >= ${from}
                               and coalesce(e.resolved_at, e.occurred_at) < ${to}
                             then e.amount_cents else 0 end), 0) as cents

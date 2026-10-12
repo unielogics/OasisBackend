@@ -364,7 +364,8 @@ export async function loadShopFacts(db: Executor, deps: Pick<ShopFactsDeps, 'env
       vipSameDayPerMonth: v.sameDayPerMonth,
       lines: bookingLines,
     },
-    fee: { guestBookingFeeCents: fee.value.cents, collect: fee.value.collect, lines: feeLines },
+    // card_hold (wave Q3a) is collected at the counter until then
+    fee: { guestBookingFeeCents: fee.value.cents, collect: fee.value.collect === 'link' ? 'link' : 'counter', lines: feeLines },
     cancellation: { freeCancelHours: c.freeCancelHours, lines: cancelLines },
     vip: { lines: vipLines },
     arrival: { lines: arrivalLines },

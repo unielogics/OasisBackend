@@ -49,6 +49,8 @@ const PUBLIC_ROUTES = new Set([
   'POST /api/v1/public/links/appointments/:ref/reschedule',
   'POST /api/v1/public/links/membership/start',
   'POST /api/v1/public/links/pay/start',
+  // the booking deposit by Square link (ADR 0171): a verified calendar page, same guards as pay/start
+  'POST /api/v1/public/links/deposit/start',
 ])
 
 /** 403 codes a permitted caller may still get from a business rule, keyed by "METHOD url". Empty with the generic {} body. */

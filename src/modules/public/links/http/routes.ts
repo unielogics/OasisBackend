@@ -28,6 +28,9 @@ import { BOARD_DEFAULT_DAYS } from '../../availability-loader.js'
 import { enforceLimits, type LimitRule } from '../../limits.js'
 import { AvailabilityQuery, BoardView } from '../../http/schemas.js'
 import { loadLinkBoard } from '../board.js'
+import { squareProcessor } from '../../../square/links.js'
+import { startSquareDeposit, startSquarePayment } from '../../../square/public.js'
+import { squareEnv } from '../../../square/runtime.js'
 import {
   bookOnLink,
   linkLocation,
@@ -52,6 +55,8 @@ import {
   LinkStateView,
   MembershipStartBody,
   MembershipStartResult,
+  DepositStartBody,
+  DepositStartResult,
   PayStartBody,
   PayStartResult,
   PinBody,
@@ -132,7 +137,14 @@ export function registerLinkRoutes(d: LinkRoutesDeps): void {
   let identity: IdentityDeps | null = null
   const id = (): IdentityDeps =>
     (identity ??= identityDeps({ db: app.db, clock: app.clock, newId: app.newId, env: app.env, queue: d.queue, log: app.log, scrypt: d.scrypt }))
-  const deps: LinkDeps = { app, scheduling: d.scheduling, linkHosts: linkHostsFromEnv(app.env.PAYMENT_LINK_HOSTS) }
+  const deps: LinkDeps = {
+    app,
+    scheduling: d.scheduling,
+    linkHosts: linkHostsFromEnv(app.env.PAYMENT_LINK_HOSTS, {
+      processor: app.env.PAYMENT_PROCESSOR,
+      production: app.env.NODE_ENV === 'production',
+    }),
+  }
 
   const guard = {
     onRequest: async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
@@ -482,7 +494,8 @@ export function registerLinkRoutes(d: LinkRoutesDeps): void {
         summary: 'Pay the invoice (payment link, fresh PIN or code)',
         description:
           `${bearerNote} Needs a PIN or code entered on this page in the last 5 minutes (403 \`IDENTITY_STEP_UP_REQUIRED\`); 403 \`LINK_PRIVILEGES_HELD\` within 72 hours of a PIN reset; 401 \`LINK_WRONG_PURPOSE\` on another kind of link; a paid or voided invoice has ended the page already (401 \`IDENTITY_SESSION_INVALID\`). ` +
-          '`{status: "redirect", redirectUrl}`: the payment URL staff attached to the invoice, only https on a `PAYMENT_LINK_HOSTS` host (default squarespace.com); one completion of the link (3). `{status: "link_pending", redirectUrl: null}`: the invoice has no allowed URL; the managers get one `payments.link_requested` notice (until they read it) to text the client a payment link. Limits: 20 an hour per address, 10 per number.',
+          '`{status: "redirect", redirectUrl}`: the payment URL staff attached to the invoice, only https on a `PAYMENT_LINK_HOSTS` host (default squarespace.com, square.link, square.site); one completion of the link (3). `{status: "link_pending", redirectUrl: null}`: the invoice has no allowed URL; the managers get one `payments.link_requested` notice (until they read it) to text the client a payment link. ' +
+          'With PAYMENT_PROCESSOR=square (ADR 0171 D3): a Square link for exactly the current balance (its lines, tax and tip, or one "Balance due" line), reused while it is active for that amount, else made now (409 `CONCURRENT_UPDATE` if the balance changed during the call, 422 `PAY_NOTHING_TO_COLLECT` when nothing is owed); `link_pending` only when Square does not answer or is watch-only. Limits: 20 an hour per address, 10 per number.',
         body: PayStartBody,
         response: { 200: PayStartResult },
       },
@@ -493,7 +506,37 @@ export function registerLinkRoutes(d: LinkRoutesDeps): void {
         { key: `link_pay:ip:${ipLimitKey(req.ip)}`, rule: LINK_LIMITS.pay.ip },
         { key: `link_pay:phone:${s0.phone}`, rule: LINK_LIMITS.pay.phone },
       ])
+      // with Square (ADR 0171 D3): a Square link for the exact balance, made or reused now, in two transactions around the call
+      if (squareProcessor(squareEnv()))
+        return startSquarePayment(deps, (db, o) => session(db, req, o), reqOf(req), req.log)
       return transaction(app.db, async (tx) => startPayment(tx, deps, await session(tx, req, { forUpdate: true }), reqOf(req)))
+    },
+  )
+
+  app.post(
+    P('/deposit/start'),
+    {
+      ...guard,
+      config: cfg('A verified calendar page pays the deposit of one of its client’s visits through a Square link', 10),
+      schema: {
+        tags: TAGS,
+        operationId: 'startClientLinkDeposit',
+        summary: 'Pay the booking deposit now (verified calendar page, Square)',
+        description:
+          `${bearerNote} The booking fee is a deposit toward the visit (ADR 0150, ADR 0171 D2). For one of the page's client's upcoming visits (\`bookingRef\` OAS-n, booked or confirmed) whose booking asked for a deposit link (booking.guest_fee.collect \`link\` with PAYMENT_PROCESSOR=square): ` +
+          '`{status: "redirect", redirectUrl}` a Square quick-pay link for exactly the deposit (an active one is reused); `paid` the deposit is already paid; `none` no deposit link is owed for that visit; `link_pending` Square did not answer (the shop texts the link). Needs a verified page (401 `LINK_WRONG_PURPOSE` on another kind of link, 403 `IDENTITY_STEP_UP_REQUIRED`); 404 for a booking that is not the page client’s. Uses no completion of the link. Limits as pay/start.',
+        body: DepositStartBody,
+        response: { 200: DepositStartResult },
+      },
+    },
+    async (req) => {
+      const s0 = await session(app.db, req, { touch: false })
+      await limit([
+        { key: `link_pay:ip:${ipLimitKey(req.ip)}`, rule: LINK_LIMITS.pay.ip },
+        { key: `link_pay:phone:${s0.phone}`, rule: LINK_LIMITS.pay.phone },
+      ])
+      if (!squareProcessor(squareEnv())) return { status: 'none' as const, redirectUrl: null, amountCents: 0 }
+      return startSquareDeposit(deps, (db, o) => session(db, req, o), reqOf(req), req.body.bookingRef, req.log)
     },
   )
 }

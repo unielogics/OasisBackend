@@ -6,15 +6,13 @@
 //   - audited and announced: the audit log and the payments SSE channel hear about every change, exactly as a staff command would
 // Commands take a transaction so the manual match endpoint can run them inside the request's idempotency transaction.
 import { sql } from 'kysely'
-import * as audit from '../../../platform/audit.js'
 import type { AuditContext } from '../../../platform/audit.js'
 import type { Clock } from '../../../platform/clock.js'
 import { transaction, type Db, type Executor, type Tx } from '../../../platform/db.js'
 import { AppError } from '../../../platform/errors.js'
 import type { NewId } from '../../../platform/ids.js'
-import * as realtime from '../../../platform/realtime.js'
-import { publishOpsForInvoice } from '../../payments/ops-events.js'
-import { calcOf, cardLabel, insertEvent, lockInvoice, touchInvoice } from '../../payments/repository.js'
+import { announceInvoiceChange } from '../../payments/announce.js'
+import { calcOf, cardLabel, insertEvent, lockInvoice } from '../../payments/repository.js'
 import type { EventRow } from '../../payments/repository.js'
 import type { IdentityRef } from '../identity.js'
 import type { LedgerCommands, LedgerContextQuery, LedgerReader, PaymentFacts } from '../ledger-ports.js'
@@ -291,7 +289,7 @@ export class SqspLedgerOps {
     return row
   }
 
-  /** The common tail: version bump, audit row and the payments SSE events the Payments screen redraws from. */
+  /** The common tail: version bump, audit row and the payments SSE events the Payments screen redraws from (payments/announce.ts). */
   private async announce(
     tx: Tx,
     invoiceId: string,
@@ -303,22 +301,11 @@ export class SqspLedgerOps {
       after?: Record<string, unknown>
     },
   ): Promise<void> {
-    const now = this.d.clock.now()
-    const version = await touchInvoice(tx, invoiceId, now)
-    const calc = await calcOf(tx, invoiceId)
-    await audit.record(tx, {
+    await announceInvoiceChange(tx, {
       locationId: this.d.locationId,
+      invoiceId,
+      now: this.d.clock.now(),
       action: o.action,
-      entityType: 'invoice',
-      entityId: invoiceId,
-      before: o.before,
-      after: {
-        status: calc.status,
-        paid: calc.paid,
-        refunded: calc.refunded,
-        balance: calc.balance,
-        ...o.after,
-      },
       ctx: o.actor.audit ?? {
         actor: {
           userId: o.actor.userId,
@@ -327,12 +314,10 @@ export class SqspLedgerOps {
           roles: o.actor.roles,
         },
       },
+      before: o.before,
+      after: o.after,
+      events: o.events,
     })
-    const pub = (type: string, payload: Record<string, string | number>) =>
-      realtime.publish(tx, { locationId: this.d.locationId, channel: 'payments', type, payload })
-    await pub('invoice.updated', { invoiceId, version })
-    for (const e of o.events) await pub('ledger.event', { invoiceId, eventId: e.id, type: e.type })
-    await publishOpsForInvoice(tx, this.d.locationId, invoiceId)
   }
 
   private invoiceSnapshot = async (tx: Tx, invoiceId: string) => {

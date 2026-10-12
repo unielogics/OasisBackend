@@ -20,6 +20,9 @@ import { sqKey } from '../src/integrations/square/keys.js'
 import { SQUARE_EVENT_TYPES } from '../src/integrations/square/webhook.js'
 import type { SquareApi } from '../src/integrations/ports/square.js'
 
+/** The only webhook URL a production Square may be registered with (the environment contract's own rule, config.ts). */
+export const PRODUCTION_HOOK_URL = /^https:\/\/[^/]+\/hooks\/square$/
+
 export interface WebhookPlan {
   action: 'none' | 'create' | 'update'
   subscriptionId?: string
@@ -47,7 +50,8 @@ export function planWebhookSubscription(
 /**
  * The settings the script needs, from the process environment (pure, tested): the Square shape without the contract's cross-field
  * rules, so no signature key is needed yet, and always the live client (SQUARE_PROVIDER is ignored: the simulator has nothing to
- * register). Needs SQUARE_ACCESS_TOKEN and SQUARE_WEBHOOK_URL.
+ * register). Needs SQUARE_ACCESS_TOKEN and SQUARE_WEBHOOK_URL; in production (NODE_ENV or SQUARE_ENVIRONMENT) the URL must be
+ * https://<domain>/hooks/square, as the contract requires.
  */
 export function webhooksScriptEnv(source: NodeJS.ProcessEnv): { ok: true; env: SquareEnv & { SQUARE_WEBHOOK_URL: string } } | { ok: false; message: string } {
   const parsed = squareEnvSchema.safeParse(source)
@@ -56,6 +60,10 @@ export function webhooksScriptEnv(source: NodeJS.ProcessEnv): { ok: true; env: S
   const e = parsed.data
   const missing = [...(!e.SQUARE_ACCESS_TOKEN ? ['SQUARE_ACCESS_TOKEN'] : []), ...(!e.SQUARE_WEBHOOK_URL ? ['SQUARE_WEBHOOK_URL (the public https URL of /hooks/square)'] : [])]
   if (missing.length) return { ok: false, message: `square:webhooks needs ${missing.join(' and ')}` }
+  // the contract's rule, kept although the contract itself is not run (Q1b leftover N1): production registers only the real hook URL
+  const production = source.NODE_ENV === 'production' || e.SQUARE_ENVIRONMENT === 'production'
+  if (production && !PRODUCTION_HOOK_URL.test(e.SQUARE_WEBHOOK_URL!))
+    return { ok: false, message: 'SQUARE_WEBHOOK_URL must be https://<domain>/hooks/square in production (the exact URL registered with Square)' }
   return { ok: true, env: { ...e, SQUARE_PROVIDER: 'live', SQUARE_WEBHOOK_URL: e.SQUARE_WEBHOOK_URL! } }
 }
 

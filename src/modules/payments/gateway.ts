@@ -34,7 +34,7 @@ export interface InvoiceSummary {
   depositCents: number
   status: InvoiceStatus
   refundPending: boolean
-  /** Card money staff recorded that Squarespace has not confirmed yet (it counts toward the balance at once). */
+  /** Card money staff recorded that its processor has not confirmed yet (it counts toward the balance at once). */
   awaitingCents: number
   /** The rate snapshotted on the invoice, in basis points (700 = 7%). */
   taxBp: number
@@ -434,7 +434,7 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
       if (!inv.canceled_at && (removed.length > 0 || added.length > 0)) {
         const ev = await tx
           .selectFrom('ledger_events')
-          .select(['type', 'amount_cents', 'status', 'dest'])
+          .select(['type', 'amount_cents', 'status', 'dest', 'processor_state'])
           .where('invoice_id', '=', inv.id)
           .execute()
         const events: CalcEvent[] = ev.map((e) => ({
@@ -442,6 +442,7 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
           amountCents: e.amount_cents,
           status: e.status,
           dest: e.dest,
+          processorState: e.processor_state,
         }))
         const next: InvoiceCalc = calcInvoice({
           itemPrices: items.map((i) => i.priceCents),

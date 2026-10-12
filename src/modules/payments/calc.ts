@@ -1,7 +1,7 @@
 // Pure twin of the invoice_calc SQL (migration 20261006190000_payments.sql): the Payments design's calc() in integer
 // cents with the review fixes. Used for sheet previews (adjust, by-item refund), seeds and the equality tests against SQL.
 import { divHalfUp, percentOfCents, taxCents } from '../../platform/money.js'
-import type { InvoiceStatus, LedgerType, RefundDest, RefundStatus } from './schema.js'
+import type { InvoiceStatus, LedgerType, ProcessorState, RefundDest, RefundStatus } from './schema.js'
 
 export interface CalcEvent {
   type: LedgerType
@@ -9,6 +9,8 @@ export interface CalcEvent {
   amountCents: number
   status?: RefundStatus
   dest?: RefundDest | null
+  /** A card refund the processor reported failed ('failed') no longer counts as refunded (ADR 0171 D4). */
+  processorState?: ProcessorState
 }
 
 export interface CalcInput {
@@ -82,8 +84,10 @@ export function calcInvoice(input: CalcInput): InvoiceCalc {
   const paidOrig = of('pay') - of('void')
   const creditApplied = of('credit_apply')
   const paid = paidOrig + creditApplied
-  const refunded = of('refund', (e) => e.status === 'done')
-  const refOrig = of('refund', (e) => e.status === 'done' && e.dest !== 'credit')
+  // a refund the processor reported failed gave nothing back (ADR 0171 D4; the same rule as invoice_calc_of)
+  const counts = (e: CalcEvent): boolean => e.status === 'done' && e.processorState !== 'failed'
+  const refunded = of('refund', counts)
+  const refOrig = of('refund', (e) => counts(e) && e.dest !== 'credit')
   const pending = ev.filter((e) => e.type === 'refund' && e.status === 'pending')
   const pendingAmt = sum(pending.map((e) => e.amountCents))
   const balance = input.canceled ? 0 : Math.max(0, total - paid)

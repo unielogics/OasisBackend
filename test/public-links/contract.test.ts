@@ -19,6 +19,7 @@ const EXPECTED: [string, string, 'required' | undefined][] = [
   ['POST', '/api/v1/public/links/appointments/:ref/reschedule', undefined],
   ['POST', '/api/v1/public/links/membership/start', undefined],
   ['POST', '/api/v1/public/links/pay/start', undefined],
+  ['POST', '/api/v1/public/links/deposit/start', undefined],
 ]
 
 describe('the personal-link API contract', () => {

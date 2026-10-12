@@ -46,6 +46,13 @@ export const squareEnvShape = {
   SQUARE_POS_API_ENABLED: bool.default('false'),
   /** Seconds a counter payment waits before auto-matching (a subscription event or a POS callback may explain it first). */
   SQUARE_MATCH_DELAY_SECONDS: z.coerce.number().int().min(0).max(3600).default(90),
+  /**
+   * Counter (POS) payments are recorded automatically only on strong evidence (plan decision 5): `evidence` (the default) needs the
+   * invoice number in the note, a POS intent, a staff "Square reader" entry of that amount, or one open invoice of that balance backed
+   * by the client's identity. `amount` also records a payment whose amount alone matches exactly one open invoice of the day (owner's
+   * choice; off by default).
+   */
+  SQUARE_POS_AUTOMATCH: z.enum(['evidence', 'amount']).default('evidence'),
   /** Which processor new links, cards, memberships and refunds use: the cutover switch (ADR 0171 D11). */
   PAYMENT_PROCESSOR: z.enum(['squarespace', 'square']).default('squarespace'),
 }

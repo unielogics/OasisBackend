@@ -99,16 +99,19 @@ export const settingDefs = {
       refundTo: 'original' as const,
     },
   },
-  // The website's guest booking fee (ADR 0150): what a guest (no active membership) owes for an online booking and how the
-  // shop collects it, at the counter or through a Squarespace payment link staff text after the booking. Members pay none.
-  // The site shows the fee as a deposit due; nothing is charged online (no card capture anywhere).
+  // The website's guest booking fee (ADR 0150): what a guest (no active membership) owes for an online booking, a deposit toward the
+  // visit, and how the shop collects it: at the counter; by a payment link (with PAYMENT_PROCESSOR=square a Square quick-pay link the
+  // job square.deposit-link creates and texts after the booking, ADR 0171 D2; before that, a link staff text); or `card_hold` (wave
+  // Q3a, a saved card: accepted, not used yet, collected at the counter until then). Members pay none.
   'booking.guest_fee': {
     schema: z.object({
       cents: z.number().int().min(0).max(100_000),
-      collect: z.enum(['counter', 'link']),
+      collect: z.enum(['counter', 'link', 'card_hold']),
     }),
     default: { cents: 2500, collect: 'counter' as const },
   },
+  // Square payment links (ADR 0171 D5): whether Square's checkout asks for a tip. Off by default.
+  'payments.link_tipping': { schema: z.boolean(), default: false },
   // Standing (recurring) appointments and the waitlist: schema, endpoints and jobs exist, nothing runs until this is turned on
   // (and the matching VIP toggle in Settings is on). No UI yet (ADR 0086).
   'features.standing_waitlist': { schema: z.boolean(), default: false },

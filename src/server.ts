@@ -10,7 +10,7 @@ import { buildHooksApp, type HooksApp } from './modules/messaging/http/hooks-app
 import { startInlineRunner, type InlineRunner } from './modules/messaging/jobs/runner.js'
 import { DbBusinessHours } from './modules/settings/db-adapters/index.js'
 import { enqueueStartupJobs } from './modules/settings/jobs/index.js'
-import { configureProductionPayments, configureProductionSettings, messagingRuntimeFor } from './composition.js'
+import { configureProductionPayments, configureProductionSettings, configureProductionSquare, messagingRuntimeFor } from './composition.js'
 import { createClock, type Clock } from './platform/clock.js'
 import { createDb, type Db, type DbOptions } from './platform/db.js'
 import { createIdGenerator, type NewId } from './platform/ids.js'
@@ -86,6 +86,7 @@ async function main(): Promise<void> {
   wireAssistant({ db, clock, newId, env, messaging, enqueue: (name, data, opts) => jobs.enqueue(name, data, opts), log: logger.child({ module: 'assistant' }) })
   configureProductionSettings({ clock, newId, messaging })
   configureProductionPayments(messaging)
+  configureProductionSquare({ db, clock, env, newId })
 
   const authorizer = makeAuthorizer(env, location.id, db, clock, newId, new MessagingAccountNotifier(messaging))
   if (env.SMS_PROVIDER === 'sim' || env.EMAIL_PROVIDER === 'sim')

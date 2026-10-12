@@ -117,8 +117,10 @@ CREATE FUNCTION public.invoice_calc_of(p_invoice uuid) RETURNS TABLE(invoice_id 
       (coalesce(sum(amount_cents) filter (where type = 'pay'), 0)
         - coalesce(sum(amount_cents) filter (where type = 'void'), 0))::bigint as paid_orig,
       coalesce(sum(amount_cents) filter (where type = 'credit_apply'), 0)::bigint as credit_applied,
-      coalesce(sum(amount_cents) filter (where type = 'refund' and status = 'done'), 0)::bigint as refunded,
-      coalesce(sum(amount_cents) filter (where type = 'refund' and status = 'done' and dest <> 'credit'), 0)::bigint as ref_orig,
+      coalesce(sum(amount_cents) filter (where type = 'refund' and status = 'done' and processor_state <> 'failed'), 0)::bigint
+        as refunded,
+      coalesce(sum(amount_cents) filter (where type = 'refund' and status = 'done' and processor_state <> 'failed'
+        and dest <> 'credit'), 0)::bigint as ref_orig,
       coalesce(sum(amount_cents) filter (where type = 'refund' and status = 'pending'), 0)::bigint as pending_amt,
       count(*) filter (where type = 'refund' and status = 'pending')::bigint as pending_n,
       coalesce(sum(amount_cents) filter (where type = 'credit_issue'), 0)::bigint as issued
@@ -172,11 +174,16 @@ declare
     'status', 'resolved_at',
     'approved_by_user_id', 'approved_by_employee_id', 'approved_by_name', 'approved_by_roles', 'approved_at',
     'denied_by_user_id', 'denied_by_employee_id', 'denied_by_name', 'denied_by_roles', 'denied_at', 'denied_note',
-    'processor_state', 'processor_ref', 'sqsp_order_id', 'processor_confirmed_at', 'processor_confirmed_by'
+    'processor_state', 'processor_ref', 'sqsp_order_id', 'processor_confirmed_at', 'processor_confirmed_by',
+    'processor', 'processor_order_id'
   ];
+  on_confirm text[] := array['method', 'brand', 'last4'];
 begin
   if tg_op = 'DELETE' then
     raise exception 'ledger_events is append-only: rows cannot be deleted' using errcode = 'restrict_violation';
+  end if;
+  if old.processor_state = 'awaiting_processor' and new.processor_state = 'confirmed' then
+    mutable := mutable || on_confirm;
   end if;
   if (to_jsonb(new) - mutable) is distinct from (to_jsonb(old) - mutable) then
     raise exception 'ledger_events is append-only: only the refund resolution and processor fields can change'
@@ -1459,6 +1466,8 @@ CREATE TABLE public.ledger_events (
     needs_review boolean DEFAULT false NOT NULL,
     idempotency_key text,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    processor text,
+    processor_order_id text,
     CONSTRAINT ledger_events_check CHECK ((((type = 'adjust'::text) AND (amount_cents <> 0)) OR ((type <> 'adjust'::text) AND (amount_cents > 0)))),
     CONSTRAINT ledger_events_check1 CHECK (((type = 'refund'::text) OR (status = 'done'::text))),
     CONSTRAINT ledger_events_check10 CHECK (((type = 'refund'::text) OR (processor_state = 'na'::text) OR (type = 'pay'::text))),
@@ -1474,8 +1483,9 @@ CREATE TABLE public.ledger_events (
     CONSTRAINT ledger_events_expiry_check CHECK (((expiry IS NULL) OR (expiry = ANY (ARRAY['none'::text, 'd30'::text, 'd90'::text])))),
     CONSTRAINT ledger_events_last4_check CHECK (((last4 IS NULL) OR (last4 ~ '^[0-9]{4}$'::text))),
     CONSTRAINT ledger_events_method_kind_check CHECK (((method_kind IS NULL) OR (method_kind = ANY (ARRAY['card'::text, 'apple_pay'::text, 'cash'::text, 'store_credit'::text, 'other'::text])))),
+    CONSTRAINT ledger_events_processor_check CHECK (((processor IS NULL) OR (processor = ANY (ARRAY['squarespace'::text, 'square'::text])))),
     CONSTRAINT ledger_events_processor_state_check CHECK ((processor_state = ANY (ARRAY['na'::text, 'awaiting_processor'::text, 'confirmed'::text, 'failed'::text]))),
-    CONSTRAINT ledger_events_source_check CHECK ((source = ANY (ARRAY['oasis'::text, 'squarespace'::text, 'system'::text, 'seed'::text]))),
+    CONSTRAINT ledger_events_source_check CHECK ((source = ANY (ARRAY['oasis'::text, 'squarespace'::text, 'system'::text, 'seed'::text, 'square'::text]))),
     CONSTRAINT ledger_events_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'done'::text, 'denied'::text]))),
     CONSTRAINT ledger_events_type_check CHECK ((type = ANY (ARRAY['pay'::text, 'adjust'::text, 'refund'::text, 'credit_issue'::text, 'credit_apply'::text, 'void'::text])))
 );
@@ -1924,7 +1934,7 @@ CREATE TABLE public.payment_links (
     invoice_id uuid NOT NULL,
     kind text DEFAULT 'checkout'::text NOT NULL,
     purpose text DEFAULT 'balance'::text NOT NULL,
-    url text NOT NULL,
+    url text,
     expected_cents integer NOT NULL,
     created_by uuid,
     sent_message_id uuid,
@@ -1933,11 +1943,25 @@ CREATE TABLE public.payment_links (
     state text DEFAULT 'active'::text NOT NULL,
     matched_sqsp_order_id text,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    provider text DEFAULT 'squarespace'::text NOT NULL,
+    origin text DEFAULT 'staff'::text NOT NULL,
+    square_payment_link_id text,
+    square_order_id text,
+    square_version integer,
+    invoice_version integer,
+    canceled_at timestamp with time zone,
+    cancel_reason text,
+    square_deleted_at timestamp with time zone,
+    paid_square_payment_id text,
+    CONSTRAINT payment_links_cancel_reason_check CHECK (((cancel_reason IS NULL) OR (cancel_reason = ANY (ARRAY['superseded'::text, 'amount_changed'::text, 'paid_elsewhere'::text, 'invoice_canceled'::text, 'expired'::text, 'stale'::text, 'square_error'::text, 'deposit_paid'::text])))),
     CONSTRAINT payment_links_expected_cents_check CHECK ((expected_cents > 0)),
-    CONSTRAINT payment_links_kind_check CHECK ((kind = ANY (ARRAY['checkout'::text, 'invoice'::text]))),
+    CONSTRAINT payment_links_kind_check CHECK ((kind = ANY (ARRAY['checkout'::text, 'invoice'::text, 'square_order'::text, 'square_quick_pay'::text]))),
+    CONSTRAINT payment_links_origin_check CHECK ((origin = ANY (ARRAY['staff'::text, 'pay_page'::text, 'booking'::text, 'deposit_page'::text]))),
+    CONSTRAINT payment_links_provider_check CHECK ((provider = ANY (ARRAY['squarespace'::text, 'square'::text]))),
     CONSTRAINT payment_links_purpose_check CHECK ((purpose = ANY (ARRAY['balance'::text, 'deposit'::text]))),
-    CONSTRAINT payment_links_state_check CHECK ((state = ANY (ARRAY['active'::text, 'paid'::text, 'expired'::text, 'canceled'::text]))),
-    CONSTRAINT payment_links_url_check CHECK ((url ~ '^https://'::text))
+    CONSTRAINT payment_links_square_check CHECK ((((provider = 'square'::text) = (kind = ANY (ARRAY['square_order'::text, 'square_quick_pay'::text]))) AND ((url IS NOT NULL) OR ((provider = 'square'::text) AND (state = ANY (ARRAY['pending'::text, 'canceled'::text, 'expired'::text])))))),
+    CONSTRAINT payment_links_state_check CHECK ((state = ANY (ARRAY['pending'::text, 'active'::text, 'paid'::text, 'expired'::text, 'canceled'::text]))),
+    CONSTRAINT payment_links_url_check CHECK (((url IS NULL) OR (url ~ '^https://'::text)))
 );
 
 --
@@ -2737,6 +2761,118 @@ CREATE TABLE public.sqsp_webhook_subscriptions (
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     last_delivery_at timestamp with time zone,
     CONSTRAINT sqsp_webhook_subscriptions_endpoint_url_check CHECK ((endpoint_url ~ '^https://'::text))
+);
+
+--
+-- Name: square_payments; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.square_payments (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    square_payment_id text NOT NULL,
+    square_location_id text,
+    status text NOT NULL,
+    source_type text,
+    square_product text,
+    application_id text,
+    square_order_id text,
+    reference_id text,
+    note text,
+    receipt_number text,
+    receipt_url text,
+    amount_cents integer NOT NULL,
+    tip_cents integer DEFAULT 0 NOT NULL,
+    total_cents integer NOT NULL,
+    refunded_cents integer DEFAULT 0 NOT NULL,
+    card_brand text,
+    last4 text,
+    entry_method text,
+    square_customer_id text,
+    buyer_email text,
+    square_created_at timestamp with time zone NOT NULL,
+    square_updated_at timestamp with time zone,
+    classification text,
+    match_state text DEFAULT 'pending'::text NOT NULL,
+    match_after timestamp with time zone,
+    invoice_id uuid,
+    event_id uuid,
+    tip_event_id uuid,
+    rule text,
+    confidence numeric(3,2),
+    candidates jsonb DEFAULT '[]'::jsonb NOT NULL,
+    variance jsonb,
+    decided_by text,
+    decided_by_user_id uuid,
+    decided_at timestamp with time zone,
+    ignore_reason text,
+    ignore_note text,
+    first_seen_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT square_payments_amount_cents_check CHECK ((amount_cents >= 0)),
+    CONSTRAINT square_payments_check CHECK (((match_state = 'matched'::text) = ((invoice_id IS NOT NULL) AND (event_id IS NOT NULL)))),
+    CONSTRAINT square_payments_check1 CHECK (((match_state = 'ignored'::text) = (ignore_reason IS NOT NULL))),
+    CONSTRAINT square_payments_classification_check CHECK (((classification IS NULL) OR (classification = ANY (ARRAY['link'::text, 'charge'::text, 'membership'::text, 'pos_intent'::text, 'counter'::text, 'ignored'::text])))),
+    CONSTRAINT square_payments_ignore_reason_check CHECK (((ignore_reason IS NULL) OR (ignore_reason = ANY (ARRAY['not_oasis_sale'::text, 'duplicate'::text, 'test'::text, 'other'::text])))),
+    CONSTRAINT square_payments_last4_check CHECK (((last4 IS NULL) OR (last4 ~ '^[0-9]{4}$'::text))),
+    CONSTRAINT square_payments_match_state_check CHECK ((match_state = ANY (ARRAY['pending'::text, 'matched'::text, 'unmatched'::text, 'ignored'::text]))),
+    CONSTRAINT square_payments_refunded_cents_check CHECK ((refunded_cents >= 0)),
+    CONSTRAINT square_payments_tip_cents_check CHECK ((tip_cents >= 0)),
+    CONSTRAINT square_payments_total_cents_check CHECK ((total_cents >= 0))
+);
+
+--
+-- Name: square_pos_intents; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.square_pos_intents (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    invoice_id uuid NOT NULL,
+    ledger_event_id uuid,
+    amount_cents integer NOT NULL,
+    callback_state text NOT NULL,
+    code text NOT NULL,
+    note text NOT NULL,
+    status text DEFAULT 'open'::text NOT NULL,
+    transaction_id text,
+    client_transaction_id text,
+    error_code text,
+    square_payment_id text,
+    created_by uuid,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    callback_at timestamp with time zone,
+    CONSTRAINT square_pos_intents_amount_cents_check CHECK ((amount_cents > 0)),
+    CONSTRAINT square_pos_intents_code_check CHECK ((code ~ '^OAS-PI-[A-Z0-9]{4,8}$'::text)),
+    CONSTRAINT square_pos_intents_status_check CHECK ((status = ANY (ARRAY['open'::text, 'callback_ok'::text, 'callback_error'::text, 'matched'::text, 'expired'::text])))
+);
+
+--
+-- Name: square_refund_legs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.square_refund_legs (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    ledger_event_id uuid NOT NULL,
+    square_payment_id text NOT NULL,
+    amount_cents integer NOT NULL,
+    origin text DEFAULT 'api'::text NOT NULL,
+    idempotency_key text,
+    square_refund_id text,
+    state text DEFAULT 'to_submit'::text NOT NULL,
+    error text,
+    attempts integer DEFAULT 0 NOT NULL,
+    submitted_at timestamp with time zone,
+    completed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT square_refund_legs_amount_cents_check CHECK ((amount_cents > 0)),
+    CONSTRAINT square_refund_legs_attempts_check CHECK ((attempts >= 0)),
+    CONSTRAINT square_refund_legs_check CHECK (((origin = 'pos'::text) OR (idempotency_key IS NOT NULL))),
+    CONSTRAINT square_refund_legs_origin_check CHECK ((origin = ANY (ARRAY['api'::text, 'pos'::text]))),
+    CONSTRAINT square_refund_legs_state_check CHECK ((state = ANY (ARRAY['to_submit'::text, 'pending'::text, 'completed'::text, 'failed'::text, 'rejected'::text])))
 );
 
 --
@@ -3615,6 +3751,20 @@ ALTER TABLE ONLY public.payment_links
     ADD CONSTRAINT payment_links_pkey PRIMARY KEY (id);
 
 --
+-- Name: payment_links payment_links_square_order_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.payment_links
+    ADD CONSTRAINT payment_links_square_order_id_key UNIQUE (square_order_id);
+
+--
+-- Name: payment_links payment_links_square_payment_link_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.payment_links
+    ADD CONSTRAINT payment_links_square_payment_link_id_key UNIQUE (square_payment_link_id);
+
+--
 -- Name: pending_checkin_texts pending_checkin_texts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3977,6 +4127,62 @@ ALTER TABLE ONLY public.sqsp_webhook_subscriptions
 
 ALTER TABLE ONLY public.sqsp_webhook_subscriptions
     ADD CONSTRAINT sqsp_webhook_subscriptions_pkey PRIMARY KEY (id);
+
+--
+-- Name: square_payments square_payments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_payments
+    ADD CONSTRAINT square_payments_pkey PRIMARY KEY (id);
+
+--
+-- Name: square_payments square_payments_square_payment_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_payments
+    ADD CONSTRAINT square_payments_square_payment_id_key UNIQUE (square_payment_id);
+
+--
+-- Name: square_pos_intents square_pos_intents_callback_state_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_pos_intents
+    ADD CONSTRAINT square_pos_intents_callback_state_key UNIQUE (callback_state);
+
+--
+-- Name: square_pos_intents square_pos_intents_code_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_pos_intents
+    ADD CONSTRAINT square_pos_intents_code_key UNIQUE (code);
+
+--
+-- Name: square_pos_intents square_pos_intents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_pos_intents
+    ADD CONSTRAINT square_pos_intents_pkey PRIMARY KEY (id);
+
+--
+-- Name: square_refund_legs square_refund_legs_idempotency_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_refund_legs
+    ADD CONSTRAINT square_refund_legs_idempotency_key_key UNIQUE (idempotency_key);
+
+--
+-- Name: square_refund_legs square_refund_legs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_refund_legs
+    ADD CONSTRAINT square_refund_legs_pkey PRIMARY KEY (id);
+
+--
+-- Name: square_refund_legs square_refund_legs_square_refund_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_refund_legs
+    ADD CONSTRAINT square_refund_legs_square_refund_id_key UNIQUE (square_refund_id);
 
 --
 -- Name: square_state square_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -4529,6 +4735,12 @@ CREATE INDEX ledger_events_invoice_idx ON public.ledger_events USING btree (invo
 CREATE INDEX ledger_events_pending_idx ON public.ledger_events USING btree (location_id, occurred_at) WHERE (status = 'pending'::text);
 
 --
+-- Name: ledger_events_processor_ref_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ledger_events_processor_ref_idx ON public.ledger_events USING btree (processor, processor_ref) WHERE (processor_ref IS NOT NULL);
+
+--
 -- Name: ledger_events_sqsp_order_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4701,6 +4913,12 @@ CREATE INDEX payment_links_active_idx ON public.payment_links USING btree (locat
 --
 
 CREATE INDEX payment_links_invoice_idx ON public.payment_links USING btree (invoice_id, created_at DESC);
+
+--
+-- Name: payment_links_square_open_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX payment_links_square_open_idx ON public.payment_links USING btree (location_id, created_at) WHERE ((provider = 'square'::text) AND (state = ANY (ARRAY['pending'::text, 'active'::text])));
 
 --
 -- Name: pending_checkin_texts_due_idx; Type: INDEX; Schema: public; Owner: -
@@ -4959,6 +5177,48 @@ CREATE INDEX sqsp_transactions_order_idx ON public.sqsp_transactions USING btree
 --
 
 CREATE INDEX sqsp_transactions_state_idx ON public.sqsp_transactions USING btree (location_id, state, created_on) WHERE (state = ANY (ARRAY['new'::text, 'deferred'::text, 'manual'::text]));
+
+--
+-- Name: square_payments_invoice_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX square_payments_invoice_idx ON public.square_payments USING btree (invoice_id) WHERE (invoice_id IS NOT NULL);
+
+--
+-- Name: square_payments_open_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX square_payments_open_idx ON public.square_payments USING btree (location_id, square_created_at) WHERE (match_state = ANY (ARRAY['pending'::text, 'unmatched'::text]));
+
+--
+-- Name: square_payments_order_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX square_payments_order_idx ON public.square_payments USING btree (square_order_id) WHERE (square_order_id IS NOT NULL);
+
+--
+-- Name: square_pos_intents_open_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX square_pos_intents_open_idx ON public.square_pos_intents USING btree (location_id, created_at) WHERE (status = ANY (ARRAY['open'::text, 'callback_ok'::text]));
+
+--
+-- Name: square_refund_legs_event_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX square_refund_legs_event_idx ON public.square_refund_legs USING btree (ledger_event_id);
+
+--
+-- Name: square_refund_legs_open_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX square_refund_legs_open_idx ON public.square_refund_legs USING btree (location_id, created_at) WHERE (state = ANY (ARRAY['to_submit'::text, 'pending'::text]));
+
+--
+-- Name: square_refund_legs_payment_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX square_refund_legs_payment_idx ON public.square_refund_legs USING btree (square_payment_id);
 
 --
 -- Name: standing_occurrences_appointment_idx; Type: INDEX; Schema: public; Owner: -
@@ -6754,6 +7014,83 @@ ALTER TABLE ONLY public.sqsp_transactions
 
 ALTER TABLE ONLY public.sqsp_webhook_subscriptions
     ADD CONSTRAINT sqsp_webhook_subscriptions_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: square_payments square_payments_decided_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_payments
+    ADD CONSTRAINT square_payments_decided_by_user_id_fkey FOREIGN KEY (decided_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: square_payments square_payments_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_payments
+    ADD CONSTRAINT square_payments_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.ledger_events(id);
+
+--
+-- Name: square_payments square_payments_invoice_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_payments
+    ADD CONSTRAINT square_payments_invoice_id_fkey FOREIGN KEY (invoice_id) REFERENCES public.invoices(id);
+
+--
+-- Name: square_payments square_payments_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_payments
+    ADD CONSTRAINT square_payments_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: square_payments square_payments_tip_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_payments
+    ADD CONSTRAINT square_payments_tip_event_id_fkey FOREIGN KEY (tip_event_id) REFERENCES public.ledger_events(id);
+
+--
+-- Name: square_pos_intents square_pos_intents_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_pos_intents
+    ADD CONSTRAINT square_pos_intents_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: square_pos_intents square_pos_intents_invoice_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_pos_intents
+    ADD CONSTRAINT square_pos_intents_invoice_id_fkey FOREIGN KEY (invoice_id) REFERENCES public.invoices(id);
+
+--
+-- Name: square_pos_intents square_pos_intents_ledger_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_pos_intents
+    ADD CONSTRAINT square_pos_intents_ledger_event_id_fkey FOREIGN KEY (ledger_event_id) REFERENCES public.ledger_events(id);
+
+--
+-- Name: square_pos_intents square_pos_intents_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_pos_intents
+    ADD CONSTRAINT square_pos_intents_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: square_refund_legs square_refund_legs_ledger_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_refund_legs
+    ADD CONSTRAINT square_refund_legs_ledger_event_id_fkey FOREIGN KEY (ledger_event_id) REFERENCES public.ledger_events(id);
+
+--
+-- Name: square_refund_legs square_refund_legs_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_refund_legs
+    ADD CONSTRAINT square_refund_legs_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 -- Name: square_state square_state_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

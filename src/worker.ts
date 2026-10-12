@@ -3,7 +3,7 @@
 import { pathToFileURL } from 'node:url'
 import type { Env } from './config/env.js'
 import { loadRuntimeEnv } from './config/secrets-source.js'
-import { configureProductionSchedulingJobs } from './composition.js'
+import { configureProductionSchedulingJobs, configureProductionSquare } from './composition.js'
 import { configureAssistantJobs } from './modules/assistant/jobs.js'
 import { notifyManagers } from './modules/messaging/notify.js'
 import { createClock, type Clock } from './platform/clock.js'
@@ -61,6 +61,8 @@ export async function startWorker(o: WorkerOptions): Promise<RunningWorker> {
     })
   const newId = createIdGenerator(clock)
   configureProductionSchedulingJobs({ clock, newId })
+  // the Square jobs text a booking's deposit link through this process's messaging queue (ADR 0171)
+  configureProductionSquare({ db, clock, env, newId })
   const jobs = createJobs({
     connectionString: env.DATABASE_URL,
     schema: env.PGBOSS_SCHEMA,

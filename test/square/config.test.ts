@@ -35,6 +35,7 @@ describe('Square environment', () => {
       PAYMENT_PROCESSOR: 'squarespace',
       SQUARE_API_VERSION: '2026-09-16',
       SQUARE_MATCH_DELAY_SECONDS: 90,
+      SQUARE_POS_AUTOMATCH: 'evidence',
     })
     expect(e.SQUARE_ACCESS_TOKEN).toBeUndefined()
     expect(squareLiveConfigured(e)).toBe(false)
@@ -89,6 +90,7 @@ describe('Square environment', () => {
       'SQUARE_WRITES_ENABLED',
       'SQUARE_POS_API_ENABLED',
       'SQUARE_MATCH_DELAY_SECONDS',
+      'SQUARE_POS_AUTOMATCH',
       'PAYMENT_PROCESSOR',
     ])
       expect(ENV_KEYS.has(k), k).toBe(true)

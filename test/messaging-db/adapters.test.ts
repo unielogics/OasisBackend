@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { LightMyRequestResponse } from 'fastify'
 import { sql } from 'kysely'
 import { SIM_DEVICE_KEY } from '../../db/seeds/messaging.js'
-import { configureProductionPayments, configureProductionSettings, messagingRuntimeFor } from '../../src/composition.js'
+import { configureProductionPayments, configureProductionSettings, messagingRuntimeFor, paymentMessengerFor } from '../../src/composition.js'
 import { createPermissiveAuthorizer } from '../../src/http/authorizer.js'
 import { apiModules } from '../../src/http/modules.js'
 import { EmailError } from '../../src/integrations/email/errors.js'
@@ -143,6 +143,30 @@ describe('payments', () => {
     const link = await w.t.db.selectFrom('payment_links').select(['sent_message_id', 'sent_at']).executeTakeFirstOrThrow()
     expect(link.sent_message_id).toBe(m.id)
     expect(link.sent_at).not.toBeNull()
+  })
+
+  it('a plain payment link stays readable once sent; a personal pay link is masked in the thread and wiped once sent (ADR 0171)', async () => {
+    const { invoiceId, invoiceNo } = await book('Maria Delgado', '2026-06-13T15:00:00-04:00')
+    await call('POST', `/invoices/${invoiceId}/payments`, { method: 'payment_link', url: 'https://oasis.squarespace.com/checkout/plain1' })
+    const personal = 'https://oasisautospanj.com/#/p/' + 'T'.repeat(43)
+    await w.t.db.transaction().execute((tx) =>
+      paymentMessengerFor(rt).sendPersonalPayLink!(tx, { invoiceId, invoiceNo, customerId: w.customer('Maria Delgado').id, url: personal, dedupeKey: `personal:${invoiceId}` }),
+    )
+    const rows = async () =>
+      (
+        await sql<{ m: string; o: string; template_key: string | null }>`select m.body as m, o.body as o, m.template_key from messages m join sms_outbox o on o.message_id = m.id
+          where m.klass = 'payment_link' and m.created_at is not null and (m.body like '%plain1%' or m.template_key = 'payment_link_personal')
+          order by m.template_key nulls first`.execute(w.t.db)
+      ).rows
+    const before = await rows()
+    expect(before[0]).toMatchObject({ m: expect.stringContaining('plain1'), o: expect.stringContaining('plain1') })
+    expect(before[1]!.m).toBe(`Your Oasis Auto Spa invoice INV-${invoiceNo} is ready. Review and pay it on this secure page: [private link]`)
+    expect(before[1]!.o).toContain(personal)
+    await drain()
+    const after = await rows()
+    expect(after[0]!.o).toContain('plain1')
+    expect(after[1]!.o).toBe('[link sent privately]')
+    expect(JSON.stringify(after)).not.toContain('T'.repeat(43))
   })
 })
 

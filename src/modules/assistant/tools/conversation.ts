@@ -177,7 +177,8 @@ async function payableInvoice(tx: Tx, ctx: ToolContext, appointmentId: string | 
     order by i.occurred_at desc, i.id desc limit 1`.execute(tx)
   const inv = rows.rows[0]
   if (!inv) throw new LinkRefused(fail('not_found', 'There is no open invoice to pay.'))
-  if (!inv.payment_link_url) throw new NoPaymentLink()
+  // with Square the pay page makes a link for the exact balance when the client opens it (ADR 0171 D3): no staff link needed
+  if (!inv.payment_link_url && ctx.env.PAYMENT_PROCESSOR !== 'square') throw new NoPaymentLink()
   return inv.id
 }
 

@@ -4,19 +4,18 @@
 // actor (RBAC engine); amounts are integer cents.
 import type { AuditContext } from '../../platform/audit.js'
 import * as audit from '../../platform/audit.js'
+import { announceInvoiceChange } from './announce.js'
 import type { Clock } from '../../platform/clock.js'
 import type { Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
 import type { NewId } from '../../platform/ids.js'
-import * as realtime from '../../platform/realtime.js'
 import { getSetting } from '../../platform/settings.js'
 import { addDays, bizDayBounds, toBizDate } from '../../platform/time.js'
 import type { PayActor } from './actor.js'
 import { adjustPreview, itemsRefundValue, type AdjustInput, type InvoiceCalc } from './calc.js'
 import { creditBalance, loadCreditLots, lockCustomerCredit, recordAllocations } from './credit.js'
 import { buildDetail, type InvoiceDetail, type LedgerEventDto } from './detail.js'
-import { limitText, money } from './format.js'
-import { publishOpsForInvoice } from './ops-events.js'
+import { limitText, money, processorName } from './format.js'
 import type { PaymentsPorts } from './ports.js'
 import {
   calcOf,
@@ -29,12 +28,14 @@ import {
   listItems,
   lockInvoice,
   refundedItemIds,
-  touchInvoice,
   type EventRow,
   type InvoiceRow,
   type NewEvent,
 } from './repository.js'
 import type { CreditExpiry, RefundDest } from './schema.js'
+import { issueClientLink } from '../identity/links.js'
+import { activateSquareLink, squareProcessor, type PreparedSquareLink } from '../square/links.js'
+import { squareEnv } from '../square/runtime.js'
 import './problems.js'
 
 export interface CommandContext {
@@ -108,7 +109,29 @@ export interface PaymentLinkInput {
 }
 
 export interface PaymentLinkResult extends CommandResult {
-  paymentLink: { id: string; url: string; expectedCents: number; purpose: 'balance' | 'deposit'; sms: string }
+  paymentLink: {
+    id: string
+    /** null for the client's personal pay page: its link is a secret only the client's text carries. */
+    url: string | null
+    expectedCents: number
+    purpose: 'balance' | 'deposit'
+    sms: string
+    /** squarespace: a pasted checkout link; square: a Square link for the exact amount; personal: the client's own pay page. */
+    provider: 'squarespace' | 'square' | 'personal'
+  }
+}
+
+/**
+ * How staff "Send link" goes out (ADR 0171 D3): before the cutover (PAYMENT_PROCESSOR=squarespace) a pasted Squarespace link; with
+ * Square, the client's personal pay page while personal links are on (a balance), else a Square link made now for the exact amount
+ * (a deposit is always a Square quick-pay link). `square` is the one that needs prepareSquareLink before the transaction.
+ */
+export function linkDelivery(
+  env: { PAYMENT_PROCESSOR: 'squarespace' | 'square'; PUBLIC_LINKS_ENABLED: boolean },
+  kind: 'balance' | 'deposit',
+): 'squarespace' | 'square' | 'personal' {
+  if (env.PAYMENT_PROCESSOR !== 'square') return 'squarespace'
+  return kind === 'balance' && env.PUBLIC_LINKS_ENABLED ? 'personal' : 'square'
 }
 
 export interface AdjustResult extends EventResult {
@@ -182,7 +205,7 @@ export class PaymentsService {
     )
   }
 
-  /** Version bump, audit row, SSE events and the refreshed detail: the common tail of every command. */
+  /** Version bump, audit row, SSE events and the refreshed detail: the common tail of every command (payments/announce.ts). */
   private async finish(
     tx: Tx,
     c: CommandContext,
@@ -196,37 +219,25 @@ export class PaymentsService {
       after?: Record<string, unknown>
     },
   ): Promise<InvoiceDetail> {
-    const now = this.d.clock.now()
-    const version = await touchInvoice(tx, inv.id, now)
-    const calc = await calcOf(tx, inv.id)
-    await audit.record(tx, {
+    await announceInvoiceChange(tx, {
       locationId: c.locationId,
+      invoiceId: inv.id,
+      now: this.d.clock.now(),
       action: o.action,
-      entityType: 'invoice',
-      entityId: inv.id,
+      ctx: c.audit,
       before: o.before,
-      after: {
+      lead: {
         events: o.events.map((e) => ({
           id: e.id,
           type: e.type,
           amountCents: e.amount_cents,
           status: e.status,
         })),
-        status: calc.status,
-        paid: calc.paid,
-        refunded: calc.refunded,
-        balance: calc.balance,
-        ...o.after,
       },
-      ctx: c.audit,
+      after: o.after,
+      events: o.events,
+      extra: o.extra,
     })
-    const pub = (type: string, payload: Record<string, string | number>): Promise<number> =>
-      realtime.publish(tx, { locationId: c.locationId, channel: 'payments', type, payload })
-    await pub('invoice.updated', { invoiceId: inv.id, version })
-    for (const e of o.events) await pub('ledger.event', { invoiceId: inv.id, eventId: e.id, type: e.type })
-    for (const x of o.extra ?? [])
-      await pub(x.type, x.eventId ? { invoiceId: inv.id, eventId: x.eventId } : { invoiceId: inv.id })
-    await publishOpsForInvoice(tx, c.locationId, inv.id)
     return this.detail(tx, c, inv.id)
   }
 
@@ -259,13 +270,14 @@ export class PaymentsService {
     c: CommandContext,
     invoiceId: string,
     input: CollectInput,
+    prepared?: PreparedSquareLink,
   ): Promise<EventResult | PaymentLinkResult> {
     assertCan(c.actor, 'pay.collect')
     const inv = await lockInvoice(tx, c.locationId, invoiceId)
     const calc = await calcOf(tx, inv.id)
     if (calc.balance <= 0) throw new AppError('PAY_NOTHING_TO_COLLECT')
     if (input.method === 'payment_link') {
-      return this.createLink(tx, c, inv, calc, { kind: 'balance', url: input.url })
+      return this.createLink(tx, c, inv, calc, { kind: 'balance', url: input.url }, prepared)
     }
     const now = this.d.clock.now()
     const e = this.base(c, inv, 'pay.collect', now)
@@ -345,7 +357,12 @@ export class PaymentsService {
     inv: InvoiceRow,
     calc: InvoiceCalc,
     o: { kind: 'balance' | 'deposit'; amountCents?: number; url?: string },
+    prepared?: PreparedSquareLink,
   ): Promise<PaymentLinkResult> {
+    const env = squareEnv()
+    const how = linkDelivery(env, o.kind)
+    if (how === 'personal') return this.personalLink(tx, c, inv, calc)
+    if (how === 'square') return this.squareLink(tx, c, inv, calc, o, prepared)
     const url = o.url ?? inv.payment_link_url
     if (!url) throw new AppError('PAYMENT_LINK_REQUIRED')
     this.checkLinkUrl(url)
@@ -392,7 +409,81 @@ export class PaymentsService {
       events: [],
       after: { paymentLinkId: id, purpose: o.kind, expectedCents: expected, sms: sent.state },
     })
-    return { invoice, paymentLink: { id, url, expectedCents: expected, purpose: o.kind, sms: sent.state } }
+    return {
+      invoice,
+      paymentLink: { id, url, expectedCents: expected, purpose: o.kind, sms: sent.state, provider: 'squarespace' },
+    }
+  }
+
+  /**
+   * A Square link made for the exact amount before this transaction (prepareSquareLink, in the route's prepare hook): made live here
+   * under the invoice lock (CONCURRENT_UPDATE when the amount changed meanwhile) and texted to the client.
+   */
+  private async squareLink(
+    tx: Tx,
+    c: CommandContext,
+    inv: InvoiceRow,
+    calc: InvoiceCalc,
+    o: { kind: 'balance' | 'deposit'; amountCents?: number },
+    prepared?: PreparedSquareLink,
+  ): Promise<PaymentLinkResult> {
+    if (!prepared || prepared.invoiceId !== inv.id || prepared.purpose !== o.kind) throw new AppError('SQUARE_UNAVAILABLE')
+    const link = await activateSquareLink(tx, { locationId: c.locationId, clock: this.d.clock }, prepared)
+    const now = this.d.clock.now()
+    const sent = await this.d.ports.messenger.sendPaymentLink(tx, {
+      invoiceId: inv.id,
+      invoiceNo: inv.invoice_no,
+      customerId: inv.customer_id,
+      url: link.url,
+      dedupeKey: `payment_link:${link.id}`,
+    })
+    await tx
+      .updateTable('payment_links')
+      .set({ sent_message_id: sent.messageId, sent_at: sent.state === 'queued' ? now : null })
+      .where('id', '=', link.id)
+      .execute()
+    if (sent.state === 'queued') await tx.updateTable('invoices').set({ payment_link_sent_at: now }).where('id', '=', inv.id).execute()
+    const invoice = await this.finish(tx, c, inv, {
+      action: 'payments.payment_link',
+      before: this.snapshot(calc),
+      events: [],
+      after: { paymentLinkId: link.id, purpose: o.kind, expectedCents: link.expectedCents, sms: sent.state, provider: 'square' },
+    })
+    return {
+      invoice,
+      paymentLink: { id: link.id, url: link.url, expectedCents: link.expectedCents, purpose: o.kind, sms: sent.state, provider: 'square' },
+    }
+  }
+
+  /** The client's personal pay page (issueClientLink kind pay, issuer staff), texted with template payment_link_personal. */
+  private async personalLink(tx: Tx, c: CommandContext, inv: InvoiceRow, calc: InvoiceCalc): Promise<PaymentLinkResult> {
+    const env = squareEnv()
+    const send = this.d.ports.messenger.sendPersonalPayLink
+    if (!send) throw new AppError('SERVICE_UNAVAILABLE', { detail: 'Text messaging is not connected yet' })
+    const now = this.d.clock.now()
+    const issued = await issueClientLink(
+      tx,
+      { newId: this.d.newId, now, ...(env.PUBLIC_SITE_URL ? { siteUrl: env.PUBLIC_SITE_URL } : {}) },
+      { locationId: c.locationId, kind: 'pay', customerId: inv.customer_id, invoiceId: inv.id, issuedBy: 'staff' },
+    )
+    const sent = await send.call(this.d.ports.messenger, tx, {
+      invoiceId: inv.id,
+      invoiceNo: inv.invoice_no,
+      customerId: inv.customer_id,
+      url: issued.url,
+      dedupeKey: `payment_link_personal:${issued.id}`,
+    })
+    if (sent.state === 'queued') await tx.updateTable('invoices').set({ payment_link_sent_at: now }).where('id', '=', inv.id).execute()
+    const invoice = await this.finish(tx, c, inv, {
+      action: 'payments.payment_link',
+      before: this.snapshot(calc),
+      events: [],
+      after: { clientLinkId: issued.id, purpose: 'balance', expectedCents: calc.balance, sms: sent.state, provider: 'personal' },
+    })
+    return {
+      invoice,
+      paymentLink: { id: issued.id, url: null, expectedCents: calc.balance, purpose: 'balance', sms: sent.state, provider: 'personal' },
+    }
   }
 
   async attachPaymentLink(
@@ -400,13 +491,14 @@ export class PaymentsService {
     c: CommandContext,
     invoiceId: string,
     input: PaymentLinkInput,
+    prepared?: PreparedSquareLink,
   ): Promise<PaymentLinkResult> {
     assertCan(c.actor, 'pay.collect')
     const inv = await lockInvoice(tx, c.locationId, invoiceId)
     const calc = await calcOf(tx, inv.id)
     if (input.kind === 'deposit' && !input.amountCents) throw new AppError('PAY_AMOUNT_INVALID')
     if (input.kind === 'balance' && calc.balance <= 0) throw new AppError('PAY_NOTHING_TO_COLLECT')
-    return this.createLink(tx, c, inv, calc, input)
+    return this.createLink(tx, c, inv, calc, input, prepared)
   }
 
   // --- refunds ------------------------------------------------------------------------------------------------------
@@ -466,6 +558,7 @@ export class PaymentsService {
         note: input.note ?? null,
         pending,
         itemIds,
+        processor: await this.refundProcessor(tx, inv, input.dest),
       }),
     )
     const invoice = await this.finish(tx, c, inv, {
@@ -488,6 +581,24 @@ export class PaymentsService {
     return firstPayMethod(tx, inv.id)
   }
 
+  /**
+   * A card refund goes out through the Square API (job square.refunds.submit, the refund row being the outbox: ADR 0171 D4) when
+   * Square is the processor and the invoice holds card money Square took; otherwise it stays a refund staff finish by hand.
+   */
+  private async refundProcessor(tx: Tx, inv: InvoiceRow, dest: RefundDest): Promise<'square' | null> {
+    if (dest !== 'card' || !squareProcessor(squareEnv())) return null
+    const sq = await tx
+      .selectFrom('ledger_events')
+      .select('id')
+      .where('invoice_id', '=', inv.id)
+      .where('type', '=', 'pay')
+      .where('processor', '=', 'square')
+      .where('processor_state', '=', 'confirmed')
+      .where('method_kind', 'in', ['card', 'apple_pay', 'other'])
+      .executeTakeFirst()
+    return sq ? 'square' : null
+  }
+
   private refundRow(
     c: CommandContext,
     inv: InvoiceRow,
@@ -502,6 +613,7 @@ export class PaymentsService {
       itemIds: string[]
       parent?: string
       suffix?: string
+      processor?: 'square' | null
     },
   ): NewEvent {
     const e = this.base(c, inv, 'pay.refund', now, o.suffix)
@@ -520,6 +632,7 @@ export class PaymentsService {
       parent_event_id: o.parent ?? null,
       resolved_at: o.pending ? null : now,
       processor_state: !o.pending && o.dest === 'card' ? 'awaiting_processor' : 'na',
+      processor: o.processor ?? null,
     }
   }
 
@@ -674,6 +787,7 @@ export class PaymentsService {
           itemIds: [],
           parent: adjustRow.id,
           suffix: 'settle',
+          processor: await this.refundProcessor(tx, inv, dest),
         }),
       )
     }
@@ -730,7 +844,7 @@ export class PaymentsService {
     return { event: this.pick(invoice, row.id), invoice }
   }
 
-  /** Reverses a cash payment or a card payment still waiting on Squarespace. Confirmed card money is refunded instead. */
+  /** Reverses a cash payment or a card payment still waiting on its processor. Confirmed card money is refunded instead. */
   async voidPayment(
     tx: Tx,
     c: CommandContext,
@@ -749,12 +863,14 @@ export class PaymentsService {
       .where('voids_event_id', '=', pay.id)
       .executeTakeFirst()
     if (already) throw new AppError('PAYMENT_ALREADY_VOIDED')
+    const processor = { processor: processorName(pay.processor) }
     if (pay.method_kind !== 'cash' && pay.processor_state !== 'awaiting_processor') {
-      throw new AppError('VOID_NOT_ALLOWED')
+      throw new AppError('VOID_NOT_ALLOWED', { params: processor })
     }
     const calc = await calcOf(tx, inv.id)
     if (calc.paid - pay.amount_cents - calc.refunded - calc.pendingAmt < 0) {
       throw new AppError('VOID_NOT_ALLOWED', {
+        params: processor,
         detail: 'Refunds were issued against this payment, so it can no longer be voided',
       })
     }
@@ -764,6 +880,7 @@ export class PaymentsService {
       (cardMoney && (await originalRefundCap(tx, inv.id, 'card')) < pay.amount_cents)
     ) {
       throw new AppError('VOID_NOT_ALLOWED', {
+        params: processor,
         detail: 'Refunds were issued against this payment, so it can no longer be voided',
       })
     }
@@ -834,7 +951,7 @@ export class PaymentsService {
     return { ...sent, invoice: await this.detail(tx, c, inv.id) }
   }
 
-  /** Staff confirm that the card payment or refund was completed in Squarespace. */
+  /** Staff confirm that the card payment or refund was completed at the processor (Squarespace, or Square by hand). */
   async confirmProcessor(
     tx: Tx,
     c: CommandContext,
@@ -845,7 +962,13 @@ export class PaymentsService {
     assertCan(c.actor, probe.type === 'refund' ? 'pay.refund' : 'pay.collect')
     const inv = await lockInvoice(tx, c.locationId, probe.invoice_id)
     const ev = await getEventForUpdate(tx, c.locationId, eventId)
-    if (ev.processor_state !== 'awaiting_processor') throw new AppError('EVENT_NOT_AWAITING')
+    if (ev.processor_state !== 'awaiting_processor')
+      throw new AppError('EVENT_NOT_AWAITING', { params: { processor: processorName(ev.processor) } })
+    // a refund sent through the Square API is settled by its legs (ADR 0171 D4): a hand confirmation would hide a leg that fails
+    if (ev.type === 'refund') {
+      const sent = await tx.selectFrom('square_refund_legs').select('id').where('ledger_event_id', '=', ev.id).where('origin', '=', 'api').executeTakeFirst()
+      if (sent) throw new AppError('REFUND_SENT_TO_SQUARE')
+    }
     const now = this.d.clock.now()
     const calc = await calcOf(tx, inv.id)
     const row = await tx

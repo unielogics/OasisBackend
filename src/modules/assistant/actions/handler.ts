@@ -40,6 +40,7 @@ import { usd } from '../facts.js'
 import { isConvoLang, serverTextEs, whenIn, type ConvoLang } from '../lang.js'
 import { actionsOn, assistantOn } from '../tools/switches.js'
 import { aiBookingsAhead, dayWord, inSavepoint, MAX_AI_BOOKINGS_AHEAD, plainSchedulingError, privilegesOf, slotVerdict, windowDaysFor } from '../tools/common.js'
+import { requestDepositLink } from '../../square/deposits.js'
 import { BookPayload, CancelPayload, cancelBlockOf, ReschedulePayload } from './plan.js'
 
 /** The answer: a template (English) and, for a Spanish conversation, its Spanish text (lang.ts serverTextEs), sent as ai_reply with the template key as its tag. */
@@ -224,6 +225,8 @@ async function execute(tx: Tx, deps: AssistantDeps, input: ActionCodeInput, acti
     const fee = await getSetting(tx, loc, 'booking.guest_fee')
     const dueCents = priv.member ? 0 : fee.value.cents
     const how = fee.value.collect === 'link' ? 'by payment link' : 'at the shop'
+    // the deposit by Square link (ADR 0171 D2): a request the job square.deposit-link turns into a texted quick-pay link
+    await requestDepositLink(tx, { newId: sched.newId, clock: sched.clock }, { locationId: loc, appointmentId, cents: dueCents, collect: fee.value.collect })
     await logActivity(tx, sched, {
       appointmentId,
       text: `Booked by text with Oasis AI · confirmed with the reply number${priv.member ? ' · member, no booking fee' : dueCents > 0 ? ` · ${usd(dueCents)} booking fee due ${how}` : ''}`,

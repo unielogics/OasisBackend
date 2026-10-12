@@ -560,7 +560,19 @@ export interface ExternalAlert {
    * 'ai_handoff': the AI assistant handed a conversation to the staff (ADR 0160); 'sms.picture_message': a text that arrived as a
    * picture message the staff should look at (the same name as the manager notification of ADR 0151).
    */
-  kind: 'new_reply' | 'sms_device_down' | 'awaiting_processor' | 'unmatched_order' | 'ai_handoff' | 'sms.picture_message'
+  kind:
+    | 'new_reply'
+    | 'sms_device_down'
+    | 'awaiting_processor'
+    | 'unmatched_order'
+    | 'ai_handoff'
+    | 'sms.picture_message'
+    // Square (ADR 0171): payments to match, a card refund Square refused, an invoice overpaid through Square, Square's health
+    | 'square_unmatched'
+    | 'square_refund_failed'
+    | 'square_external_refund'
+    | 'square_overpaid'
+    | 'square_problem'
   tone: AlertTone
   title: string
   desc: string
