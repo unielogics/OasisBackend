@@ -10,7 +10,7 @@ import { AppError } from '../../../platform/errors.js'
 import { decodeCursor, keysetCondition, paginationQuery, toPage } from '../../../platform/pagination.js'
 import { canSeeContact } from '../../people/redact.js'
 import { maskPhone } from '../../../platform/phone.js'
-import { SENSITIVE_CLASSES, REDACTED_BODY } from '../db/messages.js'
+import { SENSITIVE_CLASSES, REDACTED_BODY, holdsSecret } from '../db/messages.js'
 import { PgOutboxRepository } from '../db/outbox-repo.js'
 import type { MessagingRuntime } from '../runtime.js'
 import './problems.js'
@@ -78,6 +78,7 @@ export function registerOutboxRoutes(app: AppInstance, rt: MessagingRuntime): vo
           'o.next_attempt_at',
           'm.customer_id',
           'm.appointment_id',
+          'm.body as message_body',
           'c.full_name',
         ])
         .where('m.location_id', '=', req.auth!.locationId)
@@ -88,6 +89,9 @@ export function registerOutboxRoutes(app: AppInstance, rt: MessagingRuntime): vo
       }
       const rows = await q.orderBy('o.queued_at', 'desc').orderBy('o.id', 'desc').limit(limit + 1).execute()
       const contact = canSeeContact(req.auth!)
+      // the rule of holdsSecret: a plain payment link (a URL anyone may read) is shown and retryable; a masked one is not
+      const secret = (r: { klass: string; body: string; message_body: string | null }): boolean =>
+        SENSITIVE_CLASSES.has(r.klass) && (r.klass !== 'payment_link' || r.message_body !== r.body)
       const page = toPage(rows, limit, (r) => [r.queued_at.toISOString(), r.id])
       return {
         items: page.items.map((r) => ({
@@ -96,7 +100,7 @@ export function registerOutboxRoutes(app: AppInstance, rt: MessagingRuntime): vo
           klass: r.klass,
           lane: r.priority,
           to: contact ? r.to_e164 : maskPhone(r.to_e164),
-          text: SENSITIVE_CLASSES.has(r.klass) ? REDACTED_BODY : r.body,
+          text: secret(r) ? REDACTED_BODY : r.body,
           segments: r.segments,
           attempts: r.attempts,
           lastError: r.last_error,
@@ -106,7 +110,7 @@ export function registerOutboxRoutes(app: AppInstance, rt: MessagingRuntime): vo
           customerId: r.customer_id,
           customerName: r.full_name,
           appointmentId: r.appointment_id,
-          canRetry: (r.state === 'failed' || r.state === 'expired') && !SENSITIVE_CLASSES.has(r.klass),
+          canRetry: (r.state === 'failed' || r.state === 'expired') && !secret(r),
           canCancel: r.state === 'pending',
         })),
         nextCursor: page.nextCursor,
@@ -138,7 +142,7 @@ export function registerOutboxRoutes(app: AppInstance, rt: MessagingRuntime): vo
           .forUpdate()
           .executeTakeFirst()
         if (!row) throw new AppError('NOT_FOUND')
-        if ((row.state !== 'failed' && row.state !== 'expired') || SENSITIVE_CLASSES.has(row.klass)) throw new AppError('MESSAGE_NOT_RETRYABLE')
+        if ((row.state !== 'failed' && row.state !== 'expired') || (await holdsSecret(tx, row.id, row.klass))) throw new AppError('MESSAGE_NOT_RETRYABLE')
         const device = (await rt.store.listEnabled(row.location_id))[0]
         if (!device) throw new AppError('SMS_NO_DEVICE')
         const { dispatcher } = rt.dispatcherFor(device, tx)

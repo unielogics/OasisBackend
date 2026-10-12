@@ -25,6 +25,9 @@ import { centsOf, usd } from '../../src/integrations/square/money.js'
 import { SQUARE_EVENT_TYPES, classifySquareEvent } from '../../src/integrations/square/webhook.js'
 import { wire, wireEvent, type WireCard, type WireCustomer, type WireInvoice, type WireSubscription } from '../../src/integrations/square/wire.js'
 import type { SquareApi } from '../../src/integrations/ports/square.js'
+import { balanceLines } from '../../src/modules/square/links.js'
+import { planRefundLegs } from '../../src/modules/square/refunds.js'
+import { taxCents } from '../../src/platform/money.js'
 import { MissingConfig, Report, UsageError, cli, type ItemDef, type RunContext, type RunResult } from './lib.js'
 
 const DOC = 'docs/integrations/square.md section 7 (Sandbox verification)'
@@ -42,6 +45,11 @@ export const SQUARE_ITEMS: readonly ItemDef[] = [
   { id: 'SQR-09', title: "SearchEvents returns this run's events and each parses through our dispatcher", source: `${DOC}, check 8` },
   { id: 'SQR-10', title: 'TestWebhookSubscription reaches --webhook-url (optional)', source: `${DOC}, check 9` },
   { id: 'SQR-11', title: 'Cleanup: links deleted, subscriptions canceled, card disabled, customer deleted', source: `${DOC}, check 10` },
+  {
+    id: 'SQR-12',
+    title: "Oasis's own link builder and refund legs: a link with a tax and a tip line totals the balance exactly, paid through its order; a leg refunded with its rf_ key twice is one refund; the leg cap matches Square's",
+    source: `${DOC}, check 11 (wave Q2b)`,
+  },
 ]
 
 export const SQUARE_OPTIONS = {
@@ -270,7 +278,7 @@ async function verify(ctx: RunContext, cfg: Config): Promise<Report> {
   let customer: WireCustomer | undefined
   let card: WireCard | undefined
   if (readOnly) {
-    for (const id of ['SQR-03', 'SQR-04', 'SQR-05', 'SQR-06', 'SQR-07', 'SQR-08', 'SQR-11']) report.skip(id, '--read-only: nothing is created')
+    for (const id of ['SQR-03', 'SQR-04', 'SQR-05', 'SQR-06', 'SQR-07', 'SQR-08', 'SQR-11', 'SQR-12']) report.skip(id, '--read-only: nothing is created')
   } else {
     // ---- SQR-03 customer ------------------------------------------------------------------------------------------------------
     customer = await step('SQR-03', async () => {
@@ -426,6 +434,58 @@ async function verify(ctx: RunContext, cfg: Config): Promise<Report> {
       report.pass(
         'SQR-06',
         `link host(s) ${findings.linkHosts.join(', ')}; order total exactly ${expected}; paid through the order (order ${orderAfter.value.state}); link after paying: ${linkAfter}; delete: ${String(del)}; quick-pay deleted: ${String(delQuick)}`,
+      )
+    })
+
+    // ---- SQR-12 our link builder and refund legs ------------------------------------------------------------------------------------
+    await step('SQR-12', async () => {
+      // an invoice nobody paid yet: two lines, 6.625% tax (half up) and a tip, as balanceLines builds them for prepareSquareLink
+      const items = [
+        { name: 'Signature Hand Wash · verify', priceCents: 4000 },
+        { name: 'Rain repellent · verify', priceCents: 1500 },
+      ]
+      const tax = taxCents(5500, 663)
+      const tip = 300
+      const balance = 5500 + tax + tip
+      const lines = balanceLines({ invoiceNo: 20640 }, items, { paid: 0, adj: 0, refunded: 0, pendingAmt: 0, tax, tip, balance, total: balance })
+      const { link } = await api.checkout.createLink(sqKey('pl', `${run}:oasis-link`), {
+        order: { location_id: locationId, reference_id: ref, line_items: lines.map((l) => ({ name: l.name, quantity: '1', base_price_money: usd(l.cents) })) },
+        payment_note: `${ref} INV-20640`,
+        checkout_options: { allow_tipping: false, ask_for_shipping_address: false, enable_coupon: false, enable_loyalty: false },
+      })
+      cleanup.push({ what: `payment link ${link.id}`, run: () => api.checkout.deleteLink(link.id) })
+      const order = await api.orders.retrieve(link.order_id!)
+      if (centsOf(order.total_money) !== balance) return report.fail('SQR-12', `order total ${centsOf(order.total_money)}, expected exactly ${balance}`)
+      await client.request({
+        method: 'PUT',
+        path: `/v2/orders/${encodeURIComponent(order.id)}`,
+        body: { idempotency_key: sqKey('py', `${run}:oasis-open`), order: { location_id: locationId, state: 'OPEN', version: order.version } },
+        idempotencyKey: sqKey('py', `${run}:oasis-open`),
+        schema: wireOrderEnvelope,
+      })
+      const paid = await api.payments.create(sqKey('py', `${run}:oasis-pay`), { source_id: NONCE_OK, order_id: order.id, amount_money: usd(balance), location_id: locationId, autocomplete: true })
+      if (paid.status !== 'COMPLETED' || paid.order_id !== order.id) return report.fail('SQR-12', `payment ${paid.status} with order_id ${paid.order_id ?? 'none'}`)
+      // a refund leg as square.refunds.submit plans and sends it: the same key twice is the same refund
+      const ref0 = { paymentId: paid.id, totalCents: centsOf(paid.total_money) || balance, usedCents: 0, occurredAt: new Date(paid.created_at) }
+      const legs = planRefundLegs([ref0], 2000)
+      if (!legs || legs.length !== 1) return report.fail('SQR-12', `the planner gave ${JSON.stringify(legs)}`)
+      const legKey = sqKey('rf', `${run}:leg-1`)
+      const first = await api.refunds.refund(legKey, { payment_id: paid.id, amount_money: usd(legs[0]!.amountCents), reason: `${ref} leg` })
+      const again = await api.refunds.refund(legKey, { payment_id: paid.id, amount_money: usd(legs[0]!.amountCents), reason: `${ref} leg` })
+      if (again.id !== first.id) return report.fail('SQR-12', 'the same leg key answered a second refund')
+      // what is left is the cap the planner uses; Square refuses more, as the planner does
+      const over = planRefundLegs([{ ...ref0, usedCents: 2000 }], balance - 2000 + 1)
+      let squareOver = 'accepted'
+      try {
+        await api.refunds.refund(sqKey('rf', `${run}:leg-over`), { payment_id: paid.id, amount_money: usd(balance - 2000 + 1), reason: `${ref} over` })
+      } catch (e) {
+        squareOver = `refused (${codeOf(e)})`
+      }
+      if (over !== null || squareOver === 'accepted') return report.fail('SQR-12', `over the cap: planner ${JSON.stringify(over)}, Square ${squareOver}`)
+      const done = await poll(() => api.refunds.get(first.id), (r) => ['COMPLETED', 'FAILED', 'REJECTED'].includes(r.status))
+      report.pass(
+        'SQR-12',
+        `lines ${lines.map((l) => `${l.name} ${l.cents}`).join(', ')} = ${balance} exactly; paid through the order; leg key twice -> one refund (${done.value.status}); one cent over the cap: planner refuses, Square ${squareOver}`,
       )
     })
 

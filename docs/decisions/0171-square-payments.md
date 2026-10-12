@@ -1,5 +1,6 @@
 # 0171 Square for everything: pay-by-link, memberships, counter payments and cards on file
-Status: accepted (2026-10-12, owner plan "Square payments + prices by vehicle size", decisions 1 to 9); wave Q1b (the foundation) built
+Status: accepted (2026-10-12, owner plan "Square payments + prices by vehicle size", decisions 1 to 9); wave Q1b (the foundation) and
+wave Q2b (the core: ledger, counter matching, payment and deposit links, API refunds) built
 
 The shop already takes cards at the counter with the Square POS app and reader. The owner wants Square for everything: payment links,
 memberships billed monthly, counter payments recorded in Oasis without typing, and cards on file. Today payments are Squarespace-shaped
@@ -33,7 +34,8 @@ approved plan, the plan wins (section "Amendments").
 | `SQUARE_WRITES_ENABLED` | `false` | Observe-only: webhooks, catch-up, mirror and matching; any call that creates or changes something at Square is refused in the client before it is sent (setup calls such as EnableEvents and the webhook subscription still go). |
 | `PAYMENT_PROCESSOR` | `squarespace` | The cutover: which processor new links, saved cards, memberships and refunds use. |
 | `SQUARE_POS_API_ENABLED` | `false` | The POS app switch from the dashboard (iPad). Only with live production Square. |
-| `SQSP_SYNC_MODE` (wave Q2b) | `active` | `history` keeps Squarespace read-only about 60 days for late refunds, then `off`. |
+| `SQUARE_POS_AUTOMATCH` (wave Q2b) | `evidence` | Counter payments recorded only on strong evidence; `amount` also on an amount matching exactly one open invoice (owner's call). |
+| `SQSP_SYNC_MODE` (not built yet) | `active` | `history` keeps Squarespace read-only about 60 days for late refunds, then `off`. |
 
 The environment contract refuses: `live` without the token, location, application id, webhook key or webhook URL; production with
 `PAYMENT_PROCESSOR=square` on the simulator or the sandbox; the POS switch outside live production; a production webhook URL that is
@@ -82,6 +84,60 @@ not `https://<domain>/hooks/square`; a previous webhook key without a current on
 Nothing in this wave moves money or changes today's behaviour: with the defaults no request leaves the process, the catch-up and the
 reconcile do nothing, and the hook verifies nothing (no key) and answers 401.
 
+## The core (wave Q2b, built)
+
+- **Migration** `20261014400000_square_core.sql` (the name the wave's brief fixed; the table below said `20261014200100`):
+  `ledger_events.source` gains `square`; `processor` (`squarespace|square`, backfilled for Squarespace rows) and `processor_order_id`;
+  the guard trigger re-created (both new columns mutable like `processor_ref`; `method`, `brand` and `last4` only on the move from
+  `awaiting_processor` to `confirmed`, so a staff "Card" becomes "Visa ••4242"); `invoice_calc_of` leaves a refund whose
+  `processor_state` is `failed` out of `refunded` and `ref_orig` (D4; the twins `calc.ts`, `jobs-integrity.ts`, the refund caps,
+  `revenue.ts` and the by-item claim follow; the dashboard's `cents.ts` is the dashboard package's); `payment_links` gain `provider`,
+  `origin`, the Square ids, `invoice_version`, cancel fields, `square_deleted_at`, `paid_square_payment_id`, kinds
+  `square_order|square_quick_pay`, state `pending` and a nullable `url`; `square_payments` (mirror and match), `square_refund_legs`,
+  `square_pos_intents`.
+- **Ledger** (`src/modules/square/ledger.ts`, `SquareLedgerOps`): `recordPayment` (`square:pay:<id>`), `confirmAwaiting`, `recordTip`
+  (`square:tip:<id>`, raises `invoices.tip_cents`), `attachCash`, `reassign` (`pay.void`), `recordExternalRefund` (`square:refund:<id>`,
+  needs review), `attachPosRefund`; refund legs are confirmed or failed by `settleRefundEvent` (`refunds.ts`). Every write locks the
+  invoice, re-checks under the lock, and never writes a second live `pay` of one Square payment. The common tail (version, audit, SSE,
+  Operations refresh) is `src/modules/payments/announce.ts`, now shared with `PaymentsService` and `SqspLedgerOps`.
+- **Classifier and matcher** (`classify.ts`, pure `matcher.ts`, driver `payments.ts`): rules as the design (2.3, 2.4) with one order
+  change: R2 (a POS intent) is checked before R1 because the intent's note also names the invoice and the intent says which entry.
+  Amount-only matching is off (`SQUARE_POS_AUTOMATCH=evidence`). Counter payments wait `SQUARE_MATCH_DELAY_SECONDS`; the new job
+  `square.payments.match` (every minute) decides them (the design named no job for the delay). Every path takes the advisory lock
+  `square:payment:<id>` first; a property test races the webhook, the catch-up, the reconcile, the matching job and a person.
+- **Queue and alerts**: `GET /payments/square/unmatched`, `POST /payments/square/:paymentId/apply|ignore|reassign`; the reconciliation's
+  `square` section; `squareExternalAlerts` (payments waiting more than 30 minutes, a refused card refund, an invoice overpaid through
+  Square, the token refused, the catch-up behind, webhooks silent) in `productionExternalAlerts`; `squareCardHints` once Square is the
+  processor; the status row counts `unmatched` and `failedRefunds`.
+- **POS app switch** (`pos.ts`): `POST /invoices/:id/square-pos-intents`, `POST /payments/square/pos-callback`; production only.
+- **Links** (`links.ts`, `public.ts`, `deposits.ts`): `prepareSquareLink` outside any lock with the exact-sum assertion, the row
+  `pending` before the call (so a failed command leaves a row the sweep can clean up; this also makes the design's orphan-link pass of
+  the reconcile unnecessary: Oasis never holds a Square link it has no row for, and deleting unknown links could delete the owner's own),
+  `activateSquareLink` in the command; `collect('payment_link')`, `attachPaymentLink` and the pay page branch on `PAYMENT_PROCESSOR`;
+  the routes pass `prepare` to the idempotency handler. Staff "Send link" texts the personal pay link (`issueClientLink` kind `pay`,
+  issuer `staff`, template `payment_link_personal` in class `payment_link`, which joins `SENSITIVE_CLASSES` and `MASK_ONLY_CLASSES` so the
+  link is stored masked) while personal links are on, else the `square.link` URL. The pay page reuses or makes a link for the exact
+  balance in two transactions around the Square call. `PAYMENT_LINK_HOSTS` defaults to `squarespace.com` (until the cutover), `square.link`,
+  `square.site`, plus `squareupsandbox.com` outside production. The assistant's `payableInvoice` needs no staff URL once Square is the
+  processor. `square.links.sweep` runs every minute.
+- **Deposit** (D2): `booking.guest_fee.collect` is `counter|link|card_hold` (`card_hold` accepted, collected at the counter until Q3a);
+  the website, personal-link and assistant booking paths call `requestDepositLink` in their transaction (a `pending` row, nothing at
+  Square: a booking never fails because Square is down); the job `square.deposit-link` (every minute; a cron rather than a post-commit
+  kick, so no booking path needs the queue) makes the quick-pay link and texts it; `POST /public/links/deposit/start` opens it from a
+  verified calendar page (a verified page, not a fresh step-up: the page only opens Square's checkout for the visit's own deposit, and
+  it uses no completion of the calendar link). The payment is a deposit `pay`; `settlement.ts` is unchanged.
+- **Refunds** (D4): the refund row is the outbox; it carries `processor square` when written while Square is the processor on an invoice
+  holding Square card money (`PaymentsService.refund` and the adjust settlement). `square.refunds.submit` plans legs and sends them;
+  a refund the Square money cannot cover is failed without sending (all or nothing: no partial Square refund with the rest left to
+  staff); refund events settle legs, including the race where Square's event arrives before the job recorded its answer.
+- **Wording** (design 2.7): `VOID_NOT_ALLOWED`, `EVENT_NOT_AWAITING` name the event's processor (`processorName`), `PAYMENT_LINK_REQUIRED`
+  is neutral; the awaiting alert of a Square entry reads "Square has not confirmed it yet".
+- **Off by default**: with `SQUARE_PROVIDER=sim`, `SQUARE_WRITES_ENABLED=false` and `PAYMENT_PROCESSOR=squarespace` no payment reaches
+  the mirror, no link or refund is made at Square, no booking asks for a deposit link, Send link and the pay page behave as before.
+- Q1b leftover N1 fixed: `pnpm square:webhooks` refuses, in production (`NODE_ENV` or `SQUARE_ENVIRONMENT`), a URL that is not
+  `https://<domain>/hooks/square`.
+- Sandbox: SQR-12 drives Oasis's own link builder and refund leg planner against the sandbox (11 PASS, 2026-10-12).
+
 ## Sandbox findings (2026-10-12, `pnpm verify:square --secret oasis/sandbox/square`, 10 PASS)
 
 Recorded in `docs/integrations/square.md` section 8; the ones that change later waves:
@@ -129,7 +185,7 @@ Recorded in `docs/integrations/square.md` section 8; the ones that change later 
 
 | Wave | Adds |
 |---|---|
-| Q2b | Migration `20261014200100_square_core.sql`: `ledger_events.processor` / `processor_order_id`, the guard trigger re-created, failed refunds out of `invoice_calc_of` (D4); `square_payments` mirror, `square_refund_legs`, `square_pos_intents`; `SquareLedgerOps` with the announce tail extracted to `payments/announce.ts`; the classifier and matcher (R1 to R5), the unmatched queue routes and alerts; payment and deposit links with `square.links.sweep`; API refunds (`square.refunds.submit`); the real `payment` and `refund` ingest handlers; `SQSP_SYNC_MODE`. |
+| Q2b (built) | Migration `20261014400000_square_core.sql`: `ledger_events.processor` / `processor_order_id`, the guard trigger re-created, failed refunds out of `invoice_calc_of` (D4); `square_payments` mirror, `square_refund_legs`, `square_pos_intents`; `SquareLedgerOps` with the announce tail extracted to `payments/announce.ts`; the classifier and matcher (R1 to R5), the unmatched queue routes and alerts; payment and deposit links with `square.links.sweep`; API refunds (`square.refunds.submit`); the real `payment` and `refund` ingest handlers. `SQSP_SYNC_MODE` was not part of the wave's brief and is still to build. |
 | Q3a | Cards on file: the site's card component and CSP, link kind `card`, `square_customer_links`, `customer_cards`, `card_consents`, `square_charges`, the fee proposal and charge; the `card` and `customer` handlers. |
 | Q3b | Memberships on Square: catalog sync of the tier x size prices, enrollment with resume, billing webhooks (`invoice` and `subscription` handlers), the failure policy (D10), staff actions. |
 | Q3c, Q3e | The website's v2 catalog, join and pay pages; the dashboard's billing block, saved cards and Settings, Billing & integrations (Square status and Test connection). |

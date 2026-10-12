@@ -94,10 +94,10 @@ function onInvoice(
 }
 
 export function planSquarePayment(p: SquarePaymentFacts, ctx: MatchContext, o: MatchOptions): MatchDecision {
+  // R2: the POS intent of the dashboard's app switch (checked first: its note also names the invoice, and the intent says which entry)
+  if (ctx.intent && !ctx.intent.canceled) return onInvoice(p, ctx.intent, 'R2', ctx.intent.entryId)
   // R1: the invoice number in the note or reference id (a canceled invoice is never paid this way: a person decides)
   if (ctx.named && !ctx.named.canceled) return onInvoice(p, ctx.named, 'R1')
-  // R2: the POS intent of the dashboard's app switch
-  if (ctx.intent && !ctx.intent.canceled) return onInvoice(p, ctx.intent, 'R2', ctx.intent.entryId)
 
   if (isCash(p)) {
     const cash = ctx.cashEntries.filter((e) => e.amountCents === p.amountCents)

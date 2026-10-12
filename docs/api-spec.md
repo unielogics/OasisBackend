@@ -1011,20 +1011,20 @@ is the design's day as data.
 | `GET /invoices/:id` | `pay.reports` | Items (with `refunded` flag), adjustment lines, full `calc`, `refundCaps{cardCents,otherCents,totalCents}` (the refund command's own caps after done and pending refunds: card checks `cardCents` then `totalCents`, cash `totalCents` then `otherCents`, store credit `totalCents`), `clientCredit{balanceCents,nextExpiry}`, `ledger[]` newest first (`occurredAt desc, seq desc`, `atLabel` Today / Yesterday / `Jun 11 · 9:12 AM`), per pending refund `canApprove` and `approveBlock` (`permission`, `limit`, `self`) for the caller, `caller{canCollect,canRefund,...,refundLimitCents}`. |
 | `GET /payments/approvals` | `pay.reports` | Pending refunds oldest first with the caller's approval rights. |
 | `GET /payments/export.csv?range&filter&q` | `pay.reports` | UTF-8 BOM, CRLF, RFC 4180, plain decimals, dates in the business tz, text cells starting with `= + - @` get a leading apostrophe (numeric columns never). Scope = range and filter and search. `oasis-invoices_{from}_{to}.csv`, at most 20,000 rows (422 `EXPORT_TOO_LARGE`). Columns: `Invoice, Date, Time, Client, Vehicle, Staff, Items, Tip, Adjustments, Subtotal, Tax, Total, Paid, Credit applied, Refunded, Refund pending, Balance, Credits issued, Net revenue, Status`. |
-| `GET /payments/reconciliation` | `pay.reports` or `set.billing` | `awaitingProcessor[]` (card money older than 2 h), `unmatchedOrders[]` and `unmatchedTransactions[]` (from the sync's queues through `UnmatchedSource`; empty until wired), `overpaid[]` (last 90 days). |
+| `GET /payments/reconciliation` | `pay.reports` or `set.billing` | `awaitingProcessor[]` (card money older than 2 h), `unmatchedOrders[]` and `unmatchedTransactions[]` (from the sync's queues through `UnmatchedSource`; empty until wired), `overpaid[]` (last 90 days), `square{paymentsToMatch[], failedRefunds[], refundsInFlight}` (ADR 0171, section 30.7: the Square payments a person has to match, card refunds Square refused in the last 90 days with what did go back, refund legs on their way). |
 | `GET /clients/:id/credit` | `pay.reports` | Balance, next expiry and the lots (`state` active / used / expired). |
-| `POST /invoices/:id/payments` `{method: card\|cash\|payment_link, url?}` | `pay.collect` | Collects the full balance. Cash: `pay` event, `processorState na`. Card: `pay` event that counts immediately with `processorState awaiting_processor`; label is the card brand only (`Card`, or `Visa` from a `CardHintProvider`), never invented digits. `payment_link`: needs an https URL on an allowed host (`PAYMENT_LINK_HOST`), creates a `payment_links` row, queues the SMS, no ledger event. 422 `PAY_NOTHING_TO_COLLECT`. |
+| `POST /invoices/:id/payments` `{method: card\|cash\|payment_link, url?}` | `pay.collect` | Collects the full balance. Cash: `pay` event, `processorState na`. Card (the "Square reader" tender): `pay` event that counts immediately with `processorState awaiting_processor` until the processor confirms it (Square: the counter matcher, rule R3, fills `Visa ••4242`; Squarespace: the sync or staff); label is the card brand only (`Card`, or `Visa` from a `CardHintProvider`), never invented digits. `payment_link`: before the Square cutover needs an https URL on an allowed host (`PAYMENT_LINK_HOST`), creates a `payment_links` row, queues the SMS, no ledger event; with `PAYMENT_PROCESSOR=square` see `payment-links` below (`url` ignored). 422 `PAY_NOTHING_TO_COLLECT`. |
 | `POST /invoices/:id/credit-applications` | `pay.collect` | `min(usable credit, balance)`; FIFO allocation. 422 `PAY_NOTHING_TO_APPLY`. |
-| `POST /invoices/:id/refunds` `{mode: full\|items\|custom, itemIds?, amountCents?, dest: card\|credit\|cash, reason?, note?}` | `pay.refund` | Value: full = refundable; items = selected lines plus tax at the invoice rate, capped at refundable, each item at most once (`ITEM_ALREADY_REFUNDED`); custom = amount. Checks in the design's order: `REFUND_EXCEEDS_CARD` (`Only $X was paid by card — refund the rest to store credit.`; $X is the smaller of the non-credit money still there to give back and the card and wallet money still there, pending requests reserving both), `REFUND_EXCEEDS_REFUNDABLE`, then for `dest: cash` `REFUND_EXCEEDS_ORIGINAL` (`Only $X was paid by card or cash — refund the rest to store credit.`: store credit never comes back as cash). An amount above 2,147,483,647 cents is `422 PAY_AMOUNT_INVALID`. **Pending exactly when the amount is strictly greater than the caller's refund limit**, else done; a done card refund is `awaiting_processor`. |
+| `POST /invoices/:id/refunds` `{mode: full\|items\|custom, itemIds?, amountCents?, dest: card\|credit\|cash, reason?, note?}` | `pay.refund` | Value: full = refundable; items = selected lines plus tax at the invoice rate, capped at refundable, each item at most once (`ITEM_ALREADY_REFUNDED`); custom = amount. Checks in the design's order: `REFUND_EXCEEDS_CARD` (`Only $X was paid by card — refund the rest to store credit.`; $X is the smaller of the non-credit money still there to give back and the card and wallet money still there, pending requests reserving both), `REFUND_EXCEEDS_REFUNDABLE`, then for `dest: cash` `REFUND_EXCEEDS_ORIGINAL` (`Only $X was paid by card or cash — refund the rest to store credit.`: store credit never comes back as cash). An amount above 2,147,483,647 cents is `422 PAY_AMOUNT_INVALID`. **Pending exactly when the amount is strictly greater than the caller's refund limit**, else done; a done card refund is `awaiting_processor`. With `PAYMENT_PROCESSOR=square` a card refund on an invoice holding Square card money is written with `processor: square`: the job `square.refunds.submit` sends it through the Square API (section 30.9); a refund Square refuses becomes `processorState failed` and **no longer counts as refunded**. |
 | `POST /invoices/:id/refunds/:eventId/approve` | `pay.refund` | Limit of at least the amount (403 `CANT_APPROVE`, title `Your role can’t approve $80.00`); the requester cannot approve their own request unless unlimited or `approvals.allow_self` (403 `SELF_APPROVAL`); refundable and card cap are re-validated without the request's own reservation; 409 `REFUND_NOT_PENDING`. The event keeps its time; `approvedBy` is `Name · Roles`. |
 | `POST /invoices/:id/refunds/:eventId/deny` `{note?}` | `pay.refund` | The requester may withdraw. |
 | `POST /invoices/:id/adjustments` `{kind, unit: $\|%, value, reason?, note?, settle?}` | `pay.adjust` | `value` is cents for `$`, basis points of the items subtotal for `%` (1000 = 10%); applied before tax. Over the limit: 422 `OVER_LIMIT` with `Over your $25 limit as Customer Support. Ask Management or a Super Admin.` (no approval path). `ADJUST_EXCEEDS_INVOICE`, 409 `INVOICE_CANCELED`. A discount that leaves a paid invoice overpaid adds a settlement **refund event** (`settle` credit by default or card) under the normal refund rules (pending above the caller's refund limit, card settlements await Squarespace); `{event, settlement, invoice}`. |
 | `POST /invoices/:id/credits` `{amountCents, reason?, note?, expiry: none\|d30\|d90 (or the design labels)}` | `pay.credit` | Expires at the end of the business day 30 or 90 days out. Over the limit: 422 `OVER_LIMIT` (`Over your $50 limit as Customer Support.`). |
-| `POST /invoices/:id/void` `{eventId, note?}` | `pay.void` | Cash, or card still awaiting Squarespace; 422 `VOID_NOT_ALLOWED`, 409 `PAYMENT_ALREADY_VOIDED`. |
+| `POST /invoices/:id/void` `{eventId, note?}` | `pay.void` | Cash, or card still awaiting its processor; 422 `VOID_NOT_ALLOWED` (the detail names the processor: Square, Squarespace or "the card processor"), 409 `PAYMENT_ALREADY_VOIDED`. |
 | `PUT /invoices/:id/tip` `{tipCents}` | `pay.collect` | Untaxed; reopens a balance when the invoice was settled. |
 | `POST /invoices/:id/receipt` | `msg.send` or `pay.collect` | SMS to opted-in clients and email, through the `PaymentMessenger` port; audited; not a ledger event. |
-| `POST /invoices/:id/payment-links` `{kind: balance\|deposit, amountCents?, url?}` | `pay.collect` | Attach and text a Squarespace checkout or invoice link. |
-| `POST /ledger-events/:id/confirm-processor` `{processorRef?, sqspOrderId?}` | `pay.collect` for a payment, `pay.refund` for a refund | `awaiting_processor` to `confirmed`; 409 `EVENT_NOT_AWAITING`. |
+| `POST /invoices/:id/payment-links` `{kind: balance\|deposit, amountCents?, url?}` | `pay.collect` | Before the Square cutover: attach and text a Squarespace checkout or invoice link. With `PAYMENT_PROCESSOR=square` (ADR 0171 D3): a `balance` link is the client's personal pay page while `PUBLIC_LINKS_ENABLED` (template `payment_link_personal`, the link masked in the message row; `paymentLink.url` null, `provider personal`), else a Square link made now for exactly the balance (its lines, a "Sales tax" line and a "Tip" line, or one "Balance due" line; asserted to add up exactly); a `deposit` is a Square quick-pay link for `amountCents`. The Square call runs before the transaction (idempotency `prepare`); the link becomes active under the invoice lock (409 `CONCURRENT_UPDATE` if the amount changed meanwhile), older active links of the purpose are superseded (and deleted at Square by `square.links.sweep`). 409 `SQUARE_WRITES_OFF` (watch-only), 503 `SQUARE_UNAVAILABLE`. `paymentLink{id,url,expectedCents,purpose,sms,provider}`. |
+| `POST /ledger-events/:id/confirm-processor` `{processorRef?, sqspOrderId?}` | `pay.collect` for a payment, `pay.refund` for a refund | `awaiting_processor` to `confirmed` by hand; 409 `EVENT_NOT_AWAITING` (names the processor). |
 
 Limits and roles: the limit of a kind is the highest among the roles that grant the permission (`null` unlimited, no row 2500
 cents); ledger `by` is the real person and `byRole` the names of the granting roles (`Management + Accounting`); under
@@ -1050,8 +1050,11 @@ Canceling or a no-show cancels the invoice: `canceled` (nothing paid), `canceled
   to wire the Messaging outbox (`createPaymentMessenger(outbox)` with a real `PaymentOutbox`), the Squarespace card-brand hint
   and the sync's unmatched queues. Outside production the default outbox is in memory (`devOutbox`); **in production the
   default fails with 503 until a real outbox is passed**, so a receipt or payment link is never reported as sent when it was not.
-* `PAYMENT_LINK_HOSTS` (optional, comma separated, default `squarespace.com`; a host matches itself and its subdomains) is the
-  allow-list for payment link URLs. It is read directly from the environment (it is not part of `loadEnv`).
+* `PAYMENT_LINK_HOSTS` (optional, comma separated; a host matches itself and its subdomains) is the allow-list for payment link URLs.
+  Default: `squarespace.com` (until `PAYMENT_PROCESSOR=square` retires it), `square.link`, `square.site`, and the Square sandbox's
+  `squareupsandbox.com` outside production (ADR 0171). It is read directly from the environment (it is not part of `loadEnv`).
+* Invoice detail and ledger rows (ADR 0171): each ledger event carries `processor` (`squarespace|square|null`) and
+  `processorOrderId`, `source` may be `square`; the detail carries `processing{processor, squarePosAppSwitch}`.
 * Settings used: `tax.rate_bp` (snapshotted on each invoice), `approvals.allow_self`.
 * Job `payments.lag-scan` (every 15 minutes) is registered in `src/platform/job-registry.ts`.
 
@@ -1859,7 +1862,8 @@ The exchange (with `session` added), `GET me` and every verification step answer
 | `POST /public/links/bookings` (Idempotency-Key required) | `{serviceKey, addonKeys[] (≤12), date "YYYY-MM-DD", startMin, vehicle? {year?, make?, model?, color?, label?, plate?}, name?, email?, smsConsent?}` (strict) | 201 `{bookingRef, status: "booked", start, end, deposit {dueCents, how counter \| link}, confirmationBy sms \| none, service {key, name}, addons[{key, name}], when "Today · 1:00 PM", member, bayCount}`. Verified calendar or book-again pages. Books through the dashboard's `createAppointment` with channel `online` (lead time, windows, paused days, no overrides), source **`link`**, on the board's grid (422 `body.startMin` "Pick one of the times on the board."), the categories of the package and add-ons, the invoice, the `booking_confirmed_web` text ("Booked: Express Hand Wash, today at 1:00 PM. $25 booking fee due at the shop. Reply here to change it.") and the activity line "Booked on a personal link · …". The fee and VIP rules follow the page's own client (active member: no fee, `member: true`; VIP client or VIP-plan member: VIP rules), never during a reset hold. On a client's link `name` only fills a placeholder name (a real name is never replaced) and `email` only fills an empty one (never as a verified email; the email on file is never replaced from a link page, so a page trusted by the number alone cannot move the address a PIN reset's notice goes to — staff change it); on a stranger's link `name` is required (422 `body.name` "Enter your name.") and creates the client (source online; `smsConsent` their consent to the texts about the booking), or books for the number's client when one holds it (only their PIN verifies such a page once they have one: 409 `IDENTITY_PIN_REQUIRED`). A page verified by code on a record the stale-record rule holds (a stranger's link or the client's own) books a **new client** and the number moves to it (section 27.2 `bindPartyToNumber`; `name` fills the new record, a placeholder when empty; no member privileges). A booking made with the client's PIN records `booked_with_pin`. The Idempotency-Key belongs to the **link** (resolved from the session before the key is claimed): the same key and body from a re-opened page of the same link answers the stored booking with `Idempotent-Replayed: true`, and two links (behind one address or not) never share a key. 409 `IDENTITY_LINK_USED` once the link's bookings are spent; slot refusals in the website's words (409 `PUBLIC_SLOT_TAKEN`, `PUBLIC_SLOT_VIP`, `PUBLIC_SLOT_PAST`, `PUBLIC_SLOT_CLOSED`, `PUBLIC_SLOT_TOO_FAR`); 422 for an unknown service or add-on key. |
 | `POST /public/links/appointments/:ref/reschedule` | `:ref` `OAS-00042`; `{date, startMin}` (strict) | 200 `{bookingRef, status, start, end, when}`. Verified calendar pages; only the page's own client's visits (a calendar link sent for one visit: only that one), 404 `LINK_APPOINTMENT_NOT_FOUND` "We can’t find that visit. Text us and we’ll help." otherwise; a visit that started, ended or was canceled: 409 `LINK_CANT_RESCHEDULE` "This visit can’t be moved online. Text us and we’ll help.". The online rules (the page's VIP privileges included) and the grid as for a booking, then the dashboard's reschedule (the client is texted the new time). Uses nothing of the link. A stale record's visits are not found by a page verified only by code. |
 | `POST /public/links/membership/start` | `{email, vehicles? [{car, plate?}] (≤5)}` (strict) | 200 `{redirectUrl, membershipRef "OAS-M-1A2B3C4D", checkoutExpiresAt}`: send the browser to `redirectUrl`, the plan's Squarespace checkout (https on squarespace.com only, checked again on the way out). Membership pages with a **fresh** step-up. A pending membership of the link's plan (reused when one is pending) and a checkout intent (W2e `openCheckoutIntent`): the typed email, the plan's product, 72 hours; the membership activates when the Squarespace sync matches the paid order to the intent. The page should say the email must be the one they pay with: it is stored only on the intent, never as the client's email or a verified email, so an email alone never links an order (design section 10); an order that matches only the intent's email but carries another phone or name waits for staff (`awaiting_match`, W4c fixes). `vehicles` are added to the client (`car` like "2021 Tesla Model 3"). One completion of the link. 409 `IDENTITY_RECORD_UNCONFIRMED` on a stale record proven only by a code, 409 `LINK_ALREADY_MEMBER` "You already have a membership. Text us to change your plan.", 409 `LINK_CHECKOUT_UNAVAILABLE` "Joining online isn’t open right now. Text us and we’ll help you join." (no checkout link in Settings yet), 403 `LINK_PRIVILEGES_HELD`, 422 `body.email` "Enter a valid email.". |
-| `POST /public/links/pay/start` | `{}` | 200 `{status: "redirect", redirectUrl}`: the payment URL staff attached to the invoice, only https on a `PAYMENT_LINK_HOSTS` host (default squarespace.com) with no user, password or port; one completion of the link. 200 `{status: "link_pending", redirectUrl: null}`: the invoice has no allowed URL; tell the client the shop will text a payment link (the managers get one `payments.link_requested` notice "Text Maria a payment link", not repeated while unread). Payment pages with a **fresh** step-up; 403 `LINK_PRIVILEGES_HELD`; 409 `IDENTITY_RECORD_UNCONFIRMED` on a stale record proven only by a code. A paid or voided invoice has already ended the page (401 `IDENTITY_SESSION_INVALID`). |
+| `POST /public/links/pay/start` | `{}` | 200 `{status: "redirect", redirectUrl}`: the payment URL staff attached to the invoice, only https on a `PAYMENT_LINK_HOSTS` host (default squarespace.com, square.link, square.site) with no user, password or port; one completion of the link. With `PAYMENT_PROCESSOR=square` (ADR 0171 D3): a Square link for exactly the current balance, reused while it is active for that amount, else made now in two transactions around the Square call (409 `CONCURRENT_UPDATE` if the balance changed during the call; 422 `PAY_NOTHING_TO_COLLECT`); `link_pending` only when Square does not answer or is watch-only. 200 `{status: "link_pending", redirectUrl: null}`: the invoice has no allowed URL; tell the client the shop will text a payment link (the managers get one `payments.link_requested` notice "Text Maria a payment link", not repeated while unread). Payment pages with a **fresh** step-up; 403 `LINK_PRIVILEGES_HELD`; 409 `IDENTITY_RECORD_UNCONFIRMED` on a stale record proven only by a code. A paid or voided invoice has already ended the page (401 `IDENTITY_SESSION_INVALID`). |
+| `POST /public/links/deposit/start` | `{bookingRef}` | (ADR 0171 D2, `PAYMENT_PROCESSOR=square`) A verified calendar or book-again page pays the deposit of one of its client's upcoming visits (booked or confirmed) whose booking asked for a deposit link (`booking.guest_fee.collect` `link`): 200 `{status: "redirect", redirectUrl, amountCents}` a Square quick-pay link for exactly the deposit (an active one reused); `paid`; `none` (no deposit link owed for that visit, or Squarespace is still the processor); `link_pending` (Square did not answer). 404 for a booking that is not the page client's. Uses no completion of the link. Limits as pay/start. |
 
 ### 28.4 Flows the website builds
 
@@ -1957,10 +1961,11 @@ Tests: `test/assistant-tools/*.test.ts`, `test/leads/*.test.ts`, the authz matri
 `test/assistant/runtime-e2e.test.ts` runs the tools, the welcome flow, the reply number, the leads and the status texts through the
 real turn, guard and judge (ADR 0160, W3 integration).
 
-## 30. Square foundation (ADR 0171, wave Q1b)
+## 30. Square (ADR 0171): foundation (wave Q1b) and core (wave Q2b)
 
-Everything here is off by default (`SQUARE_PROVIDER=sim`: an in-process simulator answers, nothing reaches Square). The routes and
-jobs that move money come with waves Q2b to Q3b (ADR 0171, "What the later waves add").
+Everything here is off by default (`SQUARE_PROVIDER=sim`: an in-process simulator answers, nothing reaches Square;
+`SQUARE_WRITES_ENABLED=false`: nothing is created or changed at Square; `PAYMENT_PROCESSOR=squarespace`: links, refunds and deposits
+stay as before). Cards on file come with wave Q3a, memberships with Q3b (ADR 0171, "What the later waves add").
 
 ### 30.1 `POST /hooks/square` (webhook, public through nginx: POST only, zone `oasis_hooks`, 1 MB)
 
@@ -1975,7 +1980,8 @@ jobs that move money come with waves Q2b to Q3b (ADR 0171, "What the later waves
 | No queue (single process) | processed inline; a failure releases the claim and answers `503` |
 
 The job re-fetches the object (payment, refund, invoice, subscription, card, customer) by id, ignores another location, and runs the
-ingest handler (this wave: log only) under an advisory lock per object; the row is closed `processed`, or `ignored` with the reason in
+ingest handler under an advisory lock per object (payments and refunds since wave Q2b, sections 30.6 and 30.9; the others log until
+Q3a and Q3b); the row is closed `processed`, or `ignored` with the reason in
 `error`, or `failed` (retried 5 times, 30 s apart).
 
 ### 30.2 `GET /api/v1/integrations/square` (`set.billing` or `pay.reports`)
@@ -2009,10 +2015,66 @@ any other merchant from then on. A row learned in another environment counts as 
 override, the POS switch outside production, a catch-up that has not run for 30 minutes (live), a watermark older than 27 days, no
 webhook in 24 hours while the catch-up found events. `details`: environment, location, merchant, API version, writes, processor, POS
 switch, `token` and `webhookKey` as `set`/`not set`, events enabled, subscription verified, last webhook, catch-up and reconcile times,
-the last test result; `unmatched`, `failedRefunds` and `pendingEnrollments` are `null` until waves Q2b and Q3b fill them.
+the last test result; `unmatched` (Square payments to match) and `failedRefunds` (card refunds Square refused in the last 14 days; both
+also warnings when not zero); `pendingEnrollments` is `null` until wave Q3b.
 
 ### 30.5 Jobs and environment
 
-`square.event.process` (queue), `square.events.catchup` (every 10 minutes) and `square.reconcile` (03:45) are in `docs/jobs.md`; the
-variables in `docs/integrations/square.md` section 2. Scripts: `pnpm sim:square`, `pnpm square:webhooks [--apply|--rotate-key]`,
-`pnpm verify:square` (also in `pnpm verify:all` and `verify.sh square`).
+`square.event.process` (queue), `square.events.catchup` (every 10 minutes), `square.reconcile` (03:45), and since wave Q2b
+`square.payments.match`, `square.links.sweep`, `square.deposit-link` and `square.refunds.submit` (every minute) are in `docs/jobs.md`;
+the variables in `docs/integrations/square.md` section 2 (wave Q2b adds `SQUARE_POS_AUTOMATCH`). Scripts: `pnpm sim:square`,
+`pnpm square:webhooks [--apply|--rotate-key]` (in production it accepts only `https://<domain>/hooks/square`), `pnpm verify:square`
+(also in `pnpm verify:all` and `verify.sh square`).
+
+### 30.6 Square payments into the ledger (wave Q2b)
+
+Every Square payment of our location is mirrored in `square_payments` (re-fetched, never from a payload) and decided once, whichever
+path brings it (webhook job, catch-up, reconcile, `square.payments.match`, a POS callback, a person): advisory lock
+`square:payment:<id>`, the mirror row, ledger keys `square:pay:<id>` and `square:tip:<id>`, and never a second live `pay` of one payment.
+Classification (first rule wins): another location ignored; already in the ledger; its order is one of our payment links (`link`:
+recorded at once, `deposit` per the link's purpose, the link `paid`); a card-on-file charge (Q3a); a subscription invoice (Q3b); a POS
+intent; else `counter`, matched after `SQUARE_MATCH_DELAY_SECONDS` (90): R1 the invoice number in the note or reference id (record, or
+confirm its awaiting card entry of that amount); R2 a POS intent (confirm its entry); R3 exactly one staff "Square reader" (awaiting
+card) entry of the amount, tip excluded (narrowed by the payer's identity); R4 exactly one open invoice of the day whose balance is the
+amount, backed by the payer's identity (buyer email, the Square customer's email or phone); R4a amount only with
+`SQUARE_POS_AUTOMATCH=amount`; else R5 `unmatched` with up to 5 ranked candidates. A recorded payment is a `pay` (source and processor
+`square`, `processor_state confirmed`, `processor_ref` the payment id, `processor_order_id`, `Visa ••4242` / `Cash` / `Square`); a tip
+is its own `pay` "Tip" and raises `invoices.tip_cents` by it. A POS cash payment of the amount of a staff cash entry only attaches its
+references. Audit actions `square.record_payment`, `square.confirm_awaiting`, `square.record_tip`, `square.attach_cash`.
+
+### 30.7 Square payments to match (`pay.reports` / `pay.collect` / `pay.void`; commands need an Idempotency-Key)
+
+| Endpoint | Permission | Notes |
+|---|---|---|
+| `GET /payments/square/unmatched` | `pay.reports` | `{items[{paymentId, matchState pending\|unmatched, classification, amountCents (tip excluded), tipCents, totalCents, refundedCents, method, sourceType, brand, last4, note, receiptNumber, product, createdAt, ageMinutes, candidates[{invoiceId, invoiceNo, client, balanceCents, awaitingEventId, score, why[]}]}]}`, oldest first. |
+| `POST /payments/square/:paymentId/apply` `{invoiceId, confirmEventId?}` | `pay.collect` | Records it on the invoice (rule `manual`), or confirms the named awaiting card entry of that amount there. `{paymentId, matchState, invoiceId, eventId, invoice}`. 404 `SQUARE_PAYMENT_NOT_FOUND`, 409 `SQUARE_PAYMENT_DECIDED`, 422 `SQUARE_CONFIRM_MISMATCH`. |
+| `POST /payments/square/:paymentId/ignore` `{reason: not_oasis_sale\|duplicate\|test\|other, note?}` | `pay.collect` | Sets it aside (no ledger event); audited `square.payment_ignored`. 409 `SQUARE_PAYMENT_DECIDED`. |
+| `POST /payments/square/:paymentId/reassign` `{toInvoiceId}` | `pay.void` | A `void` of what it wrote on the wrong invoice (its tip too, which leaves that invoice's tip), then recorded on the right one (rule `reassign`). 409 `SQUARE_PAYMENT_NOT_MATCHED`, 409 `SQUARE_REASSIGN_REFUNDED`. |
+
+"Needs attention" (ExternalAlertSource, `squareExternalAlerts`): `square_unmatched` (managers; payments waiting more than 30 minutes),
+`square_refund_failed` (red, 14 days), `square_overpaid` ("Overpaid via Square", refund the difference), `square_problem` (managers,
+live only: the access token refused, the catch-up behind, webhooks silent).
+
+### 30.8 POS app switch (`SQUARE_POS_API_ENABLED`, live production Square only)
+
+| Endpoint | Permission | Notes |
+|---|---|---|
+| `POST /invoices/:id/square-pos-intents` `{}` | `pay.collect` | 404 `SQUARE_POS_DISABLED` unless on. Records the staff card entry for the balance (as the Card tender) and an intent: random `state`, note `INV-20640 · OAS-PI-xxxxxx`, 30 minutes. 201 `{intent{id, code, amountCents, note, expiresAt, appSwitch{ios, android}}, invoice}`: `ios` is `square-commerce-v1://payment/create?data=...` (version 1.3, callback `PUBLIC_DASHBOARD_URL/payments/square-callback`), `android` the `com.squareup.pos.action.CHARGE` intent URL. |
+| `POST /payments/square/pos-callback` `{state, transactionId?, clientTransactionId?, errorCode?}` | `pay.collect` | From the dashboard's callback page. 404 `SQUARE_POS_INTENT_UNKNOWN`; `{status: error}` keeps the error (the entry stays waiting: void it if nothing was charged); with a `transactionId` the order's payments are fetched and recorded on the intent's entry at once (rule R2): `{status: recorded, invoiceId, payments}`; `waiting` when Square cannot be read now (the webhook brings them). |
+
+### 30.9 Payment links, the booking deposit and refunds (`PAYMENT_PROCESSOR=square`, `SQUARE_WRITES_ENABLED=true`)
+
+* Links: section 21 `payment-links` and `payments`, section 28 `pay/start` and `deposit/start`. A link row is written `pending` before
+  the Square call (key `pl_<row id>`), made `active` by the command; `square.links.sweep` (every minute) cancels an active link whose
+  invoice is canceled, paid elsewhere, changed, whose deposit is paid, or older than 7 days, gives up on pending rows (10 minutes; a
+  booking's request after a day) and deletes canceled links at Square. A payment on a link canceled a moment too late is still recorded.
+* Deposit (D2: a deposit toward the visit): with `booking.guest_fee.collect` `link`, the website, personal-link and assistant booking
+  paths write a deposit request (a `pending` row, origin `booking`); `square.deposit-link` makes the quick-pay link and texts it
+  (template `payment_link`). The payment is a `pay` with `deposit: true`; the cancel and no-show settlement keeps or refunds it unchanged.
+  `card_hold` (wave Q3a) is accepted by `PUT /catalog/guest-fee` and collected at the counter until then (bookings answer `how: counter`).
+* Refunds (D4): `square.refunds.submit` plans legs under the invoice lock (newest Square payment first, each capped by its total less
+  its live legs) and sends RefundPayment with key `rf_<leg id>`; `refund.*` events move the legs (also when the webhook arrives before
+  the job recorded Square's answer); all completed: the refund is `confirmed` (`processor_ref` the refund id); any leg failed or
+  rejected, or Square money that cannot cover it: `processor_state failed`, no longer counted (`invoice_calc_of`, `calc.ts`,
+  `jobs-integrity.ts`), and an alert. A refund made in the Square app is attached to the staff's awaiting card refund of that amount, or
+  recorded as an external refund (`needs_review`, key `square:refund:<id>`, reason "Refunded in Square").

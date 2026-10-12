@@ -30,6 +30,23 @@ export const SENSITIVE_CLASSES: ReadonlySet<string> = new Set([
  * payment link (ADR 0171) is a Square or Squarespace URL anyone may read, or the client's personal pay page, masked.
  */
 export const MASK_ONLY_CLASSES: ReadonlySet<string> = new Set(['lead_follow_up', 'payment_link'])
+
+/**
+ * Whether a text's outbox body holds a secret (and so is wiped once final and never sent again from the outbox screen). Every sensitive
+ * class does, except a payment link that carried none: a Square or Squarespace URL anyone may read stays as it always was (kept, and
+ * retryable); only the client's personal pay page (ADR 0171, template payment_link_personal) is masked, wiped and not retryable.
+ */
+export async function holdsSecret(tx: Executor, outboxId: string, klass: string): Promise<boolean> {
+  if (!SENSITIVE_CLASSES.has(klass)) return false
+  if (klass !== 'payment_link') return true
+  const r = await tx
+    .selectFrom('sms_outbox as o')
+    .innerJoin('messages as m', 'm.id', 'o.message_id')
+    .select(['o.body as sent', 'm.body as stored'])
+    .where('o.id', '=', outboxId)
+    .executeTakeFirst()
+  return !!r && r.sent !== r.stored
+}
 export const REDACTED_BODY = '[link sent privately]'
 /** How the dashboard names the AI assistant's messages (ADR 0160). */
 export const AI_SENDER_NAME = 'Oasis AI'
@@ -287,7 +304,7 @@ export async function syncMessageFromOutbox(
     .returning(['location_id', 'customer_id', 'appointment_id', 'thread_id', 'error'])
     .executeTakeFirstOrThrow()
 
-  if (FINAL.has(row.state) && SENSITIVE_CLASSES.has(row.klass)) {
+  if (FINAL.has(row.state) && (await holdsSecret(tx, row.id, row.klass))) {
     // An invite or reset the device or carrier refused or that expired unsent reaches the employee by e-mail instead, from the live
     // link, before the link is wiped. (A text that merely waited is handled earlier, by MessagingRuntime.emailFallback.)
     if (row.state === 'failed' || row.state === 'expired')
