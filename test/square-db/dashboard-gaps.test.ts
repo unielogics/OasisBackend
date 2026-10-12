@@ -203,6 +203,38 @@ describe('the deposit of a visit on the file (Q2c N1)', () => {
     expect((await fileOf(desk, a.appointmentId)).invoice).toMatchObject({ status: 'canceled_kept', refundedCents: 0, deposit: { state: 'kept' } })
   })
 
+  it('an open visit (F1): a deposit refund waiting for approval, then the deposit given back', async () => {
+    const desk = await frontDesk()
+    const a = await m.book('Maria Delgado', 'Express Hand Wash')
+    await recordPayment(m, a.invoiceId, 2500, { kind: 'cash', deposit: true })
+    expect((await fileOf(desk, a.appointmentId)).invoice.deposit).toMatchObject({ state: 'paid', paidCents: 2500 })
+    const inv = await m.h.t.db.selectFrom('invoices').select(['location_id', 'customer_id']).where('id', '=', a.invoiceId).executeTakeFirstOrThrow()
+    const pendingId = m.h.t.app.newId()
+    await m.h.t.db
+      .insertInto('ledger_events')
+      .values({
+        id: pendingId,
+        location_id: inv.location_id,
+        invoice_id: a.invoiceId,
+        customer_id: inv.customer_id,
+        type: 'refund',
+        amount_cents: 2500,
+        status: 'pending',
+        dest: 'cash',
+        actor_name: 'Test',
+        occurred_at: m.h.clock.now(),
+        source: 'oasis',
+      })
+      .execute()
+    expect((await fileOf(desk, a.appointmentId)).invoice.deposit).toMatchObject({ state: 'refund_pending', paidCents: 2500, pendingRefundCents: 2500 })
+    const deny = await m.send(m.superS(), 'POST', `/invoices/${a.invoiceId}/refunds/${pendingId}/deny`, {}, idemKey())
+    expect(deny.statusCode, deny.body).toBe(200)
+    expect((await fileOf(desk, a.appointmentId)).invoice.deposit).toMatchObject({ state: 'paid', pendingRefundCents: 0 })
+    const r = await m.send(m.superS(), 'POST', `/invoices/${a.invoiceId}/refunds`, { mode: 'custom', amountCents: 2500, dest: 'cash' }, idemKey())
+    expect(r.statusCode, r.body).toBe(201)
+    expect((await fileOf(desk, a.appointmentId)).invoice.deposit).toMatchObject({ state: 'refunded', paidCents: 2500, refundedCents: 2500, keptCents: 0 })
+  })
+
   it('canceled ahead of the free window: refunded, the card refund still on its way', async () => {
     const desk = await frontDesk()
     const a = await m.book('Maria Delgado', 'Express Hand Wash', '2026-06-15T10:00:00-04:00')

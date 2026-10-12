@@ -66,7 +66,6 @@ describe('depositViewOf', () => {
     expect(depositViewOf({ ...base, link: link('expired', { cancelReason: 'expired' }) })?.state).toBe('link_expired')
     expect(depositViewOf({ ...base, link: link('canceled', { cancelReason: 'stale' }) })?.state).toBe('link_expired')
     expect(depositViewOf({ ...base, link: link('canceled', { cancelReason: 'deposit_paid' }) })).toBeNull()
-    expect(depositViewOf({ ...base, link: link('paid') })?.state).toBe('paid')
   })
   it('paid on an open visit (the link no longer matters)', () => {
     expect(depositViewOf({ ...base, depositPaidCents: 2500, paidCents: 2500, link: link('active', { sentAt: at }) })).toMatchObject({
@@ -74,6 +73,28 @@ describe('depositViewOf', () => {
       paidCents: 2500,
       keptCents: 0,
     })
+  })
+  it('open visit (F1): a voided deposit is not paid; a deposit refunded or waiting for a refund says so', () => {
+    // a link paid, then its payment voided: nothing is held and nothing is asked for any more
+    expect(depositViewOf({ ...base, link: link('paid') })).toBeNull()
+    expect(depositViewOf({ ...base, paidCents: 4000, link: link('paid') })).toBeNull()
+    const o = { ...base, depositPaidCents: 2500, paidCents: 2500, link: link('paid') }
+    expect(depositViewOf(o)).toMatchObject({ state: 'paid', paidCents: 2500, keptCents: 0 })
+    // a refund of the deposit waiting for approval
+    expect(depositViewOf({ ...o, pendingRefundCents: 2500, pendingRefunds: 1 })).toMatchObject({ state: 'refund_pending', pendingRefundCents: 2500, paidCents: 2500 })
+    // the deposit given back (the only money on the invoice)
+    expect(depositViewOf({ ...o, refundedCents: 2500 })).toMatchObject({ state: 'refunded', refundedCents: 2500, keptCents: 0 })
+    expect(depositViewOf({ ...o, refundedCents: 2500, refundSending: true })).toMatchObject({ state: 'refunded', refundSending: true })
+    // part of it given back: still a deposit held, the refund shown
+    expect(depositViewOf({ ...o, refundedCents: 1000 })).toMatchObject({ state: 'paid', refundedCents: 1000 })
+    // a failed card refund gave nothing back
+    expect(depositViewOf({ ...o, refundFailed: true })).toMatchObject({ state: 'paid', refundFailed: true })
+    // the balance paid too: a refund that leaves the deposit covered does not touch it
+    const full = { ...o, paidCents: 9000 }
+    expect(depositViewOf({ ...full, refundedCents: 2500 })?.state).toBe('paid')
+    expect(depositViewOf({ ...full, pendingRefundCents: 1500, pendingRefunds: 1 })?.state).toBe('paid')
+    expect(depositViewOf({ ...full, refundedCents: 6000, pendingRefundCents: 2000, pendingRefunds: 1 })?.state).toBe('refund_pending')
+    expect(depositViewOf({ ...full, refundedCents: 9000 })?.state).toBe('refunded')
   })
   it('canceled: kept, partly refunded, refunded, a refund waiting for approval (Q2c N1), a failed refund', () => {
     const c = { ...base, canceled: true, paidCents: 2500, depositPaidCents: 2500 }

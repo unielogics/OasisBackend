@@ -32,7 +32,7 @@ export const DepositView = z
     state: z
       .enum(['requested', 'link_sent', 'link_expired', 'paid', 'kept', 'refunded', 'refund_pending'])
       .describe(
-        'requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)',
+        'requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)',
       ),
     requestedCents: z.number().int().nullable().describe('What the newest deposit link asks for; null without one'),
     paidCents: z.number().int().describe('Open visit: deposit payments less voided ones. Canceled visit: the money paid (refunds not subtracted)'),

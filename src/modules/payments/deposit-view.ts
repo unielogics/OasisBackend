@@ -1,5 +1,5 @@
 // The deposit of a visit as the appointment file shows it (ADR 0171 D2, wave Q3 dashapi; dashboard review Q2c N1): asked for by a
-// link and not paid yet, paid, or, once the visit is canceled, kept, refunded or a refund waiting for approval. Read from the
+// link and not paid yet, paid, refunded or a refund waiting for approval, and once the visit is canceled, kept as well. Read from the
 // invoice's calc, its deposit payments, its refunds and its newest deposit link; nothing here writes.
 import { sql } from 'kysely'
 import type { Executor } from '../../platform/db.js'
@@ -10,8 +10,10 @@ export type DepositState = 'requested' | 'link_sent' | 'link_expired' | 'paid' |
 export interface DepositView {
   /**
    * requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link
-   * lapsed or was withdrawn unpaid; paid: a deposit is paid on an open visit; for a canceled visit holding money: refund_pending (a
-   * refund waits for approval), refunded (all of it given back), kept (some or all of it stays with the shop).
+   * lapsed or was withdrawn unpaid; paid: a deposit is paid on an open visit (a partial refund shows in refundedCents); on an open
+   * visit refund_pending when a refund waiting for approval would leave the invoice holding less than the deposit, refunded when the
+   * invoice holds nothing any more; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all
+   * of it given back), kept (some or all of it stays with the shop). A deposit paid by link and then voided gives null.
    */
   state: DepositState
   /** The amount the newest deposit link asks for; null without one. */
@@ -75,7 +77,14 @@ export function depositViewOf(f: DepositFacts): DepositView | null {
     return { ...base, state, paidCents: f.paidCents, keptCents }
   }
   const open = { ...base, paidCents: Math.max(0, f.depositPaidCents), keptCents: 0 }
-  if (f.depositPaidCents > 0) return { ...open, state: 'paid' }
+  if (f.depositPaidCents > 0) {
+    // Refunds are kept per invoice, not per payment: the deposit is touched only when what the invoice still holds (paid less
+    // refunded) falls below it. A refund waiting for approval that would bring it below reads refund_pending; nothing left: refunded.
+    const held = f.paidCents - f.refundedCents
+    if (f.pendingRefunds > 0 && held - f.pendingRefundCents < f.depositPaidCents) return { ...open, state: 'refund_pending' }
+    if (held <= 0) return { ...open, state: 'refunded' }
+    return { ...open, state: 'paid' }
+  }
   if (!f.link) return null
   switch (f.link.state) {
     case 'pending':
@@ -83,7 +92,9 @@ export function depositViewOf(f: DepositFacts): DepositView | null {
     case 'active':
       return { ...open, state: f.link.sentAt ? 'link_sent' : 'requested' }
     case 'paid':
-      return { ...open, state: 'paid' }
+      // the link's payment is recorded as a deposit in the same transaction that marks the link paid: no deposit money left means
+      // that payment was voided, so nothing is held and nothing is asked for any more
+      return null
     default:
       // withdrawn because the deposit was paid some other way: nothing is asked for any more
       if (f.link.cancelReason === 'deposit_paid' || f.link.cancelReason === 'paid_elsewhere') return null
