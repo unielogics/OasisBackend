@@ -144,7 +144,8 @@ export async function issueLinkOutcome(ctx: ToolContext, input: ToolInputs['send
       return fail(
         'rate_limited',
         // W4 live eval: "I've hit the link limit for today" confused clients (a limit they never heard of)
-        'No new link can go to this number right now. If a link of this kind was texted earlier in this conversation, point them to it (it is in their texts; a calendar link works for 3 days, a verify link for 15 minutes); otherwise say a team member will text them. Never mention a limit or a count.',
+        // full Bedrock run: "It's good for 3 days so no rush!" and "scroll up" to a client who could not find the link
+        'No new link can go to this number right now. If a link of this kind was texted earlier in this conversation and still works (a calendar link works for 3 days, a verify link for 15 minutes), point them to it (it is in their texts; never tell them how long it works); otherwise say a team member will text them. If they say they cannot find it, say a team member will text it to them and call handoff_to_staff. Never mention a limit or a count.',
       )
     if (e instanceof NoPaymentLink)
       return withHandoff(

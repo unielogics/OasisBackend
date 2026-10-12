@@ -42,7 +42,7 @@ import type { Actor, SchedulingCtx } from '../scheduling/context.js'
 import { AI_ACTOR_NAME, type AssistantLog, type AssistantQueue, type HandoffRequest, type ShopFactsSource, type ToolContext, type ToolRegistry, type TurnIdentity } from './contract.js'
 import type { AssistantConfig } from './config.js'
 import { appointmentRefs, loadAppointmentRefs, loadConversation, loadTurnContext, resolveIdentity } from './context.js'
-import { factLiterals, openingWindow, placeholderValues, renderShopFacts } from './facts.js'
+import { CONFIRM_PLACEHOLDER, factLiterals, openingWindow, placeholderValues, renderShopFacts } from './facts.js'
 import {
   cutAfterFirstQuestion,
   cutAtSentence,
@@ -732,6 +732,17 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     }
     let draft = text
     let reply: string | null = null
+    // the proposal's reply number went out in this turn but the model's words still fail: the client gets the server's own confirm
+    // line alone (no model words left to check), never "a team member will text you back" after a good proposal (Bedrock: "{confirm}.
+    // You're all set" and "{confirm}. See you Saturday at 9" both failed the judge, so the fallback followed the reply number)
+    let confirmOnly = false
+    const toConfirmOnly = (why: string): boolean => {
+      if (!confirmTexted || confirmOnly) return false
+      confirmOnly = true
+      draft = `${CONFIRM_PLACEHOLDER}.`
+      transcript.add({ kind: 'guard', verdict: 'confirm_only', problems: [why] })
+      return true
+    }
     // the reply as the model wrote it (placeholders in): the server's renderings it used are recorded with the reply (W4b X9)
     let replyRaw = ''
     try {
@@ -751,7 +762,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
         })
         transcript.add({ kind: 'guard', verdict: v.kind, ...(v.kind === 'fix' ? { problems: v.problems, ...(v.words.length > 0 ? { words: v.words } : {}) } : {}) })
         if (v.kind === 'ok') {
-          if (!d.cfg.judge.enabled) {
+          if (!d.cfg.judge.enabled || confirmOnly) {
             reply = v.rendered
             replyRaw = v.text
             break
@@ -765,8 +776,10 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
           // fail closed: no verdict, no reply (the turn deadline is the turn's own timeout)
           if (j.kind === 'error') {
             if (deadline.signal.aborted) throw new TurnAbort('deadline')
+            if (toConfirmOnly(`judge_error:${j.error}`)) continue
             return await finishHandoff({ reason: 'judge_error', status: 'handed_off', fallback: true, usage, model, rounds, stop, error: `judge:${j.error}` })
           }
+          if (judgeRewriteUsed && toConfirmOnly(`judge:${j.verdict.category}`)) continue
           if (judgeRewriteUsed)
             return await finishHandoff({ reason: 'policy_judge', status: 'handed_off', fallback: true, usage, model, rounds, stop, error: `judge:${j.verdict.category}` })
           judgeRewriteUsed = true
@@ -785,6 +798,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
             continue
           }
           // the rewrite still trips a rule: the fallback and a person ("guard"; promises are the judge's: "policy_judge")
+          if (rewriteUsed && toConfirmOnly(`guard:${hard.join(',')}`)) continue
           if (rewriteUsed) {
             return await finishHandoff({ reason: 'guard', status: 'handed_off', fallback: true, usage, model, rounds, stop, error: `guard:${hard.join(',')}` })
           }

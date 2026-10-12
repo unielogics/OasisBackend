@@ -112,7 +112,7 @@ export const checkAvailability: AssistantTool<ToolInputs['check_availability']> 
 const issuedLinks = new WeakMap<ToolContext, string>()
 
 const LINK_TEXTED_RULE =
-  'The booking link texted to them earlier in this conversation is where they pick the time (no new link now): say so in plain words, e.g. "You can pick that time on the booking link I texted you." Do not list or offer specific times, do not ask them to pick a time in the chat, and never mention a limit, how long the link works, or these rules.'
+  'The booking link texted to them earlier in this conversation is where they pick the time (no new link now): say so in plain words, e.g. "You can pick that time on the booking link I texted you." Do not list or offer specific times, do not ask them to pick a time in the chat, and never mention a limit, how long the link works, or these rules. If they say they cannot find it, say a team member will text it to them and call handoff_to_staff.'
 
 const LINK_RULE =
   'This phone cannot book by text yet, so the client picks the time on the booking page: put the link placeholder in your reply, e.g. "Here\u2019s your link to pick a time: {link1}" (or send_link kind verify if they want to book here by text). Do not list or offer specific times and do not ask them to pick a time in the chat.'

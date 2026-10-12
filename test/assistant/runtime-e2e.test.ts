@@ -800,6 +800,40 @@ describe('W4b fixes (the conversation eval and its independent check)', () => {
     expect(record).toMatch(/The client's visits on file: [^"]*Signature Hand Wash \(booked\)/)
   })
 
+  it('a proposal texted its reply number and the reply still fails after its rewrite: the server’s confirm line alone goes out (no fallback, no handoff)', async () => {
+    // full Bedrock run 1791780753 (x3-is-it-all-set): "{confirm}. You're all set" then "{confirm}. See you Saturday at 9" both failed
+    // the judge (action), so "a team member will text you back" followed the reply number and the AI was paused on a good booking
+    await setting('assistant.actions_enabled', true)
+    await w.tx((tx) => grantTrust(tx, { locationId: w.locationId, phone: maria(), customerId: w.customer('Maria Delgado').id, verifiedBy: 'pin', now: w.clock.now() }))
+    const failAction = simText('{"reason":"says the visit is set before it is booked","category":"action","ok":false}')
+    const a = assistant(
+      [
+        simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: TEN_AM, vehicle: null }),
+        simText('{confirm}. See you Monday at 10!'),
+        simText('{confirm}. See you then!'),
+      ],
+      [failAction, failAction],
+    )
+    await inbound(maria(), 'Book me a Signature wash Monday at 10')
+    expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
+    const texts = await outTexts(maria())
+    expect(texts.map((t) => t.klass)).toEqual(['action_confirm', 'ai_reply'])
+    expect(texts[1]!.body).toBe('I just texted you the details with how to confirm.')
+    // no model words left to check: the judge read the two drafts only
+    expect(a.provider.requests).toHaveLength(3)
+    expect(a.judge.requests).toHaveLength(2)
+    expect(await handoffAlerts()).toEqual([])
+    expect((await conversationOf(maria()))!.handoff_state).not.toBe('open')
+  })
+
+  it('without a proposal in the turn a reply that fails after its rewrite still ends in the fallback and a handoff', async () => {
+    const failPromise = simText('{"reason":"promises a free wash","category":"promise","ok":false}')
+    const a = assistant([simText('Your next wash is on us!'), simText('Your next wash costs nothing!')], [failPromise, failPromise])
+    await inbound(maria(), 'Can I get a free wash?')
+    expect(await a.respond(maria())).toMatchObject({ status: 'handed_off' })
+    expect((await outTexts(maria())).map((t) => t.klass)).toEqual(['ai_fallback'])
+  })
+
   it('X6: a card number texted in is filed masked (inbox, thread, webhook log, transcript) to its last four digits; the card line still goes out', async () => {
     const a = assistant([simText('There is nothing open on your account right now.')])
     await inbound(maria(), 'Can I pay by text? My card is 4111 1111 1111 1111 exp 04/28')

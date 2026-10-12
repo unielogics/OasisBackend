@@ -458,10 +458,14 @@ export const QualityVerdict = z.object({
   correctness: z.number().int().min(1).max(5),
   flow: z.number().int().min(1).max(5),
   overall: z.number().int().min(1).max(5),
-  reason: z.string().max(600),
-  policyConcerns: z.array(z.string().max(300)).max(5).default([]),
-  /** The assistant's own words that promise something (any wording), quoted exactly (W4b X9: promises without a keyword). */
-  promises: z.array(z.string().max(300)).max(5).default([]),
+  /** Cut, never refused: a rater that writes too much still rated the conversation (an overlong reason left one unrated). */
+  reason: z.string().transform((s) => s.slice(0, 600)),
+  policyConcerns: z
+    .array(z.string())
+    .default([])
+    .transform((a) => a.slice(0, 5).map((s) => s.slice(0, 300))),
+  /** The assistant's own words that promise something (any wording), quoted exactly (W4b X9: promises without a keyword): kept whole. */
+  promises: z.array(z.string()).default([]),
 })
 export type QualityVerdict = z.infer<typeof QualityVerdict>
 

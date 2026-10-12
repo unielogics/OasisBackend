@@ -92,6 +92,20 @@ describe('the turn context', () => {
     ])
       expect(STATIC_RULES).toContain(rule)
   })
+
+  it('the full Bedrock run (1791780753): the memberships never hold the booking link back; no "make it right"; a cancel is proposed without asking why', () => {
+    expect(PROMPT_VERSION).toBe('w4b-2026-10-13.15')
+    // spanish-new-texter, new-all-at-once, new-hi-books-wash: "Before you book, let me mention our plans" with no link, or "Before the
+    // booking link goes out" after it had gone out, and the plans presented again after "No membership for now"
+    expect(INTAKE_LINES.memberships).toContain('when they want to book, the booking link goes in this same text after the plans')
+    expect(INTAKE_LINES.memberships).toContain('never hold the link back for the memberships')
+    expect(INTAKE_LINES.memberships).toContain('skip this step when they already said they do not want a membership')
+    expect(STATIC_RULES).toContain('the memberships never hold the booking link back')
+    // complaint-dirty: "A team member will text you back shortly to make it right." (the rater's quoted promise)
+    expect(STATIC_RULES).toContain('never that the team will fix it, make it right, make up for it or take care of it')
+    // x1-trusted-first-cancel: "What's the reason for canceling?" before the proposal
+    expect(STATIC_RULES).toContain('propose it right away; never ask why')
+  })
 })
 
 describe('the conversation the model reads', () => {

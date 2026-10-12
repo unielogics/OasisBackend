@@ -375,6 +375,22 @@ describe('the quality judge and the totals', () => {
     expect(() => parseQualityVerdict('{"overall":9}')).toThrow()
   })
 
+  it('a verdict whose reason or concerns run long keeps its scores (cut, never dropped); every quoted promise is kept whole', () => {
+    // full run 1791780753: Opus wrote a 700-character reason for info-how-long-wash and the conversation went unrated
+    const long = 'x'.repeat(900)
+    const promises = Array.from({ length: 7 }, (_, i) => `promise number ${i} ${'y'.repeat(320)}`)
+    const v = parseQualityVerdict(
+      JSON.stringify({ helpfulness: 3, tone: 4, correctness: 2, flow: 3, overall: 3, reason: long, policyConcerns: [long, 'a', 'b', 'c', 'd', 'e'], promises }),
+    )
+    expect(v.overall).toBe(3)
+    expect(v.reason).toHaveLength(600)
+    expect(v.policyConcerns).toHaveLength(5)
+    expect(v.policyConcerns[0]).toHaveLength(300)
+    expect(v.promises).toEqual(promises)
+    // the scores themselves stay strict
+    expect(() => parseQualityVerdict(JSON.stringify({ helpfulness: 3, tone: 4, correctness: 2, flow: 3, overall: 6, reason: 'r' }))).toThrow()
+  })
+
   it('the prompt carries the facts, the persona, the expectations and the transcript (server texts marked)', () => {
     const p = qualityPrompt({
       factsText: 'FACTS',

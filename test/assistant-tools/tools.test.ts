@@ -237,6 +237,7 @@ describe('check_availability', () => {
     expect(d).toMatchObject({ bookingLink: null, linkAlreadyTexted: true, hasOpenTimes: true })
     expect(String(d.instruction)).toContain('the booking link I texted you')
     expect(String(d.instruction)).not.toMatch(/3 days/)
+    expect(String(d.instruction)).toContain('If they say they cannot find it, say a team member will text it to them and call handoff_to_staff')
     expect(next.links).toEqual([])
   })
 })
@@ -358,6 +359,9 @@ describe('send_link', () => {
     expect(limited).toMatchObject({ ok: false, error: 'rate_limited' })
     // the model points to the link already texted and never tells the client about a limit (W4 live eval)
     expect(JSON.stringify(limited)).toMatch(/point them to it .*Never mention a limit or a count/)
+    // full Bedrock run 1791780753: "It's good for 3 days so no rush!" and "scroll up" to a client who could not find the link
+    expect(JSON.stringify(limited)).toContain('never tell them how long it works')
+    expect(JSON.stringify(limited)).toContain('If they say they cannot find it, say a team member will text it to them and call handoff_to_staff')
     expect(await run('send_link', probe.ctx, { kind: 'verify', appointmentRef: null, tier: null })).toMatchObject({ ok: true })
     expect(await run('send_link', probe.ctx, { kind: 'pin', appointmentRef: null, tier: null })).toMatchObject({ ok: true })
     w.clock.advance(61 * 60_000)

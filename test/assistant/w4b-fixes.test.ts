@@ -177,7 +177,7 @@ describe('X5: the conversation language', () => {
     expect(STATIC_RULES).toContain(
       'the server writes its own parts (prices, the disclosure, the security lines) in that language too',
     )
-    expect(PROMPT_VERSION).toBe('w4b-2026-10-13.14')
+    expect(PROMPT_VERSION).toMatch(/^w4b-2026-10-13\.\d+$/)
   })
 })
 
