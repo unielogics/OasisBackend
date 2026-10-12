@@ -156,7 +156,10 @@ review below). Code: `scheduling/{visit-pricing,sizing}.ts` (new), `scheduling/{
    its own credits counted as still there; a redeem whose line is gone, is no longer covered, or changed price or plan size is given
    back (a reversing system adjust and a `restore` keyed `restore:<redeem>`, `ledger_event_id` = that adjust, in the redeem's own cycle)
    and each covered line without a redeem gets one (a replacement keeps the cycle it replaces); activity "Membership coverage updated ·
-   $40 → $60"; the invoice's `coverage` lists the redeems in force only. An apply with nothing new to cover answers
+   $40 → $60"; the invoice's `coverage` lists the redeems in force only. A change that would leave a paid visit overpaid (a
+   member's paid size difference, then a smaller size) is refused whole before anything is written (the end state is projected with
+   the pure `calcInvoice`): 409 `PRICE_CHANGE_OVERPAID` / `ADDON_REMOVE_OVERPAID` / `MEMBERSHIP_NO_BALANCE`, so the settlement's
+   adjusts never book a store-credit "Adjustment settlement" on their own (re-verification N1). An apply with nothing new to cover answers
    `MEMBERSHIP_CREDIT_APPLIED`. Arrival does not settle (the design's "optionally at arrival" is left out:
    the completion and the button are enough).
 7. **Households**: `membershipOfCustomer` / `activeMembership` / the port's `forAppointments` and `upgradeCandidates` see a live

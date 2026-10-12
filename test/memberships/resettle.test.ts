@@ -4,6 +4,8 @@
 //  * F2: an included add-on added after the visit was settled is covered; a covered add-on removed gives its coverage and credit back.
 //  * F4: one inclusion naming two add-ons covers both lines (one redeem per covered line).
 //  * F3: a household member cannot open a membership of their own through a personal link's checkout.
+//  * N1: a change that would leave a paid visit overpaid is refused (409) and changes nothing: the settlement never turns it into a
+//    store-credit refund on its own.
 // Each change writes a reversing adjust + a `restore` for the redeem it replaces, then the new redeem + adjust; the invoice shows
 // only the coverage in force, the credit counts stay right, and the ledger integrity check stays clean.
 import { describe, expect, it } from 'vitest'
@@ -12,7 +14,7 @@ import { checkLedgerIntegrity } from '../../src/modules/payments/jobs-integrity.
 import { transaction } from '../../src/platform/db.js'
 import { idemKey } from '../scheduling-gaps/support.js'
 import { useMemRig } from './harness.js'
-import { apptRow, bookAt, calcOfInvoice, memberAt, serviceIdOf, setCells, setTier } from './sizes-rig.js'
+import { apptRow, bookAt, calcOfInvoice, itemsOf, memberAt, serviceIdOf, setCells, setTier } from './sizes-rig.js'
 
 const WASH = 'Express Hand Wash'
 const WAX = 'Wax'
@@ -53,6 +55,31 @@ const creditsLeft = async (m: Rig, customerId: string): Promise<number> =>
 
 const activityOf = async (m: Rig, appointmentId: string): Promise<string[]> =>
   (await m.h.t.db.selectFrom('activity_log').select('text').where('appointment_id', '=', appointmentId).execute()).map((a) => a.text)
+
+/** Everything a refused change must leave as it was: the ledger, the invoice lines, the visit, its add-ons and its credit events. */
+const stateOf = async (m: Rig, appointmentId: string, invoiceId: string) => ({
+  ledger: await m.h.t.db
+    .selectFrom('ledger_events')
+    .select(['id', 'type', 'amount_cents', 'status', 'dest', 'reason'])
+    .where('invoice_id', '=', invoiceId)
+    .orderBy('seq')
+    .execute(),
+  items: await itemsOf(m, invoiceId),
+  calc: await calcOfInvoice(m, invoiceId),
+  appointment: await apptRow(m, appointmentId),
+  addons: await m.h.t.db
+    .selectFrom('appointment_addons')
+    .select(['id', 'price_cents', 'discount_bp', 'removed_at'])
+    .where('appointment_id', '=', appointmentId)
+    .orderBy('id')
+    .execute(),
+  credits: await m.h.t.db
+    .selectFrom('membership_credit_events')
+    .select(['id', 'kind', 'idempotency_key'])
+    .where('appointment_id', '=', appointmentId)
+    .orderBy('id')
+    .execute(),
+})
 
 describe('a settled visit that changes is settled again', () => {
   const m = useMemRig()
@@ -211,6 +238,57 @@ describe('a settled visit that changes is settled again', () => {
     expect(await creditsLeft(m, mem.customerId)).toBe(3)
     const file = (await m.get(m.superS(), `/appointments/${b.appointmentId}`)).json() as { invoice: { coverage: { serviceName: string }[] } }
     expect(file.invoice.coverage.map((c) => c.serviceName)).toEqual([WASH])
+    expect((await checkLedgerIntegrity(m.h.t.db, m.locationId())).findings).toEqual([])
+  })
+
+  it('N1: a paid member visit whose size goes down is refused (409 PRICE_CHANGE_OVERPAID) and nothing changes', async () => {
+    await setCells(m, WASH, { compact_car: 4000, large_suv: 6000 })
+    await setTier(m, 'gold', { inclusions: [{ label: 'Hand wash', services: [WASH] }] })
+    await memberAt(m, 'Maria Delgado', 'gold', 'compact_car')
+    const b = await bookAt(m, 'Maria Delgado', WASH)
+    await m.complete(b.appointmentId)
+    expect((await setSize(m, b.appointmentId, 'large_suv')).statusCode).toBe(200)
+    const due = await calcOfInvoice(m, b.invoiceId)
+    expect(due).toMatchObject({ sub: 2000, adj: -4000 })
+    const pay = await m.send(m.superS(), 'POST', `/invoices/${b.invoiceId}/payments`, { method: 'cash' })
+    expect(pay.statusCode, pay.body).toBe(201)
+    expect(await calcOfInvoice(m, b.invoiceId)).toMatchObject({ paid: due.balance, balance: 0 })
+    const before = await stateOf(m, b.appointmentId, b.invoiceId)
+
+    const r = await setSize(m, b.appointmentId, 'compact_car')
+    expect(r.statusCode, r.body).toBe(409)
+    expect((r.json() as { code: string }).code).toBe('PRICE_CHANGE_OVERPAID')
+    // no reversal, no new coverage, no store-credit refund: the ledger, the invoice, the appointment and the credits as they were
+    expect(await stateOf(m, b.appointmentId, b.invoiceId)).toEqual(before)
+    expect((await checkLedgerIntegrity(m.h.t.db, m.locationId())).findings).toEqual([])
+  })
+
+  it('N1: removing a covered add-on from a paid member visit when another paid line would be covered instead is refused (409 ADDON_REMOVE_OVERPAID)', async () => {
+    await setCells(m, WASH, { compact_car: 4000 })
+    await setCells(m, WAX, { compact_car: 3000 })
+    await setCells(m, CLAY, { compact_car: 5000 })
+    await setTier(m, 'gold', {
+      inclusions: [
+        { label: 'Hand wash', services: [WASH] },
+        { label: 'One extra', services: [WAX, CLAY], perCycle: 1 },
+      ],
+    })
+    await memberAt(m, 'Maria Delgado', 'gold', 'compact_car')
+    const b = await bookAt(m, 'Maria Delgado', WASH, { vehicleClass: 'compact_car', addons: [WAX, CLAY] })
+    await m.complete(b.appointmentId)
+    // the wash and one of the two extras covered; the other extra is due and paid
+    const redeems = await eventsOf(m, b.appointmentId, 'redeem')
+    expect(redeems).toHaveLength(2)
+    const coveredExtra = redeems[1]!.service_id === (await serviceIdOf(m, WAX)) ? WAX : CLAY
+    const pay = await m.send(m.superS(), 'POST', `/invoices/${b.invoiceId}/payments`, { method: 'cash' })
+    expect(pay.statusCode, pay.body).toBe(201)
+    expect(await calcOfInvoice(m, b.invoiceId)).toMatchObject({ balance: 0 })
+    const before = await stateOf(m, b.appointmentId, b.invoiceId)
+
+    const del = await m.send(m.superS(), 'DELETE', `/appointments/${b.appointmentId}/addons/${await serviceIdOf(m, coveredExtra)}`, undefined, false)
+    expect(del.statusCode, del.body).toBe(409)
+    expect((del.json() as { code: string }).code).toBe('ADDON_REMOVE_OVERPAID')
+    expect(await stateOf(m, b.appointmentId, b.invoiceId)).toEqual(before)
     expect((await checkLedgerIntegrity(m.h.t.db, m.locationId())).findings).toEqual([])
   })
 

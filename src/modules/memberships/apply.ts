@@ -22,6 +22,8 @@
 //     restore:<redeem>. The adjusts go through the Payments command layer exempt from the actor's adjust limit (cli.member, or only
 //     jobs.status for the automatic one, not pay.adjust) and attributed to the real person; tax falls with them. calcInvoice /
 //     invoice_calc_of do not change.
+// A visit settled before is never left overpaid by its settlement: the end state is projected before any write, and a change that
+// would overpay it is refused (re-settle: 409 ADDON_REMOVE_OVERPAID, a size change PRICE_CHANGE_OVERPAID; apply: no balance).
 // An apply with nothing new to cover answers MEMBERSHIP_CREDIT_APPLIED. Releasing (emergency closure) works per redeem.
 import { sql } from 'kysely'
 import type { AuditContext } from '../../platform/audit.js'
@@ -42,6 +44,7 @@ import {
 import type { PriceBasis } from '../customers/schema.js'
 import type { PayActor } from '../payments/actor.js'
 import { PaymentsService, type AdjustResult } from '../payments/commands.js'
+import { calcInvoice, type CalcEvent, type InvoiceCalc } from '../payments/calc.js'
 import { calcOf } from '../payments/repository.js'
 import type { InvoiceItem, InvoiceSummary, SyncItemsMeta } from '../scheduling/ports.js'
 import { creditSummaries } from './credits.js'
@@ -425,6 +428,14 @@ async function settle(tx: Tx, d: ApplyDeps, appointmentId: string, c: ApplyConte
     throw new Blocked(named ? 'no_credit' : 'not_eligible')
   }
   if (!invoice || invoice.canceled_at) throw new Blocked('no_invoice')
+  // a visit settled before (its paid part included): the settlement never turns a change into a refund on its own. The end state is
+  // projected before anything is written; one that leaves the invoice overpaid is refused (a re-settle: the gateway's 409
+  // ADDON_REMOVE_OVERPAID, a size change says PRICE_CHANGE_OVERPAID; staff refund or adjust the invoice first) and changes nothing.
+  if (held.length > 0) {
+    const releaseCents = releases.map((h) => (h.adjustCents !== null && h.adjustCents < 0 ? -h.adjustCents : 0))
+    const end = await projectedCalc(tx, invoice.id, releaseCents, target.map((t) => t.priceCents), creates.map((i) => target[i]!.coveredCents))
+    if (end.overpaid > 0) throw mode === 'resettle' ? new AppError('ADDON_REMOVE_OVERPAID') : new Blocked('no_balance')
+  }
 
   const tier = membership.plan_label
   const planClassLabel = book.labels.get(member.planClass) ?? member.planClass
@@ -532,6 +543,36 @@ async function settle(tx: Tx, d: ApplyDeps, appointmentId: string, c: ApplyConte
     first: adjusts[0] ?? null,
     last: adjusts[adjusts.length - 1] ?? null,
   }
+}
+
+/**
+ * The invoice as the settlement would leave it (the pure calcInvoice over its ledger): the give-backs' surcharges, the lines at
+ * their new prices, then each new coverage capped at what is left of the subtotal, as step 3 writes them.
+ */
+async function projectedCalc(
+  tx: Tx,
+  invoiceId: string,
+  releaseCents: number[],
+  itemPrices: number[],
+  coverCents: number[],
+): Promise<InvoiceCalc> {
+  const inv = await tx.selectFrom('invoices').select(['tax_bp', 'tip_cents']).where('id', '=', invoiceId).executeTakeFirstOrThrow()
+  const rows = await tx
+    .selectFrom('ledger_events')
+    .select(['type', 'amount_cents', 'status', 'dest'])
+    .where('invoice_id', '=', invoiceId)
+    .execute()
+  const events: CalcEvent[] = rows.map((e) => ({ type: e.type, amountCents: e.amount_cents, status: e.status, dest: e.dest }))
+  for (const cents of releaseCents) if (cents > 0) events.push({ type: 'adjust', amountCents: cents })
+  const calc = (): InvoiceCalc => calcInvoice({ itemPrices, events, taxBp: inv.tax_bp, tipCents: inv.tip_cents, canceled: false })
+  let sub = calc().sub
+  for (const cents of coverCents) {
+    const value = Math.min(cents, sub)
+    if (value <= 0) continue
+    events.push({ type: 'adjust', amountCents: -value })
+    sub -= value
+  }
+  return calc()
 }
 
 const emptyResult = (membershipId: string, appointmentId: string, repriced: boolean): SettleResult => ({
@@ -698,7 +739,8 @@ export interface ResettleOutcome {
  * coverage follows the visit: a larger size confirmed after the visit was covered is covered up to the plan size, an included add-on
  * added later is covered, a covered add-on removed gives its coverage and credit back. null when the visit holds no redeem yet (the
  * completion settles it) or the membership no longer covers it (what was covered stays). Runs in the caller's transaction, before
- * the caller syncs the invoice; an error (the sync's 409 ADDON_REMOVE_OVERPAID) refuses the whole change.
+ * the caller syncs the invoice; an error refuses the whole change: 409 ADDON_REMOVE_OVERPAID when the change would leave a paid
+ * invoice overpaid (projected before anything is written: the settlement never refunds to store credit on its own).
  */
 export async function resettleMembershipVisit(
   tx: Tx,

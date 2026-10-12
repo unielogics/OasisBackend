@@ -1604,7 +1604,11 @@ credits counted as still there: a redeem whose line is gone, no longer covered, 
 reversing system adjust, reason "Membership credit", note "Wax · Gold · coverage of $30 given back (the visit changed)", and a
 `restore` keyed `restore:<redeem id>` whose `ledger_event_id` is that adjust, in the redeem's own cycle), then each covered line
 without a redeem gets one (a replacement keeps the cycle of the redeem it replaces); the invoice's `coverage` lists only the redeems in
-force. An apply with nothing new to cover answers 409 `MEMBERSHIP_CREDIT_APPLIED`; one that finds a newly covered line (an inclusion
+force. A settled visit is never left overpaid by its settlement: the end state is projected before anything is written, and a change
+that would leave a paid invoice above its new total (a member's paid size difference, then a smaller size; a covered add-on removed
+so another paid line becomes covered) is refused whole, 409 `PRICE_CHANGE_OVERPAID` for a size change, `ADDON_REMOVE_OVERPAID` for an
+add-on, `MEMBERSHIP_NO_BALANCE` for an apply: staff choose how to give the money back (refund or adjust the invoice first), the
+settlement never refunds to store credit on its own. An apply with nothing new to cover answers 409 `MEMBERSHIP_CREDIT_APPLIED`; one that finds a newly covered line (an inclusion
 that does not apply itself) covers it. Auto-apply: the inclusions with `autoApply` (all of them
 for a member with `autoApply`, `PATCH /memberships/:id`) settle when the visit is **completed** (no payments permission needed; under
 a savepoint: anything that stops it is a quiet skip, the completion never fails; a skip keeps the repricing). `GET /appointments/:id` gains `membershipUpgrade {candidate, visits60, copy} | null` (non-members only; real
