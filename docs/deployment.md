@@ -13,7 +13,7 @@ for the environment in AWS Secrets Manager and the app's AWS identity, and 0140 
                   :80 / :443  nginx  (TLS, headers, rate limits)       tablet (SMS Gate app, local server :8080)
                   /      |      \                                         ^      | webhooks
                  /       |       \                       tailscale serve :8443 (/hooks/smsgate ONLY)
-       dashboard      /api/*     /hooks/squarespace                         |      v
+       dashboard      /api/*     /hooks/squarespace, /hooks/square          |      v
    127.0.0.1:3200  127.0.0.1:4000  (signed, public)              127.0.0.1:3002  hooks listener (same API process)
    oasis-web        oasis-api  ------------------------------------------------'
    (Next.js)        (Fastify)  <---- pg-boss jobs ----> oasis-worker (SMS dispatch, reminders, Squarespace sync, ...)
@@ -239,7 +239,7 @@ Check: `sudo iptables -S OASIS-IMDS` (`--uid-owner 0`, the oasis uid, the ec2-in
 | any other letter case of `/api`, `/dev-storage`, `/hooks` (`/API/...`, `/Dev-Storage/...`) | nothing: 404 | the dashboard's rewrites are case-insensitive and would hand them to the API around the rules here |
 | `/api/v1/auth/{login,password/forgot,password/reset,invite/accept}` | API | zone `oasis_login` (30 a minute, burst 10) |
 | `/api/v1/events` | API | server-sent events: `proxy_buffering off`, no compression, one-hour reads |
-| `/hooks/squarespace`, `/hooks/ses` | API | POST only, 1 MB body limit, zone `oasis_hooks`; signatures are checked by the app |
+| `/hooks/squarespace`, `/hooks/square`, `/hooks/ses` | API | POST only, 1 MB body limit, zone `oasis_hooks`; signatures are checked by the app (Square: HMAC over `SQUARE_WEBHOOK_URL` and the body, ADR 0171) |
 | `/hooks/*` (including `/hooks/smsgate/*`), `/dev-storage/*` | nothing: 404 | the SMS webhook is tailnet-only |
 | `/healthz` | API | public liveness |
 | `/readyz`, `/api/v1/openapi.json` | API | this host only (readiness shows database and migration detail) |

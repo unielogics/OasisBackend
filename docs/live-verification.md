@@ -1,6 +1,6 @@
 # Live verification
 
-Four commands that prove the real thing works, one per integration. Each walks the checklist that is already written in
+Five commands that prove the real thing works, one per integration. Each walks the checklist that is already written in
 `docs/integrations/` (the numbered items you will see in the output), tells you PASS, FAIL or SKIP for every item with the reason, and
 writes a report you can keep or send to someone.
 
@@ -8,9 +8,10 @@ writes a report you can keep or send to someone.
 |---|---|---|
 | `pnpm verify:smsgate` | the tablet sends and receives texts, receipts come back, STOP/START/HELP/C work | the tablet set up (below), its address and login, a phone to text |
 | `pnpm verify:squarespace` | the API key works, what orders and payments look like, which products are memberships | a read-only API key |
+| `pnpm verify:square` | the Square token, location and Events API; in the sandbox: a customer, a saved card, a $1 charge and refund, a payment link, a subscription and its first invoice, pause, swap and cancel (ADR 0171) | the sandbox app (`--secret oasis/sandbox/square`), or `--read-only` with the production token |
 | `pnpm verify:aws` | SES sends mail from your address, the photo bucket accepts uploads, nothing is missing from the permissions | an AWS login or an instance role, a verified sender, a bucket |
 | `pnpm verify:ai` | the app's identity can call Claude on Amazon Bedrock (one-token ping), and names IAM, model access or the account quota when it cannot | an AWS login or the instance role (`--instance-profile`) |
-| `pnpm verify:all` | all four in a row, one summary | all of the above |
+| `pnpm verify:all` | all five in a row, one summary | all of the above |
 
 ## How to run them
 
@@ -272,11 +273,26 @@ sudo $D/verify.sh ai --instance-profile --model us.anthropic.claude-sonnet-5-5  
 `--sim` runs against a built-in stand-in (`--sim-scenario ok|access_denied|model_access|quota|throttled|unavailable|invalid_model|refusal|no_effort`)
 to see each message without an account.
 
+## Square (ADR 0171)
+
+The checklist is [integrations/square.md](integrations/square.md) section 7; what the sandbox showed is its section 8.
+
+```bash
+AWS_PROFILE=oasis-setup pnpm verify:square --secret oasis/sandbox/square --location LCEVRH6NQ775N   # the sandbox app, from a checkout
+sudo $D/verify.sh square --read-only        # the configured (production) Square: token, location, events; creates nothing
+pnpm verify:square --sim                    # the same checks against the simulator
+```
+
+In the sandbox it creates a customer, a card, a $1 payment and its refund, two payment links, a plan with two variations and two
+subscriptions, all with a `verify-` reference, and cleans up what Square allows (`--keep` leaves it; a plan variation that a subscription
+used cannot be deleted). A production token is refused unless `--read-only`. `--capture DIR` keeps scrubbed copies of every answer (ids
+replaced, no emails, URL paths dropped): that is how `test/fixtures/square/` was made.
+
 ---
 
 ## Reading and keeping the reports
 
-`<date>-smsgate.md`, `-squarespace.md`, `-aws.md`, `-ai.md` (and `-all.md` for `verify:all`) are the human report: a table of every item with its
+`<date>-smsgate.md`, `-squarespace.md`, `-square.md`, `-aws.md`, `-ai.md` (and `-all.md` for `verify:all`) are the human report: a table of every item with its
 result, the fixes, evidence, notes (battery and health, device settings with secrets hidden, the proposed product map) and the source
 document of each item. The `.json` next to each has the same content for tools. They contain no secrets, but they describe your account
 and devices, so they stay out of git; the wrapper keeps them in `/var/lib/oasis/live-verification`.
