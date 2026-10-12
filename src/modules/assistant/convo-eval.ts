@@ -239,8 +239,12 @@ export function ownWords(text: string, renderedPhrases: readonly string[]): stri
   let t = replyPart(text)
   // longest first, so a phrase that contains another goes out whole
   for (const p of [...renderedPhrases].sort((a, b) => b.length - a.length)) if (p) t = t.split(p).join(' ')
-  return t.replace(/\[link:[a-z_]+\]/g, ' ')
+  // the {balance} rendering depends on the turn (get_balance), so it is matched by its fixed wording
+  return t.replace(/\[link:[a-z_]+\]/g, ' ').replace(BALANCE_RENDERED, ' ')
 }
+
+/** What the server writes for {balance} (facts.ts placeholderValues). */
+const BALANCE_RENDERED = /Your open balance is \$\d[\d,]*(?:\.\d\d)?/g
 
 const MONEY = /[$€£¥¢]|\b\d+(?:[.,]\d{1,2})?\s*(?:dollars?|bucks?|usd|d[oó]lares?|pesos?)\b|\b(?:dollars?|usd|d[oó]lares?)\b/i
 const NEGATION = /\b(?:no|not|never|can['’]?t|cannot|don['’]?t|doesn['’]?t|won['’]?t|isn['’]?t|aren['’]?t|unable|without|ningún|ninguna|no puedo|no podemos)\b|n['’]t\b/i
@@ -397,7 +401,7 @@ export function markServerParts(text: string, renderedPhrases: readonly string[]
   t = t.split(SAFETY_LINE).join(`⟦${SAFETY_LINE}⟧`).split(CARD_LINE).join(`⟦${CARD_LINE}⟧`)
   // longest first; a phrase is swapped for an index token first so a shorter phrase inside it is not marked twice
   for (const p of [...renderedPhrases].sort((a, b) => b.length - a.length)) if (p) t = t.split(p).join(`⟪${renderedPhrases.indexOf(p)}⟫`)
-  t = t.replace(/⟪(\d+)⟫/g, (_, i: string) => `⟦${renderedPhrases[Number(i)]}⟧`)
+  t = t.replace(/⟪(\d+)⟫/g, (_, i: string) => `⟦${renderedPhrases[Number(i)]}⟧`).replace(BALANCE_RENDERED, (m) => `⟦${m}⟧`)
   return `${head}${t}${tail}`
 }
 

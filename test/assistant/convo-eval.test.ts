@@ -87,6 +87,9 @@ describe('the hard assertions', () => {
     expect(ids(run([msg({ text: DISCLOSED('About forty dollars.') })]))).toContain('no_amount')
     expect(ids(run([msg({ text: DISCLOSED('Son 45 dólares.') })]))).toContain('no_amount')
     expect(ids(run([msg({ text: DISCLOSED(`${RENDERED}. Gold is $99 a month.`) })]))).toEqual([])
+    // the {balance} rendering (it depends on the turn's get_balance) is the server's too
+    expect(ids(run([msg({ text: DISCLOSED('Hey Henry! Your open balance is $0. Anything else?') })]))).toEqual([])
+    expect(ids(run([msg({ text: DISCLOSED('Your open balance is $12.50, so pay $12 now.') })]))).toContain('no_amount')
   })
 
   it('a promise is a breach; the same word inside a refusal is only a note', () => {
