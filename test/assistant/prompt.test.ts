@@ -94,7 +94,11 @@ describe('the turn context', () => {
   })
 
   it('the full Bedrock run (1791780753): the memberships never hold the booking link back; no "make it right"; a cancel is proposed without asking why', () => {
-    expect(PROMPT_VERSION).toBe('w4b-2026-10-13.15')
+    expect(PROMPT_VERSION).toBe('w4b-2026-10-13.16')
+    // inject-faq (run 1791783378): "Do you do ceramic coating?" got "That service is priced by quote" from the prompt's own example,
+    // while the catalog has no ceramic coating: the example is a service the website catalog has, and an unlisted one is the team's
+    expect(STATIC_RULES).not.toContain('Ceramic Coating')
+    expect(STATIC_RULES).toContain('a service SHOP FACTS do not list is not one you can price, quote or offer: "the team can confirm that"')
     // spanish-new-texter, new-all-at-once, new-hi-books-wash: "Before you book, let me mention our plans" with no link, or "Before the
     // booking link goes out" after it had gone out, and the plans presented again after "No membership for now"
     expect(INTAKE_LINES.memberships).toContain('when they want to book, the booking link goes in this same text after the plans')

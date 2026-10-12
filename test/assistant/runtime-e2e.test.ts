@@ -741,6 +741,9 @@ describe('W4b fixes (the conversation eval and its independent check)', () => {
       "Done by the server since the assistant's last text: nothing (nothing was booked, moved or cancelled).",
     )
     expect(message).toContain("The client's visits on file: none.")
+    // full Bedrock run 1791783378 (member-washes-left): "You have 2 washes left this cycle" failed as an unsupported fact twice (the
+    // judge never saw the membership): the record names it
+    expect(message).toContain("The client's membership: none.")
   })
 
   it('X3: "all set" with nothing done is rewritten (deterministic); after the server booked by reply number the assistant may say so', async () => {

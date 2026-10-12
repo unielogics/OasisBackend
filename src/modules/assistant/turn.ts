@@ -653,6 +653,8 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
           ]
         : []),
       `The client's visits on file: ${turnContext.appointments.length > 0 ? turnContext.appointments.map((a) => a.label).join('; ') : 'none'}.`,
+      // the membership the model reads in its turn context ("Gold, active, 2 washes left this cycle"): a count from it is no invented fact
+      `The client's membership: ${turnContext.membership ?? 'none'}.`,
     ].join('\n')
     let rewriteUsed = false
     let shortenUsed = false
