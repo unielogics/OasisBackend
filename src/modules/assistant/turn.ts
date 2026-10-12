@@ -663,7 +663,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
       `What the server did and returned in this turn: ${toolRecord.length > 0 ? toolRecord.join('; ') : 'nothing'}.`,
       ...(toolRecord.some((l) => l.startsWith('open times for ') && !l.includes(': none'))
         ? []
-        : ['Open times the server returned in this turn: none (no day or time may be named as open or available).']),
+        : ['Open times the server returned in this turn: none (no time may be named as open or available; a day only as this record says).']),
       `The client's visits on file: ${turnContext.appointments.length > 0 ? turnContext.appointments.map((a) => a.label).join('; ') : 'none'}.`,
       // the membership the model reads in its turn context ("Gold, active, 2 washes left this cycle"): a count from it is no invented fact
       `The client's membership: ${turnContext.membership ?? 'none'}.`,

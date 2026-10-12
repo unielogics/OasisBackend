@@ -180,7 +180,8 @@ export function recordLine(tool: string, outcome: ToolOutcome): string | null {
       const what = `${str(d.service) ?? 'the service'} on ${str(d.dateLabel) ?? str(d.date) ?? 'that day'}`
       if ('bookingLink' in d) {
         const link = typeof d.bookingLink === 'string' ? '; texted the client a calendar link to pick a time' : d.linkAlreadyTexted ? '; the calendar link texted earlier is where they pick a time' : ''
-        return `open times for ${what}: none given to this phone (it picks a time on the booking page)${link}`
+        const day = d.closed ? '; the shop is closed that day' : d.hasOpenTimes === true ? '; the day has open times' : d.hasOpenTimes === false ? '; the day has no open times' : ''
+        return `open times for ${what}: none given to this phone (it picks a time on the booking page)${day}${link}`
       }
       const times = Array.isArray(d.times) ? d.times.map((t) => str((t as { time?: unknown }).time)).filter((t): t is string => t !== null) : []
       if (times.length > 0) return `open times for ${what}: ${times.join(', ')}${typeof d.moreTimes === 'number' && d.moreTimes > 0 ? ` (and ${d.moreTimes} later)` : ''}`

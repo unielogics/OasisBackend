@@ -14,7 +14,7 @@ import type { AssistantConfig } from '../../src/modules/assistant/config.js'
 import { aiCostMicros } from '../../src/integrations/ai/cost.js'
 import { assistantConfig } from '../../src/modules/assistant/config.js'
 import { SAFETY_LINE } from '../../src/modules/assistant/guard.js'
-import { JUDGE_HINTS, JUDGE_ACTION_RULE, JUDGE_RUBRIC, TRUSTED_CLOSE, TRUSTED_OPEN, unkeyed } from '../../src/modules/assistant/judge.js'
+import { JUDGE_HINTS, JUDGE_ACTION_RULE, JUDGE_FACTS_RULE, JUDGE_RUBRIC, TRUSTED_CLOSE, TRUSTED_OPEN, unkeyed } from '../../src/modules/assistant/judge.js'
 import { INTAKE_LINES } from '../../src/modules/assistant/prompt.js'
 import { AssistantRuntime } from '../../src/modules/assistant/runtime.js'
 import { toBizDate } from '../../src/platform/time.js'
@@ -542,6 +542,7 @@ describe('the policy judge in a turn (design 3c, layer 3)', () => {
     // client data in any
     expect(req.system).toEqual([
       { text: JUDGE_RUBRIC, cache: true },
+      { text: JUDGE_FACTS_RULE },
       { text: expect.stringMatching(/^SHOP FACTS/), cache: true },
       { text: JUDGE_ACTION_RULE, cache: true },
     ])

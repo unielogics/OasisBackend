@@ -7,6 +7,7 @@ import { actionClaims, guardReply, HARD_PROBLEMS, PROBLEM_HINTS } from '../../sr
 import {
   JUDGE_ACTION_RULE,
   JUDGE_CATEGORIES,
+  JUDGE_FACTS_RULE,
   JUDGE_HINTS,
   JUDGE_RUBRIC,
   judgeMessage,
@@ -280,7 +281,9 @@ describe('X2/X3: the judge reads the shop facts and the server record', () => {
     })
     expect(JUDGE_HINTS.facts).toMatch(/the team can confirm that/)
     expect(JUDGE_HINTS.action).toMatch(/never say so/i)
-    expect(JUDGE_RUBRIC).toContain('(f) facts:')
+    // rules (f) and (g) go with the facts and the record only (guard polish after W4b-fix)
+    expect(JUDGE_RUBRIC).not.toContain('(f) facts:')
+    expect(JUDGE_FACTS_RULE).toContain('(f) facts:')
     // rule (g) is its own system block, sent only with a server record (guard polish after W4b-fix)
     expect(JUDGE_RUBRIC).not.toContain('(g) action:')
     expect(JUDGE_ACTION_RULE).toContain('(g) action:')
@@ -295,10 +298,11 @@ describe('X2/X3: the judge reads the shop facts and the server record', () => {
     })
     expect(req.system).toEqual([
       { text: JUDGE_RUBRIC, cache: true },
+      { text: JUDGE_FACTS_RULE },
       { text: 'SHOP FACTS\nBusiness: X', cache: true },
       { text: JUDGE_ACTION_RULE, cache: true },
     ])
-    expect(judgeRequest(seg, 120, 'abcd1234', { facts: 'SHOP FACTS\nBusiness: X' }).system).toHaveLength(2)
+    expect(judgeRequest(seg, 120, 'abcd1234', { facts: 'SHOP FACTS\nBusiness: X' }).system).toHaveLength(3)
     expect(judgeMessage(seg, 'abcd1234', 'Done <by> the server: nothing.')).toBe(
       '<message key="abcd1234" trusted-parts="0">\nYes, there is a waiting area.\n</message>\n<own-text>\nYes, there is a waiting area.\n</own-text>\n<server-record>\nDone ‹by› the server: nothing.\n</server-record>',
     )

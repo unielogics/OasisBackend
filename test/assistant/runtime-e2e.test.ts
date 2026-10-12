@@ -13,7 +13,7 @@ import type { AiContentBlock, AiConverseRequest, AiJson } from '../../src/integr
 import { placeholderValues } from '../../src/modules/assistant/facts.js'
 import { CARD_LINE, SAFETY_LINE } from '../../src/modules/assistant/guard.js'
 import { SAFETY_LINES } from '../../src/modules/assistant/lang.js'
-import { JUDGE_ACTION_RULE, TRUSTED_CLOSE, TRUSTED_OPEN, unkeyed } from '../../src/modules/assistant/judge.js'
+import { JUDGE_ACTION_RULE, JUDGE_FACTS_RULE, TRUSTED_CLOSE, TRUSTED_OPEN, unkeyed } from '../../src/modules/assistant/judge.js'
 import { INTAKE_LINES } from '../../src/modules/assistant/prompt.js'
 import { AssistantRuntime } from '../../src/modules/assistant/runtime.js'
 import { grantTrust } from '../../src/modules/identity/trust.js'
@@ -734,11 +734,13 @@ describe('W4b fixes (the conversation eval and its independent check)', () => {
     )
     const req = a.judge.requests[0]!
     // the rubric, the facts, rule (g) for the record (guard polish after W4b-fix: its own block, sent with the record only)
-    expect(req.system).toHaveLength(3)
-    expect(req.system[1]).toMatchObject({ cache: true })
-    expect(req.system[1]!.text).toMatch(/^SHOP FACTS/)
-    expect(req.system[0]!.text).toContain('(f) facts:')
-    expect(req.system[2]).toEqual({ text: JUDGE_ACTION_RULE, cache: true })
+    // (rule (f) right before the facts, sent with them only)
+    expect(req.system).toHaveLength(4)
+    expect(req.system[1]).toEqual({ text: JUDGE_FACTS_RULE })
+    expect(req.system[1]!.text).toContain('(f) facts:')
+    expect(req.system[2]).toMatchObject({ cache: true })
+    expect(req.system[2]!.text).toMatch(/^SHOP FACTS/)
+    expect(req.system[3]).toEqual({ text: JUDGE_ACTION_RULE, cache: true })
     const message = JSON.stringify(req.messages)
     expect(message).toContain(
       "Done by the server since the assistant's last text: nothing (nothing was booked, moved or cancelled).",
@@ -1002,8 +1004,10 @@ describe('guard polish after W4b-fix (the W4a fresh set and the W4b-fix check)',
     await inbound(maria(), 'Can I come Monday at 9?')
     expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
     const record = recordOf(a.judge.requests[0]!)
-    expect(record).toContain('open times for Signature Hand Wash on Mon Jun 15: none given to this phone (it picks a time on the booking page); texted the client a calendar link to pick a time')
-    expect(record).toContain('Open times the server returned in this turn: none (no day or time may be named as open or available).')
+    expect(record).toContain(
+      'open times for Signature Hand Wash on Mon Jun 15: none given to this phone (it picks a time on the booking page); the day has open times; texted the client a calendar link to pick a time',
+    )
+    expect(record).toContain('Open times the server returned in this turn: none (no time may be named as open or available; a day only as this record says).')
     expect(contextOf(a.provider.requests[0]!)).toContain('Verified phone: no')
   })
 

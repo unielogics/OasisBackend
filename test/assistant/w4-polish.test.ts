@@ -21,7 +21,7 @@ import {
   toGsm7,
   withoutQuestions,
 } from '../../src/modules/assistant/guard.js'
-import { JUDGE_ACTION_RULE, JUDGE_RUBRIC, judgeRequest } from '../../src/modules/assistant/judge.js'
+import { JUDGE_ACTION_RULE, JUDGE_FACTS_RULE, JUDGE_RUBRIC, judgeRequest } from '../../src/modules/assistant/judge.js'
 import { actionSummaryIn, serverTextEs, shortDateEs, timeEs, whenIn } from '../../src/modules/assistant/lang.js'
 import { asksForFree, renderTurnContext, STATIC_RULES, type TurnContextData } from '../../src/modules/assistant/prompt.js'
 import { recordLine } from '../../src/modules/assistant/tool-runner.js'
@@ -132,6 +132,8 @@ describe('P1: the fresh set’s design-induced false blocks', () => {
     expect(JUDGE_RUBRIC).not.toContain('writes its own security notice')
     expect(JUDGE_RUBRIC).toContain('"free" meaning available or open (free bays, free slots, a free time, free openings')
     expect(JUDGE_RUBRIC).toContain('saying it cannot confirm or offer something ("I can\'t confirm a free wash")')
+    // the fresh set's one leak in two runs: "Per state law, tint darker than 30% is illegal" (a statement of what the law forbids)
+    expect(JUDGE_RUBRIC).toContain('a legal or insurance statement (what the law allows, requires or forbids, fault, liability')
   })
 })
 
@@ -171,8 +173,11 @@ describe('P2: the action-claim rule’s false blocks', () => {
         data: { service: 'Signature Hand Wash', dateLabel: 'Sat Oct 17', times: [{ time: '9:00 AM', startMin: 540 }, { time: '9:30 AM', startMin: 570 }], moreTimes: 4 },
       }),
     ).toBe('open times for Signature Hand Wash on Sat Oct 17: 9:00 AM, 9:30 AM (and 4 later)')
-    expect(recordLine('check_availability', { ok: true, data: { service: 'Signature Hand Wash', dateLabel: 'Sat Oct 17', bookingLink: '{link1}' } })).toBe(
-      'open times for Signature Hand Wash on Sat Oct 17: none given to this phone (it picks a time on the booking page); texted the client a calendar link to pick a time',
+    expect(recordLine('check_availability', { ok: true, data: { service: 'Signature Hand Wash', dateLabel: 'Sat Oct 17', bookingLink: '{link1}', hasOpenTimes: true } })).toBe(
+      'open times for Signature Hand Wash on Sat Oct 17: none given to this phone (it picks a time on the booking page); the day has open times; texted the client a calendar link to pick a time',
+    )
+    expect(recordLine('check_availability', { ok: true, data: { service: 'X', dateLabel: 'Sat Oct 17', bookingLink: null, linkAlreadyTexted: true, hasOpenTimes: false } })).toBe(
+      'open times for X on Sat Oct 17: none given to this phone (it picks a time on the booking page); the day has no open times; the calendar link texted earlier is where they pick a time',
     )
     expect(recordLine('check_availability', { ok: true, data: { service: 'X', dateLabel: 'Sun Oct 18', times: [], closed: true, nextOpenDates: [{ dateLabel: 'Mon Oct 19', firstTime: '8:00 AM' }] } })).toBe(
       'open times for X on Sun Oct 18: none (closed); next open: Mon Oct 19 from 8:00 AM',
@@ -195,6 +200,13 @@ describe('P2: the action-claim rule’s false blocks', () => {
     expect(judgeRequest(seg).system.map((b) => b.text)).toEqual([JUDGE_RUBRIC])
     expect(judgeRequest(seg, 120, 'abcd1234', { record: 'Done by the server: nothing.' }).system.map((b) => b.text)).toEqual([JUDGE_RUBRIC, JUDGE_ACTION_RULE])
     expect(JUDGE_RUBRIC).not.toContain('(g) action')
+    // rule (f) likewise goes with the facts only (the held-out set's "You can cancel up to a day before." failed as facts without any)
+    expect(JUDGE_RUBRIC).not.toContain('(f) facts')
+    expect(judgeRequest(seg, 120, 'abcd1234', { facts: 'SHOP FACTS\nX' }).system).toEqual([
+      { text: JUDGE_RUBRIC, cache: true },
+      { text: JUDGE_FACTS_RULE },
+      { text: 'SHOP FACTS\nX', cache: true },
+    ])
   })
 })
 
