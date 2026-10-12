@@ -35,10 +35,8 @@ describe('the card link kind', () => {
   })
 })
 
-describe('Square routes declared for waves Q3a and Q3b', () => {
+describe('Square routes declared for wave Q3b (the card routes are built: cards.test.ts)', () => {
   const CALLS: ['GET' | 'POST' | 'DELETE', string, unknown][] = [
-    ['POST', 'cards', { sourceId: 'cnon:card-nonce-ok', consentVersion: 'v1', purposes: ['no_show_fee'] }],
-    ['DELETE', 'cards/00000000-0000-4000-8000-000000000001', undefined],
     ['POST', 'membership/subscribe', { email: 'maria@example.com', sourceId: 'cnon:card-nonce-ok', consentVersion: 'v1' }],
     ['GET', 'membership/status', undefined],
   ]
@@ -58,12 +56,12 @@ describe('Square routes declared for waves Q3a and Q3b', () => {
     expect(counts.rows[0]!.n).toBe(0)
   })
 
-  it('validate their bodies first (the contract the next waves start from)', async () => {
+  it('the card routes validate their bodies first', async () => {
     const id = await h.customer()
     const { session } = await h.page({ customerId: id, kind: 'card' })
-    const bad = await h.call('POST', 'cards', { session, body: { sourceId: 'cnon:card-nonce-ok', consentVersion: 'v1', purposes: [] } })
+    const bad = await h.call('POST', 'cards', { session, body: { sourceId: 'cnon:card-nonce-ok', consentVersion: 'v1', purposes: [] }, key: h.nextKey() })
     expect(bad.statusCode).toBe(422)
-    const extra = await h.call('POST', 'cards', { session, body: { sourceId: 'x', consentVersion: 'v1', purposes: ['balance'], pan: '4111' } })
+    const extra = await h.call('POST', 'cards', { session, body: { sourceId: 'x', consentVersion: 'v1', purposes: ['balance'], pan: '4111' }, key: h.nextKey() })
     expect(extra.statusCode).toBe(422)
     const notUuid = await h.call('DELETE', 'cards/abc', { session })
     expect(notUuid.statusCode).toBe(422)

@@ -19,6 +19,7 @@ import { consumeLink } from '../../../identity/links.js'
 import type { SessionView } from '../../../identity/sessions.js'
 import { disableCard, saveCardOnFile, type SavedCard, type SquareCardDeps } from '../../../square/cards.js'
 import { cardsOn } from '../../../square/charges.js'
+import { squareWritesOn } from '../../../square/links.js'
 import { CARD_PURPOSES } from '../../../square/consents.js'
 import { squareApi, squareEnv } from '../../../square/runtime.js'
 import { consume, windowStart, type LimitRule } from '../../limits.js'
@@ -97,8 +98,10 @@ async function cardPage(k: LinkRouteKit, s: SessionView, o: { hold: boolean }): 
   await requireProven(k.app.db, s, now)
   const loc = await linkLocation(k.app.db, s.link.locationId)
   if (o.hold) await requireNoHold(k.app.db, s.customerId, now, loc.tz)
-  // saved cards are a Square feature: before the cutover the page cannot take one
-  if (!cardsOn(squareEnv())) throw new AppError('LINK_ACTION_NOT_READY')
+  // saved cards are a Square feature: before the cutover the page cannot take one; watch-only Square writes nothing
+  const env = squareEnv()
+  if (!cardsOn(env)) throw new AppError('LINK_ACTION_NOT_READY')
+  if (!squareWritesOn(env)) throw new AppError('SQUARE_WRITES_OFF')
   return { customerId: s.customerId, locationId: loc.id }
 }
 

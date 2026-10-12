@@ -86,8 +86,18 @@ export async function ensureSquareCustomer(deps: SquareCustomerDeps, input: Ensu
     .sort((a, b) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')))[0]
   let created = false
   if (!found) {
+    // a Square customer deleted at Square (customer.deleted, card-events.ts) unlinks the client: the next customer needs its own key,
+    // or Square would answer the deleted one again (it keeps a key's first answer)
+    const unlinked = await db
+      .selectFrom('audit_log')
+      .select((eb) => eb.fn.countAll<string>().as('n'))
+      .where('location_id', '=', locationId)
+      .where('action', '=', 'square.customer_unlinked')
+      .where('entity_id', '=', client.id)
+      .executeTakeFirst()
+    const generation = Number(unlinked?.n ?? 0)
     // the body depends only on the client (never on the email of this request), so a retry with the same key is the same request
-    found = await api.customers.create(sqKey('cu', client.id), {
+    found = await api.customers.create(sqKey('cu', generation ? `${client.id}:${generation}` : client.id), {
       ...splitName(client.full_name),
       ...(client.phone_e164 ? { phone_number: client.phone_e164 } : {}),
       reference_id: client.id,

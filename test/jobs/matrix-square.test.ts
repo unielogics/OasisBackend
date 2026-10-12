@@ -18,7 +18,8 @@ import { paymentFacts } from '../../src/modules/square/facts.js'
 import { activateSquareLink, prepareSquareLink } from '../../src/modules/square/links.js'
 import { decideSquarePayment, lockPayment } from '../../src/modules/square/payments.js'
 import { transaction } from '../../src/platform/db.js'
-import { addEvent, makeInvoice } from '../payments/helpers.js'
+import { addEvent, makeCustomer, makeInvoice } from '../payments/helpers.js'
+import { saveCardOnFile } from '../../src/modules/square/cards.js'
 import { coreVars } from '../square-db/core.js'
 
 const h = useJobsHarness()
@@ -177,5 +178,47 @@ describe('the Square jobs, twice each through the real worker', () => {
     await run(w, 'square.refunds.submit')
     expect(await money()).toEqual(first)
     expect(r.sim.store.refunds.size).toBe(1)
+  })
+  it('square.charges.resolve records an unanswered saved-card charge once (the same key); the second run finds nothing', async () => {
+    const r = await q2()
+    const customerId = await makeCustomer(r.db, r.pe, { name: 'Maria Delgado' })
+    const inv = await makeInvoice(r.db, r.pe, { customerId, items: [{ name: 'Wash', priceCents: 4000 }] })
+    const card = await saveCardOnFile(
+      { db: r.db, clock: h.clock, newId: r.newId, env: r.env, api: r.sim.api, locationId: r.pe.locationId },
+      { customerId, sourceId: 'cnon:card-nonce-ok', purposes: ['balance'], consentVersion: 'v1', ip: null, userAgent: null, keyBase: 'matrix-card' },
+    )
+    const id = r.newId()
+    await r.db
+      .insertInto('square_charges')
+      .values({ id, location_id: r.pe.locationId, customer_id: customerId, card_id: card.cardId, consent_id: card.consentId, purpose: 'balance', amount_cents: 4280, state: 'unknown', idempotency_key: sqKey('ch', id), invoice_id: inv.id, attempts: 1, decided_by: 'Desk', decided_at: h.clock.now(), attempted_at: h.clock.now(), reason: 'Balance' })
+      .execute()
+    const w = await h.start({ definitions: squareJobs as never })
+    await run(w, 'square.charges.resolve')
+    const first = await money()
+    expect(first.ledger).toMatchObject([{ type: 'pay', amount_cents: 4280, processor_state: 'confirmed' }])
+    expect((await r.db.selectFrom('square_charges').select('state').executeTakeFirstOrThrow()).state).toBe('charged')
+    await run(w, 'square.charges.resolve')
+    expect(await money()).toEqual(first)
+    expect(r.sim.store.payments.size).toBe(1)
+  })
+
+  it('square.cards.nightly disables a deleted client’s card once', async () => {
+    const r = await q2()
+    const customerId = await makeCustomer(r.db, r.pe, { name: 'Maria Delgado' })
+    const card = await saveCardOnFile(
+      { db: r.db, clock: h.clock, newId: r.newId, env: r.env, api: r.sim.api, locationId: r.pe.locationId },
+      { customerId, sourceId: 'cnon:card-nonce-ok', purposes: ['no_show_fee'], consentVersion: 'v1', ip: null, userAgent: null, keyBase: 'matrix-card-2' },
+    )
+    await r.db.updateTable('customers').set({ deleted_at: h.clock.now() }).where('id', '=', customerId).execute()
+    const cards = async () => (await sql`select state, disabled_reason from customer_cards order by id`.execute(r.db)).rows
+    const w = await h.start({ definitions: squareJobs as never })
+    await run(w, 'square.cards.nightly')
+    const first = await cards()
+    expect(first).toEqual([{ state: 'disabled', disabled_reason: 'customer_deleted' }])
+    expect(r.sim.store.cards.get(card.squareCardId)!.enabled).toBe(false)
+    const disables = r.sim.sim.log.filter((x) => x.path.endsWith('/disable')).length
+    await run(w, 'square.cards.nightly')
+    expect(await cards()).toEqual(first)
+    expect(r.sim.sim.log.filter((x) => x.path.endsWith('/disable')).length).toBe(disables)
   })
 })
