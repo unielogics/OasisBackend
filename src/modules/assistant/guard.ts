@@ -727,7 +727,7 @@ export function guardReply(i: GuardInput): GuardVerdict {
 export const PROBLEM_HINTS: Record<GuardProblem, string> = {
   empty: 'The reply was empty: write the text for the client.',
   unknown_placeholder:
-    'Use only these placeholders, exactly: {price:<key>} or {price:tint:<vehicle>:<film>} with a key from SHOP FACTS, {plan:<key>}, {fee}, {balance} (only after get_balance in this turn) and {linkN} exactly as send_link returned it.',
+    'Use only these placeholders, exactly: {price:<key>} or {price:tint:<vehicle>:<film>} with a key from SHOP FACTS, {plan:<key>}, {perks:<key>}, {fee}, {balance} (only after get_balance in this turn) and {linkN} exactly as send_link returned it.',
   placement:
     'Write each price placeholder as its own sentence, with nothing attached to it: "{price:<key>}." The server writes the whole sentence, the service name included ("Signature Hand Wash starts at ..."). Never put a name, "plus", "and", "total" or another placeholder right before or after it.',
   money:

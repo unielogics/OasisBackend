@@ -8,7 +8,7 @@ import { addDays } from '../../../platform/time.js'
 import { findCustomerByPhone } from '../../customers/service.js'
 import { memberView } from '../../public/members.js'
 import { TOOL_MIN_TRUST, type AssistantTool, type ToolContext, type ToolInputs } from '../contract.js'
-import { FEE_PLACEHOLDER, planPlaceholder, pricePlaceholder, tintPlaceholder } from '../facts.js'
+import { FEE_PLACEHOLDER, perksPlaceholder, perksWords, planPlaceholder, pricePlaceholder, tintPlaceholder } from '../facts.js'
 import { atLeast, fail, json, ok } from './common.js'
 
 const TOPICS = ['hours', 'closures', 'address', 'contact', 'booking_rules', 'fee', 'cancellation', 'vip', 'arrival', 'automatic_texts', 'faq'] as const
@@ -109,11 +109,11 @@ export const listServices: AssistantTool<ToolInputs['list_services']> = {
 export const getMembershipInfo: AssistantTool<ToolInputs['get_membership_info']> = {
   name: 'get_membership_info',
   description:
-    'The membership plans (Gold, VIP) with their perks and each one’s priceKey placeholder (the server writes the monthly price), and, for a client on file, whether they are a member now. To join, offer send_link {kind: membership}.',
+    'The membership plans (Gold, VIP) with their perks, each one’s priceKey placeholder (the server writes the monthly price) and perksKey placeholder (the server writes what it includes), and, for a client on file, whether they are a member now. To join, offer send_link {kind: membership}.',
   input: z.strictObject({}),
   minTrust: TOOL_MIN_TRUST.get_membership_info,
   async run(ctx) {
-    const plans = ctx.facts.plans.map((p) => ({ tier: p.key, label: p.label, priceKey: planPlaceholder(p.key), perks: p.perks }))
+    const plans = ctx.facts.plans.map((p) => ({ tier: p.key, label: p.label, priceKey: planPlaceholder(p.key), ...(perksWords(p) ? { perksKey: perksPlaceholder(p.key) } : {}), perks: p.perks }))
     let mine: Record<string, unknown> | null = null
     if (ctx.identity.customerId && atLeast(ctx.identity.trust, 'caller')) {
       const customer = await findCustomerByPhone(ctx.db, ctx.identity.phone)
@@ -127,6 +127,8 @@ export const getMembershipInfo: AssistantTool<ToolInputs['get_membership_info']>
         plans,
         mine,
         priceRule: 'Never write the amount: write the plan\'s priceKey exactly, as its own sentence ("{plan:gold}."); the server writes "Gold is ... a month."',
+        perksRule:
+          'Never describe a plan\'s perks in your own words (the policy check reads "no booking fees" or "included" as a promise): write its perksKey as its own sentence ("{perks:gold}.") and the server writes "Gold includes: ...". Briefly: "{plan:gold}. {plan:vip}." and offer the perks of the one they ask about.',
       }),
     )
   },

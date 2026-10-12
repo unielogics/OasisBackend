@@ -168,7 +168,7 @@ describe('seam 1: prices reach the model only as placeholders, and every placeho
   it('every placeholder list_services, get_membership_info, get_business_info, get_balance and set_my_vehicle hand out is one placeholderValues renders', async () => {
     const handedOut = new Set<string>()
     const collect = (req: AiConverseRequest): SimStep => {
-      for (const m of JSON.stringify(toolResultsOf(req)).matchAll(/\{(?:price|plan|fee|balance)[^{}"]*\}/g)) handedOut.add(m[0])
+      for (const m of JSON.stringify(toolResultsOf(req)).matchAll(/\{(?:price|plan|perks|fee|balance)[^{}"]*\}/g)) handedOut.add(m[0])
       return simText('{fee}. {balance}. {price:signature-hand-wash}.')
     }
     const a = assistant([
@@ -485,6 +485,31 @@ describe('W4 live eval: what the eval on Bedrock found in these seams', () => {
     expect(contextOf(a.provider.requests.at(-1)!)).toContain(`Intake: ${INTAKE_LINES.memberships}.`)
     // the intent line itself tells the model to save what the texter already said
     expect(INTAKE_LINES.intent).toContain('note_interest')
+  })
+
+  it('the memberships: what a plan includes is the server’s {perks:<key>} (trusted for the judge), never the model’s own words', async () => {
+    // on Bedrock the judge failed every membership presentation in the model's words ("no booking fees" read as a promise), so the
+    // intake's membership step ended in the fallback and a handoff
+    const a = assistant([
+      (req) => {
+        expect(req.system[1]!.text).toContain('Gold (key gold): {plan:gold}. {perks:gold}.')
+        return simToolUse('get_membership_info', {})
+      },
+      (req) => {
+        const plans = JSON.stringify(toolResultsOf(req))
+        expect(plans).toContain('"perksKey":"{perks:gold}"')
+        expect(plans).toContain('perksRule')
+        return simText('{plan:gold}. {perks:gold}. Want a link to join?')
+      },
+    ])
+    await inbound(maria(), 'What do I get with Gold?')
+    expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
+    const values = placeholderValues(await a.facts())
+    expect((await outTexts(maria()))[0]!.body).toContain(`Gold is $99 a month. ${values.get('{perks:gold}')}. Want a link to join?`)
+    expect(values.get('{perks:gold}')).toContain('no booking fees')
+    // the judge read the perks as the server's own part: its <own-text> has only the model's words
+    const judged = JSON.stringify(a.judge.requests[0]!.messages)
+    expect(judged).toContain('<own-text>\\n…. …. Want a link to join?\\n</own-text>')
   })
 
   it('a client on file without a lead: open times open no lead (only the welcome flow and note_interest do)', async () => {

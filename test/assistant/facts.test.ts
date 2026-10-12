@@ -75,7 +75,7 @@ describe('the shop facts document', () => {
     expect(text).toMatch(/^SHOP FACTS/)
     // keys and placeholders, never a dollar figure (guard v4, design section 3c)
     expect(text).toContain(`- Signature Hand Wash (key ${signature.key}, about 45 minutes): {price:${signature.key}}. VIP: included.`)
-    expect(text).toContain('Gold (key gold): {plan:gold}. Perks: 4 hand washes a month')
+    expect(text).toContain('Gold (key gold): {plan:gold}. {perks:gold}. Perks: 4 hand washes a month')
     const quote = f.catalog.items.find((i) => i.quoteOnly)!
     expect(text).toContain(`quote only, {price:${quote.key}}`)
     const tintRow = f.catalog.tint[0]!
@@ -99,6 +99,10 @@ describe('the shop facts document', () => {
     expect(values.get(`{price:tint:${tintRow.vehicle}:${tintRow.film}}`)).toMatch(/^Carbon tint for a sedan\/coupe starts at \$229/)
     expect(values.get('{plan:gold}')).toBe('Gold is $99 a month')
     expect(values.get('{plan:vip}')).toBe('VIP is $169 a month')
+    // what a plan includes is server-written too (W4 live eval: the judge failed "no booking fees" in the model's own words)
+    expect(values.get('{perks:gold}')).toBe('Gold includes: 4 hand washes a month, interior included; share across household cars; no booking fees; member prices on everything else')
+    // a perk worded as a promise ("Priority booking and same-day guarantee") is never texted, not even as the shop's own wording
+    expect(values.get('{perks:vip}')).toBe('VIP includes: everything in Gold; wax every wash + engine bay; leather 2× and stain removal 1× a month')
     expect(values.get('{fee}')).toBe('Guests pay a $25 booking fee')
     expect(values.has('{balance}')).toBe(false)
     expect(placeholderValues(f, { balanceCents: 1250 }).get('{balance}')).toBe('Your open balance is $12.50')
@@ -143,6 +147,11 @@ describe('the shop facts document', () => {
       rendered: 'Sure! Signature Hand Wash starts at $45 for members, $54 otherwise.',
     })
     expect(guard('{plan:gold}. Want the perks?')).toMatchObject({ kind: 'ok', rendered: 'Gold is $99 a month. Want the perks?' })
+    expect(guard('{plan:vip}. {perks:vip}.')).toMatchObject({
+      kind: 'ok',
+      rendered: 'VIP is $169 a month. VIP includes: everything in Gold; wax every wash + engine bay; leather 2x and stain removal 1x a month.',
+    })
+    expect(guard('VIP {perks:vip}')).toMatchObject({ kind: 'fix', problems: ['placement'] })
     expect(guard('Without a membership: {fee}.')).toMatchObject({ kind: 'ok', rendered: 'Without a membership: Guests pay a $25 booking fee.' })
     // a placeholder attached to a name is refused: the server writes the subject itself (design 3c, layer 1)
     expect(guard(`Our Signature Hand Wash {price:${signature.key}}.`)).toMatchObject({ kind: 'fix', problems: ['placement'] })

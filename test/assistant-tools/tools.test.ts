@@ -106,9 +106,11 @@ describe('public facts: business info, services (starting prices only), membersh
     const stranger = await w.ctx({ customerId: null, phone: STRANGER, trust: 'unknown' })
     const s = data(await run('get_membership_info', stranger.ctx, {}))
     expect(s.plans).toEqual([
-      { tier: 'gold', label: 'Gold', priceKey: '{plan:gold}', perks: ['4 hand washes a month'] },
-      { tier: 'vip', label: 'VIP', priceKey: '{plan:vip}', perks: ['Everything in Gold'] },
+      { tier: 'gold', label: 'Gold', priceKey: '{plan:gold}', perksKey: '{perks:gold}', perks: ['4 hand washes a month'] },
+      { tier: 'vip', label: 'VIP', priceKey: '{plan:vip}', perksKey: '{perks:vip}', perks: ['Everything in Gold'] },
     ])
+    // the perks go out only server-written (W4 live eval: the judge failed them in the model's own words)
+    expect(s.perksRule).toMatch(/Never describe a plan.s perks in your own words/)
     expect(JSON.stringify(s)).not.toMatch(/Cents|\$\d/)
     expect(s.mine).toBeNull()
     const own = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'caller' })
