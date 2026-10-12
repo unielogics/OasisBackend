@@ -305,6 +305,20 @@ assistant on: `AI_PROVIDER=bedrock` and `AI_ENABLED=true` are set in the staged 
    reply, two after a rewrite) and any eval. An unpaced first W4a run had 208 of 286 calls throttled; a throttled judge call is a judge error and
    the reply fails closed (fallback + handoff), so ask AWS for more requests a minute before the rollout's volume grows. The eval
    retries throttled calls (`--throttle-retries 3`) and counts them, so its numbers are the judge's own.
+   **Then the whole conversation** (ADR 0160 W4b): `pnpm eval:conversations` runs the ~70 personas of
+   `test/assistant/fixtures/personas.json` in-process through the real runtime (webhook, gate, welcome flow, turn, tools, guard and
+   judge, reply numbers) against a fresh schema of the LOCAL TEST database (`DATABASE_URL_TEST` of the checkout's `.env`; never the
+   production database), with the simulated SMS device and a frozen clock, and Bedrock for the assistant, the judge, a client
+   simulator (Sonnet 4.6) and a quality rating (Opus 4.6, `us.anthropic.claude-opus-4-6-v1`):
+   `AWS_PROFILE=<operator> AWS_EC2_METADATA_DISABLED=true AWS_REGION=us-east-1 AI_PROVIDER=bedrock AI_BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-4-6 pnpm eval:conversations --json conv.json --transcripts conv.md`
+   (`--catalog unseeded` for the catalog before the website-catalog seed, `--only id,id` to rerun personas). It prints, per
+   persona, the hard assertions (no amount outside the server's placeholders, no promise, never asks for a code/PIN/card, the safety
+   line on verify/PIN/membership/payment links, bookings only by reply number, nothing after STOP or to +44/opted-out numbers, the
+   disclosure on the first text, at most 320 characters and one question per text), the quality score, turns, fallbacks,
+   handoffs, latency and cost, then the totals against the plan's targets. It shares the 50-a-minute Sonnet quota with every other
+   eval: it paces its turns at `--rpm 40` (the wait is between turns, never inside a measured turn), so run ONE eval at a time. A
+   full run costs about $3 (half of it the Opus rating) and takes about 20 minutes; it stops starting conversations at
+   `--budget-usd` (default 25).
 7. **An AWS Budgets alarm** as the account-level backstop (the app's own daily budget is the hard stop). Claude on Bedrock is billed
    partly through AWS Marketplace, so a whole-account cost budget catches it where a Bedrock-only filter might not. The first two
    budgets are free:
