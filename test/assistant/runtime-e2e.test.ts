@@ -12,7 +12,7 @@ import { DEFAULT_SIM_VERDICT, POLICY_JUDGE_HEADER, SimAiProvider, simText, simTo
 import type { AiContentBlock, AiConverseRequest, AiJson } from '../../src/integrations/ports/ai.js'
 import { placeholderValues } from '../../src/modules/assistant/facts.js'
 import { SAFETY_LINE } from '../../src/modules/assistant/guard.js'
-import { TRUSTED_CLOSE, TRUSTED_OPEN } from '../../src/modules/assistant/judge.js'
+import { TRUSTED_CLOSE, TRUSTED_OPEN, unkeyed } from '../../src/modules/assistant/judge.js'
 import { INTAKE_LINES } from '../../src/modules/assistant/prompt.js'
 import { AssistantRuntime } from '../../src/modules/assistant/runtime.js'
 import { grantTrust } from '../../src/modules/identity/trust.js'
@@ -152,7 +152,7 @@ describe('seam 1: prices reach the model only as placeholders, and every placeho
     expect(a.provider.requests).toHaveLength(2)
     // the judge read the rendered price as the server's own segment
     expect(a.judge.requests).toHaveLength(1)
-    expect(JSON.stringify(a.judge.requests[0]!.messages)).toContain(`${TRUSTED_OPEN}${values.get('{price:tint:suv:carbon}')}${TRUSTED_CLOSE}`)
+    expect(unkeyed(JSON.stringify(a.judge.requests[0]!.messages))).toContain(`${TRUSTED_OPEN}${values.get('{price:tint:suv:carbon}')}${TRUSTED_CLOSE}`)
   })
 
   it('a membership question: get_membership_info gives {plan:<tier>}, rendered "Gold is $99 a month"', async () => {

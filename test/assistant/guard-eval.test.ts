@@ -7,7 +7,7 @@ import path from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { evalGuard, parseArgs } from '../../scripts/eval-guard.js'
 import { SimAiProvider, simText } from '../../src/integrations/ai/sim.js'
-import { loadEvalFixture, runGuardEval } from '../../src/modules/assistant/guard-eval.js'
+import { formatEvalReport, loadEvalFixture, runGuardEval } from '../../src/modules/assistant/guard-eval.js'
 
 const fixture = loadEvalFixture(path.join(import.meta.dirname, 'fixtures', 'guard-eval.json'))
 const dir = mkdtempSync(path.join(tmpdir(), 'guard-eval-'))
@@ -34,6 +34,10 @@ describe('pnpm eval:guard with the simulator', () => {
     expect(lines).toContain(`ordinary false blocks: 0/${report.ordinary.total} = 0.0% (deterministic 0, judge 0)`)
     expect(lines.some((l) => l.startsWith('adversarial recall: '))).toBe(true)
     expect(lines.some((l) => l.startsWith('leaked ('))).toBe(true)
+    // the judge's own recall on what the deterministic layer let through (the simulator passes all of it)
+    const judged = report.rows.filter((r) => r.expect === 'block' && r.by !== 'deterministic').length
+    expect(lines).toContain(`judge recall: 0/${judged} = 0.0%`)
+    expect(report.stopped).toBeNull()
     expect(JSON.parse(readFileSync(out, 'utf8')).rows).toHaveLength(fixture.rows.length)
   })
 
@@ -54,6 +58,43 @@ describe('pnpm eval:guard with the simulator', () => {
     expect(report.adversarial.recall).toBe(1)
     expect((await evalGuard(['--limit', '3'], { AI_PROVIDER: 'sim' })).report.rows).toHaveLength(3)
     expect(() => parseArgs(['--bogus'])).toThrow(/unknown option/)
-    expect(parseArgs([])).toMatchObject({ fixture: 'test/assistant/fixtures/guard-eval.json', concurrency: 4, judge: true })
+    expect(parseArgs([])).toMatchObject({ fixture: 'test/assistant/fixtures/guard-eval.json', concurrency: 4, judge: true, rpm: null, budgetUsd: 2, throttleRetries: null })
+    expect(parseArgs(['--rpm', '30', '--budget-usd', '0.5'])).toMatchObject({ rpm: 30, budgetUsd: 0.5 })
+    expect(() => parseArgs(['--budget-usd', '0'])).toThrow(/positive/)
+  })
+
+  it('paces the judge calls below the per-minute quota (a throttled call would be a judge error)', async () => {
+    const rows = fixture.rows.filter((r) => r.cat === 'L').slice(0, 6)
+    const began = performance.now()
+    const report = await runGuardEval(fixture, { judge: new SimAiProvider(), rows, concurrency: 6, rpm: 3000 })
+    expect(report.judge.calls).toBe(6)
+    // 3000 a minute = one call every 20 ms: the sixth starts 100 ms after the first, whatever the concurrency
+    expect(performance.now() - began).toBeGreaterThanOrEqual(95)
+    expect(report.stopped).toBeNull()
+  })
+
+  it('retries a call the quota throttled when asked (the measurement is of the judge, not the account quota); counts the retries', async () => {
+    const rows = fixture.rows.filter((r) => r.cat === 'L').slice(0, 1)
+    const steps = () => [{ error: 'throttled' as const }, simText('{"reason":"a greeting","category":"none","ok":true}')]
+    const retried = await runGuardEval(fixture, { judge: new SimAiProvider(steps()), rows, throttleRetries: 2, throttleBackoffMs: 1 })
+    expect(retried.rows[0]).toMatchObject({ judge: 'pass', blocked: false })
+    expect(retried.judge).toMatchObject({ calls: 1, errors: 0, throttled: 1 })
+    // without retries a throttle is a judge error, as in a turn (fail closed)
+    const once = await runGuardEval(fixture, { judge: new SimAiProvider(steps()), rows })
+    expect(once.rows[0]).toMatchObject({ judge: 'error', error: 'ai:throttled', blocked: true, by: 'judge_error' })
+    expect(once.judge).toMatchObject({ errors: 1, throttled: 0 })
+  })
+
+  it('stops at the spend limit: no judge call starts once the cost reaches it; the report says so and keeps the finished rows', async () => {
+    const rows = fixture.rows.filter((r) => r.cat === 'L').slice(0, 10)
+    const sim = new SimAiProvider(() => simText('{"ok":true,"category":"none","reason":""}', { usage: { inputTokens: 1000, outputTokens: 0 } }))
+    // $3 per million input tokens: 3000 micro-dollars a call; the limit is reached after the second call
+    const prices = { inputPerMTok: 3, outputPerMTok: 15, cacheReadPerMTok: 0.3, cacheWritePerMTok: 3.75 }
+    const report = await runGuardEval(fixture, { judge: sim, rows, concurrency: 1, prices, maxCostMicros: 5000 })
+    expect(report.judge.calls).toBe(2)
+    expect(report.rows).toHaveLength(2)
+    expect(report.judge.costMicros).toBe(6000)
+    expect(report.stopped).toBe('spend limit $0.01 reached')
+    expect(formatEvalReport(report)).toContain('STOPPED: spend limit $0.01 reached (2 rows reported)')
   })
 })

@@ -1174,9 +1174,10 @@ closed (23.4a), and `ai.respond` / `ai.sweep` return at once while `AI_ENABLED=f
   JUDGE: every reply that passed is read once more, rendered, by one extra model call (`AI_GUARD_MODEL_ID`, default
   `AI_BEDROCK_MODEL_ID`; temperature 0, at most 120 tokens, 8 s) with a fixed, cached rubric; the server's segments (rendered
   placeholders, links as "[link]", the safety line, the shop's phone numbers, address and website; never client-entered text) are
-  marked trusted; it never
-  sees the client's phone, an id, a token or a URL. It answers strict JSON `{ok, category: none|price|promise|secret|
-  link_or_phone|other, reason}`. A fail gets one rewrite with the category's hint, then the guard and the judge again, then the
+  marked trusted with markers keyed per message (`<message key trusted-parts>`, `⟦K⟧…⟦/K⟧`, then the model's own text alone in
+  `<own-text>`; stored unkeyed); it never sees the client's phone, an id, a token or a URL. It answers strict JSON, the reason
+  first, `{reason, category: none|price|promise|secret|link_or_phone|other, ok}` on one line, and stops after it (stop sequence;
+  W4a, ADR 0160). A fail gets one rewrite with the category's hint, then the guard and the judge again, then the
   fallback (`policy_judge`); a judge error, timeout or an answer that is not the JSON fails closed (fallback, `judge_error`). Each
   judgement is an `assistant_tool_calls` row (tool `policy_judge`, redacted) and its cost is in the turn's `cost_micros` (the
   daily budget). `AI_GUARD_JUDGE` (default: on whenever `AI_ENABLED`; false is refused in production while `AI_ENABLED=true`). Markdown stripped, GSM-7, at most 320 characters after

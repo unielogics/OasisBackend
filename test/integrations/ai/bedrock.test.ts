@@ -287,6 +287,12 @@ describe('request mapping', () => {
     expect(JSON.parse(shapes[0]!).inferenceConfig).toEqual({ maxTokens: 800 })
   })
 
+  it('stop sequences go into inferenceConfig; a blank one is refused before the call (Bedrock refuses it)', () => {
+    expect(toConverseInput(request({ stopSequences: ['}\n'] }), { modelId: MODEL }).inferenceConfig).toEqual({ maxTokens: 800, stopSequences: ['}\n'] })
+    expect(toConverseInput(request({ stopSequences: [] }), { modelId: MODEL }).inferenceConfig).toEqual({ maxTokens: 800 })
+    expect(() => toConverseInput(request({ stopSequences: ['\n'] }), { modelId: MODEL })).toThrow(/blank/)
+  })
+
   it('toolChoice none: no tools without tool blocks; the tools stay (Bedrock requires them) once the conversation used one', () => {
     const plain = toConverseInput(request({ toolChoice: 'none' }), { modelId: MODEL })
     expect(plain).not.toHaveProperty('toolConfig')

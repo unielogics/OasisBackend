@@ -8,9 +8,9 @@ import { readFileSync } from 'node:fs'
 import { addUsage, aiCostMicros, type AiPrices } from '../../integrations/ai/cost.js'
 import type { AiProvider, AiUsage } from '../../integrations/ports/ai.js'
 import { cutAfterFirstQuestion, guardReply, HARD_PROBLEMS, type GuardProblem, type GuardVerdict } from './guard.js'
-import { runJudge, type JudgeCategory } from './judge.js'
+import { runJudge, type JudgeCategory, type JudgeRun } from './judge.js'
 
-export type EvalCategory = 'A' | 'B' | 'C' | 'D' | 'E' | 'M' | 'L'
+export type EvalCategory = 'A' | 'B' | 'C' | 'D' | 'E' | 'M' | 'J' | 'L'
 export const EVAL_CATEGORY_NAMES: Record<EvalCategory, string> = {
   A: 'secrets (codes, PINs, cards)',
   B: 'promises (free, discount, refund, guarantee, ready-by)',
@@ -18,19 +18,26 @@ export const EVAL_CATEGORY_NAMES: Record<EvalCategory, string> = {
   D: 'links and hosts',
   E: 'phone numbers and codes',
   M: 'phone formats (also masked for the model)',
+  J: 'replies that speak to the checker (injections)',
   L: 'ordinary replies',
 }
 
 export interface EvalRow {
   id: string
-  /** v3-probe: the review's 232 + 81; earlier-rounds: the v2/v3 review tables; v4-placement: the v3 placeholder forms. */
-  source: 'v3-probe' | 'earlier-rounds' | 'v4-placement'
+  /**
+   * v3-probe: the review's 232 + 81; earlier-rounds: the v2/v3 review tables; v4-placement: the v3 placeholder forms; w4-probe: the
+   * W4a probes (Spanish, quoting the client, injections; guard-eval-w4-probes.json); w4-heldout: the W4a held-out set, written after
+   * the rubric was tuned (guard-eval-w4-heldout.json).
+   */
+  source: 'v3-probe' | 'earlier-rounds' | 'v4-placement' | 'w4-probe' | 'w4-heldout'
   cat: EvalCategory
   kind: 'adversarial' | 'ordinary'
   expect: 'block' | 'pass'
   /** Adversarial rows: the layer that must stop it (deterministic rows are asserted by test/assistant/guard.test.ts). */
   layer?: 'deterministic' | 'judge'
   text: string
+  /** The judge category the row belongs to (W4 fixtures; 'none' for an ordinary reply). */
+  policy?: JudgeCategory
   /** {balance} is allowed in this row (get_balance ran in the turn). */
   balance?: boolean
   /** The client's own vehicles on file for this row (client-entered: skipped by the secret and promise word lists only). */
@@ -121,7 +128,10 @@ export interface EvalReport {
   lines: EvalSummaryLine[]
   adversarial: { total: number; blocked: number; recall: number }
   ordinary: { total: number; blocked: number; falseBlockRate: number; byDeterministic: number; byJudge: number }
-  judge: { calls: number; errors: number; usage: AiUsage; costMicros: number; p50Ms: number; p95Ms: number }
+  /** calls = rows judged; throttled = calls the quota threw back and the eval retried (throttleRetries). */
+  judge: { calls: number; errors: number; throttled: number; usage: AiUsage; costMicros: number; p50Ms: number; p95Ms: number }
+  /** Why the run stopped before its last row (the spend limit), or null when every row ran. */
+  stopped: string | null
 }
 
 const pct = (n: number, d: number): number => (d === 0 ? 0 : n / d)
@@ -131,21 +141,52 @@ const quantile = (xs: number[], q: number): number => {
   return s[Math.min(s.length - 1, Math.floor(q * s.length))]!
 }
 
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+export interface RunGuardEvalOptions {
+  judge: AiProvider | null
+  prices?: AiPrices
+  concurrency?: number
+  timeoutMs?: number
+  rows?: readonly EvalRow[]
+  onRow?: (r: EvalResult) => void
+  /**
+   * Judge calls started per minute at most (0 or unset: no pacing). The account's Bedrock quota is per minute (Sonnet 4.6: 50
+   * requests a minute, cross-region), and a throttled judge call is an error the turn fails closed on: the eval paces itself below
+   * the quota so its errors are the judge's own.
+   */
+  rpm?: number
+  /** Spend limit in micro-dollars: no judge call starts once the judge's cost reaches it (the rows left are not in the report). */
+  maxCostMicros?: number
+  /**
+   * Retries of a judge call the account's quota throttled (default 0: a throttle is a judge error, as in a turn). The quota is
+   * shared with everything else on the account, so a measurement of the judge itself retries them; report.judge.throttled counts
+   * the retries.
+   */
+  throttleRetries?: number
+  /** The wait before a retry, times the attempt (default 5 s). */
+  throttleBackoffMs?: number
+}
+
 /**
  * Runs the whole guard over the rows. `judge: null` checks the deterministic layer only. The judge calls run `concurrency` at a
- * time; each has the turn's 8-second timeout.
+ * time, at most `rpm` started a minute; each has the turn's 8-second timeout. Once the judge's cost reaches `maxCostMicros` the run
+ * stops (report.stopped says so) and reports the rows it finished.
  */
-export async function runGuardEval(
-  fixture: EvalFixture,
-  o: { judge: AiProvider | null; prices?: AiPrices; concurrency?: number; timeoutMs?: number; rows?: readonly EvalRow[]; onRow?: (r: EvalResult) => void },
-): Promise<EvalReport> {
+export async function runGuardEval(fixture: EvalFixture, o: RunGuardEvalOptions): Promise<EvalReport> {
   const rows = o.rows ?? fixture.rows
-  const results: EvalResult[] = new Array(rows.length)
+  const results: (EvalResult | undefined)[] = new Array(rows.length)
   let usage: AiUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
   const latencies: number[] = []
+  const intervalMs = o.rpm && o.rpm > 0 ? 60_000 / o.rpm : 0
+  let nextSlot = 0
+  let stopped: string | null = null
+  let throttled = 0
+  const spent = (): number => (o.prices ? aiCostMicros(usage, o.prices) : 0)
   let next = 0
   const worker = async (): Promise<void> => {
     for (;;) {
+      if (stopped) return
       const i = next++
       if (i >= rows.length) return
       const row = rows[i]!
@@ -160,8 +201,25 @@ export async function runGuardEval(
       } else if (!o.judge) {
         r = { ...base, problems: [], judge: 'skipped', blocked: false, by: null, latencyMs: 0 }
       } else {
-        const j = await runJudge(o.judge, v.segments, { timeoutMs: o.timeoutMs })
-        usage = addUsage(usage, j.usage)
+        if (o.maxCostMicros !== undefined && spent() >= o.maxCostMicros) {
+          stopped ??= `spend limit $${(o.maxCostMicros / 1e6).toFixed(2)} reached`
+          return
+        }
+        let j: JudgeRun
+        for (let attempt = 0; ; attempt++) {
+          if (intervalMs > 0) {
+            const now = performance.now()
+            const wait = Math.max(0, nextSlot - now)
+            nextSlot = Math.max(now, nextSlot) + intervalMs
+            if (wait > 0) await sleep(wait)
+          }
+          j = await runJudge(o.judge, v.segments, { timeoutMs: o.timeoutMs })
+          usage = addUsage(usage, j.usage)
+          const throttledCall = j.outcome.kind === 'error' && j.outcome.error === 'ai:throttled'
+          if (!throttledCall || attempt >= (o.throttleRetries ?? 0)) break
+          throttled++
+          await sleep((o.throttleBackoffMs ?? 5000) * (attempt + 1))
+        }
         latencies.push(j.latencyMs)
         const out = j.outcome
         r =
@@ -183,6 +241,18 @@ export async function runGuardEval(
     }
   }
   await Promise.all(Array.from({ length: Math.max(1, o.concurrency ?? 4) }, worker))
+  return summarise(o.judge, results.filter((r): r is EvalResult => r !== undefined), usage, latencies, o.prices, stopped, throttled)
+}
+
+function summarise(
+  judge: AiProvider | null,
+  results: EvalResult[],
+  usage: AiUsage,
+  latencies: number[],
+  prices: AiPrices | undefined,
+  stopped: string | null,
+  throttled: number,
+): EvalReport {
 
   const cats = [...new Set(results.map((r) => r.cat))]
   const lines: EvalSummaryLine[] = cats.map((cat) => {
@@ -202,8 +272,8 @@ export async function runGuardEval(
   const ord = results.filter((r) => r.expect === 'pass')
   const ordBlocked = ord.filter((r) => r.blocked)
   return {
-    provider: o.judge?.name ?? 'none',
-    model: o.judge?.model ?? 'none',
+    provider: judge?.name ?? 'none',
+    model: judge?.model ?? 'none',
     rows: results,
     lines,
     adversarial: { total: adv.length, blocked: adv.filter((r) => r.blocked).length, recall: pct(adv.filter((r) => r.blocked).length, adv.length) },
@@ -217,11 +287,13 @@ export async function runGuardEval(
     judge: {
       calls: latencies.length,
       errors: results.filter((r) => r.judge === 'error').length,
+      throttled,
       usage,
-      costMicros: o.prices ? aiCostMicros(usage, o.prices) : 0,
+      costMicros: prices ? aiCostMicros(usage, prices) : 0,
       p50Ms: quantile(latencies, 0.5),
       p95Ms: quantile(latencies, 0.95),
     },
+    stopped,
   }
 }
 
@@ -237,13 +309,32 @@ export function formatEvalReport(r: EvalReport): string[] {
     )
   }
   out.push('')
+  // the judge's own recall: the adversarial rows the deterministic layer let through, by category, and what the judge called them
+  out.push('judge recall on the rows the deterministic layer passed            rows  judge-fail  judge-error  recall')
+  for (const l of [...r.lines].filter((x) => x.cat !== 'L').sort((a, b) => a.cat.localeCompare(b.cat))) {
+    const xs = r.rows.filter((x) => x.cat === l.cat && x.expect === 'block' && x.by !== 'deterministic')
+    if (xs.length === 0) continue
+    const fail = xs.filter((x) => x.by === 'judge').length
+    const err = xs.filter((x) => x.by === 'judge_error').length
+    out.push(`${`${l.cat} ${EVAL_CATEGORY_NAMES[l.cat]}`.padEnd(64)}  ${String(xs.length).padStart(4)}  ${String(fail).padStart(10)}  ${String(err).padStart(11)}  ${p(fail / xs.length).padStart(6)}`)
+  }
+  const judged = r.rows.filter((x) => x.expect === 'block' && x.by !== 'deterministic')
+  if (judged.length > 0) {
+    const fail = judged.filter((x) => x.by === 'judge').length
+    out.push(`judge recall: ${fail}/${judged.length} = ${p(fail / judged.length)}`)
+    const byCategory = new Map<string, number>()
+    for (const x of judged.filter((y) => y.by === 'judge')) byCategory.set(x.category ?? '?', (byCategory.get(x.category ?? '?') ?? 0) + 1)
+    out.push(`judge fail categories: ${[...byCategory].sort().map(([k, n]) => `${k} ${n}`).join(', ')}`)
+  }
+  out.push('')
   out.push(`adversarial recall: ${r.adversarial.blocked}/${r.adversarial.total} = ${p(r.adversarial.recall)}`)
   out.push(
     `ordinary false blocks: ${r.ordinary.blocked}/${r.ordinary.total} = ${p(r.ordinary.falseBlockRate)} (deterministic ${r.ordinary.byDeterministic}, judge ${r.ordinary.byJudge})`,
   )
   out.push(
-    `judge: ${r.judge.calls} calls, ${r.judge.errors} errors (a turn fails closed on them), tokens in ${r.judge.usage.inputTokens} / out ${r.judge.usage.outputTokens} / cache read ${r.judge.usage.cacheReadTokens} / cache write ${r.judge.usage.cacheWriteTokens}, cost $${(r.judge.costMicros / 1e6).toFixed(4)}, latency p50 ${r.judge.p50Ms} ms, p95 ${r.judge.p95Ms} ms`,
+    `judge: ${r.judge.calls} calls, ${r.judge.errors} errors (a turn fails closed on them), ${r.judge.throttled} throttled and retried, tokens in ${r.judge.usage.inputTokens} / out ${r.judge.usage.outputTokens} / cache read ${r.judge.usage.cacheReadTokens} / cache write ${r.judge.usage.cacheWriteTokens}, cost $${(r.judge.costMicros / 1e6).toFixed(4)}, latency p50 ${r.judge.p50Ms} ms, p95 ${r.judge.p95Ms} ms`,
   )
+  if (r.stopped) out.push(`STOPPED: ${r.stopped} (${r.rows.length} rows reported)`)
   const leaks = r.rows.filter((x) => x.expect === 'block' && !x.blocked)
   const fps = r.rows.filter((x) => x.expect === 'pass' && x.blocked)
   if (leaks.length > 0) out.push('', `leaked (${leaks.length}):`, ...leaks.map((x) => `  ${x.id} [${x.cat}] ${JSON.stringify(x.text)}`))

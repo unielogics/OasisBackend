@@ -152,6 +152,9 @@ export function toConverseInput(
       `maxTokens must be a positive integer (got ${req.maxTokens})`,
     )
 
+  // Bedrock refuses a blank stop sequence (ValidationException "is blank"; measured W4a)
+  if (req.stopSequences?.some((s) => s.trim() === ''))
+    throw new AiProviderError('invalid_request', 'a stop sequence must not be blank (Bedrock refuses it)')
   if (req.temperature !== undefined && !(Number.isFinite(req.temperature) && req.temperature >= 0 && req.temperature <= 1))
     throw new AiProviderError('invalid_request', `temperature must be between 0 and 1 (got ${req.temperature})`)
 
@@ -161,7 +164,11 @@ export function toConverseInput(
     modelId: o.modelId,
     messages,
     ...(system.length ? { system } : {}),
-    inferenceConfig: { maxTokens: req.maxTokens, ...(req.temperature !== undefined ? { temperature: req.temperature } : {}) },
+    inferenceConfig: {
+      maxTokens: req.maxTokens,
+      ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
+      ...(req.stopSequences?.length ? { stopSequences: [...req.stopSequences] } : {}),
+    },
     ...(toolConfig ? { toolConfig } : {}),
   }
   if (effort && mode === 'output_config') input.outputConfig = { effort }
