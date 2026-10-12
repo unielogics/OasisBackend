@@ -463,8 +463,12 @@ export function textablePerks(perks: readonly string[]): string[] {
 export const PERK_PROMISE =
   /(?<![\p{L}-])(?:free|guarantee[ds]?|guaranteed|warrant(?:y|ies)|refunds?|discounts?|coupons?|complimentary|gratis|gratuit[oa]s?|descuentos?|reembolsos?|garant[ií]as?)(?![\p{L}-])/iu
 
-/** The longest perks phrase the server writes (a reply is at most 320 characters): the shop's own perks are cut first. */
-const MAX_PERKS_CHARS = 220
+/**
+ * The longest perks phrase the server writes: a reply is at most 320 characters with the disclosure and the footer, and a client
+ * comparing plans gets both plans' prices and one plan's perks in one text (wave Q3d grid run: two 200-character perks made the
+ * reply too long and ended in the fallback). What the tier includes and its % off come first; the shop's own perks fill the rest.
+ */
+export const MAX_PERKS_CHARS = 130
 
 /** One inclusion in words: "Signature Hand Wash (4 a month)", "Hand wax with every visit" (Spanish: "(4 al mes)", "en cada visita"). */
 export function inclusionWords(i: ShopFactsInclusion, lang: ConvoLang = 'en'): string {
@@ -483,19 +487,20 @@ export function perksWords(
   p: Pick<ShopFactsPlan, 'label' | 'perks'> & Partial<Pick<ShopFactsPlan, 'inclusions' | 'memberDiscountBp'>>,
   lang: ConvoLang = 'en',
 ): string | null {
-  const own = [
-    ...(p.inclusions ?? []).map((i) => inclusionWords(i, lang)),
-    ...((p.memberDiscountBp ?? 0) > 0
+  const inclusions = (p.inclusions ?? []).map((i) => inclusionWords(i, lang))
+  const off =
+    (p.memberDiscountBp ?? 0) > 0
       ? [lang === 'es' ? `${percentWords(p.memberDiscountBp!)} menos en otros servicios y extras` : `${percentWords(p.memberDiscountBp!)} off other services and add-ons`]
-      : []),
-  ].filter((x) => !PERK_PROMISE.test(x))
+      : []
   // a perk starts lower case after the colon unless it starts with an acronym or a number ("VIP ...", "4 hand washes")
   const lower = (x: string): string => (/^[A-Z][a-z]/.test(x) ? x[0]!.toLowerCase() + x.slice(1) : x)
+  // the first inclusion, the % off, the other inclusions, then the shop's own perks, while the phrase stays within MAX_PERKS_CHARS
+  const candidates = [...inclusions.slice(0, 1), ...off, ...inclusions.slice(1)].filter((x) => !PERK_PROMISE.test(x))
   const head = `${p.label} ${lang === 'es' ? 'incluye' : 'includes'}: `
-  const parts: string[] = [...own]
-  for (const perk of textablePerks(p.perks).map(lower)) {
-    if ((head + [...parts, perk].join('; ')).length > MAX_PERKS_CHARS) break
-    parts.push(perk)
+  const parts: string[] = []
+  for (const part of [...candidates, ...textablePerks(p.perks).map(lower)]) {
+    if (parts.length > 0 && (head + [...parts, part].join('; ')).length > MAX_PERKS_CHARS) break
+    parts.push(part)
   }
   return parts.length === 0 ? null : head + parts.join('; ')
 }

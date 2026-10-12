@@ -136,7 +136,7 @@ export const getMembershipInfo: AssistantTool<ToolInputs['get_membership_info']>
         priceRule:
           'Never write the amount: write the plan\'s priceKey exactly, as its own sentence ("{plan:gold}."); the server writes "Gold starts at ... a month (compact car)." For the client\'s car size write that size\'s priceKey from sizePriceKeys, the same way. A plan covers a larger car up to the plan size\'s price; the team explains the rest at the shop.',
         perksRule:
-          'Never describe a plan\'s perks in your own words (the policy check reads "no booking fees" or "included" as a promise): write its perksKey as its own sentence ("{perks:gold}.") and the server writes "Gold includes: ...". Briefly: each plan\'s "{plan:<key>}." and offer the perks of the one they ask about.',
+          'Never describe a plan\'s perks in your own words (the policy check reads "no booking fees" or "included" as a promise): write its perksKey as its own sentence ("{perks:gold}.") and the server writes "Gold includes: ...". Briefly: each plan\'s "{plan:<key>}." and the perks of ONE plan per text (the one they ask about or lean to; a perks sentence is long): to compare, give both prices and offer the other plan\'s perks in the next text.',
       }),
     )
   },

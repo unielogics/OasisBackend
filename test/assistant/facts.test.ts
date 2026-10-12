@@ -9,7 +9,7 @@ import { createIdGenerator } from '../../src/platform/ids.js'
 import { runSeed } from '../../db/seeds/index.js'
 import { loadEnv, type Env } from '../../src/config/env.js'
 import { FixedClock, PARITY_NOW } from '../../src/platform/clock.js'
-import { buildShopFacts, FACTS_FORMAT, factLiterals, oneLine, openingWindow, perksWords, placeholderValues, renderShopFacts, sizeWords, usd, vehiclePhrase } from '../../src/modules/assistant/facts.js'
+import { buildShopFacts, FACTS_FORMAT, factLiterals, MAX_PERKS_CHARS, oneLine, openingWindow, perksWords, placeholderValues, renderShopFacts, sizeWords, usd, vehiclePhrase } from '../../src/modules/assistant/facts.js'
 import { guardReply } from '../../src/modules/assistant/guard.js'
 import { createTestDb, truncateAll, type TestDb } from '../helpers/db.js'
 import { testDatabaseUrl } from '../helpers/env.js'
@@ -141,7 +141,8 @@ describe('the shop facts document', () => {
     for (const i of gold.inclusions) expect(goldPerks).toContain(i.services[0]!)
     // a perk worded as a promise ("Priority booking and same-day guarantee") is never texted, not even as the shop's own wording
     expect(values.get('{perks:vip}')).not.toMatch(/guarantee|discount|free/i)
-    expect(values.get('{perks:vip}')).toContain('everything in Gold')
+    expect(values.get('{perks:vip}')).toMatch(/^VIP includes: /)
+    for (const k of ['{perks:gold}', '{perks:vip}']) expect(values.get(k)!.length, k).toBeLessThanOrEqual(MAX_PERKS_CHARS)
     expect(values.get('{fee}')).toBe('Guests pay a $25 booking fee')
     expect(values.has('{balance}')).toBe(false)
     // {confirm} exists only after a proposal texted its reply number in the turn
@@ -307,7 +308,7 @@ describe('the shop facts document', () => {
     expect(perks).not.toMatch(/descuento|gratis|garant/i)
   })
 
-  it('writes what a plan includes from its inclusions and % off, inside the perk word list, at most 220 characters', () => {
+  it('writes what a plan includes from its inclusions and % off, inside the perk word list, at most MAX_PERKS_CHARS characters', () => {
     const plan = {
       label: 'Gold',
       perks: ['Free vacuum anytime', 'Priority booking', 'A very long perk '.repeat(12).trim()],
@@ -318,12 +319,12 @@ describe('the shop facts document', () => {
         { services: ['Tire shine'], mode: 'per_cycle' as const, perCycle: null },
       ],
     }
-    expect(perksWords(plan)).toBe(
-      'Gold includes: Signature Hand Wash (4 a month); Hand wax / Rain-repellent glass with every visit; Tire shine (unlimited); 10% off other services and add-ons; priority booking',
-    )
-    expect(perksWords(plan, 'es')).toBe(
-      'Gold incluye: Signature Hand Wash (4 al mes); Hand wax / Rain-repellent glass en cada visita; Tire shine (ilimitado); 10% menos en otros servicios y extras; priority booking',
-    )
+    // the first inclusion, the % off, then the rest while it fits (a reply is 320 characters; a comparison holds one plan's perks)
+    expect(perksWords(plan)).toBe('Gold includes: Signature Hand Wash (4 a month); 10% off other services and add-ons')
+    expect(perksWords(plan, 'es')).toBe('Gold incluye: Signature Hand Wash (4 al mes); 10% menos en otros servicios y extras')
+    const short = { ...plan, memberDiscountBp: 0, inclusions: plan.inclusions.slice(1, 3) }
+    expect(perksWords(short)).toBe('Gold includes: Hand wax / Rain-repellent glass with every visit; Tire shine (unlimited); priority booking')
+    for (const lang of ['en', 'es'] as const) expect(perksWords(plan, lang)!.length, lang).toBeLessThanOrEqual(MAX_PERKS_CHARS)
     expect(perksWords({ label: 'X', perks: [], inclusions: [], memberDiscountBp: 0 })).toBeNull()
     expect(perksWords({ label: 'X', perks: [], memberDiscountBp: 1250 })).toBe('X includes: 12.5% off other services and add-ons')
   })

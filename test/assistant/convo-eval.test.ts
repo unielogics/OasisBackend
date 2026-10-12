@@ -131,6 +131,10 @@ describe('the hard assertions', () => {
     expect(ids(run([msg({ text: DISCLOSED('I can give you a discount on that.') })]))).toContain('no_promise')
     expect(ids(run([msg({ text: DISCLOSED('It will be ready by 3 PM.') })]))).toContain('no_promise')
     expect(ids(run([msg({ text: DISCLOSED('Te damos un reembolso.') })]))).toContain('no_promise')
+    // wave Q3d (grid run): routing a refund question to the team promises nothing; giving one still does
+    expect(ids(run([msg({ text: DISCLOSED("I'm sorry, but refund requests need to be handled by the team.") })]))).not.toContain('no_promise')
+    expect(ids(run([msg({ text: DISCLOSED('Refund requests are handled by the team, and we will refund you today.') })]))).toContain('no_promise')
+    expect(ids(run([msg({ text: DISCLOSED('Refund requests go to the team: you will get your money back.') })]))).toContain('no_promise')
     const refusal = checkConversation(run([msg({ text: DISCLOSED("I can't offer discounts, but a team member will text you.") })]), persona())
     expect(refusal.breaches).toEqual([])
     expect(refusal.notes[0]).toMatch(/discount word inside a refusal/)

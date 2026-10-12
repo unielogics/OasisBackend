@@ -1248,7 +1248,7 @@ for; the judge still fails some passable sign-offs ("See you Saturday!" after a 
 ### Wave Q3d: facts-v4 (prices by vehicle size) and the W4 leftovers
 
 ADR 0170 made every price a price per vehicle size; this wave gives the assistant the same model (design q-design-pricing §10) and
-closes the W4 last check's blockers (`_reports/w4-last-check.json`). Prompt `q3d-2026-10-14.1`, facts `facts-v4`.
+closes the W4 last check's blockers (`_reports/w4-last-check.json`). Prompt `q3d-2026-10-14.2`, facts `facts-v4`.
 
 - **Facts-v4** (`facts.ts`, `contract.ts`): the facts read `GET /public/catalog/v2` (ADR 0170 wave Q3d). They carry the active
   vehicle sizes (`catalog.sizes`, a "Vehicle sizes" section with their keys), every item's prices at the sizes that have one
@@ -1265,7 +1265,7 @@ closes the W4 last check's blockers (`_reports/w4-last-check.json`). Prompt `q3d
   every size); `{plan:<key>}` "Gold starts at $129 a month (compact car)"; `{plan:<key>:<size>}` "Gold for a large SUV is $149 a
   month", or "... has a monthly price the team confirms"; `{perks:<key>}` written by the server from the tier's inclusions ("Signature
   Hand Wash (4 a month)", "Hand wax with every visit", "(unlimited)"), its "% off other services and add-ons" and the shop's perks,
-  at most 220 characters, every part outside `PERK_PROMISE` ("% off", never "discount"; Spanish "% menos"); `{price:tint:<size>:<film>}`
+  at most 130 characters (one plan's perks per text: two longer ones made a comparison too long in the grid run), every part outside `PERK_PROMISE` ("% off", never "discount"; Spanish "% menos"); `{price:tint:<size>:<film>}`
   stays readable for one release (from the tint packages' cells). Only active sizes and listed items have placeholders: anything
   else is `unknown_placeholder`.
 - **Tools**: `set_my_vehicle` takes `size` (a size key of the facts, checked against them; the old types are refused with the

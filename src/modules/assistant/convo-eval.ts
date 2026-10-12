@@ -307,12 +307,30 @@ const NEGATION =
  */
 export function refusedPromise(sentence: string, word: RegExp): boolean {
   const clean = sentence.replace(NEGATION_IDIOMS, ' ')
+  let refused = false
   for (const clause of clean.split(/[,;:–—]|\s-\s|\bbut\b|\bpero\b/i)) {
     const m = word.exec(clause)
-    if (m && NEGATION.test(clause.slice(0, m.index))) return true
+    if (!m) continue
+    if (NEGATION.test(clause.slice(0, m.index))) {
+      refused = true
+      continue
+    }
+    // wave Q3d (grid run, refund-membership): the word names what the TEAM handles ("refund requests need to be handled by the
+    // team"), with nothing given or promised in the clause: no promise. Every clause holding the word must refuse it.
+    if (TEAM_HANDLES.test(clause.slice(m.index)) && !GIVES.test(clause)) {
+      refused = true
+      continue
+    }
+    return false
   }
-  return false
+  return refused
 }
+
+/** "<refund|discount ...> requests/questions ... handled by / go to ... the team" (the owner's rule: those go to the team). */
+const TEAM_HANDLES =
+  /^\S+\s+(?:requests?|questions?|matters?|issues?|solicitudes|preguntas)\b[^.!?]{0,60}\b(?:handled|reviewed|decided|go(?:es)?|sent|passed|ve|revisa|maneja)\b[^.!?]{0,30}\b(?:team|staff|manager|equipo|personal|gerente)\b/i
+/** Words that give or promise something in the same clause ("we'll refund you", "you'll get a discount"). */
+const GIVES = /\b(?:will|we['’]ll|you['’]ll|i['’]ll|give|get|getting|offer|issue|process(?:ed)?|approved?|te (?:damos|daremos|devolvemos))\b/i
 const PROMISE: Array<[string, RegExp]> = [
   ['free', /(?<![-\w])(?:free|gratis|gratuit[oa]s?)\b(?!-)(?<!feel free)/i],
   ['complimentary', /\b(?:complimentary|on the house|on us|freebie)\b/i],
