@@ -50,6 +50,32 @@ export interface CatalogCategoriesTable {
   updated_at: Generated<Date>
 }
 
+/**
+ * The vehicle sizes of a location (migration 20261014100000, ADR 0170): Compact car, Large car, Compact SUV, Large SUV, Truck by
+ * default. The key never changes; sort is size order, smallest first.
+ */
+export interface VehicleClassesTable {
+  location_id: string
+  key: string
+  label: string
+  sort: Generated<number>
+  active: Generated<boolean>
+  version: Generated<number>
+  created_at: Generated<Date>
+  updated_at: Generated<Date>
+}
+
+/** The regular price of a service at a size; max_cents makes a range (tint). A missing row = not set. */
+export interface ServiceClassPricesTable {
+  service_id: string
+  location_id: string
+  class_key: string
+  price_cents: number
+  max_cents: number | null
+  updated_at: Generated<Date>
+  updated_by: string | null
+}
+
 export interface ChecklistTasksTable {
   id: string
   service_id: string
@@ -71,5 +97,7 @@ declare module '../../platform/schema.js' {
     catalog_categories: CatalogCategoriesTable
     services: ServicesTable
     checklist_tasks: ChecklistTasksTable
+    vehicle_classes: VehicleClassesTable
+    service_class_prices: ServiceClassPricesTable
   }
 }

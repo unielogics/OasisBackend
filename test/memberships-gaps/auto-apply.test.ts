@@ -1,4 +1,4 @@
-// Gap 3a: a credit rule can apply itself. plan_credit_rules.auto_apply (default false) and the member's own autoApply flag
+// Gap 3a: a credit rule can apply itself. membership_inclusions.auto_apply (false on the design's tiers, ADR 0170) and the member's own autoApply flag
 // (either one is enough) make completing a covered visit redeem one credit through the payments command layer: exactly once, a
 // system adjust on the invoice, a redeem event on the credit ledger and a line in the activity log. Nothing applies by default.
 import { describe, expect, it } from 'vitest'
@@ -158,7 +158,7 @@ describe('membership credit auto-apply', () => {
     const view = (await m.get(m.limited(), '/membership-plans')).json() as {
       plans: { key: string; rules: { id: string; label: string; autoApply: boolean }[] }[]
     }
-    expect(view.plans.map((p) => p.key)).toEqual(['essential', 'premium', 'executive', 'exotic'])
+    expect(view.plans.map((p) => p.key)).toEqual(['essential', 'gold', 'vip', 'exotic'])
     expect(view.plans.flatMap((p) => p.rules).every((r) => r.autoApply === false)).toBe(true)
     const rule = view.plans[0]!.rules[0]!
     expect(

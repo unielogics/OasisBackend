@@ -19,6 +19,8 @@ import { loadPublicCatalog } from '../catalog.js'
 import { publicLocation, type PublicDeps, type PublicLocation, type PublicRequest } from '../deps.js'
 import { chargeJoinLimits, joinWeb, memberRefOf } from '../memberships.js'
 import { phoneOrThrow, requestOtp, verifyOtp } from '../otp.js'
+import { loadPlans } from '../../memberships/plans.js'
+import { publicTierOf } from '../tiers.js'
 import {
   AVAILABILITY_RAW_QUERY,
   AvailabilityQuery,
@@ -242,11 +244,13 @@ export function registerPublicRoutes(d: PublicDeps): void {
       idempotentHandler(
         async (req, tx, _reply, p: Prepared) => {
           const b = req.body as z.infer<typeof MembershipBody>
-          if (p.decoy)
+          if (p.decoy) {
+            const tier = publicTierOf(await loadPlans(tx, p.loc.id), b.tier)
             return {
               status: 202,
-              body: { memberRef: memberRefOf(app.newId()), status: 'pending_payment', next: 'checkout_link_by_sms', tier: b.tier, plan: b.tier === 'gold' ? 'Gold' : 'VIP', confirmationBy: 'sms' },
+              body: { memberRef: memberRefOf(app.newId()), status: 'pending_payment', next: 'checkout_link_by_sms', tier: b.tier, plan: tier?.name ?? b.tier, confirmationBy: 'sms' },
             }
+          }
           return { status: 201, body: await joinWeb(tx, d, p.loc, reqOf(req), b) }
         },
         {

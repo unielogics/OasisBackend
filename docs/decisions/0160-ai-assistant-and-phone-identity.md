@@ -1,5 +1,5 @@
 # 0160 An AI text assistant on the shop's number, the phone as the client's identity, personal links, status texts and one catalog
-Status: accepted (2026-10-10); built in waves W1 (foundation) to W5 (staged rollout)
+Status: accepted (2026-10-10); built in waves W1 (foundation) to W5 (staged rollout); its catalog prices (member/guest, markup, tint matrix) and tag-based plan credits are replaced by prices by vehicle size and tier inclusions (ADR 0170)
 
 The owner decided (2026-10-10) that the texting line (the front-desk tablet, ADR 0004) gets an AI assistant that answers anyone 24/7
 and books by text; that the client's **phone number is their identity**, proven by a PIN they created or a texted code typed **only

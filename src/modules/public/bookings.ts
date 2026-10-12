@@ -23,7 +23,6 @@ import { loadBoardServices } from './availability-loader.js'
 import { schedulingCtx, websiteActor, type PublicDeps, type PublicLocation, type PublicRequest } from './deps.js'
 import { enforceLimits, publicLimitChecks } from './limits.js'
 import { activeMembership } from './members.js'
-import { tierOfPlan } from './tiers.js'
 import { phoneOrThrow, resolveMemberToken } from './otp.js'
 import '../identity/problems.js'
 import './problems.js'
@@ -297,7 +296,7 @@ async function privilegesOf(tx: Tx, locationId: string, customerId: string): Pro
   const listed = await isVipCustomer(tx, locationId, customerId)
   if (!m) return { member: false, vip: listed }
   const plan = (await loadPlans(tx, locationId)).find((p) => p.id === m.planId)
-  return { member: true, vip: listed || (plan !== undefined && tierOfPlan(plan.key) === 'vip') }
+  return { member: true, vip: listed || plan?.vipBooking === true }
 }
 
 /**

@@ -134,8 +134,8 @@ describe('a code-verified party on a stale record books as a new client (W4c fix
 
   it('a membership page of a stale record proven only by a code starts nothing', async () => {
     const id = await h.customer({ createdAt: ago(300) })
-    await sql`update membership_plans set checkout_url = ${CHECKOUT} where key = 'premium'`.execute(h.db)
-    const { session } = await h.page({ customerId: id, kind: 'membership', planKey: 'premium' })
+    await sql`update membership_plans set checkout_url = ${CHECKOUT} where key = 'gold'`.execute(h.db)
+    const { session } = await h.page({ customerId: id, kind: 'membership', planKey: 'gold' })
     expect((await h.verifyByCode(session)).statusCode).toBe(200)
     const r = await h.call('POST', 'membership/start', { session, body: { email: 'someone@example.test' } })
     expect(json(r)).toMatchObject({ status: 409, code: 'IDENTITY_RECORD_UNCONFIRMED' })

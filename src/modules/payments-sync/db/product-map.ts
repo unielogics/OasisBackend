@@ -93,10 +93,14 @@ export async function buildProductMap(
   const rows = await listProductRows(db, locationId)
   const plans = await db
     .selectFrom('membership_plans')
-    .select(['key', 'name'])
+    .select(['key', 'name', 'legacy_key'])
     .where('location_id', '=', locationId)
     .execute()
   const names = new Map(plans.map((p) => [p.key, p.name]))
+  // an old key (premium, executive) resolves to the tier that carries it, unless a tier still has that key itself
+  const aliases = new Map(
+    plans.filter((p) => p.legacy_key && !plans.some((x) => x.key === p.legacy_key)).map((p) => [p.legacy_key!, p.key]),
+  )
   const envEntries = (() => {
     try {
       const e = envJson?.trim() ? (JSON.parse(envJson) as ProductMapEntry[]) : []
@@ -106,7 +110,7 @@ export async function buildProductMap(
       return []
     }
   })()
-  return new ProductMap([...envEntries, ...entriesOf(rows, names)])
+  return new ProductMap([...envEntries, ...entriesOf(rows, names)], aliases)
 }
 
 export interface ValidationIssue {
@@ -124,11 +128,9 @@ export async function validateProductInputs(
   const issues: ValidationIssue[] = []
   const ids = new Set<string>()
   const skus = new Set<string>()
-  const plans = new Set(
-    (
-      await db.selectFrom('membership_plans').select('key').where('location_id', '=', locationId).execute()
-    ).map((p) => p.key as string),
-  )
+  const planRows = await db.selectFrom('membership_plans').select(['key', 'legacy_key']).where('location_id', '=', locationId).execute()
+  // a tier is named by its key or its old key (premium, executive: ADR 0170)
+  const plans = new Set(planRows.flatMap((p) => [p.key, ...(p.legacy_key ? [p.legacy_key] : [])]))
   inputs.forEach((p, index) => {
     const bad = (path: string, message: string) => issues.push({ index, path, message })
     if (!p.productId && !p.sku) bad('productId', 'Give a Squarespace product id or a SKU')
@@ -143,7 +145,7 @@ export async function validateProductInputs(
     }
     if (p.kind === 'membership') {
       const plan = p.plan ?? normalizeTier(p.planLabel)
-      if (!plan) bad('plan', 'A membership product needs a plan: Essential, Premium, Executive or Exotic')
+      if (!plan) bad('plan', 'A membership product needs a plan: name one of the membership tiers')
       else if (!plans.has(plan)) bad('plan', `The ${plan} plan is not set up`)
     }
   })
@@ -157,15 +159,16 @@ export async function replaceProductRows(
   inputs: readonly ProductInput[],
 ): Promise<ProductRow[]> {
   const now = d.clock.now()
-  const plans = new Map(
-    (
-      await tx
-        .selectFrom('membership_plans')
-        .select(['id', 'key', 'billing_interval_months'])
-        .where('location_id', '=', d.locationId)
-        .execute()
-    ).map((p) => [p.key as string, p]),
-  )
+  const planRows = await tx
+    .selectFrom('membership_plans')
+    .select(['id', 'key', 'legacy_key', 'billing_interval_months'])
+    .where('location_id', '=', d.locationId)
+    .execute()
+  // by key first, then by old key (premium, executive: ADR 0170)
+  const plans = new Map([
+    ...planRows.filter((p) => p.legacy_key).map((p) => [p.legacy_key!, p] as const),
+    ...planRows.map((p) => [p.key, p] as const),
+  ])
   const existing = await tx
     .selectFrom('sqsp_products')
     .selectAll()

@@ -6,6 +6,7 @@
 // contract stubs and W3b's suites ran the tools without the turn: these conversations are where the two meet.
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { sql } from 'kysely'
+import { seedLegacyWebsitePrices } from '../fixtures/legacy-website-prices.js'
 import { runSeed } from '../../db/seeds/index.js'
 import { SIM_DEVICE_KEY } from '../../db/seeds/messaging.js'
 import { DEFAULT_SIM_VERDICT, POLICY_JUDGE_HEADER, SimAiProvider, simText, simToolUse, type SimResponder, type SimStep } from '../../src/integrations/ai/sim.js'
@@ -44,6 +45,7 @@ const TEN_AM = 600
 beforeAll(async () => {
   // the website's catalog: Signature Hand Wash, tint by the matrix (sedan/suv/truck x carbon/ceramic), Gold and VIP
   await runSeed({ db: w.t.db, clock: w.clock, profile: 'website-catalog' })
+  await seedLegacyWebsitePrices(w.t.db, w.clock, (await w.t.db.selectFrom('locations').select('id').executeTakeFirstOrThrow()).id)
 })
 
 beforeEach(async () => {

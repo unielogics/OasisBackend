@@ -51,7 +51,7 @@ import { loadBoardServices } from '../availability-loader.js'
 import { bookingRefOf, dollars, isPlaceholderName, parseVehicleLabel, publicSlotError, vehicleOf, whenWord, type WebVehicle } from '../bookings.js'
 import { activeMembership } from '../members.js'
 import { memberRefOf } from '../memberships.js'
-import { tierOfPlan, type PublicTier } from '../tiers.js'
+import { tierKeyOf, type PublicTier } from '../tiers.js'
 import './problems.js'
 import '../problems.js'
 
@@ -183,7 +183,7 @@ export async function linkState(db: Executor, s: SessionView, now: Date): Promis
     const m = await activeMembership(db, customer.id)
     if (m) {
       const plan = (await loadPlans(db, loc.id)).find((p) => p.id === m.planId)
-      tier = plan ? tierOfPlan(plan.key) : null
+      tier = tierKeyOf(plan)
     }
   }
   const trust = customer ? await evaluateTrust(db, { locationId: loc.id, phone: s.phone, customerId: customer.id, now }) : null
@@ -295,7 +295,7 @@ async function invoiceView(db: Executor, invoiceId: string): Promise<InvoiceView
 async function planView(db: Executor, locationId: string, planKey: string): Promise<PlanView | null> {
   const p = (await listPlanPublic(db, locationId)).find((x) => x.key === planKey)
   if (!p) return null
-  return { tier: tierOfPlan(p.key), planKey: p.key, name: p.publicLabel ?? p.name, monthlyPriceCents: p.monthlyPriceCents, perks: p.perks }
+  return { tier: p.websiteTier, planKey: p.key, name: p.name, monthlyPriceCents: p.monthlyPriceCents, perks: p.perks }
 }
 
 // ---- rules shared by the actions ------------------------------------------------------------------------------------------------
@@ -354,7 +354,7 @@ export async function privilegesOf(db: Executor, s: SessionView, now: Date): Pro
   const m = await activeMembership(db, s.customerId)
   if (!m) return { member: false, vip: listed }
   const plan = (await loadPlans(db, s.link.locationId)).find((p) => p.id === m.planId)
-  return { member: true, vip: listed || (plan !== undefined && tierOfPlan(plan.key) === 'vip') }
+  return { member: true, vip: listed || plan?.vipBooking === true }
 }
 
 const bad = (path: string, message: string): AppError =>

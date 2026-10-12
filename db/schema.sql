@@ -197,6 +197,61 @@ begin
 end $$;
 
 --
+-- Name: membership_tier_prices_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.membership_tier_prices_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+declare
+  mutable text[] := array['superseded_at', 'square_variation_id', 'square_state', 'square_synced_at'];
+begin
+  if tg_op = 'DELETE' then
+    if exists (select 1 from membership_plans p where p.id = old.plan_id) then
+      raise exception 'membership_tier_prices is append-only: rows cannot be deleted' using errcode = 'restrict_violation';
+    end if;
+    return old;
+  end if;
+  if (to_jsonb(new) - mutable) is distinct from (to_jsonb(old) - mutable) then
+    raise exception 'membership_tier_prices is append-only: only superseded_at and the Square fields can change'
+      using errcode = 'restrict_violation';
+  end if;
+  if old.superseded_at is not null and new.superseded_at is distinct from old.superseded_at then
+    raise exception 'membership_tier_prices: a superseded price stays superseded' using errcode = 'restrict_violation';
+  end if;
+  return new;
+end $$;
+
+--
+-- Name: memberships_default_plan_class(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.memberships_default_plan_class() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  if new.plan_class is null then
+    insert into vehicle_classes (location_id, key, label, sort)
+    select new.location_id, c.key, c.label, c.sort
+    from (values
+      ('compact_car', 'Compact car', 10),
+      ('large_car', 'Large car', 20),
+      ('compact_suv', 'Compact SUV', 30),
+      ('large_suv', 'Large SUV', 40),
+      ('truck', 'Truck', 50)
+    ) as c(key, label, sort)
+    where not exists (select 1 from vehicle_classes vc where vc.location_id = new.location_id)
+    on conflict do nothing;
+    select vc.key into new.plan_class
+    from vehicle_classes vc
+    where vc.location_id = new.location_id
+    order by vc.active desc, vc.sort, vc.key
+    limit 1;
+  end if;
+  return new;
+end $$;
+
+--
 -- Name: realtime_channel_name(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -314,7 +369,13 @@ CREATE TABLE public.appointment_addons (
     added_by uuid,
     added_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     removed_at timestamp with time zone,
+    list_price_cents integer,
+    discount_bp integer,
+    price_basis text DEFAULT 'legacy'::text NOT NULL,
+    CONSTRAINT appointment_addons_discount_bp_check CHECK (((discount_bp IS NULL) OR ((discount_bp >= 0) AND (discount_bp <= 10000)))),
+    CONSTRAINT appointment_addons_list_price_cents_check CHECK (((list_price_cents IS NULL) OR (list_price_cents >= 0))),
     CONSTRAINT appointment_addons_name_check CHECK ((btrim(name) <> ''::text)),
+    CONSTRAINT appointment_addons_price_basis_check CHECK ((price_basis = ANY (ARRAY['legacy'::text, 'class'::text, 'unknown_class'::text, 'estimated'::text, 'base'::text]))),
     CONSTRAINT appointment_addons_price_cents_check CHECK ((price_cents >= 0))
 );
 
@@ -416,16 +477,27 @@ CREATE TABLE public.appointments (
     arrival_token_expires_at timestamp with time zone,
     categories text[] DEFAULT '{}'::text[] NOT NULL,
     booked_with_pin boolean DEFAULT false NOT NULL,
+    vehicle_class text,
+    vehicle_class_label text,
+    class_confirmed_at timestamp with time zone,
+    list_price_cents integer,
+    discount_bp integer,
+    price_basis text DEFAULT 'legacy'::text NOT NULL,
     CONSTRAINT appointments_categories_check CHECK (((array_position(categories, NULL::text) IS NULL) AND (cardinality(categories) <= 10))),
     CONSTRAINT appointments_check CHECK ((scheduled_end > scheduled_start)),
     CONSTRAINT appointments_check1 CHECK (((status <> 'cleaning'::text) OR (bay_id IS NOT NULL))),
+    CONSTRAINT appointments_discount_bp_check CHECK (((discount_bp IS NULL) OR ((discount_bp >= 0) AND (discount_bp <= 10000)))),
     CONSTRAINT appointments_duration_min_check CHECK ((duration_min > 0)),
     CONSTRAINT appointments_eta_minutes_check CHECK (((eta_minutes IS NULL) OR (eta_minutes >= 0))),
+    CONSTRAINT appointments_list_price_cents_check CHECK (((list_price_cents IS NULL) OR (list_price_cents >= 0))),
     CONSTRAINT appointments_package_name_check CHECK ((btrim(package_name) <> ''::text)),
     CONSTRAINT appointments_pickup_state_check CHECK (((pickup_state IS NULL) OR (pickup_state = ANY (ARRAY['pending'::text, 'collected'::text])))),
+    CONSTRAINT appointments_price_basis_check CHECK ((price_basis = ANY (ARRAY['legacy'::text, 'class'::text, 'unknown_class'::text, 'estimated'::text, 'base'::text]))),
     CONSTRAINT appointments_price_cents_check CHECK ((price_cents >= 0)),
     CONSTRAINT appointments_source_check CHECK ((source = ANY (ARRAY['dashboard'::text, 'walk_in'::text, 'online'::text, 'phone'::text, 'standing'::text, 'reschedule_link'::text, 'sms_ai'::text, 'link'::text]))),
-    CONSTRAINT appointments_status_check CHECK ((status = ANY (ARRAY['booked'::text, 'confirmed'::text, 'arrived'::text, 'cleaning'::text, 'completed'::text, 'canceled'::text, 'no_show'::text])))
+    CONSTRAINT appointments_status_check CHECK ((status = ANY (ARRAY['booked'::text, 'confirmed'::text, 'arrived'::text, 'cleaning'::text, 'completed'::text, 'canceled'::text, 'no_show'::text]))),
+    CONSTRAINT appointments_vehicle_class_check CHECK (((vehicle_class IS NULL) OR (vehicle_class ~ '^[a-z][a-z0-9_]{0,31}$'::text))),
+    CONSTRAINT appointments_vehicle_class_label_check CHECK (((vehicle_class_label IS NULL) OR (length(vehicle_class_label) <= 40)))
 );
 
 --
@@ -1184,12 +1256,14 @@ CREATE TABLE public.invoices (
     version integer DEFAULT 1 NOT NULL,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    vehicle_class_label text,
     CONSTRAINT invoices_cancel_reason_check CHECK (((cancel_reason IS NULL) OR (cancel_reason = ANY (ARRAY['canceled'::text, 'no_show'::text])))),
     CONSTRAINT invoices_check CHECK (((canceled_at IS NULL) = (cancel_reason IS NULL))),
     CONSTRAINT invoices_client_name_check CHECK ((btrim(client_name) <> ''::text)),
     CONSTRAINT invoices_invoice_no_check CHECK ((invoice_no > 0)),
     CONSTRAINT invoices_tax_bp_check CHECK (((tax_bp >= 0) AND (tax_bp <= 10000))),
-    CONSTRAINT invoices_tip_cents_check CHECK ((tip_cents >= 0))
+    CONSTRAINT invoices_tip_cents_check CHECK ((tip_cents >= 0)),
+    CONSTRAINT invoices_vehicle_class_label_check CHECK (((vehicle_class_label IS NULL) OR (length(vehicle_class_label) <= 40)))
 );
 
 --
@@ -1244,9 +1318,15 @@ CREATE TABLE public.invoice_items (
     name text NOT NULL,
     price_cents integer NOT NULL,
     appointment_addon_id uuid,
+    list_cents integer,
+    discount_bp integer,
+    price_basis text DEFAULT 'legacy'::text NOT NULL,
+    CONSTRAINT invoice_items_check CHECK (((list_cents IS NULL) OR (list_cents >= price_cents))),
+    CONSTRAINT invoice_items_discount_bp_check CHECK (((discount_bp IS NULL) OR ((discount_bp >= 0) AND (discount_bp <= 10000)))),
     CONSTRAINT invoice_items_kind_check CHECK ((kind = ANY (ARRAY['package'::text, 'addon'::text]))),
     CONSTRAINT invoice_items_name_check CHECK ((btrim(name) <> ''::text)),
     CONSTRAINT invoice_items_position_check CHECK (("position" >= 0)),
+    CONSTRAINT invoice_items_price_basis_check CHECK ((price_basis = ANY (ARRAY['legacy'::text, 'class'::text, 'unknown_class'::text, 'estimated'::text, 'base'::text]))),
     CONSTRAINT invoice_items_price_cents_check CHECK ((price_cents >= 0))
 );
 
@@ -1472,11 +1552,13 @@ CREATE TABLE public.membership_checkouts (
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     origin text DEFAULT 'link'::text NOT NULL,
+    plan_class text,
     CONSTRAINT membership_checkouts_check CHECK ((expires_at > started_at)),
     CONSTRAINT membership_checkouts_check1 CHECK (((state = 'matched'::text) = (matched_at IS NOT NULL))),
     CONSTRAINT membership_checkouts_checkout_url_check CHECK (((checkout_url ~ '^https://([a-z0-9-]+\.)*squarespace\.com(/[^[:space:]]*)?$'::text) AND (length(checkout_url) <= 2048))),
     CONSTRAINT membership_checkouts_expected_email_check CHECK (((expected_email IS NULL) OR (btrim((expected_email)::text) <> ''::text))),
     CONSTRAINT membership_checkouts_origin_check CHECK ((origin = ANY (ARRAY['link'::text, 'sync'::text]))),
+    CONSTRAINT membership_checkouts_plan_class_check CHECK (((plan_class IS NULL) OR (plan_class ~ '^[a-z][a-z0-9_]{0,31}$'::text))),
     CONSTRAINT membership_checkouts_plan_key_check CHECK ((plan_key ~ '^[a-z][a-z0-9_]{0,31}$'::text)),
     CONSTRAINT membership_checkouts_product_key_check CHECK (((product_key IS NULL) OR (length(product_key) <= 200))),
     CONSTRAINT membership_checkouts_state_check CHECK ((state = ANY (ARRAY['open'::text, 'matched'::text, 'awaiting_match'::text, 'expired'::text, 'superseded'::text, 'abandoned'::text, 'rejected'::text]))),
@@ -1503,9 +1585,63 @@ CREATE TABLE public.membership_credit_events (
     actor_user_id uuid,
     idempotency_key text,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    inclusion_id uuid,
+    service_id uuid,
+    line_cents integer,
+    covered_cents integer,
+    plan_class text,
+    visit_class text,
     CONSTRAINT membership_credit_events_check CHECK (((qty IS NOT NULL) OR (kind = 'grant'::text))),
+    CONSTRAINT membership_credit_events_covered_cents_check CHECK (((covered_cents IS NULL) OR (covered_cents >= 0))),
     CONSTRAINT membership_credit_events_kind_check CHECK ((kind = ANY (ARRAY['grant'::text, 'reserve'::text, 'redeem'::text, 'restore'::text, 'protect'::text, 'expire'::text]))),
-    CONSTRAINT membership_credit_events_qty_check CHECK (((qty IS NULL) OR (qty > 0)))
+    CONSTRAINT membership_credit_events_line_cents_check CHECK (((line_cents IS NULL) OR (line_cents >= 0))),
+    CONSTRAINT membership_credit_events_plan_class_check CHECK (((plan_class IS NULL) OR (plan_class ~ '^[a-z][a-z0-9_]{0,31}$'::text))),
+    CONSTRAINT membership_credit_events_qty_check CHECK (((qty IS NULL) OR (qty > 0))),
+    CONSTRAINT membership_credit_events_visit_class_check CHECK (((visit_class IS NULL) OR (visit_class ~ '^[a-z][a-z0-9_]{0,31}$'::text)))
+);
+
+--
+-- Name: membership_household; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.membership_household (
+    id uuid NOT NULL,
+    membership_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    added_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    added_by uuid,
+    removed_at timestamp with time zone,
+    CONSTRAINT membership_household_check CHECK (((removed_at IS NULL) OR (removed_at >= added_at)))
+);
+
+--
+-- Name: membership_inclusion_services; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.membership_inclusion_services (
+    inclusion_id uuid NOT NULL,
+    service_id uuid NOT NULL
+);
+
+--
+-- Name: membership_inclusions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.membership_inclusions (
+    id uuid NOT NULL,
+    plan_id uuid NOT NULL,
+    label text NOT NULL,
+    mode text DEFAULT 'per_cycle'::text NOT NULL,
+    per_cycle integer,
+    auto_apply boolean DEFAULT true NOT NULL,
+    sort integer DEFAULT 0 NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT membership_inclusions_check CHECK (((mode = 'per_cycle'::text) OR (per_cycle IS NULL))),
+    CONSTRAINT membership_inclusions_label_check CHECK (((btrim(label) <> ''::text) AND (length(label) <= 80))),
+    CONSTRAINT membership_inclusions_mode_check CHECK ((mode = ANY (ARRAY['per_cycle'::text, 'every_visit'::text]))),
+    CONSTRAINT membership_inclusions_per_cycle_check CHECK (((per_cycle IS NULL) OR ((per_cycle >= 1) AND (per_cycle <= 100))))
 );
 
 --
@@ -1532,14 +1668,51 @@ CREATE TABLE public.membership_plans (
     monthly_price_cents integer,
     checkout_url text,
     public_label text,
+    member_discount_bp integer DEFAULT 0 NOT NULL,
+    public boolean DEFAULT false NOT NULL,
+    vip_booking boolean DEFAULT false NOT NULL,
+    max_vehicles integer,
+    price_version integer DEFAULT 1 NOT NULL,
+    square_plan_id text,
+    legacy_key text,
     CONSTRAINT membership_plans_addon_discount_bp_check CHECK (((addon_discount_bp >= 0) AND (addon_discount_bp <= 10000))),
     CONSTRAINT membership_plans_billing_interval_months_check CHECK (((billing_interval_months >= 1) AND (billing_interval_months <= 12))),
     CONSTRAINT membership_plans_checkout_url_check CHECK (((checkout_url IS NULL) OR ((checkout_url ~ '^https://([a-z0-9-]+\.)*squarespace\.com(/[^[:space:]]*)?$'::text) AND (length(checkout_url) <= 2048)))),
-    CONSTRAINT membership_plans_key_check CHECK ((key = ANY (ARRAY['essential'::text, 'premium'::text, 'executive'::text, 'exotic'::text]))),
+    CONSTRAINT membership_plans_key_check CHECK ((key ~ '^[a-z][a-z0-9_]{0,31}$'::text)),
+    CONSTRAINT membership_plans_legacy_key_check CHECK (((legacy_key IS NULL) OR (legacy_key ~ '^[a-z][a-z0-9_]{0,31}$'::text))),
+    CONSTRAINT membership_plans_max_vehicles_check CHECK (((max_vehicles IS NULL) OR ((max_vehicles >= 1) AND (max_vehicles <= 20)))),
+    CONSTRAINT membership_plans_member_discount_bp_check CHECK (((member_discount_bp >= 0) AND (member_discount_bp <= 10000))),
     CONSTRAINT membership_plans_monthly_price_cents_check CHECK (((monthly_price_cents IS NULL) OR (monthly_price_cents >= 0))),
     CONSTRAINT membership_plans_name_check CHECK ((btrim(name) <> ''::text)),
+    CONSTRAINT membership_plans_price_version_check CHECK ((price_version >= 1)),
     CONSTRAINT membership_plans_public_label_check CHECK (((public_label IS NULL) OR ((btrim(public_label) <> ''::text) AND (length(public_label) <= 40)))),
-    CONSTRAINT membership_plans_service_discount_bp_check CHECK (((service_discount_bp >= 0) AND (service_discount_bp <= 10000)))
+    CONSTRAINT membership_plans_service_discount_bp_check CHECK (((service_discount_bp >= 0) AND (service_discount_bp <= 10000))),
+    CONSTRAINT membership_plans_square_plan_id_check CHECK (((square_plan_id IS NULL) OR (length(square_plan_id) <= 64)))
+);
+
+--
+-- Name: membership_tier_prices; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.membership_tier_prices (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    plan_id uuid NOT NULL,
+    class_key text NOT NULL,
+    monthly_cents integer NOT NULL,
+    effective_from timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    superseded_at timestamp with time zone,
+    price_version integer NOT NULL,
+    square_variation_id text,
+    square_state text DEFAULT 'pending'::text NOT NULL,
+    square_synced_at timestamp with time zone,
+    created_by uuid,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT membership_tier_prices_check CHECK (((superseded_at IS NULL) OR (superseded_at >= effective_from))),
+    CONSTRAINT membership_tier_prices_monthly_cents_check CHECK (((monthly_cents >= 0) AND (monthly_cents <= 10000000))),
+    CONSTRAINT membership_tier_prices_price_version_check CHECK ((price_version >= 1)),
+    CONSTRAINT membership_tier_prices_square_state_check CHECK ((square_state = ANY (ARRAY['pending'::text, 'synced'::text, 'failed'::text]))),
+    CONSTRAINT membership_tier_prices_square_variation_id_check CHECK (((square_variation_id IS NULL) OR (length(square_variation_id) <= 64)))
 );
 
 --
@@ -1574,6 +1747,8 @@ CREATE TABLE public.memberships (
     version integer DEFAULT 1 NOT NULL,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    plan_class text NOT NULL,
+    tier_price_id uuid,
     CONSTRAINT memberships_check CHECK (((current_period_end IS NULL) OR (current_period_start IS NULL) OR (current_period_end > current_period_start))),
     CONSTRAINT memberships_plan_label_check CHECK ((btrim(plan_label) <> ''::text)),
     CONSTRAINT memberships_source_check CHECK ((source = ANY (ARRAY['squarespace'::text, 'manual'::text]))),
@@ -2010,6 +2185,22 @@ CREATE TABLE public.schema_migrations (
     name text NOT NULL,
     checksum text NOT NULL,
     applied_at timestamp with time zone NOT NULL
+);
+
+--
+-- Name: service_class_prices; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.service_class_prices (
+    service_id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    class_key text NOT NULL,
+    price_cents integer NOT NULL,
+    max_cents integer,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_by uuid,
+    CONSTRAINT service_class_prices_check CHECK (((max_cents IS NULL) OR ((max_cents >= price_cents) AND (max_cents <= 10000000)))),
+    CONSTRAINT service_class_prices_price_cents_check CHECK (((price_cents >= 0) AND (price_cents <= 10000000)))
 );
 
 --
@@ -2622,6 +2813,23 @@ CREATE TABLE public.users (
 );
 
 --
+-- Name: vehicle_classes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.vehicle_classes (
+    location_id uuid NOT NULL,
+    key text NOT NULL,
+    label text NOT NULL,
+    sort integer DEFAULT 0 NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT vehicle_classes_key_check CHECK ((key ~ '^[a-z][a-z0-9_]{0,31}$'::text)),
+    CONSTRAINT vehicle_classes_label_check CHECK (((btrim(label) <> ''::text) AND (length(label) <= 40)))
+);
+
+--
 -- Name: vehicles; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2636,7 +2844,12 @@ CREATE TABLE public.vehicles (
     deleted_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     vehicle_type text,
+    vehicle_class text,
+    vehicle_class_source text,
+    CONSTRAINT vehicles_class_source_check CHECK (((vehicle_class IS NULL) = (vehicle_class_source IS NULL))),
     CONSTRAINT vehicles_plate_check CHECK (((plate IS NULL) OR (btrim(plate) <> ''::text))),
+    CONSTRAINT vehicles_vehicle_class_check CHECK (((vehicle_class IS NULL) OR (vehicle_class ~ '^[a-z][a-z0-9_]{0,31}$'::text))),
+    CONSTRAINT vehicles_vehicle_class_source_check CHECK (((vehicle_class_source IS NULL) OR (vehicle_class_source = ANY (ARRAY['staff'::text, 'client'::text, 'ai'::text, 'legacy'::text])))),
     CONSTRAINT vehicles_vehicle_type_check CHECK (((vehicle_type IS NULL) OR (vehicle_type = ANY (ARRAY['sedan_coupe'::text, 'suv_crossover'::text, 'truck_van'::text])))),
     CONSTRAINT vehicles_year_check CHECK (((year IS NULL) OR ((year >= 1900) AND (year <= 2100))))
 );
@@ -3240,6 +3453,27 @@ ALTER TABLE ONLY public.membership_credit_events
     ADD CONSTRAINT membership_credit_events_pkey PRIMARY KEY (id);
 
 --
+-- Name: membership_household membership_household_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_household
+    ADD CONSTRAINT membership_household_pkey PRIMARY KEY (id);
+
+--
+-- Name: membership_inclusion_services membership_inclusion_services_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_inclusion_services
+    ADD CONSTRAINT membership_inclusion_services_pkey PRIMARY KEY (inclusion_id, service_id);
+
+--
+-- Name: membership_inclusions membership_inclusions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_inclusions
+    ADD CONSTRAINT membership_inclusions_pkey PRIMARY KEY (id);
+
+--
 -- Name: membership_plans membership_plans_location_id_key_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3252,6 +3486,13 @@ ALTER TABLE ONLY public.membership_plans
 
 ALTER TABLE ONLY public.membership_plans
     ADD CONSTRAINT membership_plans_pkey PRIMARY KEY (id);
+
+--
+-- Name: membership_tier_prices membership_tier_prices_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_tier_prices
+    ADD CONSTRAINT membership_tier_prices_pkey PRIMARY KEY (id);
 
 --
 -- Name: memberships memberships_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3469,6 +3710,13 @@ ALTER TABLE ONLY public.roles
 
 ALTER TABLE ONLY public.schema_migrations
     ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (name);
+
+--
+-- Name: service_class_prices service_class_prices_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.service_class_prices
+    ADD CONSTRAINT service_class_prices_pkey PRIMARY KEY (service_id, class_key);
 
 --
 -- Name: services services_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3763,6 +4011,13 @@ ALTER TABLE ONLY public.users
 
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+--
+-- Name: vehicle_classes vehicle_classes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vehicle_classes
+    ADD CONSTRAINT vehicle_classes_pkey PRIMARY KEY (location_id, key);
 
 --
 -- Name: vehicles vehicles_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -4280,6 +4535,30 @@ CREATE INDEX membership_checkouts_order_idx ON public.membership_checkouts USING
 CREATE INDEX membership_credit_events_cycle_idx ON public.membership_credit_events USING btree (membership_id, cycle_start);
 
 --
+-- Name: membership_household_membership_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX membership_household_membership_idx ON public.membership_household USING btree (membership_id);
+
+--
+-- Name: membership_inclusion_services_service_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX membership_inclusion_services_service_idx ON public.membership_inclusion_services USING btree (service_id);
+
+--
+-- Name: membership_inclusions_plan_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX membership_inclusions_plan_idx ON public.membership_inclusions USING btree (plan_id, sort);
+
+--
+-- Name: membership_tier_prices_plan_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX membership_tier_prices_plan_idx ON public.membership_tier_prices USING btree (plan_id, class_key, effective_from);
+
+--
 -- Name: memberships_plan_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4458,6 +4737,12 @@ CREATE UNIQUE INDEX roles_name_lower_idx ON public.roles USING btree (lower(name
 --
 
 CREATE UNIQUE INDEX roles_one_locked_idx ON public.roles USING btree (is_locked) WHERE is_locked;
+
+--
+-- Name: service_class_prices_class_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX service_class_prices_class_idx ON public.service_class_prices USING btree (location_id, class_key);
 
 --
 -- Name: services_category_idx; Type: INDEX; Schema: public; Owner: -
@@ -4691,7 +4976,7 @@ CREATE UNIQUE INDEX uq_closures_date_live ON public.closures USING btree (locati
 -- Name: uq_credit_redeem_appointment; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_credit_redeem_appointment ON public.membership_credit_events USING btree (appointment_id) WHERE ((kind = 'redeem'::text) AND (appointment_id IS NOT NULL));
+CREATE UNIQUE INDEX uq_credit_redeem_appointment ON public.membership_credit_events USING btree (appointment_id, COALESCE(inclusion_id, rule_id)) WHERE ((kind = 'redeem'::text) AND (appointment_id IS NOT NULL));
 
 --
 -- Name: uq_customers_phone; Type: INDEX; Schema: public; Owner: -
@@ -4716,6 +5001,24 @@ CREATE UNIQUE INDEX uq_membership_checkouts_open ON public.membership_checkouts 
 --
 
 CREATE UNIQUE INDEX uq_membership_checkouts_sync_order ON public.membership_checkouts USING btree (customer_id, matched_order_id) WHERE (origin = 'sync'::text);
+
+--
+-- Name: uq_membership_household_customer_live; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_membership_household_customer_live ON public.membership_household USING btree (customer_id) WHERE (removed_at IS NULL);
+
+--
+-- Name: uq_membership_plans_legacy_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_membership_plans_legacy_key ON public.membership_plans USING btree (location_id, legacy_key) WHERE (legacy_key IS NOT NULL);
+
+--
+-- Name: uq_membership_tier_prices_current; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_membership_tier_prices_current ON public.membership_tier_prices USING btree (plan_id, class_key) WHERE (superseded_at IS NULL);
 
 --
 -- Name: uq_memberships_customer_live; Type: INDEX; Schema: public; Owner: -
@@ -4830,6 +5133,18 @@ CREATE TRIGGER customers_email_unverify BEFORE UPDATE OF email ON public.custome
 --
 
 CREATE TRIGGER ledger_events_guard BEFORE DELETE OR UPDATE ON public.ledger_events FOR EACH ROW EXECUTE FUNCTION public.ledger_events_guard();
+
+--
+-- Name: membership_tier_prices membership_tier_prices_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER membership_tier_prices_guard BEFORE DELETE OR UPDATE ON public.membership_tier_prices FOR EACH ROW EXECUTE FUNCTION public.membership_tier_prices_guard();
+
+--
+-- Name: memberships memberships_default_plan_class; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER memberships_default_plan_class BEFORE INSERT ON public.memberships FOR EACH ROW EXECUTE FUNCTION public.memberships_default_plan_class();
 
 --
 -- Name: realtime_events realtime_events_notify; Type: TRIGGER; Schema: public; Owner: -
@@ -5649,6 +5964,13 @@ ALTER TABLE ONLY public.membership_credit_events
     ADD CONSTRAINT membership_credit_events_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id);
 
 --
+-- Name: membership_credit_events membership_credit_events_inclusion_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_credit_events
+    ADD CONSTRAINT membership_credit_events_inclusion_id_fkey FOREIGN KEY (inclusion_id) REFERENCES public.membership_inclusions(id) ON DELETE SET NULL;
+
+--
 -- Name: membership_credit_events membership_credit_events_invoice_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5677,11 +5999,74 @@ ALTER TABLE ONLY public.membership_credit_events
     ADD CONSTRAINT membership_credit_events_rule_id_fkey FOREIGN KEY (rule_id) REFERENCES public.plan_credit_rules(id) ON DELETE SET NULL;
 
 --
+-- Name: membership_credit_events membership_credit_events_service_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_credit_events
+    ADD CONSTRAINT membership_credit_events_service_id_fkey FOREIGN KEY (service_id) REFERENCES public.services(id);
+
+--
+-- Name: membership_household membership_household_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_household
+    ADD CONSTRAINT membership_household_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: membership_household membership_household_membership_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_household
+    ADD CONSTRAINT membership_household_membership_id_fkey FOREIGN KEY (membership_id) REFERENCES public.memberships(id) ON DELETE CASCADE;
+
+--
+-- Name: membership_inclusion_services membership_inclusion_services_inclusion_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_inclusion_services
+    ADD CONSTRAINT membership_inclusion_services_inclusion_id_fkey FOREIGN KEY (inclusion_id) REFERENCES public.membership_inclusions(id) ON DELETE CASCADE;
+
+--
+-- Name: membership_inclusion_services membership_inclusion_services_service_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_inclusion_services
+    ADD CONSTRAINT membership_inclusion_services_service_id_fkey FOREIGN KEY (service_id) REFERENCES public.services(id) ON DELETE CASCADE;
+
+--
+-- Name: membership_inclusions membership_inclusions_plan_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_inclusions
+    ADD CONSTRAINT membership_inclusions_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.membership_plans(id) ON DELETE CASCADE;
+
+--
 -- Name: membership_plans membership_plans_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.membership_plans
     ADD CONSTRAINT membership_plans_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: membership_tier_prices membership_tier_prices_class_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_tier_prices
+    ADD CONSTRAINT membership_tier_prices_class_fkey FOREIGN KEY (location_id, class_key) REFERENCES public.vehicle_classes(location_id, key) ON UPDATE CASCADE;
+
+--
+-- Name: membership_tier_prices membership_tier_prices_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_tier_prices
+    ADD CONSTRAINT membership_tier_prices_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: membership_tier_prices membership_tier_prices_plan_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.membership_tier_prices
+    ADD CONSTRAINT membership_tier_prices_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.membership_plans(id) ON DELETE CASCADE;
 
 --
 -- Name: memberships memberships_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -5698,11 +6083,25 @@ ALTER TABLE ONLY public.memberships
     ADD CONSTRAINT memberships_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
+-- Name: memberships memberships_plan_class_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memberships
+    ADD CONSTRAINT memberships_plan_class_fkey FOREIGN KEY (location_id, plan_class) REFERENCES public.vehicle_classes(location_id, key) ON UPDATE CASCADE;
+
+--
 -- Name: memberships memberships_plan_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.memberships
     ADD CONSTRAINT memberships_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.membership_plans(id);
+
+--
+-- Name: memberships memberships_tier_price_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memberships
+    ADD CONSTRAINT memberships_tier_price_id_fkey FOREIGN KEY (tier_price_id) REFERENCES public.membership_tier_prices(id);
 
 --
 -- Name: message_threads message_threads_ai_paused_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -5983,6 +6382,27 @@ ALTER TABLE ONLY public.role_permissions
 
 ALTER TABLE ONLY public.role_permissions
     ADD CONSTRAINT role_permissions_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE;
+
+--
+-- Name: service_class_prices service_class_prices_class_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.service_class_prices
+    ADD CONSTRAINT service_class_prices_class_fkey FOREIGN KEY (location_id, class_key) REFERENCES public.vehicle_classes(location_id, key) ON UPDATE CASCADE;
+
+--
+-- Name: service_class_prices service_class_prices_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.service_class_prices
+    ADD CONSTRAINT service_class_prices_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: service_class_prices service_class_prices_service_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.service_class_prices
+    ADD CONSTRAINT service_class_prices_service_id_fkey FOREIGN KEY (service_id) REFERENCES public.services(id) ON DELETE CASCADE;
 
 --
 -- Name: services services_category_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -6361,6 +6781,13 @@ ALTER TABLE ONLY public.user_preferences
 
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE;
+
+--
+-- Name: vehicle_classes vehicle_classes_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.vehicle_classes
+    ADD CONSTRAINT vehicle_classes_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 -- Name: vehicles vehicles_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

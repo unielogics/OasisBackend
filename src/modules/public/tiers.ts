@@ -1,25 +1,16 @@
-// The website sells two plans, Gold and VIP ("Oasis Site v2"); the dashboard's membership plans are the Operations design's four
-// (essential, premium, executive, exotic). The website's tier is a label over a dashboard plan (ADR 0150): joining Gold creates
-// a membership of the mapped plan with plan_label "Gold", so the board, the Membership tab and the Squarespace product map keep
-// working unchanged. The site shows its own prices as static content; the plans carry none.
-import type { PlanKey } from '../memberships/schema.js'
+// The tiers the website, personal links and the assistant sell (ADR 0170): every ACTIVE PUBLIC membership tier, named by its key
+// (gold and vip by default). The fixed Gold -> premium / VIP -> executive mapping of ADR 0150 is gone: the tiers themselves are
+// editable in Settings and premium / executive survive only as legacy keys (memberships/plans.ts planByKey). The VIP slot rules
+// come from the tier's vipBooking flag, not from its key.
+import type { Plan } from '../memberships/plans.js'
 
-export type PublicTier = 'gold' | 'vip'
+/** A tier's key as the public side names it (a slug). */
+export type PublicTier = string
 
-export interface TierSpec {
-  key: PublicTier
-  /** The label the membership is sold under (memberships.plan_label). */
-  label: string
-  planKey: PlanKey
-}
+/** The tier sold online under this key: active and public; undefined otherwise (also for a legacy key). */
+export const publicTierOf = (plans: readonly Plan[], key: string): Plan | undefined =>
+  plans.find((p) => p.key === key && p.active && p.public)
 
-export const PUBLIC_TIERS: readonly TierSpec[] = [
-  { key: 'gold', label: 'Gold', planKey: 'premium' },
-  { key: 'vip', label: 'VIP', planKey: 'executive' },
-]
-
-export const tierSpec = (tier: PublicTier): TierSpec => PUBLIC_TIERS.find((t) => t.key === tier)!
-
-/** The website tier of a dashboard plan, or null for a plan the website does not sell (still a member: no fee). */
-export const tierOfPlan = (planKey: string): PublicTier | null =>
-  PUBLIC_TIERS.find((t) => t.planKey === planKey)?.key ?? null
+/** The key a member's tier is shown under on the public side: its key when the tier is public, null for one never sold online. */
+export const tierKeyOf = (plan: Pick<Plan, 'key' | 'public'> | undefined): PublicTier | null =>
+  plan && plan.public ? plan.key : null

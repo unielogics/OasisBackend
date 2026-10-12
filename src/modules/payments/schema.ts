@@ -1,4 +1,5 @@
 // Kysely types for the payments tables (migration 20261006190000_payments.sql), registered by module augmentation.
+import type { PriceBasis } from '../customers/schema.js'
 import type { Generated } from 'kysely'
 
 export type LedgerType = 'pay' | 'adjust' | 'refund' | 'credit_issue' | 'credit_apply' | 'void'
@@ -48,6 +49,8 @@ export interface InvoicesTable {
   version: Generated<number>
   created_at: Generated<Date>
   updated_at: Generated<Date>
+  /** The size the visit was priced at ("Large SUV"; migration 20261014100200, written from wave Q2). */
+  vehicle_class_label: string | null
 }
 
 export interface InvoiceItemsTable {
@@ -59,6 +62,10 @@ export interface InvoiceItemsTable {
   name: string
   price_cents: number
   appointment_addon_id: string | null
+  /** The regular price at the visit's size (null on legacy lines); price_cents is the charge (the member price, or this). */
+  list_cents: number | null
+  discount_bp: number | null
+  price_basis: Generated<PriceBasis>
 }
 
 export interface LedgerEventsTable {

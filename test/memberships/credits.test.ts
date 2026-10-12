@@ -37,8 +37,8 @@ describe('membership credits', () => {
       plans.map((p) => [p.key, p.color, p.bg_color, p.tint, p.addon_discount_bp, p.service_discount_bp]),
     ).toEqual([
       ['essential', '#7A8B73', '#E9EDE4', '#5E7A52', 1000, 0],
-      ['premium', '#8A6D3B', '#F2E9D6', '#8A6D3B', 1500, 0],
-      ['executive', '#3B5A8A', '#E0E8F4', '#3B5A8A', 2000, 0],
+      ['gold', '#8A6D3B', '#F2E9D6', '#8A6D3B', 1500, 0],
+      ['vip', '#3B5A8A', '#E0E8F4', '#3B5A8A', 2000, 0],
       ['exotic', '#7A3B8A', '#EEDFF2', '#7A3B8A', 2500, 2500],
     ])
     expect(plans[0]?.perks).toEqual([
@@ -48,20 +48,29 @@ describe('membership credits', () => {
       'Free vacuum anytime',
     ])
     expect(plans[3]?.perks).toContain('Unlimited hand washes')
-    const rules = await m.h.t.db
-      .selectFrom('plan_credit_rules as r')
+    // the design's credit rules are inclusions (ADR 0170) naming the services their tags covered when the tiers were made
+    const inclusions = await m.h.t.db
+      .selectFrom('membership_inclusions as r')
       .innerJoin('membership_plans as p', 'p.id', 'r.plan_id')
-      .select(['p.key', 'r.label', 'r.include_tags', 'r.per_cycle'])
+      .select(['r.id', 'p.key', 'r.label', 'r.mode', 'r.per_cycle'])
       .orderBy('p.sort')
       .orderBy('r.sort')
       .execute()
-    expect(rules.map((r) => [r.key, r.include_tags.join(','), r.per_cycle])).toEqual([
-      ['essential', 'express', 2],
-      ['premium', 'premium', 2],
-      ['executive', 'express', null],
-      ['executive', 'executive', 2],
-      ['exotic', 'handwash', null],
+    expect(inclusions.map((r) => [r.key, r.label, r.mode, r.per_cycle])).toEqual([
+      ['essential', 'Express wash', 'per_cycle', 2],
+      ['gold', 'Premium wash', 'per_cycle', 2],
+      ['vip', 'Express wash', 'per_cycle', null],
+      ['vip', 'Executive detail', 'per_cycle', 2],
+      ['exotic', 'Hand wash', 'per_cycle', null],
     ])
+    const tagged = async (tag: string) =>
+      (await m.h.t.db.selectFrom('services').select(['id', 'tags']).execute()).filter((s) => s.tags.includes(tag)).map((s) => s.id).sort()
+    const covered = async (id: string) =>
+      (await m.h.t.db.selectFrom('membership_inclusion_services').select('service_id').where('inclusion_id', '=', id).execute()).map((x) => x.service_id).sort()
+    for (const [i, tag] of ['express', 'premium', 'express', 'executive', 'handwash'].entries()) {
+      expect(await covered(inclusions[i]!.id), tag).toEqual(await tagged(tag))
+      expect((await tagged(tag)).length, tag).toBeGreaterThan(0)
+    }
     const { id } = await m.member('Sofia Marchetti', 'executive')
     const grants = await m.h.t.db
       .selectFrom('membership_credit_events')
@@ -292,7 +301,7 @@ describe('membership credits', () => {
     const credit = list.find((x) => x.kind === 'member_credit')
     expect(credit).toMatchObject({
       title: 'Member credit available',
-      desc: 'Priya Nair has 1 unused Premium credit this cycle',
+      desc: 'Priya Nair has 1 unused Gold credit this cycle',
       action: { type: 'apply_credit' },
     })
     const file = await m.get(m.superS(), `/appointments/${a.appointmentId}`)
@@ -307,7 +316,7 @@ describe('membership credits', () => {
         }
       }
     ).membership
-    expect(membership).toMatchObject({ plan: 'Premium', renewLabel: 'Jul 12, 2026', creditAvailable: true })
+    expect(membership).toMatchObject({ plan: 'Gold', renewLabel: 'Jul 12, 2026', creditAvailable: true })
     expect(membership.perks).toContain('Free rain repellent')
     expect(membership.retention.label).toBe('Loyal · low risk')
     await apply(a.appointmentId)

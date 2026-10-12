@@ -224,10 +224,11 @@ describe('Squarespace routes', () => {
       seen: { sku: string; mapped: boolean }[]
       plans: { key: string }[]
     }
-    expect(body.entries[0]).toMatchObject({ plan: 'premium', planLabel: 'Premium Care' })
+    // "Premium Care" names the old premium key: it maps to the tier that carries it, gold (ADR 0170)
+    expect(body.entries[0]).toMatchObject({ plan: 'gold', planLabel: 'Premium Care' })
     expect(body.seen.find((s) => s.sku === 'MEM-1')?.mapped).toBe(true)
     expect(body.seen.find((s) => s.sku === 'WASH-1')?.mapped).toBe(false)
-    expect(body.plans.map((p) => p.key)).toEqual(['essential', 'premium', 'executive', 'exotic'])
+    expect(body.plans.map((p) => p.key)).toEqual(['essential', 'gold', 'vip', 'exotic'])
     const again = await get(acct, '/integrations/squarespace/product-map')
     expect((again.json() as { entries: unknown[] }).entries).toHaveLength(1)
   })

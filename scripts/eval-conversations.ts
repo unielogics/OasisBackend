@@ -3,8 +3,8 @@
 // conversation marker, AssistantRuntime.respond: the turn, the tool registry, the shop facts, the output guard v4 and the policy judge,
 // the reply-number handler, the leads), against a fresh schema in the LOCAL TEST database (DATABASE_URL_TEST of .env), with the
 // simulated SMS device (every outbound text is captured as the phone would show it) and a frozen clock moved between texts.
-// Settings as production will have them: the `catalog` seed (+ `website-catalog` for the seeded run, the current production state
-// without it), assistant.enabled, stage everyone, actions on. The AI_* switches on, PUBLIC_LINKS_ENABLED on.
+// Settings as production will have them: the `catalog` seed (+ `website-catalog` and `pricing-defaults` for the seeded run: Signature
+// Hand Wash from $40, Gold $129 a month, ADR 0170; the current production state without them), assistant.enabled, stage everyone, actions on. The AI_* switches on, PUBLIC_LINKS_ENABLED on.
 //
 // AI_PROVIDER=bedrock calls the assistant and its policy judge (AI_BEDROCK_MODEL_ID, default Sonnet 4.6), the client simulator (the
 // same model) and the quality judge (Opus 4.6) on Bedrock with the default credential chain. On oasis-app run it with the operator
@@ -67,7 +67,7 @@ import { formatPhoneDisplay } from '../src/platform/phone.js'
 import { performance } from 'node:perf_hooks'
 
 export const DEFAULT_PERSONAS = 'test/assistant/fixtures/personas.json'
-const SEEDED_PROFILES = 'people,catalog,website-catalog,messaging'
+const SEEDED_PROFILES = 'people,catalog,website-catalog,pricing-defaults,messaging'
 const UNSEEDED_PROFILES = 'people,catalog,messaging'
 /** The shop's numbers as the runtime e2e uses them (the texting line is where the clients text to). */
 const BUSINESS_PHONE = '+12015986304'
@@ -313,7 +313,7 @@ async function setupClient(w: EvalWorld, p: Persona, phone: string): Promise<str
   if (c.membership) {
     const d = { locationId: w.locationId, clock: w.clock, newId: w.newId }
     await ensurePlans(w.db, d)
-    const plan = (await loadPlans(w.db, w.locationId)).find((x) => x.key === (c.membership === 'gold' ? 'premium' : 'executive'))
+    const plan = (await loadPlans(w.db, w.locationId)).find((x) => x.key === c.membership)
     if (plan) {
       const mid = w.newId()
       const start = new Date(now.getTime() - 10 * 86_400_000)

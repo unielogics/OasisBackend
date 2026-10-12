@@ -36,11 +36,11 @@ describe('the memberships seed profile', () => {
     expect(rows.map((r) => [r.full_name, r.plan_label, r.key])).toEqual([
       ['Aisha Rahman', 'Exotic', 'exotic'],
       ['Elena Volkov', 'Exotic', 'exotic'],
-      ['Jonathan Franco', 'Premium Care', 'premium'],
+      ['Jonathan Franco', 'Premium Care', 'gold'],
       ['Maria Delgado', 'Essential', 'essential'],
       ['Nathan Brooks', 'Essential', 'essential'],
-      ['Priya Nair', 'Premium', 'premium'],
-      ['Sofia Marchetti', 'Executive', 'executive'],
+      ['Priya Nair', 'Premium', 'gold'],
+      ['Sofia Marchetti', 'Executive', 'vip'],
     ])
     for (const r of rows) {
       expect(r).toMatchObject({

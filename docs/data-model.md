@@ -42,6 +42,9 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261012100000_location_address.sql` | the shop’s street address for the existing location when none is set (the assistant’s shop facts read it; ADR 0160, W4b) |
 | `20261013010000_identity_rebinding.sql` | stale-record re-binding (ADR 0160, W4c fixes): `customers.identity_confirmed_at` (proof of the client: their PIN, staff), `customers.phone_reassigned_at` / `phone_reassigned_to` (the number moved to a new client), `appointments.booked_with_pin` |
 | `20261013090000_assistant_language.sql` | `assistant_conversations.language` (`en`\|`es`): the client's language, detected from their texts; the server's own words in the conversation follow it (ADR 0160, W4b X5) |
+| `20261014100000_vehicle_classes_and_prices.sql` | vehicle sizes (`vehicle_classes`, the five defaults for every location) and prices by size (`service_class_prices`) backfilled from today's guest prices and tint matrix; `catalog.tint_films`; `vehicles.vehicle_class` / `vehicle_class_source` from `vehicle_type` (ADR 0170) |
+| `20261014100100_membership_tiers.sql` | editable tiers: slug keys (premium -> gold, executive -> vip, old key in `legacy_key`, cascaded to links and checkouts), `member_discount_bp`, `public`, `vip_booking`, `max_vehicles`, `price_version`; `membership_tier_prices` (append-only, guard trigger); `membership_inclusions` + `membership_inclusion_services` from `plan_credit_rules` (same ids); credit events gain `inclusion_id` and the coverage columns, one redeem per appointment and inclusion; `memberships.plan_class` (required) and `tier_price_id`; `membership_household`; `membership_checkouts.plan_class` (ADR 0170) |
+| `20261014100200_class_price_snapshots.sql` | the size snapshot of a visit (written from wave Q2): `appointments.vehicle_class`, `vehicle_class_label`, `class_confirmed_at`, `list_price_cents`, `discount_bp`, `price_basis`; the same per add-on and invoice line; `invoices.vehicle_class_label` (ADR 0170) |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -183,8 +186,8 @@ and the status ladder in integer cents; `src/modules/payments/calc.ts` is the Ty
 
 | Table                      | Key columns and rules                                                                                                                                                                                                                                     |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `membership_plans`         | Essential, Premium, Executive, Exotic per location: display colours, `perks`, discount basis points (display only), `billing_interval_months`.                                                                                                            |
-| `plan_credit_rules`        | A credit covers a service whose `services.tags` include any `include_tags` and none of `exclude_tags`; `per_cycle` null = unlimited; **`auto_apply`** (default false) redeems the credit when a covered visit is completed.                               |
+| `membership_plans`         | The tiers (ADR 0170: editable, slug `key`; the design's Essential, Gold, VIP, Exotic by default): display colours, `perks`, discount basis points (display only), `billing_interval_months`; the tier fields of migration `20261014100100` below.            |
+| `plan_credit_rules`        | History since ADR 0170 (read only; `membership_inclusions` replaced it with the same ids): a credit covered a service whose `services.tags` included any `include_tags` and none of `exclude_tags`; `per_cycle` null = unlimited; `auto_apply`. |
 | `memberships`              | One live membership per customer (partial unique); `plan_label`, `status`, `source squarespace\|manual`, the current cycle, grace and review flags, the member's own `auto_apply`, `manual_status_at`.                                                    |
 | `membership_credit_events` | Append-only credit ledger: `grant` per rule per cycle, `redeem` (names the appointment, one per appointment), `restore` (gives a credit back), `protect` (a marker an emergency closure leaves; moves no count), `reserve` and `expire` (reserved kinds). |
 
@@ -317,6 +320,33 @@ Columns added to existing tables:
 | `vehicles.vehicle_type`                                                                        | `sedan_coupe\|suv_crossover\|truck_van` (the tint matrix's vehicle types): what `set_my_vehicle` records (W3b, migration `20261012020000`) |
 | `customers.archived_at`                                                                        | the welcome flow's archive (W3b): a provisional client ("New texter ••NNNN", `source inbound_sms`, `needs_details`) with no name and no booking 30 days after its last text is soft-deleted (`deleted_at`) and marked here (check: only with `deleted_at`); a new text from the number restores it. Partial indexes for the scan and the restore |
 
+## Vehicle sizes, prices by size and tiers (migrations `20261014100000` to `20261014100200`, ADR 0170)
+
+Prices per vehicle size and editable membership tiers. A service has one regular price per size; a member pays it less the tier's %
+off (computed, never stored); a covered line is covered up to the price at the membership's plan size. Money is integer cents.
+
+| Table                           | Key columns and rules                                                                                                                                                                                                         |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vehicle_classes`               | pk `(location_id, key)` (slug, never changes): `label` (40, unique per location in the API), `sort` (size order, smallest first), `active`, `version`. Defaults compact_car, large_car, compact_suv, large_suv, truck (seeded for existing locations; `ensureDomainDefaults` for new ones). |
+| `service_class_prices`          | pk `(service_id, class_key)`: the regular `price_cents` (0 to $100,000) of a service at a size, `max_cents` (null, or at least the price: a range), `updated_at`, `updated_by`; fk `(location_id, class_key)` to `vehicle_classes`. A missing row = not set. |
+| `membership_tier_prices`        | Append-only (guard trigger: only `superseded_at`, once, and the `square_*` fields change; deleted only with its tier): a tier's `monthly_cents` at a size from `effective_from`; one current row (`superseded_at` null) per tier and size (partial unique); `price_version`; `square_variation_id`, `square_state pending\|synced\|failed`, `square_synced_at` (wave Q3b); `created_by`. |
+| `membership_inclusions`         | What a tier includes: `label`, `mode per_cycle\|every_visit`, `per_cycle` (null = unlimited; always null for every_visit), `auto_apply` (default true; the design tiers' false), `sort`, `active`. Made from `plan_credit_rules` with the same ids. |
+| `membership_inclusion_services` | pk `(inclusion_id, service_id)`: the services an inclusion covers.                                                                                                                                                             |
+| `membership_household`          | The other customers a membership covers (the holder is `memberships.customer_id`): `membership_id`, `customer_id` (one live household per customer: partial unique where `removed_at` is null), `added_at`, `added_by`, `removed_at`. Written from wave Q2. |
+
+Columns added to existing tables:
+
+| Column                                                                                                            | Meaning                                                                                                                                       |
+| ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vehicles.vehicle_class`, `.vehicle_class_source`                                                                 | the car's size (slug, no fk: vehicles carry no location) and who said it, `staff\|client\|ai\|legacy` (both or neither); backfilled from `vehicle_type` (sedan_coupe -> compact_car, suv_crossover -> compact_suv, truck_van -> truck) |
+| `membership_plans.member_discount_bp`, `.public`, `.vip_booking`, `.max_vehicles`, `.price_version`, `.square_plan_id`, `.legacy_key` | the tier's member % off (0 to 10000), sold online, gives the VIP slot rules, car cap, the token of a tier-price save, the Square plan (wave Q3b), the old key (unique per location) |
+| `membership_credit_events.inclusion_id`, `.service_id`, `.line_cents`, `.covered_cents`, `.plan_class`, `.visit_class` | the inclusion (backfilled from `rule_id`), the covered line, its regular price, the amount covered and both sizes; unique redeem per `(appointment_id, coalesce(inclusion_id, rule_id))` |
+| `memberships.plan_class`, `.tier_price_id`                                                                        | the size the membership is priced at (NOT NULL, fk to `vehicle_classes`; an insert without one gets the location's smallest active size: trigger `memberships_default_plan_class`); the tier price billed (wave Q3b) |
+| `membership_checkouts.plan_class`                                                                                 | the size a link-started membership was chosen at (wave Q2)                                                                                     |
+| `appointments.vehicle_class`, `.vehicle_class_label`, `.class_confirmed_at`, `.list_price_cents`, `.discount_bp`, `.price_basis` | the size snapshot of a visit (wave Q2); `price_basis legacy\|class\|unknown_class\|estimated\|base`, `legacy` until then |
+| `appointment_addons.list_price_cents`, `.discount_bp`, `.price_basis`                                             | the same per add-on                                                                                                                            |
+| `invoice_items.list_cents`, `.discount_bp`, `.price_basis`; `invoices.vehicle_class_label`                          | the regular price of a line at the size (null, or at least `price_cents`), the member % off and the basis; the size on the invoice           |
+
 ## Foreign keys
 
 `domain_links` added the keys from the domain tables to `employees` and `users`. Two columns stay plain `uuid` on purpose, and a
@@ -385,7 +415,7 @@ Operations design day re-anchored on **today** in the business time zone with th
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (106 tables, 1 view, 12 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (112 tables, 1 view, 14 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -414,8 +444,11 @@ Primary key `(id)`. `(appointment_id)` references `appointments(id)` on delete c
 | `added_by` | uuid | yes |  |
 | `added_at` | timestamp with time zone | no | `app_now()` |
 | `removed_at` | timestamp with time zone | yes |  |
+| `list_price_cents` | integer | yes |  |
+| `discount_bp` | integer | yes |  |
+| `price_basis` | text | no | `'legacy'::text` |
 
-Primary key `(id)`. `(added_by)` references `users(id)` on delete set null. `(appointment_id)` references `appointments(id)` on delete cascade. `(service_id)` references `services(id)`. 2 check constraints. Index `appointment_addons_appointment_idx` `(appointment_id)`. Unique index `uq_appointment_addons_live` `(appointment_id, service_id)` where `removed_at IS NULL`.
+Primary key `(id)`. `(added_by)` references `users(id)` on delete set null. `(appointment_id)` references `appointments(id)` on delete cascade. `(service_id)` references `services(id)`. 5 check constraints. Index `appointment_addons_appointment_idx` `(appointment_id)`. Unique index `uq_appointment_addons_live` `(appointment_id, service_id)` where `removed_at IS NULL`.
 
 #### `appointment_late_texts`
 
@@ -507,8 +540,14 @@ Primary key `(id)`. `(appointment_id)` references `appointments(id)` on delete c
 | `arrival_token_expires_at` | timestamp with time zone | yes |  |
 | `categories` | text[] | no | `'{}'::text[]` |
 | `booked_with_pin` | boolean | no | `false` |
+| `vehicle_class` | text | yes |  |
+| `vehicle_class_label` | text | yes |  |
+| `class_confirmed_at` | timestamp with time zone | yes |  |
+| `list_price_cents` | integer | yes |  |
+| `discount_bp` | integer | yes |  |
+| `price_basis` | text | no | `'legacy'::text` |
 
-Primary key `(id)`. Unique `(seq)`. `(assigned_employee_id)` references `employees(id)` on delete set null. `(bay_id)` references `bays(id)`. `(created_by)` references `users(id)` on delete set null. `(customer_id)` references `customers(id)`. `(emergency_closure_id)` references `emergency_closures(id)`. `(location_id)` references `locations(id)` on delete cascade. `(planned_bay_id)` references `bays(id)`. `(service_id)` references `services(id)`. `(vehicle_id)` references `vehicles(id)`. 10 check constraints. Index `appointments_active_idx` `(status)` where `status = ANY (ARRAY['booked'::text, 'confirmed'::text, 'arrived'::text, 'cleaning'::text])`. Index `appointments_categories_idx` `(categories)`. Index `appointments_customer_idx` `(customer_id, scheduled_start DESC)`. Index `appointments_emergency_idx` `(emergency_closure_id)` where `emergency_closure_id IS NOT NULL`. Index `appointments_location_start_idx` `(location_id, scheduled_start)`. Index `appointments_location_status_start_idx` `(location_id, status, scheduled_start)`. Index `appointments_planned_bay_idx` `(planned_bay_id, scheduled_start)` where `planned_bay_id IS NOT NULL`. Unique index `uq_appointments_arrival_token` `(arrival_token_hash)` where `arrival_token_hash IS NOT NULL`. Unique index `uq_bay_occupied` `(bay_id)` where `status = 'cleaning'::text`.
+Primary key `(id)`. Unique `(seq)`. `(assigned_employee_id)` references `employees(id)` on delete set null. `(bay_id)` references `bays(id)`. `(created_by)` references `users(id)` on delete set null. `(customer_id)` references `customers(id)`. `(emergency_closure_id)` references `emergency_closures(id)`. `(location_id)` references `locations(id)` on delete cascade. `(planned_bay_id)` references `bays(id)`. `(service_id)` references `services(id)`. `(vehicle_id)` references `vehicles(id)`. 15 check constraints. Index `appointments_active_idx` `(status)` where `status = ANY (ARRAY['booked'::text, 'confirmed'::text, 'arrived'::text, 'cleaning'::text])`. Index `appointments_categories_idx` `(categories)`. Index `appointments_customer_idx` `(customer_id, scheduled_start DESC)`. Index `appointments_emergency_idx` `(emergency_closure_id)` where `emergency_closure_id IS NOT NULL`. Index `appointments_location_start_idx` `(location_id, scheduled_start)`. Index `appointments_location_status_start_idx` `(location_id, status, scheduled_start)`. Index `appointments_planned_bay_idx` `(planned_bay_id, scheduled_start)` where `planned_bay_id IS NOT NULL`. Unique index `uq_appointments_arrival_token` `(arrival_token_hash)` where `arrival_token_hash IS NOT NULL`. Unique index `uq_bay_occupied` `(bay_id)` where `status = 'cleaning'::text`.
 
 #### `arrival_pings`
 
@@ -1097,8 +1136,11 @@ Primary key `(location_id)`. `(location_id)` references `locations(id)` on delet
 | `name` | text | no |  |
 | `price_cents` | integer | no |  |
 | `appointment_addon_id` | uuid | yes |  |
+| `list_cents` | integer | yes |  |
+| `discount_bp` | integer | yes |  |
+| `price_basis` | text | no | `'legacy'::text` |
 
-Primary key `(id)`. `(appointment_addon_id)` references `appointment_addons(id)`. `(invoice_id)` references `invoices(id)` on delete cascade. `(service_id)` references `services(id)`. 4 check constraints. Index `invoice_items_invoice_idx` `(invoice_id, "position")`.
+Primary key `(id)`. `(appointment_addon_id)` references `appointment_addons(id)`. `(invoice_id)` references `invoices(id)` on delete cascade. `(service_id)` references `services(id)`. 7 check constraints. Index `invoice_items_invoice_idx` `(invoice_id, "position")`.
 
 #### `invoices`
 
@@ -1126,8 +1168,9 @@ Primary key `(id)`. `(appointment_addon_id)` references `appointment_addons(id)`
 | `version` | integer | no | `1` |
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `updated_at` | timestamp with time zone | no | `app_now()` |
+| `vehicle_class_label` | text | yes |  |
 
-Primary key `(id)`. Unique `(appointment_id)`. Unique `(location_id, invoice_no)`. `(appointment_id)` references `appointments(id)`. `(canceled_by)` references `users(id)` on delete set null. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. 6 check constraints. Index `invoices_biz_date_idx` `(location_id, biz_date DESC, invoice_no DESC)`. Index `invoices_customer_idx` `(customer_id, biz_date DESC)`.
+Primary key `(id)`. Unique `(appointment_id)`. Unique `(location_id, invoice_no)`. `(appointment_id)` references `appointments(id)`. `(canceled_by)` references `users(id)` on delete set null. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. 7 check constraints. Index `invoices_biz_date_idx` `(location_id, biz_date DESC, invoice_no DESC)`. Index `invoices_customer_idx` `(customer_id, biz_date DESC)`.
 
 #### `job_checklist_items`
 
@@ -1302,8 +1345,9 @@ Primary key `(id)`. Unique `(slug)`. 3 check constraints.
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `updated_at` | timestamp with time zone | no | `app_now()` |
 | `origin` | text | no | `'link'::text` |
+| `plan_class` | text | yes |  |
 
-Primary key `(id)`. `(customer_id)` references `customers(id)` on delete cascade. `(link_id)` references `client_links(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. `(matched_order_id)` references `sqsp_orders(id)` on delete set null. `(membership_id, customer_id)` references `memberships(id, customer_id)`. `(membership_id)` references `memberships(id)` on delete cascade. `(location_id, plan_key)` references `membership_plans(location_id, key)`. 10 check constraints. Index `membership_checkouts_awaiting_idx` `(location_id, created_at DESC)` where `state = 'awaiting_match'::text`. Index `membership_checkouts_customer_idx` `(customer_id, started_at DESC)`. Index `membership_checkouts_email_idx` `(location_id, expected_email)` where `state = ANY (ARRAY['open'::text, 'awaiting_match'::text])`. Index `membership_checkouts_expiry_idx` `(expires_at)` where `state = 'open'::text`. Index `membership_checkouts_order_idx` `(matched_order_id)` where `matched_order_id IS NOT NULL`. Unique index `uq_membership_checkouts_open` `(membership_id)` where `state = 'open'::text`. Unique index `uq_membership_checkouts_sync_order` `(customer_id, matched_order_id)` where `origin = 'sync'::text`.
+Primary key `(id)`. `(customer_id)` references `customers(id)` on delete cascade. `(link_id)` references `client_links(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. `(matched_order_id)` references `sqsp_orders(id)` on delete set null. `(membership_id, customer_id)` references `memberships(id, customer_id)`. `(membership_id)` references `memberships(id)` on delete cascade. `(location_id, plan_key)` references `membership_plans(location_id, key)`. 11 check constraints. Index `membership_checkouts_awaiting_idx` `(location_id, created_at DESC)` where `state = 'awaiting_match'::text`. Index `membership_checkouts_customer_idx` `(customer_id, started_at DESC)`. Index `membership_checkouts_email_idx` `(location_id, expected_email)` where `state = ANY (ARRAY['open'::text, 'awaiting_match'::text])`. Index `membership_checkouts_expiry_idx` `(expires_at)` where `state = 'open'::text`. Index `membership_checkouts_order_idx` `(matched_order_id)` where `matched_order_id IS NOT NULL`. Unique index `uq_membership_checkouts_open` `(membership_id)` where `state = 'open'::text`. Unique index `uq_membership_checkouts_sync_order` `(customer_id, matched_order_id)` where `origin = 'sync'::text`.
 
 #### `membership_credit_events`
 
@@ -1323,8 +1367,53 @@ Primary key `(id)`. `(customer_id)` references `customers(id)` on delete cascade
 | `actor_user_id` | uuid | yes |  |
 | `idempotency_key` | text | yes |  |
 | `created_at` | timestamp with time zone | no | `app_now()` |
+| `inclusion_id` | uuid | yes |  |
+| `service_id` | uuid | yes |  |
+| `line_cents` | integer | yes |  |
+| `covered_cents` | integer | yes |  |
+| `plan_class` | text | yes |  |
+| `visit_class` | text | yes |  |
 
-Primary key `(id)`. Unique `(idempotency_key)`. `(actor_user_id)` references `users(id)` on delete set null. `(appointment_id)` references `appointments(id)`. `(invoice_id)` references `invoices(id)`. `(ledger_event_id)` references `ledger_events(id)`. `(membership_id)` references `memberships(id)` on delete cascade. `(rule_id)` references `plan_credit_rules(id)` on delete set null. 3 check constraints. Index `membership_credit_events_cycle_idx` `(membership_id, cycle_start)`. Unique index `uq_credit_redeem_appointment` `(appointment_id)` where `(kind = 'redeem'::text) AND (appointment_id IS NOT NULL)`.
+Primary key `(id)`. Unique `(idempotency_key)`. `(actor_user_id)` references `users(id)` on delete set null. `(appointment_id)` references `appointments(id)`. `(inclusion_id)` references `membership_inclusions(id)` on delete set null. `(invoice_id)` references `invoices(id)`. `(ledger_event_id)` references `ledger_events(id)`. `(membership_id)` references `memberships(id)` on delete cascade. `(rule_id)` references `plan_credit_rules(id)` on delete set null. `(service_id)` references `services(id)`. 7 check constraints. Index `membership_credit_events_cycle_idx` `(membership_id, cycle_start)`. Unique index `uq_credit_redeem_appointment` `(appointment_id, COALESCE(inclusion_id, rule_id))` where `(kind = 'redeem'::text) AND (appointment_id IS NOT NULL)`.
+
+#### `membership_household`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `membership_id` | uuid | no |  |
+| `customer_id` | uuid | no |  |
+| `added_at` | timestamp with time zone | no | `app_now()` |
+| `added_by` | uuid | yes |  |
+| `removed_at` | timestamp with time zone | yes |  |
+
+Primary key `(id)`. `(customer_id)` references `customers(id)`. `(membership_id)` references `memberships(id)` on delete cascade. 1 check constraint. Index `membership_household_membership_idx` `(membership_id)`. Unique index `uq_membership_household_customer_live` `(customer_id)` where `removed_at IS NULL`.
+
+#### `membership_inclusion_services`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `inclusion_id` | uuid | no |  |
+| `service_id` | uuid | no |  |
+
+Primary key `(inclusion_id, service_id)`. `(inclusion_id)` references `membership_inclusions(id)` on delete cascade. `(service_id)` references `services(id)` on delete cascade. Index `membership_inclusion_services_service_idx` `(service_id)`.
+
+#### `membership_inclusions`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `plan_id` | uuid | no |  |
+| `label` | text | no |  |
+| `mode` | text | no | `'per_cycle'::text` |
+| `per_cycle` | integer | yes |  |
+| `auto_apply` | boolean | no | `true` |
+| `sort` | integer | no | `0` |
+| `active` | boolean | no | `true` |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. `(plan_id)` references `membership_plans(id)` on delete cascade. 4 check constraints. Index `membership_inclusions_plan_idx` `(plan_id, sort)`.
 
 #### `membership_plans`
 
@@ -1349,8 +1438,35 @@ Primary key `(id)`. Unique `(idempotency_key)`. `(actor_user_id)` references `us
 | `monthly_price_cents` | integer | yes |  |
 | `checkout_url` | text | yes |  |
 | `public_label` | text | yes |  |
+| `member_discount_bp` | integer | no | `0` |
+| `public` | boolean | no | `false` |
+| `vip_booking` | boolean | no | `false` |
+| `max_vehicles` | integer | yes |  |
+| `price_version` | integer | no | `1` |
+| `square_plan_id` | text | yes |  |
+| `legacy_key` | text | yes |  |
 
-Primary key `(id)`. Unique `(location_id, key)`. `(location_id)` references `locations(id)` on delete cascade. 8 check constraints.
+Primary key `(id)`. Unique `(location_id, key)`. `(location_id)` references `locations(id)` on delete cascade. 13 check constraints. Unique index `uq_membership_plans_legacy_key` `(location_id, legacy_key)` where `legacy_key IS NOT NULL`.
+
+#### `membership_tier_prices`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `plan_id` | uuid | no |  |
+| `class_key` | text | no |  |
+| `monthly_cents` | integer | no |  |
+| `effective_from` | timestamp with time zone | no | `app_now()` |
+| `superseded_at` | timestamp with time zone | yes |  |
+| `price_version` | integer | no |  |
+| `square_variation_id` | text | yes |  |
+| `square_state` | text | no | `'pending'::text` |
+| `square_synced_at` | timestamp with time zone | yes |  |
+| `created_by` | uuid | yes |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. `(location_id, class_key)` references `vehicle_classes(location_id, key)`. `(location_id)` references `locations(id)` on delete cascade. `(plan_id)` references `membership_plans(id)` on delete cascade. 5 check constraints. Index `membership_tier_prices_plan_idx` `(plan_id, class_key, effective_from)`. Unique index `uq_membership_tier_prices_current` `(plan_id, class_key)` where `superseded_at IS NULL`. Trigger: `membership_tier_prices_guard`.
 
 #### `memberships`
 
@@ -1383,8 +1499,10 @@ Primary key `(id)`. Unique `(location_id, key)`. `(location_id)` references `loc
 | `version` | integer | no | `1` |
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `updated_at` | timestamp with time zone | no | `app_now()` |
+| `plan_class` | text | no |  |
+| `tier_price_id` | uuid | yes |  |
 
-Primary key `(id)`. Unique `(id, customer_id)`. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. `(plan_id)` references `membership_plans(id)`. 4 check constraints. Index `memberships_plan_idx` `(plan_id)`. Index `memberships_status_idx` `(location_id, status)`. Unique index `uq_memberships_customer_live` `(customer_id)` where `status = ANY (ARRAY['pending'::text, 'active'::text, 'past_due'::text, 'paused'::text])`.
+Primary key `(id)`. Unique `(id, customer_id)`. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. `(location_id, plan_class)` references `vehicle_classes(location_id, key)`. `(plan_id)` references `membership_plans(id)`. `(tier_price_id)` references `membership_tier_prices(id)`. 4 check constraints. Index `memberships_plan_idx` `(plan_id)`. Index `memberships_status_idx` `(location_id, status)`. Unique index `uq_memberships_customer_live` `(customer_id)` where `status = ANY (ARRAY['pending'::text, 'active'::text, 'past_due'::text, 'paused'::text])`. Trigger: `memberships_default_plan_class`.
 
 #### `message_threads`
 
@@ -1748,6 +1866,20 @@ Primary key `(id)`. Unique `(key)`. 4 check constraints. Unique index `roles_nam
 | `applied_at` | timestamp with time zone | no |  |
 
 Primary key `(name)`.
+
+#### `service_class_prices`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `service_id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `class_key` | text | no |  |
+| `price_cents` | integer | no |  |
+| `max_cents` | integer | yes |  |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+| `updated_by` | uuid | yes |  |
+
+Primary key `(service_id, class_key)`. `(location_id, class_key)` references `vehicle_classes(location_id, key)`. `(location_id)` references `locations(id)` on delete cascade. `(service_id)` references `services(id)` on delete cascade. 2 check constraints. Index `service_class_prices_class_idx` `(location_id, class_key)`.
 
 #### `services`
 
@@ -2277,6 +2409,21 @@ Primary key `(user_id)`. `(user_id)` references `users(id)` on delete cascade. 1
 
 Primary key `(id)`. Unique `(email)`. Unique `(employee_id)`. `(employee_id)` references `employees(id)` on delete cascade.
 
+#### `vehicle_classes`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `location_id` | uuid | no |  |
+| `key` | text | no |  |
+| `label` | text | no |  |
+| `sort` | integer | no | `0` |
+| `active` | boolean | no | `true` |
+| `version` | integer | no | `1` |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(location_id, key)`. `(location_id)` references `locations(id)` on delete cascade. 2 check constraints.
+
 #### `vehicles`
 
 | Column | Type | Null | Default |
@@ -2291,8 +2438,10 @@ Primary key `(id)`. Unique `(email)`. Unique `(employee_id)`. `(employee_id)` re
 | `deleted_at` | timestamp with time zone | yes |  |
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `vehicle_type` | text | yes |  |
+| `vehicle_class` | text | yes |  |
+| `vehicle_class_source` | text | yes |  |
 
-Primary key `(id)`. `(customer_id)` references `customers(id)`. 3 check constraints. Unique index `uq_vehicles_customer_plate` `(customer_id, upper(plate))`. Index `vehicles_customer_idx` `(customer_id)`. Index `vehicles_plate_idx` `(upper(plate))` where `plate IS NOT NULL`.
+Primary key `(id)`. `(customer_id)` references `customers(id)`. 6 check constraints. Unique index `uq_vehicles_customer_plate` `(customer_id, upper(plate))`. Index `vehicles_customer_idx` `(customer_id)`. Index `vehicles_plate_idx` `(upper(plate))` where `plate IS NOT NULL`.
 
 #### `vip_clients`
 
@@ -2417,6 +2566,8 @@ Primary key `(id)`. Unique `(provider, external_id)`. 2 check constraints. Index
 - function `ensure_location(p_id uuid, p_slug text, p_name text, p_timezone text DEFAULT 'America/New_York'::text) returns uuid`
 - function `invoice_calc_of(p_invoice uuid) returns TABLE(invoice_id uuid, items bigint, adj bigint, sub bigint, tax bigint, tip bigint, total bigint, paid_orig bigint, credit_applied bigint, paid bigint, refunded bigint, ref_orig bigint, pending_amt bigint, pending_n bigint, issued bigint, balance bigint, refundable bigint, to_orig_max bigint, net bigint, overpaid bigint, status text)`
 - function `ledger_events_guard() returns trigger`
+- function `membership_tier_prices_guard() returns trigger`
+- function `memberships_default_plan_class() returns trigger`
 - function `realtime_channel_name() returns text`
 - function `realtime_events_notify() returns trigger`
 - function `realtime_purge(p_before timestamp with time zone) returns bigint`

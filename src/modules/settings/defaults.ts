@@ -1,6 +1,7 @@
 // Design defaults and the idempotent row-creation used by seeds, tests and new locations.
 import type { Tx } from '../../platform/db.js'
 import { ensureCatalogCategories } from '../catalog/categories.js'
+import { ensureVehicleClasses } from '../catalog/vehicle-classes.js'
 import './schema.js'
 import type { HoursDay } from './hours.js'
 
@@ -16,8 +17,8 @@ export const DEFAULT_HOURS: readonly HoursDay[] = [
 ]
 
 /**
- * Inserts any missing hours, booking_rules, vip_settings and arrival_settings row with the design defaults, and the default catalog
- * categories (ADR 0160).
+ * Inserts any missing hours, booking_rules, vip_settings and arrival_settings row with the design defaults, the default catalog
+ * categories (ADR 0160) and, for a location without any, the default vehicle sizes (ADR 0170).
  */
 export async function ensureDomainDefaults(tx: Tx, locationId: string): Promise<void> {
   await tx
@@ -49,4 +50,5 @@ export async function ensureDomainDefaults(tx: Tx, locationId: string): Promise<
     .onConflict((oc) => oc.column('location_id').doNothing())
     .execute()
   await ensureCatalogCategories(tx, locationId)
+  await ensureVehicleClasses(tx, locationId)
 }

@@ -19,7 +19,7 @@ const verify = (challengeId: string, code: string, ip?: string) => h.post('publi
 async function member(phone: string, name = 'Mia Member'): Promise<string> {
   return h.db.transaction().execute(async (tx) => {
     const { customer } = await upsertCustomerByPhone(tx, { newId: h.newId, now: h.clock.now(), fullName: name, phone, email: 'mia@example.test', source: 'online', smsOptIn: 'online' })
-    await createManualMembership(tx, { locationId: h.locationId, clock: h.clock, newId: h.newId }, { customerId: customer.id, planKey: 'premium', planLabel: 'Gold' }, { userId: 'test', name: 'Test', audit: {} })
+    await createManualMembership(tx, { locationId: h.locationId, clock: h.clock, newId: h.newId }, { customerId: customer.id, planKey: 'gold', planLabel: 'Gold' }, { userId: 'test', name: 'Test', audit: {} })
     return customer.id
   })
 }

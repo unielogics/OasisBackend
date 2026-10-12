@@ -119,7 +119,7 @@ describe('scripts/eval-conversations.ts (simulated models, the real runtime)', (
 
     const price = byId.get('price')!
     const first = price.run.messages.find((m) => m.dir === 'out')!
-    expect(first.text).toMatch(/^Oasis Auto Spa.s automated assistant here\. Signature Hand Wash starts at \$45 for members, \$54 otherwise\. What is your first name\? Reply STOP to opt out\.$/)
+    expect(first.text).toMatch(/^Oasis Auto Spa.s automated assistant here\. Signature Hand Wash starts at \$40\. What is your first name\? Reply STOP to opt out\.$/)
     expect(price.quality?.overall).toBe(5)
     expect(price.turns).toBe(1)
 

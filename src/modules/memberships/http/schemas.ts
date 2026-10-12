@@ -3,7 +3,8 @@ import { AdjustResult } from '../../payments/http/schemas.js'
 
 const Uuid = z.string().uuid()
 export const IdParams = z.object({ id: Uuid })
-const PlanKey = z.enum(['essential', 'premium', 'executive', 'exotic'])
+/** A tier's key (gold, vip, …; ADR 0170). An input may name a tier by its old key (premium, executive). */
+const PlanKey = z.string().regex(/^[a-z][a-z0-9_]{0,31}$/, 'Use a tier key such as gold')
 const Status = z.enum(['pending', 'active', 'past_due', 'paused', 'canceled'])
 const BizDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
 
@@ -156,20 +157,25 @@ export const ApplyResult = AdjustResult.extend({
 export const PlanRule = z.object({
   id: z.string(),
   label: z.string(),
-  includeTags: z.array(z.string()),
-  excludeTags: z.array(z.string()),
-  perCycle: z.number().int().nullable().describe('null = unlimited'),
+  mode: z.enum(['per_cycle', 'every_visit']).describe('per_cycle: perCycle visits a billing cycle; every_visit: on every visit'),
+  perCycle: z.number().int().nullable().describe('null = unlimited (always null for every_visit)'),
   autoApply: z.boolean(),
+  active: z.boolean(),
+  serviceIds: z.array(z.string()).describe('The services the inclusion covers'),
 })
 
 export const PlanView = z.object({
   id: z.string(),
   key: PlanKey,
   name: z.string(),
+  active: z.boolean(),
   perks: z.array(z.string()),
   addonDiscountBp: z.number().int(),
   serviceDiscountBp: z.number().int(),
-  rules: z.array(PlanRule),
+  memberDiscountBp: z.number().int().describe('The member % off, in basis points (ADR 0170)'),
+  vipBooking: z.boolean(),
+  inclusions: z.array(PlanRule),
+  rules: z.array(PlanRule).describe('The inclusions under their old name (deprecated)'),
 })
 
 export const PlansResult = z.object({ plans: z.array(PlanView) })

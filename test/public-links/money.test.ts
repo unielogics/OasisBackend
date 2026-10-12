@@ -14,15 +14,15 @@ const CHECKOUT = 'https://oasis-auto-spa.squarespace.com/checkout/subscribe?prod
 
 async function membershipPage(o: { checkout?: string | null } = {}) {
   const id = await h.customer()
-  if (o.checkout !== null) await sql`update membership_plans set checkout_url = ${o.checkout ?? CHECKOUT} where key = 'premium'`.execute(h.db)
-  const p = await h.page({ customerId: id, kind: 'membership', planKey: 'premium' })
+  if (o.checkout !== null) await sql`update membership_plans set checkout_url = ${o.checkout ?? CHECKOUT} where key = 'gold'`.execute(h.db)
+  const p = await h.page({ customerId: id, kind: 'membership', planKey: 'gold' })
   return { id, ...p }
 }
 
 describe('POST membership/start', () => {
   it('shows the plan, needs a fresh PIN or code, then opens a pending membership and a checkout intent and redirects to Squarespace', async () => {
     const { id, session, body, link } = await membershipPage()
-    expect(body.plan).toMatchObject({ tier: 'gold', planKey: 'premium' })
+    expect(body.plan).toMatchObject({ tier: 'gold', planKey: 'gold' })
     const early = await h.call('POST', 'membership/start', { session, body: { email: 'maria.pays@example.test' } })
     expect(early.statusCode).toBe(403)
     expect(json(early)).toMatchObject({ code: 'IDENTITY_STEP_UP_REQUIRED', meta: { need: 'fresh' } })
@@ -39,7 +39,7 @@ describe('POST membership/start', () => {
     const m = await h.db.selectFrom('memberships').selectAll().where('customer_id', '=', id).executeTakeFirstOrThrow()
     expect(m).toMatchObject({ status: 'pending', source: 'manual', manual_status_at: null })
     const c = await h.db.selectFrom('membership_checkouts').selectAll().where('membership_id', '=', m.id).executeTakeFirstOrThrow()
-    expect(c).toMatchObject({ state: 'open', origin: 'link', link_id: link.id, plan_key: 'premium', expected_email: 'maria.pays@example.test', checkout_url: CHECKOUT })
+    expect(c).toMatchObject({ state: 'open', origin: 'link', link_id: link.id, plan_key: 'gold', expected_email: 'maria.pays@example.test', checkout_url: CHECKOUT })
     const v = await h.db.selectFrom('vehicles').select(['make', 'model', 'year', 'plate']).where('customer_id', '=', id).execute()
     expect(v).toEqual([{ make: 'Tesla', model: 'Model 3', year: 2021, plate: 'NJ-MAR1' }])
     expect((await h.db.selectFrom('client_links').select('uses').where('id', '=', link.id).executeTakeFirstOrThrow()).uses).toBe(1)
@@ -55,11 +55,11 @@ describe('POST membership/start', () => {
     const ref: CustomerRef = { id, emails: row.email && row.email_verified ? [row.email] : [], unverifiedEmails: row.email ? [row.email] : [], phones: [PHONES.maria] }
     const intents = await loadIntentRefs(h.db, h.locationId)
     // inside the intent's window, the intent decides (the tier the design puts first)
-    const inside = linkCustomer({ email: 'maria.pays@example.test', orderId: 'o-1', createdOn: h.clock.now(), product: { key: 'gold', tier: 'premium' } }, [ref], intents)
+    const inside = linkCustomer({ email: 'maria.pays@example.test', orderId: 'o-1', createdOn: h.clock.now(), product: { key: 'gold', tier: 'gold' } }, [ref], intents)
     expect(inside).toMatchObject({ customerId: id, by: 'checkout_intent' })
     // after it, the same email alone links nobody
     const later = new Date(h.clock.now().getTime() + 5 * DAY)
-    const after = linkCustomer({ email: 'maria.pays@example.test', orderId: 'o-2', createdOn: later, product: { key: 'gold', tier: 'premium' } }, [ref], [])
+    const after = linkCustomer({ email: 'maria.pays@example.test', orderId: 'o-2', createdOn: later, product: { key: 'gold', tier: 'gold' } }, [ref], [])
     expect(after.customerId).toBeUndefined()
     expect(after.by).not.toBe('email')
   })
@@ -69,12 +69,12 @@ describe('POST membership/start', () => {
     await h.verifyByCode(session)
     const none = await h.call('POST', 'membership/start', { session, body: { email: 'maria@example.test' } })
     expect(json(none)).toMatchObject({ status: 409, code: 'LINK_CHECKOUT_UNAVAILABLE' })
-    await sql`update membership_plans set checkout_url = ${CHECKOUT} where key = 'premium'`.execute(h.db)
+    await sql`update membership_plans set checkout_url = ${CHECKOUT} where key = 'gold'`.execute(h.db)
     h.advance(6 * MIN)
     const stale = await h.call('POST', 'membership/start', { session, body: { email: 'maria@example.test' } })
     expect(json(stale)).toMatchObject({ status: 403, code: 'IDENTITY_STEP_UP_REQUIRED' })
     await h.db.transaction().execute((tx) =>
-      createManualMembership(tx, { locationId: h.locationId, clock: h.clock, newId: h.newId }, { customerId: id, planKey: 'premium', planLabel: 'Gold' }, { userId: 'test', name: 'Test', audit: {} }),
+      createManualMembership(tx, { locationId: h.locationId, clock: h.clock, newId: h.newId }, { customerId: id, planKey: 'gold', planLabel: 'Gold' }, { userId: 'test', name: 'Test', audit: {} }),
     )
     await h.verifyByCode(session)
     const member = await h.call('POST', 'membership/start', { session, body: { email: 'maria@example.test' } })

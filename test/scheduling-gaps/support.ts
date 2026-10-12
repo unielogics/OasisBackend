@@ -204,7 +204,9 @@ export async function setRuleAutoApply(
   const plans = (await rig.get(rig.superS(), '/membership-plans')).json() as {
     plans: { key: string; rules: { id: string; label: string }[] }[]
   }
-  const rule = plans.plans.find((p) => p.key === planKey)!.rules.find((x) => x.label === label)!
+  // a tier by its key or its old key (premium = gold, executive = vip: ADR 0170)
+  const key = ({ premium: 'gold', executive: 'vip' } as Record<string, string>)[planKey] ?? planKey
+  const rule = plans.plans.find((p) => p.key === key)!.rules.find((x) => x.label === label)!
   const res = await rig.send(
     rig.superS(),
     'PATCH',

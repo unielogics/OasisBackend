@@ -11,7 +11,7 @@ import { findCustomerByPhone, updateCustomer, upsertCustomerByPhone, upsertVehic
 import { hasPin } from '../identity/common.js'
 import { reassignNumber } from '../identity/rebind.js'
 import { staleRecord, staleWhy } from '../identity/stale.js'
-import { ensurePlans, loadPlans, planByKey } from '../memberships/plans.js'
+import { ensurePlans, loadPlans } from '../memberships/plans.js'
 import { notifyManagers } from '../messaging/notify.js'
 import { raiseAlert } from '../payments-sync/db/alerts.js'
 import { listProductRows } from '../payments-sync/db/product-map.js'
@@ -22,7 +22,13 @@ import { enforceLimits, publicLimitChecks } from './limits.js'
 import { phoneOrThrow, resolveMemberToken } from './otp.js'
 import '../identity/problems.js'
 import './problems.js'
-import { tierSpec, type PublicTier, type TierSpec } from './tiers.js'
+import { publicTierOf, type PublicTier } from './tiers.js'
+
+/** The tier as it is sold: its key and the name the membership is sold under (memberships.plan_label). */
+interface TierSpec {
+  key: PublicTier
+  label: string
+}
 
 export interface WebJoinInput {
   tier: PublicTier
@@ -57,13 +63,20 @@ export async function membershipProductFor(
   locationId: string,
   envJson: string | undefined,
   planKey: string,
+  legacyKey: string | null = null,
 ): Promise<TierProduct | undefined> {
   const rows = await listProductRows(tx, locationId)
   const row = rows.find((r) => r.active && r.kind === 'membership' && r.plan === planKey)
   if (row) return { productId: row.productId, sku: row.sku, name: row.name }
+  // the bootstrap map may still name the tier by its old key (premium for gold, executive for vip: ADR 0170)
+  const names = [planKey, ...(legacyKey ? [legacyKey] : [])]
   try {
     const entries = envJson?.trim() ? (JSON.parse(envJson) as ProductMapEntry[]) : []
-    const e = entries.find((x) => x.kind === 'membership' && (x.tier === planKey || (x.tierLabel ?? '').toLowerCase().includes(planKey)))
+    const e = entries.find(
+      (x) =>
+        x.kind === 'membership' &&
+        names.some((k) => x.tier === k || (x.tierLabel ?? '').toLowerCase().includes(k)),
+    )
     if (e) return { productId: e.productId ?? null, sku: e.sku ?? null, name: e.label ?? e.tierLabel ?? null }
   } catch {
     // an invalid bootstrap map is ignored here as the sync ignores it
@@ -87,10 +100,10 @@ export async function joinWeb(
   const phone = phoneOrThrow(input.phone)
   const { clock, newId } = d.app
   const now = clock.now()
-  const spec = tierSpec(input.tier)
   const dctx = { locationId: loc.id, clock, newId }
   await ensurePlans(tx, dctx)
-  const plan = planByKey(await loadPlans(tx, loc.id), spec.planKey)
+  const plan = publicTierOf(await loadPlans(tx, loc.id), input.tier)
+  const spec: TierSpec = { key: input.tier, label: plan?.name ?? input.tier }
   if (!plan)
     throw new AppError('VALIDATION_FAILED', {
       detail: 'That plan is not available right now.',
@@ -163,7 +176,7 @@ export async function joinWeb(
     .executeTakeFirst()
   if (live) throw new AppError('PUBLIC_ALREADY_MEMBER')
 
-  const product = await membershipProductFor(tx, loc.id, d.app.env.SQSP_PRODUCT_MAP, plan.key)
+  const product = await membershipProductFor(tx, loc.id, d.app.env.SQSP_PRODUCT_MAP, plan.key, plan.legacyKey)
   const id = newId()
   await tx
     .insertInto('memberships')
@@ -254,7 +267,7 @@ async function unverifiedJoin(
   r: PublicRequest,
   input: WebJoinInput,
   existing: CustomerRecord,
-  plan: { id: string; key: string; name: string },
+  plan: { id: string; key: string; name: string; legacyKey: string | null },
   spec: TierSpec,
 ): Promise<WebJoinResult> {
   const { clock, newId } = d.app
@@ -265,7 +278,7 @@ async function unverifiedJoin(
     .where('customer_id', '=', existing.id)
     .where('status', 'in', ['pending', 'active', 'past_due', 'paused'])
     .executeTakeFirst()
-  const product = await membershipProductFor(tx, loc.id, d.app.env.SQSP_PRODUCT_MAP, plan.key)
+  const product = await membershipProductFor(tx, loc.id, d.app.env.SQSP_PRODUCT_MAP, plan.key, plan.legacyKey)
   const who = `${existing.fullName} (${formatPhoneDisplay(existing.phoneE164 ?? '')})`
   const typed = [
     `name "${input.name.trim()}"`,

@@ -190,7 +190,7 @@ describe('the website and the stale-record rule (L1, probes R1 and R2; closed by
 
 describe('a membership proves the client from its last matched payment or staff action (L3, probe R3)', () => {
   async function membership(customerId: string, o: { status: string; lastPaidAt: Date | null; manualStatusAt: Date | null }) {
-    const plan = await h.db.selectFrom('membership_plans').select('id').where('key', '=', 'premium').executeTakeFirstOrThrow()
+    const plan = await h.db.selectFrom('membership_plans').select('id').where('key', '=', 'gold').executeTakeFirstOrThrow()
     await h.db
       .insertInto('memberships')
       .values({

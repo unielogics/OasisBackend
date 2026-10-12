@@ -5,6 +5,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { sql } from 'kysely'
 import { z } from 'zod/v4'
+import { seedLegacyWebsitePrices } from '../fixtures/legacy-website-prices.js'
 import { runSeed } from '../../db/seeds/index.js'
 import { SIM_DEVICE_KEY } from '../../db/seeds/messaging.js'
 import { SimAiProvider, simText, simToolUse, type SimResponder, type SimStep } from '../../src/integrations/ai/sim.js'
@@ -32,6 +33,7 @@ const NEWCOMER = '+13055550198'
 beforeAll(async () => {
   // the website's catalog (Signature Hand Wash starts at $45 for members, $54 otherwise; Gold $99, VIP $169 a month)
   await runSeed({ db: w.t.db, clock: w.clock, profile: 'website-catalog' })
+  await seedLegacyWebsitePrices(w.t.db, w.clock, (await w.t.db.selectFrom('locations').select('id').executeTakeFirstOrThrow()).id)
 })
 
 afterAll(async () => {

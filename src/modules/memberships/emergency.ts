@@ -17,6 +17,7 @@ interface HeldCredit {
   cycle_start: Date
   qty: number
   rule_id: string | null
+  inclusion_id: string | null
   appointment_id: string
   invoice_id: string | null
   rule_label: string | null
@@ -26,8 +27,10 @@ interface HeldCredit {
 async function heldCredits(tx: Tx, appointmentIds: readonly string[]): Promise<HeldCredit[]> {
   if (appointmentIds.length === 0) return []
   const r = await sql<HeldCredit>`
-    select e.id, e.membership_id, e.cycle_start, e.qty::int as qty, e.rule_id, e.appointment_id, e.invoice_id, r.label as rule_label
+    select e.id, e.membership_id, e.cycle_start, e.qty::int as qty, e.rule_id, e.inclusion_id, e.appointment_id, e.invoice_id,
+      coalesce(i.label, r.label) as rule_label
     from membership_credit_events e
+    left join membership_inclusions i on i.id = coalesce(e.inclusion_id, e.rule_id)
     left join plan_credit_rules r on r.id = e.rule_id
     where e.kind = 'redeem' and e.appointment_id = any(${appointmentIds as string[]}::uuid[])
       and not exists (select 1 from membership_credit_events x where x.idempotency_key = 'restore:' || e.id::text)
@@ -45,9 +48,9 @@ export async function protectMemberCredits(
   let n = 0
   for (const h of held) {
     const res = await sql`
-      insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, rule_id, appointment_id, invoice_id, note, actor,
+      insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, rule_id, inclusion_id, appointment_id, invoice_id, note, actor,
         idempotency_key, created_at)
-      values (${d.newId()}, ${h.membership_id}, ${h.cycle_start}, 'protect', ${h.qty}, ${h.rule_id}, ${h.appointment_id}, ${h.invoice_id},
+      values (${d.newId()}, ${h.membership_id}, ${h.cycle_start}, 'protect', ${h.qty}, ${h.rule_id}, ${h.inclusion_id}, ${h.appointment_id}, ${h.invoice_id},
         'Emergency closure · credit protected', 'System', ${`protect:${h.appointment_id}:${ctx.emergencyClosureId}`}, ${d.clock.now()})
       on conflict (idempotency_key) do nothing`.execute(tx)
     n += Number(res.numAffectedRows ?? 0)
@@ -74,9 +77,9 @@ export async function restoreClosureCredit(
     select current_period_start from memberships where id = ${held.membership_id}`.execute(tx)
   const cycle = m.rows[0]?.current_period_start ?? held.cycle_start
   await sql`
-    insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, rule_id, appointment_id, invoice_id, note, actor,
+    insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, rule_id, inclusion_id, appointment_id, invoice_id, note, actor,
       idempotency_key, created_at)
-    values (${d.newId()}, ${held.membership_id}, ${cycle}, 'restore', ${held.qty}, ${held.rule_id}, ${held.appointment_id}, ${held.invoice_id},
+    values (${d.newId()}, ${held.membership_id}, ${cycle}, 'restore', ${held.qty}, ${held.rule_id}, ${held.inclusion_id}, ${held.appointment_id}, ${held.invoice_id},
       'Emergency closure · credit restored', 'System', ${`restore:${held.id}`}, ${d.clock.now()})
     on conflict (idempotency_key) do nothing`.execute(tx)
   return { ruleLabel: held.rule_label ?? 'Membership credit' }

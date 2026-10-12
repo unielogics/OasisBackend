@@ -11,6 +11,8 @@ export const BizDate = z
 // the shape check is lenient on purpose: the normaliser answers "Enter a valid mobile number." for anything that is not one
 const Phone = z.string().trim().min(1, 'Enter a valid mobile number.').max(32, 'Enter a valid mobile number.')
 const Short = (n: number) => z.string().trim().max(n)
+/** A membership tier's key (gold, vip, …: the tiers Settings sells online; ADR 0170). */
+export const TierKey = z.string().regex(/^[a-z][a-z0-9_]{0,31}$/, 'Pick one of the membership tiers.')
 
 /** A catalog key: the slug of a name (keys.ts). */
 const KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
@@ -79,7 +81,7 @@ export const OtpVerifyBody = z
 
 export const MemberView = z.object({
   firstName: z.string(),
-  tier: z.enum(['gold', 'vip']).nullable(),
+  tier: TierKey.nullable(),
   washesLeft: z.number().int().nullable(),
   plan: z.string().nullable(),
   active: z.boolean(),
@@ -134,7 +136,7 @@ export const BookingResult = z.object({
 
 export const MembershipBody = z
   .object({
-    tier: z.enum(['gold', 'vip']),
+    tier: TierKey,
     name: z.string().trim().min(1).max(80),
     phone: Phone,
     email: z.string().trim().email().max(120),
@@ -151,7 +153,7 @@ export const MembershipResult = z.object({
   memberRef: z.string(),
   status: z.literal('pending_payment'),
   next: z.literal('checkout_link_by_sms'),
-  tier: z.enum(['gold', 'vip']),
+  tier: TierKey,
   plan: z.string(),
   confirmationBy: z.enum(['sms', 'none']),
 })

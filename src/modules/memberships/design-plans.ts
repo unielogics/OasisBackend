@@ -2,6 +2,10 @@
 // (planTint) and the marketing perks, verbatim. Percent-discount basis points are DISPLAY data (review B12: 1000 / 1500 /
 // 2000 / 2500), never applied automatically; the credit rules are the only thing a visit can redeem (tags are the
 // services.tags vocabulary: express, premium, executive, handwash).
+//
+// ADR 0170: the plans are editable tiers. The design's Premium and Executive are the tiers the website sells, Gold and VIP (keys
+// gold and vip; the old keys stay as legacyKey so old Squarespace product names and links resolve); Essential and Exotic are not
+// sold online. A rule becomes an inclusion: ensurePlans resolves its tags to the services that carry them when it creates it.
 import type { PlanKey } from './schema.js'
 
 export interface DesignCreditRule {
@@ -14,7 +18,13 @@ export interface DesignCreditRule {
 
 export interface DesignPlan {
   key: PlanKey
+  /** The key before ADR 0170 (premium, executive). */
+  legacyKey: string | null
   name: string
+  /** Sold on the website and by the assistant. */
+  public: boolean
+  /** Members get the VIP slot rules. */
+  vipBooking: boolean
   color: string
   bgColor: string
   tint: string
@@ -27,7 +37,10 @@ export interface DesignPlan {
 export const DESIGN_PLANS: readonly DesignPlan[] = [
   {
     key: 'essential',
+    legacyKey: null,
     name: 'Essential',
+    public: false,
+    vipBooking: false,
     color: '#7A8B73',
     bgColor: '#E9EDE4',
     tint: '#5E7A52',
@@ -37,8 +50,11 @@ export const DESIGN_PLANS: readonly DesignPlan[] = [
     rules: [{ label: 'Express wash', includeTags: ['express'], perCycle: 2 }],
   },
   {
-    key: 'premium',
-    name: 'Premium',
+    key: 'gold',
+    legacyKey: 'premium',
+    name: 'Gold',
+    public: true,
+    vipBooking: false,
     color: '#8A6D3B',
     bgColor: '#F2E9D6',
     tint: '#8A6D3B',
@@ -54,8 +70,11 @@ export const DESIGN_PLANS: readonly DesignPlan[] = [
     rules: [{ label: 'Premium wash', includeTags: ['premium'], perCycle: 2 }],
   },
   {
-    key: 'executive',
-    name: 'Executive',
+    key: 'vip',
+    legacyKey: 'executive',
+    name: 'VIP',
+    public: true,
+    vipBooking: true,
     color: '#3B5A8A',
     bgColor: '#E0E8F4',
     tint: '#3B5A8A',
@@ -75,7 +94,10 @@ export const DESIGN_PLANS: readonly DesignPlan[] = [
   },
   {
     key: 'exotic',
+    legacyKey: null,
     name: 'Exotic',
+    public: false,
+    vipBooking: false,
     color: '#7A3B8A',
     bgColor: '#EEDFF2',
     tint: '#7A3B8A',

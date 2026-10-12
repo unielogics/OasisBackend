@@ -14,13 +14,21 @@ import { tintPlaceholder } from '../facts.js'
 import '../welcome/schema.js'
 import { fail, json, ok, shortDate } from './common.js'
 
+/** The vehicle size (ADR 0170, migration 20261014100000) a set_my_vehicle type maps to until facts-v4 (wave Q3d) names sizes. */
+export const SIZE_OF_TYPE: Readonly<Record<VehicleType, string>> = {
+  sedan_coupe: 'compact_car',
+  suv_crossover: 'compact_suv',
+  truck_van: 'truck',
+}
+
 /**
- * The tint matrix rows of a vehicle class. set_my_vehicle's types (sedan_coupe | suv_crossover | truck_van, vehicles.vehicle_type)
- * are the price classes; the matrix (setting catalog.tint_matrix) keys its vehicle types itself ("sedan", "suv", "truck" in the
- * website's matrix), so a class matches its own key or the key of its first word.
+ * The tint rows of a vehicle class. set_my_vehicle's types (sedan_coupe | suv_crossover | truck_van, vehicles.vehicle_type)
+ * are the price classes; the tint rows are keyed by vehicle size since ADR 0170 (compact_car, compact_suv, truck: the type's
+ * size), and by the old matrix's own keys before ("sedan", "suv", "truck"), so a class matches its size, its own key or the key of
+ * its first word.
  */
 export function tintRowsFor<R extends { vehicle: string }>(tint: readonly R[], type: VehicleType): R[] {
-  const keys = new Set([type, type.split('_')[0]!])
+  const keys = new Set([SIZE_OF_TYPE[type], type, type.split('_')[0]!])
   return tint.filter((t) => keys.has(t.vehicle))
 }
 
@@ -231,7 +239,14 @@ export const setMyVehicle: AssistantTool<ToolInputs['set_my_vehicle']> = {
       }
       await tx
         .updateTable('vehicles')
-        .set({ vehicle_type: input.type, ...(same && input.year !== null && same.year === null ? { year: input.year } : {}), ...(same && color && !same.color ? { color } : {}) })
+        .set({
+          vehicle_type: input.type,
+          // the size the type maps to (ADR 0170), unless staff set one
+          vehicle_class: sql<string>`case when vehicle_class_source = 'staff' then vehicle_class else ${SIZE_OF_TYPE[input.type]} end`,
+          vehicle_class_source: sql<'staff' | 'ai'>`case when vehicle_class_source = 'staff' then 'staff' else 'ai' end`,
+          ...(same && input.year !== null && same.year === null ? { year: input.year } : {}),
+          ...(same && color && !same.color ? { color } : {}),
+        })
         .where('id', '=', vehicleId)
         .where('customer_id', '=', customerId)
         .execute()

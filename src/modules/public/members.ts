@@ -5,7 +5,7 @@ import type { Executor } from '../../platform/db.js'
 import type { CustomerRecord } from '../customers/service.js'
 import { creditSummaries } from '../memberships/credits.js'
 import { loadPlans } from '../memberships/plans.js'
-import { tierOfPlan, type PublicTier } from './tiers.js'
+import { tierKeyOf, type PublicTier } from './tiers.js'
 
 export interface MemberView {
   /** "" when the number belongs to nobody yet. */
@@ -53,7 +53,7 @@ export async function memberView(
     : undefined
   return {
     firstName,
-    tier: plan ? tierOfPlan(plan.key) : null,
+    tier: tierKeyOf(plan),
     washesLeft: credits?.creditsLeft ?? null,
     plan: m.planLabel,
     active: true,

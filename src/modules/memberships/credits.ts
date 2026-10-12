@@ -1,17 +1,20 @@
-// Credits of the current membership cycle. The ledger of credit events is append-only: a cycle grant per rule (qty = the
-// rule's per_cycle, or null for an unlimited rule), redeems when a credit is applied to a visit. "Left" is derived: grants
-// minus redeems (plus restores) for the cycle that started at memberships.current_period_start, over the rules of the member's
-// CURRENT plan, so a tier change starts the new plan's credits without touching history.
+// Credits of the current membership cycle. The ledger of credit events is append-only: a cycle grant per per_cycle inclusion
+// (qty = its per_cycle, or null when unlimited), redeems when an inclusion covers a visit. "Left" is derived: grants minus redeems
+// (plus restores) for the cycle that started at memberships.current_period_start, over the inclusions of the member's CURRENT tier,
+// so a tier change starts the new tier's credits without touching history. Events written before ADR 0170 name a credit rule; the
+// migration gave each rule's inclusion the rule's id and backfilled inclusion_id, so they count through it (coalesce(inclusion_id,
+// rule_id)). An every_visit inclusion is not a credit: it has no grant and no count, and always covers.
 import { sql } from 'kysely'
 import type { Clock } from '../../platform/clock.js'
 import type { Executor } from '../../platform/db.js'
 import type { NewId } from '../../platform/ids.js'
-import { ruleCovers, type CreditRule, type Plan } from './plans.js'
+import { inclusionCovers, type Inclusion, type Plan } from './plans.js'
 
 export interface RuleCredit {
+  /** The inclusion's id (the credit rule's id for an inclusion the migration made from one). */
   ruleId: string
   label: string
-  /** The rule redeems itself when a covered visit is completed. */
+  /** The inclusion applies itself when a covered visit is completed. */
   autoApply: boolean
   unlimited: boolean
   /** null when unlimited */
@@ -23,8 +26,9 @@ export interface RuleCredit {
 
 export interface CreditSummary {
   cycleStart: Date | null
+  /** The per_cycle inclusions of the tier (every_visit ones are not credits). */
   rules: RuleCredit[]
-  /** null = unlimited (shown as the infinity sign): at least one rule has no cap */
+  /** null = unlimited (shown as the infinity sign): at least one inclusion has no cap */
   creditsLeft: number | null
   creditsUsed: number
 }
@@ -34,6 +38,10 @@ export interface CycleRef {
   planId: string
   currentPeriodStart: Date | null
 }
+
+/** The inclusions that count as credits: active per_cycle ones. */
+export const creditInclusions = (plan: Plan | undefined): Inclusion[] =>
+  (plan?.inclusions ?? []).filter((i) => i.active && i.mode === 'per_cycle')
 
 export async function creditSummaries(
   db: Executor,
@@ -45,7 +53,13 @@ export async function creditSummaries(
   const events = withCycle.length
     ? await db
         .selectFrom('membership_credit_events')
-        .select(['membership_id', 'cycle_start', 'kind', 'qty', 'rule_id'])
+        .select((eb) => [
+          'membership_id',
+          'cycle_start',
+          'kind',
+          'qty',
+          eb.fn.coalesce('inclusion_id', 'rule_id').as('inclusion_id'),
+        ])
         .where(
           'membership_id',
           'in',
@@ -61,8 +75,8 @@ export async function creditSummaries(
         m.currentPeriodStart &&
         e.cycle_start.getTime() === m.currentPeriodStart.getTime(),
     )
-    const rules: RuleCredit[] = (plan?.rules ?? []).map((r) => {
-      const grants = mine.filter((e) => e.kind === 'grant' && e.rule_id === r.id)
+    const rules: RuleCredit[] = creditInclusions(plan).map((r) => {
+      const grants = mine.filter((e) => e.kind === 'grant' && e.inclusion_id === r.id)
       const granted = grants.length
         ? grants.some((g) => g.qty === null)
           ? null
@@ -72,8 +86,8 @@ export async function creditSummaries(
       // the cycle it is written in: when the redeem belonged to an earlier cycle there is nothing to offset, and the credit
       // comes back as a bonus. 'protect' is a marker only (ADR 0084) and never changes a count.
       const net =
-        mine.filter((e) => e.kind === 'redeem' && e.rule_id === r.id).reduce((n, e) => n + (e.qty ?? 0), 0) -
-        mine.filter((e) => e.kind === 'restore' && e.rule_id === r.id).reduce((n, e) => n + (e.qty ?? 0), 0)
+        mine.filter((e) => e.kind === 'redeem' && e.inclusion_id === r.id).reduce((n, e) => n + (e.qty ?? 0), 0) -
+        mine.filter((e) => e.kind === 'restore' && e.inclusion_id === r.id).reduce((n, e) => n + (e.qty ?? 0), 0)
       const used = Math.max(0, net)
       const bonus = Math.max(0, -net)
       return {
@@ -98,22 +112,29 @@ export async function creditSummaries(
   return out
 }
 
-/** The first rule (in plan order) that covers the service tags and still has a credit this cycle. */
-export function eligibleRule(
+/**
+ * The first inclusion (in tier order) that covers the service and can still cover it: an every_visit one, or a per_cycle one with a
+ * credit left this cycle (or unlimited). `covered: false` names the first covering inclusion when none has a credit left.
+ */
+export function eligibleInclusion(
   plan: Plan,
   summary: CreditSummary,
-  serviceTags: readonly string[],
-): { rule: CreditRule; covered: boolean } | undefined {
-  const covering = plan.rules.filter((r) => ruleCovers(r, serviceTags))
+  serviceId: string,
+): { inclusion: Inclusion; covered: boolean } | undefined {
+  const covering = plan.inclusions.filter((r) => inclusionCovers(r, serviceId))
   if (covering.length === 0) return undefined
   for (const r of covering) {
+    if (r.mode === 'every_visit') return { inclusion: r, covered: true }
     const c = summary.rules.find((x) => x.ruleId === r.id)
-    if (c && (c.unlimited || (c.left ?? 0) > 0)) return { rule: r, covered: true }
+    if (c && (c.unlimited || (c.left ?? 0) > 0)) return { inclusion: r, covered: true }
   }
-  return { rule: covering[0]!, covered: false }
+  return { inclusion: covering[0]!, covered: false }
 }
 
-/** Writes the cycle's grant events for every rule of the plan; idempotent per membership, cycle and rule. Returns how many were new. */
+/**
+ * Writes the cycle's grant events for every per_cycle inclusion of the tier; idempotent per membership, cycle and inclusion (the key
+ * keeps the old rule wording, so a cycle granted before ADR 0170 is not granted again). Returns how many were new.
+ */
 export async function grantCycleCredits(
   db: Executor,
   d: { clock: Clock; newId: NewId },
@@ -122,9 +143,9 @@ export async function grantCycleCredits(
   actor = 'System',
 ): Promise<number> {
   let n = 0
-  for (const r of plan.rules) {
+  for (const r of creditInclusions(plan)) {
     const res = await sql`
-      insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, rule_id, note, actor, idempotency_key, created_at)
+      insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, inclusion_id, note, actor, idempotency_key, created_at)
       values (${d.newId()}, ${m.id}, ${m.currentPeriodStart}, 'grant', ${r.perCycle}, ${r.id}, 'Cycle credits', ${actor},
         ${`grant:${m.id}:${m.currentPeriodStart.toISOString()}:${r.id}`}, ${d.clock.now()})
       on conflict (idempotency_key) do nothing`.execute(db)

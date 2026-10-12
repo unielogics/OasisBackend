@@ -1,14 +1,16 @@
-// Settings → Catalog (ADR 0160, plan A and K): the one catalog the website, the bookings and the AI assistant read. Staff edit here
-// each service's website fields, the categories (name, colour, order, on/off; the key never changes), the tint price matrix, the
-// guest markup and the membership plans' public fields. Reads are open to any signed-in user; every write needs set.services, runs in
-// one transaction, writes an audit row and publishes settings.changed. Versions are ETags; the PUTs (whole-object saves of the
-// Settings screen) require the version they edited (428 without, 412 when stale), PATCH and DELETE enforce it when sent.
+// Settings → Catalog (ADR 0160, plan A and K; ADR 0170): the one catalog the website, the bookings and the AI assistant read. Staff
+// edit here each service's website fields, the categories (name, colour, order, on/off; the key never changes), the vehicle sizes,
+// the prices by size (one regular price per service and size), the membership tiers (perks, member % off, VIP booking, inclusions)
+// with their monthly price per size, and the booking fee. Reads are open to any signed-in user; every write needs set.services, runs
+// in one transaction, writes an audit row and publishes settings.changed. Versions are ETags; the PUTs (whole-object saves of the
+// Settings screen) require the version they edited (428 without, 412 when stale), PATCH and DELETE enforce it when sent. The old
+// writes of the tint matrix, the guest markup and a plan's public fields answer 410 CATALOG_ROUTE_RETIRED (prices are by size now).
 import { access } from '../../../http/access.js'
 import { hasPermission } from '../../../http/authorizer.js'
 import { z } from '../../../http/zod.js'
 import type { Executor } from '../../../platform/db.js'
 import { AppError } from '../../../platform/errors.js'
-import { getSetting, settingDefs, updateSetting, type SettingValue } from '../../../platform/settings.js'
+import { getSetting, updateSetting, type SettingValue } from '../../../platform/settings.js'
 import {
   createCategory,
   deleteCategory,
@@ -16,16 +18,27 @@ import {
   updateCategory,
   type Category,
 } from '../../catalog/categories.js'
-import { listPlanPublic, putPlanPublic, type PlanPublic } from '../../catalog/plans.js'
-import { effectivePrices, type TintMatrix } from '../../catalog/pricing.js'
+import { putClassPrices } from '../../catalog/class-prices.js'
+import { listPlanPublic, type PlanPublic } from '../../catalog/plans.js'
+import { fromPrice, loadPriceBook, loadTierCells, memberCents, missingCells, tierFromPrice, type PriceBook } from '../../catalog/price-book.js'
 import { listCatalog, requireService, type CatalogService } from '../../catalog/service.js'
+import { createTier, deleteTier, listTiers, putTier, putTierPrices, type Tier, type TierFields } from '../../catalog/tiers.js'
+import {
+  createVehicleClass,
+  deleteVehicleClass,
+  listVehicleClasses,
+  updateVehicleClass,
+  type VehicleClass,
+} from '../../catalog/vehicle-classes.js'
 import { putWebsiteFields, syncBookingPrices } from '../../catalog/website.js'
+import { loadPlans } from '../../memberships/plans.js'
 import { etag, expectedVersion, idem, inTx, requestContext, requiredVersion, storedUserId, type SettingsRuntime } from './runtime.js'
 
 const TAGS = ['catalog']
 const Cents = z.number().int()
 const Version = z.number().int().min(0)
 const VipInclusion = z.enum(['included', 'allowance', 'none'])
+const Slug = z.string().max(64)
 
 export const CategoryView = z.object({
   key: z.string(),
@@ -37,31 +50,100 @@ export const CategoryView = z.object({
   version: z.number().int(),
 })
 
+export const VehicleClassView = z.object({
+  key: z.string().describe('Never changes: prices, tiers, vehicles, memberships and visits refer to it'),
+  label: z.string(),
+  sort: z.number().int().describe('Size order, smallest first'),
+  active: z.boolean(),
+  version: z.number().int(),
+})
+
 export const WebsiteServiceView = z.object({
   id: z.string(),
   kind: z.enum(['package', 'addon']),
   name: z.string(),
   active: z.boolean(),
   priceCents: Cents.describe(
-    'What a booking charges. For an item priced on the website (a member price, or a tint film) it follows the guest price; otherwise it is the plain price, which is also the member price',
+    'The starting price (the lowest price over the active sizes) for a service priced by size, kept in step by every grid save; otherwise the base price a booking charges',
   ),
   durationMin: z.number().int(),
   tags: z.array(z.string()),
   category: z.string(),
   publicName: z.string().nullable(),
   description: z.string().nullable(),
-  memberPriceCents: Cents.nullable().describe('null: the plain price'),
-  guestPriceCents: Cents.nullable().describe('null: the member price plus the guest markup, rounded half up to whole dollars'),
-  vipInclusion: VipInclusion,
-  vipNote: z.string().nullable(),
+  memberPriceCents: Cents.nullable().describe('Deprecated (ADR 0170): the stored pre-size member price, read only'),
+  guestPriceCents: Cents.nullable().describe('Deprecated (ADR 0170): the stored pre-size guest price, read only'),
+  vipInclusion: VipInclusion.describe('Deprecated (ADR 0170): VIP members get the VIP tier’s inclusions'),
+  vipNote: z.string().nullable().describe('Deprecated (ADR 0170)'),
   quoteOnly: z.boolean(),
   visibleOnline: z.boolean(),
   sort: z.number().int(),
   effective: z
     .object({ memberPriceCents: Cents, guestPriceCents: Cents, tintFilm: z.string().nullable() })
     .describe(
-      'The starting prices the website and the assistant state (design §3b; a tint package: the lowest prices of its film in the tint matrix)',
+      'The starting prices the website and the assistant state: the regular starting price, and the member one at the lowest % off of the public tiers that have a price (ADR 0170)',
     ),
+  version: z.number().int(),
+})
+
+const PriceCell = z.object({
+  class: z.string(),
+  cents: Cents,
+  maxCents: Cents.nullable().describe('The “up to” price of a range (tint); null = one price'),
+})
+
+export const PriceRowView = z.object({
+  serviceId: z.string(),
+  version: z.number().int().describe('The service’s version: the token a grid save of this row takes'),
+  cells: z.array(PriceCell).describe('The sizes that have a price, in size order (a size not listed is not set)'),
+  fromCents: Cents.describe('The starting price: the lowest over the active sizes, else the base price'),
+  missing: z.number().int().describe('Active sizes without a price (priced at the starting price, confirm at the shop)'),
+})
+
+const InclusionView = z.object({
+  id: z.string(),
+  label: z.string(),
+  mode: z.enum(['per_cycle', 'every_visit']),
+  perCycle: z.number().int().nullable().describe('per_cycle: visits a billing cycle, null = unlimited; always null for every_visit'),
+  autoApply: z.boolean().describe('Applied by itself when a covered visit is completed'),
+  active: z.boolean(),
+  serviceIds: z.array(z.string()),
+})
+
+const TierPriceView = z.object({
+  class: z.string(),
+  monthlyCents: Cents,
+  priceVersion: z.number().int(),
+  effectiveFrom: z.iso.datetime(),
+  squareState: z.enum(['pending', 'synced', 'failed']).optional().describe('Staff with set.services only'),
+})
+
+export const TierView = z.object({
+  key: z.string().describe('Never changes'),
+  name: z.string(),
+  colour: z.string().describe('#RRGGBB: the board badge colour'),
+  bgColour: z.string(),
+  sort: z.number().int(),
+  active: z.boolean(),
+  public: z.boolean().describe('Sold on the website and by the assistant'),
+  vipBooking: z.boolean().describe('Members get the VIP slot rules'),
+  memberDiscountBp: z.number().int().describe('The member % off every line the membership does not cover (1000 = 10%)'),
+  maxVehicles: z.number().int().nullable(),
+  perks: z.array(z.string()),
+  checkoutUrl: z.string().nullable().describe('The Squarespace subscription checkout (internal: never in the public catalog)'),
+  legacyKey: z.string().nullable().describe('The key before ADR 0170 (premium, executive)'),
+  priceVersion: z.number().int().describe('The token a tier-price save of this tier takes'),
+  version: z.number().int().describe('The token PUT /catalog/tiers/{key} takes'),
+  squarePlanId: z.string().nullable().optional().describe('Staff with set.services only'),
+  inclusions: z.array(InclusionView),
+  prices: z.array(TierPriceView).describe('The current monthly price of each size that has one, in size order'),
+  fromMonthlyCents: Cents.nullable().describe('The lowest current price over the active sizes; null = no price, not sold online'),
+  sold: z.boolean().describe('Memberships, links or checkouts name it: it can be turned off, never deleted'),
+})
+
+export const GuestFeeView = z.object({
+  cents: Cents.describe('The booking fee guests pay toward the visit (members pay none)'),
+  collect: z.enum(['counter', 'link']),
   version: z.number().int(),
 })
 
@@ -89,12 +171,12 @@ export const TintMatrixView = z.object({ ...TintMatrixShape, version: z.number()
 export const GuestMarkupView = z.object({ pct: z.number().int(), version: z.number().int() })
 
 export const PlanPublicView = z.object({
-  key: z.enum(['essential', 'premium', 'executive', 'exotic']),
-  name: z.string().describe('The dashboard plan’s name'),
+  key: z.string(),
+  name: z.string().describe('The tier’s name'),
   active: z.boolean(),
-  websiteTier: z.enum(['gold', 'vip']).nullable().describe('The website tier sold over this plan'),
-  publicLabel: z.string().nullable(),
-  monthlyPriceCents: Cents.nullable(),
+  websiteTier: z.string().nullable().describe('The key the website sells it under (a public tier), or null'),
+  publicLabel: z.string().nullable().describe('The tier’s name (deprecated)'),
+  monthlyPriceCents: Cents.nullable().describe('The tier’s starting monthly price over the active sizes'),
   perks: z.array(z.string()),
   checkoutUrl: z.string().nullable().describe('The Squarespace subscription checkout (internal: never in the public catalog)'),
   version: z.number().int(),
@@ -104,13 +186,19 @@ export const CatalogSettingsView = z.object({
   categories: z.array(CategoryView),
   packages: z.array(WebsiteServiceView),
   addons: z.array(WebsiteServiceView),
-  tintMatrix: TintMatrixView,
-  guestMarkup: GuestMarkupView,
+  vehicleClasses: z.array(VehicleClassView).describe('Every size in size order, turned-off ones included'),
+  prices: z.array(PriceRowView).describe('One row per listed service (packages, then add-ons)'),
+  missingPrices: z.number().int().describe('Cells not set over the listed services and the active sizes (“N prices not set”)'),
+  tiers: z.array(TierView),
+  guestFee: GuestFeeView,
+  tintMatrix: TintMatrixView.describe('Deprecated (ADR 0170): the stored pre-size matrix, read only'),
+  guestMarkup: GuestMarkupView.describe('Deprecated (ADR 0170): the stored pre-size markup, read only'),
   guestBookingFeeCents: Cents,
-  plans: z.array(PlanPublicView),
+  plans: z.array(PlanPublicView).describe('Deprecated (ADR 0170): the tiers’ public fields; read `tiers`'),
 })
 
 const categoryView = (c: Category): z.infer<typeof CategoryView> => ({ ...c })
+const vehicleClassView = (c: VehicleClass): z.infer<typeof VehicleClassView> => ({ ...c })
 
 const planView = (p: PlanPublic): z.infer<typeof PlanPublicView> => ({
   key: p.key,
@@ -124,75 +212,137 @@ const planView = (p: PlanPublic): z.infer<typeof PlanPublicView> => ({
   version: p.version,
 })
 
+export const tierView = (t: Tier, admin: boolean): z.infer<typeof TierView> => ({
+  key: t.key,
+  name: t.name,
+  colour: t.colour,
+  bgColour: t.bgColour,
+  sort: t.sort,
+  active: t.active,
+  public: t.public,
+  vipBooking: t.vipBooking,
+  memberDiscountBp: t.memberDiscountBp,
+  maxVehicles: t.maxVehicles,
+  perks: t.perks,
+  checkoutUrl: t.checkoutUrl,
+  legacyKey: t.legacyKey,
+  priceVersion: t.priceVersion,
+  version: t.version,
+  ...(admin ? { squarePlanId: t.squarePlanId } : {}),
+  inclusions: t.inclusions.map((i) => ({
+    id: i.id,
+    label: i.label,
+    mode: i.mode,
+    perCycle: i.perCycle,
+    autoApply: i.autoApply,
+    active: i.active,
+    serviceIds: i.serviceIds,
+  })),
+  prices: t.prices.map((p) => ({
+    class: p.class,
+    monthlyCents: p.monthlyCents,
+    priceVersion: p.priceVersion,
+    effectiveFrom: p.effectiveFrom.toISOString(),
+    ...(admin ? { squareState: p.squareState } : {}),
+  })),
+  fromMonthlyCents: t.fromMonthlyCents,
+  sold: t.sold,
+})
+
+/** What the website and the assistant state as starting prices: the regular one and the member one at `memberBp`. */
 interface PricingContext {
-  markupPct: number
-  tint: TintMatrix
+  book: PriceBook
+  memberBp: number
+  tintFilms: ReadonlySet<string>
+}
+
+/** The lowest member % off over the public active tiers that have a price ("members from"); 0 when none. */
+export async function memberDisplayBp(db: Executor, locationId: string, book: PriceBook): Promise<number> {
+  const [plans, cells] = await Promise.all([loadPlans(db, locationId), loadTierCells(db, locationId)])
+  const priced = plans.filter((p) => p.active && p.public && tierFromPrice(book, cells.get(p.id) ?? []) !== null)
+  return priced.length ? Math.min(...priced.map((p) => p.memberDiscountBp)) : 0
 }
 
 async function pricingOf(db: Executor, locationId: string): Promise<PricingContext> {
-  const [markup, tint] = await Promise.all([
-    getSetting(db, locationId, 'catalog.guest_markup_pct'),
-    getSetting(db, locationId, 'catalog.tint_matrix'),
-  ])
-  return { markupPct: markup.value, tint: tint.value }
+  const book = await loadPriceBook(db, locationId)
+  return { book, memberBp: await memberDisplayBp(db, locationId, book), tintFilms: new Set(book.tintFilms.map((f) => f.key)) }
 }
 
-export const websiteServiceView = (s: CatalogService, p: PricingContext): z.infer<typeof WebsiteServiceView> => ({
-  id: s.id,
-  kind: s.kind,
-  name: s.name,
-  active: s.active,
-  priceCents: s.priceCents,
-  durationMin: s.durationMin,
-  tags: s.tags,
-  category: s.category,
-  publicName: s.publicName,
-  description: s.description,
-  memberPriceCents: s.memberPriceCents,
-  guestPriceCents: s.guestPriceCents,
-  vipInclusion: s.vipInclusion,
-  vipNote: s.vipNote,
-  quoteOnly: s.quoteOnly,
-  visibleOnline: s.visibleOnline,
-  sort: s.sort,
-  effective: effectivePrices(s, p),
-  version: s.version,
-})
+export const websiteServiceView = (s: CatalogService, p: PricingContext): z.infer<typeof WebsiteServiceView> => {
+  const from = fromPrice(p.book, s.id).cents
+  return {
+    id: s.id,
+    kind: s.kind,
+    name: s.name,
+    active: s.active,
+    priceCents: s.priceCents,
+    durationMin: s.durationMin,
+    tags: s.tags,
+    category: s.category,
+    publicName: s.publicName,
+    description: s.description,
+    memberPriceCents: s.memberPriceCents,
+    guestPriceCents: s.guestPriceCents,
+    vipInclusion: s.vipInclusion,
+    vipNote: s.vipNote,
+    quoteOnly: s.quoteOnly,
+    visibleOnline: s.visibleOnline,
+    sort: s.sort,
+    effective: {
+      memberPriceCents: memberCents(from, p.memberBp),
+      guestPriceCents: from,
+      tintFilm: s.category === 'tint' ? (s.tags.find((t) => p.tintFilms.has(t)) ?? null) : null,
+    },
+    version: s.version,
+  }
+}
+
+const priceRowView = (s: CatalogService, book: PriceBook): z.infer<typeof PriceRowView> => {
+  const cells = book.cells.get(s.id)
+  const order = new Map(book.classes.map((c, i) => [c.key, i]))
+  return {
+    serviceId: s.id,
+    version: s.version,
+    cells: [...(cells?.entries() ?? [])]
+      .map(([cls, c]) => ({ class: cls, cents: c.cents, maxCents: c.maxCents }))
+      .sort((a, b) => (order.get(a.class) ?? 99) - (order.get(b.class) ?? 99) || (a.class < b.class ? -1 : 1)),
+    fromCents: fromPrice(book, s.id).cents,
+    missing: s.quoteOnly ? 0 : missingCells(book, s.id),
+  }
+}
 
 const tintView = (r: { value: SettingValue<'catalog.tint_matrix'>; version: number }): z.infer<typeof TintMatrixView> => ({
   ...r.value,
   version: r.version,
 })
 
-/** The registry's rules for the tint matrix (keys, ranges, known pairs, no duplicates), as a 422 with body paths. */
-function parseTintMatrix(v: unknown): TintMatrix {
-  const r = settingDefs['catalog.tint_matrix'].schema.safeParse(v)
-  if (!r.success)
-    throw new AppError('VALIDATION_FAILED', {
-      detail: r.error.issues[0]?.message ?? 'Check the tint prices.',
-      errors: r.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
-    })
-  return r.data
-}
-
 export async function loadCatalogSettings(
   db: Executor,
   locationId: string,
   includeInactive: boolean,
+  admin = false,
 ): Promise<z.infer<typeof CatalogSettingsView>> {
-  const [categories, catalog, tint, markup, fee, plans] = await Promise.all([
+  const [categories, catalog, tint, markup, fee, plans, classes, tiers, p] = await Promise.all([
     listCategories(db, locationId),
     listCatalog(db, locationId, { includeInactive }),
     getSetting(db, locationId, 'catalog.tint_matrix'),
     getSetting(db, locationId, 'catalog.guest_markup_pct'),
     getSetting(db, locationId, 'booking.guest_fee'),
     listPlanPublic(db, locationId),
+    listVehicleClasses(db, locationId),
+    listTiers(db, locationId),
+    pricingOf(db, locationId),
   ])
-  const p = { markupPct: markup.value, tint: tint.value }
+  const prices = [...catalog.packages, ...catalog.addons].map((s) => priceRowView(s, p.book))
   return {
     categories: categories.map(categoryView),
     packages: catalog.packages.map((s) => websiteServiceView(s, p)),
     addons: catalog.addons.map((s) => websiteServiceView(s, p)),
+    vehicleClasses: classes.map(vehicleClassView),
+    prices,
+    missingPrices: prices.reduce((n, r) => n + r.missing, 0),
+    tiers: tiers.map((t) => tierView(t, admin)),
+    guestFee: { cents: fee.value.cents, collect: fee.value.collect, version: fee.version },
     tintMatrix: tintView(tint),
     guestMarkup: { pct: markup.value, version: markup.version },
     guestBookingFeeCents: fee.value.cents,
@@ -202,6 +352,43 @@ export async function loadCatalogSettings(
 
 const NullableText = (max: number) => z.string().max(max).nullable()
 const CategoryKeyParam = z.object({ key: z.string().max(64) })
+
+const InclusionBody = z
+  .object({
+    id: z.string().uuid().optional(),
+    label: z.string().max(200),
+    mode: z.enum(['per_cycle', 'every_visit']),
+    perCycle: z.number().int().nullable(),
+    autoApply: z.boolean(),
+    active: z.boolean().optional(),
+    serviceIds: z.array(z.string().uuid()).max(100),
+  })
+  .strict()
+
+const TierBody = {
+  name: z.string().max(200),
+  colour: z.string().max(16),
+  bgColour: z.string().max(16).nullish(),
+  sort: z.number().int(),
+  active: z.boolean(),
+  public: z.boolean(),
+  vipBooking: z.boolean(),
+  memberDiscountBp: z.number().int(),
+  maxVehicles: z.number().int().nullable(),
+  perks: z.array(z.string().max(500)).max(40),
+  checkoutUrl: NullableText(4096),
+  inclusions: z.array(InclusionBody).max(40),
+}
+
+const RETIRED =
+  'Retired (ADR 0170): answers 410 CATALOG_ROUTE_RETIRED. Prices are set per vehicle size (PUT /catalog/prices) and tiers in PUT /catalog/tiers/{key} and PUT /catalog/tier-prices.'
+
+const retired = async (): Promise<never> => {
+  throw new AppError('CATALOG_ROUTE_RETIRED')
+}
+
+const isAdmin = (req: { auth?: Parameters<typeof hasPermission>[0] | null }): boolean =>
+  req.auth != null && hasPermission(req.auth, 'set.services')
 
 export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
   const { app } = rt
@@ -213,9 +400,10 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
       schema: {
         tags: TAGS,
         operationId: 'getCatalogSettings',
-        summary: 'Settings → Catalog in one call: categories, every service’s website fields, tint matrix, guest markup, plans',
+        summary:
+          'Settings → Catalog in one call: categories, every service’s website fields, vehicle sizes, prices by size, membership tiers, booking fee',
         description:
-          'Active services only; `includeInactive=true` (retired ones too) needs set.services. Each part carries its own `version` (the token its save takes).',
+          'Active services only; `includeInactive=true` (retired ones too) needs set.services. Each part carries its own `version` (the token its save takes): a price row carries its service’s version, a tier its `version` (PUT /catalog/tiers/{key}) and `priceVersion` (PUT /catalog/tier-prices). Square fields of the tiers are shown to set.services holders only. `tintMatrix`, `guestMarkup` and `plans` are the deprecated pre-size data, read only (ADR 0170).',
         querystring: z.object({ includeInactive: z.enum(['true', 'false']).default('false') }),
         response: { 200: CatalogSettingsView },
       },
@@ -224,7 +412,7 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
       const includeInactive = req.query.includeInactive === 'true'
       if (includeInactive && !hasPermission(req.auth!, 'set.services'))
         throw new AppError('FORBIDDEN', { meta: { required: ['set.services'], mode: 'all' } })
-      return loadCatalogSettings(app.db, requestContext(req).locationId, includeInactive)
+      return loadCatalogSettings(app.db, requestContext(req).locationId, includeInactive, isAdmin(req))
     },
   )
 
@@ -237,7 +425,7 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
       schema: {
         tags: TAGS,
         operationId: 'getCatalogService',
-        summary: 'A package’s or add-on’s website fields with the prices the website shows (ETag = version)',
+        summary: 'A package’s or add-on’s website fields with the starting prices the website shows (ETag = version)',
         params: z.object({ id: z.string().uuid() }),
         response: { 200: WebsiteServiceView },
       },
@@ -257,11 +445,10 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
       schema: {
         tags: TAGS,
         operationId: 'putCatalogService',
-        summary: 'Save a package’s or add-on’s website fields (category, public name, description, prices, VIP, quote-only, online, order)',
+        summary: 'Save a package’s or add-on’s website fields (category, public name, description, quote-only, online, order)',
         description:
-          'All fields, replaced together; `version` (or If-Match) is required: 428 without, 412 VERSION_CONFLICT when stale (the service’s version, shared with checklist and catalog edits). ' +
-          'Texts are trimmed (blank = none). 422: an unknown or turned-off category (a service may keep a category that was turned off later), a price outside 0..$100,000, a guest price without a member price or below it, `allowance` without a `vipNote`. ' +
-          'The member and guest prices (`effective`) are the starting prices the website and the assistant state; for an item priced on the website (a member price, or a tint film) what a booking charges (`priceCents`) is set to its guest price by the same save. ' +
+          'All fields, replaced together; `version` (or If-Match) is required: 428 without, 412 VERSION_CONFLICT when stale (the service’s version, shared with checklist, price and catalog edits). ' +
+          'Texts are trimmed (blank = none). 422: an unknown or turned-off category (a service may keep a category that was turned off later). Prices are not website fields (ADR 0170): they are set per vehicle size (PUT /catalog/prices); what VIP members get is the VIP tier’s inclusions. ' +
           'A category change re-derives `categories` on the visits not yet finished that hold the service (`appointmentsUpdated`). Publishes `settings.changed {section: "services"}`.',
         params: z.object({ id: z.string().uuid() }),
         body: z
@@ -269,10 +456,6 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
             category: z.string().max(32),
             publicName: NullableText(200),
             description: NullableText(2000),
-            memberPriceCents: Cents.nullable(),
-            guestPriceCents: Cents.nullable(),
-            vipInclusion: VipInclusion,
-            vipNote: NullableText(400),
             quoteOnly: z.boolean(),
             visibleOnline: z.boolean(),
             sort: z.number().int(),
@@ -413,7 +596,375 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
     },
   )
 
-  // ---- tint matrix and guest markup (settings keys) -------------------------------------------------------------------
+  // ---- vehicle sizes ---------------------------------------------------------------------------------------------------
+
+  app.get(
+    '/catalog/vehicle-classes',
+    {
+      config: { access: access.authenticated() },
+      schema: {
+        tags: TAGS,
+        operationId: 'listVehicleClasses',
+        summary: 'The vehicle sizes in size order, turned-off ones included, with their versions',
+        response: { 200: z.object({ vehicleClasses: z.array(VehicleClassView) }) },
+      },
+    },
+    async (req) => ({ vehicleClasses: (await listVehicleClasses(app.db, requestContext(req).locationId)).map(vehicleClassView) }),
+  )
+
+  app.post(
+    '/catalog/vehicle-classes',
+    {
+      config: { access: access.perm('set.services'), idempotency: 'optional' },
+      schema: {
+        tags: TAGS,
+        operationId: 'createVehicleClass',
+        summary: 'Add a vehicle size',
+        description:
+          '`key` is immutable once created: a lowercase letter, then letters, digits or underscores (up to 32). `label` up to 40 characters, unique (case-insensitively). `sort` defaults to after the last (size order, smallest first). 409 CLASS_KEY_TAKEN; 422 CLASS_LIMIT past 12 sizes. A new size has no prices (“not set”). Publishes `settings.changed {section: "catalog", key: "vehicle_classes"}`.',
+        body: z
+          .object({ key: z.string().max(64), label: z.string().max(200), sort: z.number().int().optional(), active: z.boolean().optional() })
+          .strict(),
+        response: { 201: VehicleClassView },
+      },
+    },
+    idem(async (req, tx) => {
+      const c = requestContext(req)
+      const b = req.body as { key: string; label: string; sort?: number; active?: boolean }
+      const vc = await createVehicleClass(tx, { ...b, locationId: c.locationId, audit: c.audit })
+      return { status: 201, body: vehicleClassView(vc) }
+    }),
+  )
+
+  app.patch(
+    '/catalog/vehicle-classes/:key',
+    {
+      config: { access: access.perm('set.services') },
+      schema: {
+        tags: TAGS,
+        operationId: 'updateVehicleClass',
+        summary: 'Rename, reorder or turn a vehicle size on or off (the key never changes)',
+        description:
+          '`version` (or If-Match) is optional and enforced when sent. The last size that is on cannot be turned off (422). A size that is off is not offered and its prices are kept but not used; turning one on or off moves the starting price of the services priced on it (audited `catalog.price.sync`). Publishes `settings.changed {section: "catalog", key: "vehicle_classes"}`.',
+        params: CategoryKeyParam,
+        body: z
+          .object({
+            label: z.string().max(200).optional(),
+            sort: z.number().int().optional(),
+            active: z.boolean().optional(),
+            version: Version.optional(),
+          })
+          .strict(),
+        response: { 200: VehicleClassView.extend({ changed: z.boolean() }) },
+      },
+    },
+    async (req, reply) => {
+      const c = requestContext(req)
+      const { version, ...patch } = req.body
+      const r = await inTx(app.db, async (tx) => {
+        const out = await updateVehicleClass(tx, {
+          locationId: c.locationId,
+          key: req.params.key,
+          patch,
+          expectedVersion: expectedVersion(req, version),
+          audit: c.audit,
+        })
+        if (out.changed) await syncBookingPrices(tx, { locationId: c.locationId, reason: 'catalog.vehicle_classes', audit: c.audit })
+        return out
+      })
+      etag(reply, r.vehicleClass.version)
+      return { ...vehicleClassView(r.vehicleClass), changed: r.changed }
+    },
+  )
+
+  app.delete(
+    '/catalog/vehicle-classes/:key',
+    {
+      config: { access: access.perm('set.services') },
+      schema: {
+        tags: TAGS,
+        operationId: 'deleteVehicleClass',
+        summary: 'Delete a vehicle size nothing uses',
+        description:
+          '409 CLASS_IN_USE (meta names the counts) while any price, tier price (current or past), membership, membership checkout, credit event, vehicle or visit uses it: turn it off instead. The last size that is on cannot be deleted (422). If-Match is enforced when sent.',
+        params: CategoryKeyParam,
+        response: { 200: z.object({ key: z.string(), removed: z.literal(true) }) },
+      },
+    },
+    async (req) => {
+      const c = requestContext(req)
+      const v = req.headers['if-match'] ? expectedVersion(req, undefined) : undefined
+      const vc = await inTx(app.db, (tx) =>
+        deleteVehicleClass(tx, { locationId: c.locationId, key: req.params.key, expectedVersion: v, audit: c.audit }),
+      )
+      return { key: vc.key, removed: true as const }
+    },
+  )
+
+  // ---- prices by size ----------------------------------------------------------------------------------------------------
+
+  app.put(
+    '/catalog/prices',
+    {
+      config: { access: access.perm('set.services') },
+      schema: {
+        tags: TAGS,
+        operationId: 'putCatalogPrices',
+        summary: 'Save rows of the price grid (services × vehicle sizes), all or nothing',
+        description:
+          'Each row names a service and the version it was edited at (its service’s version: 428 when a row has none, 412 VERSION_CONFLICT when stale with `meta.row` and `meta.serviceId` naming the row; nothing is saved). Cells: a size and a regular price in cents (0 to $100,000), `maxCents` for an “up to” price (a range, tint), or `cents: null` to clear it (not set: priced at the starting price, confirm at the shop). Sizes a row does not list keep their price. 422 for an unknown size, a size twice in a row, a service twice. ' +
+          'Every changed row bumps the service’s version, sets `priceCents` to the new starting price, is audited (`catalog.price.update`) and publishes `settings.changed {section: "services"}`; the save publishes `settings.changed {section: "catalog", key: "prices"}`.',
+        body: z
+          .object({
+            rows: z
+              .array(
+                z
+                  .object({
+                    serviceId: z.string().max(64),
+                    version: Version.optional(),
+                    cells: z
+                      .array(z.object({ class: Slug, cents: Cents.nullable(), maxCents: Cents.nullable().default(null) }).strict())
+                      .max(24),
+                  })
+                  .strict(),
+              )
+              .max(200),
+          })
+          .strict(),
+        response: {
+          200: z.object({
+            rows: z.array(PriceRowView.extend({ changed: z.boolean() })),
+            missingPrices: z.number().int(),
+          }),
+        },
+      },
+    },
+    async (req) => {
+      const c = requestContext(req)
+      const rows = req.body.rows.map((r, i) => {
+        if (r.version === undefined)
+          throw new AppError('PRECONDITION_REQUIRED', { meta: { row: i, serviceId: r.serviceId } })
+        return { serviceId: r.serviceId, version: r.version, cells: r.cells }
+      })
+      return inTx(app.db, async (tx) => {
+        const saved = await putClassPrices(tx, {
+          locationId: c.locationId,
+          rows,
+          userId: await storedUserId(tx, c.userId),
+          audit: c.audit,
+        })
+        const book = await loadPriceBook(tx, c.locationId)
+        const out = await Promise.all(
+          saved.map(async (r) => ({
+            ...priceRowView(await requireService(tx, c.locationId, r.serviceId), book),
+            changed: r.changed,
+          })),
+        )
+        const catalog = await listCatalog(tx, c.locationId)
+        const missing = [...catalog.packages, ...catalog.addons].reduce(
+          (n, s) => n + (s.quoteOnly ? 0 : missingCells(book, s.id)),
+          0,
+        )
+        return { rows: out, missingPrices: missing }
+      })
+    },
+  )
+
+  // ---- membership tiers --------------------------------------------------------------------------------------------------
+
+  app.get(
+    '/catalog/tiers',
+    {
+      config: { access: access.authenticated() },
+      schema: {
+        tags: TAGS,
+        operationId: 'listCatalogTiers',
+        summary: 'The membership tiers with their inclusions and monthly prices by size',
+        description: 'Square fields (`squarePlanId`, each price’s `squareState`) are shown to set.services holders only.',
+        response: { 200: z.object({ tiers: z.array(TierView) }) },
+      },
+    },
+    async (req) => ({ tiers: (await listTiers(app.db, requestContext(req).locationId)).map((t) => tierView(t, isAdmin(req))) }),
+  )
+
+  app.post(
+    '/catalog/tiers',
+    {
+      config: { access: access.perm('set.services'), idempotency: 'optional' },
+      schema: {
+        tags: TAGS,
+        operationId: 'createCatalogTier',
+        summary: 'Add a membership tier',
+        description:
+          '`key` is immutable once created (a lowercase slug, up to 32); it cannot be a key or an old key (premium, executive) another tier holds (409 TIER_KEY_TAKEN). At most 12 tiers. The tier starts without prices (not sold online until it has one): set them with PUT /catalog/tier-prices. Body fields as PUT /catalog/tiers/{key}. Publishes `settings.changed {section: "catalog", key: "tiers"}`.',
+        body: z.object({ key: z.string().max(64), ...TierBody }).strict(),
+        response: { 201: TierView },
+      },
+    },
+    idem(async (req, tx) => {
+      const c = requestContext(req)
+      const { key, ...fields } = req.body as { key: string } & TierFields
+      const t = await createTier(tx, { newId: app.newId }, { locationId: c.locationId, key, fields, audit: c.audit })
+      return { status: 201, body: tierView(t, true) }
+    }),
+  )
+
+  app.put(
+    '/catalog/tiers/:key',
+    {
+      config: { access: access.perm('set.services') },
+      schema: {
+        tags: TAGS,
+        operationId: 'putCatalogTier',
+        summary: 'Save a membership tier: name, colour, perks, member % off, VIP booking, car cap, online, inclusions',
+        description:
+          'The whole tier, replaced together; `version` (or If-Match) is required: 428 without, 412 when stale. The key never changes. `memberDiscountBp` 0 to 10000 (the member % off every line the membership does not cover, rounded to whole dollars); `vipBooking` gives members the VIP slot rules; `maxVehicles` 1 to 20 or null; perks up to 12, each up to 120 characters, trimmed, no duplicates; `checkoutUrl` a Squarespace checkout (https on squarespace.com) or null. ' +
+          '`inclusions` replace the tier’s list in order: an `id` keeps an existing inclusion (its credit history follows it), no `id` adds one; an inclusion left out is deleted, or turned off when credits name it. Each covers `serviceIds` (at least one service of the catalog), `mode` per_cycle (`perCycle` visits a cycle, null = unlimited) or every_visit (`perCycle` null), and `autoApply`. Audited `catalog.tier.update`; publishes `settings.changed {section: "catalog", key: "tiers"}`.',
+        params: CategoryKeyParam,
+        body: z.object({ ...TierBody, version: Version.optional() }).strict(),
+        response: { 200: TierView.extend({ changed: z.boolean() }) },
+      },
+    },
+    async (req, reply) => {
+      const c = requestContext(req)
+      const { version, ...fields } = req.body
+      const v = requiredVersion(req, version)
+      const r = await inTx(app.db, (tx) =>
+        putTier(tx, { newId: app.newId }, { locationId: c.locationId, key: req.params.key, fields, expectedVersion: v, audit: c.audit }),
+      )
+      etag(reply, r.tier.version)
+      return { ...tierView(r.tier, true), changed: r.changed }
+    },
+  )
+
+  app.delete(
+    '/catalog/tiers/:key',
+    {
+      config: { access: access.perm('set.services') },
+      schema: {
+        tags: TAGS,
+        operationId: 'deleteCatalogTier',
+        summary: 'Delete a membership tier that was never sold',
+        description:
+          '409 TIER_IN_USE when a membership (any status), a personal link, a checkout or a Squarespace product names it: turn it off instead. Its price history goes with it. If-Match is enforced when sent.',
+        params: CategoryKeyParam,
+        response: { 200: z.object({ key: z.string(), removed: z.literal(true) }) },
+      },
+    },
+    async (req) => {
+      const c = requestContext(req)
+      const v = req.headers['if-match'] ? expectedVersion(req, undefined) : undefined
+      const t = await inTx(app.db, (tx) =>
+        deleteTier(tx, { locationId: c.locationId, key: req.params.key, expectedVersion: v, audit: c.audit }),
+      )
+      return { key: t.key, removed: true as const }
+    },
+  )
+
+  app.put(
+    '/catalog/tier-prices',
+    {
+      config: { access: access.perm('set.services') },
+      schema: {
+        tags: TAGS,
+        operationId: 'putCatalogTierPrices',
+        summary: 'Save rows of the tier × size monthly price grid, all or nothing',
+        description:
+          'Each row names a tier and the `priceVersion` it was edited at (428 when a row has none, 412 VERSION_CONFLICT naming the row in `meta.row` and `meta.tierKey` when stale; nothing is saved). Cells: a size and a monthly price in cents (0 to $100,000), or `monthlyCents: null` to clear it (that size is not sold). Sizes a row does not list keep their price. ' +
+          'Prices are append-only: a changed size supersedes its current price and adds a new one at the tier’s next `priceVersion` with Square state `pending` (synced to Square later); members keep the price they joined at. Audited `catalog.tier_price.update`; publishes `settings.changed {section: "catalog", key: "tier_prices"}`.',
+        body: z
+          .object({
+            rows: z
+              .array(
+                z
+                  .object({
+                    tierKey: Slug,
+                    priceVersion: Version.optional(),
+                    cells: z.array(z.object({ class: Slug, monthlyCents: Cents.nullable() }).strict()).max(24),
+                  })
+                  .strict(),
+              )
+              .max(24),
+          })
+          .strict(),
+        response: { 200: z.object({ tiers: z.array(TierView), changed: z.array(z.string()) }) },
+      },
+    },
+    async (req) => {
+      const c = requestContext(req)
+      const rows = req.body.rows.map((r, i) => {
+        if (r.priceVersion === undefined) throw new AppError('PRECONDITION_REQUIRED', { meta: { row: i, tierKey: r.tierKey } })
+        return { tierKey: r.tierKey, priceVersion: r.priceVersion, cells: r.cells }
+      })
+      const out = await inTx(app.db, async (tx) =>
+        putTierPrices(
+          tx,
+          { newId: app.newId, now: app.clock.now() },
+          { locationId: c.locationId, rows, userId: await storedUserId(tx, c.userId), audit: c.audit },
+        ),
+      )
+      return { tiers: out.tiers.map((t) => tierView(t, true)), changed: out.changed }
+    },
+  )
+
+  // ---- the booking fee ---------------------------------------------------------------------------------------------------
+
+  app.get(
+    '/catalog/guest-fee',
+    {
+      config: { access: access.authenticated() },
+      schema: {
+        tags: TAGS,
+        operationId: 'getCatalogGuestFee',
+        summary: 'The booking fee guests pay toward the visit, and how it is collected (ETag = version)',
+        response: { 200: GuestFeeView },
+      },
+    },
+    async (req, reply) => {
+      const r = await getSetting(app.db, requestContext(req).locationId, 'booking.guest_fee')
+      etag(reply, r.version)
+      return { cents: r.value.cents, collect: r.value.collect, version: r.version }
+    },
+  )
+
+  app.put(
+    '/catalog/guest-fee',
+    {
+      config: { access: access.perm('set.services') },
+      schema: {
+        tags: TAGS,
+        operationId: 'putCatalogGuestFee',
+        summary: 'Save the booking fee (0 to $1,000) and how it is collected (at the counter or by a payment link)',
+        description:
+          'A deposit toward the visit guests pay (members pay none; ADR 0150), settled by the cancel and no-show rules. `version` (or If-Match) required (0 before the first save): 428 without, 412 when stale. Audited `settings.update`; publishes `settings.changed {key: "booking.guest_fee"}`.',
+        body: z.object({ cents: Cents, collect: z.enum(['counter', 'link']), version: Version.optional() }).strict(),
+        response: { 200: GuestFeeView },
+      },
+    },
+    async (req, reply) => {
+      const c = requestContext(req)
+      const v = requiredVersion(req, req.body.version)
+      if (req.body.cents < 0 || req.body.cents > 100_000)
+        throw new AppError('VALIDATION_FAILED', {
+          detail: 'Enter a fee from $0 to $1,000.',
+          errors: [{ path: 'cents', message: 'Enter a fee from $0 to $1,000.' }],
+        })
+      const r = await inTx(app.db, async (tx) =>
+        updateSetting(tx, {
+          locationId: c.locationId,
+          key: 'booking.guest_fee',
+          value: { cents: req.body.cents, collect: req.body.collect },
+          expectedVersion: v,
+          updatedBy: await storedUserId(tx, c.userId),
+          audit: c.audit,
+        }),
+      )
+      etag(reply, r.version)
+      return { cents: r.value.cents, collect: r.value.collect, version: r.version }
+    },
+  )
+
+  // ---- the pre-size data (ADR 0170): reads kept, writes retired ------------------------------------------------------------
 
   app.get(
     '/catalog/tint-matrix',
@@ -422,7 +973,8 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
       schema: {
         tags: TAGS,
         operationId: 'getCatalogTintMatrix',
-        summary: 'The tint price matrix: vehicle types × films, member and guest ranges, VLT options (ETag = version)',
+        summary: 'Deprecated: the stored pre-size tint matrix (ETag = version)',
+        description: 'Read only (ADR 0170): tint packages are priced per vehicle size now (PUT /catalog/prices).',
         response: { 200: TintMatrixView },
       },
     },
@@ -437,37 +989,9 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
     '/catalog/tint-matrix',
     {
       config: { access: access.perm('set.services') },
-      schema: {
-        tags: TAGS,
-        operationId: 'putCatalogTintMatrix',
-        summary: 'Save the whole tint price matrix',
-        description:
-          '`version` (or If-Match) is required (0 before the first save): 428 without, 412 VERSION_CONFLICT when stale. Keys are lowercase (letters, digits, underscore); a price row names a listed vehicle type and film, each pair once, each range not ending below its start; VLT values 1..100. ' +
-          'A tint package names its film by a tag (e.g. `ceramic`) and shows that film’s lowest prices; what it charges at booking (`priceCents`) moves to the film’s lowest guest price (audited `catalog.price.sync`). Publishes `settings.changed {section: "catalog", key: "catalog.tint_matrix"}`.',
-        body: z.object({ ...TintMatrixShape, version: Version.optional() }).strict(),
-        response: { 200: TintMatrixView },
-      },
+      schema: { tags: TAGS, operationId: 'putCatalogTintMatrix', summary: 'Retired: save the tint matrix', description: RETIRED, deprecated: true },
     },
-    async (req, reply) => {
-      const c = requestContext(req)
-      const { version, ...value } = req.body
-      const v = requiredVersion(req, version)
-      const matrix = parseTintMatrix(value)
-      const r = await inTx(app.db, async (tx) => {
-        const saved = await updateSetting(tx, {
-          locationId: c.locationId,
-          key: 'catalog.tint_matrix',
-          value: matrix,
-          expectedVersion: v,
-          updatedBy: await storedUserId(tx, c.userId),
-          audit: c.audit,
-        })
-        await syncBookingPrices(tx, { locationId: c.locationId, reason: 'catalog.tint_matrix', audit: c.audit })
-        return saved
-      })
-      etag(reply, r.version)
-      return tintView(r)
-    },
+    retired,
   )
 
   app.get(
@@ -477,7 +1001,8 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
       schema: {
         tags: TAGS,
         operationId: 'getCatalogGuestMarkup',
-        summary: 'The guest markup in percent over the member price (ETag = version)',
+        summary: 'Deprecated: the stored pre-size guest markup (ETag = version)',
+        description: 'Read only (ADR 0170): a member price is the regular price less the tier’s % off now.',
         response: { 200: GuestMarkupView },
       },
     },
@@ -492,42 +1017,10 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
     '/catalog/guest-markup',
     {
       config: { access: access.perm('set.services') },
-      schema: {
-        tags: TAGS,
-        operationId: 'putCatalogGuestMarkup',
-        summary: 'Save the guest markup (0 to 200 percent)',
-        description:
-          'Applies to every service without its own guest price: guest = member × (100 + pct) / 100, rounded half up to whole dollars; what such a service charges at booking (`priceCents`) moves with it (audited `catalog.price.sync`). `version` (or If-Match) required (0 before the first save). Publishes `settings.changed {section: "catalog", key: "catalog.guest_markup_pct"}`.',
-        body: z.object({ pct: z.number().int(), version: Version.optional() }).strict(),
-        response: { 200: GuestMarkupView },
-      },
+      schema: { tags: TAGS, operationId: 'putCatalogGuestMarkup', summary: 'Retired: save the guest markup', description: RETIRED, deprecated: true },
     },
-    async (req, reply) => {
-      const c = requestContext(req)
-      const v = requiredVersion(req, req.body.version)
-      if (req.body.pct < 0 || req.body.pct > 200)
-        throw new AppError('VALIDATION_FAILED', {
-          detail: 'Enter a markup from 0 to 200 percent.',
-          errors: [{ path: 'pct', message: 'Enter a markup from 0 to 200 percent.' }],
-        })
-      const r = await inTx(app.db, async (tx) => {
-        const saved = await updateSetting(tx, {
-          locationId: c.locationId,
-          key: 'catalog.guest_markup_pct',
-          value: req.body.pct,
-          expectedVersion: v,
-          updatedBy: await storedUserId(tx, c.userId),
-          audit: c.audit,
-        })
-        await syncBookingPrices(tx, { locationId: c.locationId, reason: 'catalog.guest_markup_pct', audit: c.audit })
-        return saved
-      })
-      etag(reply, r.version)
-      return { pct: r.value, version: r.version }
-    },
+    retired,
   )
-
-  // ---- membership plans' public fields -----------------------------------------------------------------------------------
 
   app.get(
     '/catalog/plans',
@@ -536,7 +1029,8 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
       schema: {
         tags: TAGS,
         operationId: 'listCatalogPlans',
-        summary: 'The membership plans’ public fields: public name, monthly price, perks, Squarespace checkout link',
+        summary: 'Deprecated: the tiers’ public fields (name, starting monthly price, perks, Squarespace checkout link)',
+        description: 'Read `GET /catalog/tiers` instead (ADR 0170).',
         response: { 200: z.object({ plans: z.array(PlanPublicView) }) },
       },
     },
@@ -547,35 +1041,8 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
     '/catalog/plans/:key',
     {
       config: { access: access.perm('set.services') },
-      schema: {
-        tags: TAGS,
-        operationId: 'putCatalogPlan',
-        summary: 'Save a plan’s public name, monthly price, perks and checkout link',
-        description:
-          'All four fields, replaced together; `version` (or If-Match) is required (the plan’s version): 428 without, 412 when stale. Perks: up to 12, each up to 120 characters, trimmed, blanks dropped, no duplicates (they are also what the Membership tab lists). ' +
-          '`checkoutUrl` is the plan’s Squarespace subscription checkout: https on squarespace.com or a subdomain, no user, password or port (422 otherwise); it never appears in the public catalog. Publishes `settings.changed {section: "catalog", key: "plans"}`.',
-        params: z.object({ key: z.enum(['essential', 'premium', 'executive', 'exotic']) }),
-        body: z
-          .object({
-            publicLabel: NullableText(200),
-            monthlyPriceCents: Cents.nullable(),
-            perks: z.array(z.string().max(500)).max(40),
-            checkoutUrl: NullableText(4096),
-            version: Version.optional(),
-          })
-          .strict(),
-        response: { 200: PlanPublicView.extend({ changed: z.boolean() }) },
-      },
+      schema: { tags: TAGS, operationId: 'putCatalogPlan', summary: 'Retired: save a plan’s public fields', description: RETIRED, deprecated: true },
     },
-    async (req, reply) => {
-      const c = requestContext(req)
-      const { version, ...fields } = req.body
-      const v = requiredVersion(req, version)
-      const r = await inTx(app.db, (tx) =>
-        putPlanPublic(tx, { locationId: c.locationId, key: req.params.key, fields, expectedVersion: v, audit: c.audit }),
-      )
-      etag(reply, r.plan.version)
-      return { ...planView(r.plan), changed: r.changed }
-    },
+    retired,
   )
 }

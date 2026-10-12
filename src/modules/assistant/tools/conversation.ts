@@ -8,7 +8,6 @@ import { cancelPendingActions } from '../../identity/pending-actions.js'
 import { issueClientLink } from '../../identity/links.js'
 import { PgOptOutRepository } from '../../messaging/db/optout-repo.js'
 import { loadCustomerTarget, strangerRecipient } from '../../messaging/db/recipients.js'
-import { tierSpec } from '../../public/tiers.js'
 import { noteLeadInterest, openLead } from '../../leads/service.js'
 import { TOOL_MIN_TRUST, type AssistantTool, type ToolContext, type ToolInputs } from '../contract.js'
 import { atLeast, fail, json, ok, ownAppointment, withHandoff } from './common.js'
@@ -51,7 +50,7 @@ export const sendLink: AssistantTool<ToolInputs['send_link']> = {
   input: z.strictObject({
     kind: z.enum(LINK_KINDS),
     appointmentRef: z.enum(['A1', 'A2', 'A3']).nullable(),
-    tier: z.enum(['gold', 'vip']).nullable(),
+    tier: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/).nullable(),
   }),
   minTrust: TOOL_MIN_TRUST.send_link,
   run: (ctx, input) => issueLinkOutcome(ctx, input),
@@ -95,7 +94,9 @@ export async function issueLinkOutcome(ctx: ToolContext, input: ToolInputs['send
           .selectFrom('membership_plans')
           .select('key')
           .where('location_id', '=', id.locationId)
-          .where('key', '=', tierSpec(input.tier!).planKey)
+          .where('key', '=', input.tier ?? '')
+          .where('active', '=', true)
+          .where('public', '=', true)
           .executeTakeFirst()
         if (!plan)
           throw new LinkRefused(
@@ -116,7 +117,7 @@ export async function issueLinkOutcome(ctx: ToolContext, input: ToolInputs['send
           phone: client ? null : id.phone,
           appointmentId: input.kind === 'calendar' ? appointmentId : null,
           invoiceId,
-          planKey: input.kind === 'membership' ? tierSpec(input.tier!).planKey : null,
+          planKey: input.kind === 'membership' ? input.tier : null,
           issuedBy: 'assistant',
         },
       )

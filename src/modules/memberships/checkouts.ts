@@ -422,13 +422,20 @@ export interface OpenCheckoutResult {
 }
 
 /** The Squarespace product key (id, else SKU) sold for a plan: the admin's product table first, then the bootstrap map. */
-export async function planProductKey(tx: Executor, locationId: string, planKey: string, envJson?: string): Promise<string | null> {
+export async function planProductKey(
+  tx: Executor,
+  locationId: string,
+  planKey: string,
+  envJson?: string,
+  legacyKey: string | null = null,
+): Promise<string | null> {
   const rows = await listProductRows(tx, locationId)
   const row = rows.find((r) => r.active && r.kind === 'membership' && r.plan === planKey)
   if (row) return row.productId ?? row.sku ?? null
   try {
     const entries = envJson?.trim() ? (JSON.parse(envJson) as ProductMapEntry[]) : []
-    const e = entries.find((x) => x.kind === 'membership' && x.tier === planKey)
+    // the bootstrap map may name the tier by its old key (premium for gold: ADR 0170)
+    const e = entries.find((x) => x.kind === 'membership' && (x.tier === planKey || (legacyKey !== null && x.tier === legacyKey)))
     if (e) return e.productId ?? e.sku ?? null
   } catch {
     // an invalid bootstrap map is ignored here as the sync ignores it
@@ -446,7 +453,7 @@ export async function openCheckoutIntent(tx: Tx, d: Ctx, input: OpenCheckoutInpu
   if (!email)
     throw new AppError('VALIDATION_FAILED', { detail: 'Enter a valid email.', errors: [{ path: 'email', message: 'Enter a valid email.' }] })
   await ensurePlans(tx, d)
-  const plan = planByKey(await loadPlans(tx, d.locationId), input.planKey as Plan['key'])
+  const plan = planByKey(await loadPlans(tx, d.locationId), input.planKey)
   const planRow = plan
     ? await tx
         .selectFrom('membership_plans')
@@ -467,8 +474,8 @@ export async function openCheckoutIntent(tx: Tx, d: Ctx, input: OpenCheckoutInpu
     .executeTakeFirst()
   if (!customer) throw new AppError('NOT_FOUND', { detail: 'That customer does not exist' })
   const now = d.clock.now()
-  const label = input.planLabel?.trim() || planRow.public_label || plan.name
-  const productKey = await planProductKey(tx, d.locationId, plan.key, input.envProductMap)
+  const label = input.planLabel?.trim() || plan.name
+  const productKey = await planProductKey(tx, d.locationId, plan.key, input.envProductMap, plan.legacyKey)
   const live = await tx
     .selectFrom('memberships')
     .select(['id', 'status', 'plan_id'])

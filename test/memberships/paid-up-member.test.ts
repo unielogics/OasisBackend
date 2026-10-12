@@ -169,7 +169,7 @@ describe('a paid-up member and the stale-record rule (W4c re-review 3, D1 and D2
       customerId: string,
       o: { status: 'active' | 'past_due' | 'paused' | 'canceled'; paidDaysAgo: number | null; endInDays: number | null; manualDaysAgo?: number },
     ) {
-      const plan = await r.db.selectFrom('membership_plans').select('id').where('key', '=', 'premium').executeTakeFirstOrThrow()
+      const plan = await r.db.selectFrom('membership_plans').select('id').where('key', '=', 'gold').executeTakeFirstOrThrow()
       const at = (days: number) => new Date(r.clock.now().getTime() + days * D)
       await r.db
         .insertInto('memberships')
@@ -214,10 +214,10 @@ describe('a paid-up member and the stale-record rule (W4c re-review 3, D1 and D2
     it('without a period end, the plan’s period after the last payment decides', async () => {
       const r = rig()
       const id = await olga(r)
-      await r.db.updateTable('membership_plans').set({ billing_interval_months: 12 }).where('key', '=', 'premium').execute()
+      await r.db.updateTable('membership_plans').set({ billing_interval_months: 12 }).where('key', '=', 'gold').execute()
       await member(r, id, { status: 'active', paidDaysAgo: 300, endInDays: null })
       expect((await verdict(r, id, OLGA_PHONE)).stale).toBe(false)
-      await r.db.updateTable('membership_plans').set({ billing_interval_months: 1 }).where('key', '=', 'premium').execute()
+      await r.db.updateTable('membership_plans').set({ billing_interval_months: 1 }).where('key', '=', 'gold').execute()
       expect((await verdict(r, id, OLGA_PHONE)).stale).toBe(true)
     })
 
