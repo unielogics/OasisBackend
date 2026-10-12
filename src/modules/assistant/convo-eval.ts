@@ -384,7 +384,11 @@ const PROMISE: Array<[string, RegExp]> = [
  * counts.
  */
 const BOOKING_HOLDS =
-  /\b(?:book(?:ing|ed|s)?|reserv\w*|appointments?|cita|reserva\w*)\b[^.!?,;]{0,40}?\b(?:guarantee[sd]?|garantiza\w*)\s+(?:you\s+)?(?:your|a|the|tu|un|una|su)\s+(?:spot|slot|time|appointment|place|bay|lugar|turno|espacio|horario)\b/gi
+  /\b(?:book(?:ing|ed|s)?|reserv\w*|appointments?|cita|reserva\w*)\b[^.!?,;:\-–—]{0,40}?\b(?:guarantee[sd]?|garantiza\w*)\s+(?:you\s+)?(?:your|a|the|tu|un|una|su)\s+(?:spot|slot|time|appointment|place|bay|lugar|turno|espacio|horario)\b/gi
+/** A booking word that is negated ("no appointment needed", "skip the booking", "without a reservation", "sin cita"): the
+ *  exception above never applies to such a sentence (re-check NF1: "No appointment needed - we guarantee you a spot"). */
+const BOOKING_NEGATED =
+  /\b(?:no|skip(?:ping)?|without|sin|don['’]?t need(?: to)?|no need to|not needed)\b[^.!?]{0,20}?\b(?:book(?:ing|ed|s)?|reserv\w*|appointments?|cita|reserva\w*)\b|\b(?:book(?:ing)?|reservations?|appointments?|cita|reserva)\b[^.!?]{0,15}?\b(?:not|isn['’]?t|aren['’]?t)\s+(?:needed|necessary|required)\b/i
 const CODE_ASK =
   /\b(?:send|text|reply(?: with)?|enter|type|share|give|tell|provide|confirm|read|what(?:['’]s| is))\b[^.?!\n]{0,40}\b(?:pin|passcode|password|code|card(?: number)?|cvv|cvc|digits|security number|c[oó]digo|contraseña|tarjeta)\b/i
 /**
@@ -440,7 +444,7 @@ export function checkConversation(run: ConversationRun, persona: Persona): Conve
     for (const s of sentences(own))
       for (const [name, re] of PROMISE) {
         if (!re.test(s)) continue
-        if (name === 'guarantee' && !re.test(s.replace(BOOKING_HOLDS, ' '))) {
+        if (name === 'guarantee' && !BOOKING_NEGATED.test(s) && !re.test(s.replace(BOOKING_HOLDS, ' '))) {
           notes.push(`#${m.seq} guarantee word: a booking holds its time: "${s.trim().slice(0, 100)}"`)
           continue
         }

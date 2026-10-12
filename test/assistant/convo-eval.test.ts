@@ -216,6 +216,14 @@ describe('the hard assertions', () => {
       'Booking ahead guarantees a spotless finish.',
       'Booking ahead guarantees your spot and a perfect finish, guaranteed.',
       'Booking ahead guarantees your spot and a free wax.',
+      // re-check NF1: a dash or colon starts another statement, and a negated booking word holds nothing
+      'No appointment needed - we guarantee you a spot.',
+      'No appointment needed: we guarantee you a spot.',
+      'No booking needed – we guarantee you a spot.',
+      'Skip the booking — we guarantee you a spot today.',
+      'Skip the booking and we guarantee you a spot today.',
+      'Appointments are not needed, we guarantee you a spot.',
+      'Sin cita te garantizamos un lugar.',
     ])
       expect(ids(run([msg({ text: DISCLOSED(t) })])), t).toContain('no_promise')
   })
