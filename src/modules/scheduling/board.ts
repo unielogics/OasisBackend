@@ -20,6 +20,7 @@ import type { SchedulingCtx } from './context.js'
 import type { InvoiceSummary, MembershipInfo } from './ports.js'
 import { photoCounts } from './photos.js'
 import { visitCategory } from '../catalog/appointment-categories.js'
+import { sizeFlags } from './visit-pricing.js'
 
 export interface BoardRow {
   a: AppointmentRecord
@@ -282,6 +283,11 @@ export interface OpsCard {
   prepped: boolean
   pickupState: 'pending' | 'collected' | null
   version: number
+  /** The size the visit is priced at (ADR 0170) and the "Confirm size" / "Confirm price" badges. */
+  vehicleClass: string | null
+  vehicleClassLabel: string | null
+  needsSizeConfirm: boolean
+  needsPriceConfirm: boolean
 }
 
 export interface BayIndex {
@@ -334,6 +340,9 @@ export function toCard(
     prepped: a.bayPreppedAt !== null,
     pickupState: a.pickupState,
     version: a.version,
+    vehicleClass: a.vehicleClass,
+    vehicleClassLabel: a.vehicleClassLabel,
+    ...sizeFlags(a),
   }
 }
 

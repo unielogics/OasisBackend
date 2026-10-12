@@ -180,6 +180,7 @@ export const proposeBooking: AssistantTool<ToolInputs['propose_booking']> = {
     if ((await aiBookingsAhead(ctx.db, customerId, ctx.now)) >= MAX_AI_BOOKINGS_AHEAD)
       return fail('rate_limited', `This client already has ${MAX_AI_BOOKINGS_AHEAD} upcoming visits booked by text; more go through the team or the booking link.`)
     let vehicleId: string | null = null
+    let vehicleClass: string | null = null
     if (input.vehicle) {
       const words = input.vehicle.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 1 && w !== 'the' && w !== 'my')
       const vehicles = await listVehicles(ctx.db, customerId)
@@ -190,6 +191,8 @@ export const proposeBooking: AssistantTool<ToolInputs['propose_booking']> = {
       if (match.length !== 1)
         return fail('invalid', match.length === 0 ? 'That vehicle is not on the client’s record. Save it with set_my_vehicle first, or pass null.' : 'Several vehicles match; name it more precisely.')
       vehicleId = match[0]!.id
+      // the car on file supplies the size the visit is priced at (ADR 0170)
+      vehicleClass = match[0]!.vehicleClass
     }
     const vip = await vipFor(ctx)
     const v = await slotVerdict(ctx.db, {
@@ -214,6 +217,7 @@ export const proposeBooking: AssistantTool<ToolInputs['propose_booking']> = {
       date: input.date,
       startMin: input.startMin,
       vehicleId,
+      vehicleClass,
     }
     // guard polish after W4b-fix (P3): the summary and its date in the conversation's language ("vie 16 oct, 11:00 a. m.")
     return propose(ctx, { kind: 'book', summary: actionSummaryIn(lang, { kind: 'book', service, when: whenIn(lang, input.date, input.startMin, today) }), payload, appointmentId: null })

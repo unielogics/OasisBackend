@@ -105,7 +105,7 @@ describe('membership credits', () => {
       amount_cents: -4500,
       source: 'system',
       reason: 'Membership credit',
-      note: 'Express wash · Essential',
+      note: 'Express Hand Wash · Essential (Compact car plan) · covers $45 of $45',
       status: 'done',
     })
     expect(await calc(a.invoiceId)).toMatchObject({ adj: -4500, sub: 0, tax: 0, total: 0, balance: 0 })

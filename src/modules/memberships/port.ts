@@ -21,13 +21,28 @@ export const dbMembershipPort: MembershipPort = {
     const out = new Map<string, MembershipInfo>()
     if (refs.length === 0) return out
     const customerIds = [...new Set(refs.map((r) => r.customerId))]
+    // the holder or a live household member (ADR 0170): a household shares the membership and its credits
+    const shared = await db
+      .selectFrom('membership_household')
+      .select(['membership_id', 'customer_id'])
+      .where('customer_id', 'in', customerIds)
+      .where('removed_at', 'is', null)
+      .execute()
     const members = await db
       .selectFrom('memberships')
       .selectAll()
-      .where('customer_id', 'in', customerIds)
+      .where((eb) =>
+        eb.or([
+          eb('customer_id', 'in', customerIds),
+          ...(shared.length ? [eb('id', 'in', shared.map((s) => s.membership_id))] : []),
+        ]),
+      )
       .where('status', '=', 'active')
       .execute()
     if (members.length === 0) return out
+    const membershipOf = (customerId: string) =>
+      members.find((x) => x.customer_id === customerId) ??
+      members.find((x) => shared.some((s) => s.customer_id === customerId && s.membership_id === x.id))
     const locationId = members[0]!.location_id
     const now = (await sql<{ now: Date }>`select app_now() as now`.execute(db)).rows[0]!.now
     const tz = await locationTz(db, locationId)
@@ -46,7 +61,7 @@ export const dbMembershipPort: MembershipPort = {
       where a.id = any(${apptIds}::uuid[])`.execute(db)
     const tagsOf = new Map(tags.rows.map((t) => [t.id, t]))
     for (const r of refs) {
-      const m = members.find((x) => x.customer_id === r.customerId)
+      const m = membershipOf(r.customerId)
       if (!m) continue
       const plan = plans.find((p) => p.id === m.plan_id)
       if (!plan) continue
@@ -77,7 +92,7 @@ export const dbMembershipPort: MembershipPort = {
     const payments = new PaymentsService({ clock: c.clock, newId: c.newId, ports: defaultPorts() })
     const r = await autoApplyMembershipCredit(
       tx,
-      { locationId: c.locationId, clock: c.clock, newId: c.newId, payments },
+      { locationId: c.locationId, clock: c.clock, newId: c.newId, payments, invoices: c.ports.invoices },
       { appointmentId },
       { actor: actorFromAuth(actor.auth), audit: actor.audit, idempotencyKey: null },
     )
@@ -99,7 +114,16 @@ export const dbMembershipPort: MembershipPort = {
       .where('customer_id', 'in', customerIds)
       .where('status', 'in', ['pending', 'active', 'past_due', 'paused'])
       .execute()
-    const members = new Set(live.map((m) => m.customer_id))
+    // a household member shares a live membership: not an upgrade candidate either
+    const sharing = await db
+      .selectFrom('membership_household as h')
+      .innerJoin('memberships as m', 'm.id', 'h.membership_id')
+      .select('h.customer_id')
+      .where('h.customer_id', 'in', customerIds)
+      .where('h.removed_at', 'is', null)
+      .where('m.status', 'in', ['pending', 'active', 'past_due', 'paused'])
+      .execute()
+    const members = new Set([...live.map((m) => m.customer_id), ...sharing.map((m) => m.customer_id)])
     const nonMembers = customerIds.filter((id) => !members.has(id))
     if (nonMembers.length === 0) return out
     const names = await db

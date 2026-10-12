@@ -71,7 +71,7 @@ describe('joining with the number of an existing customer', () => {
     const id = await existingCustomer(PHONES.extra, { member: true })
     const r = await join(joinBody({ phone: PHONES.extra }))
     expect(r.statusCode, r.body).toBe(201)
-    expect(Object.keys(json(r)).sort()).toEqual(['confirmationBy', 'memberRef', 'next', 'plan', 'status', 'tier'])
+    expect(Object.keys(json(r)).sort()).toEqual(['confirmationBy', 'memberRef', 'monthlyCents', 'next', 'plan', 'planClass', 'planClassLabel', 'status', 'tier'])
     expect(await h.db.selectFrom('memberships').select('id').where('customer_id', '=', id).execute()).toHaveLength(1)
     const n = await notifications()
     expect(n[0]!.body).toContain('They already have a Gold membership (active)')
@@ -183,7 +183,7 @@ describe('joining on the website', () => {
     expect((await join(joinBody())).statusCode).toBe(201)
     const again = await join(joinBody({ tier: 'vip' }))
     expect(again.statusCode, again.body).toBe(201)
-    expect(Object.keys(json(again)).sort()).toEqual(['confirmationBy', 'memberRef', 'next', 'plan', 'status', 'tier'])
+    expect(Object.keys(json(again)).sort()).toEqual(['confirmationBy', 'memberRef', 'monthlyCents', 'next', 'plan', 'planClass', 'planClassLabel', 'status', 'tier'])
     expect(json(again)).toMatchObject({ status: 'pending_payment', next: 'checkout_link_by_sms', tier: 'vip', plan: 'VIP', confirmationBy: 'sms' })
     expect(await h.db.selectFrom('memberships').select('id').execute()).toHaveLength(1)
     for (const [extra, path] of [

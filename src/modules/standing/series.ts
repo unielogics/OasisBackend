@@ -228,9 +228,22 @@ export async function materializeSeries(
       continue
     }
     const start = wallToInstant(date, s.timeMin, c.tz)
+    // the series' car (still on file) is the visit's car, and its size prices the visit (ADR 0170)
+    const vehicleId = s.vehicleId
+      ? ((
+          await tx
+            .selectFrom('vehicles')
+            .select('id')
+            .where('id', '=', s.vehicleId)
+            .where('customer_id', '=', s.customerId)
+            .where('deleted_at', 'is', null)
+            .executeTakeFirst()
+        )?.id ?? null)
+      : null
     const r = await attempt(tx, async () => {
       const booked = await createAppointment(tx, c, actor, {
         customer: { id: s.customerId },
+        vehicleId,
         serviceId: s.serviceId,
         start,
         source: 'standing',
@@ -238,7 +251,7 @@ export async function materializeSeries(
       })
       await tx
         .updateTable('appointments')
-        .set({ standing_series_id: s.id, ...(s.vehicleId ? { vehicle_id: s.vehicleId } : {}) })
+        .set({ standing_series_id: s.id })
         .where('id', '=', booked.appointment.id)
         .execute()
       return booked.appointment.id

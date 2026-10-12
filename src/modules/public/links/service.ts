@@ -48,7 +48,21 @@ import { rescheduleAppointment } from '../../scheduling/lifecycle.js'
 import type { SchedulingPorts } from '../../scheduling/ports.js'
 import { checkSlot } from '../../scheduling/slots.js'
 import { loadBoardServices } from '../availability-loader.js'
-import { bookingRefOf, dollars, isPlaceholderName, parseVehicleLabel, publicSlotError, vehicleOf, whenWord, type WebVehicle } from '../bookings.js'
+import {
+  bookingRefOf,
+  classOfLabel,
+  dollars,
+  isPlaceholderName,
+  parseVehicleLabel,
+  publicSlotError,
+  vehicleOf,
+  webPricingOf,
+  whenWord,
+  type WebPricing,
+  type WebVehicle,
+} from '../bookings.js'
+import { listVehicleClasses, requireVehicleClass } from '../../catalog/vehicle-classes.js'
+import { coverageOf, lineClassLabel } from '../../payments/gateway.js'
 import { activeMembership } from '../members.js'
 import { memberRefOf } from '../memberships.js'
 import { tierKeyOf, type PublicTier } from '../tiers.js'
@@ -122,7 +136,9 @@ export interface ClientView {
 export interface InvoiceView {
   number: number
   date: string
-  items: { name: string; priceCents: number }[]
+  items: { name: string; priceCents: number; listCents: number | null; discountBp: number | null; memberDiscountCents: number; classLabel: string | null }[]
+  /** What the membership covered (ADR 0170). */
+  coverage: { serviceName: string; coveredCents: number; lineCents: number; differenceCents: number; planClassLabel: string | null }[]
   subtotalCents: number
   taxCents: number
   tipCents: number
@@ -268,21 +284,30 @@ async function upcomingOf(db: Executor, loc: LinkLocation, customerId: string, o
 }
 
 async function invoiceView(db: Executor, invoiceId: string): Promise<InvoiceView | null> {
-  const inv = await db.selectFrom('invoices').select(['id', 'invoice_no', 'biz_date']).where('id', '=', invoiceId).executeTakeFirst()
+  const inv = await db.selectFrom('invoices').select(['id', 'invoice_no', 'biz_date', 'vehicle_class_label']).where('id', '=', invoiceId).executeTakeFirst()
   if (!inv) return null
   const items = await db
     .selectFrom('invoice_items')
-    .select(['name', 'price_cents'])
+    .select(['name', 'price_cents', 'list_cents', 'discount_bp', 'price_basis'])
     .where('invoice_id', '=', invoiceId)
     .orderBy('position')
     .execute()
+  const coverage = (await coverageOf(db, [invoiceId])).get(invoiceId) ?? []
   const c = await sql<{ sub: string; tax: string; tip: string; total: string; paid: string; balance: string }>`
     select sub, tax, tip, total, paid, balance from invoice_calc_of(${invoiceId}::uuid)`.execute(db)
   const calc = c.rows[0]
   return {
     number: inv.invoice_no,
     date: String(inv.biz_date),
-    items: items.map((i) => ({ name: i.name, priceCents: i.price_cents })),
+    items: items.map((i) => ({
+      name: i.name,
+      priceCents: i.price_cents,
+      listCents: i.list_cents,
+      discountBp: i.discount_bp,
+      memberDiscountCents: i.list_cents === null ? 0 : i.list_cents - i.price_cents,
+      classLabel: lineClassLabel(i.price_basis, inv.vehicle_class_label),
+    })),
+    coverage: coverage.map(({ eventId: _e, ...c }) => c),
     subtotalCents: Number(calc?.sub ?? 0),
     taxCents: Number(calc?.tax ?? 0),
     tipCents: Number(calc?.tip ?? 0),
@@ -377,6 +402,8 @@ export interface LinkBookingInput {
   date: string
   startMin: number
   vehicle?: WebVehicle & { color?: string }
+  /** The size chip (ADR 0170): prices the visit and is recorded on the car (source client). */
+  vehicleClass?: string | null
   /** The client's name: required on a stranger's link (no client yet); fills a placeholder name otherwise. */
   name?: string
   email?: string
@@ -396,6 +423,7 @@ export interface LinkBookingResult {
   when: string
   member: boolean
   bayCount: number
+  pricing: WebPricing
 }
 
 /** POST bookings: a verified calendar or book-again page books a visit for its client (inside the idempotency transaction). */
@@ -414,6 +442,11 @@ export async function bookOnLink(tx: Tx, d: LinkDeps, s: SessionView, r: LinkReq
     addons.push(a)
   }
   await assertOnTheGrid(tx, d, loc, input.date, input.startMin)
+  // the size: the chip, else a size label sent as the car (ADR 0170)
+  const sizes = await listVehicleClasses(tx, loc.id, { activeOnly: true })
+  const vehicleClass = input.vehicleClass
+    ? (await requireVehicleClass(tx, loc.id, input.vehicleClass, { active: true, path: 'body.vehicleClass' })).key
+    : classOfLabel(input.vehicle?.label, sizes)
   // one completion of the link (the calendar's three bookings, book-again's one); refused before anything is written
   await consumeLink(tx, s.link.id, now)
 
@@ -466,12 +499,17 @@ export async function bookOnLink(tx: Tx, d: LinkDeps, s: SessionView, r: LinkReq
   const start = wallToInstant(input.date, input.startMin, loc.tz)
   const c = schedulingCtx(d, loc)
   const actor = linkActor(loc.id, r)
-  const v = vehicleOf(input.vehicle)
+  const v = vehicleOf(input.vehicle, sizes)
   let booked
   try {
     booked = await createAppointment(tx, c, actor, {
       customer: { id: customerId },
       vehicle: v ? { ...v, color: input.vehicle?.color ?? null } : null,
+      // the page's client (or the new client the page made): their own record, so the size is recorded on the car they named
+      vehicleClass,
+      recordClassAs: 'client',
+      memberPricing: privileges.member,
+      confirmPriceVar: 'confirm',
       serviceId: pkg.id,
       addonIds: addons.map((a) => a.id),
       start,
@@ -518,6 +556,7 @@ export async function bookOnLink(tx: Tx, d: LinkDeps, s: SessionView, r: LinkReq
     when: `${when === 'today' ? 'Today' : when === 'tomorrow' ? 'Tomorrow' : when} · ${time}`,
     member: privileges.member,
     bayCount: bays,
+    pricing: webPricingOf(booked.pricing),
   }
 }
 
@@ -623,7 +662,7 @@ export async function startMembership(
   d: LinkDeps,
   s: SessionView,
   r: LinkRequest,
-  input: { email: string; vehicles?: { car: string; plate?: string }[] },
+  input: { email: string; planClass?: string; vehicles?: { car: string; plate?: string }[] },
 ): Promise<MembershipStartResult> {
   requireKind(s, ['membership'])
   const now = d.app.clock.now()
@@ -644,12 +683,21 @@ export async function startMembership(
     out = await openCheckoutIntent(
       tx,
       { locationId: loc.id, clock: d.app.clock, newId: d.app.newId },
-      { customerId: s.customerId, planKey: s.link.planKey, email: input.email, linkId: s.link.id, envProductMap: d.app.env.SQSP_PRODUCT_MAP },
+      {
+        customerId: s.customerId,
+        planKey: s.link.planKey,
+        planClass: input.planClass,
+        email: input.email,
+        linkId: s.link.id,
+        envProductMap: d.app.env.SQSP_PRODUCT_MAP,
+      },
       linkAudit(r),
     )
   } catch (e) {
     if (e instanceof AppError && e.code === 'MEMBERSHIP_EXISTS') throw new AppError('LINK_ALREADY_MEMBER', { cause: e })
     if (e instanceof AppError && e.code === 'MEMBERSHIP_CHECKOUT_UNAVAILABLE') throw new AppError('LINK_CHECKOUT_UNAVAILABLE', { cause: e })
+    if (e instanceof AppError && e.code === 'VALIDATION_FAILED' && e.errors?.some((x) => x.path === 'planClass'))
+      throw bad('planClass', 'Pick one of the vehicle sizes.')
     if (e instanceof AppError && e.code === 'VALIDATION_FAILED' && e.errors?.some((x) => x.path === 'email'))
       throw bad('email', 'Enter a valid email.')
     if (e instanceof AppError && e.code === 'VALIDATION_FAILED') throw new AppError('LINK_CHECKOUT_UNAVAILABLE', { cause: e })

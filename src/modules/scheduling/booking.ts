@@ -33,6 +33,17 @@ import { toCore, type AppointmentCore, type Toast } from './lifecycle.js'
 import type { InvoiceSummary } from './ports.js'
 import type { TemplateVars } from '../messaging/templates/render.js'
 import { checkSlot, recordOverrides, type AppliedOverride, type OverrideRequest } from './slots.js'
+import {
+  lineColumns,
+  memberFor,
+  notTheirVehicle,
+  priceVisit,
+  pricingView,
+  recordVehicleClass,
+  resolveVisitClass,
+  type ClassSource,
+  type PricingView,
+} from './visit-pricing.js'
 
 export interface BookingInput {
   customer: {
@@ -49,6 +60,23 @@ export interface BookingInput {
     color?: string | null
     plate?: string | null
   } | null
+  /**
+   * One of the customer's own vehicles (live): the visit's car instead of `vehicle` (ADR 0170, wave Q2: the assistant, the standing
+   * series and the staff sheet name the car on file; no duplicate is created for a car without a plate).
+   */
+  vehicleId?: string | null
+  /**
+   * The size the visit is priced at (a size of the shop that is on; 422 otherwise). Absent or null: the vehicle's size on file,
+   * else none (priced at the smallest size, "Confirm size").
+   */
+  vehicleClass?: string | null
+  /**
+   * When `vehicleClass` is given and the visit has a vehicle: record that size on the car with this source (the caller may write the
+   * record). Absent: the car is left as it is (a guest's size prices the visit but never reaches someone else's record).
+   */
+  recordClassAs?: ClassSource | null
+  /** false: priced as a guest whatever the customer's membership (a website booking that proved nothing). Absent: their membership. */
+  memberPricing?: boolean
   serviceId: string
   addonIds?: string[]
   /** Exactly one of start and walkIn. */
@@ -70,6 +98,11 @@ export interface BookingInput {
   /** The customer text queued instead of the booking thanks (the website's confirmation); none when `null`. */
   message?: { templateKey: string; vars: TemplateVars } | null
   /**
+   * The variable of `message` set to "yes" when the size is unknown or has no price of its own (ADR 0170: the confirmation says the
+   * exact price is confirmed at the shop).
+   */
+  confirmPriceVar?: string
+  /**
    * A link page or the assistant books for a session verified with this client's own PIN (ADR 0160, W4c fixes): the stale-record
    * rule counts the visit as the client's activity (a booking proven only by the number never is).
    */
@@ -83,6 +116,8 @@ export interface BookingResult {
   overrides: AppliedOverride[]
   messageQueued: boolean
   toast: Toast
+  /** What the visit was priced at (ADR 0170): the size, the flags, the totals before tax. */
+  pricing: PricingView
 }
 
 const bad = (path: string, message: string): AppError =>
@@ -199,19 +234,40 @@ export async function createAppointment(
   const v = input.vehicle
   const hasVehicle =
     !!v && [v.make, v.model, v.plate, v.color, v.year].some((x) => x !== undefined && x !== null && x !== '')
-  const vehicle = hasVehicle
-    ? (
-        await upsertVehicleByPlate(tx, {
-          newId: c.newId,
-          customerId: customer.id,
-          year: v!.year ?? null,
-          make: v!.make,
-          model: v!.model,
-          color: v!.color,
-          plate: v!.plate,
-        })
-      ).vehicle
-    : null
+  let vehicle: { id: string; vehicleClass: string | null } | null = null
+  if (input.vehicleId) {
+    const own = isUuid(input.vehicleId)
+      ? await tx
+          .selectFrom('vehicles')
+          .select(['id', 'vehicle_class'])
+          .where('id', '=', input.vehicleId)
+          .where('customer_id', '=', customer.id)
+          .where('deleted_at', 'is', null)
+          .executeTakeFirst()
+      : undefined
+    if (!own) throw notTheirVehicle('vehicleId')
+    vehicle = { id: own.id, vehicleClass: own.vehicle_class }
+  } else if (hasVehicle) {
+    const up = (
+      await upsertVehicleByPlate(tx, {
+        newId: c.newId,
+        customerId: customer.id,
+        year: v!.year ?? null,
+        make: v!.make,
+        model: v!.model,
+        color: v!.color,
+        plate: v!.plate,
+      })
+    ).vehicle
+    const row = await tx.selectFrom('vehicles').select('vehicle_class').where('id', '=', up.id).executeTakeFirstOrThrow()
+    vehicle = { id: up.id, vehicleClass: row.vehicle_class }
+  }
+  // the size: the one named, else the car's on file (ADR 0170); recorded on the car only when the caller may write the record
+  const classKey = await resolveVisitClass(tx, c.locationId, { explicit: input.vehicleClass, vehicleClass: vehicle?.vehicleClass })
+  if (input.vehicleClass && vehicle && input.recordClassAs) await recordVehicleClass(tx, vehicle.id, classKey!, input.recordClassAs)
+  const member = await memberFor(tx, c, customer.id, input.memberPricing !== false)
+  const priced = await priceVisit(tx, c, { packageId: pkg.id, addonIds: addons.map((a) => a.id), classKey, member })
+  const pkgLine = priced.quote.lines[0]!
 
   const start = input.start ?? (await walkInStart(tx, c))
   const end = new Date(start.getTime() + pkg.durationMin * MS_PER_MIN)
@@ -238,7 +294,10 @@ export async function createAppointment(
       vehicle_id: vehicle?.id ?? null,
       service_id: pkg.id,
       package_name: pkg.name,
-      price_cents: pkg.priceCents,
+      ...lineColumns(pkgLine),
+      vehicle_class: priced.classKey,
+      vehicle_class_label: priced.classLabel,
+      membership_id: member?.membershipId ?? null,
       duration_min: pkg.durationMin,
       scheduled_start: start,
       scheduled_end: end,
@@ -252,7 +311,7 @@ export async function createAppointment(
       created_by: isUuid(actor.auth.userId) ? actor.auth.userId : null,
     })
     .execute()
-  for (const a of addons) {
+  for (const [i, a] of addons.entries()) {
     const rowId = c.newId()
     await tx
       .insertInto('appointment_addons')
@@ -261,7 +320,7 @@ export async function createAppointment(
         appointment_id: id,
         service_id: a.id,
         name: a.name,
-        price_cents: a.priceCents,
+        ...lineColumns(priced.quote.lines[i + 1]!),
         added_by: isUuid(actor.auth.userId) ? actor.auth.userId : null,
       })
       .execute()
@@ -298,10 +357,13 @@ export async function createAppointment(
       actor,
     })
   // a standing visit is booked by the materializer every few weeks; thanking the client each time would be noise
+  const view = pricingView(priced)
   const message =
     input.message === undefined
       ? { templateKey: 'booking_thanks', vars: { first: customer.fullName.trim().split(/\s+/)[0] } }
-      : input.message
+      : input.message && input.confirmPriceVar && view.confirmAtShop
+        ? { ...input.message, vars: { ...input.message.vars, [input.confirmPriceVar]: 'yes' } }
+        : input.message
   const sent =
     input.source === 'standing' || message === null
       ? { queued: false }
@@ -325,6 +387,9 @@ export async function createAppointment(
     start: start.toISOString(),
     source: appt.source,
     overrides: decision.overrides.map((o) => ({ kind: o.kind, reason: o.reason })),
+    vehicleClass: priced.classKey,
+    priceCents: priced.quote.totals.listCents - priced.quote.totals.discountCents,
+    member: member !== null,
   })
   await publishOps(tx, c.locationId, {
     appointment: { id, version: appt.version, status: appt.status, change: 'created' },
@@ -337,5 +402,6 @@ export async function createAppointment(
     overrides: decision.overrides,
     messageQueued: sent.queued,
     toast: { title: 'Appointment booked', detail: `${pkg.name} · ${fmtT(minutesOfDay(start, c.tz))}` },
+    pricing: view,
   }
 }

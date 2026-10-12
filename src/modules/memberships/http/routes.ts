@@ -13,6 +13,7 @@ import { wallToInstant } from '../../../platform/time.js'
 import { actorFromAuth } from '../../payments/actor.js'
 import { PaymentsService } from '../../payments/commands.js'
 import { defaultPorts } from '../../payments/ports.js'
+import { createInvoiceGateway } from '../../payments/gateway.js'
 import { applyMembershipCredit } from '../apply.js'
 import { historyFor, upgradeOf, visitCounts } from '../retention.js'
 import '../problems.js'
@@ -25,7 +26,14 @@ import {
   type CheckoutRow,
 } from '../checkouts.js'
 import { runMembershipPass } from '../jobs.js'
-import { createManualMembership, currentMembership, patchMembership } from '../service.js'
+import {
+  addHouseholdMember,
+  createManualMembership,
+  currentMembership,
+  patchMembership,
+  removeHouseholdMember,
+  sharedMembership,
+} from '../service.js'
 import { locationTz, viewsOf, type MembershipRow } from '../view.js'
 import { loadPlans } from '../plans.js'
 import * as audit from '../../../platform/audit.js'
@@ -38,6 +46,8 @@ import {
   CheckoutListResult,
   CreateBody,
   CustomerMembership,
+  HouseholdBody,
+  HouseholdParams,
   IdParams,
   ListQuery,
   ListResult,
@@ -62,6 +72,7 @@ export function registerMembershipRoutes(app: AppInstance): void {
     newId: app.newId,
   })
   const payments = new PaymentsService({ clock: app.clock, newId: app.newId, ports: defaultPorts() })
+  const invoices = createInvoiceGateway({ clock: app.clock, newId: app.newId })
   const idem = (fn: Parameters<typeof idempotentHandler<FastifyRequest>>[0]): never =>
     idempotentHandler(fn) as never
 
@@ -92,7 +103,10 @@ export function registerMembershipRoutes(app: AppInstance): void {
       if (!cust) throw new AppError('NOT_FOUND', { detail: 'That customer does not exist' })
       const now = app.clock.now()
       const tz = await locationTz(app.db, c.locationId)
-      const row = await currentMembership(app.db, cust.id)
+      const held = await currentMembership(app.db, cust.id)
+      // a client without a membership of their own may share one as a household member (ADR 0170)
+      const shared = held && held.status !== 'canceled' ? undefined : await sharedMembership(app.db, cust.id)
+      const row = shared?.row ?? held
       const [view] =
         row && row.location_id === c.locationId ? await viewsOf(app.db, { ...c, now, tz }, [row]) : []
       const live = view && view.status !== 'canceled'
@@ -100,6 +114,7 @@ export function registerMembershipRoutes(app: AppInstance): void {
       return {
         customerId: cust.id,
         membership: view ?? null,
+        sharedFrom: shared && view ? { customerId: shared.row.customer_id, name: shared.holderName } : null,
         upgrade: live ? null : upgradeOf(cust.full_name, counts?.visits60 ?? 0),
         history: await historyFor(app.db, c.locationId, cust.id),
       }
@@ -295,6 +310,7 @@ export function registerMembershipRoutes(app: AppInstance): void {
           {
             customerId: b.customerId,
             planKey: b.planKey,
+            planClass: b.planClass ?? null,
             planLabel: b.planLabel,
             renewsAt: b.renewsOn ? wallToInstant(b.renewsOn, 12 * 60, tz) : undefined,
           },
@@ -334,6 +350,7 @@ export function registerMembershipRoutes(app: AppInstance): void {
           {
             status: b.status,
             planKey: b.planKey,
+            planClass: b.planClass,
             planLabel: b.planLabel,
             renewsAt: b.renewsOn ? wallToInstant(b.renewsOn, 12 * 60, tz) : undefined,
             autoApply: b.autoApply,
@@ -342,6 +359,69 @@ export function registerMembershipRoutes(app: AppInstance): void {
           },
           { userId: a.userId, name: a.actorName ?? 'Unknown', audit: auditContextOf(req) },
         ),
+      )
+      const [view] = await viewsOf(app.db, { ...c, now: app.clock.now(), tz }, [row])
+      return { membership: view! }
+    },
+  )
+
+  // ---- households (ADR 0170) ------------------------------------------------------------------------------------------
+
+  app.post(
+    '/memberships/:id/household',
+    {
+      config: { access: access.perm('cli.member') },
+      schema: {
+        tags: [TAG],
+        summary: 'Add a client to a membership’s household',
+        description:
+          'The client is then priced and covered as the member (ADR 0170): the member % off, the inclusions up to the plan size’s price, the website’s member privileges once they verify; the membership’s credits are shared. A client who holds a live membership or shares another: 409 `MEMBERSHIP_HOUSEHOLD_TAKEN`. A record the stale-record rule holds: 409 `MEMBERSHIP_CLIENT_UNCONFIRMED` (confirm the client first). Adding a client already in the household changes nothing. Audited (`membership.household.add`).',
+        params: IdParams,
+        body: HouseholdBody,
+        response: { 200: MembershipResult },
+      },
+    },
+    async (req) => {
+      const a = auth(req)
+      const c = dctx(req)
+      const b = req.body as z.infer<typeof HouseholdBody>
+      const tz = await locationTz(app.db, c.locationId)
+      const r = await app.db.transaction().execute((tx) =>
+        addHouseholdMember(tx, c, req.params.id, b.customerId, {
+          userId: a.userId,
+          name: a.actorName ?? 'Unknown',
+          audit: auditContextOf(req),
+        }),
+      )
+      const [view] = await viewsOf(app.db, { ...c, now: app.clock.now(), tz }, [r.row])
+      return { membership: view! }
+    },
+  )
+
+  app.delete(
+    '/memberships/:id/household/:customerId',
+    {
+      config: { access: access.perm('cli.member') },
+      schema: {
+        tags: [TAG],
+        summary: 'Remove a client from a membership’s household',
+        description:
+          'From now on the client is priced as anyone else; visits already covered stay covered. 404 when the client is not in the household. Audited (`membership.household.remove`).',
+        params: HouseholdParams,
+        response: { 200: MembershipResult },
+      },
+    },
+    async (req) => {
+      const a = auth(req)
+      const c = dctx(req)
+      const p = req.params as z.infer<typeof HouseholdParams>
+      const tz = await locationTz(app.db, c.locationId)
+      const row = await app.db.transaction().execute((tx) =>
+        removeHouseholdMember(tx, c, p.id, p.customerId, {
+          userId: a.userId,
+          name: a.actorName ?? 'Unknown',
+          audit: auditContextOf(req),
+        }),
       )
       const [view] = await viewsOf(app.db, { ...c, now: app.clock.now(), tz }, [row])
       return { membership: view! }
@@ -430,10 +510,10 @@ export function registerMembershipRoutes(app: AppInstance): void {
       config: { access: access.perm('cli.member'), idempotency: 'required' as const },
       schema: {
         tags: [TAG],
-        summary: 'Apply one membership credit to this appointment’s invoice',
+        summary: 'Apply the membership to this visit: what its inclusions cover, written once',
         description:
-          'Creates a system adjust event (reason “Membership credit”) equal to the package line, exempt from the caller’s adjust limit, attributed to the caller. ' +
-          'The member must be active, the plan must have an unused credit covering the service, and the invoice must have a balance. Percent perks are never applied.',
+          'Settles the visit (ADR 0170): the client holds or shares (household) an active membership; each inclusion with a credit left (or every-visit, or unlimited) covers one line, up to the price at the plan size, so a larger car’s size difference stays due. The lines are priced again first (a covered line at the regular price, the others at the member price). Then one system adjust event (reason “Membership credit”) and one redeem per covered line, exempt from the caller’s adjust limit, attributed to the caller; `lines` lists them, `discountCents` is the total covered, `event` is the first adjust and `invoice` the invoice after the last. ' +
+          'Refused: no live membership 404 `MEMBERSHIP_NOT_FOUND`, not active 409 `MEMBERSHIP_NOT_ACTIVE`, already applied 409 `MEMBERSHIP_CREDIT_APPLIED`, nothing covered 409 `MEMBERSHIP_NOT_ELIGIBLE` / `MEMBERSHIP_NO_CREDIT`, no balance 409 `MEMBERSHIP_NO_BALANCE`, a reprice that would leave the invoice overpaid 409 `PRICE_CHANGE_OVERPAID`.',
         params: IdParams,
         body: ApplyBody,
         response: { 201: ApplyResult },
@@ -446,7 +526,7 @@ export function registerMembershipRoutes(app: AppInstance): void {
         status: 201,
         body: await applyMembershipCredit(
           tx,
-          { ...dctx(req), payments },
+          { ...dctx(req), payments, invoices },
           { appointmentId: (req.params as { id: string }).id },
           {
             actor: actorFromAuth(a),

@@ -248,7 +248,17 @@ export function registerPublicRoutes(d: PublicDeps): void {
             const tier = publicTierOf(await loadPlans(tx, p.loc.id), b.tier)
             return {
               status: 202,
-              body: { memberRef: memberRefOf(app.newId()), status: 'pending_payment', next: 'checkout_link_by_sms', tier: b.tier, plan: tier?.name ?? b.tier, confirmationBy: 'sms' },
+              body: {
+                memberRef: memberRefOf(app.newId()),
+                status: 'pending_payment',
+                next: 'checkout_link_by_sms',
+                tier: b.tier,
+                plan: tier?.name ?? b.tier,
+                confirmationBy: 'sms',
+                planClass: b.planClass ?? 'compact_car',
+                planClassLabel: null,
+                monthlyCents: null,
+              },
             }
           }
           return { status: 201, body: await joinWeb(tx, d, p.loc, reqOf(req), b) }
@@ -289,5 +299,6 @@ async function decoy(tx: Tx, l: PublicLocation, b: z.infer<typeof BookingBody>):
     addons: [],
     when: `${b.date} · ${fmtT(b.startMin)} (${dollars(fee.value.cents)} fee)`,
     member: false,
+    pricing: { vehicleClass: b.vehicleClass ?? null, vehicleClassLabel: null, confirmAtShop: true, listCents: 0, discountCents: 0, coveredCents: 0, dueCents: 0 },
   }
 }

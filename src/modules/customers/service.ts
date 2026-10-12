@@ -7,7 +7,7 @@ import { isUuid, type NewId } from '../../platform/ids.js'
 import { formatPhoneDisplay, normalizePhone } from '../../platform/phone.js'
 import './schema.js'
 import '../settings/schema.js'
-import type { CustomerSource, SmsOptInSource } from './schema.js'
+import type { CustomerSource, SmsOptInSource, VehicleClassSource } from './schema.js'
 import { revokeForPhoneChange } from '../identity/revoke.js'
 
 registerProblems({
@@ -47,6 +47,9 @@ export interface VehicleRecord {
   model: string | null
   color: string | null
   plate: string | null
+  /** The car's size (vehicle_classes key, ADR 0170) and who said it; null when nobody did. */
+  vehicleClass: string | null
+  vehicleClassSource: VehicleClassSource | null
   deletedAt: Date | null
 }
 
@@ -133,6 +136,8 @@ const toVehicle = (r: {
   model: string | null
   color: string | null
   plate: string | null
+  vehicle_class: string | null
+  vehicle_class_source: VehicleClassSource | null
   deleted_at: Date | null
 }): VehicleRecord => ({
   id: r.id,
@@ -142,6 +147,8 @@ const toVehicle = (r: {
   model: r.model,
   color: r.color,
   plate: r.plate,
+  vehicleClass: r.vehicle_class,
+  vehicleClassSource: r.vehicle_class_source,
   deletedAt: r.deleted_at,
 })
 
@@ -153,6 +160,8 @@ const VEHICLE_COLUMNS = [
   'model',
   'color',
   'plate',
+  'vehicle_class',
+  'vehicle_class_source',
   'deleted_at',
 ] as const
 
@@ -528,6 +537,33 @@ export async function findVehiclesByPlate(db: Executor, plate: string): Promise<
     .orderBy('created_at')
     .execute()
   return rows.map(toVehicle)
+}
+
+/**
+ * Staff set (or clear) a car's size (ADR 0170): PATCH /customers/:id/vehicles/:vehicleId. undefined when the customer has no such live
+ * vehicle. The size key is checked by the caller (a size of the shop that is on).
+ */
+export async function setVehicleClass(
+  tx: Tx,
+  input: { customerId: string; vehicleId: string; classKey: string | null },
+): Promise<{ before: VehicleRecord; after: VehicleRecord } | undefined> {
+  if (!isUuid(input.customerId) || !isUuid(input.vehicleId)) return undefined
+  const cur = await tx
+    .selectFrom('vehicles')
+    .select([...VEHICLE_COLUMNS])
+    .where('id', '=', input.vehicleId)
+    .where('customer_id', '=', input.customerId)
+    .where('deleted_at', 'is', null)
+    .forUpdate()
+    .executeTakeFirst()
+  if (!cur) return undefined
+  const row = await tx
+    .updateTable('vehicles')
+    .set({ vehicle_class: input.classKey, vehicle_class_source: input.classKey ? 'staff' : null })
+    .where('id', '=', cur.id)
+    .returning([...VEHICLE_COLUMNS])
+    .executeTakeFirstOrThrow()
+  return { before: toVehicle(cur), after: toVehicle(row) }
 }
 
 export async function softDeleteVehicle(tx: Tx, vehicleId: string): Promise<void> {

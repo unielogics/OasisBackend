@@ -31,6 +31,7 @@ import { settleClosed, settlementLog, type Settlement } from './closing.js'
 import { ensureInvoiceFor, staffLabel } from './invoicing.js'
 import { checkSlot, recordOverrides, type OverrideRequest } from './slots.js'
 import './problems.js'
+import { sizeFlags } from './visit-pricing.js'
 
 export interface Toast {
   title: string
@@ -55,6 +56,13 @@ export interface AppointmentCore {
   /** appointments.categories after the command (ADR 0160, plan K). */
   categories: string[]
   category: string | null
+  /** The size the visit is priced at and its label (ADR 0170); null when unknown. */
+  vehicleClass: string | null
+  vehicleClassLabel: string | null
+  /** No size known: priced at the smallest size until staff confirm it ("Confirm size"). */
+  needsSizeConfirm: boolean
+  /** The size has no price of its own: charged the starting price until staff confirm it ("Confirm price"). */
+  needsPriceConfirm: boolean
 }
 
 export interface CommandResult {
@@ -92,6 +100,9 @@ export async function toCore(db: Executor, c: SchedulingCtx, a: AppointmentRecor
     canDrag: canDrag(a.status),
     categories: a.categories,
     category: visitCategory(a.categories),
+    vehicleClass: a.vehicleClass,
+    vehicleClassLabel: a.vehicleClassLabel,
+    ...sizeFlags(a),
   }
 }
 

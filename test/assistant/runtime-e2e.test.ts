@@ -337,7 +337,7 @@ describe('the welcome flow, verification and an in-chat booking, one conversatio
     })
     const booked = (await outTexts(NEWCOMER)).at(-1)!
     expect(booked).toMatchObject({ klass: 'ai_reply', sender_kind: 'ai', template_key: 'action_booked' })
-    expect(booked.body).toBe("You're booked: Signature Hand Wash, Mon Jun 15 at 10:00 AM. $25 booking fee due at the shop. See you then!")
+    expect(booked.body).toBe("You're booked: Signature Hand Wash, Mon Jun 15 at 10:00 AM. $25 booking fee due at the shop. We'll confirm the exact price at the shop. See you then!")
     // the digits were filed masked and never became a turn
     const inboxRow = await w.t.db.selectFrom('sms_inbox').select(['body', 'decision']).where('from_e164', '=', NEWCOMER).orderBy('received_at', 'desc').executeTakeFirstOrThrow()
     expect(inboxRow.decision).toBe('action_code')

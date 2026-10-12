@@ -9,7 +9,9 @@ import { maskEmail, maskPhone } from '../../platform/phone.js'
 import { visitCategory } from '../catalog/appointment-categories.js'
 import { listCatalog } from '../catalog/service.js'
 import '../customers/schema.js'
-import type { AppointmentStatus } from '../customers/schema.js'
+import type { AppointmentStatus, PriceBasis } from '../customers/schema.js'
+import { classPrice, loadPriceBook } from '../catalog/price-book.js'
+import { sizeFlags } from './visit-pricing.js'
 import { isVipCustomer } from '../customers/service.js'
 import { canSeeContact } from '../people/redact.js'
 import {
@@ -69,7 +71,16 @@ export interface AppointmentFile {
     model: string | null
     color: string | null
     plate: string | null
+    vehicleClass: string | null
+    vehicleClassSource: 'staff' | 'client' | 'ai' | 'legacy' | null
   } | null
+  /** The size the visit is priced at and its badges (ADR 0170). */
+  vehicleClass: string | null
+  vehicleClassLabel: string | null
+  needsSizeConfirm: boolean
+  needsPriceConfirm: boolean
+  priceBasis: PriceBasis
+  classConfirmedAt: string | null
   overview: {
     startsAt: string
     endsAt: string
@@ -154,6 +165,7 @@ export async function loadAppointmentFile(
     vip,
     memberMap,
     staff,
+    book,
   ] = await Promise.all([
     customerBrief(db, a.customerId),
     vehicleBrief(db, a.vehicleId),
@@ -176,6 +188,7 @@ export async function loadAppointmentFile(
       { appointmentId: a.id, customerId: a.customerId, membershipId: a.membershipId },
     ]),
     staffLabel(db, a.assignedEmployeeId),
+    loadPriceBook(db, c.locationId),
   ])
   const history = await db
     .selectFrom('appointments')
@@ -236,6 +249,11 @@ export async function loadAppointmentFile(
       smsOptedOut: customer.smsOptedOutAt !== null,
     },
     vehicle,
+    vehicleClass: a.vehicleClass,
+    vehicleClassLabel: a.vehicleClassLabel,
+    ...sizeFlags(a),
+    priceBasis: a.priceBasis,
+    classConfirmedAt: a.classConfirmedAt?.toISOString() ?? null,
     overview: {
       startsAt: a.scheduledStart.toISOString(),
       endsAt: a.scheduledEnd.toISOString(),
@@ -264,10 +282,11 @@ export async function loadAppointmentFile(
     },
     addons: {
       selected: addons,
+      // the regular price at the visit's size (ADR 0170); the starting price while the size is unknown
       catalog: catalog.addons.map((x) => ({
         serviceId: x.id,
         name: x.name,
-        priceCents: x.priceCents,
+        priceCents: classPrice(book, x.id, a.vehicleClass).cents,
         selected: selectedIds.has(x.id),
       })),
       totalCents: addons.reduce((n, x) => n + x.priceCents, 0),

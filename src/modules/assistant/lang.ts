@@ -153,6 +153,7 @@ export function serverTextEs(key: string, vars: Record<string, string | undefine
       return [
         `Reservado: ${vars.service}, ${stop(vars.when ?? '')}`,
         vars.member ? 'Los miembros nunca pagan tarifa de reserva.' : vars.fee ? `Tarifa de reserva de ${vars.fee}, se paga ${vars.how === 'by payment link' ? 'con el enlace de pago' : 'en el local'}.` : null,
+        vars.confirm ? 'Confirmamos el precio exacto en el local.' : null,
         '¡Te esperamos!',
       ]
         .filter((x) => x !== null)

@@ -64,6 +64,18 @@ registerProblems({
     title: 'Not waiting for staff',
     detail: 'This checkout is {state}, not waiting for a match: reload and try again',
   },
+  // ADR 0170: a membership is sold at a size the tier has a price for
+  TIER_CLASS_UNPRICED: {
+    status: 422,
+    title: 'Not sold for that size yet',
+    detail: 'This plan has no price for that vehicle size yet. Pick another size or ask us.',
+  },
+  // ADR 0170 households
+  MEMBERSHIP_HOUSEHOLD_TAKEN: {
+    status: 409,
+    title: 'Already covered',
+    detail: 'This client already has a membership or shares another one. Remove them from it first',
+  },
   MEMBERSHIP_CHECKOUT_UNAVAILABLE: {
     status: 409,
     title: 'No checkout for this plan',

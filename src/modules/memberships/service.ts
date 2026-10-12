@@ -29,6 +29,7 @@ import {
 import type { ProductMap } from '../payments-sync/product-map.js'
 import { loadIntentRefs, markIntentsMatched, openAwaitingMatch } from './checkouts.js'
 import { grantCycleCredits } from './credits.js'
+import { resolvePlanClass } from './plan-class.js'
 import { ensurePlans, loadPlans, planByKey, type Plan } from './plans.js'
 import './problems.js'
 import type { MembershipRow } from './view.js'
@@ -586,6 +587,8 @@ export async function runMembershipCycle(
 export interface MembershipPatch {
   status?: MembershipStatus
   planKey?: PlanKey
+  /** The size the membership is priced at (ADR 0170); absent keeps it. */
+  planClass?: string
   planLabel?: string
   /** The next renewal instant; the period start is derived from the plan's billing interval when it does not fit. */
   renewsAt?: Date
@@ -638,8 +641,14 @@ export async function patchMembership(
     if (!start || start.getTime() >= end.getTime()) start = addMonths(end, -plan.billingIntervalMonths)
   }
   const planChanged = plan.id !== cur.plan_id
+  // the size (ADR 0170): the one named, else the current one; the price billed follows the tier and size (null without a price)
+  const size =
+    p.planClass !== undefined || planChanged
+      ? await resolvePlanClass(tx, d.locationId, plan.id, { requested: p.planClass ?? cur.plan_class })
+      : null
   const set = {
     plan_id: plan.id,
+    ...(size ? { plan_class: size.classKey, tier_price_id: size.tierPriceId } : {}),
     plan_label: p.planLabel?.trim() || (planChanged ? plan.name : cur.plan_label),
     status,
     current_period_start: start,
@@ -665,12 +674,14 @@ export async function patchMembership(
     before: {
       status: cur.status,
       plan: plans.find((x) => x.id === cur.plan_id)?.key,
+      planClass: cur.plan_class,
       renewsAt: cur.current_period_end?.toISOString() ?? null,
       autoApply: cur.auto_apply,
     },
     after: {
       status: row.status,
       plan: plan.key,
+      planClass: row.plan_class,
       renewsAt: row.current_period_end?.toISOString() ?? null,
       autoApply: row.auto_apply,
       note: p.note ?? null,
@@ -685,6 +696,8 @@ export async function patchMembership(
 export interface NewManualMembership {
   customerId: string
   planKey: PlanKey
+  /** The size it is priced at (ADR 0170); absent: the tier's cheapest priced size, else the smallest size. */
+  planClass?: string | null
   planLabel?: string
   renewsAt?: Date
   startedAt?: Date
@@ -737,6 +750,8 @@ export async function createManualMembership(
     .executeTakeFirst()
   if (live) throw new AppError('MEMBERSHIP_EXISTS')
   await requireConfirmedClient(tx, d, input.customerId)
+  await requireNotInHousehold(tx, input.customerId)
+  const size = await resolvePlanClass(tx, d.locationId, plan.id, { requested: input.planClass })
   const now = d.clock.now()
   const end = input.renewsAt ?? addMonths(now, plan.billingIntervalMonths)
   const start = addMonths(end, -plan.billingIntervalMonths)
@@ -749,6 +764,8 @@ export async function createManualMembership(
       customer_id: input.customerId,
       plan_id: plan.id,
       plan_label: input.planLabel?.trim() || plan.name,
+      plan_class: size.classKey,
+      tier_price_id: size.tierPriceId,
       status: 'active',
       source: 'manual',
       started_at: input.startedAt ?? now,
@@ -765,9 +782,153 @@ export async function createManualMembership(
     action: 'membership.created',
     entityType: 'membership',
     entityId: id,
-    after: { customerId: input.customerId, plan: plan.key, source: 'manual' },
+    after: { customerId: input.customerId, plan: plan.key, planClass: size.classKey, source: 'manual' },
     ctx: actor.audit,
   })
   await grantCycleCredits(tx, d, { id, currentPeriodStart: start }, plan, actor.name)
   return row
+}
+
+// ---- households (ADR 0170) -----------------------------------------------------------------------------------------------
+
+/** 409 MEMBERSHIP_HOUSEHOLD_TAKEN when the client shares someone else's membership as a live household member. */
+async function requireNotInHousehold(tx: Tx, customerId: string, exceptMembershipId?: string): Promise<void> {
+  const h = await tx
+    .selectFrom('membership_household')
+    .select('membership_id')
+    .where('customer_id', '=', customerId)
+    .where('removed_at', 'is', null)
+    .executeTakeFirst()
+  if (h && h.membership_id !== exceptMembershipId) throw new AppError('MEMBERSHIP_HOUSEHOLD_TAKEN')
+}
+
+const LIVE: MembershipStatus[] = ['pending', 'active', 'past_due', 'paused']
+
+async function lockLiveMembership(tx: Tx, locationId: string, id: string): Promise<MembershipRow> {
+  const m = await tx
+    .selectFrom('memberships')
+    .selectAll()
+    .where('id', '=', id)
+    .where('location_id', '=', locationId)
+    .forUpdate()
+    .executeTakeFirst()
+  if (!m) throw new AppError('MEMBERSHIP_NOT_FOUND')
+  if (!LIVE.includes(m.status)) throw new AppError('MEMBERSHIP_NOT_ACTIVE', { detail: 'This membership is canceled' })
+  return m
+}
+
+/**
+ * Adds a client to a membership's household (POST /memberships/:id/household): they are priced and covered as the member, and the
+ * membership's credits are shared. A client who holds a live membership or shares another is refused (409
+ * MEMBERSHIP_HOUSEHOLD_TAKEN); adding one already in this household changes nothing. Like adding a membership, it is proof of the
+ * client: a record the stale-record rule holds is refused until staff confirm the client (409 MEMBERSHIP_CLIENT_UNCONFIRMED).
+ */
+export async function addHouseholdMember(
+  tx: Tx,
+  d: { locationId: string; clock: Clock; newId: NewId },
+  membershipId: string,
+  customerId: string,
+  actor: PatchActor,
+): Promise<{ row: MembershipRow; added: boolean }> {
+  const m = await lockLiveMembership(tx, d.locationId, membershipId)
+  const customer = await tx
+    .selectFrom('customers')
+    .select('id')
+    .where('id', '=', customerId)
+    .where('deleted_at', 'is', null)
+    .where('merged_into', 'is', null)
+    .forUpdate()
+    .executeTakeFirst()
+  if (!customer) throw new AppError('NOT_FOUND', { detail: 'That customer does not exist' })
+  if (customerId === m.customer_id)
+    throw new AppError('VALIDATION_FAILED', {
+      detail: 'This client holds the membership already.',
+      errors: [{ path: 'customerId', message: 'This client holds the membership already.' }],
+    })
+  const mine = await tx
+    .selectFrom('membership_household')
+    .select('id')
+    .where('membership_id', '=', m.id)
+    .where('customer_id', '=', customerId)
+    .where('removed_at', 'is', null)
+    .executeTakeFirst()
+  if (mine) return { row: m, added: false }
+  await requireNotInHousehold(tx, customerId)
+  const own = await tx
+    .selectFrom('memberships')
+    .select('id')
+    .where('customer_id', '=', customerId)
+    .where('status', 'in', LIVE)
+    .executeTakeFirst()
+  if (own) throw new AppError('MEMBERSHIP_HOUSEHOLD_TAKEN')
+  await requireConfirmedClient(tx, d, customerId)
+  const now = d.clock.now()
+  await tx
+    .insertInto('membership_household')
+    .values({ id: d.newId(), membership_id: m.id, customer_id: customerId, added_at: now, added_by: actor.userId })
+    .execute()
+  await audit.record(tx, {
+    locationId: d.locationId,
+    action: 'membership.household.add',
+    entityType: 'membership',
+    entityId: m.id,
+    after: { customerId, holderId: m.customer_id },
+    ctx: actor.audit,
+  })
+  return { row: m, added: true }
+}
+
+/** Removes a client from a membership's household (DELETE /memberships/:id/household/:customerId); 404 when they are not in it. */
+export async function removeHouseholdMember(
+  tx: Tx,
+  d: { locationId: string; clock: Clock },
+  membershipId: string,
+  customerId: string,
+  actor: PatchActor,
+): Promise<MembershipRow> {
+  const m = await tx
+    .selectFrom('memberships')
+    .selectAll()
+    .where('id', '=', membershipId)
+    .where('location_id', '=', d.locationId)
+    .forUpdate()
+    .executeTakeFirst()
+  if (!m) throw new AppError('MEMBERSHIP_NOT_FOUND')
+  const r = await tx
+    .updateTable('membership_household')
+    .set({ removed_at: d.clock.now() })
+    .where('membership_id', '=', m.id)
+    .where('customer_id', '=', customerId)
+    .where('removed_at', 'is', null)
+    .executeTakeFirst()
+  if (Number(r.numUpdatedRows ?? 0) === 0) throw new AppError('NOT_FOUND', { detail: 'That client is not in this household' })
+  await audit.record(tx, {
+    locationId: d.locationId,
+    action: 'membership.household.remove',
+    entityType: 'membership',
+    entityId: m.id,
+    before: { customerId, holderId: m.customer_id },
+    ctx: actor.audit,
+  })
+  return m
+}
+
+/** The live membership a client shares as a household member (not the one they hold), with its holder's name. */
+export async function sharedMembership(
+  db: Executor,
+  customerId: string,
+): Promise<{ row: MembershipRow; holderName: string } | undefined> {
+  const r = await db
+    .selectFrom('membership_household as h')
+    .innerJoin('memberships as m', 'm.id', 'h.membership_id')
+    .innerJoin('customers as cu', 'cu.id', 'm.customer_id')
+    .selectAll('m')
+    .select('cu.full_name as holder_name')
+    .where('h.customer_id', '=', customerId)
+    .where('h.removed_at', 'is', null)
+    .where('m.status', 'in', LIVE)
+    .executeTakeFirst()
+  if (!r) return undefined
+  const { holder_name, ...row } = r
+  return { row: row as MembershipRow, holderName: holder_name }
 }

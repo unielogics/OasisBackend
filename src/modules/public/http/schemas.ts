@@ -85,6 +85,9 @@ export const MemberView = z.object({
   washesLeft: z.number().int().nullable(),
   plan: z.string().nullable(),
   active: z.boolean(),
+  tierName: z.string().nullable().describe('The tier’s name ("Gold"; ADR 0170)'),
+  planClass: z.string().nullable().describe('The vehicle size the membership is priced at'),
+  memberDiscountBp: z.number().int().describe('The member % off, in basis points (0 for a non-member)'),
 })
 
 export const OtpVerified = z.object({
@@ -103,12 +106,31 @@ export const VehicleBody = z
   })
   .strict()
 
+/** A vehicle size key (Settings → Vehicle sizes; ADR 0170). */
+export const VehicleClassKey = z.string().regex(/^[a-z][a-z0-9_]{0,31}$/, 'Pick one of the vehicle sizes.')
+
+/** What a booking was priced at (ADR 0170); a guest is priced as a guest, whoever the number belongs to. */
+export const WebPricing = z.object({
+  vehicleClass: z.string().nullable(),
+  vehicleClassLabel: z.string().nullable(),
+  confirmAtShop: z.boolean().describe('The size is not known yet, or has no price of its own: the exact price is confirmed at the shop'),
+  listCents: z.number().int().describe('The regular prices at the size'),
+  discountCents: z.number().int().describe('The member % off'),
+  coveredCents: z.number().int().describe('What the membership covers (applied at the shop)'),
+  dueCents: z.number().int().describe('What is due before tax'),
+})
+
 export const BookingBody = z
   .object({
     name: z.string().trim().min(1).max(80),
     phone: Phone,
     email: z.string().trim().email().max(120).optional(),
     vehicle: VehicleBody.optional(),
+    /**
+     * The size chip (ADR 0170): a vehicle size key. It prices the visit; it is written on the car only for the verified owner of the
+     * record (or a new client). Absent: a `vehicle.label` that names a size counts as the size; else unknown (the "starts at" price).
+     */
+    vehicleClass: VehicleClassKey.nullable().optional(),
     serviceKey: z.string().trim().min(1).max(80),
     addonKeys: z.array(z.string().trim().min(1).max(80)).max(12).default([]),
     date: BizDate,
@@ -132,11 +154,17 @@ export const BookingResult = z.object({
   addons: z.array(z.object({ key: z.string(), name: z.string() })),
   when: z.string(),
   member: z.boolean(),
+  pricing: WebPricing,
 })
 
 export const MembershipBody = z
   .object({
     tier: TierKey,
+    /**
+     * The vehicle size the membership is priced at (ADR 0170): a size the tier has a price for (422 TIER_CLASS_UNPRICED otherwise).
+     * Absent (older pages): the tier's cheapest priced size.
+     */
+    planClass: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/, 'Pick one of the vehicle sizes.').optional(),
     name: z.string().trim().min(1).max(80),
     phone: Phone,
     email: z.string().trim().email().max(120),
@@ -156,4 +184,7 @@ export const MembershipResult = z.object({
   tier: TierKey,
   plan: z.string(),
   confirmationBy: z.enum(['sms', 'none']),
+  planClass: z.string().describe('The vehicle size the membership is priced at'),
+  planClassLabel: z.string().nullable(),
+  monthlyCents: z.number().int().nullable().describe('The tier’s monthly price at that size; null when the tier has no price yet'),
 })

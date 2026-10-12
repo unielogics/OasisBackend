@@ -8,11 +8,14 @@ import * as audit from '../../../platform/audit.js'
 import { transaction } from '../../../platform/db.js'
 import { normalizePhone } from '../../../platform/phone.js'
 import { canSeeContact } from '../../people/redact.js'
+import { AppError } from '../../../platform/errors.js'
+import { requireVehicleClass } from '../../catalog/vehicle-classes.js'
 import {
   findCustomerByPhone,
   isVipCustomer,
   listVehicles,
   searchCustomers,
+  setVehicleClass,
   upsertCustomerByPhone,
   upsertVehicleByPlate,
   type VehicleRecord,
@@ -25,6 +28,11 @@ const Vehicle = z.object({
   model: z.string().nullable(),
   color: z.string().nullable(),
   plate: z.string().nullable(),
+  vehicleClass: z.string().nullable().describe('The car’s size (a vehicle size key, ADR 0170); null when nobody said'),
+  vehicleClassSource: z
+    .enum(['staff', 'client', 'ai', 'legacy'])
+    .nullable()
+    .describe('Who said the size: staff, the client (website or personal link), the AI assistant, or the old vehicle type'),
 })
 
 const CustomerHit = z.object({
@@ -84,6 +92,8 @@ const vehicleOut = (v: VehicleRecord) => ({
   model: v.model,
   color: v.color,
   plate: v.plate,
+  vehicleClass: v.vehicleClass,
+  vehicleClassSource: v.vehicleClassSource,
 })
 
 export function registerCustomerBookingRoutes(app: AppInstance): void {
@@ -122,6 +132,45 @@ export function registerCustomerBookingRoutes(app: AppInstance): void {
           vehicles: h.vehicles.map(vehicleOut),
         })),
       }
+    },
+  )
+
+  app.patch(
+    '/customers/:id/vehicles/:vehicleId',
+    {
+      config: { access: access.perm('cli.edit') },
+      schema: {
+        tags: ['customers'],
+        summary: 'Set the size of a client’s car',
+        description:
+          'The size prices the car’s next visits (ADR 0170): a size of the shop that is on, or null to clear it. Recorded as said by staff. Booked visits keep their price; change a visit’s size with PUT /appointments/{id}/vehicle-class. Audited (`customer.vehicle.update`).',
+        params: z.object({ id: z.string().uuid(), vehicleId: z.string().uuid() }),
+        body: z
+          .object({ vehicleClass: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/, 'Pick one of the shop’s vehicle sizes.').nullable() })
+          .strict(),
+        response: { 200: z.object({ vehicle: Vehicle }) },
+      },
+    },
+    async (req) => {
+      const locationId = req.auth!.locationId
+      return transaction(app.db, async (tx) => {
+        const key = req.body.vehicleClass
+          ? (await requireVehicleClass(tx, locationId, req.body.vehicleClass, { active: true, path: 'vehicleClass' })).key
+          : null
+        const r = await setVehicleClass(tx, { customerId: req.params.id, vehicleId: req.params.vehicleId, classKey: key })
+        if (!r) throw new AppError('NOT_FOUND', { detail: 'That vehicle does not exist' })
+        if (r.before.vehicleClass !== r.after.vehicleClass || r.before.vehicleClassSource !== r.after.vehicleClassSource)
+          await audit.record(tx, {
+            locationId,
+            action: 'customer.vehicle.update',
+            entityType: 'vehicle',
+            entityId: r.after.id,
+            before: { vehicleClass: r.before.vehicleClass, source: r.before.vehicleClassSource },
+            after: { vehicleClass: r.after.vehicleClass, source: r.after.vehicleClassSource, customerId: req.params.id },
+            ctx: auditContextOf(req),
+          })
+        return { vehicle: vehicleOut(r.after) }
+      })
     },
   )
 

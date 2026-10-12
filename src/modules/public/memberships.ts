@@ -23,6 +23,7 @@ import { phoneOrThrow, resolveMemberToken } from './otp.js'
 import '../identity/problems.js'
 import './problems.js'
 import { publicTierOf, type PublicTier } from './tiers.js'
+import { resolvePlanClass } from '../memberships/plan-class.js'
 
 /** The tier as it is sold: its key and the name the membership is sold under (memberships.plan_label). */
 interface TierSpec {
@@ -32,6 +33,8 @@ interface TierSpec {
 
 export interface WebJoinInput {
   tier: PublicTier
+  /** The vehicle size the membership is priced at (ADR 0170); absent: the tier's cheapest priced size. */
+  planClass?: string
   name: string
   phone: string
   email: string
@@ -49,6 +52,9 @@ export interface WebJoinResult {
   tier: PublicTier
   plan: string
   confirmationBy: 'sms' | 'none'
+  planClass: string
+  planClassLabel: string | null
+  monthlyCents: number | null
 }
 
 export interface TierProduct {
@@ -109,6 +115,10 @@ export async function joinWeb(
       detail: 'That plan is not available right now.',
       errors: [{ path: 'body.tier', message: 'That plan is not available right now.' }],
     })
+  // the size it is priced at (ADR 0170): a size named must have a price for the tier (422 TIER_CLASS_UNPRICED)
+  const size = await resolvePlanClass(tx, loc.id, plan.id, { requested: input.planClass, requirePrice: input.planClass !== undefined, path: 'body.planClass' })
+  const sizeLabel = (await tx.selectFrom('vehicle_classes').select('label').where('location_id', '=', loc.id).where('key', '=', size.classKey).executeTakeFirst())?.label ?? null
+  const sized = { planClass: size.classKey, planClassLabel: sizeLabel, monthlyCents: size.monthlyCents }
 
   const verified = input.memberToken ? await resolveMemberToken(tx, loc, input.memberToken, now) : null
   if (verified && verified.phoneE164 !== phone) throw new AppError('PUBLIC_TOKEN_PHONE_MISMATCH')
@@ -139,7 +149,8 @@ export async function joinWeb(
   // record or attach a membership to it. Anyone else gets the same answer as a new member, and staff are asked to confirm with
   // the customer: nothing is written to the record, nothing is texted, and nothing tells the caller the number is known, or a
   // member already (review 2026-10-10).
-  if (existing && !(verified && verified.customerId === existing.id)) return unverifiedJoin(tx, d, loc, r, input, existing, plan, spec)
+  if (existing && !(verified && verified.customerId === existing.id))
+    return { ...(await unverifiedJoin(tx, d, loc, r, input, existing, plan, spec, sizeLabel)), ...sized }
   if (existing) {
     const patch: { fullName?: string; email?: string | null } = {}
     if (input.name.trim() && input.name.trim() !== existing.fullName) patch.fullName = input.name.trim()
@@ -186,6 +197,8 @@ export async function joinWeb(
       customer_id: customer.id,
       plan_id: plan.id,
       plan_label: spec.label,
+      plan_class: size.classKey,
+      tier_price_id: size.tierPriceId,
       status: 'pending',
       source: 'manual',
       sqsp_subscription_ref: null,
@@ -213,7 +226,7 @@ export async function joinWeb(
     action: 'membership.created',
     entityType: 'membership',
     entityId: id,
-    after: { customerId: customer.id, plan: plan.key, tier: spec.key, status: 'pending', source: 'web', product: product?.productId ?? product?.sku ?? null },
+    after: { customerId: customer.id, plan: plan.key, tier: spec.key, planClass: size.classKey, status: 'pending', source: 'web', product: product?.productId ?? product?.sku ?? null },
     ctx: { actor: { name: 'Website' }, requestId: r.requestId, idempotencyKey: r.idempotencyKey ?? null, ip: r.ip },
   })
   const who = `${customer.fullName} (${formatPhoneDisplay(phone)})`
@@ -224,7 +237,7 @@ export async function joinWeb(
       kind: 'membership.web_join',
       title: `Website join: send ${customer.fullName.trim().split(/\s+/)[0]} the ${spec.label} checkout link`,
       body: product
-        ? `${who} joined ${spec.label} on the website. Text them the Squarespace checkout link for "${product.name ?? product.sku ?? product.productId}"; the membership activates when the order is paid.`
+        ? `${who} joined ${spec.label}${sizeLabel ? ` (${sizeLabel} plan)` : ''} on the website. Text them the Squarespace checkout link for "${product.name ?? product.sku ?? product.productId}"; the membership activates when the order is paid.`
         : `${who} joined ${spec.label} on the website. The Squarespace product map has no product for the ${plan.name} plan: text them the checkout link by hand and map the product in Settings so the payment activates the membership.`,
       entityType: 'membership',
       entityId: id,
@@ -252,6 +265,7 @@ export async function joinWeb(
     plan: spec.label,
     // the policy's outcome is the verified owner's to know; anyone else is told what they asked for (a STOP would show through)
     confirmationBy: verified ? (sent.queued ? 'sms' : 'none') : input.smsConsent ? 'sms' : 'none',
+    ...sized,
   }
 }
 
@@ -269,7 +283,8 @@ async function unverifiedJoin(
   existing: CustomerRecord,
   plan: { id: string; key: string; name: string; legacyKey: string | null },
   spec: TierSpec,
-): Promise<WebJoinResult> {
+  sizeLabel: string | null,
+): Promise<Omit<WebJoinResult, 'planClass' | 'planClassLabel' | 'monthlyCents'>> {
   const { clock, newId } = d.app
   const ref = memberRefOf(newId())
   const live = await tx
@@ -294,7 +309,7 @@ async function unverifiedJoin(
     ? `Careful: ${staleWhy(verdict, now)} — the texter may be a new holder of the number: confirm who they are before adding a membership; if they are new, create a new client.`
     : live
     ? `They already have a ${live.plan_label} membership (${live.status.replace('_', ' ')}): check with them before changing anything.`
-    : `Call or text them to confirm; if they did join, add the ${spec.label} membership on their record and text them the Squarespace checkout link${product ? ` for "${product.name ?? product.sku ?? product.productId}"` : ''}.`
+    : `Call or text them to confirm; if they did join, add the ${spec.label} membership${sizeLabel ? ` (${sizeLabel} plan)` : ''} on their record and text them the Squarespace checkout link${product ? ` for "${product.name ?? product.sku ?? product.productId}"` : ''}.`
   await audit.record(tx, {
     locationId: loc.id,
     action: 'membership.web_join_unverified',

@@ -1,7 +1,7 @@
 // Request and response schemas of the personal-link API (ADR 0160, design section 5). Bodies are strict except the code request's,
 // which ignores what it does not know (a `phone` sent with it is dropped: the code only ever goes to the link's own number).
 import { z } from '../../../../http/zod.js'
-import { BizDate, TierKey } from '../../http/schemas.js'
+import { BizDate, TierKey, VehicleClassKey, WebPricing } from '../../http/schemas.js'
 
 const iso = z.string()
 const isoOrNull = z.string().nullable()
@@ -30,7 +30,27 @@ export const AppointmentView = z.object({
 export const InvoiceView = z.object({
   number: z.number().int(),
   date: z.string(),
-  items: z.array(z.object({ name: z.string(), priceCents: z.number().int() })),
+  items: z.array(
+    z.object({
+      name: z.string(),
+      priceCents: z.number().int().describe('What the line charges'),
+      listCents: z.number().int().nullable().describe('The regular price at the size (ADR 0170); null on a line priced before sizes'),
+      discountBp: z.number().int().nullable().describe('The member % off applied, in basis points'),
+      memberDiscountCents: z.number().int(),
+      classLabel: z.string().nullable().describe('The size the line is priced at'),
+    }),
+  ),
+  coverage: z
+    .array(
+      z.object({
+        serviceName: z.string(),
+        coveredCents: z.number().int(),
+        lineCents: z.number().int(),
+        differenceCents: z.number().int(),
+        planClassLabel: z.string().nullable(),
+      }),
+    )
+    .describe('What the membership covered ("Covered $40 · $20 size difference due")'),
   subtotalCents: z.number().int(),
   taxCents: z.number().int(),
   tipCents: z.number().int(),
@@ -114,6 +134,9 @@ export const BookingBody = z
     date: BizDate,
     startMin: z.number().int().min(0).max(24 * 60),
     vehicle: VehicleBody.optional(),
+    vehicleClass: VehicleClassKey.nullable()
+      .optional()
+      .describe('The size chip (ADR 0170): prices the visit and is recorded on the car; absent: the car’s size on file, else unknown'),
     name: z.string().trim().max(80).optional().describe('Required on a stranger’s link; fills a name the shop does not have yet'),
     email: z.string().trim().email('Enter a valid email.').max(254).optional(),
     smsConsent: z.boolean().optional().describe('A stranger’s consent to the texts about this booking'),
@@ -132,6 +155,7 @@ export const BookingResult = z.object({
   when: z.string(),
   member: z.boolean(),
   bayCount: z.number().int(),
+  pricing: WebPricing,
 })
 
 export const RefParams = z.object({ ref: z.string().regex(/^OAS-\d{1,9}$/, 'A booking reference such as OAS-00042') })
@@ -143,6 +167,9 @@ export const RescheduleResult = z.object({ bookingRef: z.string(), status: z.str
 export const MembershipStartBody = z
   .object({
     email: z.string().trim().email('Enter a valid email.').max(254).describe('The email the client will pay with at Squarespace'),
+    planClass: VehicleClassKey.optional().describe(
+      'The vehicle size the membership is priced at (ADR 0170): a size the tier has a price for (422 TIER_CLASS_UNPRICED); absent: the tier’s cheapest priced size',
+    ),
     vehicles: z
       .array(z.object({ car: z.string().trim().min(1).max(80), plate: z.string().trim().max(15).optional() }).strict())
       .max(5)

@@ -28,7 +28,14 @@ export interface MembershipView {
     perks: string[]
     addonDiscountBp: number
     serviceDiscountBp: number
+    /** The member % off every line the membership does not cover (ADR 0170). */
+    memberDiscountBp: number
   }
+  /** The size the membership is priced at: a covered line is covered up to this size's price (ADR 0170). */
+  planClass: string
+  planClassLabel: string | null
+  /** The other clients the membership covers (the holder is customerId); credits are shared. */
+  household: { customerId: string; name: string; addedAt: string }[]
   startedAt: string
   memberMonths: number
   currentPeriodStart: string | null
@@ -79,6 +86,20 @@ export async function viewsOf(
   )
   const counts = await visitCounts(db, c.locationId, [...new Set(rows.map((r) => r.customer_id))], c.now)
   const checkouts = await liveCheckouts(db, rows.map((r) => r.id))
+  const sizes = await db.selectFrom('vehicle_classes').select(['key', 'label']).where('location_id', '=', c.locationId).execute()
+  const household = await db
+    .selectFrom('membership_household as h')
+    .innerJoin('customers as cu', 'cu.id', 'h.customer_id')
+    .select(['h.membership_id', 'h.customer_id', 'cu.full_name', 'h.added_at'])
+    .where(
+      'h.membership_id',
+      'in',
+      rows.map((r) => r.id),
+    )
+    .where('h.removed_at', 'is', null)
+    .orderBy('h.added_at')
+    .orderBy('h.id')
+    .execute()
   return rows.map((r) => {
     const co = checkouts.get(r.id)
     const plan = plans.find((p) => p.id === r.plan_id)!
@@ -98,7 +119,13 @@ export async function viewsOf(
         perks: plan.perks,
         addonDiscountBp: plan.addonDiscountBp,
         serviceDiscountBp: plan.serviceDiscountBp,
+        memberDiscountBp: plan.memberDiscountBp,
       },
+      planClass: r.plan_class,
+      planClassLabel: sizes.find((s) => s.key === r.plan_class)?.label ?? null,
+      household: household
+        .filter((h) => h.membership_id === r.id)
+        .map((h) => ({ customerId: h.customer_id, name: h.full_name, addedAt: h.added_at.toISOString() })),
       startedAt: r.started_at.toISOString(),
       memberMonths: memberMonths(r.started_at, c.now),
       currentPeriodStart: r.current_period_start?.toISOString() ?? null,

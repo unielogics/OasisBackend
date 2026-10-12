@@ -16,6 +16,8 @@ import { hasPin } from '../identity/common.js'
 import { reassignNumber } from '../identity/rebind.js'
 import { staleRecord } from '../identity/stale.js'
 import { loadPlans } from '../memberships/plans.js'
+import { listVehicleClasses, requireVehicleClass } from '../catalog/vehicle-classes.js'
+import type { PricingView } from '../scheduling/visit-pricing.js'
 import { logActivity } from '../scheduling/appointments.js'
 import { createAppointment } from '../scheduling/booking.js'
 import { engineInput, evaluateStart, loadDayData } from '../scheduling/availability-loader.js'
@@ -31,9 +33,38 @@ export interface WebVehicle {
   year?: number
   make?: string
   model?: string
-  /** Free text such as "2021 Tesla Model 3" (the join flow's "car" field); parsed when make and model are absent. */
+  /**
+   * Free text such as "2021 Tesla Model 3" (the join flow's "car" field); parsed when make and model are absent. A label that is a
+   * vehicle size ("Compact SUV", or the old site's "Sedan / Coupe") is the size, never a car (ADR 0170).
+   */
   label?: string
   plate?: string
+}
+
+/** The old website's size chips (before ADR 0170) and the size each one prices at (the vehicle_type backfill's mapping). */
+export const LEGACY_SIZE_LABELS: Readonly<Record<string, string>> = {
+  'sedan / coupe': 'compact_car',
+  'suv / crossover': 'compact_suv',
+  'truck / van': 'truck',
+}
+
+const normLabel = (s: string): string => s.trim().toLowerCase().replace(/\s*\/\s*/g, ' / ').replace(/\s+/g, ' ')
+
+/** Whether a free-text label names a vehicle size (one of the shop's, by label or key, or an old size chip) rather than a car. */
+export function isSizeLabel(label: string | undefined, sizes: readonly { key: string; label: string }[]): boolean {
+  if (!label?.trim()) return false
+  const n = normLabel(label)
+  return n in LEGACY_SIZE_LABELS || sizes.some((s) => normLabel(s.label) === n || s.key === n.replace(/ /g, '_'))
+}
+
+/** The size a size label names (null when it names none, or the size it maps to is not one of `sizes`). */
+export function classOfLabel(label: string | undefined, sizes: readonly { key: string; label: string }[]): string | null {
+  if (!label?.trim()) return null
+  const n = normLabel(label)
+  const own = sizes.find((s) => normLabel(s.label) === n || s.key === n.replace(/ /g, '_'))
+  if (own) return own.key
+  const legacy = LEGACY_SIZE_LABELS[n]
+  return legacy && sizes.some((s) => s.key === legacy) ? legacy : null
 }
 
 export interface WebBookingInput {
@@ -41,6 +72,8 @@ export interface WebBookingInput {
   phone: string
   email?: string
   vehicle?: WebVehicle
+  /** The size chip (ADR 0170): prices the visit; recorded on the car only for the verified owner of the record or a new client. */
+  vehicleClass?: string | null
   serviceKey: string
   addonKeys: string[]
   date: string
@@ -63,7 +96,28 @@ export interface WebBookingResult {
   /** "Today · 1:00 PM" */
   when: string
   member: boolean
+  /** What the visit was priced at (ADR 0170): the size, whether the shop confirms the price, the totals before tax. */
+  pricing: WebPricing
 }
+
+export interface WebPricing {
+  vehicleClass: string | null
+  vehicleClassLabel: string | null
+  /** The size is not known yet, or has no price of its own: the exact price is confirmed at the shop. */
+  confirmAtShop: boolean
+  listCents: number
+  discountCents: number
+  coveredCents: number
+  dueCents: number
+}
+
+/** The pricing a public booking answer carries (nothing of the record: a guest is priced as a guest). */
+export const webPricingOf = (p: PricingView): WebPricing => ({
+  vehicleClass: p.vehicleClass,
+  vehicleClassLabel: p.vehicleClassLabel,
+  confirmAtShop: p.confirmAtShop,
+  ...p.totals,
+})
 
 const bad = (path: string, message: string): AppError =>
   new AppError('VALIDATION_FAILED', { detail: message, errors: [{ path: `body.${path}`, message }] })
@@ -79,9 +133,14 @@ export function parseVehicleLabel(label: string): { year: number | null; make: s
   return { year, make, model }
 }
 
-export function vehicleOf(v: WebVehicle | undefined): { year: number | null; make: string | null; model: string | null; plate: string | null } | null {
+/** The car a form describes; a label that names a size is not a car (ADR 0170: "Sedan / Coupe" never becomes make "Sedan"). */
+export function vehicleOf(
+  v: WebVehicle | undefined,
+  sizes: readonly { key: string; label: string }[] = [],
+): { year: number | null; make: string | null; model: string | null; plate: string | null } | null {
   if (!v) return null
-  const parsed = v.label && !v.make && !v.model ? parseVehicleLabel(v.label) : { year: null, make: null, model: null }
+  const label = isSizeLabel(v.label, sizes) ? undefined : v.label
+  const parsed = label && !v.make && !v.model ? parseVehicleLabel(label) : { year: null, make: null, model: null }
   const out = {
     year: v.year ?? parsed.year,
     make: v.make ?? parsed.make,
@@ -148,6 +207,11 @@ export async function createWebBooking(
     if (!a) throw bad('addonKeys', 'Pick add-ons from the catalog.')
     addons.push(a)
   }
+  // the size: the chip, else a size label an old cached page sent as the car (ADR 0170)
+  const sizes = await listVehicleClasses(tx, loc.id, { activeOnly: true })
+  const vehicleClass = input.vehicleClass
+    ? (await requireVehicleClass(tx, loc.id, input.vehicleClass, { active: true, path: 'body.vehicleClass' })).key
+    : classOfLabel(input.vehicle?.label, sizes)
   const verified = input.memberToken ? await resolveMemberToken(tx, loc, input.memberToken, now) : null
   if (verified && verified.phoneE164 !== phone) throw new AppError('PUBLIC_TOKEN_PHONE_MISMATCH')
 
@@ -222,7 +286,12 @@ export async function createWebBooking(
   try {
     booked = await createAppointment(tx, c, actor, {
       customer: linkOnly && existing ? { id: existing.id } : { name: input.name, phone, email: input.email ?? null, smsOptIn: input.smsConsent },
-      vehicle: linkOnly ? null : vehicleOf(input.vehicle),
+      vehicle: linkOnly ? null : vehicleOf(input.vehicle, sizes),
+      // a guest's size prices the visit but never reaches someone else's record; member prices only for the verified owner
+      vehicleClass,
+      recordClassAs: linkOnly ? null : 'client',
+      memberPricing: member,
+      confirmPriceVar: 'confirm',
       serviceId: pkg.id,
       addonIds: addons.map((a) => a.id),
       start,
@@ -245,7 +314,7 @@ export async function createWebBooking(
   }
   const appointmentId = booked.appointment.id
   if (linkOnly)
-    await logActivity(tx, c, { appointmentId, text: unverifiedDetails(input), channels: ['internal'], actor })
+    await logActivity(tx, c, { appointmentId, text: unverifiedDetails(input, sizes), channels: ['internal'], actor })
   if (typedNameNote) await logActivity(tx, c, { appointmentId, text: typedNameNote, channels: ['internal'], actor })
   await logActivity(tx, c, {
     appointmentId,
@@ -271,6 +340,7 @@ export async function createWebBooking(
     addons: addons.map((a) => ({ key: a.key, name: a.name })),
     when: `${when === 'today' ? 'Today' : when === 'tomorrow' ? 'Tomorrow' : when} · ${time}`,
     member,
+    pricing: webPricingOf(booked.pricing),
   }
 }
 
@@ -309,8 +379,8 @@ export function isPlaceholderName(c: { fullName: string; needsDetails: boolean }
 }
 
 /** What an unverified caller typed for a customer the shop already has, for staff to confirm (nothing of it reaches the record). */
-function unverifiedDetails(input: WebBookingInput): string {
-  const v = vehicleOf(input.vehicle)
+function unverifiedDetails(input: WebBookingInput, sizes: readonly { key: string; label: string }[]): string {
+  const v = vehicleOf(input.vehicle, sizes)
   const car = v ? [v.year, v.make, v.model].filter((x) => x !== null && x !== '').join(' ') + (v.plate ? ` (${v.plate})` : '') : null
   const parts = [
     `name "${input.name.trim()}"`,

@@ -54,9 +54,30 @@ export const InvoiceSummary = z.object({
   awaitingCents: z.number().int().optional(),
   taxBp: z.number().int().optional(),
   items: z.array(
-    z.object({ name: z.string(), priceCents: z.number().int(), kind: z.enum(['package', 'addon']) }),
+    z.object({
+      name: z.string(),
+      priceCents: z.number().int().describe('What the line charges'),
+      kind: z.enum(['package', 'addon']),
+      listCents: z.number().int().nullable().optional().describe('The regular price at the size; null on a line priced before sizes'),
+      discountBp: z.number().int().nullable().optional().describe('The member % off applied, in basis points'),
+      memberDiscountCents: z.number().int().optional().describe('list - price'),
+      classLabel: z.string().nullable().optional().describe('The size the line is priced at'),
+    }),
   ),
   payMethodLabel: z.string().nullable(),
+  vehicleClassLabel: z.string().nullable().optional().describe('The size the invoice is priced at ("Large SUV")'),
+  coverage: z
+    .array(
+      z.object({
+        serviceName: z.string(),
+        coveredCents: z.number().int(),
+        lineCents: z.number().int(),
+        differenceCents: z.number().int().describe('line - covered: the size difference that stays due'),
+        planClassLabel: z.string().nullable().describe('The size the membership is priced at'),
+      }),
+    )
+    .optional()
+    .describe('What the membership covered: "Covered $40 · $20 size difference due"'),
 })
 
 /** appointments.categories (ADR 0160, plan K): the category keys of the package and live add-ons, in category order. */
@@ -67,6 +88,81 @@ export const VisitCategory = z
   .string()
   .nullable()
   .describe('The one word the visit counts under (KPIs, Payments split): its category ignoring add-ons, "mixed" for two or more, the add-ons category for add-ons alone, null for none')
+
+/** The size of a visit (ADR 0170, wave Q2). */
+export const SizeFields = {
+  vehicleClass: z.string().nullable().describe('The vehicle size the visit is priced at (a size key); null when nobody knew it'),
+  vehicleClassLabel: z.string().nullable().describe('"Large SUV"'),
+  needsSizeConfirm: z
+    .boolean()
+    .describe('No size known: priced at the smallest size (the starting price) until staff confirm the size at the shop ("Confirm size")'),
+  needsPriceConfirm: z
+    .boolean()
+    .describe('The size has no price of its own: charged the starting price until staff confirm it ("Confirm price")'),
+}
+
+export const PriceBasis = z
+  .enum(['legacy', 'class', 'unknown_class', 'estimated', 'base'])
+  .describe(
+    "How a price was found: class (the size's own price), unknown_class (no size known: the smallest size's), estimated (the size has no price: the starting price), base (the service has no prices by size), legacy (priced before sizes)",
+  )
+
+export const QuoteTotals = z.object({
+  listCents: z.number().int().describe('Sum of the regular prices at the size'),
+  discountCents: z.number().int().describe('Sum of the member % off'),
+  coveredCents: z.number().int().describe('What the membership would cover (applied when the visit is completed)'),
+  dueCents: z.number().int().describe('What the client owes before tax and tip'),
+})
+
+export const PricingView = z
+  .object({
+    vehicleClass: z.string().nullable(),
+    vehicleClassLabel: z.string().nullable(),
+    basis: PriceBasis,
+    needsSizeConfirm: z.boolean(),
+    needsPriceConfirm: z.boolean(),
+    member: z.boolean().describe('Priced as a member (the holder or a household member of an active membership)'),
+    confirmAtShop: z
+      .boolean()
+      .describe('A price depends on a size not known yet, or the size has no price of its own: the exact price is confirmed at the shop'),
+    totals: QuoteTotals,
+  })
+  .describe('What the visit was priced at (ADR 0170)')
+
+export const QuoteResult = z.object({
+  pricing: PricingView,
+  member: z
+    .object({
+      tierName: z.string(),
+      planClass: z.string(),
+      planClassLabel: z.string().nullable(),
+      discountBp: z.number().int(),
+      household: z.boolean().describe('The client shares the membership as a household member'),
+    })
+    .nullable(),
+  lines: z.array(
+    z.object({
+      serviceId: z.string(),
+      name: z.string(),
+      kind: z.enum(['package', 'addon']),
+      listCents: z.number().int(),
+      listMaxCents: z.number().int().nullable().describe('The top of a range (tint)'),
+      chargeCents: z.number().int().describe('What the line would charge'),
+      memberDiscountCents: z.number().int(),
+      discountBp: z.number().int(),
+      basis: PriceBasis,
+      coverage: z
+        .object({
+          label: z.string(),
+          coveredCents: z.number().int(),
+          differenceCents: z.number().int(),
+          planClassLabel: z.string().nullable(),
+        })
+        .nullable(),
+      dueCents: z.number().int(),
+    }),
+  ),
+})
 
 export const Vehicle = z.object({
   year: z.number().int().nullable(),
@@ -111,6 +207,7 @@ export const OpsCard = z.object({
   prepped: z.boolean(),
   pickupState: z.enum(['pending', 'collected']).nullable(),
   version: z.number().int(),
+  ...SizeFields,
 })
 
 export const Kpi = z.object({
@@ -327,6 +424,7 @@ export const AppointmentCore = z.object({
   canDrag: z.boolean(),
   categories: Categories,
   category: VisitCategory,
+  ...SizeFields,
 })
 
 export const Toast = z.object({ title: z.string(), detail: z.string() })
@@ -371,6 +469,7 @@ export const BookingResult = z.object({
   overrides: z.array(z.object({ kind: z.string(), reason: z.string() })),
   messageQueued: z.boolean(),
   toast: Toast,
+  pricing: PricingView,
 })
 
 const ChecklistItem = z.object({
@@ -432,7 +531,14 @@ export const AppointmentFile = z.object({
     smsOptedIn: z.boolean(),
     smsOptedOut: z.boolean(),
   }),
-  vehicle: Vehicle.extend({ id: z.string() }).nullable(),
+  vehicle: Vehicle.extend({
+    id: z.string(),
+    vehicleClass: z.string().nullable().describe('The car’s size on file (ADR 0170)'),
+    vehicleClassSource: z.enum(['staff', 'client', 'ai', 'legacy']).nullable().describe('Who said the size'),
+  }).nullable(),
+  ...SizeFields,
+  priceBasis: PriceBasis,
+  classConfirmedAt: z.string().nullable().describe('When staff confirmed the size at the shop'),
   overview: z.object({
     startsAt: Instant,
     endsAt: Instant,

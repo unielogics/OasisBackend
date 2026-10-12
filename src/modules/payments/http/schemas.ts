@@ -191,8 +191,12 @@ export const InvoiceDetail = z.object({
       position: z.number().int(),
       kind: z.enum(['package', 'addon']),
       name: z.string(),
-      priceCents: z.number().int(),
+      priceCents: z.number().int().describe('What the line charges'),
       refunded: z.boolean(),
+      listCents: z.number().int().nullable().describe('The regular price at the visit’s size (ADR 0170); null on a line priced before sizes'),
+      discountBp: z.number().int().nullable().describe('The member % off applied, in basis points'),
+      memberDiscountCents: z.number().int().describe('list - price: the member % off in cents'),
+      classLabel: z.string().nullable().describe('The size the line is priced at ("Large SUV")'),
     }),
   ),
   adjustments: z.array(
@@ -202,6 +206,16 @@ export const InvoiceDetail = z.object({
       reason: z.string().nullable(),
       note: z.string().nullable(),
       amountCents: z.number().int(),
+      coverage: z
+        .object({
+          serviceName: z.string(),
+          coveredCents: z.number().int(),
+          lineCents: z.number().int().describe('The covered line’s regular price'),
+          differenceCents: z.number().int().describe('line - covered: the size difference that stays due (no % off)'),
+          planClassLabel: z.string().nullable().describe('The size the membership is priced at'),
+        })
+        .nullable()
+        .describe('A membership’s coverage of one line (ADR 0170): "Covered $40 · $20 size difference due"; null for any other adjustment'),
     }),
   ),
   calc: Calc,

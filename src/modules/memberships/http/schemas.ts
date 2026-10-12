@@ -42,7 +42,13 @@ export const MembershipView = z.object({
     perks: z.array(z.string()),
     addonDiscountBp: z.number().int(),
     serviceDiscountBp: z.number().int(),
+    memberDiscountBp: z.number().int().describe('The member % off, in basis points (ADR 0170)'),
   }),
+  planClass: z.string().describe('The size the membership is priced at: a covered line is covered up to this size’s price'),
+  planClassLabel: z.string().nullable(),
+  household: z
+    .array(z.object({ customerId: z.string(), name: z.string(), addedAt: z.string() }))
+    .describe('The other clients the membership covers (the holder is customerId); its credits are shared'),
   startedAt: z.string(),
   memberMonths: z.number().int(),
   currentPeriodStart: z.string().nullable(),
@@ -93,6 +99,10 @@ export const History = z.object({
 export const CustomerMembership = z.object({
   customerId: z.string(),
   membership: MembershipView.nullable(),
+  sharedFrom: z
+    .object({ customerId: z.string(), name: z.string() })
+    .nullable()
+    .describe('Set when the client is a household member of someone else’s membership (then `membership` is that one)'),
   upgrade: Upgrade.nullable(),
   history: History,
 })
@@ -121,10 +131,14 @@ export const ListResult = z.object({
   }),
 })
 
+/** A vehicle size key (ADR 0170). */
+const ClassKey = z.string().regex(/^[a-z][a-z0-9_]{0,31}$/, 'Pick one of the shop’s vehicle sizes.')
+
 export const PatchBody = z
   .object({
     status: Status.optional(),
     planKey: PlanKey.optional(),
+    planClass: ClassKey.optional().describe('The size the membership is priced at (a size of the shop)'),
     planLabel: z.string().trim().min(1).max(40).optional(),
     renewsOn: BizDate.optional(),
     autoApply: z.boolean().optional(),
@@ -137,10 +151,16 @@ export const CreateBody = z
   .object({
     customerId: Uuid,
     planKey: PlanKey,
+    planClass: ClassKey.optional().describe(
+      'The size the membership is priced at (a size of the shop that is on); absent: the smallest size the tier has a price for, else the smallest size',
+    ),
     planLabel: z.string().trim().min(1).max(40).optional(),
     renewsOn: BizDate.optional(),
   })
   .strict()
+
+export const HouseholdBody = z.object({ customerId: Uuid }).strict()
+export const HouseholdParams = z.object({ id: Uuid, customerId: Uuid })
 
 export const MembershipResult = z.object({ membership: MembershipView })
 
@@ -150,8 +170,27 @@ export const ApplyResult = AdjustResult.extend({
   membershipId: z.string(),
   appointmentId: z.string(),
   rule: z.object({ id: z.string(), label: z.string() }),
-  discountCents: z.number().int(),
+  discountCents: z.number().int().describe('What the membership covered on the visit, all lines together'),
   credits: z.object({ left: z.number().int().nullable(), used: z.number().int() }),
+  lines: z
+    .array(
+      z.object({
+        inclusionId: z.string(),
+        label: z.string(),
+        serviceId: z.string(),
+        serviceName: z.string(),
+        kind: z.enum(['package', 'addon']),
+        lineCents: z.number().int().describe('The line’s regular price'),
+        coveredCents: z.number().int(),
+        differenceCents: z.number().int().describe('The size difference that stays due (no % off)'),
+        planClass: z.string(),
+        visitClass: z.string().nullable(),
+        eventId: z.string().describe('The adjust event'),
+        redeemId: z.string(),
+      }),
+    )
+    .describe('One entry per covered line (ADR 0170)'),
+  repriced: z.boolean().describe('A line’s price changed before the coverage (covered at the regular price, others at the member price)'),
 })
 
 export const PlanRule = z.object({

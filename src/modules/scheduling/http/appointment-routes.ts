@@ -7,6 +7,7 @@ import { transaction, type Tx } from '../../../platform/db.js'
 import { paginationQuery } from '../../../platform/pagination.js'
 import { canSeeContact } from '../../people/redact.js'
 import { addAddon, removeAddon } from '../addons.js'
+import { quoteFor, setAppointmentClass } from '../sizing.js'
 import { createAppointment } from '../booking.js'
 import { bulkSetChecklist, setChecklistItem } from '../checklist.js'
 import { loadAppointmentFile } from '../file.js'
@@ -38,6 +39,7 @@ import {
   CommandResult,
   DepositChoice,
   OpsCard,
+  QuoteResult,
   OverrideBody,
   Status,
   BizDate,
@@ -69,10 +71,17 @@ const VehicleInput = z
   })
   .strict()
 
+/** A vehicle size key (Settings → Vehicle sizes; ADR 0170). */
+const ClassKey = z.string().regex(/^[a-z][a-z0-9_]{0,31}$/, 'Pick one of the shop’s vehicle sizes.')
+
 const BookingBody = z
   .object({
     customer: CustomerInput,
     vehicle: VehicleInput.nullish(),
+    vehicleId: Uuid.nullish().describe('One of the client’s vehicles on file (instead of `vehicle`)'),
+    vehicleClass: ClassKey.nullish().describe(
+      'The size the visit is priced at (also recorded on the visit’s car, source staff). Absent: the car’s size on file, else unknown (priced at the smallest size, "Confirm size")',
+    ),
     serviceId: Uuid,
     addonIds: z.array(Uuid).max(20).optional(),
     start: IsoStart.optional(),
@@ -83,6 +92,16 @@ const BookingBody = z
     notes: z.string().max(1000).nullish(),
     specialInstructions: z.string().max(1000).nullish(),
     override: OverrideBody.optional(),
+  })
+  .strict()
+
+const QuoteBody = z
+  .object({
+    customerId: Uuid.nullish().describe('The client (their membership prices the visit); absent: a guest'),
+    serviceId: Uuid,
+    addonIds: z.array(Uuid).max(20).optional(),
+    vehicleId: Uuid.nullish().describe('One of the client’s vehicles: its size on file prices the visit when no vehicleClass is named'),
+    vehicleClass: ClassKey.nullish(),
   })
   .strict()
 
@@ -160,6 +179,9 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
         const r = await createAppointment(tx, c, actorOf(req), {
           customer: b.customer,
           vehicle: b.vehicle,
+          vehicleId: b.vehicleId ?? null,
+          vehicleClass: b.vehicleClass ?? null,
+          recordClassAs: 'staff',
           serviceId: b.serviceId,
           addonIds: b.addonIds,
           start: b.start ? instant(b.start) : undefined,
@@ -174,6 +196,51 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
         return { status: 201, body: r, headers: { Location: `/api/v1/appointments/${r.appointment.id}` } }
       }),
     ),
+  )
+
+  app.post(
+    '/appointments/quote',
+    {
+      config: { access: access.perm('sched.edit') },
+      schema: {
+        tags: TAGS,
+        summary: 'Price preview for the booking sheet (nothing is written)',
+        description:
+          'The same rules as the booking (ADR 0170): the size named, else the vehicle’s size on file, else unknown (the smallest size’s price, the "starts at" price); a client who holds or shares an active membership gets the member price, and a line an inclusion covers shows the regular price with what the membership would cover (up to the price at the plan size) and the size difference due. Coverage itself is applied when the visit is completed.',
+        body: QuoteBody,
+        response: { 200: QuoteResult },
+      },
+    },
+    async (req) => {
+      const b = req.body as z.infer<typeof QuoteBody>
+      return quoteFor(app.db, await ctxOf(app, req, ports), {
+        customerId: b.customerId ?? null,
+        serviceId: b.serviceId,
+        addonIds: b.addonIds,
+        vehicleId: b.vehicleId ?? null,
+        vehicleClass: b.vehicleClass ?? null,
+      })
+    },
+  )
+
+  app.put(
+    '/appointments/:id/vehicle-class',
+    {
+      config: { access: access.perm('sched.edit') },
+      schema: {
+        tags: TAGS,
+        summary: 'Set or confirm the vehicle size at the shop: the visit is priced again',
+        description:
+          'The package and live add-ons are priced again at the size for the client (ADR 0170), the invoice follows, the "Confirm size" / "Confirm price" badges go away (class_confirmed_at) and the visit’s car gets the size (source staff). A change that would leave the invoice paid above its new total: 409 `PRICE_CHANGE_OVERPAID` (refund or adjust first); nothing changes. Stale `version`: 409 `VERSION_CONFLICT`. A canceled or no-show visit: 409 `INVALID_TRANSITION`. Audited (`appointment.vehicle_class.set`).',
+        params: IdParams,
+        body: z.object({ vehicleClass: ClassKey, version: z.number().int() }).strict(),
+        response: { 200: CommandResult },
+      },
+    },
+    async (req) => {
+      const c = await ctxOf(app, req, ports)
+      return inTx((tx) => setAppointmentClass(tx, c, actorOf(req), req.params.id, req.body))
+    },
   )
 
   app.patch(

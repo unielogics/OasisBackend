@@ -29,6 +29,7 @@ import { ensurePlans, loadPlans, planByKey, type Plan } from './plans.js'
 import './problems.js'
 import type { MembershipCheckoutState, MembershipCheckoutsTable } from './schema.js'
 import type { Selectable } from 'kysely'
+import { resolvePlanClass } from './plan-class.js'
 
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
@@ -411,6 +412,11 @@ export interface OpenCheckoutInput {
   envProductMap?: string
   /** The plan label the membership is sold under ("Gold"); the plan's public label or name by default. */
   planLabel?: string
+  /**
+   * The vehicle size the membership is priced at (ADR 0170): a size the tier has a price for (422 TIER_CLASS_UNPRICED); absent: the
+   * tier's cheapest priced size, else the smallest size.
+   */
+  planClass?: string
 }
 
 export interface OpenCheckoutResult {
@@ -464,6 +470,7 @@ export async function openCheckoutIntent(tx: Tx, d: Ctx, input: OpenCheckoutInpu
   if (!plan || !planRow || !planRow.active)
     throw new AppError('VALIDATION_FAILED', { detail: 'That plan is not available right now.', errors: [{ path: 'planKey', message: 'That plan is not available right now.' }] })
   if (!planRow.checkout_url) throw new AppError('MEMBERSHIP_CHECKOUT_UNAVAILABLE')
+  const size = await resolvePlanClass(tx, d.locationId, plan.id, { requested: input.planClass, requirePrice: input.planClass !== undefined })
   const customer = await tx
     .selectFrom('customers')
     .select('id')
@@ -478,7 +485,7 @@ export async function openCheckoutIntent(tx: Tx, d: Ctx, input: OpenCheckoutInpu
   const productKey = await planProductKey(tx, d.locationId, plan.key, input.envProductMap, plan.legacyKey)
   const live = await tx
     .selectFrom('memberships')
-    .select(['id', 'status', 'plan_id'])
+    .select(['id', 'status', 'plan_id', 'plan_class'])
     .where('customer_id', '=', customer.id)
     .where('status', 'in', ['pending', 'active', 'past_due', 'paused'])
     .forUpdate()
@@ -488,10 +495,18 @@ export async function openCheckoutIntent(tx: Tx, d: Ctx, input: OpenCheckoutInpu
   const created = !live
   if (live) {
     membershipId = live.id
-    if (live.plan_id !== plan.id)
+    if (live.plan_id !== plan.id || live.plan_class !== size.classKey)
       await tx
         .updateTable('memberships')
-        .set((eb) => ({ plan_id: plan.id, plan_label: label, sqsp_product_key: productKey, updated_at: now, version: eb('version', '+', 1) }))
+        .set((eb) => ({
+          plan_id: plan.id,
+          plan_label: label,
+          plan_class: size.classKey,
+          tier_price_id: size.tierPriceId,
+          sqsp_product_key: productKey,
+          updated_at: now,
+          version: eb('version', '+', 1),
+        }))
         .where('id', '=', live.id)
         .execute()
   } else {
@@ -504,6 +519,8 @@ export async function openCheckoutIntent(tx: Tx, d: Ctx, input: OpenCheckoutInpu
         customer_id: customer.id,
         plan_id: plan.id,
         plan_label: label,
+        plan_class: size.classKey,
+        tier_price_id: size.tierPriceId,
         status: 'pending',
         source: 'manual',
         sqsp_product_key: productKey,
@@ -532,6 +549,7 @@ export async function openCheckoutIntent(tx: Tx, d: Ctx, input: OpenCheckoutInpu
       customer_id: customer.id,
       link_id: input.linkId ?? null,
       plan_key: plan.key,
+      plan_class: size.classKey,
       product_key: productKey,
       expected_email: email,
       checkout_url: planRow.checkout_url,
@@ -545,7 +563,7 @@ export async function openCheckoutIntent(tx: Tx, d: Ctx, input: OpenCheckoutInpu
     action: 'membership.checkout.started',
     entityType: 'membership',
     entityId: membershipId,
-    after: { checkoutId, plan: plan.key, email, product: productKey, expiresAt: expiresAt.toISOString(), membershipCreated: created },
+    after: { checkoutId, plan: plan.key, planClass: size.classKey, email, product: productKey, expiresAt: expiresAt.toISOString(), membershipCreated: created },
     ctx,
   })
   return { membershipId, checkoutId, checkoutUrl: planRow.checkout_url, expiresAt, membershipCreated: created }

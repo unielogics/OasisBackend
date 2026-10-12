@@ -10,6 +10,7 @@ import { renderTemplate, type TemplateVars } from '../messaging/templates/render
 import { QUICK_REPLIES } from '../messaging/templates/registry.js'
 import type { SmsClass } from '../messaging/policy/classes.js'
 import type { MemberContext } from '../catalog/price-book.js'
+import type { PriceBasis } from '../customers/schema.js'
 import type { Actor, SchedulingCtx } from './context.js'
 import type { SettlementKind, SettlementView } from './cancellation.js'
 import type { AppointmentRecord } from './appointments.js'
@@ -31,8 +32,28 @@ export type InvoiceStatus =
 
 export interface InvoiceItem {
   name: string
+  /** What the line charges (the member price, or the regular price for a guest or a line the membership covers). */
   priceCents: number
   kind: 'package' | 'addon'
+  /** The regular price at the visit's size (ADR 0170, wave Q2); absent/null on a line priced before sizes. */
+  listCents?: number | null
+  /** The member % off applied, in basis points. */
+  discountBp?: number | null
+  basis?: PriceBasis
+  /** Read side only: the size the line is priced at ("Large SUV") and the member % off in cents (list - price). */
+  classLabel?: string | null
+  memberDiscountCents?: number
+}
+
+/** A covered line of the invoice (ADR 0170): the membership's adjust and the line it covered (read side). */
+export interface InvoiceCoverage {
+  serviceName: string
+  coveredCents: number
+  lineCents: number
+  /** line - covered: the size difference that stays due. */
+  differenceCents: number
+  /** "Compact car": the size the membership is priced at. */
+  planClassLabel: string | null
 }
 
 /**
@@ -58,6 +79,10 @@ export interface InvoiceSummary {
   taxBp?: number
   items: InvoiceItem[]
   payMethodLabel: string | null
+  /** The size the invoice is priced at ("Large SUV"); absent/null when unknown or priced before sizes. */
+  vehicleClassLabel?: string | null
+  /** What the membership covered on this invoice, one entry per covered line (ADR 0170). */
+  coverage?: InvoiceCoverage[]
 }
 
 export interface EnsureInvoiceInput {
@@ -70,9 +95,21 @@ export interface EnsureInvoiceInput {
   occurredAt: Date
   packageName: string
   packagePriceCents: number
-  addons: { name: string; priceCents: number }[]
+  /** The package line's regular price, member % off and how it was priced (ADR 0170); absent on a visit priced before sizes. */
+  packageListCents?: number | null
+  packageDiscountBp?: number | null
+  packageBasis?: PriceBasis
+  addons: { name: string; priceCents: number; listCents?: number | null; discountBp?: number | null; basis?: PriceBasis }[]
+  /** The size label the invoice header shows ("Large SUV"); null when unknown. */
+  vehicleClassLabel?: string | null
   /** The acting person and request, for the invoice's audit rows (SEC-15). */
   audit?: AuditContext
+}
+
+/** What an item sync may also refresh on the invoice header. */
+export interface SyncItemsMeta {
+  /** The size label after a size change (null clears it); absent leaves it as it is. */
+  vehicleClassLabel?: string | null
 }
 
 /**
@@ -81,8 +118,8 @@ export interface EnsureInvoiceInput {
  */
 export interface InvoiceGateway {
   ensureForAppointment(tx: Tx, a: EnsureInvoiceInput): Promise<InvoiceSummary>
-  /** Replaces the invoice items; 409 ADDON_REMOVE_OVERPAID when a removal would leave paid above the new total. */
-  syncItems(tx: Tx, appointmentId: string, items: InvoiceItem[]): Promise<InvoiceSummary>
+  /** Replaces the invoice items; 409 ADDON_REMOVE_OVERPAID when a removal (or a lower price) would leave paid above the new total. */
+  syncItems(tx: Tx, appointmentId: string, items: InvoiceItem[], meta?: SyncItemsMeta): Promise<InvoiceSummary>
   cancelForAppointment(
     tx: Tx,
     appointmentId: string,
@@ -159,6 +196,7 @@ interface MemInvoice {
   refundPending: boolean
   payMethodLabel: string | null
   occurredAt: Date
+  vehicleClassLabel: string | null
 }
 
 const sum = (xs: readonly number[]): number => xs.reduce((a, b) => a + b, 0)
@@ -207,6 +245,7 @@ export class InMemoryInvoiceGateway implements InvoiceGateway {
       refundPending: inv.refundPending,
       items: inv.items.map((i) => ({ ...i })),
       payMethodLabel: inv.payMethodLabel,
+      vehicleClassLabel: inv.vehicleClassLabel,
     }
   }
 
@@ -227,9 +266,17 @@ export class InMemoryInvoiceGateway implements InvoiceGateway {
       appointmentId: a.appointmentId,
       locationId: a.locationId,
       items: [
-        { name: a.packageName, priceCents: a.packagePriceCents, kind: 'package' },
-        ...a.addons.map((x) => ({ name: x.name, priceCents: x.priceCents, kind: 'addon' as const })),
+        {
+          name: a.packageName,
+          priceCents: a.packagePriceCents,
+          kind: 'package',
+          ...(a.packageListCents !== undefined ? { listCents: a.packageListCents } : {}),
+          ...(a.packageDiscountBp !== undefined ? { discountBp: a.packageDiscountBp } : {}),
+          ...(a.packageBasis !== undefined ? { basis: a.packageBasis } : {}),
+        },
+        ...a.addons.map((x) => ({ ...x, kind: 'addon' as const })),
       ],
+      vehicleClassLabel: a.vehicleClassLabel ?? null,
       tipCents: 0,
       paidCents: 0,
       refundedCents: 0,
@@ -244,10 +291,11 @@ export class InMemoryInvoiceGateway implements InvoiceGateway {
     return this.summarize(inv)
   }
 
-  async syncItems(_tx: Tx, appointmentId: string, items: InvoiceItem[]): Promise<InvoiceSummary> {
+  async syncItems(_tx: Tx, appointmentId: string, items: InvoiceItem[], meta: SyncItemsMeta = {}): Promise<InvoiceSummary> {
     this.calls.push({ method: 'syncItems', appointmentId })
     const inv = this.byAppointment.get(appointmentId)
     if (!inv) throw appError('NOT_FOUND', { detail: 'That invoice does not exist' })
+    if (meta.vehicleClassLabel !== undefined) inv.vehicleClassLabel = meta.vehicleClassLabel
     const next = { ...inv, items: items.map((i) => ({ ...i })) }
     const after = this.summarize(next)
     if (inv.paidCents - inv.refundedCents > after.totalCents) {

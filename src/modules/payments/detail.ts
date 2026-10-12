@@ -17,6 +17,7 @@ import {
   type ItemRow,
 } from './repository.js'
 import type { CreditExpiry, InvoiceStatus } from './schema.js'
+import { coverageOf, lineClassLabel, type CoverageLine } from './gateway.js'
 
 export const EXPIRY_LABELS: Record<CreditExpiry, string> = {
   none: 'No expiry',
@@ -74,6 +75,14 @@ export interface InvoiceItemDto {
   priceCents: number
   /** Claimed by a done or pending by-item refund. */
   refunded: boolean
+  /** The regular price at the visit's size (ADR 0170); null on a line priced before sizes. */
+  listCents: number | null
+  /** The member % off applied, in basis points (null before sizes). */
+  discountBp: number | null
+  /** list - price: the member % off in cents. */
+  memberDiscountCents: number
+  /** The size the line is priced at ("Large SUV"); null when unknown or not priced by size. */
+  classLabel: string | null
 }
 
 export interface AdjustmentLineDto {
@@ -82,6 +91,14 @@ export interface AdjustmentLineDto {
   reason: string | null
   note: string | null
   amountCents: number
+  /** A membership's coverage of one line (ADR 0170): "Covered $40 · $20 size difference due"; null for any other adjustment. */
+  coverage: {
+    serviceName: string
+    coveredCents: number
+    lineCents: number
+    differenceCents: number
+    planClassLabel: string | null
+  } | null
 }
 
 export interface CallerDto {
@@ -223,6 +240,17 @@ export function callerDto(actor: PayActor | null): CallerDto | null {
   }
 }
 
+const coverageDto = (x: CoverageLine | undefined): AdjustmentLineDto['coverage'] =>
+  x
+    ? {
+        serviceName: x.serviceName,
+        coveredCents: x.coveredCents,
+        lineCents: x.lineCents,
+        differenceCents: x.differenceCents,
+        planClassLabel: x.planClassLabel,
+      }
+    : null
+
 export interface DetailContext {
   locationId: string
   now: Date
@@ -241,14 +269,16 @@ export async function invoiceDetail(
 }
 
 export async function buildDetail(db: Executor, c: DetailContext, inv: InvoiceRow): Promise<InvoiceDetail> {
-  const [items, events, calc, credit, cardCap, otherCap] = await Promise.all([
+  const [items, events, calc, credit, cardCap, otherCap, coverage] = await Promise.all([
     listItems(db, inv.id),
     listEvents(db, inv.id),
     calcOf(db, inv.id),
     clientCreditSummary(db, inv.customer_id, c.now),
     originalRefundCap(db, inv.id, 'card'),
     originalRefundCap(db, inv.id, 'cash'),
+    coverageOf(db, [inv.id]),
   ])
+  const covered = new Map((coverage.get(inv.id) ?? []).map((x) => [x.eventId, x]))
   const voidedIds = new Set(
     events.filter((e) => e.type === 'void' && e.voids_event_id).map((e) => e.voids_event_id!),
   )
@@ -289,6 +319,10 @@ export async function buildDetail(db: Executor, c: DetailContext, inv: InvoiceRo
       name: i.name,
       priceCents: i.price_cents,
       refunded: claimed.has(i.id),
+      listCents: i.list_cents,
+      discountBp: i.discount_bp,
+      memberDiscountCents: i.list_cents === null ? 0 : i.list_cents - i.price_cents,
+      classLabel: lineClassLabel(i.price_basis, inv.vehicle_class_label),
     })),
     adjustments: events
       .filter((e) => e.type === 'adjust')
@@ -299,6 +333,7 @@ export async function buildDetail(db: Executor, c: DetailContext, inv: InvoiceRo
         reason: e.reason,
         note: e.note,
         amountCents: e.amount_cents,
+        coverage: coverageDto(covered.get(e.id)),
       })),
     calc,
     refundCaps: { cardCents: cardCap, otherCents: otherCap, totalCents: calc.refundable },

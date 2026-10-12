@@ -47,11 +47,12 @@ export async function protectMemberCredits(
   const held = await heldCredits(tx, ctx.appointmentIds)
   let n = 0
   for (const h of held) {
+    // one marker per redeem (a visit may hold several since ADR 0170: a wash and an included add-on)
     const res = await sql`
       insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, rule_id, inclusion_id, appointment_id, invoice_id, note, actor,
         idempotency_key, created_at)
       values (${d.newId()}, ${h.membership_id}, ${h.cycle_start}, 'protect', ${h.qty}, ${h.rule_id}, ${h.inclusion_id}, ${h.appointment_id}, ${h.invoice_id},
-        'Emergency closure · credit protected', 'System', ${`protect:${h.appointment_id}:${ctx.emergencyClosureId}`}, ${d.clock.now()})
+        'Emergency closure · credit protected', 'System', ${`protect:${h.id}:${ctx.emergencyClosureId}`}, ${d.clock.now()})
       on conflict (idempotency_key) do nothing`.execute(tx)
     n += Number(res.numAffectedRows ?? 0)
   }
@@ -59,8 +60,9 @@ export async function protectMemberCredits(
 }
 
 /**
- * A canceled or no-show appointment that an emergency closure flagged (and whose closure protects credits) gives back the credit
- * it held. Idempotent per redeem. null when nothing was held, the job was not flagged, or the closure left credits unprotected.
+ * A canceled or no-show appointment that an emergency closure flagged (and whose closure protects credits) gives back every credit
+ * it held (one restore per redeem: a wash and an included add-on are two). Idempotent per redeem. null when nothing was held, the
+ * job was not flagged, or the closure left credits unprotected.
  */
 export async function restoreClosureCredit(
   tx: Tx,
@@ -71,16 +73,18 @@ export async function restoreClosureCredit(
     select c.credits from appointments a join emergency_closures c on c.id = a.emergency_closure_id
     where a.id = ${appointmentId}`.execute(tx)
   if (!flag.rows[0]?.credits) return null
-  const held = (await heldCredits(tx, [appointmentId]))[0]
-  if (!held) return null
-  const m = await sql<{ current_period_start: Date | null }>`
-    select current_period_start from memberships where id = ${held.membership_id}`.execute(tx)
-  const cycle = m.rows[0]?.current_period_start ?? held.cycle_start
-  await sql`
-    insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, rule_id, inclusion_id, appointment_id, invoice_id, note, actor,
-      idempotency_key, created_at)
-    values (${d.newId()}, ${held.membership_id}, ${cycle}, 'restore', ${held.qty}, ${held.rule_id}, ${held.inclusion_id}, ${held.appointment_id}, ${held.invoice_id},
-      'Emergency closure · credit restored', 'System', ${`restore:${held.id}`}, ${d.clock.now()})
-    on conflict (idempotency_key) do nothing`.execute(tx)
-  return { ruleLabel: held.rule_label ?? 'Membership credit' }
+  const held = await heldCredits(tx, [appointmentId])
+  if (held.length === 0) return null
+  for (const h of held) {
+    const m = await sql<{ current_period_start: Date | null }>`
+      select current_period_start from memberships where id = ${h.membership_id}`.execute(tx)
+    const cycle = m.rows[0]?.current_period_start ?? h.cycle_start
+    await sql`
+      insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, rule_id, inclusion_id, appointment_id, invoice_id, note, actor,
+        idempotency_key, created_at)
+      values (${d.newId()}, ${h.membership_id}, ${cycle}, 'restore', ${h.qty}, ${h.rule_id}, ${h.inclusion_id}, ${h.appointment_id}, ${h.invoice_id},
+        'Emergency closure · credit restored', 'System', ${`restore:${h.id}`}, ${d.clock.now()})
+      on conflict (idempotency_key) do nothing`.execute(tx)
+  }
+  return { ruleLabel: [...new Set(held.map((h) => h.rule_label ?? 'Membership credit'))].join(' + ') }
 }

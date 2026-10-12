@@ -227,7 +227,7 @@ export function coveringInclusion(member: MemberContext, serviceId: string, used
  * The price at a member's plan size: that size's own cell even when the size was turned off later (a member keeps the size they pay
  * for), else rule 1.
  */
-function planSizeCents(book: PriceBook, serviceId: string, planClass: string): number {
+export function planSizeCents(book: PriceBook, serviceId: string, planClass: string): number {
   return book.cells.get(serviceId)?.get(planClass)?.cents ?? classPrice(book, serviceId, planClass).cents
 }
 
@@ -291,7 +291,10 @@ export interface VisitQuote {
   }
 }
 
-/** A whole visit (the package, then the add-ons in order) at a size; each covered line spends one of the cycle's credits. */
+/**
+ * A whole visit (the package, then the add-ons in order) at a size; each covered line spends one of the cycle's credits, and an
+ * inclusion covers at most one line of a visit (wave Q2: one redeem per inclusion and visit, `redeem:<appointment>:<inclusion>`).
+ */
 export function quoteVisit(
   book: PriceBook,
   visit: { packageId: string; addonIds: readonly string[]; classKey: string | null },
@@ -299,7 +302,7 @@ export function quoteVisit(
 ): VisitQuote {
   const used = new Map<string, number>()
   const lines = [visit.packageId, ...visit.addonIds].map((serviceId) => {
-    const inc = member ? coveringInclusion(member, serviceId, used) : null
+    const inc = member ? coveringInclusion({ ...member, inclusions: member.inclusions.filter((i) => !used.has(i.id)) }, serviceId, used) : null
     if (inc) used.set(inc.id, (used.get(inc.id) ?? 0) + 1)
     return priceLine(book, { serviceId }, visit.classKey, member, { inclusion: inc })
   })

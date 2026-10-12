@@ -145,7 +145,7 @@ describe('the website and the stale-record rule (L1, probes R1 and R2; closed by
   it('R1: /public/otp/verify on a stale record shows nobody (no first name, no membership)', async () => {
     await h.customer({ name: 'Maria Delgado', createdAt: ago(200) })
     const v = await verifyOtp(PHONES.maria)
-    expect(v.member).toEqual({ firstName: '', tier: null, washesLeft: null, plan: null, active: false })
+    expect(v.member).toEqual({ firstName: '', tier: null, washesLeft: null, plan: null, active: false, tierName: null, planClass: null, memberDiscountBp: 0 })
   })
 
   it('/public/otp/verify on a record that is not stale still greets the client', async () => {

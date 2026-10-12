@@ -9,7 +9,7 @@ import { addDays, dateLabel, fmtT, minutesOfDay, toBizDate } from '../../platfor
 import { DateTime } from 'luxon'
 import '../customers/schema.js'
 import '../catalog/schema.js'
-import type { ActivityChannel, AppointmentSource, AppointmentStatus } from '../customers/schema.js'
+import type { ActivityChannel, AppointmentSource, AppointmentStatus, PriceBasis } from '../customers/schema.js'
 import { actorName, firstName, type Actor, type SchedulingCtx } from './context.js'
 import './problems.js'
 
@@ -49,6 +49,15 @@ export interface AppointmentRecord {
   emergencyClosureId: string | null
   /** The category keys of the package and live add-ons, in category order (appointments.categories, ADR 0160 plan K). */
   categories: string[]
+  /** The size the visit is priced at (ADR 0170, wave Q2); null when nobody knew it (priced at the smallest size). */
+  vehicleClass: string | null
+  vehicleClassLabel: string | null
+  /** Staff confirmed the size at the shop (the "Confirm size" badge goes away). */
+  classConfirmedAt: Date | null
+  /** The package line's regular price at the size, the member % off applied and how the price was found. */
+  listPriceCents: number | null
+  discountBp: number | null
+  priceBasis: PriceBasis
   version: number
   createdBy: string | null
   createdAt: Date
@@ -89,6 +98,12 @@ export const APPOINTMENT_COLUMNS = [
   'membership_id',
   'emergency_closure_id',
   'categories',
+  'vehicle_class',
+  'vehicle_class_label',
+  'class_confirmed_at',
+  'list_price_cents',
+  'discount_bp',
+  'price_basis',
   'version',
   'created_by',
   'created_at',
@@ -129,6 +144,12 @@ type Row = {
   membership_id: string | null
   emergency_closure_id: string | null
   categories: string[]
+  vehicle_class: string | null
+  vehicle_class_label: string | null
+  class_confirmed_at: Date | null
+  list_price_cents: number | null
+  discount_bp: number | null
+  price_basis: PriceBasis
   version: number
   created_by: string | null
   created_at: Date
@@ -169,6 +190,12 @@ export const toAppointment = (r: Row): AppointmentRecord => ({
   membershipId: r.membership_id,
   emergencyClosureId: r.emergency_closure_id,
   categories: r.categories ?? [],
+  vehicleClass: r.vehicle_class,
+  vehicleClassLabel: r.vehicle_class_label,
+  classConfirmedAt: r.class_confirmed_at,
+  listPriceCents: r.list_price_cents,
+  discountBp: r.discount_bp,
+  priceBasis: r.price_basis,
   version: r.version,
   createdBy: r.created_by,
   createdAt: r.created_at,
@@ -262,6 +289,9 @@ export interface VehicleBrief {
   model: string | null
   color: string | null
   plate: string | null
+  /** The car's size on file (ADR 0170) and who said it. */
+  vehicleClass: string | null
+  vehicleClassSource: 'staff' | 'client' | 'ai' | 'legacy' | null
 }
 
 export async function customerBrief(db: Executor, id: string): Promise<CustomerBrief> {
@@ -286,10 +316,12 @@ export async function vehicleBrief(db: Executor, id: string | null): Promise<Veh
   if (!id) return null
   const r = await db
     .selectFrom('vehicles')
-    .select(['id', 'year', 'make', 'model', 'color', 'plate'])
+    .select(['id', 'year', 'make', 'model', 'color', 'plate', 'vehicle_class', 'vehicle_class_source'])
     .where('id', '=', id)
     .executeTakeFirst()
-  return r ?? null
+  if (!r) return null
+  const { vehicle_class, vehicle_class_source, ...rest } = r
+  return { ...rest, vehicleClass: vehicle_class, vehicleClassSource: vehicle_class_source }
 }
 
 export const vehicleLabel = (v: Pick<VehicleBrief, 'year' | 'make' | 'model'> | null): string =>

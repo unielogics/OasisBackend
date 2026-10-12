@@ -82,6 +82,12 @@ const defs: Record<string, ProblemDef> = {
     detail: 'The deposit was refunded. Book a new appointment instead',
   },
   NOT_AN_ADDON: { status: 422, title: 'Not an add-on', detail: 'Pick an add-on from the catalog' },
+  // a size change (ADR 0170) that would leave the invoice paid above its new total: the gateway's ADDON_REMOVE_OVERPAID, reworded
+  PRICE_CHANGE_OVERPAID: {
+    status: 409,
+    title: 'Can’t change the size',
+    detail: 'Refund or adjust the invoice first — the new price would leave the invoice overpaid',
+  },
 }
 
 export function ensureSchedulingProblems(): void {

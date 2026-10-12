@@ -1,5 +1,5 @@
-// Add-on operations. The price is always the catalog's, snapshotted on the appointment; the invoice and the checklist
-// follow. Allowed at any status except canceled and no-show. Removing an add-on that would leave the invoice overpaid is
+// Add-on operations. The price is the price book's at the visit's size for the client (ADR 0170: the member price, or the regular
+// price when an inclusion covers it), snapshotted on the appointment; the invoice and the checklist follow. Allowed at any status except canceled and no-show. Removing an add-on that would leave the invoice overpaid is
 // refused by the invoice gateway (409 ADDON_REMOVE_OVERPAID) and rolls the whole change back.
 import type { Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
@@ -18,6 +18,7 @@ import type { Actor, SchedulingCtx } from './context.js'
 import { liveAddons, syncInvoiceItems } from './invoicing.js'
 import type { InvoiceSummary } from './ports.js'
 import './problems.js'
+import { lineColumns, memberFor, priceVisit, withVisitCredits } from './visit-pricing.js'
 
 export interface AddonChange {
   /** The add-on is on the appointment after the call (what the toast direction follows). */
@@ -50,9 +51,21 @@ export async function addAddon(
   const svc = await requireService(tx, c.locationId, serviceId)
   if (svc.kind !== 'addon') throw new AppError('NOT_AN_ADDON')
   if (!svc.active) throw new AppError('NOT_AN_ADDON', { detail: 'That add-on is no longer offered' })
-  const live = (await liveAddons(tx, a.id)).find((x) => x.serviceId === svc.id)
+  const current = await liveAddons(tx, a.id)
+  const live = current.find((x) => x.serviceId === svc.id)
   let changed = false
+  let priceCents = live?.priceCents ?? svc.priceCents
   if (!live) {
+    // priced at the visit's size for the client (ADR 0170): the member price, or the regular price when an inclusion covers it
+    const member = await withVisitCredits(tx, await memberFor(tx, c, a.customerId), a.id)
+    const priced = await priceVisit(tx, c, {
+      packageId: a.serviceId,
+      addonIds: [...current.map((x) => x.serviceId), svc.id],
+      classKey: a.vehicleClass,
+      member,
+    })
+    const line = priced.quote.lines[priced.quote.lines.length - 1]!
+    priceCents = line.chargeCents
     const rowId = c.newId()
     await tx
       .insertInto('appointment_addons')
@@ -61,7 +74,7 @@ export async function addAddon(
         appointment_id: a.id,
         service_id: svc.id,
         name: svc.name,
-        price_cents: svc.priceCents,
+        ...lineColumns(line),
         added_by: actor.auth.userId,
       })
       .execute()
@@ -85,7 +98,7 @@ export async function addAddon(
     await audit(tx, c, actor, 'addon.add', a.id, null, {
       serviceId: svc.id,
       name: svc.name,
-      priceCents: svc.priceCents,
+      priceCents,
     })
     await publishOps(tx, c.locationId, {
       appointment: { id: a.id, version: a.version + 1, status: a.status, change: 'addons' },
@@ -94,7 +107,7 @@ export async function addAddon(
   return {
     added: true,
     changed,
-    addon: { serviceId: svc.id, name: svc.name, priceCents: live?.priceCents ?? svc.priceCents },
+    addon: { serviceId: svc.id, name: svc.name, priceCents },
     invoice,
     checklist: await checklistProgress(tx, a.id),
     toast: { title: 'Invoice + checklist updated', detail: `Added ${svc.name}` },

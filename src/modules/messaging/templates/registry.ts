@@ -209,9 +209,10 @@ export const TEMPLATES = {
     // the site design's SMS demo: "Booked: Signature Hand Wash, today at 1:00 PM. Members never pay a booking fee. Reply C to change."
     // The member sentence stays for members; a guest gets the fee sentence instead. "Reply C to change" is "Reply here to change it":
     // a C reply means confirm in this system.
-    body: 'Booked: {service}, {when} at {time}.{#fee} {fee} booking fee due {how}.{/fee}{#member} Members never pay a booking fee.{/member} Reply here to change it.',
+    // {confirm} (ADR 0170): the size is not known yet, or has no price of its own, so the exact price is confirmed at the shop
+    body: 'Booked: {service}, {when} at {time}.{#fee} {fee} booking fee due {how}.{/fee}{#member} Members never pay a booking fee.{/member}{#confirm} We’ll confirm the exact price at the shop.{/confirm} Reply here to change it.',
     required: ['service', 'when', 'time'],
-    optional: ['fee', 'how', 'member'],
+    optional: ['fee', 'how', 'member', 'confirm'],
     editable: true,
     source: 'Oasis Site v2 SMS demo (design logic SMS()), adapted for the C keyword',
   }),
@@ -393,9 +394,9 @@ export const TEMPLATES = {
     key: 'action_booked',
     label: 'Booked by text',
     klass: 'ai_reply',
-    body: 'You’re booked: {service}, {when} at {time}.{#fee} {fee} booking fee due {how}.{/fee}{#member} Members never pay a booking fee.{/member} See you then!',
+    body: 'You’re booked: {service}, {when} at {time}.{#fee} {fee} booking fee due {how}.{/fee}{#member} Members never pay a booking fee.{/member}{#confirm} We’ll confirm the exact price at the shop.{/confirm} See you then!',
     required: ['service', 'when', 'time'],
-    optional: ['fee', 'how', 'member'],
+    optional: ['fee', 'how', 'member', 'confirm'],
     editable: false,
     source: 'new: in-chat booking confirmed by the reply number (wording of booking_confirmed_web)',
   }),

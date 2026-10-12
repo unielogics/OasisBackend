@@ -16,6 +16,8 @@ export const BookPayload = z.strictObject({
   date: z.string(),
   startMin: z.number().int(),
   vehicleId: z.string().nullable(),
+  /** The size the visit is priced at (ADR 0170): the named vehicle's size on file; null when unknown. Absent on older proposals. */
+  vehicleClass: z.string().nullable().optional(),
 })
 export type BookPayload = z.infer<typeof BookPayload>
 

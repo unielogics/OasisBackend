@@ -15,6 +15,7 @@ import { toBizDate } from '../../platform/time.js'
 import { calcInvoice, type CalcEvent, type InvoiceCalc } from './calc.js'
 import { invoiceLabel } from './format.js'
 import { calcFromRow, touchInvoice, type InvoiceRow } from './repository.js'
+import type { PriceBasis } from '../customers/schema.js'
 import type { InvoiceCalcRow, InvoiceStatus, ItemKind } from './schema.js'
 import './problems.js'
 
@@ -37,8 +38,38 @@ export interface InvoiceSummary {
   awaitingCents: number
   /** The rate snapshotted on the invoice, in basis points (700 = 7%). */
   taxBp: number
-  items: { name: string; priceCents: number; kind: ItemKind }[]
+  items: SummaryItem[]
   payMethodLabel: string | null
+  /** The size the visit is priced at ("Large SUV"; ADR 0170); null when unknown or priced before sizes. */
+  vehicleClassLabel: string | null
+  /** What the membership covered, one entry per covered line (the redeem events of the invoice's adjusts). */
+  coverage: CoverageLine[]
+}
+
+/** An invoice line as the summaries show it: the charge, and from wave Q2 the regular price, the member % off and the size. */
+export interface SummaryItem {
+  name: string
+  priceCents: number
+  kind: ItemKind
+  /** The regular price at the size; null on a line priced before sizes. */
+  listCents: number | null
+  discountBp: number | null
+  basis: PriceBasis
+  /** list - price: the member % off in cents (0 without one). */
+  memberDiscountCents: number
+  /** The size the line is priced at, when its price is the size's own (or the starting price for a size without one). */
+  classLabel: string | null
+}
+
+/** A line the membership covered: "Signature Hand Wash · covers $40 of $60, $20 size difference due". */
+export interface CoverageLine {
+  /** The ledger adjust that carries the coverage. */
+  eventId: string
+  serviceName: string
+  coveredCents: number
+  lineCents: number
+  differenceCents: number
+  planClassLabel: string | null
 }
 
 export interface EnsureInvoiceInput {
@@ -51,18 +82,34 @@ export interface EnsureInvoiceInput {
   occurredAt: Date
   packageName: string
   packagePriceCents: number
-  addons: { name: string; priceCents: number }[]
+  packageListCents?: number | null
+  packageDiscountBp?: number | null
+  packageBasis?: PriceBasis
+  addons: { name: string; priceCents: number; listCents?: number | null; discountBp?: number | null; basis?: PriceBasis }[]
+  /** The size label the invoice header keeps ("Large SUV"; ADR 0170). */
+  vehicleClassLabel?: string | null
   /** Who asked for it and the request (actor, request id, idempotency key, address), for the invoice's audit rows (SEC-15). */
   audit?: AuditContext
 }
 
-export type InvoiceItemInput = { name: string; priceCents: number; kind: ItemKind }
+export type InvoiceItemInput = {
+  name: string
+  priceCents: number
+  kind: ItemKind
+  /** The regular price at the size, the member % off and how the price was found (ADR 0170); absent = priced before sizes. */
+  listCents?: number | null
+  discountBp?: number | null
+  basis?: PriceBasis
+}
 
 export interface InvoiceGateway {
   /** Idempotent per appointment: creates the invoice (and its number) once, later calls refresh labels and the date. */
   ensureForAppointment(tx: Tx, a: EnsureInvoiceInput): Promise<InvoiceSummary>
-  /** Replaces the lines with the appointment's current package and add-ons. 409 ADDON_REMOVE_OVERPAID when a removal would leave the invoice overpaid. */
-  syncItems(tx: Tx, appointmentId: string, items: InvoiceItemInput[]): Promise<InvoiceSummary>
+  /**
+   * Replaces the lines with the appointment's current package and add-ons (a repriced line is a removed line plus an added one).
+   * 409 ADDON_REMOVE_OVERPAID when the change would leave the invoice overpaid. `meta.vehicleClassLabel` refreshes the size label.
+   */
+  syncItems(tx: Tx, appointmentId: string, items: InvoiceItemInput[], meta?: { vehicleClassLabel?: string | null }): Promise<InvoiceSummary>
   /** Cancels the invoice of a canceled or no-show appointment; null when the appointment has no invoice. */
   cancelForAppointment(
     tx: Tx,
@@ -96,6 +143,49 @@ interface SummaryRow extends InvoiceCalcRow {
   appointment_id: string | null
   invoice_no: number
   tax_bp: number
+  vehicle_class_label: string | null
+}
+
+/** The size label of a line: the invoice's, for a line priced at the size's own price or its starting price. */
+export const lineClassLabel = (basis: PriceBasis, invoiceLabel: string | null): string | null =>
+  basis === 'class' || basis === 'estimated' ? invoiceLabel : null
+
+/** The covered lines of these invoices: each membership redeem with the adjust it wrote (ADR 0170). */
+export async function coverageOf(db: Executor, invoiceIds: readonly string[]): Promise<Map<string, CoverageLine[]>> {
+  const out = new Map<string, CoverageLine[]>()
+  if (invoiceIds.length === 0) return out
+  const r = await sql<{
+    invoice_id: string
+    event_id: string
+    service_name: string | null
+    covered_cents: number | null
+    line_cents: number | null
+    amount_cents: number
+    plan_class_label: string | null
+  }>`
+    select e.invoice_id, e.id as event_id, s.name as service_name, ce.covered_cents, ce.line_cents, e.amount_cents::int as amount_cents,
+      vc.label as plan_class_label
+    from membership_credit_events ce
+    join ledger_events e on e.id = ce.ledger_event_id
+    left join services s on s.id = ce.service_id
+    left join vehicle_classes vc on vc.location_id = e.location_id and vc.key = ce.plan_class
+    where ce.kind = 'redeem' and e.invoice_id = any(${invoiceIds as string[]}::uuid[])
+    order by e.seq`.execute(db)
+  for (const row of r.rows) {
+    const covered = row.covered_cents ?? -row.amount_cents
+    const line = row.line_cents ?? covered
+    const list = out.get(row.invoice_id) ?? []
+    list.push({
+      eventId: row.event_id,
+      serviceName: row.service_name ?? 'Membership credit',
+      coveredCents: covered,
+      lineCents: line,
+      differenceCents: Math.max(0, line - covered),
+      planClassLabel: row.plan_class_label,
+    })
+    out.set(row.invoice_id, list)
+  }
+  return out
 }
 
 export async function summariesByAppointment(
@@ -105,17 +195,18 @@ export async function summariesByAppointment(
   const out = new Map<string, InvoiceSummary>()
   if (appointmentIds.length === 0) return out
   const r = await sql<SummaryRow>`
-    select c.*, i.appointment_id, i.invoice_no, i.tax_bp
+    select c.*, i.appointment_id, i.invoice_no, i.tax_bp, i.vehicle_class_label
     from invoices i cross join lateral invoice_calc_of(i.id) c
     where i.appointment_id = any(${appointmentIds}::uuid[])`.execute(db)
   if (r.rows.length === 0) return out
   const ids = r.rows.map((x) => x.invoice_id)
   const items = await db
     .selectFrom('invoice_items')
-    .select(['invoice_id', 'name', 'price_cents', 'kind'])
+    .select(['invoice_id', 'name', 'price_cents', 'kind', 'list_cents', 'discount_bp', 'price_basis'])
     .where('invoice_id', 'in', ids)
     .orderBy('position')
     .execute()
+  const coverage = await coverageOf(db, ids)
   const deposits = await sql<{ invoice_id: string; cents: number }>`
     select invoice_id,
            (coalesce(sum(amount_cents) filter (where type = 'pay' and deposit), 0)
@@ -153,11 +244,41 @@ export async function summariesByAppointment(
       taxBp: row.tax_bp,
       items: items
         .filter((i) => i.invoice_id === row.invoice_id)
-        .map((i) => ({ name: i.name, priceCents: i.price_cents, kind: i.kind })),
+        .map((i) => ({
+          name: i.name,
+          priceCents: i.price_cents,
+          kind: i.kind,
+          listCents: i.list_cents,
+          discountBp: i.discount_bp,
+          basis: i.price_basis,
+          memberDiscountCents: i.list_cents === null ? 0 : i.list_cents - i.price_cents,
+          classLabel: lineClassLabel(i.price_basis, row.vehicle_class_label),
+        })),
       payMethodLabel: methods.rows.find((m) => m.invoice_id === row.invoice_id)?.method ?? null,
+      vehicleClassLabel: row.vehicle_class_label,
+      coverage: coverage.get(row.invoice_id) ?? [],
     })
   }
   return out
+}
+
+/** The columns of one invoice line (a line priced before sizes keeps the 'legacy' basis and no list price). */
+function itemColumns(l: InvoiceItemInput): {
+  kind: ItemKind
+  name: string
+  price_cents: number
+  list_cents: number | null
+  discount_bp: number | null
+  price_basis: PriceBasis
+} {
+  return {
+    kind: l.kind,
+    name: l.name,
+    price_cents: l.priceCents,
+    list_cents: l.listCents ?? null,
+    discount_bp: l.discountBp ?? null,
+    price_basis: l.basis ?? 'legacy',
+  }
 }
 
 export interface GatewayDeps {
@@ -203,6 +324,7 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
             client_name: a.clientName,
             vehicle_label: a.vehicleLabel,
             staff_label: a.staffLabel,
+            ...(a.vehicleClassLabel !== undefined ? { vehicle_class_label: a.vehicleClassLabel } : {}),
             ...(existing.date_frozen_at
               ? {}
               : { occurred_at: a.occurredAt, biz_date: toBizDate(a.occurredAt, tz) }),
@@ -243,23 +365,24 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
           occurred_at: a.occurredAt,
           biz_date: toBizDate(a.occurredAt, tz),
           tax_bp: taxBp,
+          vehicle_class_label: a.vehicleClassLabel ?? null,
         })
         .execute()
       const lines: InvoiceItemInput[] = [
-        { name: a.packageName, priceCents: a.packagePriceCents, kind: 'package' },
-        ...a.addons.map((x) => ({ name: x.name, priceCents: x.priceCents, kind: 'addon' as const })),
+        {
+          name: a.packageName,
+          priceCents: a.packagePriceCents,
+          kind: 'package',
+          listCents: a.packageListCents,
+          discountBp: a.packageDiscountBp,
+          basis: a.packageBasis,
+        },
+        ...a.addons.map((x) => ({ ...x, kind: 'addon' as const })),
       ]
       for (const [position, l] of lines.entries()) {
         await tx
           .insertInto('invoice_items')
-          .values({
-            id: d.newId(),
-            invoice_id: id,
-            position,
-            kind: l.kind,
-            name: l.name,
-            price_cents: l.priceCents,
-          })
+          .values({ id: d.newId(), invoice_id: id, position, ...itemColumns(l) })
           .execute()
       }
       await audit.record(tx, {
@@ -279,7 +402,7 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
       return summaryOf(tx, a.appointmentId)
     },
 
-    async syncItems(tx, appointmentId, items) {
+    async syncItems(tx, appointmentId, items, meta = {}) {
       const inv = await byAppointment(tx, appointmentId)
       if (!inv) throw new AppError('NOT_FOUND', { detail: 'That appointment has no invoice' })
       const current = await tx
@@ -288,15 +411,17 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
         .where('invoice_id', '=', inv.id)
         .orderBy('position')
         .execute()
-      const key = (x: { kind: string; name: string; price: number }): string =>
-        `${x.kind}|${x.name}|${x.price}`
+      // a line is kept when everything about its price is the same (a repriced line is removed and added again)
+      const key = (x: { kind: string; name: string; price: number; list: number | null; bp: number | null; basis: string }): string =>
+        `${x.kind}|${x.name}|${x.price}|${x.list ?? ''}|${x.bp ?? ''}|${x.basis}`
       const pool = new Map<string, string[]>()
       for (const row of current) {
-        const k = key({ kind: row.kind, name: row.name, price: row.price_cents })
+        const k = key({ kind: row.kind, name: row.name, price: row.price_cents, list: row.list_cents, bp: row.discount_bp, basis: row.price_basis })
         pool.set(k, [...(pool.get(k) ?? []), row.id])
       }
       const plan = items.map((it) => {
-        const ids = pool.get(key({ kind: it.kind, name: it.name, price: it.priceCents }))
+        const c = itemColumns(it)
+        const ids = pool.get(key({ kind: c.kind, name: c.name, price: c.price_cents, list: c.list_cents, bp: c.discount_bp, basis: c.price_basis }))
         return { it, keep: ids?.shift() ?? null }
       })
       const keepIds = new Set(plan.flatMap((p) => (p.keep ? [p.keep] : [])))
@@ -341,18 +466,14 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
         } else {
           await tx
             .insertInto('invoice_items')
-            .values({
-              id: d.newId(),
-              invoice_id: inv.id,
-              position,
-              kind: p.it.kind,
-              name: p.it.name,
-              price_cents: p.it.priceCents,
-            })
+            .values({ id: d.newId(), invoice_id: inv.id, position, ...itemColumns(p.it) })
             .execute()
         }
       }
-      if (removed.length > 0 || added.length > 0) {
+      const relabel = meta.vehicleClassLabel !== undefined && meta.vehicleClassLabel !== inv.vehicle_class_label
+      if (relabel)
+        await tx.updateTable('invoices').set({ vehicle_class_label: meta.vehicleClassLabel ?? null }).where('id', '=', inv.id).execute()
+      if (removed.length > 0 || added.length > 0 || relabel) {
         const version = await touchInvoice(tx, inv.id, d.clock.now())
         await audit.record(tx, {
           locationId: inv.location_id,

@@ -195,10 +195,11 @@ async function execute(tx: Tx, deps: AssistantDeps, input: ActionCodeInput, acti
       windowDays: await windowDaysFor(tx, loc, priv.vip),
     })
     if (!v.ok) throw new ActionRefused(v.problem === 'past' ? 'that time has passed.' : 'that time was just taken.')
+    // the car on file by its id (ADR 0170, wave Q2: no duplicate of a car without a plate); its size prices the visit
     const vehicle = p.vehicleId
       ? await tx
           .selectFrom('vehicles')
-          .select(['year', 'make', 'model', 'color', 'plate'])
+          .select(['id', 'vehicle_class'])
           .where('id', '=', p.vehicleId)
           .where('customer_id', '=', customer.id)
           .where('deleted_at', 'is', null)
@@ -209,7 +210,7 @@ async function execute(tx: Tx, deps: AssistantDeps, input: ActionCodeInput, acti
     const booked = await createAppointment(tx, sched, actor, {
       bookedWithPin: trust.trusted && trust.verifiedBy === 'pin',
       customer: { id: customer.id },
-      vehicle: vehicle ?? null,
+      vehicleId: vehicle?.id ?? null,
       serviceId: pkg.id,
       addonIds: addons.map((a) => a!.id),
       start: wallToInstant(p.date, p.startMin, tz),
@@ -239,7 +240,11 @@ async function execute(tx: Tx, deps: AssistantDeps, input: ActionCodeInput, acti
       after: { pendingActionId: action.id, serviceKey: p.serviceKey, date: p.date, startMin: p.startMin },
       ctx: actor.audit,
     })
-    const extra: Record<string, string> = priv.member ? { member: 'yes' } : dueCents > 0 ? { fee: usd(dueCents), how } : {}
+    const extra: Record<string, string> = {
+      ...(priv.member ? { member: 'yes' } : dueCents > 0 ? { fee: usd(dueCents), how } : {}),
+      // the size is not known yet (or has no price of its own): the exact price is confirmed at the shop (ADR 0170)
+      ...(booked.pricing.confirmAtShop ? { confirm: 'yes' } : {}),
+    }
     return {
       templateKey: 'action_booked',
       vars: {
