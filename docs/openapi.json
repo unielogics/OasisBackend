@@ -51733,6 +51733,58 @@
                                 "minimum": -9007199254740991,
                                 "type": "integer"
                               },
+                              "coverage": {
+                                "anyOf": [
+                                  {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "coveredCents": {
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      },
+                                      "differenceCents": {
+                                        "description": "line - covered: the size difference that stays due (no % off)",
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      },
+                                      "lineCents": {
+                                        "description": "The covered line’s regular price",
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      },
+                                      "planClassLabel": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ],
+                                        "description": "The size the membership is priced at"
+                                      },
+                                      "serviceName": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "serviceName",
+                                      "coveredCents",
+                                      "lineCents",
+                                      "differenceCents",
+                                      "planClassLabel"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "A membership’s coverage of one line (ADR 0170): \"Covered $40 · $20 size difference due\"; null for any other adjustment"
+                              },
                               "eventId": {
                                 "type": "string"
                               },
@@ -51769,7 +51821,8 @@
                               "kind",
                               "reason",
                               "note",
-                              "amountCents"
+                              "amountCents",
+                              "coverage"
                             ],
                             "type": "object"
                           },
@@ -52078,6 +52131,30 @@
                           "items": {
                             "additionalProperties": false,
                             "properties": {
+                              "classLabel": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "The size the line is priced at (\"Large SUV\")"
+                              },
+                              "discountBp": {
+                                "anyOf": [
+                                  {
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "The member % off applied, in basis points"
+                              },
                               "id": {
                                 "type": "string"
                               },
@@ -52088,6 +52165,25 @@
                                 ],
                                 "type": "string"
                               },
+                              "listCents": {
+                                "anyOf": [
+                                  {
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "The regular price at the visit’s size (ADR 0170); null on a line priced before sizes"
+                              },
+                              "memberDiscountCents": {
+                                "description": "list - price: the member % off in cents",
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
                               "name": {
                                 "type": "string"
                               },
@@ -52097,6 +52193,7 @@
                                 "type": "integer"
                               },
                               "priceCents": {
+                                "description": "What the line charges",
                                 "maximum": 9007199254740991,
                                 "minimum": -9007199254740991,
                                 "type": "integer"
@@ -52111,7 +52208,11 @@
                               "kind",
                               "name",
                               "priceCents",
-                              "refunded"
+                              "refunded",
+                              "listCents",
+                              "discountBp",
+                              "memberDiscountCents",
+                              "classLabel"
                             ],
                             "type": "object"
                           },
@@ -67221,6 +67322,58 @@
                                     "minimum": -9007199254740991,
                                     "type": "integer"
                                   },
+                                  "coverage": {
+                                    "anyOf": [
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "coveredCents": {
+                                            "maximum": 9007199254740991,
+                                            "minimum": -9007199254740991,
+                                            "type": "integer"
+                                          },
+                                          "differenceCents": {
+                                            "description": "line - covered: the size difference that stays due (no % off)",
+                                            "maximum": 9007199254740991,
+                                            "minimum": -9007199254740991,
+                                            "type": "integer"
+                                          },
+                                          "lineCents": {
+                                            "description": "The covered line’s regular price",
+                                            "maximum": 9007199254740991,
+                                            "minimum": -9007199254740991,
+                                            "type": "integer"
+                                          },
+                                          "planClassLabel": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string"
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ],
+                                            "description": "The size the membership is priced at"
+                                          },
+                                          "serviceName": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "serviceName",
+                                          "coveredCents",
+                                          "lineCents",
+                                          "differenceCents",
+                                          "planClassLabel"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "A membership’s coverage of one line (ADR 0170): \"Covered $40 · $20 size difference due\"; null for any other adjustment"
+                                  },
                                   "eventId": {
                                     "type": "string"
                                   },
@@ -67257,7 +67410,8 @@
                                   "kind",
                                   "reason",
                                   "note",
-                                  "amountCents"
+                                  "amountCents",
+                                  "coverage"
                                 ],
                                 "type": "object"
                               },
@@ -67566,6 +67720,30 @@
                               "items": {
                                 "additionalProperties": false,
                                 "properties": {
+                                  "classLabel": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "The size the line is priced at (\"Large SUV\")"
+                                  },
+                                  "discountBp": {
+                                    "anyOf": [
+                                      {
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "The member % off applied, in basis points"
+                                  },
                                   "id": {
                                     "type": "string"
                                   },
@@ -67576,6 +67754,25 @@
                                     ],
                                     "type": "string"
                                   },
+                                  "listCents": {
+                                    "anyOf": [
+                                      {
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "The regular price at the visit’s size (ADR 0170); null on a line priced before sizes"
+                                  },
+                                  "memberDiscountCents": {
+                                    "description": "list - price: the member % off in cents",
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  },
                                   "name": {
                                     "type": "string"
                                   },
@@ -67585,6 +67782,7 @@
                                     "type": "integer"
                                   },
                                   "priceCents": {
+                                    "description": "What the line charges",
                                     "maximum": 9007199254740991,
                                     "minimum": -9007199254740991,
                                     "type": "integer"
@@ -67599,7 +67797,11 @@
                                   "kind",
                                   "name",
                                   "priceCents",
-                                  "refunded"
+                                  "refunded",
+                                  "listCents",
+                                  "discountBp",
+                                  "memberDiscountCents",
+                                  "classLabel"
                                 ],
                                 "type": "object"
                               },
@@ -68249,6 +68451,58 @@
                                     "minimum": -9007199254740991,
                                     "type": "integer"
                                   },
+                                  "coverage": {
+                                    "anyOf": [
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "coveredCents": {
+                                            "maximum": 9007199254740991,
+                                            "minimum": -9007199254740991,
+                                            "type": "integer"
+                                          },
+                                          "differenceCents": {
+                                            "description": "line - covered: the size difference that stays due (no % off)",
+                                            "maximum": 9007199254740991,
+                                            "minimum": -9007199254740991,
+                                            "type": "integer"
+                                          },
+                                          "lineCents": {
+                                            "description": "The covered line’s regular price",
+                                            "maximum": 9007199254740991,
+                                            "minimum": -9007199254740991,
+                                            "type": "integer"
+                                          },
+                                          "planClassLabel": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string"
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ],
+                                            "description": "The size the membership is priced at"
+                                          },
+                                          "serviceName": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "serviceName",
+                                          "coveredCents",
+                                          "lineCents",
+                                          "differenceCents",
+                                          "planClassLabel"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "A membership’s coverage of one line (ADR 0170): \"Covered $40 · $20 size difference due\"; null for any other adjustment"
+                                  },
                                   "eventId": {
                                     "type": "string"
                                   },
@@ -68285,7 +68539,8 @@
                                   "kind",
                                   "reason",
                                   "note",
-                                  "amountCents"
+                                  "amountCents",
+                                  "coverage"
                                 ],
                                 "type": "object"
                               },
@@ -68594,6 +68849,30 @@
                               "items": {
                                 "additionalProperties": false,
                                 "properties": {
+                                  "classLabel": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "The size the line is priced at (\"Large SUV\")"
+                                  },
+                                  "discountBp": {
+                                    "anyOf": [
+                                      {
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "The member % off applied, in basis points"
+                                  },
                                   "id": {
                                     "type": "string"
                                   },
@@ -68604,6 +68883,25 @@
                                     ],
                                     "type": "string"
                                   },
+                                  "listCents": {
+                                    "anyOf": [
+                                      {
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "The regular price at the visit’s size (ADR 0170); null on a line priced before sizes"
+                                  },
+                                  "memberDiscountCents": {
+                                    "description": "list - price: the member % off in cents",
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  },
                                   "name": {
                                     "type": "string"
                                   },
@@ -68613,6 +68911,7 @@
                                     "type": "integer"
                                   },
                                   "priceCents": {
+                                    "description": "What the line charges",
                                     "maximum": 9007199254740991,
                                     "minimum": -9007199254740991,
                                     "type": "integer"
@@ -68627,7 +68926,11 @@
                                   "kind",
                                   "name",
                                   "priceCents",
-                                  "refunded"
+                                  "refunded",
+                                  "listCents",
+                                  "discountBp",
+                                  "memberDiscountCents",
+                                  "classLabel"
                                 ],
                                 "type": "object"
                               },
@@ -69262,6 +69565,58 @@
                                     "minimum": -9007199254740991,
                                     "type": "integer"
                                   },
+                                  "coverage": {
+                                    "anyOf": [
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "coveredCents": {
+                                            "maximum": 9007199254740991,
+                                            "minimum": -9007199254740991,
+                                            "type": "integer"
+                                          },
+                                          "differenceCents": {
+                                            "description": "line - covered: the size difference that stays due (no % off)",
+                                            "maximum": 9007199254740991,
+                                            "minimum": -9007199254740991,
+                                            "type": "integer"
+                                          },
+                                          "lineCents": {
+                                            "description": "The covered line’s regular price",
+                                            "maximum": 9007199254740991,
+                                            "minimum": -9007199254740991,
+                                            "type": "integer"
+                                          },
+                                          "planClassLabel": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string"
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ],
+                                            "description": "The size the membership is priced at"
+                                          },
+                                          "serviceName": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "serviceName",
+                                          "coveredCents",
+                                          "lineCents",
+                                          "differenceCents",
+                                          "planClassLabel"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "A membership’s coverage of one line (ADR 0170): \"Covered $40 · $20 size difference due\"; null for any other adjustment"
+                                  },
                                   "eventId": {
                                     "type": "string"
                                   },
@@ -69298,7 +69653,8 @@
                                   "kind",
                                   "reason",
                                   "note",
-                                  "amountCents"
+                                  "amountCents",
+                                  "coverage"
                                 ],
                                 "type": "object"
                               },
@@ -69607,6 +69963,30 @@
                               "items": {
                                 "additionalProperties": false,
                                 "properties": {
+                                  "classLabel": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "The size the line is priced at (\"Large SUV\")"
+                                  },
+                                  "discountBp": {
+                                    "anyOf": [
+                                      {
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "The member % off applied, in basis points"
+                                  },
                                   "id": {
                                     "type": "string"
                                   },
@@ -69617,6 +69997,25 @@
                                     ],
                                     "type": "string"
                                   },
+                                  "listCents": {
+                                    "anyOf": [
+                                      {
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "The regular price at the visit’s size (ADR 0170); null on a line priced before sizes"
+                                  },
+                                  "memberDiscountCents": {
+                                    "description": "list - price: the member % off in cents",
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  },
                                   "name": {
                                     "type": "string"
                                   },
@@ -69626,6 +70025,7 @@
                                     "type": "integer"
                                   },
                                   "priceCents": {
+                                    "description": "What the line charges",
                                     "maximum": 9007199254740991,
                                     "minimum": -9007199254740991,
                                     "type": "integer"
@@ -69640,7 +70040,11 @@
                                   "kind",
                                   "name",
                                   "priceCents",
-                                  "refunded"
+                                  "refunded",
+                                  "listCents",
+                                  "discountBp",
+                                  "memberDiscountCents",
+                                  "classLabel"
                                 ],
                                 "type": "object"
                               },
