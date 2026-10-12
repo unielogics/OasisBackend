@@ -12,6 +12,10 @@ import { runSquareReconcile } from '../../src/modules/square/reconcile.js'
 import { squareIngest } from '../../src/modules/square/runtime.js'
 import { transaction } from '../../src/platform/db.js'
 import { AppError } from '../../src/platform/errors.js'
+import { actorFromAuth } from '../../src/modules/payments/actor.js'
+import { PaymentsService } from '../../src/modules/payments/commands.js'
+import { defaultPorts } from '../../src/modules/payments/ports.js'
+import { makeUser } from '../helpers/factories.js'
 import { truncateAll, useTestDb } from '../helpers/db.js'
 import { coreRig, silent, useCoreRuntime } from './core.js'
 
@@ -86,4 +90,40 @@ describe('one payment, many arrivals', () => {
       { numRuns: 25 },
     )
   }, 240_000)
+
+  it('a staff void and the matcher racing on one "Square reader" entry: never a confirmed entry voided, never the money twice', async () => {
+    for (let run = 0; run < 12; run++) {
+      await truncateAll(t.db)
+      const r = await coreRig(t)
+      const a = await r.openInvoice()
+      const entry = await r.staffCard(a, 4280)
+      const user = await makeUser(t.db, r.newId, { first: 'Rafael' })
+      const service = new PaymentsService({ clock: r.clock, newId: r.newId, ports: defaultPorts() })
+      const ctx = {
+        locationId: r.pe.locationId,
+        actor: actorFromAuth({ userId: user.userId, employeeId: user.employeeId, locationId: r.pe.locationId, permissions: new Set(['*']), actorName: 'Rafael M.' }),
+        audit: { actor: { name: 'Rafael M.' } },
+        idempotencyKey: `void-${run}`,
+      }
+      const p = r.posPayment({ amountCents: 4280 })
+      const [voided, decided] = await Promise.allSettled([
+        transaction(t.db, (tx) => service.voidPayment(tx, ctx, a.id, { eventId: entry })),
+        r.decide(p.id),
+      ])
+      const e = await t.db.selectFrom('ledger_events').selectAll().where('id', '=', entry).executeTakeFirstOrThrow()
+      const voids = await t.db.selectFrom('ledger_events').select('id').where('voids_event_id', '=', entry).execute()
+      if (voided.status === 'fulfilled') {
+        // the void won: the entry never became Square's, and the payment did not land on it
+        expect(e.processor_ref).toBeNull()
+        expect(voids).toHaveLength(1)
+      } else {
+        // the matcher won: the confirmed card money cannot be voided (refund it instead)
+        expect(e).toMatchObject({ processor_state: 'confirmed', processor_ref: p.id })
+        expect(voids).toEqual([])
+      }
+      expect(decided.status).toBe('fulfilled')
+      expect((await r.livePays(p.id)).length).toBeLessThanOrEqual(1)
+      expect((await r.calc(a.id)).paidOrig).toBeLessThanOrEqual(4280)
+    }
+  }, 120_000)
 })
