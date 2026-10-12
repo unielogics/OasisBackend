@@ -265,8 +265,9 @@ describe('GET /public/catalog/v2', () => {
     expect(gold.inclusions).toEqual([
       { serviceKey: 'signature-hand-wash', mode: 'per_cycle', perCycle: 4, group: 1 },
       { serviceKey: 'exterior-hand-wash', mode: 'per_cycle', perCycle: 4, group: 2 },
-      { serviceKey: 'hand-wax', mode: 'per_cycle', perCycle: 2, group: 3 },
+      // an inclusion's items in the catalog's order (packages, then add-ons), whatever order staff picked them in
       { serviceKey: 'carbon-window-tint', mode: 'per_cycle', perCycle: 2, group: 3 },
+      { serviceKey: 'hand-wax', mode: 'per_cycle', perCycle: 2, group: 3 },
     ])
   })
 

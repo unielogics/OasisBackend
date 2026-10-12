@@ -313,6 +313,8 @@ export async function loadPublicCatalogV2(db: Executor, locationId: string, now:
   const packages = services.packages.filter((s) => listed(s) && !s.quoteOnly)
   const addons = services.addons.filter((s) => listed(s) && !s.quoteOnly)
   const keyOf = new Map([...packages, ...addons].map((s) => [s.id, s.key]))
+  // an inclusion's items in the catalog's own order (packages, then add-ons, as listed below)
+  const listOrder = new Map([...packages, ...addons].map((s, n) => [s.id, n]))
   const includedIn = (serviceId: string) =>
     sold.flatMap(({ p }) =>
       p.inclusions
@@ -394,7 +396,7 @@ export async function loadPublicCatalogV2(db: Executor, locationId: string, now:
       // read apart from one inclusion of 4 a month over two items (review F4)
       inclusions: p.inclusions
         .filter((i) => i.active)
-        .map((i) => ({ i, keys: i.serviceIds.flatMap((id) => keyOf.get(id) ?? []) }))
+        .map((i) => ({ i, keys: [...new Set(i.serviceIds)].filter((id) => keyOf.has(id)).sort((a, b) => listOrder.get(a)! - listOrder.get(b)!).map((id) => keyOf.get(id)!) }))
         .filter((x) => x.keys.length > 0)
         .flatMap(({ i, keys }, n) =>
           keys.map((serviceKey) => ({ serviceKey, mode: i.mode, perCycle: i.mode === 'every_visit' ? null : i.perCycle, group: n + 1 })),
