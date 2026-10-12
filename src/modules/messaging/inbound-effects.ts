@@ -21,6 +21,8 @@ import type { InboundEffects } from './inbound/service.js'
 import { MMS_SUPERSEDED_NOTE, planAttachments } from './inbound/mms.js'
 import { handoffSourceRef } from './assistant/inbox.js'
 import { CODE_REPLY_TEMPLATE } from './inbound/router.js'
+import { isConvoLang, withDisclosure } from '../assistant/lang.js'
+import { renderTemplate } from './templates/render.js'
 import { publishToManagers } from './notify.js'
 import type { DbMessageQueue } from './queue.js'
 
@@ -107,18 +109,44 @@ export function createInboundEffects(
       }
       const target = ctx.customerId ? await loadCustomerTarget(tx, o.locationId, ctx.customerId) : null
       const recipient = target?.recipient ?? (await strangerRecipient(tx, o.locationId, to))
-      await e.queue.enqueueFor(tx, {
+      // the link-page line answers for the assistant: when it is the first text of the number's AI conversation it discloses the
+      // assistant and carries the STOP footer (W4b X1), in the conversation's language
+      const conversation =
+        template === CODE_REPLY_TEMPLATE
+          ? await tx
+              .selectFrom('assistant_conversations')
+              .select(['id', 'disclosed_at', 'language'])
+              .where('location_id', '=', o.locationId)
+              .where('phone_e164', '=', to)
+              .executeTakeFirst()
+          : undefined
+      const disclose = template === CODE_REPLY_TEMPLATE && !conversation?.disclosed_at
+      const lang = isConvoLang(conversation?.language) ? conversation.language : 'en'
+      const out = await e.queue.enqueueFor(tx, {
         locationId: o.locationId,
         customerId: ctx.customerId,
         recipient,
         appointmentId: null,
-        templateKey: template,
-        vars,
+        ...(disclose
+          ? {
+              text: withDisclosure(renderTemplate(template, vars).text, lang),
+              klass: 'ai_reply' as const,
+              tag: template,
+            }
+          : { templateKey: template, vars }),
         purpose: 'inbound-reply',
         // the link-page line answers for the assistant (it carries the "Oasis AI" label in the thread)
         senderKind: template === CODE_REPLY_TEMPLATE ? 'ai' : 'system',
         dedupeKey: replyKey(template),
       })
+      if (disclose && out.queued) {
+        const now = e.clock.now()
+        await sql`insert into assistant_conversations (id, location_id, phone_e164, customer_id, disclosed_at, updated_at)
+          values (${e.newId()}, ${o.locationId}, ${to}, ${ctx.customerId}, ${now}, ${now})
+          on conflict (location_id, phone_e164) do update set disclosed_at = coalesce(assistant_conversations.disclosed_at, excluded.disclosed_at)`.execute(
+          tx,
+        )
+      }
     },
 
     async confirmAppointment(appointmentId, customerId) {

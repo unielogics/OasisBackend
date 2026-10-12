@@ -47,31 +47,26 @@
 //       turn adds the safety line). Nothing a client entered is ever trusted.
 // Kept: markdown stripped (a line break ends a clause), GSM-7, at most MAX_REPLY_CHARS after rendering, at most one question.
 import { isGsm7Char, normalizeForSms } from '../../integrations/sms/gsm.js'
+import { holdsCardNumber } from '../messaging/inbound/cards.js'
+import { CARD_LINES, SAFETY_LINES } from './lang.js'
 
 /** The longest reply (characters, after rendering; {linkN} counted as written). */
 export const MAX_REPLY_CHARS = 320
 
 /** The safety line the server appends to a reply that carries a verify, PIN, membership or payment link (A). The model never writes it. */
-export const SAFETY_LINE = 'For your security, enter codes and your PIN only on the secure page, never by text.'
+export const SAFETY_LINE = SAFETY_LINES.en
 /**
  * The line the server appends when the texts a turn answers hold what looks like a card number (W4 live eval: the model may write
  * nothing about cards, so a client who texted a card got no warning at all). The model never writes it.
  */
-export const CARD_LINE = 'For your security, please never text card numbers.'
+export const CARD_LINE = CARD_LINES.en
 
-/** 13 to 19 digits in a row (single spaces or dashes between them allowed) that pass the Luhn check: a card number. */
+/**
+ * 13 to 19 digits in a row (single spaces or dashes between them allowed) that pass the Luhn check: a card number; or one the inbound
+ * path already masked ("[card ending 1111]", W4b X6: a card number is never filed readable).
+ */
 export function looksLikeCardNumber(text: string): boolean {
-  for (const m of text.matchAll(/(?<![\d])\d(?:[ -]?\d){12,18}(?![\d])/g)) {
-    const digits = m[0].replace(/\D/g, '')
-    let sum = 0
-    for (let i = 0; i < digits.length; i++) {
-      let d = Number(digits[digits.length - 1 - i])
-      if (i % 2 === 1) d = d * 2 > 9 ? d * 2 - 9 : d * 2
-      sum += d
-    }
-    if (sum % 10 === 0) return true
-  }
-  return false
+  return holdsCardNumber(text)
 }
 
 /** The link kinds whose reply gets SAFETY_LINE. */
@@ -87,6 +82,8 @@ export type GuardProblem =
   | 'url'
   | 'questions'
   | 'too_long'
+  /** W4b X3: says something is booked, moved, cancelled, confirmed or "all set" while the server executed no such action. */
+  | 'action_claim'
 
 /** Problems only a rewrite can fix; a reply that still has one after the rewrite becomes the fallback. */
 export const HARD_PROBLEMS: ReadonlySet<GuardProblem> = new Set(['empty', 'unknown_placeholder', 'placement', 'money', 'digits', 'secret', 'url'])
@@ -144,6 +141,12 @@ export interface GuardInput {
    */
   openWindow?: OpenWindow | null
   maxChars?: number
+  /**
+   * W4b X3: check for claims that something is booked, moved, cancelled, confirmed or "all set" (actionClaims). The turn sets it
+   * while the server executed no action since the assistant's last text and no rewrite was used yet; a claim left after the one
+   * rewrite is the policy judge's, which reads the server's record of what was done and the client's visits.
+   */
+  checkActionClaims?: boolean
 }
 
 /** Markdown and list syntax out, one line; a line break that ends a line without punctuation becomes a full stop (a clause end). */
@@ -677,6 +680,48 @@ export function replySegments(text: string, o: { values: ReadonlyMap<string, str
 // ---- the verdict ----------------------------------------------------------------------------------------------------------------
 
 /** Cleans a draft, checks every deterministic rule on the model's raw text and, when it passes, renders the placeholders. */
+// ---- action claims (W4b X3) -------------------------------------------------------------------------------------------------------
+
+/** "you're booked", "it is all set", "your visit has been moved", "I've cancelled it", "you're confirmed"; "esta reservado", "te agende". */
+const CLAIM_EN = new RegExp(
+  [
+    // a subject, a form of "be" (or "'s"/"'re"), maybe "all"/"now"/"officially", then the done word
+    "\\b(?:you|it|that|this|everything|we|your\\s+(?:visit|appointment|booking|reservation|wash|spot|slot|time|cancell?ation|change)|(?:the\\s+)?(?:visit|appointment|booking|reservation))\\s*(?:'s|'re|\\s+is|\\s+are|\\s+was|\\s+were|\\s+has\\s+been|\\s+have\\s+been|'ve\\s+been|\\s+got|\\s+just\\s+got)\\s+(?:all\\s+|now\\s+|officially\\s+|already\\s+|just\\s+|been\\s+)*(?:booked|confirmed|scheduled|rescheduled|moved|cancell?ed|reserved|locked\\s+in|set\\b|good\\s+to\\s+go)",
+    // "I've booked you", "I moved it", "I went ahead and cancelled your visit", "we have you down for"
+    "\\b(?:i|we)(?:'ve|\\s+have|\\s+just|\\s+went\\s+ahead\\s+and)?\\s+(?:booked|confirmed|scheduled|rescheduled|moved|cancell?ed|reserved|locked\\s+in|put)\\s+(?:you|it|that|your|the)\\b",
+    '\\b(?:we|i)\\s+(?:have|got)\\s+you\\s+(?:down|booked|in)\\b',
+    '\\ball\\s+set\\b',
+    "\\byou'?re\\s+(?:all\\s+)?(?:good\\s+to\\s+go|in)\\b",
+  ].join('|'),
+  'i',
+)
+const CLAIM_ES = new RegExp(
+  [
+    '\\b(?:esta|estas|estan|queda|quedo|quedaste|quedas|ya\\s+esta|fue|ha\\s+sido|tienes)\\s+(?:todo\\s+|ya\\s+)?(?:reservad[oa]s?|agendad[oa]s?|confirmad[oa]s?|cancelad[oa]s?|programad[oa]s?|movid[oa]s?|cambiad[oa]s?|list[oa]s?)\\b',
+    '\\bte\\s+(?:reserve|agende|cancele|movi|confirme|cambie|anote)\\b',
+    '\\btodo\\s+listo\\b',
+  ].join('|'),
+  'i',
+)
+/** A sentence that only says what will happen, what is not done yet or asks: no claim ("Nothing is booked until you confirm"). */
+const CLAIM_EXCEPT =
+  /\b(?:until|once|after|before|when|whenever|if|unless|not|never|nothing|no|yet|cannot|can't|won't|will|would|could|can|should|be|to\s+get|want|like|need|let|hasta|cuando|una\s+vez|antes|todavia|aun|nada|quieres|puedes|para)\b|n't\b|'ll\b|\bsi\s+(?!,)/i
+
+/** The model's claims that an action was done ("you're all set", "I've booked you"): questions and conditional sentences excluded. */
+export function actionClaims(text: string): string[] {
+  const out: string[] = []
+  const folded = text.normalize('NFD').replace(/\p{M}/gu, '').replace(/[’‘]/g, "'")
+  for (const s of folded.split(/(?<=[.!?])\s+|\n+/)) {
+    if (s.trim().endsWith('?')) continue
+    const m = CLAIM_EN.exec(s) ?? CLAIM_ES.exec(s)
+    if (!m) continue
+    // only the words before the claim decide whether it is conditional ("Once you confirm, you're all set" is no claim)
+    if (CLAIM_EXCEPT.test(s.slice(0, m.index))) continue
+    out.push(m[0].trim())
+  }
+  return out
+}
+
 export function guardReply(i: GuardInput): GuardVerdict {
   const max = i.maxChars ?? MAX_REPLY_CHARS
   const values = i.values ?? new Map<string, string>()
@@ -708,7 +753,14 @@ export function guardReply(i: GuardInput): GuardVerdict {
   flag('secret', secretRequests(worded))
   flag('url', urlWords(raw, i.website))
   const literals = [...addressLiterals(i.address), ...(i.literals ?? [])]
-  flag('digits', digitWords(withoutOwnHost(withoutLiterals(raw, literals, i.shopNumbers ?? []), i.website), i.openWindow ?? DEFAULT_OPEN_WINDOW))
+  flag(
+    'digits',
+    digitWords(
+      withoutOwnHost(withoutLiterals(raw, literals, i.shopNumbers ?? []), i.website),
+      i.openWindow ?? DEFAULT_OPEN_WINDOW,
+    ),
+  )
+  if (i.checkActionClaims) flag('action_claim', actionClaims(raw))
   // the form: one question, the length after rendering
   const rendered = toGsm7(renderPlaceholders(text, values))
   if ((rendered.match(/\?/g) ?? []).length > 1) problems.push('questions')
@@ -734,4 +786,6 @@ export const PROBLEM_HINTS: Record<GuardProblem, string> = {
   url: 'Never write a web address or anything shaped like one (name.com, name dot com, an IP address, http, www): only the shop website exactly as in SHOP FACTS, or a {linkN} placeholder a tool gave you. If it was a missing space after a full stop or a comma, add the space.',
   questions: 'Ask at most one question per text.',
   too_long: `Keep it under ${MAX_REPLY_CHARS - 20} characters.`,
+  action_claim:
+    'Nothing was booked, moved or cancelled by the server: never say it is booked, confirmed, moved, cancelled, reserved, done or "all set". To book or change it, give the booking link (send_link) or, for a verified phone, propose it and write "{confirm}."; a visit the client already has reads "you have <service> on <day> at <time>".',
 }

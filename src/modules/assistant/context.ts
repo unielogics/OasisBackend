@@ -14,6 +14,7 @@ import { memberView } from '../public/members.js'
 import type { AppointmentRefLabel, AppointmentRefs, TurnIdentity } from './contract.js'
 import { nextIntakeStep, type HistoryLine, type TurnContextData } from './prompt.js'
 import { maskPhones } from './transcript.js'
+import { maskCardNumbers } from '../messaging/inbound/cards.js'
 import '../customers/schema.js'
 import '../messaging/schema.js'
 import '../scheduling/schema.js'
@@ -138,10 +139,10 @@ const STATUS_WORDS: Record<string, string> = {
  * pattern set as the stored transcript (transcript.ts PHONE_PATTERNS via maskPhones).
  */
 export function maskForModel(text: string): string {
-  return maskPhones(text.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '[id]'), () => '[number]').replace(
-    /\b(?:oa_|tok_)[A-Za-z0-9_-]{8,}\b/g,
-    '[token]',
-  )
+  return maskPhones(
+    maskCardNumbers(text).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '[id]'),
+    () => '[number]',
+  ).replace(/\b(?:oa_|tok_)[A-Za-z0-9_-]{8,}\b/g, '[token]')
 }
 
 export interface ConversationSnapshot {
@@ -152,6 +153,20 @@ export interface ConversationSnapshot {
   inboxIds: string[]
   /** The client wrote before this burst or the shop texted the number before: not a first contact. */
   firstContact: boolean
+  /** A text this turn answers came with a picture (an MMS photo the model cannot see; W4b X8). */
+  photo: boolean
+}
+
+/** An inbound MMS that carried a picture (its attachments list an image part). */
+function hasPicture(kind: string, attachments: unknown): boolean {
+  if (kind !== 'mms') return false
+  const list = (typeof attachments === 'string' ? JSON.parse(attachments) : attachments) as Array<{
+    contentType?: string
+  }> | null
+  return (
+    Array.isArray(list) &&
+    list.some((a) => typeof a?.contentType === 'string' && a.contentType.startsWith('image/'))
+  )
 }
 
 /** The last historyLimit texts of the number within historyWindowMs, inbound (sms_inbox) and outbound (messages), oldest first. */
@@ -163,7 +178,15 @@ export async function loadConversation(
   const inbound = await db
     .selectFrom('sms_inbox as i')
     .innerJoin('sms_devices as d', 'd.id', 'i.device_id')
-    .select(['i.id', 'i.body', 'i.received_at', 'i.decision', 'i.assistant_conversation_id'])
+    .select([
+      'i.id',
+      'i.body',
+      'i.received_at',
+      'i.decision',
+      'i.assistant_conversation_id',
+      'i.kind',
+      'i.attachments',
+    ])
     .where('d.location_id', '=', o.locationId)
     .where('i.from_e164', '=', o.phone)
     .where('i.superseded_by', 'is', null)
@@ -189,7 +212,13 @@ export async function loadConversation(
   const fresh = (r: (typeof inbound)[number]): boolean =>
     r.assistant_conversation_id === o.conversationId && r.decision === 'assistant' && r.received_at.getTime() >= pending
   const lines: HistoryLine[] = [
-    ...inbound.map((r) => ({ at: r.received_at, when: when(r.received_at), who: 'client' as const, text: maskForModel(r.body), fresh: fresh(r) })),
+    ...inbound.map((r) => ({
+      at: r.received_at,
+      when: when(r.received_at),
+      who: 'client' as const,
+      text: `${maskForModel(r.body)}${hasPicture(r.kind, r.attachments) ? ' [photo attached]' : ''}`,
+      fresh: fresh(r),
+    })),
     ...outbound.map((m) => ({
       at: m.queued_at,
       when: when(m.queued_at),
@@ -212,6 +241,7 @@ export async function loadConversation(
     newestInboundAt: answered.length > 0 ? answered[0]!.received_at : (inbound[0]?.received_at ?? null),
     inboxIds: answered.map((r) => r.id),
     firstContact: (prior.rows[0]?.n ?? 0) === 0,
+    photo: answered.some((r) => hasPicture(r.kind, r.attachments)),
   }
 }
 

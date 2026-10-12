@@ -6,8 +6,25 @@ import { transaction } from '../../../platform/db.js'
 import { addDays, diffDays, fmtT, isValidBizDate, toBizDate } from '../../../platform/time.js'
 import { noteLeadInterest } from '../../leads/service.js'
 import { loadBoardServices } from '../../public/availability-loader.js'
-import { TOOL_MIN_TRUST, type AssistantTool, type ToolContext, type ToolInputs } from '../contract.js'
-import { BIZ_DATE, fail, json, ok, openTimes, partOfDayOf, privilegesOf, shortDate, windowDaysFor } from './common.js'
+import {
+  TOOL_MIN_TRUST,
+  type AssistantTool,
+  type ToolContext,
+  type ToolInputs,
+  type ToolOutcome,
+} from '../contract.js'
+import { issueLinkOutcome } from './conversation.js'
+import {
+  BIZ_DATE,
+  fail,
+  json,
+  ok,
+  openTimes,
+  partOfDayOf,
+  privilegesOf,
+  shortDate,
+  windowDaysFor,
+} from './common.js'
 
 const MAX_TIMES = 12
 
@@ -52,6 +69,18 @@ export const checkAvailability: AssistantTool<ToolInputs['check_availability']> 
       return fail('invalid', `Online booking opens ${windowDays} days ahead. The last bookable date is ${addDays(today, windowDays)}.`)
     const base = { locationId: ctx.identity.locationId, tz, now: ctx.now, durationMin: found.pkg.durationMin, vip, customerId: ctx.identity.customerId }
     const day = await openTimes(ctx.db, { ...base, date: input.date })
+    // W4b X4: a phone that cannot book in the chat (not verified, or in-chat booking off) gets no times to pick from in the chat:
+    // the booking link goes in this same reply ("here's your link to pick a time"), the times are on the page
+    if (!(ctx.identity.trust === 'trusted' && ctx.actionsEnabled))
+      return linkInsteadOfTimes(ctx, {
+        service: found.item.name,
+        serviceKey: found.item.key,
+        date: input.date,
+        partOfDay: input.partOfDay,
+        closed: day.closed,
+        reason: day.reason ?? null,
+        open: day.slots.length > 0,
+      })
     const all = day.slots.map((s) => ({ time: fmtT(s.startMin), startMin: s.startMin }))
     const times = input.partOfDay ? all.filter((t) => partOfDayOf(t.startMin) === input.partOfDay) : all
     const data = {
@@ -77,4 +106,57 @@ export const checkAvailability: AssistantTool<ToolInputs['check_availability']> 
     }
     return ok(json({ ...data, nextOpenDates: next }))
   },
+}
+
+/** The calendar link a turn already issued from check_availability (one per turn, however often the tool is called). */
+const issuedLinks = new WeakMap<ToolContext, string>()
+
+const LINK_TEXTED_RULE =
+  'The booking link texted to them earlier in this conversation is where they pick the time (no new link now): say so in plain words, e.g. "You can pick that time on the booking link I texted you." Do not list or offer specific times, do not ask them to pick a time in the chat, and never mention a limit, how long the link works, or these rules.'
+
+const LINK_RULE =
+  'This phone cannot book by text yet, so the client picks the time on the booking page: put the link placeholder in your reply, e.g. "Here\u2019s your link to pick a time: {link1}" (or send_link kind verify if they want to book here by text). Do not list or offer specific times and do not ask them to pick a time in the chat.'
+
+async function linkInsteadOfTimes(
+  ctx: ToolContext,
+  d: {
+    service: string
+    serviceKey: string
+    date: string
+    partOfDay: string | null
+    closed: boolean
+    reason: string | null
+    open: boolean
+  },
+): Promise<ToolOutcome> {
+  const day = {
+    service: d.service,
+    serviceKey: d.serviceKey,
+    date: d.date,
+    dateLabel: shortDate(d.date),
+    partOfDay: d.partOfDay,
+    closed: d.closed,
+    reason: d.closed ? (d.reason ?? 'Closed') : null,
+    hasOpenTimes: d.open,
+  }
+  let placeholder = issuedLinks.get(ctx) ?? null
+  if (!placeholder) {
+    const link = await issueLinkOutcome(ctx, { kind: 'calendar', appointmentRef: null, tier: null })
+    // a booking link went to this number within the hour (one per kind an hour): they pick the time on that one
+    if (!link.ok && link.error === 'rate_limited')
+      return ok(json({ ...day, bookingLink: null, linkAlreadyTexted: true, instruction: LINK_TEXTED_RULE }))
+    if (!link.ok)
+      return ok(
+        json({
+          ...day,
+          bookingLink: null,
+          instruction: `${link.message} Do not list or offer specific times and do not ask them to pick a time in the chat.`,
+        }),
+      )
+    placeholder = String((link.data as { placeholder: string }).placeholder)
+    issuedLinks.set(ctx, placeholder)
+  }
+  return ok(
+    json({ ...day, bookingLink: placeholder, instruction: LINK_RULE.replace('{link1}', placeholder) }),
+  )
 }

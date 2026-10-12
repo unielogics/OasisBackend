@@ -338,6 +338,8 @@ export type ToolHandoffReason =
   | 'late_cancel'
   /** A payment link was asked for and the invoice has no payment URL. */
   | 'no_payment_link'
+  /** The client texted a photo and the reply says the team will review it (W4b X8: the AI cannot see pictures). */
+  | 'photo_quote'
 
 export interface HandoffRequest {
   reason: ToolHandoffReason

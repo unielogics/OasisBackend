@@ -43,7 +43,28 @@ import { AI_ACTOR_NAME, type AssistantLog, type AssistantQueue, type HandoffRequ
 import type { AssistantConfig } from './config.js'
 import { appointmentRefs, loadAppointmentRefs, loadConversation, loadTurnContext, resolveIdentity } from './context.js'
 import { factLiterals, openingWindow, placeholderValues, renderShopFacts } from './facts.js'
-import { CARD_LINE, cutAfterFirstQuestion, cutAtSentence, guardReply, HARD_PROBLEMS, isolatePlaceholders, looksLikeCardNumber, MAX_REPLY_CHARS, SAFETY_LINE, SAFETY_LINK_KINDS, type GuardProblem, type ReplySegment } from './guard.js'
+import {
+  cutAfterFirstQuestion,
+  cutAtSentence,
+  guardReply,
+  HARD_PROBLEMS,
+  isolatePlaceholders,
+  looksLikeCardNumber,
+  MAX_REPLY_CHARS,
+  SAFETY_LINK_KINDS,
+  type GuardProblem,
+  type ReplySegment,
+} from './guard.js'
+import {
+  CARD_LINES,
+  detectLanguage,
+  isConvoLang,
+  SAFETY_LINES,
+  storeLanguage,
+  withDisclosure,
+  type ConvoLang,
+} from './lang.js'
+import { whenWords } from './tools/common.js'
 import { JUDGE_HINTS, runJudge } from './judge.js'
 import { HANDOFF_SUMMARIES, markUnanswered, openTurnHandoff, recipientOf, sendFallback, type ConversationRef, type HandoffDeps } from './handoff.js'
 import type { AssistantGate, AssistantInbox } from './ports.js'
@@ -89,7 +110,18 @@ export type TurnResult =
 type CapKind = 'number_hour' | 'number_day' | 'unknown_day' | 'global_hour' | 'global_day' | 'budget'
 const GLOBAL_CAPS: ReadonlySet<CapKind> = new Set(['global_hour', 'global_day', 'budget'])
 
-const COLUMNS = ['id', 'location_id', 'phone_e164', 'customer_id', 'pending_since', 'last_inbound_at', 'running_since', 'handoff_state', 'disclosed_at'] as const
+const COLUMNS = [
+  'id',
+  'location_id',
+  'phone_e164',
+  'customer_id',
+  'pending_since',
+  'last_inbound_at',
+  'running_since',
+  'handoff_state',
+  'disclosed_at',
+  'language',
+] as const
 
 const ZERO_USAGE: AiUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
 
@@ -167,17 +199,31 @@ export async function noProgress(db: Db | Tx, o: { conversationId: string; now: 
  * The reply as queued: the ai_reply template (the disclosure on the first AI text), links as secretVars (class personal_link), and
  * with `safety` (a verify, PIN, membership or payment link) the server's SAFETY_LINE after the reply: the model never writes it.
  */
-export function composeReply(o: { text: string; disclose: boolean; links: ReadonlyMap<string, string>; safety?: boolean; card?: boolean }): {
+export function composeReply(o: {
+  text: string
+  disclose: boolean
+  links: ReadonlyMap<string, string>
+  safety?: boolean
+  card?: boolean
+  lang?: ConvoLang
+}): {
   text: string
   klass: 'ai_reply' | 'personal_link'
   secretVars?: Record<string, string>
 } {
+  const lang = o.lang ?? 'en'
   let reply = o.text
   // a registered link the reply left out is appended (the contract: the model may forget the placeholder)
   for (const p of o.links.keys()) if (!reply.includes(p)) reply = `${reply} ${p}`
-  if (o.safety) reply = `${reply} ${SAFETY_LINE}`
-  if (o.card) reply = `${reply} ${CARD_LINE}`
-  const text = renderTemplate('ai_reply', { reply, ...(o.disclose ? { disclosure: 'yes' } : {}) }).text
+  if (o.safety) reply = `${reply} ${SAFETY_LINES[lang]}`
+  if (o.card) reply = `${reply} ${CARD_LINES[lang]}`
+  // the first AI text of the conversation: the disclosure and the STOP footer, in the conversation's language (W4b X5)
+  const text =
+    lang === 'en'
+      ? renderTemplate('ai_reply', { reply, ...(o.disclose ? { disclosure: 'yes' } : {}) }).text
+      : o.disclose
+        ? withDisclosure(reply, lang)
+        : reply.trim()
   const used = [...o.links.entries()].filter(([p]) => text.includes(p))
   if (used.length === 0) return { text, klass: 'ai_reply' }
   return { text, klass: 'personal_link', secretVars: Object.fromEntries(used.map(([p, url]) => [p.slice(1, -1), url])) }
@@ -372,7 +418,22 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     limit: d.cfg.historyLimit,
     windowMs: d.cfg.historyWindowMs,
   })
-  const turnContext = await loadTurnContext(d.db, { resolved, conversationId: conv.id, refs: refRows, actionsEnabled, firstContact: snap.firstContact, now, tz })
+  // the client's language (W4b X5): what their new texts are written in, else what the conversation was in (English by default)
+  const detected = detectLanguage(snap.lines.filter((l) => l.fresh && l.who === 'client').map((l) => l.text))
+  const lang: ConvoLang = detected ?? (isConvoLang(claim.conv.language) ? claim.conv.language : 'en')
+  if (detected) await storeLanguage(d.db, conv.id, detected)
+  const turnContext = {
+    ...(await loadTurnContext(d.db, {
+      resolved,
+      conversationId: conv.id,
+      refs: refRows,
+      actionsEnabled,
+      firstContact: snap.firstContact,
+      now,
+      tz,
+    })),
+    language: lang,
+  }
   const contextText = renderTurnContext(turnContext)
   const tools = offeredTools(d.registry, actionsEnabled)
   const specs = toolSpecs(tools)
@@ -562,7 +623,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
 
     // ---- the output guard
     // what the placeholders render to (the current facts; {balance} only after get_balance; the links stay for composeReply)
-    const values = placeholderValues(facts, { balanceCents, confirmTexted })
+    const values = placeholderValues(facts, { balanceCents, confirmTexted, lang })
     for (const p of links.keys()) values.set(p, p)
     // server-owned literals only (the address, catalog and plan names): the digit rules skip them. Client-entered text (a vehicle on
     // file, the name) is NEVER a literal and never trusted by the judge (fix 1 of the v4 re-check: a vehicle "Free Wash 2015550123")
@@ -573,8 +634,26 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     const safety = [...linkKinds].some((k) => SAFETY_LINK_KINDS.has(k))
     // the client texted a card number: the server's CARD_LINE follows the reply (the model may write nothing about cards)
     const card =
-      snap.inboxIds.length > 0 && (await d.db.selectFrom('sms_inbox').select('body').where('id', 'in', snap.inboxIds).execute()).some((r) => looksLikeCardNumber(r.body))
-    const maxChars = MAX_REPLY_CHARS - (safety ? SAFETY_LINE.length + 1 : 0) - (card ? CARD_LINE.length + 1 : 0)
+      snap.inboxIds.length > 0 &&
+      (await d.db.selectFrom('sms_inbox').select('body').where('id', 'in', snap.inboxIds).execute()).some(
+        (r) => looksLikeCardNumber(r.body),
+      )
+    const safetyLine = SAFETY_LINES[lang]
+    const cardLine = CARD_LINES[lang]
+    const maxChars = MAX_REPLY_CHARS - (safety ? safetyLine.length + 1 : 0) - (card ? cardLine.length + 1 : 0)
+    // W4b X3: what the server did since the assistant's last text (a reply number executed a booking, a move, a cancel): only then
+    // may the reply say it is booked, moved, cancelled or "all set"; the judge reads the same record and the client's visits
+    const executed = await executedSinceLastReply(d.db, { conversationId: conv.id, turnId, now, tz })
+    const actionDone = executed.length > 0
+    const judgeRecord = [
+      `Done by the server since the assistant's last text: ${actionDone ? executed.join('; ') : 'nothing (nothing was booked, moved or cancelled)'}.`,
+      ...(confirmTexted
+        ? [
+            'In this turn the server texted the client a proposal to confirm with its reply number: nothing is done until they confirm it.',
+          ]
+        : []),
+      `The client's visits on file: ${turnContext.appointments.length > 0 ? turnContext.appointments.map((a) => a.label).join('; ') : 'none'}.`,
+    ].join('\n')
     let rewriteUsed = false
     let shortenUsed = false
     let judgeRewriteUsed = false
@@ -591,10 +670,28 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     const judge = async (segments: readonly ReplySegment[]) => {
       const all = [
         ...segments,
-        ...(safety ? [{ text: ' ', trusted: false }, { text: SAFETY_LINE, trusted: true }] : []),
-        ...(card ? [{ text: ' ', trusted: false }, { text: CARD_LINE, trusted: true }] : []),
+        ...(safety
+          ? [
+              { text: ' ', trusted: false },
+              { text: safetyLine, trusted: true },
+            ]
+          : []),
+        ...(card
+          ? [
+              { text: ' ', trusted: false },
+              { text: cardLine, trusted: true },
+            ]
+          : []),
       ]
-      const run = () => runJudge(d.judge, all, { timeoutMs: d.cfg.judge.timeoutMs, maxTokens: d.cfg.judge.maxTokens, signal: deadline.signal, nowMs })
+      const run = () =>
+        runJudge(d.judge, all, {
+          timeoutMs: d.cfg.judge.timeoutMs,
+          maxTokens: d.cfg.judge.maxTokens,
+          signal: deadline.signal,
+          nowMs,
+          facts: factsText,
+          record: judgeRecord,
+        })
       let r = await run()
       judgeUsage = addUsage(judgeUsage, r.usage)
       let attempts = 1
@@ -635,6 +732,8 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     }
     let draft = text
     let reply: string | null = null
+    // the reply as the model wrote it (placeholders in): the server's renderings it used are recorded with the reply (W4b X9)
+    let replyRaw = ''
     try {
       for (let i = 0; i < 10 && reply === null; i++) {
         const v = guardReply({
@@ -647,16 +746,20 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
           website: facts.business.website,
           shopNumbers: [facts.contact.textingNumber, facts.contact.callingNumber],
           maxChars,
+          // one rewrite for a claim that something was done when nothing was (a claim left after it is the judge's)
+          checkActionClaims: !actionDone && !rewriteUsed,
         })
         transcript.add({ kind: 'guard', verdict: v.kind, ...(v.kind === 'fix' ? { problems: v.problems, ...(v.words.length > 0 ? { words: v.words } : {}) } : {}) })
         if (v.kind === 'ok') {
           if (!d.cfg.judge.enabled) {
             reply = v.rendered
+            replyRaw = v.text
             break
           }
           const j = await judge(v.segments)
           if (j.kind === 'pass') {
             reply = v.rendered
+            replyRaw = v.text
             break
           }
           // fail closed: no verdict, no reply (the turn deadline is the turn's own timeout)
@@ -671,7 +774,10 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
           continue
         }
         const hard = v.problems.filter((p) => HARD_PROBLEMS.has(p))
-        if (hard.length > 0 || (v.problems.includes('questions') && !rewriteUsed)) {
+        if (
+          hard.length > 0 ||
+          ((v.problems.includes('questions') || v.problems.includes('action_claim')) && !rewriteUsed)
+        ) {
           // the rewrite still trips only the placement rule: the server isolates the placeholders itself, once (each its own sentence)
           if (rewriteUsed && !isolateUsed && hard.length === 1 && hard[0] === 'placement') {
             isolateUsed = true
@@ -704,7 +810,27 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
       transcript.add({ kind: 'error', error: reason })
       return await finishHandoff({ reason: 'fallback', status: 'failed', fallback: true, error: reason, usage, model, rounds, stop })
     }
-    if (reply === null) return await finishHandoff({ reason: 'guard', status: 'handed_off', fallback: true, usage, model, rounds, stop, error: 'guard:unresolved' })
+    if (reply === null)
+      return await finishHandoff({
+        reason: 'guard',
+        status: 'handed_off',
+        fallback: true,
+        usage,
+        model,
+        rounds,
+        stop,
+        error: 'guard:unresolved',
+      })
+    // W4b X8: the client texted a photo and the reply says the team will review it: a person is asked to (the AI cannot see it)
+    if (snap.photo && TEAM_REVIEW.test(reply))
+      toolHandoff ??= {
+        reason: 'photo_quote',
+        summary:
+          'The client texted a photo; the assistant told them the team will review it. Look at the photo in Messages and reply.',
+      }
+    const rendered = [...values.entries()]
+      .filter(([k]) => !k.startsWith('{link') && replyRaw.includes(k))
+      .map(([, v]) => v)
 
     // ---- the reply
     const out = await transaction(d.db, async (tx) => {
@@ -721,7 +847,14 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
             .executeTakeFirst()
         : undefined
       const superseded = c.handoff_state === 'open' || paused !== undefined
-      const composed = composeReply({ text: reply, disclose: c.disclosed_at === null, links, safety, card })
+      const composed = composeReply({
+        text: reply,
+        disclose: c.disclosed_at === null,
+        links,
+        safety,
+        card,
+        lang,
+      })
       const queued = superseded
         ? null
         : await d.queue.enqueueFor(tx, {
@@ -740,7 +873,12 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
       const messageId = queued?.queued ? queued.messageId : null
       const status: 'replied' | 'skipped' | 'failed' = messageId ? 'replied' : superseded || (queued && !queued.queued && queued.skipped === 'opted_out') ? 'skipped' : 'failed'
       const error = superseded ? 'superseded' : queued && !queued.queued ? `enqueue:${queued.skipped}` : null
-      transcript.add({ kind: 'reply', text: composed.text, klass: composed.klass })
+      transcript.add({
+        kind: 'reply',
+        text: composed.text,
+        klass: composed.klass,
+        ...(rendered.length > 0 ? { rendered } : {}),
+      })
       // newer texts arrived while this turn ran: keep the marker (from the oldest of them) and kick again
       const newer = c.last_inbound_at && snapshotInbound && c.last_inbound_at.getTime() > snapshotInbound.getTime()
       const nextPending = newer
@@ -832,5 +970,46 @@ async function notifyCapOnce(d: TurnDeps, o: { locationId: string; cap: CapKind;
       },
       { newId: d.newId, clock: d.clock },
     )
+  })
+}
+
+/** A reply that tells the client the team will look at what they sent (W4b X8: a photo then opens a handoff). */
+const TEAM_REVIEW =
+  /\b(?:team|staff|someone|a person|technician|we(?:'ll| will))\b[^.!?]{0,60}\b(?:review|look|check|see|get back|text you|quote|estimate)|\b(?:equipo|alguien)\b[^.!?]{0,60}\b(?:revis|mira|cotiz|te escrib|te contact)/i
+
+/**
+ * W4b X3: the in-chat actions the server executed for this conversation since the assistant's last reply (a reply number booked,
+ * moved or cancelled a visit), in words: "booked: Signature Hand Wash, Mon Jun 15 at 10:00 AM". Before the first reply: the last day.
+ */
+export async function executedSinceLastReply(
+  db: Db,
+  o: { conversationId: string; turnId: string; now: Date; tz: string },
+): Promise<string[]> {
+  const last = await db
+    .selectFrom('assistant_turns')
+    .select((eb) => eb.fn.max('finished_at').as('at'))
+    .where('conversation_id', '=', o.conversationId)
+    .where('status', '=', 'replied')
+    .where('id', '!=', o.turnId)
+    .executeTakeFirst()
+  const since = last?.at ?? new Date(o.now.getTime() - 86_400_000)
+  const rows = await db
+    .selectFrom('assistant_pending_actions')
+    .select(['kind', 'payload'])
+    .where('conversation_id', '=', o.conversationId)
+    .where('state', '=', 'executed')
+    .where('resolved_at', '>', since)
+    .orderBy('resolved_at')
+    .execute()
+  const today = toBizDate(o.now, o.tz)
+  return rows.map((r) => {
+    const p = (typeof r.payload === 'string' ? JSON.parse(r.payload) : r.payload) as {
+      serviceName?: string
+      date?: string
+      startMin?: number
+    }
+    const when = p.date && typeof p.startMin === 'number' ? `, ${whenWords(p.date, p.startMin, today)}` : ''
+    const what = r.kind === 'book' ? 'booked' : r.kind === 'reschedule' ? 'moved' : 'cancelled'
+    return `${what}: ${p.serviceName ?? 'a visit'}${when}`
   })
 }

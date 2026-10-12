@@ -4,6 +4,7 @@ import { normalizeE164 } from '../../../integrations/sms/phone.js'
 import { GATE_OFF, type AssistantGateInput, type AssistantGateVerdict } from '../../assistant/ports.js'
 import type { OptOutRepository } from '../policy/optouts.js'
 import type { CustomerDirectory, InboxRepository, InboxRow } from './repositories.js'
+import { maskCardNumbers } from './cards.js'
 import { CODE_MASK, parseReplyCode } from './keywords.js'
 import { mmsText, type MmsAttachmentRecord } from './mms.js'
 import { routeInbound, type InboundCommand, type InboundDecision, type InboundText } from './router.js'
@@ -108,8 +109,11 @@ export class InboundService {
     return this.process({ ...base, body: text, kind: 'mms', placeholder, incomplete: event.mms.incomplete }, event.mms.parts)
   }
 
-  async process(msg: InboundText, parts: readonly MmsPart[] = []): Promise<InboundOutcome> {
+  async process(input: InboundText, parts: readonly MmsPart[] = []): Promise<InboundOutcome> {
     const now = this.clock.now()
+    // a card number is never filed readable (ADR 0160 W4b X6): the inbox row, the thread, the event stream, alerts and the assistant
+    // all get "[card ending 1234]" (last four digits only), like a code gets CODE_MASK
+    const msg: InboundText = { ...input, body: maskCardNumbers(input.body) }
     // An MMS can come twice under one device id: first incomplete (its own provider id, filed as a placeholder), then complete.
     // The complete one is routed as usual and supersedes the placeholder; an incomplete one after the complete one is a repeat.
     const completeId = msg.kind === 'mms' ? completeIdOf(msg.providerMessageId) : null

@@ -53,79 +53,116 @@ export const sendLink: AssistantTool<ToolInputs['send_link']> = {
     tier: z.enum(['gold', 'vip']).nullable(),
   }),
   minTrust: TOOL_MIN_TRUST.send_link,
-  async run(ctx, input) {
-    if (!ctx.env.PUBLIC_LINKS_ENABLED) return fail('unavailable', 'Personal links are not available right now. Offer to have a team member text back.')
-    const id = ctx.identity
-    const client = id.customerId
-    // a stranger (no client) or a record the stale rule hides gets only what proves the number: verify, or a calendar for a stranger
-    if (input.kind === 'verify' && !client) return fail('not_allowed', 'There is no client record for this number yet; ask their name first.')
-    if (input.kind === 'calendar' && client && !atLeast(id.trust, 'caller'))
-      return fail('needs_verification', 'This number has to be verified first: send a verify link.')
-    if ((input.kind === 'pin' || input.kind === 'membership' || input.kind === 'pay') && (!client || !atLeast(id.trust, 'caller')))
-      return fail('not_allowed', 'That link is only for a client on file; send a verify link first.')
-    if (input.kind === 'membership' && !input.tier) return fail('invalid', 'Say which plan: tier gold or vip.')
-    try {
-      const issued = await transaction(ctx.db, async (tx) => {
-        let appointmentId: string | null = null
-        let invoiceId: string | null = null
-        if (input.appointmentRef && (input.kind === 'calendar' || input.kind === 'pay')) {
-          const a = await ownAppointment(tx, ctx, input.appointmentRef)
-          if (!a) throw new LinkRefused(fail('not_found', 'No such appointment for this client.'))
-          appointmentId = a.id
-        }
-        if (input.kind === 'pay') invoiceId = await payableInvoice(tx, ctx, appointmentId)
-        if (input.kind === 'membership') {
-          const plan = await tx
-            .selectFrom('membership_plans')
-            .select('key')
-            .where('location_id', '=', id.locationId)
-            .where('key', '=', tierSpec(input.tier!).planKey)
-            .executeTakeFirst()
-          if (!plan) throw new LinkRefused(fail('unavailable', 'Memberships cannot be started by link right now; a team member can help.'))
-        }
-        const issued = await issueClientLink(
-          tx,
-          { newId: ctx.newId, now: ctx.now, ...(ctx.env.PUBLIC_SITE_URL ? { siteUrl: ctx.env.PUBLIC_SITE_URL } : {}) },
-          {
-            locationId: id.locationId,
-            kind: input.kind,
-            customerId: client,
-            phone: client ? null : id.phone,
-            appointmentId: input.kind === 'calendar' ? appointmentId : null,
-            invoiceId,
-            planKey: input.kind === 'membership' ? tierSpec(input.tier!).planKey : null,
-            issuedBy: 'assistant',
-          },
-        )
-        // the link goes only to the number that is texting (the client's number on file is the same number)
-        if (issued.phone !== id.phone) throw new LinkRefused(fail('not_allowed', 'This number is not the client’s number on file.'))
-        await ctx.audit(tx, 'assistant.link.sent', { entityType: client ? 'customer' : 'lead', entityId: client, after: { kind: input.kind, expiresAt: issued.expiresAt.toISOString() } })
-        return issued
+  run: (ctx, input) => issueLinkOutcome(ctx, input),
+}
+
+/**
+ * send_link's work: issues the personal link to the number that is texting, registers it with the turn ({linkN}) and says how to
+ * use it. check_availability calls it too (W4b X4: an unverified booking gets the calendar link in the same reply).
+ */
+export async function issueLinkOutcome(ctx: ToolContext, input: ToolInputs['send_link']) {
+  if (!ctx.env.PUBLIC_LINKS_ENABLED)
+    return fail(
+      'unavailable',
+      'Personal links are not available right now. Offer to have a team member text back.',
+    )
+  const id = ctx.identity
+  const client = id.customerId
+  // a stranger (no client) or a record the stale rule hides gets only what proves the number: verify, or a calendar for a stranger
+  if (input.kind === 'verify' && !client)
+    return fail('not_allowed', 'There is no client record for this number yet; ask their name first.')
+  if (input.kind === 'calendar' && client && !atLeast(id.trust, 'caller'))
+    return fail('needs_verification', 'This number has to be verified first: send a verify link.')
+  if (
+    (input.kind === 'pin' || input.kind === 'membership' || input.kind === 'pay') &&
+    (!client || !atLeast(id.trust, 'caller'))
+  )
+    return fail('not_allowed', 'That link is only for a client on file; send a verify link first.')
+  if (input.kind === 'membership' && !input.tier) return fail('invalid', 'Say which plan: tier gold or vip.')
+  try {
+    const issued = await transaction(ctx.db, async (tx) => {
+      let appointmentId: string | null = null
+      let invoiceId: string | null = null
+      if (input.appointmentRef && (input.kind === 'calendar' || input.kind === 'pay')) {
+        const a = await ownAppointment(tx, ctx, input.appointmentRef)
+        if (!a) throw new LinkRefused(fail('not_found', 'No such appointment for this client.'))
+        appointmentId = a.id
+      }
+      if (input.kind === 'pay') invoiceId = await payableInvoice(tx, ctx, appointmentId)
+      if (input.kind === 'membership') {
+        const plan = await tx
+          .selectFrom('membership_plans')
+          .select('key')
+          .where('location_id', '=', id.locationId)
+          .where('key', '=', tierSpec(input.tier!).planKey)
+          .executeTakeFirst()
+        if (!plan)
+          throw new LinkRefused(
+            fail('unavailable', 'Memberships cannot be started by link right now; a team member can help.'),
+          )
+      }
+      const issued = await issueClientLink(
+        tx,
+        {
+          newId: ctx.newId,
+          now: ctx.now,
+          ...(ctx.env.PUBLIC_SITE_URL ? { siteUrl: ctx.env.PUBLIC_SITE_URL } : {}),
+        },
+        {
+          locationId: id.locationId,
+          kind: input.kind,
+          customerId: client,
+          phone: client ? null : id.phone,
+          appointmentId: input.kind === 'calendar' ? appointmentId : null,
+          invoiceId,
+          planKey: input.kind === 'membership' ? tierSpec(input.tier!).planKey : null,
+          issuedBy: 'assistant',
+        },
+      )
+      // the link goes only to the number that is texting (the client's number on file is the same number)
+      if (issued.phone !== id.phone)
+        throw new LinkRefused(fail('not_allowed', 'This number is not the client’s number on file.'))
+      await ctx.audit(tx, 'assistant.link.sent', {
+        entityType: client ? 'customer' : 'lead',
+        entityId: client,
+        after: { kind: input.kind, expiresAt: issued.expiresAt.toISOString() },
       })
-      // registered once the link row is committed: the reply never carries a link that does not exist
-      const placeholder = ctx.addLink(issued.url, { kind: input.kind, expiresAt: issued.expiresAt })
-      const minutes = Math.round((issued.expiresAt.getTime() - ctx.now.getTime()) / 60_000)
-      return ok({
-        placeholder,
-        kind: input.kind,
-        expiresInMinutes: minutes,
-        instruction: `Put ${placeholder} in your reply exactly once; it is replaced by the secure link. Never write a URL yourself.`,
-      })
-    } catch (e) {
-      if (e instanceof LinkRefused) return e.outcome
-      if (e instanceof AppError && e.code === 'IDENTITY_LINK_LIMIT')
-        return fail(
-          'rate_limited',
-          // W4 live eval: "I've hit the link limit for today" confused clients (a limit they never heard of)
-          'No new link can go to this number right now. If a link of this kind was texted earlier in this conversation, point them to it (it is in their texts; a calendar link works for 3 days, a verify link for 15 minutes); otherwise say a team member will text them. Never mention a limit or a count.',
-        )
-      if (e instanceof NoPaymentLink)
-        return withHandoff(ctx, fail('unavailable', 'There is no online payment for that invoice yet; a team member will text a payment link.'), 'no_payment_link', 'The client asked to pay online; the invoice has no payment link yet.')
-      if (e instanceof AppError && (e.code === 'VALIDATION_FAILED' || e.code === 'NOT_FOUND' || e.code === 'IDENTITY_NO_PHONE'))
-        return fail('not_found', 'There is nothing that link could be for.')
-      throw e
-    }
-  },
+      return issued
+    })
+    // registered once the link row is committed: the reply never carries a link that does not exist
+    const placeholder = ctx.addLink(issued.url, { kind: input.kind, expiresAt: issued.expiresAt })
+    const minutes = Math.round((issued.expiresAt.getTime() - ctx.now.getTime()) / 60_000)
+    return ok({
+      placeholder,
+      kind: input.kind,
+      expiresInMinutes: minutes,
+      instruction: `Put ${placeholder} in your reply exactly once; it is replaced by the secure link. Never write a URL yourself.`,
+    })
+  } catch (e) {
+    if (e instanceof LinkRefused) return e.outcome
+    if (e instanceof AppError && e.code === 'IDENTITY_LINK_LIMIT')
+      return fail(
+        'rate_limited',
+        // W4 live eval: "I've hit the link limit for today" confused clients (a limit they never heard of)
+        'No new link can go to this number right now. If a link of this kind was texted earlier in this conversation, point them to it (it is in their texts; a calendar link works for 3 days, a verify link for 15 minutes); otherwise say a team member will text them. Never mention a limit or a count.',
+      )
+    if (e instanceof NoPaymentLink)
+      return withHandoff(
+        ctx,
+        fail(
+          'unavailable',
+          'There is no online payment for that invoice yet; a team member will text a payment link.',
+        ),
+        'no_payment_link',
+        'The client asked to pay online; the invoice has no payment link yet.',
+      )
+    if (
+      e instanceof AppError &&
+      (e.code === 'VALIDATION_FAILED' || e.code === 'NOT_FOUND' || e.code === 'IDENTITY_NO_PHONE')
+    )
+      return fail('not_found', 'There is nothing that link could be for.')
+    throw e
+  }
 }
 
 /** The open invoice a pay link is for: the visit's, or the client's latest with a balance; it needs a staff-attached payment URL. */

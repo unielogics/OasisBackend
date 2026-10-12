@@ -87,7 +87,8 @@ describe('propose_booking', () => {
     expect(await appointmentsOf(maria().id)).toEqual([])
     const confirm = (await aiTexts(maria().id)).find((m) => m.klass === 'action_confirm')!
     expect(confirm).toMatchObject({ sender_kind: 'ai' })
-    expect(confirm.body).toMatch(/^Express Hand Wash, Mon Jun 15 at 10:00 AM\. Reply \[code\] to confirm\./)
+    // the proposal is the conversation's first AI text: it discloses the assistant and carries the STOP footer (W4b X1)
+    expect(confirm.body).toBe("Oasis Auto Spa's automated assistant here. Express Hand Wash, Mon Jun 15 at 10:00 AM. Reply [code] to confirm. Reply STOP to opt out.")
     expect(await w.t.db.selectFrom('audit_log').select('action').where('action', '=', 'assistant.book.proposed').execute()).toHaveLength(1)
   })
 

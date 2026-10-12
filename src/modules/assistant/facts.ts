@@ -19,6 +19,7 @@ import { sql } from 'kysely'
 import type { Executor } from '../../platform/db.js'
 import { formatPhoneDisplay } from '../../platform/phone.js'
 import { getSetting } from '../../platform/settings.js'
+import { CONFIRM_WORDS_BY_LANG, type ConvoLang } from './lang.js'
 import { addDays, fmtT, toBizDate, tryParseT } from '../../platform/time.js'
 import { normalizeE164 } from '../../integrations/sms/phone.js'
 import { DEFAULT_SITE_URL } from '../identity/links.js'
@@ -428,12 +429,15 @@ const PERK_PROMISE =
   /(?<![\p{L}-])(?:free|guarantee[ds]?|guaranteed|warrant(?:y|ies)|refunds?|discounts?|coupons?|complimentary|gratis|gratuit[oa]s?|descuentos?|reembolsos?|garant[ií]as?)(?![\p{L}-])/iu
 
 /** A plan's perks as one phrase, "Gold includes: 4 hand washes a month, interior included; no booking fees; ...", or null. */
-export function perksWords(p: { label: string; perks: readonly string[] }): string | null {
+export function perksWords(
+  p: { label: string; perks: readonly string[] },
+  lang: ConvoLang = 'en',
+): string | null {
   const perks = textablePerks(p.perks)
   if (perks.length === 0) return null
   // a perk starts lower case after the colon unless it starts with an acronym or a number ("VIP ...", "4 hand washes")
   const lower = (x: string): string => (/^[A-Z][a-z]/.test(x) ? x[0]!.toLowerCase() + x.slice(1) : x)
-  return `${p.label} includes: ${perks.map(lower).join('; ')}`
+  return `${p.label} ${lang === 'es' ? 'incluye' : 'includes'}: ${perks.map(lower).join('; ')}`
 }
 export const FEE_PLACEHOLDER = '{fee}'
 export const BALANCE_PLACEHOLDER = '{balance}'
@@ -442,7 +446,7 @@ export const BALANCE_PLACEHOLDER = '{balance}'
  * failed the model's "confirm with that text" as asking for a received code, so a booking proposal ended in the fallback).
  */
 export const CONFIRM_PLACEHOLDER = '{confirm}'
-export const CONFIRM_WORDS = 'I just texted you the details with how to confirm'
+export const CONFIRM_WORDS = CONFIRM_WORDS_BY_LANG.en
 
 /**
  * The facts as the cached system block: plain text, deterministic (no generatedAt, no version, fixed order). It names KEYS and
@@ -543,25 +547,69 @@ export function vehiclePhrase(label: string): string {
  *   {confirm}                      "I just texted you the details with how to confirm", only after a propose_* texted its number
  * The {linkN} placeholders are the turn's own (turn.ts). The names are the shop's own public names (Settings, one line each).
  */
-export function placeholderValues(f: ShopFacts, o: { balanceCents?: number | null; confirmTexted?: boolean } = {}): Map<string, string> {
+export function placeholderValues(
+  f: ShopFacts,
+  o: { balanceCents?: number | null; confirmTexted?: boolean; lang?: ConvoLang } = {},
+): Map<string, string> {
+  const es = o.lang === 'es'
   const out = new Map<string, string>()
   for (const it of f.catalog.items)
     out.set(
       pricePlaceholder(it.key),
-      `${it.name} ${it.quoteOnly ? 'is priced by quote - text us a photo' : (priceWords(it.memberFromCents, it.guestFromCents) ?? 'is priced at the shop')}`,
+      es
+        ? `${it.name}: ${it.quoteOnly ? 'precio por cotizacion - envianos una foto' : (priceWordsEs(it.memberFromCents, it.guestFromCents) ?? 'el precio se confirma en el local')}`
+        : `${it.name} ${it.quoteOnly ? 'is priced by quote - text us a photo' : (priceWords(it.memberFromCents, it.guestFromCents) ?? 'is priced at the shop')}`,
     )
   for (const r of f.catalog.tint)
-    out.set(tintPlaceholder(r.vehicle, r.film), `${r.filmLabel} tint for ${vehiclePhrase(r.vehicleLabel)} ${priceWords(r.memberFromCents, r.guestFromCents) ?? 'is priced at the shop'}`)
+    out.set(
+      tintPlaceholder(r.vehicle, r.film),
+      es
+        ? `Polarizado ${r.filmLabel} para ${r.vehicleLabel.replace(/\s*\/\s*/g, '/')}: ${priceWordsEs(r.memberFromCents, r.guestFromCents) ?? 'el precio se confirma en el local'}`
+        : `${r.filmLabel} tint for ${vehiclePhrase(r.vehicleLabel)} ${priceWords(r.memberFromCents, r.guestFromCents) ?? 'is priced at the shop'}`,
+    )
   for (const p of f.plans) {
-    out.set(planPlaceholder(p.key), `${p.label} ${p.monthlyPriceCents === null ? 'has a monthly price the team confirms' : `is ${usd(p.monthlyPriceCents)} a month`}`)
-    const perks = perksWords(p)
+    out.set(
+      planPlaceholder(p.key),
+      es
+        ? p.monthlyPriceCents === null
+          ? `${p.label}: el equipo confirma el precio mensual`
+          : `${p.label} cuesta ${usd(p.monthlyPriceCents)} al mes`
+        : `${p.label} ${p.monthlyPriceCents === null ? 'has a monthly price the team confirms' : `is ${usd(p.monthlyPriceCents)} a month`}`,
+    )
+    const perks = perksWords(p, o.lang)
     if (perks) out.set(perksPlaceholder(p.key), perks)
   }
-  out.set(FEE_PLACEHOLDER, f.fee.guestBookingFeeCents > 0 ? `Guests pay a ${usd(f.fee.guestBookingFeeCents)} booking fee` : 'There is no booking fee')
-  if (o.balanceCents !== undefined && o.balanceCents !== null && Number.isInteger(o.balanceCents) && o.balanceCents >= 0)
-    out.set(BALANCE_PLACEHOLDER, `Your open balance is ${usd(o.balanceCents)}`)
-  if (o.confirmTexted) out.set(CONFIRM_PLACEHOLDER, CONFIRM_WORDS)
+  const fee = f.fee.guestBookingFeeCents
+  out.set(
+    FEE_PLACEHOLDER,
+    es
+      ? fee > 0
+        ? `Quienes no son miembros pagan una tarifa de reserva de ${usd(fee)}`
+        : 'No hay tarifa de reserva'
+      : fee > 0
+        ? `Guests pay a ${usd(fee)} booking fee`
+        : 'There is no booking fee',
+  )
+  if (
+    o.balanceCents !== undefined &&
+    o.balanceCents !== null &&
+    Number.isInteger(o.balanceCents) &&
+    o.balanceCents >= 0
+  )
+    out.set(
+      BALANCE_PLACEHOLDER,
+      es ? `Tu saldo pendiente es ${usd(o.balanceCents)}` : `Your open balance is ${usd(o.balanceCents)}`,
+    )
+  if (o.confirmTexted) out.set(CONFIRM_PLACEHOLDER, CONFIRM_WORDS_BY_LANG[o.lang ?? 'en'])
   return out
+}
+
+/** The Spanish starting-price wording: "desde $45 para miembros, $54 para los demas" (or "desde $45"); null without a price. */
+export function priceWordsEs(member: number | null, guest: number | null): string | null {
+  if (member === null && guest === null) return null
+  if (member !== null && guest !== null && member !== guest)
+    return `desde ${usd(member)} para miembros, ${usd(guest)} para los demas`
+  return `desde ${usd((member ?? guest)!)}`
 }
 
 /**

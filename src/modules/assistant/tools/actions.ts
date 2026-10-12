@@ -17,6 +17,7 @@ import { loadBoardServices } from '../../public/availability-loader.js'
 import { TOOL_MIN_TRUST, type AssistantTool, type ToolContext, type ToolInputs, type ToolOutcome } from '../contract.js'
 import { actionSummary, cancelBlockOf, serviceWithAddons, type BookPayload, type CancelPayload, type ReschedulePayload } from '../actions/plan.js'
 import { bookablePackage, vipFor } from './availability.js'
+import { actionConfirmText, conversationVoice, markDisclosed, withDisclosure } from '../lang.js'
 import {
   aiBookingsAhead,
   BIZ_DATE,
@@ -79,20 +80,34 @@ async function propose(
         throw e
       }
       const target = await loadCustomerTarget(tx, ctx.identity.locationId, customerId)
-      if (!target || target.recipient.phone !== ctx.identity.phone) throw new Refused(fail('not_allowed', 'This number is not the client’s number on file.'))
+      if (!target || target.recipient.phone !== ctx.identity.phone)
+        throw new Refused(fail('not_allowed', 'This number is not the client’s number on file.'))
+      // W4b X1: when this is the first text of the conversation's AI flow (a trusted client's first text can be a proposal), it
+      // carries the automated-assistant disclosure and the STOP footer, and the reply that follows does not repeat them; X5: in the
+      // conversation's language
+      const voice = await conversationVoice(tx, ctx.conversationId)
+      const body = actionConfirmText(o.summary, voice.lang)
       const out = await ctx.queue.enqueueFor(tx, {
         locationId: ctx.identity.locationId,
         customerId,
         recipient: target.recipient,
         appointmentId: o.appointmentId,
-        templateKey: 'action_confirm',
-        vars: { summary: o.summary },
+        text: voice.disclosed ? body : withDisclosure(body, voice.lang),
+        klass: 'action_confirm',
+        tag: 'action_confirm',
         secretVars: { code: proposal.code },
         purpose: `assistant-${o.kind}-confirm`,
         senderKind: 'ai',
         dedupeKey: `action-confirm:${proposal.id}`,
       })
-      if (!out.queued) throw new Refused(fail('unavailable', 'The confirmation text could not be sent to this number. Offer a team member instead.'))
+      if (!out.queued)
+        throw new Refused(
+          fail(
+            'unavailable',
+            'The confirmation text could not be sent to this number. Offer a team member instead.',
+          ),
+        )
+      if (!voice.disclosed) await markDisclosed(tx, ctx.conversationId, ctx.now)
       await attachConfirmMessage(tx, proposal.id, out.messageId)
       await ctx.audit(tx, `assistant.${o.kind}.proposed`, {
         entityType: o.appointmentId ? 'appointment' : 'customer',
@@ -119,7 +134,7 @@ async function propose(
 export const proposeBooking: AssistantTool<ToolInputs['propose_booking']> = {
   name: 'propose_booking',
   description:
-    'Proposes a booking for the verified client: serviceKey (a package from list_services), addonKeys (add-on keys, or []), date (YYYY-MM-DD), startMin (from check_availability), vehicle (the client’s own vehicle as they named it, or null). The server texts them a confirmation number; nothing is booked until they reply with it.',
+    'Proposes a booking for the verified client: serviceKey (a package from list_services), addonKeys (add-on keys, or []), date (YYYY-MM-DD), startMin (from check_availability), vehicle (the client’s own vehicle as they named it, or null: a vehicle is never needed, so never ask for one before proposing). The server texts them a confirmation number; nothing is booked until they reply with it.',
   input: z.strictObject({
     serviceKey: z.string().min(1).max(80),
     addonKeys: z.array(z.string().min(1).max(80)).max(6),

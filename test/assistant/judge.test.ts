@@ -125,6 +125,6 @@ describe('one judge call with the simulator', () => {
   })
 
   it('a hint per fail category for the one rewrite', () => {
-    expect(Object.keys(JUDGE_HINTS).sort()).toEqual(['link_or_phone', 'other', 'price', 'promise', 'secret'])
+    expect(Object.keys(JUDGE_HINTS).sort()).toEqual(['action', 'facts', 'link_or_phone', 'other', 'price', 'promise', 'secret'])
   })
 })

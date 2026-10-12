@@ -505,9 +505,11 @@ CREATE TABLE public.assistant_conversations (
     disclosed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    language text DEFAULT 'en'::text NOT NULL,
     CONSTRAINT assistant_conversations_check CHECK (((handoff_state IS NULL) = (handoff_at IS NULL))),
     CONSTRAINT assistant_conversations_handoff_reason_check CHECK (((handoff_reason IS NULL) OR (length(handoff_reason) <= 500))),
     CONSTRAINT assistant_conversations_handoff_state_check CHECK (((handoff_state IS NULL) OR (handoff_state = ANY (ARRAY['open'::text, 'resolved'::text])))),
+    CONSTRAINT assistant_conversations_language_check CHECK ((language = ANY (ARRAY['en'::text, 'es'::text]))),
     CONSTRAINT assistant_conversations_phone_e164_check CHECK ((phone_e164 ~ '^\+[1-9][0-9]{6,14}$'::text))
 );
 

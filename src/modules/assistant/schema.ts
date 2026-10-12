@@ -25,6 +25,8 @@ export interface AssistantConversationsTable {
   handoff_at: Date | null
   last_fallback_at: Date | null
   disclosed_at: Date | null
+  /** The client's language ('en' | 'es', ADR 0160 W4b X5): the server's own words (disclosure, footer, renderings) follow it. */
+  language: Generated<string>
   created_at: Generated<Date>
   updated_at: Generated<Date>
 }

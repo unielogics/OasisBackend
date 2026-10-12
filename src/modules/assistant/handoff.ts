@@ -15,6 +15,7 @@ import { notifyManagers } from '../messaging/notify.js'
 import type { SmsRecipient } from '../messaging/policy/canSend.js'
 import type { AssistantQueue } from './contract.js'
 import type { AssistantInbox } from './ports.js'
+import { conversationVoice, FALLBACK_TEXTS, markDisclosed, withDisclosure } from './lang.js'
 import '../messaging/schema.js'
 import './schema.js'
 
@@ -61,18 +62,29 @@ export async function sendFallback(tx: Tx, d: HandoffDeps, c: ConversationRef, o
   const now = d.clock.now()
   const row = await tx.selectFrom('assistant_conversations').select('last_fallback_at').where('id', '=', c.id).executeTakeFirst()
   if (row?.last_fallback_at && now.getTime() - row.last_fallback_at.getTime() < o.everyMs) return null
+  // W4b X1/X5: the fallback can be the first text of the AI flow (the first turn failed): then it discloses the assistant and
+  // carries the STOP footer, in the conversation's language
+  const voice = await conversationVoice(tx, c.id)
+  const fixed = FALLBACK_TEXTS[voice.lang]
   const out = await d.queue.enqueueFor(tx, {
     locationId: c.locationId,
     customerId: c.threadCustomerId,
     recipient: await recipientOf(tx, c),
     appointmentId: null,
-    templateKey: FALLBACK_TEMPLATE,
+    text: voice.disclosed ? fixed : withDisclosure(fixed, voice.lang),
+    klass: 'ai_fallback',
+    tag: FALLBACK_TEMPLATE,
     purpose: 'assistant',
     senderKind: 'ai',
     dedupeKey: `ai-fallback:${o.turnId}`,
   })
   if (!out.queued) return null
-  await tx.updateTable('assistant_conversations').set({ last_fallback_at: now, updated_at: now }).where('id', '=', c.id).execute()
+  if (!voice.disclosed) await markDisclosed(tx, c.id, now)
+  await tx
+    .updateTable('assistant_conversations')
+    .set({ last_fallback_at: now, updated_at: now })
+    .where('id', '=', c.id)
+    .execute()
   return out.messageId
 }
 

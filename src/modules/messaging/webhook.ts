@@ -23,6 +23,7 @@ import { SmsEventIngestor, type IngestResult } from './dispatch/ingest.js'
 import { createInboundEffects } from './inbound-effects.js'
 import { InboundService, type InboundOutcome } from './inbound/service.js'
 import { CODE_MASK, parseReplyCode } from './inbound/keywords.js'
+import { maskCardNumbers } from './inbound/cards.js'
 import { noteAppStarted } from './device-notices.js'
 import { notifyManagers } from './notify.js'
 import type { MessagingRuntime } from './runtime.js'
@@ -76,8 +77,39 @@ export function stripAttachmentData(raw: string): string {
 /** The body column update that strips attachment bytes from a final row, or nothing when there is nothing to strip. */
 const stripped = (body: string | null, o: { redactText?: boolean } = {}): { body?: string } => {
   if (body === null) return {}
-  const out = o.redactText ? redactInboundText(stripAttachmentData(body)) : stripAttachmentData(body)
+  const out = o.redactText
+    ? redactInboundText(stripAttachmentData(body))
+    : maskInboundCards(stripAttachmentData(body))
   return out === body ? {} : { body: out }
+}
+
+/**
+ * A stored delivery's text with its card numbers masked to the last four digits (ADR 0160 W4b X6: "[card ending 1234]"), in the
+ * payload's text fields (`message`, `body`) and the text of its MMS parts; a body that is not readable JSON is masked as a whole.
+ */
+export function maskInboundCards(raw: string): string {
+  let env: unknown
+  try {
+    env = JSON.parse(raw)
+  } catch {
+    return maskCardNumbers(raw)
+  }
+  const p = (env as { payload?: Record<string, unknown> } | null)?.payload
+  if (!p || typeof p !== 'object') return raw
+  let changed = false
+  const mask = (o: Record<string, unknown>, k: string): void => {
+    const v = o[k]
+    if (typeof v !== 'string') return
+    const m = maskCardNumbers(v)
+    if (m !== v) {
+      o[k] = m
+      changed = true
+    }
+  }
+  for (const k of ['message', 'body', 'text']) mask(p, k)
+  if (Array.isArray(p.attachments))
+    for (const a of p.attachments) if (a && typeof a === 'object') mask(a as Record<string, unknown>, 'text')
+  return changed ? JSON.stringify(env) : raw
 }
 
 /**

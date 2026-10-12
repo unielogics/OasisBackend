@@ -12,6 +12,7 @@ import { DEFAULT_SIM_VERDICT, POLICY_JUDGE_HEADER, SimAiProvider, simText, simTo
 import type { AiContentBlock, AiConverseRequest, AiJson } from '../../src/integrations/ports/ai.js'
 import { placeholderValues } from '../../src/modules/assistant/facts.js'
 import { CARD_LINE, SAFETY_LINE } from '../../src/modules/assistant/guard.js'
+import { SAFETY_LINES } from '../../src/modules/assistant/lang.js'
 import { TRUSTED_CLOSE, TRUSTED_OPEN, unkeyed } from '../../src/modules/assistant/judge.js'
 import { INTAKE_LINES } from '../../src/modules/assistant/prompt.js'
 import { AssistantRuntime } from '../../src/modules/assistant/runtime.js'
@@ -219,7 +220,9 @@ describe('the welcome flow, verification and an in-chat booking, one conversatio
       simToolUse('check_availability', { serviceKey: 'signature-hand-wash', date: MONDAY, partOfDay: 'morning' }),
       simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: TEN_AM, vehicle: 'the CR-V' }),
       simToolUse('send_link', { kind: 'verify', appointmentRef: null, tier: null }),
-      simText('Monday morning has openings, 10:00 AM included. First, please confirm it is you here: {link1}'),
+      simText(
+        'Monday morning has openings. Here is your link to pick a time: {link1} Or confirm it is you to book by text: {link2}',
+      ),
       // turn 6 (verified on the link page): "Done. Monday 10 please"
       simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: TEN_AM, vehicle: 'the CR-V' }),
       (req) => {
@@ -267,21 +270,41 @@ describe('the welcome flow, verification and an in-chat booking, one conversatio
     expect(await turn('Not now')).toMatchObject({ status: 'replied' })
     expect(contextOf(a.provider.requests.at(-1)!)).toContain('Client: a client on file, first name "Ana".')
 
-    // ---- untrusted: the booking ask needs a verify link; the reply carries {link1} as a secret and the server's safety line
-    expect(await turn('An SUV, a Honda CR-V. Can I come Monday morning?')).toMatchObject({ status: 'replied' })
-    expect(await w.t.db.selectFrom('vehicles').select(['make', 'model', 'vehicle_type']).where('customer_id', '=', client.id).execute()).toEqual([
-      { make: 'Honda', model: 'CR-V', vehicle_type: 'suv_crossover' },
-    ])
+    // ---- untrusted: the booking ask gets no times to pick in the chat but the calendar link (W4b X4) and, asked for, a verify link;
+    // the reply carries both as secrets and the server's safety line
+    expect(await turn('An SUV, a Honda CR-V. Can I come Monday morning?')).toMatchObject({
+      status: 'replied',
+    })
+    expect(
+      await w.t.db
+        .selectFrom('vehicles')
+        .select(['make', 'model', 'vehicle_type'])
+        .where('customer_id', '=', client.id)
+        .execute(),
+    ).toEqual([{ make: 'Honda', model: 'CR-V', vehicle_type: 'suv_crossover' }])
     const availability = JSON.stringify(toolResultsOf(a.provider.requests.at(-1)!))
-    expect(availability).toContain(`"startMin":${TEN_AM}`)
+    expect(availability).not.toContain('"startMin"')
+    expect(availability).toContain('"bookingLink":"{link1}"')
     expect(availability).toContain('"error":"needs_verification"')
     const verify = (await outTexts(NEWCOMER)).at(-1)!
     expect(verify.klass).toBe('personal_link')
-    expect(verify.body).toContain('[private link]')
-    expect(verify.body.endsWith(SAFETY_LINE)).toBe(true)
-    expect((await outboxOf(verify.id)).body).toMatch(/https:\/\/oasisautospanj\.com\/#\/v\/[A-Za-z0-9_-]{20,}/)
-    expect(JSON.stringify(a.provider.requests)).not.toMatch(/#\/v\//)
-    expect(await w.t.db.selectFrom('client_links').select(['kind', 'customer_id', 'issued_by']).execute()).toEqual([{ kind: 'verify', customer_id: client.id, issued_by: 'assistant' }])
+    expect(verify.body).toBe(
+      `Monday morning has openings. Here is your link to pick a time: [private link] Or confirm it is you to book by text: [private link] ${SAFETY_LINE}`,
+    )
+    expect((await outboxOf(verify.id)).body).toMatch(
+      /https:\/\/oasisautospanj\.com\/#\/c\/[A-Za-z0-9_-]{20,} .*https:\/\/oasisautospanj\.com\/#\/v\/[A-Za-z0-9_-]{20,}/,
+    )
+    expect(JSON.stringify(a.provider.requests)).not.toMatch(/#\/[cv]\//)
+    expect(
+      await w.t.db
+        .selectFrom('client_links')
+        .select(['kind', 'customer_id', 'issued_by'])
+        .orderBy('kind')
+        .execute(),
+    ).toEqual([
+      { kind: 'calendar', customer_id: client.id, issued_by: 'assistant' },
+      { kind: 'verify', customer_id: client.id, issued_by: 'assistant' },
+    ])
 
     // ---- verified on the link page (the link API grants the 30-day trust)
     await w.tx((tx) => grantTrust(tx, { locationId: w.locationId, phone: NEWCOMER, customerId: client.id, verifiedBy: 'code', now: w.clock.now() }))
@@ -557,5 +580,342 @@ describe('W4 live eval: what the eval on Bedrock found in these seams', () => {
     await inbound(maria(), 'Any openings Monday?')
     expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
     expect(await w.t.db.selectFrom('leads').select('id').execute()).toEqual([])
+  })
+})
+
+describe('W4b fixes (the conversation eval and its independent check)', () => {
+  const STOPS = (t: string) => (t.match(/Reply STOP|Responde STOP/g) ?? []).length
+
+  it('X1: a verified client whose first text is a booking: the server’s proposal is the first AI text and discloses; the reply after it does not; STOP once', async () => {
+    // the independent check: the proposal went first without the disclosure, and the disclosed reply carried a second STOP footer
+    await setting('assistant.actions_enabled', true)
+    await w.tx((tx) =>
+      grantTrust(tx, {
+        locationId: w.locationId,
+        phone: maria(),
+        customerId: w.customer('Maria Delgado').id,
+        verifiedBy: 'pin',
+        now: w.clock.now(),
+      }),
+    )
+    const a = assistant([
+      simToolUse('propose_booking', {
+        serviceKey: 'signature-hand-wash',
+        addonKeys: [],
+        date: MONDAY,
+        startMin: TEN_AM,
+        vehicle: null,
+      }),
+      simText('{confirm}.'),
+    ])
+    await inbound(maria(), 'Book me a Signature wash Monday at 10')
+    expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
+    const texts = await outTexts(maria())
+    expect(texts.map((t) => t.klass)).toEqual(['action_confirm', 'ai_reply'])
+    expect(texts[0]!.body).toBe(
+      "Oasis Auto Spa's automated assistant here. Signature Hand Wash, Mon Jun 15 at 10:00 AM. Reply [code] to confirm. Reply STOP to opt out.",
+    )
+    expect(texts[0]!.template_key).toBe('action_confirm')
+    expect((await outboxOf(texts[0]!.id)).body).toMatch(
+      /^Oasis Auto Spa's automated assistant here\. Signature Hand Wash, Mon Jun 15 at 10:00 AM\. Reply \d{4} to confirm\. Reply STOP to opt out\.$/,
+    )
+    expect(texts[1]!.body).toBe('I just texted you the details with how to confirm.')
+    expect(texts.reduce((n, t) => n + STOPS(t.body), 0)).toBe(1)
+    expect((await conversationOf(maria()))!.disclosed_at).not.toBeNull()
+  })
+
+  it('X1: the fallback as the first AI text discloses the assistant; a code texted first gets the disclosed link-page line, and the next reply does not repeat it', async () => {
+    const a = assistant([{ error: 'invalid_request' }])
+    await inbound(NEWCOMER, 'hi there')
+    expect(await a.respond(NEWCOMER)).toMatchObject({ status: 'handed_off' })
+    const [fallback] = await outTexts(NEWCOMER)
+    expect(fallback).toMatchObject({ klass: 'ai_fallback', template_key: 'ai_fallback', sender_kind: 'ai' })
+    expect(fallback!.body).toBe(
+      "Oasis Auto Spa's automated assistant here. Thanks - a team member will text you back shortly. Reply STOP to opt out.",
+    )
+
+    // Maria texts digits with nothing waiting for them: the link-page line is the first AI text of her conversation
+    const b = assistant([simText('We open at 8 AM.')])
+    await inbound(maria(), '483920')
+    const [line] = await outTexts(maria())
+    expect(line).toMatchObject({ klass: 'ai_reply', template_key: 'code_on_link_page', sender_kind: 'ai' })
+    expect(line!.body).toBe(
+      "Oasis Auto Spa's automated assistant here. For your security, codes are only entered on your secure link page, never by text. Reply here if you need a new link. Reply STOP to opt out.",
+    )
+    w.clock.advance(60_000)
+    await inbound(maria(), 'when do you open?')
+    expect(await b.respond(maria())).toMatchObject({ status: 'replied' })
+    expect((await outTexts(maria())).at(-1)!.body).toBe('We open at 8 AM.')
+  })
+
+  it('X5: a Spanish conversation: language stored, the renderings, the disclosure, the footer and the safety line in Spanish; "ok" keeps it Spanish', async () => {
+    const a = assistant([
+      simToolUse('list_services', { category: 'wash' }),
+      (req) => {
+        expect(contextOf(req)).toContain('Language: Spanish (write your text in Spanish).')
+        return simText('¡Hola! {price:signature-hand-wash}. {fee}. ¿Cómo te llamas?')
+      },
+      simToolUse('send_link', { kind: 'verify', appointmentRef: null, tier: null }),
+      simText('Confirma que eres tú aquí: {link1}'),
+    ])
+    await inbound(NEWCOMER, 'Hola, cuánto cuesta un lavado?')
+    expect(await a.respond(NEWCOMER)).toMatchObject({ status: 'replied' })
+    expect((await conversationOf(NEWCOMER))!.language).toBe('es')
+    const [first] = await outTexts(NEWCOMER)
+    expect(first!.body).toBe(
+      'Asistente automatizado de Oasis Auto Spa. ¡Hola! Signature Hand Wash: desde $45 para miembros, $54 para los demas. Quienes no son miembros pagan una tarifa de reserva de $25. ¿Como te llamas? Responde STOP para no recibir mas mensajes.',
+    )
+    expect(STOPS(first!.body)).toBe(1)
+    w.clock.advance(60_000)
+    await inbound(NEWCOMER, 'ok')
+    expect(await a.respond(NEWCOMER)).toMatchObject({ status: 'replied' })
+    expect((await conversationOf(NEWCOMER))!.language).toBe('es')
+    const link = (await outTexts(NEWCOMER)).at(-1)!
+    expect(link.body).toBe(`Confirma que eres tu aqui: [private link] ${SAFETY_LINES.es}`)
+    // the judge read the Spanish renderings as the server's own
+    expect(unkeyed(JSON.stringify(a.judge.requests[0]!.messages))).toContain(
+      `${TRUSTED_OPEN}Signature Hand Wash: desde $45 para miembros, $54 para los demas${TRUSTED_CLOSE}`,
+    )
+  })
+
+  it('X5: a verified Spanish client’s reply-number text and the {confirm} pointer are Spanish', async () => {
+    await setting('assistant.actions_enabled', true)
+    await w.tx((tx) =>
+      grantTrust(tx, {
+        locationId: w.locationId,
+        phone: maria(),
+        customerId: w.customer('Maria Delgado').id,
+        verifiedBy: 'pin',
+        now: w.clock.now(),
+      }),
+    )
+    const a = assistant([
+      simToolUse('propose_booking', {
+        serviceKey: 'signature-hand-wash',
+        addonKeys: [],
+        date: MONDAY,
+        startMin: TEN_AM,
+        vehicle: null,
+      }),
+      simText('{confirm}.'),
+    ])
+    await inbound(maria(), 'Hola, quiero reservar un lavado el lunes a las 10 por favor')
+    expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
+    const texts = await outTexts(maria())
+    expect(texts[0]!.body).toBe(
+      'Asistente automatizado de Oasis Auto Spa. Signature Hand Wash, Mon Jun 15 at 10:00 AM. Responde [code] para confirmar. Responde STOP para no recibir mas mensajes.',
+    )
+    expect(texts[1]!.body).toBe('Te acabo de enviar los detalles para confirmar.')
+  })
+
+  it('X2: the judge reads the shop facts (a cached second system block) and the server record; a claim the facts do not hold is rewritten', async () => {
+    const judge: SimStep[] = [
+      simText('{"reason":"claims a waiting area the facts do not list","category":"facts","ok":false}'),
+      simText(DEFAULT_SIM_VERDICT),
+    ]
+    const a = assistant(
+      [
+        (req) => {
+          expect(req.system[0]!.text).toContain('ONLY WHAT SHOP FACTS SAY')
+          return simText('Yes, we have a comfy waiting area with wifi.')
+        },
+        (req) => {
+          expect(JSON.stringify(req.messages.at(-1))).toContain('SHOP FACTS do not state')
+          return simText('The team can confirm that and will text you back.')
+        },
+      ],
+      judge,
+    )
+    await inbound(maria(), 'Do you have a waiting room with wifi?')
+    expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
+    expect((await outTexts(maria())).at(-1)!.body).toContain(
+      'The team can confirm that and will text you back.',
+    )
+    const req = a.judge.requests[0]!
+    expect(req.system).toHaveLength(2)
+    expect(req.system[1]).toMatchObject({ cache: true })
+    expect(req.system[1]!.text).toMatch(/^SHOP FACTS/)
+    expect(req.system[0]!.text).toContain('(f) facts:')
+    const message = JSON.stringify(req.messages)
+    expect(message).toContain(
+      "Done by the server since the assistant's last text: nothing (nothing was booked, moved or cancelled).",
+    )
+    expect(message).toContain("The client's visits on file: none.")
+  })
+
+  it('X3: "all set" with nothing done is rewritten (deterministic); after the server booked by reply number the assistant may say so', async () => {
+    await setting('assistant.actions_enabled', true)
+    await w.tx((tx) =>
+      grantTrust(tx, {
+        locationId: w.locationId,
+        phone: maria(),
+        customerId: w.customer('Maria Delgado').id,
+        verifiedBy: 'pin',
+        now: w.clock.now(),
+      }),
+    )
+    const a = assistant([
+      // turn 1: the model claims a booking nobody made
+      simText('Monday at 10:00 AM is all set to go!'),
+      (req) => {
+        expect(JSON.stringify(req.messages.at(-1))).toContain(
+          'Nothing was booked, moved or cancelled by the server',
+        )
+        return simText('Want me to set up Monday at 10:00 AM for you?')
+      },
+      // turn 2: "yes"
+      simToolUse('propose_booking', {
+        serviceKey: 'signature-hand-wash',
+        addonKeys: [],
+        date: MONDAY,
+        startMin: TEN_AM,
+        vehicle: null,
+      }),
+      simText('{confirm}.'),
+      // turn 4: "great, is it all set?" after the reply number booked it
+      simText("Yes, you're all set for Monday at 10:00 AM."),
+    ])
+    await inbound(maria(), 'Book me a Signature wash Monday at 10')
+    expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
+    expect((await outTexts(maria())).at(-1)!.body).toContain('Want me to set up Monday at 10:00 AM for you?')
+    expect(a.judge.requests).toHaveLength(1)
+    w.clock.advance(60_000)
+    await inbound(maria(), 'yes')
+    expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
+    const confirm = (await outTexts(maria())).find((m) => m.klass === 'action_confirm')!
+    const code = /Reply (\d{4}) to confirm/.exec((await outboxOf(confirm.id)).body)![1]!
+    w.clock.advance(30_000)
+    await inbound(maria(), code)
+    expect((await outTexts(maria())).at(-1)!.template_key).toBe('action_booked')
+    w.clock.advance(60_000)
+    await inbound(maria(), 'great, is it all set?')
+    expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
+    expect((await outTexts(maria())).at(-1)!.body).toBe("Yes, you're all set for Monday at 10:00 AM.")
+    // no rewrite in the last turn (5 model calls in all); the judge read what the server did
+    expect(a.provider.requests).toHaveLength(5)
+    const record = JSON.stringify(a.judge.requests.at(-1)!.messages)
+    expect(record).toContain(
+      "Done by the server since the assistant's last text: booked: Signature Hand Wash, Mon Jun 15 at 10:00 AM.",
+    )
+    expect(record).toMatch(/The client's visits on file: [^"]*Signature Hand Wash \(booked\)/)
+  })
+
+  it('X6: a card number texted in is filed masked (inbox, thread, webhook log, transcript) to its last four digits; the card line still goes out', async () => {
+    const a = assistant([simText('There is nothing open on your account right now.')])
+    await inbound(maria(), 'Can I pay by text? My card is 4111 1111 1111 1111 exp 04/28')
+    expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
+    expect((await outTexts(maria()))[0]!.body).toContain(CARD_LINE)
+    const masked = 'Can I pay by text? My card is [card ending 1111] exp 04/28'
+    expect(
+      (
+        await w.t.db
+          .selectFrom('sms_inbox')
+          .select('body')
+          .where('from_e164', '=', maria())
+          .executeTakeFirstOrThrow()
+      ).body,
+    ).toBe(masked)
+    expect(
+      (
+        await w.t.db
+          .selectFrom('messages')
+          .select('body')
+          .where('peer_e164', '=', maria())
+          .where('direction', '=', 'in')
+          .executeTakeFirstOrThrow()
+      ).body,
+    ).toBe(masked)
+    const logs = await w.t.db.selectFrom('webhook_log').select('body').execute()
+    expect(logs.length).toBeGreaterThan(0)
+    for (const l of logs) expect(l.body ?? '').not.toMatch(/4111[ -]?1111[ -]?1111[ -]?1111/)
+    expect(logs.some((l) => (l.body ?? '').includes('[card ending 1111]'))).toBe(true)
+    const turns = JSON.stringify(await w.t.db.selectFrom('assistant_turns').select('transcript').execute())
+    expect(turns).not.toMatch(/4111[ -]?1111/)
+    expect(turns).toContain('[card ending 1111]')
+    expect(JSON.stringify(a.provider.requests)).not.toMatch(/4111[ -]?1111/)
+  })
+
+  it('X7: the last name is optional; the client corrects the name the assistant saved in this conversation; never a name staff set', async () => {
+    const a = assistant([
+      simToolUse('set_my_name', { fullName: 'Rosa Rosa' }),
+      simText('Nice to meet you, Rosa! What can I help you with?'),
+      simToolUse('set_my_name', { fullName: 'Rosa García' }),
+      simText('Thanks, Rosa García! What can I help you with?'),
+      simToolUse('set_my_name', { fullName: 'Rosa Lopez' }),
+      simText('Got it.'),
+    ])
+    const name = async () =>
+      (
+        await w.t.db
+          .selectFrom('customers')
+          .select('full_name')
+          .where('phone_e164', '=', NEWCOMER)
+          .executeTakeFirstOrThrow()
+      ).full_name
+    await inbound(NEWCOMER, 'Hi, I am Rosa')
+    expect(await a.respond(NEWCOMER)).toMatchObject({ status: 'replied' })
+    expect(await name()).toBe('Rosa Rosa')
+    w.clock.advance(60_000)
+    await inbound(NEWCOMER, 'It is Rosa García actually')
+    expect(await a.respond(NEWCOMER)).toMatchObject({ status: 'replied' })
+    expect(await name()).toBe('Rosa García')
+    // staff complete the record: the name is theirs now, never changed by text
+    await w.t.db
+      .updateTable('customers')
+      .set({ full_name: 'Rosa García Mendez' })
+      .where('phone_e164', '=', NEWCOMER)
+      .execute()
+    w.clock.advance(60_000)
+    await inbound(NEWCOMER, 'my last name is Lopez')
+    expect(await a.respond(NEWCOMER)).toMatchObject({ status: 'replied' })
+    expect(await name()).toBe('Rosa García Mendez')
+    expect(
+      (await toolCalls()).filter((c) => c.tool === 'set_my_name').map((c) => [c.outcome, c.error]),
+    ).toEqual([
+      ['ok', null],
+      ['ok', null],
+      ['error', 'not_allowed'],
+    ])
+    const description = (await import('../../src/modules/assistant/tools/account.js')).setMyName.description
+    expect(description).toMatch(/last name ONLY if they said it \(never invent/)
+  })
+
+  it('X8: a photo texted for a quote and a reply that says the team will review it opens a handoff (staff prompted); the model is told a photo came', async () => {
+    const a = assistant([
+      (req) => {
+        expect(JSON.stringify(req.messages[0])).toContain('How much to fix this scratch? [photo attached]')
+        return simText('Thanks for the photo! The team will review it and text you back with a quote.')
+      },
+    ])
+    await inbound(maria(), 'How much to fix this scratch?')
+    await w.t.db
+      .updateTable('sms_inbox')
+      .set({
+        kind: 'mms',
+        attachments: JSON.stringify([
+          {
+            index: 0,
+            partId: '1',
+            name: 'IMG_1.jpg',
+            contentType: 'image/jpeg',
+            size: 10,
+            status: 'stored',
+            reason: null,
+            key: 'k',
+          },
+        ]) as never,
+      })
+      .where('from_e164', '=', maria())
+      .execute()
+    expect(await a.respond(maria())).toMatchObject({ status: 'replied', turn: { handoff: true } })
+    expect(await conversationOf(maria())).toMatchObject({
+      handoff_state: 'open',
+      handoff_reason: 'photo_quote',
+    })
+    expect((await handoffAlerts())[0]!.body).toContain('texted a photo')
+    // the same words with no photo open nothing
+    const b = assistant([simText('The team will review it and text you back with a quote.')])
+    await inbound(STRANGER, 'How much to fix a scratch?')
+    expect(await b.respond(STRANGER)).toMatchObject({ status: 'replied', turn: { handoff: false } })
   })
 })
