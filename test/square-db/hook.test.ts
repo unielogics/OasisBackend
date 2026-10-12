@@ -7,7 +7,7 @@ import { createTestApp, type TestApp } from '../helpers/app.js'
 import { useTestDb } from '../helpers/db.js'
 import { usd } from '../../src/integrations/square/money.js'
 import { sqKey } from '../../src/integrations/square/keys.js'
-import { HOOK_KEY_PREVIOUS, fakeJobs, signed, simFor, squareEnvVars, useSquareRuntime } from './helpers.js'
+import { HOOK_KEY_PREVIOUS, fakeJobs, liveEnvVars, signed, simFor, squareEnvVars, useSquareRuntime } from './helpers.js'
 
 describe('POST /hooks/square', () => {
   const t = useTestDb()
@@ -113,6 +113,31 @@ describe('POST /hooks/square', () => {
     expect(q.calls).toHaveLength(0)
     expect((await post(app, signed(event('evt-ours', { merchant: 'MOURS0001' })))).json()).toEqual({ status: 'accepted' })
     await app.close()
+  })
+
+  it('a merchant learned from the simulator (or the sandbox) never applies after the switch to live: our real events are accepted', async () => {
+    // Test connection ran in sim mode: the row describes the simulator's merchant
+    const sim = await appWith({ jobs: fakeJobs().jobs })
+    await saveSquareState(sim.db, sim.location.id, sim.env, sim.clock.now(), {
+      merchant_id: 'MSIMOASIS0001',
+      events_enabled_at: sim.clock.now(),
+      webhook_subscription_id: 'wsub-sim',
+      watermark: sim.clock.now(),
+    })
+    await sim.close()
+    // the stack goes live (production): the real merchant's event is ours, queued and kept
+    const q = fakeJobs()
+    const live = await appWith({ jobs: q.jobs, env: { ...liveEnvVars, SQUARE_ENVIRONMENT: 'production' } })
+    const r = await post(live, signed(event('evt-real', { merchant: 'MREALMERCHANT01' })))
+    expect(r.statusCode, r.body).toBe(200)
+    expect(r.json()).toEqual({ status: 'accepted' })
+    expect(q.calls).toEqual([{ name: 'square.event.process', data: { eventId: 'evt-real' }, opts: { singletonKey: 'evt-real' } }])
+    expect(await logRows(live)).toHaveLength(1)
+    // and the row now describes production: nothing learned from the simulator survived the switch
+    const state = await live.db.selectFrom('square_state').selectAll().executeTakeFirstOrThrow()
+    expect(state).toMatchObject({ environment: 'production', merchant_id: null, events_enabled_at: null, webhook_subscription_id: null, watermark: null })
+    expect(state.last_webhook_at).not.toBeNull()
+    await live.close()
   })
 
   it('a signed body that is not a Square event is a 400', async () => {

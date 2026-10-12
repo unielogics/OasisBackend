@@ -1873,7 +1873,7 @@ jobs that move money come with waves Q2b to Q3b (ADR 0171, "What the later waves
 |---|---|
 | `x-square-hmacsha256-signature` is not base64 HMAC-SHA256(key, `SQUARE_WEBHOOK_URL` + raw body) for the current key or `SQUARE_WEBHOOK_SIGNATURE_KEY_PREVIOUS`; no key or URL configured | `401 WEBHOOK_SIGNATURE_INVALID`, nothing kept |
 | Signed, but not a Square event envelope (`merchant_id`, `type`, `event_id`, `created_at`, `data.type`) | `400 MALFORMED_REQUEST` |
-| An event of a merchant other than the one Test connection learned | `200 {status: "ignored"}`, nothing kept |
+| An event of a merchant other than the one Test connection learned (in the configured Square environment) | `200 {status: "ignored"}`, nothing kept |
 | An `event_id` already in `webhook_log` (provider `square`; a Square retry, a replay, or the catch-up was first) | `200 {status: "duplicate"}` |
 | Accepted: claimed in `webhook_log` (body, headers without the signature), `square_state.last_webhook_at` set, `square.event.process {eventId}` queued (singleton key = the event id) | `200 {status: "accepted"}` |
 | The queue refuses the job | the claim is released; `503 SERVICE_UNAVAILABLE` (Square's retry is accepted) |
@@ -1903,7 +1903,8 @@ Body `{}`. Calls ListLocations, EnableEvents and ListWebhookSubscriptions (again
 | `webhook` | a subscription for exactly `SQUARE_WEBHOOK_URL` exists, is enabled and carries every event type (`pnpm square:webhooks --apply` fixes it) |
 
 A failing check is still `200` with `ok: false` and a plain reason. The merchant id, the location, `events_enabled_at` and the verified
-subscription are kept in `square_state`; the hook drops events of any other merchant from then on.
+subscription are kept in `square_state` for the configured Square environment (sim, sandbox or production); the hook drops events of
+any other merchant from then on. A row learned in another environment counts as none (switching environment starts it afresh).
 
 ### 30.4 `GET /api/v1/system/integrations`: the `square` row
 

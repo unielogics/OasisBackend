@@ -9,7 +9,7 @@ import { SQUARE_EVENT_TYPES } from '../../../integrations/square/webhook.js'
 import * as audit from '../../../platform/audit.js'
 import { AppError } from '../../../platform/errors.js'
 import { testSquareConnection } from '../connection.js'
-import { getSquareState, saveSquareState, squareEnvironment } from '../db/state.js'
+import { currentSquareState, saveSquareState, squareEnvironment } from '../db/state.js'
 import { squareApi } from '../runtime.js'
 import { squareStatus } from '../status.js'
 import { SquareIntegrationView, SquareTestResult } from './schemas.js'
@@ -37,7 +37,7 @@ export function registerSquareRoutes(app: AppInstance): void {
     async (req) => {
       const locationId = loc(req)
       const now = app.clock.now()
-      const state = await getSquareState(app.db, locationId)
+      const state = await currentSquareState(app.db, locationId, app.env)
       const test = state?.last_test ?? null
       const rec = state?.last_reconcile ?? null
       return {

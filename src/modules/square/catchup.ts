@@ -1,12 +1,13 @@
 // The Events API catch-up (ADR 0171): every 10 minutes, SearchEvents from the watermark minus 10 minutes (ascending, paged), each event
 // claimed in the same webhook_log('square', event_id) the hook uses, so an event is processed once whether the webhook or the
-// catch-up saw it first. Square keeps events 28 days: the search never starts earlier, and a watermark older than 27 days is an
-// alert (events may be lost). Runs only when SQUARE_PROVIDER=live and the token and location are set.
+// catch-up saw it first. The watermark is the newest event read, and after a complete run with no failure at least the run's time
+// minus 10 minutes. Square keeps events 28 days: the search never starts earlier, and a watermark older than 27 days (runs failing or
+// never finishing for that long) is an alert (events may be lost). Runs only when SQUARE_PROVIDER=live and the token and location are set.
 import { squareLiveConfigured } from '../../integrations/square/config.js'
 import { SQUARE_EVENT_TYPES } from '../../integrations/square/webhook.js'
 import { getDefaultLocation } from '../../platform/locations.js'
 import { maskText } from '../../platform/logging.js'
-import { getSquareState, saveSquareState } from './db/state.js'
+import { currentSquareState, saveSquareState } from './db/state.js'
 import { processLoggedEvent, squareWebhookLog, type SquareEventDeps } from './events.js'
 
 const MIN = 60_000
@@ -39,7 +40,7 @@ export async function runSquareCatchup(d: SquareEventDeps, o: { force?: boolean 
   if (!o.force && !squareLiveConfigured(d.env)) return { status: 'skipped', reason: 'SQUARE_PROVIDER is not live or not configured', ...empty }
   const location = await getDefaultLocation(d.db)
   if (!location) return { status: 'skipped', reason: 'no location', ...empty }
-  const state = await getSquareState(d.db, location.id)
+  const state = await currentSquareState(d.db, location.id, d.env)
   const now = d.clock.now()
   const floor = now.getTime() - EVENTS_RETENTION_MS
   const wm = state?.watermark ?? null
@@ -88,9 +89,15 @@ export async function runSquareCatchup(d: SquareEventDeps, o: { force?: boolean 
   }
   // a failed event holds the watermark back, so the next run reads it again (and the 27-day alert fires if it never succeeds)
   if (earliestFailed && (!newest || earliestFailed < newest)) newest = earliestFailed
+  // a complete run with no failure has covered everything up to now: the watermark moves to at least now minus the overlap even when
+  // nothing happened (a quiet week is not lost events; only runs that keep failing or never finish let it age past 27 days)
+  else if (r.complete && r.failed === 0) {
+    const covered = new Date(now.getTime() - CATCHUP_OVERLAP_MS)
+    if (!newest || covered > newest) newest = covered
+  }
   r.watermark = newest?.toISOString() ?? null
   const alert = stale
-    ? `catch-up: the last event read is older than 27 days (${wm!.toISOString()}); Square keeps events 28 days, so some may be lost: reconcile now`
+    ? `catch-up: the watermark is older than 27 days (${wm!.toISOString()}): no complete run since then, and Square keeps events 28 days, so some may be lost: reconcile now`
     : null
   if (alert) d.logger.error({ square: { watermark: wm!.toISOString() } }, alert)
   await saveSquareState(d.db, location.id, d.env, now, {

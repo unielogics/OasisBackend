@@ -296,7 +296,7 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
   'square.events.catchup': {
     owner: 'square',
     purpose:
-      'Every 10 minutes while SQUARE_PROVIDER=live with a token and location: SearchEvents from the watermark minus 10 minutes (never more than 28 days back; the first run reads the last day), each event claimed in the same webhook_log as the hook and processed at once; a failed event holds the watermark back; a watermark older than 27 days is an alert in square_state and the status row.',
+      'Every 10 minutes while SQUARE_PROVIDER=live with a token and location: SearchEvents from the watermark minus 10 minutes (never more than 28 days back; the first run reads the last day), each event claimed in the same webhook_log as the hook and processed at once; a failed event holds the watermark back; a complete run with no failure moves it to at least the run time minus 10 minutes; a watermark older than 27 days (runs failing or unfinished that long) is an alert in square_state and the status row.',
     idempotency: 'webhook_log unique (square, event_id): an event the webhook already claimed is skipped (a failed one is run again).',
     clock: 'Injected clock for the window and the watermark.',
     tests: 'test/square-db/jobs.test.ts, test/square-db/sim-socket.test.ts, test/jobs/matrix-square.test.ts, test/jobs/registry.test.ts',

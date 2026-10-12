@@ -1,6 +1,7 @@
 // POST /hooks/square (ADR 0171): Square's webhook. The signature is base64 HMAC-SHA256(key, SQUARE_WEBHOOK_URL + raw body), checked in
 // constant time against the current key and, during a rotation, the previous one; the URL is the configured one, never the request's.
-// An event of a merchant other than ours (learned by the connection test) is acknowledged and dropped. The event is claimed in
+// An event of a merchant other than ours (learned by the connection test against this same Square environment: a merchant learned
+// from the simulator or the sandbox never applies to production) is acknowledged and dropped. The event is claimed in
 // webhook_log('square', event_id) with its headers (no signature) and raw body, square.event.process is queued (singleton per event)
 // and Square gets 200 at once; a duplicate gets 200 too. A queue that refuses the job releases the claim and answers 503, so Square's
 // retry is accepted. The object itself is re-fetched by the job; nothing in the payload is trusted.
@@ -10,7 +11,7 @@ import { SQUARE_SIGNATURE_HEADER, parseSquareEvent, verifySquareSignature } from
 import { AppError } from '../../../platform/errors.js'
 import { createIdGenerator } from '../../../platform/ids.js'
 import { getDefaultLocation } from '../../../platform/locations.js'
-import { getSquareState, saveSquareState } from '../db/state.js'
+import { currentSquareState, saveSquareState } from '../db/state.js'
 import { processLoggedEvent, squareWebhookLog } from '../events.js'
 import { squareApi, squareIngest } from '../runtime.js'
 import '../problems.js'
@@ -39,7 +40,7 @@ export const squareHookModule: ApiModule = (app, deps) => {
       const event = parsed.event
       const location = await getDefaultLocation(deps.db)
       if (!location) throw new AppError('SERVICE_UNAVAILABLE')
-      const state = await getSquareState(deps.db, location.id)
+      const state = await currentSquareState(deps.db, location.id, env)
       if (state?.merchant_id && event.merchant_id && event.merchant_id !== state.merchant_id) {
         req.log.warn({ square: { event: event.event_id, type: event.type } }, 'square webhook of another merchant ignored')
         return reply.status(200).send({ status: 'ignored' })

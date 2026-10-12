@@ -7,7 +7,7 @@ import { sqKey } from '../../src/integrations/square/keys.js'
 import { usd } from '../../src/integrations/square/money.js'
 import type { SquareApi } from '../../src/integrations/ports/square.js'
 import { runSquareCatchup } from '../../src/modules/square/catchup.js'
-import { saveSquareState, getSquareState } from '../../src/modules/square/db/state.js'
+import { currentSquareState, saveSquareState, getSquareState } from '../../src/modules/square/db/state.js'
 import { processLoggedEvent, squareWebhookLog, type SquareEventDeps } from '../../src/modules/square/events.js'
 import { noopSquareIngest, type SquareIngest } from '../../src/modules/square/ingest.js'
 import { squareCatchupJob, squareEventJob, squareReconcileJob } from '../../src/modules/square/jobs/index.js'
@@ -87,6 +87,55 @@ describe('Square jobs', () => {
     expect(r.calls).toEqual([])
   })
 
+  it('event.process: a merchant learned in another Square environment (the simulator, the sandbox) does not make our events foreign', async () => {
+    const r = await rig()
+    const p = await r.pay(100, 'env')
+    const simEnv = env({})
+    await saveSquareState(t.db, r.location.id, simEnv, r.clock.now(), { merchant_id: 'MSIMOASIS0001', events_enabled_at: r.clock.now() })
+    await r.logEvent({ merchant_id: 'MREAL', created_at: '2026-06-13T14:00:00Z', type: 'payment.updated', event_id: 'e-real', data: { type: 'payment', id: p.id, object: {} } })
+    expect(await processLoggedEvent(r.d, 'e-real')).toBe('processed')
+    expect(r.calls).toEqual([{ kind: 'payment', id: p.id }])
+  })
+
+  it('square_state: one environment at a time; a save in another environment starts the row afresh, the same one keeps it', async () => {
+    const r = await rig()
+    const at = r.clock.now()
+    const simEnv = env({})
+    await saveSquareState(t.db, r.location.id, simEnv, at, {
+      merchant_id: 'MSIM',
+      events_enabled_at: at,
+      webhook_subscription_id: 'wsub-sim',
+      watermark: at,
+      last_catchup_at: at,
+      last_catchup_events: 7,
+      last_test_at: at,
+      last_test: { ok: true, at: at.toISOString(), checks: [] },
+      last_error: 'x',
+      last_error_at: at,
+    })
+    await saveSquareState(t.db, r.location.id, simEnv, at, { last_webhook_at: at })
+    expect(await getSquareState(t.db, r.location.id)).toMatchObject({ environment: 'sim', merchant_id: 'MSIM', last_catchup_events: 7, last_error: 'x' })
+    expect(await currentSquareState(t.db, r.location.id, simEnv)).toBeDefined()
+    expect(await currentSquareState(t.db, r.location.id, r.env)).toBeUndefined()
+    // the stack goes live (sandbox): what the save sets is kept, everything else learned from the simulator is gone
+    await saveSquareState(t.db, r.location.id, r.env, at, { merchant_id: 'MSANDBOX' })
+    const row = await getSquareState(t.db, r.location.id)
+    expect(row).toMatchObject({
+      environment: 'sandbox',
+      merchant_id: 'MSANDBOX',
+      events_enabled_at: null,
+      webhook_subscription_id: null,
+      watermark: null,
+      last_webhook_at: null,
+      last_catchup_at: null,
+      last_catchup_events: 0,
+      last_test_at: null,
+      last_test: null,
+      last_error: null,
+    })
+    expect(await currentSquareState(t.db, r.location.id, r.env)).toMatchObject({ merchant_id: 'MSANDBOX' })
+  })
+
   it('event.process: a handler error marks the row failed and throws (pg-boss retries); the retry then processes it', async () => {
     let fail = true
     const r = await rig({
@@ -161,6 +210,31 @@ describe('Square jobs', () => {
     expect(seen.at(-1)).toBe(new Date(now - 28 * 86_400_000).toISOString())
     const state = await getSquareState(t.db, r.location.id)
     expect(state?.last_error).toMatch(/older than 27 days/)
+  })
+
+  it('catch-up: a quiet period is not lost events: complete runs move the watermark to the run time minus 10 minutes, no alert', async () => {
+    const r = await rig()
+    const now = () => r.clock.now().getTime()
+    // a watermark 27.5 days old (the last event, weeks ago): this run is the first to cover the gap, so it alerts once
+    await saveSquareState(t.db, r.location.id, r.env, r.clock.now(), { watermark: new Date(now() - 27.5 * 86_400_000) })
+    expect(await runSquareCatchup(r.d)).toMatchObject({ status: 'ok', read: 0, stale: true, complete: true })
+    expect((await getSquareState(t.db, r.location.id))?.last_error).toMatch(/older than 27 days/)
+    expect((await getSquareState(t.db, r.location.id))?.watermark?.getTime()).toBe(now() - 600_000)
+    // then nothing happens at the shop for weeks; every run succeeds: no alert, the error clears
+    for (let i = 0; i < 3; i++) {
+      r.clock.advance(20 * 86_400_000)
+      expect(await runSquareCatchup(r.d)).toMatchObject({ status: 'ok', read: 0, stale: false })
+      const st = await getSquareState(t.db, r.location.id)
+      expect(st?.last_error).toBeNull()
+      expect(st?.watermark?.getTime()).toBe(now() - 600_000)
+    }
+    // an event after the quiet period is still read (the search starts 10 minutes before the watermark)
+    r.clock.advance(60_000)
+    await r.pay(700, 'after-quiet')
+    r.clock.advance(60_000)
+    const rep = await runSquareCatchup(r.d)
+    expect(rep).toMatchObject({ stale: false, failed: 0 })
+    expect(rep.claimed).toBeGreaterThan(0)
   })
 
   it('catch-up: a failed event holds the watermark back and is run again by the next catch-up', async () => {

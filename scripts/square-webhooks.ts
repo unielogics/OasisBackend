@@ -5,12 +5,16 @@
 // until the new one is live (docs/integrations/square.md section 6). Square needs a public https URL: there is nothing to register
 // for a sandbox stack without one.
 //
+// It reads only the Square settings it needs (SQUARE_ACCESS_TOKEN, SQUARE_WEBHOOK_URL, SQUARE_ENVIRONMENT, SQUARE_API_BASE, the API
+// version and timeouts), not the whole environment contract: the first --apply runs BEFORE the signature key exists, while the stack
+// still runs SQUARE_PROVIDER=sim (the contract requires the key once SQUARE_PROVIDER=live). It always talks to Square for
+// SQUARE_ENVIRONMENT (or SQUARE_API_BASE), whatever SQUARE_PROVIDER says.
+//
 //   pnpm square:webhooks                 what exists for SQUARE_WEBHOOK_URL, and what --apply would change
 //   pnpm square:webhooks --apply         create it, or update its event types / API version / enabled flag
 //   pnpm square:webhooks --rotate-key    a new signature key for the existing subscription
 import { applySecretEnvironment } from '../src/config/secrets-source.js'
-import { loadEnv } from '../src/config/env.js'
-import { SQUARE_API_VERSION } from '../src/integrations/square/config.js'
+import { SQUARE_API_VERSION, squareEnvSchema, type SquareEnv } from '../src/integrations/square/config.js'
 import { squareApiFor } from '../src/integrations/square/factory.js'
 import { sqKey } from '../src/integrations/square/keys.js'
 import { SQUARE_EVENT_TYPES } from '../src/integrations/square/webhook.js'
@@ -38,6 +42,21 @@ export function planWebhookSubscription(
     ...(sub.enabled === false ? ['disabled'] : []),
   ]
   return { action: reasons.length ? 'update' : 'none', subscriptionId: sub.id, missingTypes, reasons }
+}
+
+/**
+ * The settings the script needs, from the process environment (pure, tested): the Square shape without the contract's cross-field
+ * rules, so no signature key is needed yet, and always the live client (SQUARE_PROVIDER is ignored: the simulator has nothing to
+ * register). Needs SQUARE_ACCESS_TOKEN and SQUARE_WEBHOOK_URL.
+ */
+export function webhooksScriptEnv(source: NodeJS.ProcessEnv): { ok: true; env: SquareEnv & { SQUARE_WEBHOOK_URL: string } } | { ok: false; message: string } {
+  const parsed = squareEnvSchema.safeParse(source)
+  if (!parsed.success)
+    return { ok: false, message: `Invalid Square settings:\n${parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`).join('\n')}` }
+  const e = parsed.data
+  const missing = [...(!e.SQUARE_ACCESS_TOKEN ? ['SQUARE_ACCESS_TOKEN'] : []), ...(!e.SQUARE_WEBHOOK_URL ? ['SQUARE_WEBHOOK_URL (the public https URL of /hooks/square)'] : [])]
+  if (missing.length) return { ok: false, message: `square:webhooks needs ${missing.join(' and ')}` }
+  return { ok: true, env: { ...e, SQUARE_PROVIDER: 'live', SQUARE_WEBHOOK_URL: e.SQUARE_WEBHOOK_URL! } }
 }
 
 export async function runSquareWebhooks(
@@ -77,11 +96,12 @@ if (process.argv[1]?.endsWith('square-webhooks.ts')) {
   const argv = process.argv.slice(2)
   applySecretEnvironment()
     .then(async () => {
-      const env = loadEnv()
-      if (env.SQUARE_PROVIDER !== 'live' || !env.SQUARE_WEBHOOK_URL) {
-        console.log('square:webhooks needs SQUARE_PROVIDER=live with SQUARE_ACCESS_TOKEN and SQUARE_WEBHOOK_URL (the public https URL of /hooks/square)')
+      const cfg = webhooksScriptEnv(process.env)
+      if (!cfg.ok) {
+        console.log(cfg.message)
         process.exit(2)
       }
+      const env = cfg.env
       const api = squareApiFor(env, { writesEnabled: false })
       process.exit(await runSquareWebhooks(api, { url: env.SQUARE_WEBHOOK_URL, apply: argv.includes('--apply'), rotate: argv.includes('--rotate-key'), log: console.log }))
     })

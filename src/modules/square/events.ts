@@ -9,7 +9,7 @@ import type { NewId } from '../../platform/ids.js'
 import { getDefaultLocation } from '../../platform/locations.js'
 import { maskText } from '../../platform/logging.js'
 import { DbWebhookLog } from '../../platform/webhook-log.js'
-import { getSquareState } from './db/state.js'
+import { currentSquareState } from './db/state.js'
 import { processSquareEvent, type SquareIngest, type SquareLogger } from './ingest.js'
 
 export interface SquareEventDeps {
@@ -39,7 +39,7 @@ export async function processLoggedEvent(d: SquareEventDeps, eventId: string): P
   }
   const location = await getDefaultLocation(d.db)
   if (!location) throw new Error('no location: run the seed first')
-  const state = await getSquareState(d.db, location.id)
+  const state = await currentSquareState(d.db, location.id, d.env)
   try {
     const r = await processSquareEvent(
       { ...d, locationId: location.id, merchantId: state?.merchant_id ?? null },

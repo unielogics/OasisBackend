@@ -64,7 +64,10 @@ into its own app secret with `pnpm secrets:push`.
 - **Signature**: `x-square-hmacsha256-signature` = base64 HMAC-SHA256(signature key, `SQUARE_WEBHOOK_URL` + raw body). The URL comes
   from the environment, never from the request. The current key and the previous key are tried, in constant time. Anything else is
   401 and nothing is kept. With no key or URL configured (the default) every delivery is 401.
-- **Merchant**: once Test connection learned our merchant id, an event of any other merchant is answered 200 and dropped.
+- **Merchant**: once Test connection learned our merchant id, an event of any other merchant is answered 200 and dropped. The merchant
+  counts only in the Square environment it was learned in: `square_state` keeps one environment (sim, sandbox or production), is read
+  only when that is the configured one, and starts afresh when a save comes from another, so a merchant, "events enabled", subscription
+  or watermark learned from the simulator or the sandbox never applies to production. Run Test connection again after switching.
 - **Dedupe**: the event is claimed in `webhook_log` (provider `square`, external id = `event_id`) with its body and the headers without
   the signature. A second delivery of the same event answers 200 `duplicate`. The Events API catch-up claims in the same place.
 - **Answer**: `square.event.process` is queued (singleton per event id) and Square gets 200 at once. If the queue refuses, the claim is
@@ -78,12 +81,17 @@ into its own app secret with `pnpm secrets:push`.
 `subscription.created`, `subscription.updated`, `card.created`, `card.updated`, `card.disabled`, `card.forgotten`,
 `card.automatically_updated`, `customer.updated`, `customer.deleted`. All 18 exist at version 2026-09-16 (sandbox, 2026-10-12).
 
-**Registration** (Square needs a public https URL; there is nothing to register for a stack without one):
+**Registration** (Square needs a public https URL; there is nothing to register for a stack without one). The script reads only
+`SQUARE_ACCESS_TOKEN`, `SQUARE_WEBHOOK_URL`, `SQUARE_ENVIRONMENT` (and `SQUARE_API_BASE`, the API version and timeouts), never the
+signature key, and always talks to Square whatever `SQUARE_PROVIDER` says. So the first `--apply` runs while the stack is still
+`SQUARE_PROVIDER=sim`: the app refuses `live` until the key exists, and the key is what `--apply` prints.
 
 ```bash
+# the stack still runs SQUARE_PROVIDER=sim; the token and SQUARE_WEBHOOK_URL are set
 pnpm square:webhooks             # what exists for SQUARE_WEBHOOK_URL and what --apply would change
 pnpm square:webhooks --apply     # creates the subscription (prints its signature key ONCE) or updates its types / version
-pnpm secrets:push                # put the printed key in the secret as SQUARE_WEBHOOK_SIGNATURE_KEY, restart
+pnpm secrets:push                # put the printed key in the secret as SQUARE_WEBHOOK_SIGNATURE_KEY
+# then SQUARE_PROVIDER=live in the env file, restart
 ```
 
 Then Settings, Square, **Test connection** (`POST /api/v1/integrations/square/test`) checks: the token works; the location is active, in
@@ -94,7 +102,7 @@ USD and takes cards; the Events API is enabled; our subscription exists, is enab
 | Job | When | What |
 |---|---|---|
 | `square.event.process` | queued by the hook | Re-fetch and dispatch one logged event (section 4). 5 retries, 30 s apart. |
-| `square.events.catchup` | every 10 minutes, live only | SearchEvents from the watermark minus 10 minutes (the first run reads the last day; never more than 28 days back), ascending, paged; each event claimed in `webhook_log` and processed. A failed event holds the watermark back so the next run tries it again; a row the hook claimed whose job was lost (still `received` after 15 minutes) is run here. A watermark older than 27 days is an alert (status row and `square_state.last_error`): Square keeps events 28 days. |
+| `square.events.catchup` | every 10 minutes, live only | SearchEvents from the watermark minus 10 minutes (the first run reads the last day; never more than 28 days back), ascending, paged; each event claimed in `webhook_log` and processed. A failed event holds the watermark back so the next run tries it again; a complete run with no failure moves it to at least the run time minus 10 minutes (a quiet week is not an alert); a row the hook claimed whose job was lost (still `received` after 15 minutes) is run here. A watermark older than 27 days (runs failing or never finishing for that long) is an alert (status row and `square_state.last_error`): Square keeps events 28 days. |
 | `square.reconcile` | nightly 03:45, live only | Lists the last 72 hours of payments and refunds at our location and keeps the counts (by status, source, product) in `square_state.last_reconcile`. |
 
 With `SQUARE_PROVIDER=sim` (the default) the catch-up and the reconcile do nothing and call nobody.

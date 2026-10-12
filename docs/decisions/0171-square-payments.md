@@ -59,19 +59,22 @@ not `https://<domain>/hooks/square`; a previous webhook key without a current on
   duplicate and out-of-order modes; `/__sim` controls (link pay, POS payment and refund, subscription billing, card updates, failed
   refunds, faults). The captured sandbox answers keep it honest (`test/fixtures/square/`, `test/square/sim.test.ts`).
 - **`/hooks/square`**: signature = base64 HMAC-SHA256(key, `SQUARE_WEBHOOK_URL` + raw body), current and previous key, constant time;
-  a merchant other than ours is acknowledged and dropped; the event is claimed in `webhook_log('square', event_id)` (the platform
+  a merchant other than ours (as learned by Test connection in the same Square environment) is acknowledged and dropped; the event is claimed in `webhook_log('square', event_id)` (the platform
   `DbWebhookLog`, now shared with the Squarespace hook), `square.event.process` is queued and Square gets 200 at once; a duplicate gets
   200; a queue that refuses the job releases the claim and answers 503. nginx: `location = /hooks/square`, POST only, zone
   `oasis_hooks`, 1 MB.
 - **Jobs**: `square.event.process` re-fetches the event's object by id (payment, refund, invoice, subscription, card, customer) and
   dispatches it to an ingest handler under an advisory lock per object; this wave's handlers only log and close the row.
   `square.events.catchup` (every 10 minutes, live only) reads SearchEvents from the watermark minus 10 minutes through the same
-  `webhook_log` claim, so a webhook and the catch-up never both process an event; a failed event holds the watermark back; a watermark
-  older than 27 days is an alert (Square keeps events 28 days). `square.reconcile` (nightly, live only) counts the last 72 hours of
+  `webhook_log` claim, so a webhook and the catch-up never both process an event; a failed event holds the watermark back; a complete
+  run with no failure moves it to at least the run time minus 10 minutes, so only runs that keep failing or never finish let it age;
+  a watermark older than 27 days is an alert (Square keeps events 28 days). `square.reconcile` (nightly, live only) counts the last 72 hours of
   payments and refunds into `square_state`.
 - **Status and connection**: the `square` row of `GET /system/integrations`; `GET /integrations/square`; `POST /integrations/square/test`
   (`set.billing`, audited): ListLocations (active, USD, card processing), EnableEvents, our webhook subscription carries every event type;
-  it stores the merchant id the hook checks.
+  it stores the merchant id the hook checks. `square_state` describes one Square environment (sim, sandbox or production): the code
+  reads it only when its environment is the one configured, and a save in another environment starts the row afresh, so nothing
+  learned from the simulator or the sandbox (merchant, events enabled, subscription, watermark) applies to production.
 - **Scripts**: `pnpm square:webhooks [--apply | --rotate-key]` (prints a new signature key once), `pnpm verify:square` (`--sim`,
   `--secret oasis/sandbox/square`, `--read-only` for production), part of `pnpm verify:all` and `verify.sh square`.
 - **Data**: migration `20261014200000_square_foundation.sql` (`webhook_log` provider `square`, `square_state`).
@@ -132,6 +135,7 @@ Recorded in `docs/integrations/square.md` section 8; the ones that change later 
 | Q3c, Q3e | The website's v2 catalog, join and pay pages; the dashboard's billing block, saved cards and Settings, Billing & integrations (Square status and Test connection). |
 | Q4 | The adversarial money and security review, and a sandbox end-to-end run on a disposable stack. |
 
-Rollout (plan): deploy with `SQUARE_PROVIDER=sim`; production token into the secret, `pnpm square:webhooks --apply`, the key pushed,
+Rollout (plan): deploy with `SQUARE_PROVIDER=sim`; production token and `SQUARE_WEBHOOK_URL` into the secret and env (still sim),
+`pnpm square:webhooks --apply` (it needs only the token and the URL, not the key it creates), the key pushed, `SQUARE_PROVIDER=live`,
 Test connection, observe-only for about a week; writes on in stages (links, deposits and refunds; saved cards and fees; catalog and
 memberships); then `PAYMENT_PROCESSOR=square` with the production CSP and redirect hosts; Squarespace to `history`, then `off`.

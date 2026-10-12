@@ -6,7 +6,7 @@ import type { Executor } from '../../platform/db.js'
 import { getDefaultLocation } from '../../platform/locations.js'
 import { maskText } from '../../platform/logging.js'
 import type { IntegrationStatus } from '../system/integrations.js'
-import { getSquareState } from './db/state.js'
+import { currentSquareState } from './db/state.js'
 
 const H = 3600_000
 const at = (d: Date | null | undefined): string | null => (d ? d.toISOString() : null)
@@ -14,7 +14,7 @@ const latest = (...ds: Array<Date | null | undefined>): Date | null => ds.reduce
 
 export async function squareStatus(db: Executor, env: Env, now: Date): Promise<IntegrationStatus> {
   const location = await getDefaultLocation(db)
-  const state = location ? await getSquareState(db, location.id) : undefined
+  const state = location ? await currentSquareState(db, location.id, env) : undefined
   const live = env.SQUARE_PROVIDER === 'live'
   const missing: string[] = []
   const warnings: string[] = []
@@ -33,7 +33,7 @@ export async function squareStatus(db: Executor, env: Env, now: Date): Promise<I
   if (live && (!state?.last_catchup_at || now.getTime() - state.last_catchup_at.getTime() > 30 * 60_000))
     warnings.push('the Events API catch-up has not run in the last 30 minutes (job square.events.catchup)')
   if (state?.watermark && now.getTime() - state.watermark.getTime() > 27 * 24 * H)
-    warnings.push('the catch-up watermark is older than 27 days: Square keeps events 28 days, some may be lost')
+    warnings.push('the catch-up watermark is older than 27 days (no complete catch-up since): Square keeps events 28 days, some may be lost')
   if (
     state?.last_catchup_claimed_at &&
     now.getTime() - state.last_catchup_claimed_at.getTime() < 24 * H &&
