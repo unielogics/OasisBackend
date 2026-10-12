@@ -184,9 +184,33 @@ export function stripMarkdown(text: string): string {
     .trim()
 }
 
-/** Compatibility forms folded (NFKC: full-width "ＰＩＮ" -> "PIN") and look-alike full stops ("。", "．") made a dot, before GSM-7. */
+/**
+ * Greek, Cyrillic and small-capital letters that imitate a Latin one (wave Q3d re-check SR, A052 "Send your Ρ1Ν."): GSM-7 has none of
+ * them, so they used to be dropped ("Send your 1."), and neither layer saw the word they spell. Read and sent as the Latin letter. The
+ * GSM-7 Greek capitals (Δ Φ Γ Λ Ω Π Ψ Σ Θ Ξ) imitate no Latin letter and stay.
+ */
+const LATIN_LOOKALIKE: Record<string, string> = Object.fromEntries(
+  [
+    // Greek
+    'ΑA', 'ΒB', 'ΕE', 'ΖZ', 'ΗH', 'ΙI', 'ΚK', 'ΜM', 'ΝN', 'ΟO', 'ΡP', 'ΤT', 'ΥY', 'ΧX', 'αa', 'ιi', 'κk', 'νv', 'οo', 'ρp', 'υu', 'χx', 'ϲc', 'ϳj',
+    // Cyrillic
+    'АA', 'ВB', 'СC', 'ЕE', 'НH', 'ІI', 'ЈJ', 'КK', 'МM', 'ОO', 'РP', 'ЅS', 'ТT', 'ХX', 'УY', 'ԚQ', 'ԜW', 'аa', 'сc', 'еe', 'оo', 'рp', 'хx', 'уy',
+    'іi', 'јj', 'ѕs', 'һh', 'ԁd', 'ԛq', 'ԝw', 'ӏl',
+    // small capitals
+    'ᴀa', 'ʙb', 'ᴄc', 'ᴅd', 'ᴇe', 'ɢg', 'ʜh', 'ɪi', 'ᴊj', 'ᴋk', 'ʟl', 'ᴍm', 'ɴn', 'ᴏo', 'ᴘp', 'ʀr', 'ꜱs', 'ᴛt', 'ᴜu', 'ᴠv', 'ᴡw', 'ʏy', 'ᴢz',
+  ].map((pair) => [pair[0]!, pair[1]!]),
+)
+const LATIN_LOOKALIKE_RE = new RegExp(`[${Object.keys(LATIN_LOOKALIKE).join('')}]`, 'gu')
+
+/**
+ * Compatibility forms folded (NFKC: full-width "ＰＩＮ" -> "PIN"), look-alike letters of other alphabets made Latin ("Ρ1Ν" -> "P1N")
+ * and look-alike full stops ("。", "．") made a dot, before GSM-7.
+ */
 export function foldInput(text: string): string {
-  return text.normalize('NFKC').replace(/[。｡．․‧]/g, '.')
+  return text
+    .normalize('NFKC')
+    .replace(LATIN_LOOKALIKE_RE, (c) => LATIN_LOOKALIKE[c] ?? c)
+    .replace(/[。｡．․‧]/g, '.')
 }
 
 /** GSM-7 only: the shared SMS normalisation, then any character GSM-7 still lacks is dropped. */

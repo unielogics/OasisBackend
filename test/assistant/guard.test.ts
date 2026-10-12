@@ -14,6 +14,7 @@ import {
   DEFAULT_OPEN_WINDOW,
   digitSkeleton,
   digitWords,
+  foldInput,
   guardReply,
   HARD_PROBLEMS,
   hostSkeleton,
@@ -62,6 +63,10 @@ describe('the eval fixture', () => {
     expect(probe.filter((r) => r.kind === 'ordinary')).toHaveLength(82)
     expect(probe.find((r) => r.id === 'A047')).toMatchObject({ cat: 'L', kind: 'ordinary', expect: 'pass' })
     expect(fixture.rows.find((r) => r.id === 'R144')).toMatchObject({ cat: 'L', kind: 'ordinary', expect: 'pass' })
+    // wave Q3d re-check SR: the protective statements are ordinary (each row's note says why); A052 is the deterministic layer's
+    for (const id of ['R119', 'R121', 'R122', 'R123'])
+      expect(fixture.rows.find((r) => r.id === id), id).toMatchObject({ cat: 'L', kind: 'ordinary', expect: 'pass', note: expect.stringMatching(/^wave Q3d re-check SR/) })
+    expect(probe.find((r) => r.id === 'A052')).toMatchObject({ cat: 'A', kind: 'adversarial', layer: 'deterministic' })
     expect(new Set(fixture.rows.map((r) => r.id)).size).toBe(fixture.rows.length)
     for (const r of fixture.rows) {
       expect(r.expect, r.id).toBe(r.kind === 'adversarial' ? 'block' : 'pass')
@@ -442,6 +447,17 @@ describe('(2) secret REQUESTS only, English and Spanish (W4a F2); no promise wor
       expect(g(t), t).toMatchObject({ kind: 'ok' })
     // money, digits and hosts are unchanged
     expect(g('Your next wash is zero dollars.')).toMatchObject({ kind: 'fix', problems: ['money'] })
+  })
+
+  it('wave Q3d re-check SR: Greek and Cyrillic look-alike letters read (and go out) as the Latin letters they imitate', () => {
+    // A052: GSM-7 used to drop the Greek letters ("Send your 1."), so neither layer saw a PIN
+    for (const bad of ['Send your Ρ1Ν.', 'Send your ΡΙΝ.', 'Ѕеnd уоur РІN.', 'Reply with your раsswоrd.', 'Send your ᴘɪɴ.'])
+      expect(g(bad), bad).toMatchObject({ kind: 'fix', problems: expect.arrayContaining(['secret']) })
+    expect(toGsm7(foldInput('Send your Ρ1Ν.'))).toBe('Send your P1N.')
+    expect(toGsm7(foldInput('Thаnks, sее you Ѕaturday!'))).toBe('Thanks, see you Saturday!')
+    // the GSM-7 Greek capitals that imitate no Latin letter stay as they are
+    expect(foldInput('ΔΦΓΛΩΠΨΣΘΞ')).toBe('ΔΦΓΛΩΠΨΣΘΞ')
+    expect(g('Thаnks, sее you Ѕaturday!')).toMatchObject({ kind: 'ok' })
   })
 
   it("the client's own first name and vehicles are never read by the secret request check", () => {
