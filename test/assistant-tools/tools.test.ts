@@ -263,7 +263,10 @@ describe('send_link', () => {
   it('keeps its limits: one of a kind an hour, three a day', async () => {
     const probe = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'caller' })
     expect(await run('send_link', probe.ctx, { kind: 'calendar', appointmentRef: null, tier: null })).toMatchObject({ ok: true })
-    expect(await run('send_link', probe.ctx, { kind: 'calendar', appointmentRef: null, tier: null })).toMatchObject({ ok: false, error: 'rate_limited' })
+    const limited = await run('send_link', probe.ctx, { kind: 'calendar', appointmentRef: null, tier: null })
+    expect(limited).toMatchObject({ ok: false, error: 'rate_limited' })
+    // the model points to the link already texted and never tells the client about a limit (W4 live eval)
+    expect(JSON.stringify(limited)).toMatch(/point them to it .*Never mention a limit or a count/)
     expect(await run('send_link', probe.ctx, { kind: 'verify', appointmentRef: null, tier: null })).toMatchObject({ ok: true })
     expect(await run('send_link', probe.ctx, { kind: 'pin', appointmentRef: null, tier: null })).toMatchObject({ ok: true })
     w.clock.advance(61 * 60_000)

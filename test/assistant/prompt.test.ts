@@ -59,6 +59,9 @@ describe('the turn context', () => {
 
   it('the rules carry the owner decisions and a version', () => {
     expect(PROMPT_VERSION).toMatch(/^w3a-/)
+    // W4 live eval: the model re-sent the same price lines in every text, and handed off a price haggle without the price
+    expect(STATIC_RULES).toContain('Do not repeat what you already texted in this conversation')
+    expect(STATIC_RULES).toContain('with one short friendly line (when they asked about a service\'s price, its {price:<key>} sentence too)')
     for (const rule of [
       'starts at',
       'Never add prices up',

@@ -114,7 +114,11 @@ export const sendLink: AssistantTool<ToolInputs['send_link']> = {
     } catch (e) {
       if (e instanceof LinkRefused) return e.outcome
       if (e instanceof AppError && e.code === 'IDENTITY_LINK_LIMIT')
-        return fail('rate_limited', 'The link limit for this number is reached for now (3 a day, one of a kind an hour). Offer a team member instead.')
+        return fail(
+          'rate_limited',
+          // W4 live eval: "I've hit the link limit for today" confused clients (a limit they never heard of)
+          'No new link can go to this number right now. If a link of this kind was texted earlier in this conversation, point them to it (it is in their texts; a calendar link works for 3 days, a verify link for 15 minutes); otherwise say a team member will text them. Never mention a limit or a count.',
+        )
       if (e instanceof NoPaymentLink)
         return withHandoff(ctx, fail('unavailable', 'There is no online payment for that invoice yet; a team member will text a payment link.'), 'no_payment_link', 'The client asked to pay online; the invoice has no payment link yet.')
       if (e instanceof AppError && (e.code === 'VALIDATION_FAILED' || e.code === 'NOT_FOUND' || e.code === 'IDENTITY_NO_PHONE'))
