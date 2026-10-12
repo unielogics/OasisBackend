@@ -302,8 +302,9 @@ assistant on: `AI_PROVIDER=bedrock` and `AI_ENABLED=true` are set in the staged 
    never used for tuning: when the rubric changes, write a new one AFTER the change). The run paces itself at `--rpm 30` and stops
    at `--budget-usd 2` (exit 3). **Quota**: the account's Bedrock quota for Sonnet 4.6 is 50 requests a minute (cross-region; see
    `aws service-quotas list-service-quotas --service-code bedrock`), shared by the assistant's model calls, its judge calls (one per
-   reply, two after a rewrite) and any eval. An unpaced first W4a run had 208 of 286 calls throttled; a throttled judge call is a judge error and
-   the reply fails closed (fallback + handoff), so ask AWS for more requests a minute before the rollout's volume grows. The eval
+   reply, two after a rewrite) and any eval. An unpaced first W4a run had 208 of 286 calls throttled. A turn retries a throttled or
+   timed-out model or judge call once (800-1500 ms, within the turn deadline); a second throttle is a judge error and the reply fails
+   closed (fallback + handoff), so ask AWS for more requests a minute before the rollout's volume grows. The eval
    retries throttled calls (`--throttle-retries 3`) and counts them, so its numbers are the judge's own.
 7. **An AWS Budgets alarm** as the account-level backstop (the app's own daily budget is the hard stop). Claude on Bedrock is billed
    partly through AWS Marketplace, so a whole-account cost budget catches it where a Bedrock-only filter might not. The first two
