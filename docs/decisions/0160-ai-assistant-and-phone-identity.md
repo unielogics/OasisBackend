@@ -1264,7 +1264,8 @@ closes the W4 last check's blockers (`_reports/w4-last-check.json`). Prompt `q3d
   $60", or "... is priced at the shop" for a size without a price of its own (an item without prices by size: its base price at
   every size); `{plan:<key>}` "Gold starts at $129 a month (compact car)"; `{plan:<key>:<size>}` "Gold for a large SUV is $149 a
   month", or "... has a monthly price the team confirms"; `{perks:<key>}` written by the server from the tier's inclusions ("Signature
-  Hand Wash (4 a month)", "Hand wax with every visit", "(unlimited)"), its "% off other services and add-ons" and the shop's perks,
+  Hand Wash (4 a month)", "Hand wax with every visit", "(unlimited)"; one allowance over two items "Signature Hand Wash or
+  Interior (4 a month in all)": the facts group a plan's inclusions by v2's `group`, never by their allowance, review F4), its "% off other services and add-ons" and the shop's perks,
   at most 130 characters (one plan's perks per text: two longer ones made a comparison too long in the grid run), every part outside `PERK_PROMISE` ("% off", never "discount"; Spanish "% menos"); `{price:tint:<size>:<film>}`
   stays readable for one release (from the tint packages' cells). Only active sizes and listed items have placeholders: anything
   else is `unknown_placeholder`.

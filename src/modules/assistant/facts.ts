@@ -323,16 +323,18 @@ export async function loadShopFacts(db: Executor, deps: Pick<ShopFactsDeps, 'env
     .map((f) => ({ key: f.key, label: oneLine(f.label, 40), vlt: [...f.vlt] }))
   const nameOfKey = new Map(items.map((x) => [x.key, x.name]))
   const plans: ShopFactsPlan[] = catalog.tiers.map((x) => {
-    // one inclusion row per covered item in v2: grouped back by mode and allowance, in order
-    const inclusions: ShopFactsInclusion[] = []
+    // one inclusion row per covered item in v2: grouped back by the inclusion it belongs to (two inclusions of 4 a month stay two;
+    // one of 4 a month over two items is one shared allowance: review F4), in order
+    const groups = new Map<number, ShopFactsInclusion>()
     for (const inc of x.inclusions) {
       const name = nameOfKey.get(inc.serviceKey)
       if (!name) continue
-      const same = inclusions.find((i) => i.mode === inc.mode && i.perCycle === inc.perCycle)
+      const same = groups.get(inc.group)
       if (same) {
         if (!same.services.includes(name)) same.services.push(name)
-      } else inclusions.push({ services: [name], mode: inc.mode, perCycle: inc.perCycle })
+      } else groups.set(inc.group, { services: [name], mode: inc.mode, perCycle: inc.perCycle })
     }
+    const inclusions = [...groups.values()]
     return {
       key: x.key,
       label: oneLine(x.name, 40),
@@ -475,6 +477,9 @@ export function inclusionWords(i: ShopFactsInclusion, lang: ConvoLang = 'en'): s
   const names = i.services.join(' / ')
   if (i.mode === 'every_visit') return `${names} ${lang === 'es' ? 'en cada visita' : 'with every visit'}`
   if (i.perCycle === null) return `${names} (${lang === 'es' ? 'ilimitado' : 'unlimited'})`
+  // one allowance over several items: "Signature Hand Wash or Interior (4 a month in all)", never read as 4 of each
+  if (i.services.length > 1)
+    return `${i.services.join(lang === 'es' ? ' o ' : ' or ')} (${i.perCycle} ${lang === 'es' ? 'al mes en total' : 'a month in all'})`
   return `${names} (${i.perCycle} ${lang === 'es' ? 'al mes' : 'a month'})`
 }
 

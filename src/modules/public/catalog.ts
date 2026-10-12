@@ -270,6 +270,10 @@ export const PublicCatalogV2View = z.object({
             serviceKey: z.string().describe('An item key of services or addons'),
             mode: z.enum(['per_cycle', 'every_visit']),
             perCycle: z.number().int().nullable(),
+            group: z
+              .number()
+              .int()
+              .describe('The inclusion this row belongs to (1, 2, ... in tier order): rows with the same group share ONE allowance (perCycle visits a month in all, not each)'),
           }),
         ),
       }),
@@ -386,13 +390,14 @@ export async function loadPublicCatalogV2(db: Executor, locationId: string, now:
       }),
       fromMonthlyCents: from.monthlyCents,
       fromClass: from.classKey,
+      // one row per covered listed item; `group` numbers the inclusions that cover a listed item, so two inclusions of 4 a month
+      // read apart from one inclusion of 4 a month over two items (review F4)
       inclusions: p.inclusions
         .filter((i) => i.active)
-        .flatMap((i) =>
-          i.serviceIds.flatMap((id) => {
-            const serviceKey = keyOf.get(id)
-            return serviceKey ? [{ serviceKey, mode: i.mode, perCycle: i.mode === 'every_visit' ? null : i.perCycle }] : []
-          }),
+        .map((i) => ({ i, keys: i.serviceIds.flatMap((id) => keyOf.get(id) ?? []) }))
+        .filter((x) => x.keys.length > 0)
+        .flatMap(({ i, keys }, n) =>
+          keys.map((serviceKey) => ({ serviceKey, mode: i.mode, perCycle: i.mode === 'every_visit' ? null : i.perCycle, group: n + 1 })),
         ),
     })),
   }

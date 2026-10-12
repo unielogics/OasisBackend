@@ -209,7 +209,7 @@ describe('GET /public/catalog/v2', () => {
         prices: [{ class: 'compact_car', monthlyCents: 12900 }],
         fromMonthlyCents: 12900,
         fromClass: 'compact_car',
-        inclusions: [{ serviceKey: 'signature-hand-wash', mode: 'per_cycle', perCycle: 4 }],
+        inclusions: [{ serviceKey: 'signature-hand-wash', mode: 'per_cycle', perCycle: 4, group: 1 }],
       },
     ])
     expect([...keysOf(b)].filter((k) => FORBIDDEN.test(k) && k !== 'version')).toEqual([])
@@ -234,8 +234,8 @@ describe('GET /public/catalog/v2', () => {
       fromMonthlyCents: 19900,
       fromClass: 'compact_car',
       inclusions: [
-        { serviceKey: 'signature-hand-wash', mode: 'per_cycle', perCycle: null },
-        { serviceKey: 'hand-wax', mode: 'every_visit', perCycle: null },
+        { serviceKey: 'signature-hand-wash', mode: 'per_cycle', perCycle: null, group: 1 },
+        { serviceKey: 'hand-wax', mode: 'every_visit', perCycle: null, group: 2 },
       ],
     })
     const sig = b.services.find((s: { key: string }) => s.key === 'signature-hand-wash')
@@ -249,6 +249,25 @@ describe('GET /public/catalog/v2', () => {
     expect(c.tiers.map((x: { key: string }) => x.key)).toEqual(['vip'])
     expect(c.memberDisplay.discountBp).toBe(2000)
     expect(c.services.find((s: { key: string }) => s.key === 'signature-hand-wash').memberFromCents).toBe(3200)
+  })
+
+  it('numbers the inclusions: two of 4 a month stay apart, one of 4 a month over two items shares its group (review F4)', async () => {
+    await priced()
+    const [sig, ext, wax, tint] = await Promise.all(['Signature Hand Wash', 'Exterior Hand Wash', 'Hand wax', 'Carbon window tint'].map(serviceId))
+    await tier('gold', {
+      inclusions: [
+        { label: 'Signature washes', mode: 'per_cycle', perCycle: 4, autoApply: true, serviceIds: [sig!] },
+        { label: 'Exterior washes', mode: 'per_cycle', perCycle: 4, autoApply: true, serviceIds: [ext!] },
+        { label: 'Wax or tint', mode: 'per_cycle', perCycle: 2, autoApply: false, serviceIds: [wax!, tint!] },
+      ],
+    })
+    const gold = (await v2()).tiers.find((x: { key: string }) => x.key === 'gold')
+    expect(gold.inclusions).toEqual([
+      { serviceKey: 'signature-hand-wash', mode: 'per_cycle', perCycle: 4, group: 1 },
+      { serviceKey: 'exterior-hand-wash', mode: 'per_cycle', perCycle: 4, group: 2 },
+      { serviceKey: 'hand-wax', mode: 'per_cycle', perCycle: 2, group: 3 },
+      { serviceKey: 'carbon-window-tint', mode: 'per_cycle', perCycle: 2, group: 3 },
+    ])
   })
 
   it('a size turned off drops out with its prices; a tier priced only at sizes that are off is not listed', async () => {

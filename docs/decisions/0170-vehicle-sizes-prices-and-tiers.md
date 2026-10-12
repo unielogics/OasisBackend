@@ -201,7 +201,10 @@ the assistant's side is ADR 0160 "Wave Q3d". API: api-spec 26.1.
    an active size is not listed** (plan decision 3; the Q1a review's deferred F4): it is not in `tiers`, its % off does not count in
    `memberDisplay`, and nothing `includedIn` names it. An item with no cell and a $0 base price is left out, as in v1; an item with a
    base price and no cell has `prices: []` and `fromClass: null`. No ids, versions, price versions, Square ids or states, checkout URLs
-   or tags (`test/catalog-settings/catalog-v2.test.ts` walks every key).
+   or tags (`test/catalog-settings/catalog-v2.test.ts` walks every key). One addition to §9's shape (review F4): each tier inclusion row
+   carries `group`, the inclusion's number in the tier (1, 2, ...; only inclusions covering a listed item), so one inclusion of 4 a
+   month over two items (4 in all) reads apart from two inclusions of 4 a month (4 each); the facts group by it and write a shared
+   allowance as "Signature Hand Wash or Interior (4 a month in all)".
 2. **v1 is unchanged** (the website keeps reading it until wave Q3c switches; v1 `plans` still lists an unpriced public tier with
    `priceCents: null`, as before).
 3. **Cache and limits as v1**: `canonicalQuery({})` (a query is 422), `Cache-Control: public, max-age=60`, 60 a minute per address;
@@ -211,7 +214,8 @@ the assistant's side is ADR 0160 "Wave Q3d". API: api-spec 26.1.
 4. **The assistant's facts read v2** (facts-v4): the sizes, every item's prices by size, the tiers sold online with their prices by
    size, % off and inclusions; a tier without a price is not offered by the assistant either (no `{plan:<key>}`, `send_link
    {membership}` refused). `set_my_vehicle` records a size key of the facts (source `ai`, never over a staff size) and
-   `propose_booking` passes `vehicleClass` (a staff size on the car wins; the reply-number handler books it while the size is still on).
+   `propose_booking` passes `vehicleClass` (a staff size on the car wins, also one set between the proposal and the reply number; the
+   reply-number handler books it while the size is still on).
 
 ## What the next waves add
 

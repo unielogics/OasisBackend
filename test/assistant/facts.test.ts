@@ -4,7 +4,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { sql } from 'kysely'
 import { seedLegacyWebsitePrices } from '../fixtures/legacy-website-prices.js'
-import { putTierPrices, requireTier } from '../../src/modules/catalog/tiers.js'
+import { putTier, putTierPrices, requireTier } from '../../src/modules/catalog/tiers.js'
 import { createIdGenerator } from '../../src/platform/ids.js'
 import { runSeed } from '../../db/seeds/index.js'
 import { loadEnv, type Env } from '../../src/config/env.js'
@@ -291,6 +291,38 @@ describe('the shop facts document', () => {
     expect(renderShopFacts(f)).not.toContain('{plan:vip}')
   })
 
+  it('keeps a plan’s inclusions apart even when they share an allowance; one inclusion over two items is one shared allowance (review F4)', async () => {
+    const listed = (await source().get(locationId)).catalog.items.filter((i) => !i.quoteOnly && i.kind === 'package').slice(0, 3)
+    expect(listed).toHaveLength(3)
+    const ids = await Promise.all(
+      listed.map(async (i) => (await t.db.selectFrom('services').select('id').where('location_id', '=', locationId).where('name', '=', i.name).executeTakeFirstOrThrow()).id),
+    )
+    await t.db.transaction().execute(async (tx) => {
+      const cur = await requireTier(tx, locationId, 'gold')
+      await putTier(tx, { newId: createIdGenerator(clock) }, {
+        locationId,
+        key: 'gold',
+        expectedVersion: cur.version,
+        fields: {
+          ...cur,
+          inclusions: [
+            { label: 'A', mode: 'per_cycle', perCycle: 4, autoApply: true, serviceIds: [ids[0]!] },
+            { label: 'B', mode: 'per_cycle', perCycle: 4, autoApply: true, serviceIds: [ids[1]!] },
+            { label: 'C', mode: 'per_cycle', perCycle: 4, autoApply: true, serviceIds: [ids[1]!, ids[2]!] },
+          ],
+        },
+      })
+    })
+    const f = await source().get(locationId)
+    const [a, b, c] = listed.map((i) => i.name)
+    expect(f.plans.find((p) => p.key === 'gold')!.inclusions).toEqual([
+      { services: [a], mode: 'per_cycle', perCycle: 4 },
+      { services: [b], mode: 'per_cycle', perCycle: 4 },
+      { services: [b, c], mode: 'per_cycle', perCycle: 4 },
+    ])
+    expect(placeholderValues(f).get('{perks:gold}')).toContain(`${a} (4 a month)`)
+  })
+
   it('writes every placeholder in Spanish too, unpriced sizes included', async () => {
     const f = await source().get(locationId)
     const sig = f.catalog.items.find((i) => i.name === 'Signature Hand Wash')!
@@ -324,6 +356,10 @@ describe('the shop facts document', () => {
     // the first inclusion, the % off, then the rest while it fits (a reply is 320 characters; a comparison holds one plan's perks)
     expect(perksWords(plan)).toBe('Gold includes: Signature Hand Wash (4 a month); 10% off other services and add-ons')
     expect(perksWords(plan, 'es')).toBe('Gold incluye: Signature Hand Wash (4 al mes); 10% menos en otros servicios y extras')
+    // one allowance over two items reads as shared, never as that many of each (review F4)
+    const shared = { label: 'Gold', perks: [], memberDiscountBp: 0, inclusions: [{ services: ['Signature Hand Wash', 'Interior'], mode: 'per_cycle' as const, perCycle: 4 }] }
+    expect(perksWords(shared)).toBe('Gold includes: Signature Hand Wash or Interior (4 a month in all)')
+    expect(perksWords(shared, 'es')).toBe('Gold incluye: Signature Hand Wash o Interior (4 al mes en total)')
     const short = { ...plan, memberDiscountBp: 0, inclusions: plan.inclusions.slice(1, 3) }
     expect(perksWords(short)).toBe('Gold includes: Hand wax / Rain-repellent glass with every visit; Tire shine (unlimited); priority booking')
     for (const lang of ['en', 'es'] as const) expect(perksWords(plan, lang)!.length, lang).toBeLessThanOrEqual(MAX_PERKS_CHARS)

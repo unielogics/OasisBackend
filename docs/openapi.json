@@ -73280,6 +73280,12 @@
                             "items": {
                               "additionalProperties": false,
                               "properties": {
+                                "group": {
+                                  "description": "The inclusion this row belongs to (1, 2, ... in tier order): rows with the same group share ONE allowance (perCycle visits a month in all, not each)",
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
                                 "mode": {
                                   "enum": [
                                     "per_cycle",
@@ -73307,7 +73313,8 @@
                               "required": [
                                 "serviceKey",
                                 "mode",
-                                "perCycle"
+                                "perCycle",
+                                "group"
                               ],
                               "type": "object"
                             },
