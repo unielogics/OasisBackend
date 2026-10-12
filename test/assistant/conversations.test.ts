@@ -417,11 +417,12 @@ describe('the pricing rule in a turn (design sections 3b and 3c: amounts are ser
   })
 
   it('a promise the judge fails and the rewrite removes goes out rewritten, with no handoff ("free times" -> "open times") (B)', async () => {
-    const a = assistant([simText('We have free times at 2 PM and 4 PM today.'), simText('We have open times at 2 PM and 4 PM today.')], {}, [fail('promise'), pass()])
+    // (no day or time named: to this unverified phone that is an availability claim of its own, W4 final check L6)
+    const a = assistant([simText('We have free times this week.'), simText('We have open times this week.')], {}, [fail('promise'), pass()])
     await inbound(maria(), 'Any time today?')
     expect(await a.turn(maria())).toMatchObject({ status: 'replied', handoff: false })
     expect(a.provider.requests).toHaveLength(2)
-    expect((await aiTexts(maria()))[0]!.body).toContain('We have open times at 2 PM and 4 PM today.')
+    expect((await aiTexts(maria()))[0]!.body).toContain('We have open times this week.')
     expect((await conversationOf(maria()))!.handoff_state).not.toBe('open')
   })
 
@@ -490,7 +491,8 @@ describe('the policy judge in a turn (design 3c, layer 3)', () => {
     ['a throttled call, twice', { error: 'throttled' }, 'judge:ai:throttled', 2],
     ['a provider error, twice', { error: 'unavailable' }, 'judge:ai:unavailable', 2],
     ['an answer that is not the JSON', simText('Looks fine to me.'), 'judge:unparseable', 1],
-    ['a cut answer', simText('{"ok":tr', { stopReason: 'max_tokens' }), 'judge:stop:max_tokens', 1],
+    // W4 final check L4: a cut answer is asked once more for a shorter reason (2 calls); cut again, it fails closed
+    ['a cut answer', simText('{"ok":tr', { stopReason: 'max_tokens' }), 'judge:stop:max_tokens', 2],
   ]
   for (const [what, step, error, calls] of closed) {
     it(`the judge fails closed on ${what}: no reply, the fallback and a handoff`, async () => {
@@ -546,7 +548,7 @@ describe('the policy judge in a turn (design 3c, layer 3)', () => {
       { text: expect.stringMatching(/^SHOP FACTS/), cache: true },
       { text: JUDGE_ACTION_RULE, cache: true },
     ])
-    expect(req).toMatchObject({ maxTokens: 120, temperature: 0, toolChoice: 'none' })
+    expect(req).toMatchObject({ maxTokens: 256, temperature: 0, toolChoice: 'none' })
     const message = unkeyed(JSON.stringify(req.messages))
     expect(message).toContain(`Hi Maria! ${TRUSTED_OPEN}Signature Hand Wash`)
     expect(message).toContain(`${TRUSTED_OPEN}[link]${TRUSTED_CLOSE} ${TRUSTED_OPEN}${SAFETY_LINE}${TRUSTED_CLOSE}`)

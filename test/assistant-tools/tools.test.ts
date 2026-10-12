@@ -214,6 +214,9 @@ describe('check_availability', () => {
         closed: false,
         hasOpenTimes: true,
         bookingLink: '{link1}',
+        // W4 final check L2: the parts of the day with open times (for the judge's record; the model is given no times)
+        openParts: expect.arrayContaining(['morning']),
+        partOfDay: 'morning',
       })
       expect(d).not.toHaveProperty('times')
       expect(JSON.stringify(d)).not.toMatch(/startMin|\d{1,2}:\d\d/)

@@ -87,6 +87,12 @@ export type GuardProblem =
   | 'action_claim'
   /** The model's own notes in the text: "the client" in the third person, a self-correction, a recited writing rule. */
   | 'meta'
+  /**
+   * W4 final check L6: for a phone the server gives no open times (not verified, or in-chat booking off), a time named as open or
+   * available, a day or part of a day named so with no check_availability result on the record, or "you're verified" while the
+   * phone is not.
+   */
+  | 'unverified_claim'
 
 /** Problems only a rewrite can fix; a reply that still has one after the rewrite becomes the fallback. */
 export const HARD_PROBLEMS: ReadonlySet<GuardProblem> = new Set(['empty', 'unknown_placeholder', 'placement', 'money', 'digits', 'secret', 'url', 'meta'])
@@ -150,6 +156,14 @@ export interface GuardInput {
    * rewrite is the policy judge's, which reads the server's record of what was done and the client's visits.
    */
   checkActionClaims?: boolean
+  /**
+   * W4 final check L6: the phone is given no open times in the chat (not verified, or in-chat booking off): a clock time named as
+   * open, available or working is a claim the server cannot back; a day or a part of a day named so is one unless check_availability
+   * ran for it (`dayChecked`: a result in this turn or earlier in the conversation; the judge reads which day). Unset: not checked.
+   */
+  checkAvailabilityClaims?: { dayChecked: boolean } | null
+  /** W4 final check L6: false while the phone is not verified: "you're verified" is a false claim. Unset: not checked. */
+  phoneVerified?: boolean
 }
 
 /** Markdown and list syntax out, one line; a line break that ends a line without punctuation becomes a full stop (a clause end). */
@@ -775,6 +789,15 @@ const CLAIM_EXCEPT =
  */
 const META = new RegExp(
   [
+    // W4 final check L5: its own instructions, tools, FAQ or intake ("The FAQ doesn't mention a waiting area or wifi, so I can only
+    // say ...", seeded 2 x2-amenity-waiting-wifi: it passed the judge) and its own plan ("I should ask their name")
+    "\\b(?:the|my)\\s+(?:faqs?|f\\.a\\.q\\.?|intake|instructions?|system\\s+prompt|turn\\s+context|shop\\s+facts|server\\s+record|tool\\s+results?)(?:'s)?\\s+(?:doesn'?t|does\\s+not|don'?t|do\\s+not|says?|said|mentions?|lists?|states?|shows?|has|have|covers?|only|is\\s+silent|isn'?t|returned|gave)\\b",
+    '\\b(?:shop\\s+facts|turn\\s+context|server\\s+record|system\\s+prompt|policy\\s+check|intake\\s+step)\\b',
+    '\\bmy\\s+(?:tools?|instructions?|notes|rules)\\b',
+    '\\baccording\\s+to\\s+(?:the|my)\\s+(?:faqs?|instructions?|intake|tools?|records?|notes|rules)\\b',
+    "(?:^|[.!?:;,]\\s*|\\b(?:so|and|but|now)\\s+)i\\s+(?:should|'ll\\s+now|will\\s+now|need\\s+to\\s+(?:ask|mention|present|pitch|follow|stick|answer\\s+with))\\b(?!\\s+be\\s+able)",
+    '\\b(?:el|la|las|los|mis)\\s+(?:faq|preguntas\\s+frecuentes|instrucciones|herramientas)\\s+(?:no\\s+)?(?:dice|dicen|menciona|mencionan|incluye|incluyen)\\b',
+    '\\b(?:debo|deberia|tengo\\s+que)\\s+(?:preguntar|pedir|mencionar|ofrecer|presentar|responder)\\b',
     "\\b(?:the\\s+(?:client|user)|el\\s+(?:cliente|usuario)|la\\s+(?:clienta|usuaria))(?:'s)?\\s+(?:has|hasn'?t|had|is|isn'?t|was|wasn'?t|wants?|said|asked|did|didn'?t|does|doesn'?t|needs?|seems|may|might|will|would|can|could|no|ya|quiere|dijo|pidio|pregunto|necesita|parece|todavia|aun|aún|tiene|esta|está)\\b",
     '\\blet\\s+me\\s+(?:redo|rewrite|revise|rephrase|try\\s+(?:that\\s+)?again)\\b',
     '\\b(?:plain\\s+text\\s+only|no\\s+emojis?)\\b',
@@ -799,6 +822,51 @@ export function actionClaims(text: string): string[] {
     // that negates nothing ("No problem, you're all set") is no condition (the eval's check found actionClaims skipped it)
     if (CLAIM_EXCEPT.test(s.slice(0, m.index).replace(NEGATION_IDIOMS, ' '))) continue
     out.push(m[0].trim())
+  }
+  return out
+}
+
+// ---- claims an unverified phone cannot have backed (W4 final check L6) -------------------------------------------------------------
+
+const CLOCK = '(?:\\b\\d{1,2}(?::[0-5]\\d)?\\s*(?:a\\.?\\s?m\\b\\.?|p\\.?\\s?m\\b\\.?)|\\b\\d{1,2}:[0-5]\\d\\b|\\bnoon\\b|\\bmidday\\b|\\bmediodia\\b|\\ba\\s+las\\s+\\d{1,2}\\b)'
+const DAYWORD =
+  '\\b(?:(?:mon|tues?|wed(?:nes)?|thu(?:rs?)?|fri|sat(?:ur)?|sun)(?:day)?s?|today|tonight|tomorrow|weekend|morning|afternoon|evening|lunes|martes|miercoles|jueves|viernes|sabado|domingo|hoy|manana|tarde|noche)\\b'
+/** Words that say a time or a day is open: "11 AM is open", "3 PM should work", "Friday morning has openings", "hay espacio". */
+const OPEN_WORDS =
+  /\b(?:open(?:ings?)?|available|availability|free|works?|work|room|spots?|slots?|disponibles?|libres?|espacio|lugar|cupo)\b/i
+/** A sentence that only says what the client can do, gives hours, refuses, asks or is conditional: no claim. */
+const AVAIL_EXCEPT =
+  /\b(?:if|once|after|when|whenever|unless|until|not|no|never|none|nothing|closed?|closes|pick|choose|select|link|page|calendar|hours|you\s+can|you\s+could|let\s+me|i\s+can|we\s+can|check|whatever|whichever|which|any|si|cuando|una\s+vez|elige|escoge|enlace|horario|cerrad[oa]|n't)\b|\bwe(?:'re|\s+are)?\s+open\b|\bopens?\s+(?:at|from|until|till)\b|\bopen\s+(?:from|until|till)\b|\d\s*(?:a\.?m\.?|p\.?m\.?)?\s*(?:to|-|until|till|a)\s*\d/i
+const VERIFIED_CLAIM =
+  /\b(?:you(?:'re|\s+are|'ve\s+been|\s+have\s+been|\s+were)|your\s+(?:phone|number)\s+(?:is|has\s+been|was))\s+(?:now\s+|all\s+|fully\s+|successfully\s+|already\s+)*verified\b|\bverification\s+(?:is\s+|was\s+)?(?:done|complete|completed|went\s+through|worked)\b|\b(?:ya\s+)?(?:estas|quedaste|fuiste|esta)\s+verificad[oa]\b|\bthanks\s+for\s+verifying\b/i
+const VERIFIED_EXCEPT = /\b(?:if|once|after|when|whenever|until|before|as\s+soon\s+as|not|si|cuando|una\s+vez|hasta|despues)\b|n't\b/i
+
+/**
+ * W4 final check L6 (X4 still open: "11 AM is open for both!" and "3 PM should work" to unverified phones with no lookup, "Great,
+ * you're verified Chloe!" with no verify link): what an unverified phone's reply may not claim. `o.availability` set: a clock time
+ * named with an open word (the phone is given no times), and a day or part of a day named so unless `dayChecked`; `o.verified`
+ * false: "you're verified". Questions, conditionals, refusals, hours ("we're open 8 to 6") and what the client can pick are skipped.
+ */
+export function unverifiedClaims(text: string, o: { availability?: { dayChecked: boolean } | null; verified?: boolean }): string[] {
+  const out: string[] = []
+  // "11 a. m." (Spanish) is one clock time, not two sentences
+  const folded = text.normalize('NFD').replace(/\p{M}/gu, '').replace(/[’‘]/g, "'").replace(/\b([ap])\.\s?m\./gi, '$1m')
+  for (const s of folded.split(/(?<=[.!?])\s+|\n+/)) {
+    if (s.trim().endsWith('?')) continue
+    if (o.verified === false) {
+      const m = VERIFIED_CLAIM.exec(s)
+      if (m && !VERIFIED_EXCEPT.test(s.slice(0, m.index).replace(NEGATION_IDIOMS, ' '))) out.push(m[0].trim())
+    }
+    if (!o.availability) continue
+    const open = OPEN_WORDS.exec(s)
+    if (!open || AVAIL_EXCEPT.test(s.replace(NEGATION_IDIOMS, ' '))) continue
+    const time = new RegExp(CLOCK, 'i').exec(s)
+    if (time) {
+      out.push(`${time[0].trim()} … ${open[0]}`)
+      continue
+    }
+    const day = new RegExp(DAYWORD, 'i').exec(s)
+    if (day && !o.availability.dayChecked) out.push(`${day[0]} … ${open[0]}`)
   }
   return out
 }
@@ -842,6 +910,8 @@ export function guardReply(i: GuardInput): GuardVerdict {
     ),
   )
   if (i.checkActionClaims) flag('action_claim', actionClaims(raw))
+  if (i.checkAvailabilityClaims || i.phoneVerified === false)
+    flag('unverified_claim', unverifiedClaims(raw, { availability: i.checkAvailabilityClaims ?? null, ...(i.phoneVerified === false ? { verified: false } : {}) }))
   flag('meta', metaNotes(raw))
   // the form: one question, the length after rendering
   const rendered = toGsm7(renderPlaceholders(text, values))
@@ -869,6 +939,8 @@ export const PROBLEM_HINTS: Record<GuardProblem, string> = {
   questions: 'Ask at most one question per text.',
   too_long: `Keep it under ${MAX_REPLY_CHARS - 20} characters.`,
   meta: 'Write only the text the client reads, to them: never a note about "the client", your reasoning, a correction of your own draft or a rule about how to write.',
+  unverified_claim:
+    'This phone is not verified and the server gave you no open times: never name a time, a day or a part of a day as open, available or working (the booking link shows the open times), and never say they are verified (they are not). Point them to the booking link, or to the verify link to book by text.',
   action_claim:
     'Nothing was booked, moved or cancelled by the server: never say it is booked, confirmed, moved, cancelled, reserved, done or "all set". To book or change it, give the booking link (send_link) or, for a verified phone, propose it and write "{confirm}."; a visit the client already has reads "you have <service> on <day> at <time>".',
 }

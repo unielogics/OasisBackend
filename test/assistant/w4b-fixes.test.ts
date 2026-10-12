@@ -268,6 +268,7 @@ describe('X2/X3: the judge reads the shop facts and the server record', () => {
       'other',
       'facts',
       'action',
+      'meta',
     ])
     expect(parseVerdict('{"reason":"invents a waiting area","category":"facts","ok":false}')).toEqual({
       ok: false,
@@ -290,7 +291,7 @@ describe('X2/X3: the judge reads the shop facts and the server record', () => {
     // a link offered to do it is no claim; pointing to a link texted earlier writes no address (W4b spot check on Bedrock)
     expect(JUDGE_ACTION_RULE).toContain('Not claims: a link or an offer to book, move or cancel')
     expect(JUDGE_RUBRIC).toContain('Pointing to a link the shop texted ("the link I texted you", "the booking link above") writes no address and passes.')
-    expect(JUDGE_RUBRIC).toContain('|facts|action","ok":false}')
+    expect(JUDGE_RUBRIC).toContain('|facts|action|meta","ok":false}')
     const seg = [{ text: 'Yes, there is a waiting area.', trusted: false }]
     const req = judgeRequest(seg, 120, 'abcd1234', {
       facts: 'SHOP FACTS\nBusiness: X',

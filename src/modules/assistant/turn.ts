@@ -34,18 +34,20 @@ import type { Clock } from '../../platform/clock.js'
 import { transaction, type Db, type Tx } from '../../platform/db.js'
 import type { NewId } from '../../platform/ids.js'
 import { getSetting } from '../../platform/settings.js'
-import { bizDayBounds, toBizDate } from '../../platform/time.js'
+import { bizDayBounds, bizWeekday, clockLabel, toBizDate } from '../../platform/time.js'
+import { DAY_ABBR } from '../settings/labels.js'
 import { renderTemplate } from '../messaging/templates/render.js'
 import { hasActiveOptOut } from '../messaging/db/recipients.js'
 import { notifyManagers } from '../messaging/notify.js'
 import type { Actor, SchedulingCtx } from '../scheduling/context.js'
-import { AI_ACTOR_NAME, type AssistantLog, type AssistantQueue, type HandoffRequest, type ShopFactsSource, type ToolContext, type ToolRegistry, type TurnIdentity } from './contract.js'
+import { AI_ACTOR_NAME, type AssistantLog, type AssistantQueue, type HandoffRequest, type ShopFactsSource, type ToolContext, type ToolOutcome, type ToolRegistry, type TurnIdentity } from './contract.js'
 import type { AssistantConfig } from './config.js'
 import { appointmentRefs, loadAppointmentRefs, loadConversation, loadTurnContext, resolveIdentity } from './context.js'
 import { CONFIRM_PLACEHOLDER, factLiterals, openingWindow, placeholderValues, renderShopFacts } from './facts.js'
 import {
   cutAfterFirstQuestion,
   cutAtSentence,
+  sentencesOf,
   guardReply,
   HARD_PROBLEMS,
   isolatePlaceholders,
@@ -70,8 +72,8 @@ import { whenWords } from './tools/common.js'
 import { JUDGE_HINTS, runJudge } from './judge.js'
 import { HANDOFF_SUMMARIES, markUnanswered, openTurnHandoff, recipientOf, sendFallback, type ConversationRef, type HandoffDeps } from './handoff.js'
 import type { AssistantGate, AssistantInbox } from './ports.js'
-import { asksForFree, judgeRewriteInstruction, PROMPT_VERSION, REPLY_NOW_TEXT, STATIC_RULES, renderConversation, renderTurnContext, rewriteInstruction } from './prompt.js'
-import { NON_PROGRESS_TOOLS, offeredTools, runToolRound, toolSpecs } from './tool-runner.js'
+import { asksForFree, declinesPlans, judgeRewriteInstruction, PROMPT_VERSION, REPLY_NOW_TEXT, STATIC_RULES, renderConversation, renderTurnContext, rewriteInstruction } from './prompt.js'
+import { NON_PROGRESS_TOOLS, offeredTools, recordLine, runToolRound, toolSpecs } from './tool-runner.js'
 import { redactText, Transcript } from './transcript.js'
 import './schema.js'
 import '../messaging/schema.js'
@@ -425,18 +427,23 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
   const detected = detectLanguage(freshClient)
   const lang: ConvoLang = detected ?? (isConvoLang(claim.conv.language) ? claim.conv.language : 'en')
   if (detected) await storeLanguage(d.db, conv.id, detected)
+  const loaded = await loadTurnContext(d.db, {
+    resolved,
+    conversationId: conv.id,
+    refs: refRows,
+    actionsEnabled,
+    firstContact: snap.firstContact,
+    now,
+    tz,
+  })
+  // W4 final check L7: "no just book it" (any client text in the window) skips the memberships step and says not to pitch them
+  const declinedPlans = loaded.membership === null && declinesPlans(snap.lines.filter((l) => l.who === 'client').map((l) => l.text))
   const turnContext = {
-    ...(await loadTurnContext(d.db, {
-      resolved,
-      conversationId: conv.id,
-      refs: refRows,
-      actionsEnabled,
-      firstContact: snap.firstContact,
-      now,
-      tz,
-    })),
+    ...loaded,
+    ...(declinedPlans && loaded.intake === 'memberships' ? { intake: loaded.vehicles.length > 0 ? null : ('vehicle' as const) } : {}),
     language: lang,
     ...(asksForFree(freshClient) ? { asksFree: true } : {}),
+    ...(declinedPlans ? { declinedPlans: true } : {}),
   }
   const contextText = renderTurnContext(turnContext)
   const tools = offeredTools(d.registry, actionsEnabled)
@@ -587,6 +594,11 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
 
   let text: string | null = null
   let optedOut = false
+  // a link offered as a question ("Want me to text you a link to join?") is asked once; offered again in the next text it is sent
+  const lastAiOffered = offersLink(snap.lines.filter((l) => l.who === 'ai').at(-1)?.text ?? '')
+  /** W4 final check L7: text the model wrote in the same round as handoff_to_staff ("I can't confirm a free wash, but ..."). */
+  let handoffText: string | null = null
+  let linkNudged = false
   try {
     try {
       for (;;) {
@@ -596,6 +608,10 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
         if (res.stopReason === 'tool_use') {
           const uses = res.message.content.filter((b): b is Extract<AiContentBlock, { type: 'toolUse' }> => b.type === 'toolUse')
           if (final || uses.length === 0) throw new TurnAbort('tool_use_after_reply_now')
+          if (uses.some((u) => u.name === 'handoff_to_staff')) {
+            const said = textOf(res.message).trim()
+            if (said) handoffText = said
+          }
           rounds += 1
           const r = await runToolRound({ db: d.db, newId: d.newId, nowMs }, { registry: d.registry, ctx, uses, round: rounds, seq, actionsEnabled })
           seq = r.seq
@@ -618,6 +634,15 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
         }
         if (res.stopReason !== 'end_turn') throw new TurnAbort(`stop:${res.stopReason}`)
         text = textOf(res.message)
+        // W4 final check L7 (pin-fishing offered a reset link twice and never sent it): a reply that offers a link no tool sent in
+        // this turn goes back to the model ONCE, tools on: send it now or reply without offering it
+        if (!final && !linkNudged && links.size === 0 && tools.some((t) => t.name === 'send_link') && (offersLink(text, { statement: true }) || (offersLink(text) && lastAiOffered))) {
+          linkNudged = true
+          messages.push({ role: 'user', content: [{ type: 'text', text: LINK_NUDGE_TEXT }] })
+          transcript.add({ kind: 'message', message: messages[messages.length - 1]! })
+          text = null
+          continue
+        }
         break
       }
     } catch (e) {
@@ -627,6 +652,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     }
     // the loop ends without a text only after an opt-out
     if (optedOut || text === null) return await finishOptedOut({ usage, model, rounds, stop })
+    if (handoffText) text = withHandoffText(handoffText, text)
 
     // ---- the output guard
     // what the placeholders render to (the current facts; {balance} only after get_balance; the links stay for composeReply)
@@ -652,6 +678,14 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     // may the reply say it is booked, moved, cancelled or "all set"; the judge reads the same record and the client's visits
     const executed = await executedSinceLastReply(d.db, { conversationId: conv.id, turnId, now, tz })
     const actionDone = executed.length > 0
+    // W4 final check L1: the record covers the conversation, not only this turn (links texted earlier, a proposal still waiting,
+    // what earlier turns saved and returned, the verification): "use the link I sent earlier" is true when one was sent
+    const earlier = await conversationRecord(d.db, { locationId: loc, conversationId: conv.id, turnId, phone: conv.phone_e164, now, tz })
+    const verified = state.identity.trust === 'trusted'
+    // a phone the server gives no times in the chat (check_availability returns the booking link instead)
+    const noTimes = !(verified && actionsEnabled)
+    const timesReturned = [...toolRecord, ...earlier.lines].some((l) => /open times for [^:]*: (?!none)/.test(l))
+    const dayChecked = toolRecord.some((l) => l.startsWith('open times for ')) || earlier.availabilityChecked
     const judgeRecord = [
       `Done by the server since the assistant's last text: ${actionDone ? executed.join('; ') : 'nothing (nothing was booked, moved or cancelled)'}.`,
       ...(confirmTexted
@@ -661,9 +695,21 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
         : []),
       // guard polish after W4b-fix: the tool results of this turn (a saved vehicle is no false claim; open times only as returned)
       `What the server did and returned in this turn: ${toolRecord.length > 0 ? toolRecord.join('; ') : 'nothing'}.`,
-      ...(toolRecord.some((l) => l.startsWith('open times for ') && !l.includes(': none'))
+      `Earlier in this conversation (last 24 hours): ${earlier.lines.length > 0 ? earlier.lines.join('; ') : 'nothing'}.`,
+      `Links the server texted to this number in the last 24 hours: ${earlier.links.length > 0 ? earlier.links.join('; ') : 'none'}.`,
+      `A proposal waiting for the client's reply number: ${earlier.pending ?? 'none'}.`,
+      ...(timesReturned
         ? []
-        : ['Open times the server returned in this turn: none (no time may be named as open or available; a day only as this record says).']),
+        : [
+            noTimes
+              ? 'Open times the server returned: none (this phone is given no times in the chat: no time may be named as open or available; a day or a part of a day only as this record says).'
+              : 'Open times the server returned: none (no time may be named as open or available; a day only as this record says).',
+          ]),
+      verified
+        ? `Verified phone: yes${state.identity.trustUntil ? `, until ${toBizDate(state.identity.trustUntil, tz)}` : ''}.`
+        : 'Verified phone: no (the client has not verified this phone: never say they are verified).',
+      `The client's name on file: ${turnContext.firstName ?? 'none'}.`,
+      `Vehicles on file: ${turnContext.vehicles.length > 0 ? turnContext.vehicles.join('; ') : 'none'}.`,
       `The client's visits on file: ${turnContext.appointments.length > 0 ? turnContext.appointments.map((a) => a.label).join('; ') : 'none'}.`,
       // the membership the model reads in its turn context ("Gold, active, 2 washes left this cycle"): a count from it is no invented fact
       `The client's membership: ${turnContext.membership ?? 'none'}.`,
@@ -721,6 +767,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
         model: r.model,
         latencyMs: r.latencyMs,
         ...(attempts > 1 ? { attempts } : {}),
+        ...(r.shortened ? { shortened: true } : {}),
         ...(o.kind === 'error' ? { error: o.error } : { category: o.verdict.category, reason: o.verdict.reason }),
       }
       transcript.add({ kind: 'judge', ...entry })
@@ -773,6 +820,9 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
           maxChars,
           // one rewrite for a claim that something was done when nothing was (a claim left after it is the judge's)
           checkActionClaims: !actionDone && !rewriteUsed,
+          // W4 final check L6: an unverified phone's open times and "you're verified" (one rewrite; then the judge's)
+          checkAvailabilityClaims: noTimes && !rewriteUsed ? { dayChecked } : null,
+          ...(!verified && !rewriteUsed ? { phoneVerified: false } : {}),
         })
         transcript.add({ kind: 'guard', verdict: v.kind, ...(v.kind === 'fix' ? { problems: v.problems, ...(v.words.length > 0 ? { words: v.words } : {}) } : {}) })
         if (v.kind === 'ok') {
@@ -803,7 +853,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
         const hard = v.problems.filter((p) => HARD_PROBLEMS.has(p))
         if (
           hard.length > 0 ||
-          ((v.problems.includes('questions') || v.problems.includes('action_claim')) && !rewriteUsed)
+          ((v.problems.includes('questions') || v.problems.includes('action_claim') || v.problems.includes('unverified_claim')) && !rewriteUsed)
         ) {
           // the rewrite still trips only the placement rule: the server isolates the placeholders itself, once (each its own sentence)
           if (rewriteUsed && !isolateUsed && hard.length === 1 && hard[0] === 'placement') {
@@ -1047,4 +1097,102 @@ export async function executedSinceLastReply(
     const what = r.kind === 'book' ? 'booked' : r.kind === 'reschedule' ? 'moved' : 'cancelled'
     return `${what}: ${p.serviceName ?? 'a visit'}${when}`
   })
+}
+
+/** W4 final check L7: what the model is told when its reply offers a link that no tool sent in this turn. */
+export const LINK_NUDGE_TEXT =
+  'Your reply offers a link but none was sent in this turn. If the link helps, call send_link now (kind pin for a PIN reset, calendar to book, verify to book by text) and write your reply with its placeholder; otherwise write the reply again without offering a link.'
+
+/** A reply that offers to send a link ("I can send you a link to set a new one", "Want me to text you the booking link?"). */
+const OFFERS_LINK =
+  /\b(?:i\s+can|i\s+could|i'?ll|i\s+will|i\s+would|want\s+me\s+to|shall\s+i|should\s+i|would\s+you\s+like(?:\s+me\s+to)?|let\s+me|happy\s+to|glad\s+to)\s+(?:send|text|get)\b[^.!?]{0,40}\blinks?\b|\b(?:would\s+you\s+like|do\s+you\s+want|want)\s+(?:a|the|another|your)\s+(?:\w+\s+){0,2}links?\b|\b(?:te\s+)?(?:puedo|quieres\s+que\s+te)\s+(?:enviar|mandar|envie|mande)\b[^.!?]{0,30}\benlace\b/i
+
+/**
+ * Whether the text offers to send a link; `statement`: only an offer that is not a question ("I can send you a link to set a new
+ * one", not "Want me to text you a link to join?", which may wait for the client's yes once).
+ */
+export function offersLink(text: string, o: { statement?: boolean } = {}): boolean {
+  const t = text.normalize('NFD').replace(/\p{M}/gu, '').replace(/[’‘]/g, "'")
+  if (!o.statement) return OFFERS_LINK.test(t)
+  return sentencesOf(t).some((s) => !s.trim().endsWith('?') && OFFERS_LINK.test(s))
+}
+
+/**
+ * W4 final check L7 (inject-you-are-now): the text written in the same round as handoff_to_staff ("I can't confirm a free wash, but
+ * a team member will text you back shortly.") goes out ahead of the final round's text; a sentence of the final text it already holds,
+ * or a second "a team member will text you back", is dropped.
+ */
+export function withHandoffText(before: string, after: string): string {
+  const norm = (x: string): string => x.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, '').replace(/\s+/g, ' ').trim()
+  const b = norm(before)
+  const TEAM = /\b(?:text you back|will text you|reach out|get back to you|te escribir|te contactar|te respond)/i
+  const kept = sentencesOf(after.trim()).filter((x) => {
+    const n = norm(x)
+    return n !== '' && !b.includes(n) && !(TEAM.test(x) && TEAM.test(before))
+  })
+  return [before.trim(), ...kept].join(' ').trim()
+}
+
+/**
+ * W4 final check L1: the conversation part of the judge's server record. `links`: what the server texted to this number in the last
+ * 24 hours (client_links: kind and when, whoever sent it); `pending`: a proposal still waiting for its reply number; `lines`: what
+ * earlier turns of this conversation (24 hours) saved and the open times they got (tool-runner.ts recordLine over the stored
+ * results); `availabilityChecked`: check_availability answered in an earlier turn.
+ */
+export async function conversationRecord(
+  db: Db,
+  o: { locationId: string; conversationId: string; turnId: string; phone: string; now: Date; tz: string },
+): Promise<{ links: string[]; pending: string | null; lines: string[]; availabilityChecked: boolean }> {
+  const since = new Date(o.now.getTime() - 86_400_000)
+  const when = (at: Date): string => `${DAY_ABBR[bizWeekday(toBizDate(at, o.tz))]} ${clockLabel(at, o.tz)}`
+  const linkRows = await db
+    .selectFrom('client_links')
+    .select(['kind', 'created_at'])
+    .where('location_id', '=', o.locationId)
+    .where('phone_e164', '=', o.phone)
+    .where('created_at', '>', since)
+    .where('created_at', '<=', o.now)
+    .orderBy('created_at')
+    .execute()
+  const links = linkRows.map((l) => `a ${l.kind === 'book_again' ? 'book-again' : l.kind} link (${when(l.created_at)})`)
+  const pendingRow = await db
+    .selectFrom('assistant_pending_actions')
+    .select(['kind', 'payload'])
+    .where('conversation_id', '=', o.conversationId)
+    .where('state', '=', 'pending')
+    .where('expires_at', '>', o.now)
+    .orderBy('created_at', 'desc')
+    .limit(1)
+    .executeTakeFirst()
+  let pending: string | null = null
+  if (pendingRow) {
+    const p = (typeof pendingRow.payload === 'string' ? JSON.parse(pendingRow.payload) : pendingRow.payload) as { serviceName?: string; date?: string; startMin?: number }
+    const at = p.date && typeof p.startMin === 'number' ? `, ${whenWords(p.date, p.startMin, toBizDate(o.now, o.tz))}` : ''
+    pending = `${pendingRow.kind === 'book' ? 'book' : pendingRow.kind === 'reschedule' ? 'move' : 'cancel'}: ${p.serviceName ?? 'a visit'}${at}`
+  }
+  const calls = await db
+    .selectFrom('assistant_tool_calls as c')
+    .innerJoin('assistant_turns as t', 't.id', 'c.turn_id')
+    .select(['c.tool', 'c.output', 't.started_at'])
+    .where('t.conversation_id', '=', o.conversationId)
+    .where('t.id', '!=', o.turnId)
+    .where('t.started_at', '>', since)
+    .where('c.outcome', '=', 'ok')
+    .where('c.tool', 'in', ['set_my_name', 'set_my_vehicle', 'check_availability'])
+    .orderBy('t.started_at')
+    .orderBy('c.seq')
+    .execute()
+  const lines: string[] = []
+  let availabilityChecked = false
+  for (const c of calls) {
+    const out = (typeof c.output === 'string' ? JSON.parse(c.output) : c.output) as Record<string, unknown> | null
+    if (!out || out.ok !== true) continue
+    const data = Object.fromEntries(Object.entries(out).filter(([k]) => k !== 'ok'))
+    const line = recordLine(c.tool, { ok: true, data } as ToolOutcome)
+    if (!line) continue
+    if (c.tool === 'check_availability') availabilityChecked = true
+    const entry = `${line} (${when(c.started_at)})`
+    if (!lines.includes(entry)) lines.push(entry)
+  }
+  return { links, pending, lines: lines.slice(-8), availabilityChecked }
 }

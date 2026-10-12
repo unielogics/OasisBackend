@@ -172,7 +172,7 @@ describe('P2: the action-claim rule’s false blocks', () => {
         ok: true,
         data: { service: 'Signature Hand Wash', dateLabel: 'Sat Oct 17', times: [{ time: '9:00 AM', startMin: 540 }, { time: '9:30 AM', startMin: 570 }], moreTimes: 4 },
       }),
-    ).toBe('open times for Signature Hand Wash on Sat Oct 17: 9:00 AM, 9:30 AM (and 4 later)')
+    ).toBe('open times for Signature Hand Wash on Sat Oct 17: 9:00 AM, 9:30 AM (morning) (and 4 later)')
     expect(recordLine('check_availability', { ok: true, data: { service: 'Signature Hand Wash', dateLabel: 'Sat Oct 17', bookingLink: '{link1}', hasOpenTimes: true } })).toBe(
       'open times for Signature Hand Wash on Sat Oct 17: none given to this phone (it picks a time on the booking page); the day has open times; texted the client a calendar link to pick a time',
     )
@@ -278,7 +278,7 @@ describe('P4/P5: availability only as returned; handoffs end without a question;
     expect(STATIC_RULES).toContain('Name a day or time as open or available ONLY when check_availability returned it in this turn')
     expect(STATIC_RULES).toContain('"Saturday at 9 AM should be available" is wrong')
     expect(JUDGE_ACTION_RULE).toContain(
-      'or names a day or time as open or available for the client when <server-record> does not list it among the open times the server returned in this turn',
+      'or names a day, a part of a day or a time as open, available or working for the client when <server-record> does not list it among the open times the server returned',
     )
   })
 

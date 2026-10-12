@@ -1,5 +1,5 @@
 // The output guard v4, layer 3: the policy judge (ADR 0160, design section 3c) with the SimAiProvider: its request (the fixed,
-// cached rubric, the trusted-segment markers, temperature 0, at most 120 tokens, no tools), its strict JSON verdict, and every way
+// cached rubric, the trusted-segment markers, temperature 0, at most 256 tokens, no tools), its strict JSON verdict, and every way
 // it fails closed (an error, a timeout, an unknown stop, an answer that is not the JSON). The turn's use of it (rewrite, fallback,
 // handoff, cost, the stored row) is in conversations.test.ts.
 import { describe, expect, it } from 'vitest'
@@ -31,12 +31,12 @@ const segmentsOf = (text: string) => {
 }
 
 describe('the judge request', () => {
-  it('the fixed rubric (cached), the rendered reply with the trusted segments marked, temperature 0, 120 tokens, no tools', () => {
+  it('the fixed rubric (cached), the rendered reply with the trusted segments marked, temperature 0, 256 tokens, no tools', () => {
     const req = judgeRequest(segmentsOf('Hi! {price:signature-hand-wash}. Book here: {link1}'), JUDGE_MAX_TOKENS, '0a1b2c3d')
     expect(req.system).toEqual([{ text: JUDGE_RUBRIC, cache: true }])
     expect(req).toMatchObject({ toolChoice: 'none', maxTokens: JUDGE_MAX_TOKENS, temperature: 0 })
     expect(req.tools).toBeUndefined()
-    expect(JUDGE_MAX_TOKENS).toBe(120)
+    expect(JUDGE_MAX_TOKENS).toBe(256)
     expect(textOf(req.messages[0]!)).toBe(
       '<message key="0a1b2c3d" trusted-parts="2">\nHi! ⟦0a1b2c3d⟧Signature Hand Wash starts at $45 for members, $54 otherwise⟦/0a1b2c3d⟧. Book here: ⟦0a1b2c3d⟧[link]⟦/0a1b2c3d⟧\n</message>\n<own-text>\nHi! …. Book here: …\n</own-text>',
     )
@@ -65,7 +65,7 @@ describe('the judge request', () => {
     expect(JUDGE_ACTION_RULE).toContain('what happens or can be done once they verify or confirm ("once you verify, I can book 9 AM for you")')
     // Bedrock gets the temperature and the cache point after the rubric
     const input = toConverseInput(req, { modelId: 'us.anthropic.claude-sonnet-4-6' })
-    expect(input.inferenceConfig).toEqual({ maxTokens: 120, temperature: 0, stopSequences: ['}\n'] })
+    expect(input.inferenceConfig).toEqual({ maxTokens: 256, temperature: 0, stopSequences: ['}\n'] })
     expect(req.stopSequences).toEqual([JUDGE_STOP])
     expect(input.system).toEqual([{ text: JUDGE_RUBRIC }, { cachePoint: { type: 'default' } }])
     expect(input.toolConfig).toBeUndefined()
@@ -113,7 +113,8 @@ describe('one judge call with the simulator', () => {
     expect((await run([simText('{"ok":false,"category":"price","reason":"an amount"}')])).outcome).toEqual({ kind: 'fail', verdict: { ok: false, category: 'price', reason: 'an amount' } })
     expect((await run([{ error: 'throttled' }])).outcome).toEqual({ kind: 'error', error: 'ai:throttled' })
     expect((await run([simText('{"ok":true,"category":"none","reason":""}', { delayMs: 500 })], 50)).outcome).toEqual({ kind: 'error', error: 'timeout' })
-    expect((await run([simText('{"ok":true', { stopReason: 'max_tokens' })])).outcome).toEqual({ kind: 'error', error: 'stop:max_tokens' })
+    // W4 final check L4: a cut answer is asked once more for a shorter reason; cut twice, it fails closed
+    expect((await run([simText('{"ok":true', { stopReason: 'max_tokens' }), simText('{"ok":true', { stopReason: 'max_tokens' })])).outcome).toEqual({ kind: 'error', error: 'stop:max_tokens' })
     // stopped after its line (W4a): the stop sequence's "}" is put back, and only that first object counts
     expect((await run([simText('{"reason":"a greeting","category":"none","ok":true', { stopReason: 'stop_sequence' })])).outcome).toEqual({
       kind: 'pass',
@@ -129,6 +130,6 @@ describe('one judge call with the simulator', () => {
   })
 
   it('a hint per fail category for the one rewrite', () => {
-    expect(Object.keys(JUDGE_HINTS).sort()).toEqual(['action', 'facts', 'link_or_phone', 'other', 'price', 'promise', 'secret'])
+    expect(Object.keys(JUDGE_HINTS).sort()).toEqual(['action', 'facts', 'link_or_phone', 'meta', 'other', 'price', 'promise', 'secret'])
   })
 })

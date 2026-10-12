@@ -145,6 +145,10 @@ export async function runToolRound(
   return { ...out, seq }
 }
 
+const PARTS = ['morning', 'afternoon', 'evening'] as const
+/** The part of the day a start time falls in (tools/common.ts partOfDayOf: before noon, before 5 PM, after). */
+const partOf = (startMin: number): (typeof PARTS)[number] => (startMin < 12 * 60 ? 'morning' : startMin < 17 * 60 ? 'afternoon' : 'evening')
+
 const str = (x: unknown): string | null => (typeof x === 'string' && x.trim() !== '' ? oneLine(x, 60) : null)
 const quoted = (x: unknown): string => `"${(str(x) ?? '').replace(/"/g, "'")}"`
 
@@ -178,17 +182,33 @@ export function recordLine(tool: string, outcome: ToolOutcome): string | null {
       return 'noted what the client is interested in'
     case 'check_availability': {
       const what = `${str(d.service) ?? 'the service'} on ${str(d.dateLabel) ?? str(d.date) ?? 'that day'}`
+      const asked = PARTS.find((p) => p === d.partOfDay) ?? null
       if ('bookingLink' in d) {
         const link = typeof d.bookingLink === 'string' ? '; texted the client a calendar link to pick a time' : d.linkAlreadyTexted ? '; the calendar link texted earlier is where they pick a time' : ''
-        const day = d.closed ? '; the shop is closed that day' : d.hasOpenTimes === true ? '; the day has open times' : d.hasOpenTimes === false ? '; the day has no open times' : ''
-        return `open times for ${what}: none given to this phone (it picks a time on the booking page)${day}${link}`
+        // W4 final check L2: the part of the day asked about, and every part that has open times ("Friday morning has openings")
+        const parts = Array.isArray(d.openParts) ? PARTS.filter((p) => (d.openParts as unknown[]).includes(p)) : null
+        const which = asked ? `the ${asked}` : 'the day'
+        const partsText = parts && (asked || parts.length > 0) ? `; parts of that day with open times: ${parts.length > 0 ? parts.join(', ') : 'none'}` : ''
+        const day = d.closed ? '; the shop is closed that day' : d.hasOpenTimes === true ? `; ${which} has open times${partsText}` : d.hasOpenTimes === false ? `; ${which} has no open times${partsText}` : ''
+        return `open times for ${what}${asked ? ` (${asked})` : ''}: none given to this phone (it picks a time on the booking page)${day}${link}`
       }
-      const times = Array.isArray(d.times) ? d.times.map((t) => str((t as { time?: unknown }).time)).filter((t): t is string => t !== null) : []
-      if (times.length > 0) return `open times for ${what}: ${times.join(', ')}${typeof d.moreTimes === 'number' && d.moreTimes > 0 ? ` (and ${d.moreTimes} later)` : ''}`
+      // the times with their part of the day: "9:00 AM, 9:30 AM (morning); 1:00 PM (afternoon)"
+      const list = Array.isArray(d.times) ? d.times.map((t) => t as { time?: unknown; startMin?: unknown }).filter((t) => str(t.time) !== null) : []
+      const runs: { part: string | null; times: string[] }[] = []
+      for (const t of list) {
+        // the part of the day each time is in (not repeated when the check asked for one part)
+        const part = !asked && typeof t.startMin === 'number' ? partOf(t.startMin) : null
+        const time = str(t.time) ?? ''
+        const last = runs.at(-1)
+        if (last && last.part === part) last.times.push(time)
+        else runs.push({ part, times: [time] })
+      }
+      const groups = runs.map((r) => `${r.times.join(', ')}${r.part ? ` (${r.part})` : ''}`)
+      if (groups.length > 0) return `open times for ${what}${asked ? ` (${asked})` : ''}: ${groups.join('; ')}${typeof d.moreTimes === 'number' && d.moreTimes > 0 ? ` (and ${d.moreTimes} later)` : ''}`
       const next = Array.isArray(d.nextOpenDates)
         ? d.nextOpenDates.map((n) => { const x = n as { dateLabel?: unknown; firstTime?: unknown }; return `${str(x.dateLabel) ?? '?'} from ${str(x.firstTime) ?? '?'}` })
         : []
-      return `open times for ${what}: none${d.closed ? ' (closed)' : ''}${next.length > 0 ? `; next open: ${next.join(', ')}` : ''}`
+      return `open times for ${what}${asked ? ` (${asked})` : ''}: none${d.closed ? ' (closed)' : ''}${next.length > 0 ? `; next open: ${next.join(', ')}` : ''}`
     }
     default:
       return null

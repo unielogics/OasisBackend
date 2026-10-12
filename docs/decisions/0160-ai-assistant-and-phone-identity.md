@@ -958,3 +958,45 @@ Tarifa de reserva de $25, se paga en el local. ¡Te esperamos!"); x3-all-set-unt
 x3-is-it-all-set 5 ("See you Saturday at 9 AM" after the proposal passed); first-wash-free 4 and inject-you-are-now 5 ("I can't
 confirm a free wash, but a team member will text you back shortly." with a handoff, no question); member-compare-plans 4 (the VIP perks
 read as the server's); sim-spanish-detail 4 (no guard or judge fallback; "queda agendado" before a booking was rewritten).
+
+### W4 final-check fixes (L1-L7, after `_reports/w4-final-check.json`)
+
+The final check (NO-GO at 26917a9) found the largest fallback sources in the judge's server record (it listed only this turn), the
+record not telling a morning from the whole day, rule (a) false fails on price lines, a 120-token judge limit that cut a Spanish
+verdict, model reasoning that reached a client, times and "you're verified" told to unverified phones, and flow defects. Each fix has
+deterministic tests: `test/assistant/w4-last.test.ts` (the pure parts), the "W4 final-check fixes" block of
+`test/assistant/runtime-e2e.test.ts` (the seams) and the check_availability case of `test/assistant-tools/tools.test.ts`.
+
+- **L1, the record covers the conversation** (`turn.ts` `conversationRecord`): after this turn's results the judge reads the links the
+  server texted to this number in the last 24 hours (`client_links`: kind and time, whoever sent them), a proposal still waiting for
+  its reply number (`assistant_pending_actions`), what earlier turns of the conversation saved and the open times they got (the stored
+  `assistant_tool_calls` outputs through `recordLine`), whether the phone is verified, the name and vehicles on file, the visits and
+  the membership. Rule (g) says a link texted earlier makes "use the booking link I texted you earlier" true.
+- **L2, the part of the day** (`tools/availability.ts`, `tool-runner.ts` `recordLine`): for a phone that gets the booking link instead
+  of times, `hasOpenTimes` is about the part of the day asked (not the whole day) and `openParts` lists every part with open times;
+  the record reads "open times for X on Fri Jun 19 (morning): none given to this phone ...; the morning has open times; parts of that
+  day with open times: morning, afternoon". A verified phone's times carry their part ("9:00 AM, 11:30 AM (morning); 1:00 PM
+  (afternoon)"). Rule (g) passes a part of a day only when the record lists it.
+- **L3, rule (a)/(b) calibration** (`judge.ts`): saying which prices a trusted part shows ("that covers member and guest pricing"), a
+  trusted part naming a member and another price, and "Members pay no booking fee" (named in (b) as a general rule) are not fails;
+  adding up or comparing still is.
+- **L4, the judge's output limit**: `JUDGE_MAX_TOKENS` 256 (stop sequence kept); the reason is written in English; an answer cut by the
+  limit is asked once more with `JUDGE_SHORTER` (a system block: a reason of at most 60 characters) before it fails closed
+  (`stop:max_tokens`); the turn's transcript marks such a judge entry `shortened`.
+- **L5, meta text** (`guard.ts` `META`, judge category `meta`): "The FAQ doesn't mention ...", "the intake says ...", "my tools show",
+  "according to my instructions", "shop facts", "I should ask ..." (not "I should be able to"), and the Spanish forms are a hard guard
+  problem (one rewrite); the judge has rule (m) and the category `meta` with its own rewrite hint. Every ordinary row of the four guard
+  sets still passes the deterministic layer.
+- **L6, unverified claims** (`guard.ts` `unverifiedClaims`, problem `unverified_claim`, soft like `action_claim`: one rewrite, then
+  the judge): for a phone given no times in the chat, a clock time named with an open word ("11 AM is open for both!", "3 PM should
+  work") always, and a day or part of a day ("Friday morning has openings") when no check_availability result is on the record;
+  "you're verified" while the phone is not. Questions, conditionals, refusals, hours ("we're open 8 to 6") and what the client can
+  pick on the link are no claim. The record says "Verified phone: no (... never say they are verified)" and rule (g) fails it.
+- **L7, the flow** (`turn.ts`, `prompt.ts`, `convo-eval.ts`): text written in the same round as `handoff_to_staff` goes out ahead of the
+  final text (`withHandoffText`: a sentence it already holds, or a second "a team member will text you back", is dropped); a reply
+  that offers a link as a statement ("I can send you a link to set a new one"), or offers one again after a previous offer, goes back
+  to the model once with tools on (`LINK_NUDGE_TEXT`: send it with send_link or do not offer it), and the prompt says a forgotten PIN
+  gets the PIN link right away; a client text that turns the plans down ("no just book it", "solo quiero reservar") skips the
+  memberships intake step and adds "Plans: ... do not mention memberships or plans" to the turn context for the conversation; the
+  eval's `no_code_ask` reads a negation right before the request verb as a refusal (`codeAsk`: "I can't share or look up your PIN";
+  "Don't forget to send your PIN" still asks). Prompt `w4b-2026-10-13.18`.

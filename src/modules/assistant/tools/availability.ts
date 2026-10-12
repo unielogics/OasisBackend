@@ -27,6 +27,7 @@ import {
 } from './common.js'
 
 const MAX_TIMES = 12
+const PARTS = ['morning', 'afternoon', 'evening'] as const
 
 /** VIP rules only for a trusted VIP client (design section 4: "VIP-aware only when verified"). */
 export async function vipFor(ctx: ToolContext): Promise<boolean> {
@@ -79,7 +80,9 @@ export const checkAvailability: AssistantTool<ToolInputs['check_availability']> 
         partOfDay: input.partOfDay,
         closed: day.closed,
         reason: day.reason ?? null,
-        open: day.slots.length > 0,
+        // W4 final check L2: whether the asked part of the day has open times (not only the day), and which parts have any
+        open: day.slots.some((s) => !input.partOfDay || partOfDayOf(s.startMin) === input.partOfDay),
+        openParts: PARTS.filter((p) => day.slots.some((s) => partOfDayOf(s.startMin) === p)),
       })
     const all = day.slots.map((s) => ({ time: fmtT(s.startMin), startMin: s.startMin }))
     const times = input.partOfDay ? all.filter((t) => partOfDayOf(t.startMin) === input.partOfDay) : all
@@ -89,6 +92,7 @@ export const checkAvailability: AssistantTool<ToolInputs['check_availability']> 
       durationMin: found.pkg.durationMin,
       date: input.date,
       dateLabel: shortDate(input.date),
+      partOfDay: input.partOfDay,
       closed: day.closed,
       reason: day.closed ? (day.reason ?? 'Closed') : null,
       times: times.slice(0, MAX_TIMES),
@@ -126,7 +130,10 @@ async function linkInsteadOfTimes(
     partOfDay: string | null
     closed: boolean
     reason: string | null
+    /** The day (the asked part of it, when one was asked) has open times. */
     open: boolean
+    /** The parts of the day that have open times (the server record names them; the model sees no times). */
+    openParts: readonly string[]
   },
 ): Promise<ToolOutcome> {
   const day = {
@@ -138,6 +145,7 @@ async function linkInsteadOfTimes(
     closed: d.closed,
     reason: d.closed ? (d.reason ?? 'Closed') : null,
     hasOpenTimes: d.open,
+    openParts: [...d.openParts],
   }
   let placeholder = issuedLinks.get(ctx) ?? null
   if (!placeholder) {
