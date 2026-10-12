@@ -5,6 +5,7 @@ import type { FastifyRequest } from 'fastify'
 import { access } from '../../../http/access.js'
 import { auditContextOf } from '../../../http/authorizer.js'
 import type { AppInstance } from '../../../http/types.js'
+import type { z } from '../../../http/zod.js'
 import { SQUARE_EVENT_TYPES } from '../../../integrations/square/webhook.js'
 import * as audit from '../../../platform/audit.js'
 import { AppError } from '../../../platform/errors.js'
@@ -15,6 +16,25 @@ import { squareStatus } from '../status.js'
 import { SquareIntegrationView, SquareTestResult } from './schemas.js'
 
 const TAG = 'square'
+
+/** The body of GET /integrations/square (also the `square` block of GET /settings/billing). */
+export async function squareIntegrationView(app: AppInstance, locationId: string): Promise<z.infer<typeof SquareIntegrationView>> {
+  const now = app.clock.now()
+  const state = await currentSquareState(app.db, locationId, app.env)
+  const test = state?.last_test ?? null
+  const rec = state?.last_reconcile ?? null
+  return {
+    status: await squareStatus(app.db, app.env, now),
+    eventTypes: [...SQUARE_EVENT_TYPES],
+    lastTest: test && state?.last_test_at ? { ok: test.ok, at: state.last_test_at.toISOString(), checks: test.checks as never } : null,
+    catchup: {
+      watermark: state?.watermark?.toISOString() ?? null,
+      lastRunAt: state?.last_catchup_at?.toISOString() ?? null,
+      lastEvents: state?.last_catchup_events ?? 0,
+    },
+    reconcile: rec && state?.last_reconcile_at ? { at: state.last_reconcile_at.toISOString(), ...rec } : null,
+  }
+}
 
 export function registerSquareRoutes(app: AppInstance): void {
   const loc = (req: FastifyRequest): string => {
@@ -34,24 +54,7 @@ export function registerSquareRoutes(app: AppInstance): void {
         response: { 200: SquareIntegrationView },
       },
     },
-    async (req) => {
-      const locationId = loc(req)
-      const now = app.clock.now()
-      const state = await currentSquareState(app.db, locationId, app.env)
-      const test = state?.last_test ?? null
-      const rec = state?.last_reconcile ?? null
-      return {
-        status: await squareStatus(app.db, app.env, now),
-        eventTypes: [...SQUARE_EVENT_TYPES],
-        lastTest: test && state?.last_test_at ? { ok: test.ok, at: state.last_test_at.toISOString(), checks: test.checks as never } : null,
-        catchup: {
-          watermark: state?.watermark?.toISOString() ?? null,
-          lastRunAt: state?.last_catchup_at?.toISOString() ?? null,
-          lastEvents: state?.last_catchup_events ?? 0,
-        },
-        reconcile: rec && state?.last_reconcile_at ? { at: state.last_reconcile_at.toISOString(), ...rec } : null,
-      }
-    },
+    async (req) => squareIntegrationView(app, loc(req)),
   )
 
   app.post(
