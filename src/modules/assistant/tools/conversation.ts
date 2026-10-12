@@ -197,11 +197,24 @@ async function retext(ctx: ToolContext, input: ToolInputs['send_link']): Promise
   if (!tokenKey) return null
   try {
     return await transaction(ctx.db, async (tx) => {
-      const appointmentId = input.appointmentRef && input.kind === 'calendar' ? ((await ownAppointment(tx, ctx, input.appointmentRef))?.id ?? null) : null
+      // the binding the new link would have had (as in issueLinkOutcome): only a link bound to exactly that is texted again
+      let visitId: string | null = null
+      if (input.appointmentRef && (input.kind === 'calendar' || input.kind === 'pay')) {
+        visitId = (await ownAppointment(tx, ctx, input.appointmentRef))?.id ?? null
+        if (!visitId) return null
+      }
+      const invoiceId = input.kind === 'pay' ? await payableInvoice(tx, ctx, visitId) : null
       const again = await retextClientLink(
         tx,
         { now: ctx.now, tokenKey, ...(ctx.env.PUBLIC_SITE_URL ? { siteUrl: ctx.env.PUBLIC_SITE_URL } : {}) },
-        { locationId: ctx.identity.locationId, phone: ctx.identity.phone, kind: input.kind, appointmentId },
+        {
+          locationId: ctx.identity.locationId,
+          phone: ctx.identity.phone,
+          kind: input.kind,
+          appointmentId: input.kind === 'calendar' ? visitId : null,
+          invoiceId,
+          planKey: input.kind === 'membership' ? input.tier : null,
+        },
       )
       if (!again) return null
       await ctx.audit(tx, 'assistant.link.resent', {
@@ -213,6 +226,7 @@ async function retext(ctx: ToolContext, input: ToolInputs['send_link']): Promise
     })
   } catch (e) {
     if (e instanceof AppError && e.code === 'IDENTITY_LINK_LIMIT') return null
+    if (e instanceof LinkRefused || e instanceof NoPaymentLink) return null
     throw e
   }
 }

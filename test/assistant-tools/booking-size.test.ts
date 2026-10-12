@@ -153,4 +153,29 @@ describe('an in-chat booking and the car’s size', () => {
       ]),
     )
   })
+
+  it('a size staff set on the car after the proposal and before the reply number still wins: the visit is priced at it', async () => {
+    await washCells()
+    const car = w.newId()
+    await w.t.db
+      .insertInto('vehicles')
+      .values({ id: car, customer_id: maria().id, year: null, make: 'Kia', model: 'Soul', color: null, plate: null, deleted_at: null, vehicle_class: null, vehicle_class_source: null })
+      .execute()
+    const probe = await trustedMaria()
+    expect(await run('propose_booking', probe, { ...BOOK, vehicle: 'the Soul', vehicleClass: 'compact_car' })).toMatchObject({ ok: true })
+    const action = await w.t.db.selectFrom('assistant_pending_actions').select('payload').orderBy('created_at', 'desc').executeTakeFirstOrThrow()
+    expect(action.payload).toMatchObject({ vehicleId: car, vehicleClass: 'compact_car' })
+    // verifier F3: staff size the car meanwhile
+    await w.t.db.updateTable('vehicles').set({ vehicle_class: 'large_suv', vehicle_class_source: 'staff' }).where('id', '=', car).execute()
+    await reply(maria().phone, await lastCode(maria().phone), maria().id)
+    expect(await w.t.db.selectFrom('appointments').select(['vehicle_class', 'price_cents', 'price_basis']).where('vehicle_id', '=', car).executeTakeFirstOrThrow()).toEqual({
+      vehicle_class: 'large_suv',
+      price_cents: 6000,
+      price_basis: 'class',
+    })
+    expect(await w.t.db.selectFrom('vehicles').select(['vehicle_class', 'vehicle_class_source']).where('id', '=', car).executeTakeFirstOrThrow()).toEqual({
+      vehicle_class: 'large_suv',
+      vehicle_class_source: 'staff',
+    })
+  })
 })

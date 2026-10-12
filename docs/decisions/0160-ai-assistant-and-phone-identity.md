@@ -1273,7 +1273,8 @@ closes the W4 last check's blockers (`_reports/w4-last-check.json`). Prompt `q3d
   size stands and the answer says so), keeps the old `vehicle_type` for the default sizes (one release), and answers the price keys
   of that size (the washes, then the plans). `propose_booking` takes `vehicleClass` (the size the client said, or null); a size staff
   set on the car named wins, else the size said, else the car's; the reply-number handler books with it while that size is on and
-  records it on the car as the assistant's. `list_services` and `get_membership_info` give each item and plan its `sizePriceKeys`
+  records it on the car as the assistant's, except that a size staff set on the car meanwhile (between the proposal and the reply
+  number) wins again: the visit is then priced at the car's size (verifier F3). `list_services` and `get_membership_info` give each item and plan its `sizePriceKeys`
   (the sizes with a price) besides the starting `priceKey`. The turn context shows each vehicle's size key.
 - **Prompt**: the intake's last step asks for the car's SIZE from the facts' list (then make and model; still one question per
   text, order name → intent → memberships → vehicle); a shop that sells no plan online skips the memberships step; the price rules
@@ -1287,8 +1288,9 @@ closes the W4 last check's blockers (`_reports/w4-last-check.json`). Prompt `q3d
 - **A link the client cannot find is texted again** (W4 last check, low; migration `20261014700000_link_retext.sql`): a link the
   assistant issues takes a token derived from its id (HMAC under a key derived from `PIN_PEPPER`, `identity/links.ts linkTokenFor`;
   still only its hash is stored). When `send_link` hits the one-of-a-kind-an-hour limit, the server texts the SAME link again
-  (`retextClientLink`: the newest live, openable link of that kind the assistant texted this number, never re-texted; for a calendar
-  link of one visit, that visit's or a general one): no new token, no new row, `retexted_at` set, audited `assistant.link.resent`,
+  (`retextClientLink`: the newest live, openable link of that kind the assistant texted this number, never re-texted, and bound to
+  exactly what is asked for now: the same visit or none for a calendar link, the same open invoice for a pay link, the same plan for
+  a membership link; a Gold join link is never texted again for VIP, nor invoice A's pay link for invoice B, verifier F1): no new token, no new row, `retexted_at` set, audited `assistant.link.resent`,
   and the re-text counts as one of the day's three links. The model is told "the same link texted earlier, sent again"; the judge's
   record reads "texted the client again the same calendar link it texted earlier". Once per link; past that (or the day's limit,
   or a link issued before this change) the old answer stands (point to it; if they cannot find it, a team member texts it).

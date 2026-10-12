@@ -222,15 +222,24 @@ async function assistantLinkCounts(tx: Tx, locationId: string, phone: string, ki
 
 /**
  * Texts the SAME link again (W4 leftover: a client who cannot find the calendar link while send_link is at its hourly limit): the
- * newest live link of this kind the assistant texted this number (for a calendar link of one visit, that visit's or a general one),
- * still openable (linkDeadReason), never re-texted before, and whose token the key re-derives (a link from before re-texting, or
- * issued without the key, cannot be). The re-text counts as one of the day's links: past the day's limit it throws
- * IDENTITY_LINK_LIMIT. Returns null when there is no such link. Nothing new is stored but the re-text's time.
+ * newest live link of this kind the assistant texted this number and bound to exactly what is asked for now (the same visit or
+ * none, the same invoice, the same plan: a Gold link is never texted again for VIP, nor invoice A's pay link for invoice B), still
+ * openable (linkDeadReason), never re-texted before, and whose token the key re-derives (a link from before re-texting, or issued
+ * without the key, cannot be). The re-text counts as one of the day's links: past the day's limit it throws IDENTITY_LINK_LIMIT.
+ * Returns null when there is no such link. Nothing new is stored but the re-text's time.
  */
 export async function retextClientLink(
   tx: Tx,
   deps: { now: Date; siteUrl?: string; tokenKey: Buffer },
-  input: { locationId: string; phone: string; kind: ClientLinkKind; appointmentId?: string | null },
+  input: {
+    locationId: string
+    phone: string
+    kind: ClientLinkKind
+    /** The binding asked for (null or absent = none): the link's own must be the same, column for column. */
+    appointmentId?: string | null
+    invoiceId?: string | null
+    planKey?: string | null
+  },
 ): Promise<IssuedLink | null> {
   const { now } = deps
   await advisoryXactLock(tx, `client-links:${input.locationId}:${input.phone}`)
@@ -245,7 +254,9 @@ export async function retextClientLink(
     .where('consumed_at', 'is', null)
     .where('retexted_at', 'is', null)
     .where('expires_at', '>', now)
-    .$if(!!input.appointmentId, (q) => q.where((eb) => eb.or([eb('appointment_id', 'is', null), eb('appointment_id', '=', input.appointmentId!)])))
+    .where(sql<boolean>`appointment_id is not distinct from ${input.appointmentId ?? null}::uuid`)
+    .where(sql<boolean>`invoice_id is not distinct from ${input.invoiceId ?? null}::uuid`)
+    .where(sql<boolean>`plan_key is not distinct from ${input.planKey ?? null}::text`)
     .orderBy('created_at', 'desc')
     .limit(1)
     .execute()

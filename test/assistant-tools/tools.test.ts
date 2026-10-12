@@ -10,6 +10,7 @@ import { privilegesOf } from '../../src/modules/assistant/tools/common.js'
 import { createToolRegistry } from '../../src/modules/assistant/tools/index.js'
 import { createNewTexters } from '../../src/modules/assistant/welcome/new-texters.js'
 import { hashToken } from '../../src/modules/auth/tokens.js'
+import { ensurePlans } from '../../src/modules/memberships/plans.js'
 import { STRANGER, useToolWorld } from './world.js'
 
 const w = useToolWorld()
@@ -447,6 +448,27 @@ describe('send_link', () => {
     await w.t.db.updateTable('client_links').set({ revoked_at: w.clock.now(), revoke_reason: 'staff' }).execute()
     expect(await run('send_link', probe.ctx, { kind: 'verify', appointmentRef: null, tier: null })).toMatchObject({ ok: false, error: 'rate_limited' })
     expect(await w.t.db.selectFrom('client_links').select('retexted_at').execute()).toEqual([{ retexted_at: null }])
+  })
+
+  it('re-texts only the same plan’s link: a VIP link asked for within the hour of a Gold one is not the Gold link again', async () => {
+    await ensurePlans(w.t.db, { locationId: w.locationId, clock: w.clock, newId: w.newId })
+    const before = await w.t.db.selectFrom('membership_plans').select(['key', 'public', 'active']).where('key', 'in', ['gold', 'vip']).execute()
+    expect(before.map((p) => p.key).sort()).toEqual(['gold', 'vip'])
+    await w.t.db.updateTable('membership_plans').set({ public: true, active: true }).where('key', 'in', ['gold', 'vip']).execute()
+    try {
+      const probe = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'caller' })
+      expect(await run('send_link', probe.ctx, { kind: 'membership', appointmentRef: null, tier: 'gold' })).toMatchObject({ ok: true })
+      // verifier probe (F1): this re-texted the Gold link as "the same link texted earlier"
+      const vip = await run('send_link', probe.ctx, { kind: 'membership', appointmentRef: null, tier: 'vip' })
+      expect(vip).toMatchObject({ ok: false, error: 'rate_limited' })
+      expect(probe.links).toHaveLength(1)
+      expect(await w.t.db.selectFrom('client_links').select(['plan_key', 'retexted_at']).execute()).toEqual([{ plan_key: 'gold', retexted_at: null }])
+      // the same plan again: the Gold link, texted again
+      expect(await run('send_link', probe.ctx, { kind: 'membership', appointmentRef: null, tier: 'gold' })).toMatchObject({ ok: true, data: { resent: true } })
+      expect(probe.links.map((l) => l.url)).toEqual([probe.links[0]!.url, probe.links[0]!.url])
+    } finally {
+      for (const p of before) await w.t.db.updateTable('membership_plans').set({ public: p.public, active: p.active }).where('key', '=', p.key).execute()
+    }
   })
 
   it('a membership link only for a plan sold online (facts-v4: a tier with a price), and only once the plan is set up', async () => {

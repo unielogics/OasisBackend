@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest'
 import { sql } from 'kysely'
 import { hashToken } from '../../src/modules/auth/tokens.js'
 import { updateCustomer } from '../../src/modules/customers/service.js'
-import { ASSISTANT_LINK_LIMITS, consumeLink, LINK_POLICY, linkUrl, resolveLink } from '../../src/modules/identity/links.js'
+import { ASSISTANT_LINK_LIMITS, consumeLink, issueClientLink, LINK_POLICY, linkUrl, resolveLink, retextClientLink, type IssueLinkInput } from '../../src/modules/identity/links.js'
+import { ensurePlans } from '../../src/modules/memberships/plans.js'
 import { resolveSession } from '../../src/modules/identity/sessions.js'
 import { PHONES, useIdentityWorld } from './world.js'
 
@@ -124,6 +125,39 @@ describe('issueClientLink', () => {
     await expect(w.link({ customerId: maria, kind: 'pin', issuedBy: 'assistant' })).rejects.toMatchObject({ code: 'IDENTITY_LINK_LIMIT' })
     w.advance(24 * 60 * MIN)
     await w.link({ customerId: maria, kind: 'pin', issuedBy: 'assistant' })
+  })
+})
+
+describe('retextClientLink', () => {
+  const KEY = Buffer.alloc(32, 9)
+  const issue = (o: Partial<IssueLinkInput> & { customerId: string }) =>
+    w.tx((tx) => issueClientLink(tx, { newId: w.newId, now: w.clock.now(), tokenKey: KEY }, { locationId: w.locationId, kind: 'calendar', issuedBy: 'assistant', ...o }))
+  const retext = (o: { kind: IssueLinkInput['kind']; appointmentId?: string | null; invoiceId?: string | null; planKey?: string | null }) =>
+    w.tx((tx) => retextClientLink(tx, { now: w.clock.now(), tokenKey: KEY }, { locationId: w.locationId, phone: PHONES.maria, ...o }))
+
+  it('texts again only the link bound to exactly what is asked for: never a Gold link for VIP, nor invoice A’s pay link for B', async () => {
+    const maria = await w.customer({})
+    await ensurePlans(w.t.db, { locationId: w.locationId, clock: w.clock, newId: w.newId })
+    // verifier probe (F1): a Gold join link, then VIP within the hour, re-texted the Gold link as "the same link"
+    const gold = await issue({ customerId: maria, kind: 'membership', planKey: 'gold' })
+    expect(await retext({ kind: 'membership', planKey: 'vip' })).toBeNull()
+    expect(await retext({ kind: 'membership', planKey: null })).toBeNull()
+    expect(await retext({ kind: 'membership', planKey: 'gold' })).toMatchObject({ id: gold.id, token: gold.token, url: gold.url })
+    w.advance(25 * 60 * MIN)
+    const a = await invoice(maria)
+    const b = await invoice(maria)
+    const payA = await issue({ customerId: maria, kind: 'pay', invoiceId: a })
+    expect(await retext({ kind: 'pay', invoiceId: b })).toBeNull()
+    expect(await retext({ kind: 'pay', invoiceId: null })).toBeNull()
+    expect(await retext({ kind: 'pay', invoiceId: a })).toMatchObject({ id: payA.id, token: payA.token })
+    w.advance(25 * 60 * MIN)
+    // a general calendar link is not one visit's link, and one visit's is not another's or a general one
+    const general = await issue({ customerId: maria, kind: 'calendar' })
+    expect(await retext({ kind: 'calendar', appointmentId: w.newId() })).toBeNull()
+    expect(await retext({ kind: 'calendar', appointmentId: null })).toMatchObject({ id: general.id, token: general.token })
+    // nothing was re-texted but the three exact matches
+    const rows = await w.t.db.selectFrom('client_links').select(['id', 'retexted_at']).where('retexted_at', 'is not', null).execute()
+    expect(rows.map((r) => r.id).sort()).toEqual([gold.id, payA.id, general.id].sort())
   })
 })
 
