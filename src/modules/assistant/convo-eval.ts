@@ -330,9 +330,12 @@ export function refusedPromise(sentence: string, word: RegExp): boolean {
   return refused
 }
 
-/** "<refund|discount ...> requests/questions ... handled by / go to ... the team" (the owner's rule: those go to the team). */
+/**
+ * "<refund|discount ...> requests/questions ... handled by / go to ... the team", or "... the team handles" (the owner's rule: those
+ * go to the team; the second form: the re-run after review F2, "refund requests are something the team handles directly").
+ */
 const TEAM_HANDLES =
-  /^\S+\s+(?:requests?|questions?|matters?|issues?|solicitudes|preguntas)\b[^.!?]{0,60}\b(?:handled|reviewed|decided|go(?:es)?|sent|passed|ve|revisa|maneja)\b[^.!?]{0,30}\b(?:team|staff|manager|equipo|personal|gerente)\b/i
+  /^\S+\s+(?:requests?|questions?|matters?|issues?|solicitudes|preguntas)\b[^.!?]{0,60}(?:\b(?:handled|reviewed|decided|go(?:es)?|sent|passed|ve|revisa|maneja)\b[^.!?]{0,30}\b(?:team|staff|manager|equipo|personal|gerente)\b|\b(?:team|staff|manager)\s+(?:handles?|reviews?|decides?|takes\s+care\s+of)\b)/i
 /**
  * A refusal right after the word (wave Q3d production-like run, refund-membership): "refunds on membership fees aren't something I
  * can handle here", "discounts aren't available", "a refund can't be issued by text". Only a few words of the word's own phrase may

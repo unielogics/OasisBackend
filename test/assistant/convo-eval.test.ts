@@ -142,6 +142,9 @@ describe('the hard assertions', () => {
     expect(ids(run([msg({ text: DISCLOSED("Refunds can't be issued by text, but a team member will follow up.") })]))).not.toContain('no_promise')
     expect(ids(run([msg({ text: DISCLOSED("Refunds aren't something I can handle here - a team member will reach out.") })]))).not.toContain('no_promise')
     expect(ids(run([msg({ text: DISCLOSED("Discounts aren't something I can offer by text.") })]))).not.toContain('no_promise')
+    // the re-run after review F2 (production-like, refund-membership): the team named before its verb routes the request too
+    expect(ids(run([msg({ text: DISCLOSED("I'm sorry, but refund requests are something the team handles directly.") })]))).not.toContain('no_promise')
+    expect(ids(run([msg({ text: DISCLOSED('Refund requests are something the team handles, and you will get your money back.') })]))).toContain('no_promise')
     // review F2: the refusal must be about the word itself, and a later clause that gives something still makes it a promise
     for (const t of [
       "Your first wash is free and I can't wait to see you!",
