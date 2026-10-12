@@ -1,8 +1,11 @@
 // Squarespace contact -> Oasis customer links (sqsp_customer_links): unambiguous email first, then phone. A contact that
-// matches more than one customer links nobody (a person decides); a manual link is never overwritten by a sync.
+// matches more than one customer links nobody (a person decides); a manual link is never overwritten by a sync. The phone of a
+// record the stale-record rule holds links nothing (identity/stale.ts: numbers are recycled; W4c re-review 2, N1): the contact
+// stays unlinked and is tried again on the next run.
 import { sql } from 'kysely'
 import type { Clock } from '../../../platform/clock.js'
 import type { Executor } from '../../../platform/db.js'
+import { staleRecord } from '../../identity/stale.js'
 import { normalizeEmail, normalizePhone } from '../identity.js'
 
 export interface LinkResult {
@@ -38,7 +41,9 @@ export async function linkContacts(
       q = source === 'email' ? q.where('email', '=', value) : q.where('phone_e164', '=', value)
       const rows = await q.limit(2).execute()
       if (rows.length === 1) {
-        hit = { id: rows[0]!.id, source }
+        const stale =
+          source === 'phone' && (await staleRecord(db, { locationId: d.locationId, customerId: rows[0]!.id, phone: value, now: d.clock.now() })).stale
+        if (!stale) hit = { id: rows[0]!.id, source }
         break
       }
       if (rows.length > 1) {

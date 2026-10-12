@@ -23,7 +23,9 @@ import type { ProductMap, ResolvedProduct, Tier } from './product-map.js'
  * matches a client only that way waits for staff ('unverified_email', the awaiting_match state). A second paid order of the same
  * plan while the first period still runs is a duplicate: flagged, and never moves the period. An open intent only names the email its
  * client typed: an order matching it alone but carrying another phone or name than the client's waits for staff too
- * ('intent_mismatch', awaiting_match; W4c fixes).
+ * ('intent_mismatch', awaiting_match; W4c fixes). A STALE record (identity/stale.ts: numbers are recycled) is no match by its phone or by
+ * an email nobody verified: the order names it for staff ('stale_record', "needs a customer") and links nobody (W4c re-review 2,
+ * N1); its Squarespace links made while it was not stale (memberships/service.ts) and a verified email still link.
  */
 export interface MembershipConfig {
   /** Days after period end during which the member is still active (Squarespace retries failed renewals). Default 7. */
@@ -54,7 +56,17 @@ export interface CustomerRef {
    * another client's checkout intent never takes an order of one of them (F1).
    */
   heldSqspCustomerIds?: string[]
+  /**
+   * Set when the stale-record rule holds the client (identity/stale.ts): since when it has. Their phone and their unverified email
+   * link no order placed since then and hold none (whoever holds the number now may be someone else): such an order names them as
+   * 'stale_record' for staff (W4c re-review 2). An order placed before then was the client's as it always was.
+   */
+  staleSince?: Date
 }
+
+/** The client's phone and unverified email speak for an order: they are not stale, or the order was placed before they were. */
+const speaksFor = (c: CustomerRef, who: OrderIdentity): boolean =>
+  c.staleSince === undefined || (who.createdOn !== undefined && who.createdOn.getTime() < c.staleSince.getTime())
 
 /** A membership_checkouts row as the matching sees it (memberships/checkouts.ts loads them). */
 export interface CheckoutIntentRef {
@@ -90,6 +102,7 @@ export type LinkedBy =
   | 'phone'
   | 'unverified_email'
   | 'intent_mismatch'
+  | 'stale_record'
   | 'ambiguous'
   | 'none'
 
@@ -117,6 +130,7 @@ export interface MembershipInference {
   /**
    * linkedBy 'unverified_email': the one client whose unverified email the order carries; 'intent_mismatch': the client of the open
    * intent whose email the order carries with another phone or name. Never linked by the inference: staff confirm (awaiting_match).
+   * 'stale_record': the stale record whose phone or unverified email the order carries; staff decide ("needs a customer").
    */
   candidateCustomerId?: string
   /** Open checkout intents an order of this person matched (intent id, Squarespace order id): the sync marks them matched. */
@@ -213,7 +227,7 @@ export interface CustomerLink {
   by: LinkedBy
   /** by 'checkout_intent': the intent that linked; `fresh` when it was still open (this order consumes it). */
   intent?: { id: string; fresh: boolean }
-  /** by 'unverified_email' or 'intent_mismatch': the client staff are asked about. */
+  /** by 'unverified_email', 'intent_mismatch' or 'stale_record': the client staff are asked about. */
   candidateCustomerId?: string
   /** An intent that named this order but was ignored because another client holds the order (the other tiers linked it). */
   intentConflict?: string
@@ -273,23 +287,24 @@ export function sameName(a: string | undefined, b: string | undefined): boolean 
 /** A name the shop made up, not the client's: the walk-in default and the welcome flow's "New texter ••0142". */
 const PLACEHOLDER_NAME = /^\s*(walk[\s-]*in guest|new texter\b)/i
 
-/**
- * A client name that says too little to tell two people apart: a single word ("Maria" matches "Maria Gonzalez" by design) or a
- * placeholder (W4c re-review I1). For such a client only the order's phone can show the order is theirs.
- */
-const weakName = (name: string | undefined): boolean => PLACEHOLDER_NAME.test(name ?? '') || nameWords(name).length <= 1
+/** No name to compare: a placeholder the shop made up, or none at all. Only the order's phone can show the order is the client's. */
+const noRealName = (name: string | undefined): boolean => PLACEHOLDER_NAME.test(name ?? '') || nameWords(name).length === 0
 
 /**
- * The order carries a phone or a name, and it is not the intent client's (a client with none on file matches nothing); when the
- * client's name is a single word or a placeholder, an order without the client's own phone is not shown to be theirs either. An
- * intent whose client was not loaded (`client` absent: never from loadIntentRefs, which always sets it) is not checked.
+ * The order carries a phone or a name, and it is not the intent client's (a client with none on file matches nothing). A client
+ * name that says too little to tell two people apart needs the order's phone too (W4c re-review I1): a single real word ("Maria"
+ * matches "Maria Gonzalez" by design) needs the client's own phone on the order AND a name that can be theirs ("John Smith" with
+ * Maria's phone is not hers; re-review 2, N2); a placeholder ("New texter ••0142", "Walk-in guest") or no name says nothing, so
+ * the phone alone decides. An intent whose client was not loaded (`client` absent: never from loadIntentRefs, which always sets it)
+ * is not checked.
  */
 function notTheClient(who: OrderIdentity, intent: CheckoutIntentRef): boolean {
   if (!intent.client) return false
   const phone = normalizePhone(who.phone)
-  if (phone !== undefined && normalizePhone(intent.client?.phone) !== phone) return true
-  if (weakName(intent.client.name)) return phone === undefined
-  if (nameWords(who.name).length > 0 && !sameName(who.name, intent.client?.name)) return true
+  if (phone !== undefined && normalizePhone(intent.client.phone) !== phone) return true
+  if (noRealName(intent.client.name)) return phone === undefined
+  if (nameWords(intent.client.name).length === 1 && phone === undefined) return true
+  if (nameWords(who.name).length > 0 && !sameName(who.name, intent.client.name)) return true
   return false
 }
 
@@ -303,8 +318,9 @@ function oneClient(hits: readonly CheckoutIntentRef[]): CheckoutIntentRef | 'amb
 /**
  * Another client than `clientId` holds the order, so an intent of `clientId` never takes it (F1): any Squarespace link of theirs
  * for the order's Squarespace customer (whatever its source), that customer on one of their membership rows, their email on file
- * (verified or NOT: after the identity migration no member's email is verified), their phone, or a checkout row of theirs bound
- * to the same Squarespace customer or waiting on this very order.
+ * (verified or NOT: after the identity migration no member's email is verified), their phone (unless the stale-record rule holds
+ * them: a recycled number says nothing about them), or a checkout row of theirs bound to the same Squarespace customer or waiting on
+ * this very order.
  */
 function holdsOrder(who: OrderIdentity, customers: readonly CustomerRef[], intents: readonly CheckoutIntentRef[], clientId: string): boolean {
   const e = normalizeEmail(who.email)
@@ -315,7 +331,7 @@ function holdsOrder(who: OrderIdentity, customers: readonly CustomerRef[], inten
       c.id !== clientId &&
       ((sq !== undefined && (c.sqspCustomerIds?.includes(sq) === true || c.heldSqspCustomerIds?.includes(sq) === true)) ||
         (e !== undefined && [...c.emails, ...(c.unverifiedEmails ?? [])].some((x) => normalizeEmail(x) === e)) ||
-        (p !== undefined && c.phones.some((x) => normalizePhone(x) === p))),
+        (p !== undefined && speaksFor(c, who) && c.phones.some((x) => normalizePhone(x) === p))),
   )
   if (byClient) return true
   return intents.some(
@@ -392,7 +408,12 @@ export function linkCustomer(
   return byIntent.refused ? { ...link, intentConflict: byIntent.refused } : link
 }
 
-/** The tiers after the intents: the Squarespace customer id, a verified email, the phone, then an unverified email's candidate. */
+/**
+ * The tiers after the intents: the Squarespace customer id, a verified email, the phone, then an unverified email's candidate. A
+ * stale record (CustomerRef.staleSince) takes no part in the phone and unverified-email tiers for an order placed since it went
+ * stale: when only such a record carries the order's phone or email, the order names it as 'stale_record' for staff and links
+ * nobody (W4c re-review 2, N1).
+ */
 function linkByIdentity(who: OrderIdentity, customers: readonly CustomerRef[]): CustomerLink {
   const tiers: [LinkedBy, (c: CustomerRef) => boolean][] = []
   if (who.sqspCustomerId)
@@ -400,17 +421,22 @@ function linkByIdentity(who: OrderIdentity, customers: readonly CustomerRef[]): 
   const e = normalizeEmail(who.email)
   if (e) tiers.push(['email', (c) => c.emails.some((x) => normalizeEmail(x) === e)])
   const p = normalizePhone(who.phone)
-  if (p) tiers.push(['phone', (c) => c.phones.some((x) => normalizePhone(x) === p)])
+  const byPhone = (c: CustomerRef): boolean => p !== undefined && c.phones.some((x) => normalizePhone(x) === p)
+  const byUnverified = (c: CustomerRef): boolean => e !== undefined && (c.unverifiedEmails ?? []).some((x) => normalizeEmail(x) === e)
+  if (p) tiers.push(['phone', (c) => speaksFor(c, who) && byPhone(c)])
   for (const [by, test] of tiers) {
     const hits = customers.filter(test)
     if (hits.length === 1) return { customerId: hits[0]!.id, by }
     if (hits.length > 1) return { by: 'ambiguous' }
   }
   if (e) {
-    const hits = customers.filter((c) => (c.unverifiedEmails ?? []).some((x) => normalizeEmail(x) === e))
+    const hits = customers.filter((c) => speaksFor(c, who) && byUnverified(c))
     if (hits.length === 1) return { by: 'unverified_email', candidateCustomerId: hits[0]!.id }
     if (hits.length > 1) return { by: 'ambiguous' }
   }
+  const stale = customers.filter((c) => !speaksFor(c, who) && (byPhone(c) || byUnverified(c)))
+  if (stale.length === 1) return { by: 'stale_record', candidateCustomerId: stale[0]!.id }
+  if (stale.length > 1) return { by: 'ambiguous' }
   return { by: 'none' }
 }
 
@@ -534,7 +560,8 @@ export function inferMemberships(
       personKey,
       customerId: link.customerId,
       linkedBy: link.by,
-      candidateCustomerId: link.by === 'unverified_email' || link.by === 'intent_mismatch' ? link.candidateCustomerId : undefined,
+      candidateCustomerId:
+        link.by === 'unverified_email' || link.by === 'intent_mismatch' || link.by === 'stale_record' ? link.candidateCustomerId : undefined,
       checkoutMatches: list.flatMap((c) =>
         c.link.intent?.fresh ? [{ intentId: c.link.intent.id, orderId: c.order.id }] : [],
       ),

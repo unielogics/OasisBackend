@@ -449,3 +449,23 @@ describe('no proposal while staff hold the chat (W4c re-review L2, probes RA1 an
     expect({ booked: (await appointmentsOf(maria().id)).length, state: (await pending()).at(-1)?.state }).toEqual({ booked: 0, state: 'canceled' })
   })
 })
+
+describe('no proposal once the turn asked for a handoff (W4c re-review 2, N3; probe L2-N3)', () => {
+  it('handoff_to_staff, then propose_booking in the same turn: unavailable, no reply number texted, no pending action, nothing booked', async () => {
+    const probe = await trustedMaria()
+    w.rt.useAssistant({ actionCodes: handler() })
+    expect(await run('handoff_to_staff', probe, { reason: 'client_asked', summary: 'Wants a person.' })).toMatchObject({ ok: true })
+    expect(await run('propose_booking', probe, BOOK)).toMatchObject({ ok: false, error: 'unavailable' })
+    expect((await aiTexts(maria().id)).filter((m) => m.klass === 'action_confirm')).toEqual([])
+    expect(await pending()).toEqual([])
+    expect(await appointmentsOf(maria().id)).toEqual([])
+  })
+
+  it('… and so do propose_reschedule and propose_cancel after any handoff the turn requested (a late cancel included)', async () => {
+    const probe = await trustedMaria()
+    probe.ctx.handoff('cannot_help', 'Something the assistant could not do.')
+    expect(await run('propose_reschedule', probe, { appointmentRef: 'A1', date: '2026-06-15', startMin: 600 })).toMatchObject({ ok: false, error: 'unavailable' })
+    expect(await run('propose_cancel', probe, { appointmentRef: 'A1', reason: 'sick' })).toMatchObject({ ok: false, error: 'unavailable' })
+    expect(await pending()).toEqual([])
+  })
+})

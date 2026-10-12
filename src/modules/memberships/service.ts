@@ -12,6 +12,7 @@ import type { AuditContext } from '../../platform/audit.js'
 import { AppError } from '../../platform/errors.js'
 import type { NewId } from '../../platform/ids.js'
 import { sql } from 'kysely'
+import { staleRecord, type StaleVerdict } from '../identity/stale.js'
 import { raiseAlert, resolveAlertKeys } from '../payments-sync/db/alerts.js'
 import { orderFromJson } from '../payments-sync/db/codec.js'
 import { normalizeEmail, normalizePhone } from '../payments-sync/identity.js'
@@ -84,6 +85,7 @@ async function customerRefs(
   db: Executor,
   locationId: string,
   orders: readonly { customerEmail?: string; customerPhone?: string; customerId?: string }[],
+  now: Date,
 ): Promise<CustomerRef[]> {
   const emails = [
     ...new Set(orders.map((o) => normalizeEmail(o.customerEmail)).filter((x): x is string => !!x)),
@@ -108,7 +110,7 @@ async function customerRefs(
   if (rows.rows.length === 0) return []
   const links = await db
     .selectFrom('sqsp_customer_links')
-    .select(['customer_id', 'sqsp_customer_id', 'source'])
+    .select(['customer_id', 'sqsp_customer_id', 'source', 'created_at'])
     .where('location_id', '=', locationId)
     .where(
       'customer_id',
@@ -127,6 +129,19 @@ async function customerRefs(
       rows.rows.map((r) => r.id),
     )
     .execute()
+  // The stale-record rule (identity/stale.ts, W4c re-review 2 N1): numbers are recycled, so the phone of a record the rule holds
+  // links no order placed since it went stale (and neither does its unverified email): its new holder paying with it is not that
+  // client. Nor does a Squarespace contact the contacts job linked BY that phone after the record went stale; one linked while it
+  // was the client's (a real member's renewals), a staff link and a verified email still link, and so does every order placed
+  // before the record went stale (a lapsed member's own history).
+  const verdicts = new Map<string, StaleVerdict>()
+  for (const r of rows.rows)
+    if (r.phone_e164) verdicts.set(r.id, await staleRecord(db, { locationId, customerId: r.id, phone: r.phone_e164, now }))
+  const staleSinceOf = (v: StaleVerdict | undefined): Date | undefined => (v?.stale ? (v.staleSince ?? v.lastActivityAt) : undefined)
+  const linkedWhileStale = (l: { customer_id: string; source: string; created_at: Date }): boolean => {
+    const since = staleSinceOf(verdicts.get(l.customer_id))
+    return l.source === 'phone' && since !== undefined && l.created_at.getTime() >= since.getTime()
+  }
   // Only a verified email links an order (ADR 0160): an unverified one is offered to staff instead, and a Squarespace contact
   // that was linked automatically BY that email (sqsp.contacts) is not a way around it. Phone and staff links count as before.
   // What a client HOLDS is wider (F1): every link whatever its source and the Squarespace customer on their membership rows; and
@@ -136,8 +151,9 @@ async function customerRefs(
     emails: r.email && r.email_verified ? [r.email] : [],
     unverifiedEmails: r.email && !r.email_verified ? [r.email] : [],
     phones: r.phone_e164 ? [r.phone_e164] : [],
+    staleSince: staleSinceOf(verdicts.get(r.id)),
     sqspCustomerIds: links
-      .filter((l) => l.customer_id === r.id && (l.source !== 'email' || r.email_verified))
+      .filter((l) => l.customer_id === r.id && (l.source !== 'email' || r.email_verified) && !linkedWhileStale(l))
       .map((l) => l.sqsp_customer_id),
     heldSqspCustomerIds: [
       ...new Set([
@@ -168,7 +184,7 @@ export async function syncMemberships(db: Db, d: MembershipSyncDeps): Promise<Me
     .filter((o) => o.lineItems.some((li) => d.productMap.resolve(li)?.kind === 'membership'))
   if (orders.length === 0) return report
 
-  const customers = await customerRefs(db, d.locationId, orders)
+  const customers = await customerRefs(db, d.locationId, orders, now)
   const intents = await loadIntentRefs(db, d.locationId)
   const inferences = inferMemberships(orders, d.productMap, customers, now, d.config, intents)
   const plans = await loadPlans(db, d.locationId)
@@ -229,10 +245,20 @@ export async function syncMemberships(db: Db, d: MembershipSyncDeps): Promise<Me
       report.needsCustomer++
       // an order a checkout intent named while another client's identity points at it says why (payments-sync/membership.ts)
       const conflict = inf.flags.find((f) => f.code === 'ambiguous_customer' && f.orderId !== undefined)
+      // an order only a stale record's phone or unverified email points at: staff decide who paid (W4c re-review 2, N1)
+      const stale =
+        inf.linkedBy === 'stale_record' && inf.candidateCustomerId
+          ? await db.selectFrom('customers').select('full_name').where('id', '=', inf.candidateCustomerId).executeTakeFirst()
+          : undefined
+      const why = stale
+        ? `the order's phone or email matches ${stale.full_name}, whose record is stale (no sign of that client for 180 days, or the number bounced): the number may belong to someone new. Confirm who paid, then create a client or link one`
+        : conflict
+          ? conflict.note
+          : action.reason
       await raiseAlert(db, d, {
         code: 'membership_needs_customer',
         subject: inf.personKey,
-        message: `${conflict ? conflict.note : action.reason}. Paid for ${labelFor(inf, plan)} on order ${inf.lastOrderId}.`,
+        message: `${why}. Paid for ${labelFor(inf, plan)} on order ${inf.lastOrderId}.`,
       })
       continue
     }

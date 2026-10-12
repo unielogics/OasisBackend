@@ -396,6 +396,8 @@ export interface ToolContext {
   addLink(url: string, link: { kind: ClientLinkKind; expiresAt: Date }): string
   /** Hands the conversation to staff once the turn ends (alert ai_handoff, thread unread, AI paused). The first request wins. */
   handoff(reason: ToolHandoffReason, summary: string): void
+  /** The turn has asked for a handoff (a tool's, handoff_to_staff's): the chat is the staff's from here, nothing is proposed. */
+  handoffRequested(): boolean
   /** Writes an audit row in the tool's transaction: action "assistant.<what>" (e.g. assistant.booking.proposed). */
   audit(tx: Tx, action: string, detail: ToolAuditDetail): Promise<void>
   /**

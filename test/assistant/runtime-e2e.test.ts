@@ -374,6 +374,26 @@ describe('the untrusted ask, the handoff, the staff reply, STOP and opt-out', ()
     expect((await outTexts(maria())).map((t) => t.sender_kind)).toEqual(['ai', 'staff'])
   })
 
+  it('a handoff asked for earlier in the turn: a propose_booking later in that turn is unavailable, nothing is texted or booked (W4c re-review 2, N3)', async () => {
+    await setting('assistant.actions_enabled', true)
+    await w.tx((tx) => grantTrust(tx, { locationId: w.locationId, phone: maria(), customerId: w.customer('Maria Delgado').id, verifiedBy: 'code', now: w.clock.now() }))
+    const a = assistant([
+      simToolUse('handoff_to_staff', { reason: 'client_asked', summary: 'Wants a person, and a wash Monday.' }),
+      simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: TEN_AM, vehicle: null }),
+      simText('A team member will text you back shortly.'),
+    ])
+    await inbound(maria(), 'Can a person book me Monday at 10?')
+    expect(await a.respond(maria())).toMatchObject({ status: 'replied', turn: { handoff: true } })
+    expect((await toolCalls()).filter((c) => c.tool !== 'policy_judge').map((c) => [c.tool, c.outcome, c.error])).toEqual([
+      ['handoff_to_staff', 'ok', null],
+      ['propose_booking', 'error', 'unavailable'],
+    ])
+    expect(await w.t.db.selectFrom('assistant_pending_actions').select('id').execute()).toEqual([])
+    expect((await outTexts(maria())).filter((t) => t.klass === 'action_confirm')).toEqual([])
+    expect(await w.t.db.selectFrom('appointments').select('id').where('customer_id', '=', w.customer('Maria Delgado').id).where('source', '=', 'sms_ai').execute()).toEqual([])
+    expect(await conversationOf(maria())).toMatchObject({ handoff_state: 'open' })
+  })
+
   it('STOP: the keyword is answered by the opt-out confirmation, never by the AI, and later texts get no reply', async () => {
     const a = assistant([simText('We are open until 6 PM.')])
     await inbound(maria(), 'STOP')

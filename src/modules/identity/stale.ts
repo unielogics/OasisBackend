@@ -28,6 +28,11 @@ export interface StaleVerdict {
   reason: 'inactive' | 'invalid_number' | null
   /** The newest proof of the client: the record's creation, their PIN, a staff action, a membership payment (see staleRecord). */
   lastActivityAt: Date
+  /**
+   * Since when the rule has held the record (stale only): 180 days after its newest proof, or the invalid-number bounce. Something
+   * the record got before then (a Squarespace contact linked by its phone) was given while it was still the client's (W4c re-review 2).
+   */
+  staleSince?: Date
 }
 
 /** Appointment sources staff create (the dashboard's booking sheet, a walk-in, a phone booking, a standing series). */
@@ -66,7 +71,7 @@ export async function staleRecord(
         from memberships m where m.customer_id = c.id) as member
     from customers c where c.id = ${o.customerId}`.execute(db)
   const row = r.rows[0]
-  if (!row) return { stale: true, reason: 'inactive', lastActivityAt: new Date(0) }
+  if (!row) return { stale: true, reason: 'inactive', lastActivityAt: new Date(0), staleSince: new Date(0) }
   // the membership's proof time, capped at now (in JS: Postgres least() would turn a missing time into now)
   const member = row.member === null ? null : new Date(Math.min(new Date(row.member).getTime(), o.now.getTime()))
   const times = [row.created, row.appt, row.proof, member].filter((x): x is Date => x !== null).map((x) => new Date(x))
@@ -85,7 +90,8 @@ export async function staleRecord(
   // a bounce before the record existed (a previous holder's number) or before its newest proof says nothing about it
   const provenAt = Math.max(new Date(row.created).getTime(), row.proof ? new Date(row.proof).getTime() : -Infinity)
   if (lastOut?.status === 'failed' && isInvalidNumberError(lastOut.error) && lastOut.queued_at.getTime() > provenAt)
-    return { stale: true, reason: 'invalid_number', lastActivityAt: last }
-  if (o.now.getTime() - last.getTime() >= STALE_AFTER_DAYS * DAY_MS) return { stale: true, reason: 'inactive', lastActivityAt: last }
+    return { stale: true, reason: 'invalid_number', lastActivityAt: last, staleSince: lastOut.queued_at }
+  if (o.now.getTime() - last.getTime() >= STALE_AFTER_DAYS * DAY_MS)
+    return { stale: true, reason: 'inactive', lastActivityAt: last, staleSince: new Date(last.getTime() + STALE_AFTER_DAYS * DAY_MS) }
   return { stale: false, reason: null, lastActivityAt: last }
 }

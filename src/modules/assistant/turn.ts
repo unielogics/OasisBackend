@@ -403,6 +403,9 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     handoff(reason, summary) {
       toolHandoff ??= { reason, summary }
     },
+    handoffRequested() {
+      return toolHandoff !== null
+    },
     async audit(tx, action, detail) {
       await audit.record(tx, {
         locationId: loc,

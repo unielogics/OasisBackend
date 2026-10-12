@@ -102,6 +102,22 @@ describe('a client with a one-word or placeholder name: the order’s phone must
     expect(linkCustomer(who({ phone: '(201) 555-0188' }), [], [maria])).toEqual(mine)
   })
 
+  it('a one-word REAL name still has to agree with the order’s name: her phone with "John Smith" waits for staff (W4c re-review 2, N2)', () => {
+    const maria = intent({ client: { phone: '+12015550188', name: 'Maria' } })
+    expect(linkCustomer(who({ phone: '(201) 555-0188', name: 'John Smith' }), [], [maria])).toEqual(waits)
+    expect(linkCustomer(who({ phone: '(201) 555-0188', name: 'John' }), [], [maria])).toEqual(waits)
+    // her phone and a name that can be hers (or none): hers
+    expect(linkCustomer(who({ phone: '(201) 555-0188', name: 'MARIA' }), [], [maria])).toEqual(mine)
+    expect(linkCustomer(who({ phone: '(201) 555-0188', name: 'Maria L. Gonzalez' }), [], [maria])).toEqual(mine)
+    // a client with no name at all has nothing to compare: the phone decides, as for a placeholder
+    const unnamed = intent({ client: { phone: '+12015550188', name: '' } })
+    expect(linkCustomer(who({ phone: '(201) 555-0188', name: 'John Smith' }), [], [unnamed])).toEqual(mine)
+    expect(linkCustomer(who({ name: 'John Smith' }), [], [unnamed])).toEqual(waits)
+    // a two-word client in the same case waits, as before I1
+    const full = intent({ client: { phone: '+12015550188', name: 'Maria Gonzalez' } })
+    expect(linkCustomer(who({ phone: '(201) 555-0188', name: 'John Smith' }), [], [full])).toEqual(waits)
+  })
+
   it('a placeholder name ("New texter ••0188", "Walk-in guest") matches no name: only the phone links', () => {
     for (const name of ['New texter ••0188', 'Walk-in guest']) {
       const c = intent({ client: { phone: '+12015550188', name } })
@@ -110,6 +126,40 @@ describe('a client with a one-word or placeholder name: the order’s phone must
       expect(linkCustomer(who(), [], [c]), name).toEqual(waits)
       expect(linkCustomer(who({ phone: '(201) 555-0188', name: 'Ana Ruiz' }), [], [c]), name).toEqual(mine)
     }
+  })
+})
+
+describe('a stale record is no phone match (W4c re-review 2, N1)', () => {
+  // Olga's record has been stale since March: the new holder's orders come after
+  const olga: CustomerRef = { id: 'c-olga', emails: [], unverifiedEmails: ['olga@example.com'], phones: ['+13055550003'], staleSince: new Date('2026-03-01T00:00:00Z') }
+  const fresh: CustomerRef = { id: 'c-fran', emails: [], phones: ['+13055550003'] }
+  const at = new Date('2026-10-12T09:00:00Z')
+
+  it('the phone or an unverified email of a stale record links nobody: stale_record names it for staff, nothing links', () => {
+    expect(linkCustomer({ email: 'nora@example.com', phone: '(305) 555-0003', createdOn: at }, [olga])).toEqual({ by: 'stale_record', candidateCustomerId: 'c-olga' })
+    expect(linkCustomer({ email: 'olga@example.com', createdOn: at }, [olga])).toEqual({ by: 'stale_record', candidateCustomerId: 'c-olga' })
+    // an order of no known time is taken as placed now
+    expect(linkCustomer({ phone: '(305) 555-0003' }, [olga])).toEqual({ by: 'stale_record', candidateCustomerId: 'c-olga' })
+    const [inf] = inferMemberships([order({ at: '2026-10-12T09:00:00Z', customerEmail: 'nora@example.com', customerName: 'Nora Newholder', customerPhone: '3055550003' })], map, [olga], new Date('2026-10-12T10:00:00Z'))
+    expect(inf).toMatchObject({ customerId: undefined, linkedBy: 'stale_record', candidateCustomerId: 'c-olga' })
+  })
+
+  it('a record that is not stale with the same phone wins; the Squarespace id and a verified email of a stale record still link', () => {
+    expect(linkCustomer({ phone: '(305) 555-0003', createdOn: at }, [olga, fresh])).toEqual({ customerId: 'c-fran', by: 'phone' })
+    expect(linkCustomer({ sqspCustomerId: 'sq-1', phone: '(305) 555-0003', createdOn: at }, [{ ...olga, sqspCustomerIds: ['sq-1'] }])).toEqual({ customerId: 'c-olga', by: 'sqsp_customer_id' })
+    expect(linkCustomer({ email: 'olga@example.com', createdOn: at }, [{ ...olga, emails: ['olga@example.com'], unverifiedEmails: [] }])).toEqual({ customerId: 'c-olga', by: 'email' })
+  })
+
+  it('an order placed BEFORE the record went stale is still hers by phone (a lapsed member’s own history)', () => {
+    const before = new Date('2026-02-01T09:00:00Z')
+    expect(linkCustomer({ phone: '(305) 555-0003', createdOn: before }, [olga])).toEqual({ customerId: 'c-olga', by: 'phone' })
+    expect(linkCustomer({ email: 'olga@example.com', createdOn: before }, [olga])).toEqual({ by: 'unverified_email', candidateCustomerId: 'c-olga' })
+  })
+
+  it('a stale record’s phone does not hold an order against the new holder’s own checkout intent', () => {
+    const nora = intent({ customerId: 'c-nora', expectedEmail: 'nora@example.com', client: { phone: '+13055550003', name: 'Nora Newholder' } })
+    const who = { email: 'nora@example.com', phone: '(305) 555-0003', name: 'Nora Newholder', orderId: 'o-n', createdOn: new Date('2026-10-12T09:00:00Z'), product }
+    expect(linkCustomer(who, [olga], [nora])).toEqual({ customerId: 'c-nora', by: 'checkout_intent', intent: { id: 'i1', fresh: true } })
   })
 })
 

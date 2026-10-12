@@ -3,7 +3,9 @@
 // PROPOSAL: the server records it (identity/pending-actions.ts: the trust is checked again there) and texts the client the summary
 // with a 4-digit reply number (class action_confirm, the number a secretVar: masked in the thread). Nothing changes until the client
 // texts that number back (actions/handler.ts). The model never sees the number. Untrusted: needs_verification (send a verify link).
-// While staff hold the chat (an open handoff, a staff pause) nothing is proposed: unavailable (identity/pending-actions.ts).
+// While staff hold the chat (an open handoff, a staff pause) nothing is proposed: unavailable (identity/pending-actions.ts). Nor once
+// the turn itself has asked for a handoff (handoff_to_staff or a tool's; the handoff opens when the turn ends): unavailable, nothing
+// is recorded or texted (W4c re-review 2, N3).
 // A cancel inside the late window or with money held on the visit is the staff's (handoff).
 import { z } from 'zod/v4'
 import { transaction } from '../../../platform/db.js'
@@ -39,6 +41,7 @@ const StartMin = z.number().int().min(0).max(24 * 60 - 1)
 const NEEDS_VERIFY = 'This needs a quick verification first: send the client a verify link (send_link kind verify).'
 const OFF = 'Booking, moving or canceling by text is switched off right now. Offer the booking link or a team member.'
 const STAFF_HOLDS = 'A team member has this conversation now: nothing was proposed. Tell the client a team member will text them.'
+const HANDED_OFF = 'This conversation was handed to a team member in this turn: nothing was proposed. Tell the client a team member will text them.'
 
 class Refused extends Error {
   constructor(readonly outcome: ToolOutcome) {
@@ -46,9 +49,10 @@ class Refused extends Error {
   }
 }
 
-/** The pre-checks every action shares: actions on, a client, a trust the server agrees with. */
+/** The pre-checks every action shares: actions on, no handoff asked for in this turn, a client, a trust the server agrees with. */
 function precheck(ctx: ToolContext): ToolOutcome | null {
   if (!ctx.actionsEnabled) return fail('unavailable', OFF)
+  if (ctx.handoffRequested()) return fail('unavailable', HANDED_OFF)
   if (!ctx.identity.customerId) return fail('not_allowed', 'There is no client record for this number.')
   if (ctx.identity.trust !== 'trusted') return fail('needs_verification', NEEDS_VERIFY)
   return null
@@ -67,6 +71,7 @@ async function propose(
   o: { kind: PendingActionKind; summary: string; payload: { [key: string]: JsonValue }; appointmentId: string | null },
 ): Promise<ToolOutcome> {
   const customerId = ctx.identity.customerId!
+  if (ctx.handoffRequested()) return fail('unavailable', HANDED_OFF)
   try {
     await transaction(ctx.db, async (tx) => {
       let proposal

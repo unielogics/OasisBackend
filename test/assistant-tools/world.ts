@@ -249,6 +249,7 @@ export function useToolWorld(o: { env?: Record<string, string> } = {}): ToolWorl
       handoff(reason: ToolHandoffReason, summary: string) {
         if (handoffs.length === 0) handoffs.push({ reason, summary })
       },
+      handoffRequested: () => handoffs.length > 0,
       async audit(tx: Tx, action, detail) {
         await audit.record(tx, { locationId: w.locationId, action, ...detail, ctx: { actor: { name: AI_ACTOR_NAME }, requestId: turnId } })
       },
