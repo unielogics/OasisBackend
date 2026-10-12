@@ -20005,6 +20005,37 @@
                       ],
                       "type": "object"
                     },
+                    "numberReassigned": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "at": {
+                              "type": "string"
+                            },
+                            "toCustomerId": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "at",
+                            "toCustomerId"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Someone who verified only this number (a texted code) while the record was stale booked as a new client, so the number moved to that client: merge the two if it is the same person"
+                    },
                     "pendingAction": {
                       "anyOf": [
                         {
@@ -20239,7 +20270,8 @@
                     "links",
                     "sessions",
                     "pendingAction",
-                    "stale"
+                    "stale",
+                    "numberReassigned"
                   ],
                   "type": "object"
                 }
@@ -20253,6 +20285,350 @@
           "customers"
         ],
         "x-oasis-access": "cli.view"
+      }
+    },
+    "/api/v1/customers/{id}/identity/confirm": {
+      "post": {
+        "description": "Staff confirmed with the client (in person or on the phone) that the number on file is still theirs: a staff action is proof of the client, so the stale-record rule (180 days without proof, or a bounce as an invalid number) no longer holds the record and the assistant and the link pages know the client again. A texted code never does this (it proves only the number). 422 `IDENTITY_NO_PHONE` for a client without a number. Audited as identity.client.confirmed.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "customerId": {
+                      "type": "string"
+                    },
+                    "links": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "byKind": {
+                          "additionalProperties": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "lastIssuedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "live": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "live",
+                        "byKind",
+                        "lastIssuedAt"
+                      ],
+                      "type": "object"
+                    },
+                    "numberReassigned": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "at": {
+                              "type": "string"
+                            },
+                            "toCustomerId": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "at",
+                            "toCustomerId"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Someone who verified only this number (a texted code) while the record was stale booked as a new client, so the number moved to that client: merge the two if it is the same person"
+                    },
+                    "pendingAction": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "expiresAt": {
+                              "type": "string"
+                            },
+                            "kind": {
+                              "enum": [
+                                "book",
+                                "reschedule",
+                                "cancel"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "expiresAt"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "phone": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The client’s number masked to its last four digits"
+                    },
+                    "pin": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "lockedUntil": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "resetHoldUntil": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "After a reset by texted code, membership changes and payments through links wait until then"
+                        },
+                        "setAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "enum": [
+                            "none",
+                            "set",
+                            "locked",
+                            "disabled",
+                            "cleared"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "setAt",
+                        "lockedUntil",
+                        "resetHoldUntil"
+                      ],
+                      "type": "object"
+                    },
+                    "sessions": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "live": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "live"
+                      ],
+                      "type": "object"
+                    },
+                    "stale": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "lastActivityAt": {
+                              "type": "string"
+                            },
+                            "reason": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "inactive",
+                                    "invalid_number"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "stale": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "stale",
+                            "reason",
+                            "lastActivityAt"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The stale-record rule: no activity for 180 days, or the last text bounced as an invalid number"
+                    },
+                    "trust": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "none",
+                                "expired",
+                                "revoked",
+                                "epoch",
+                                "owner_changed",
+                                "opted_out",
+                                "stale"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "revokeReason": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "trusted": {
+                          "type": "boolean"
+                        },
+                        "until": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "verifiedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "verifiedBy": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "pin",
+                                "code"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "trusted",
+                        "until",
+                        "verifiedAt",
+                        "verifiedBy",
+                        "reason",
+                        "revokeReason"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "customerId",
+                    "phone",
+                    "pin",
+                    "trust",
+                    "links",
+                    "sessions",
+                    "pendingAction",
+                    "stale",
+                    "numberReassigned"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Confirm the number still belongs to this client",
+        "tags": [
+          "customers"
+        ],
+        "x-oasis-access": "cli.edit"
       }
     },
     "/api/v1/customers/{id}/identity/pin/clear": {
@@ -20317,6 +20693,37 @@
                       ],
                       "type": "object"
                     },
+                    "numberReassigned": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "at": {
+                              "type": "string"
+                            },
+                            "toCustomerId": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "at",
+                            "toCustomerId"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Someone who verified only this number (a texted code) while the record was stale booked as a new client, so the number moved to that client: merge the two if it is the same person"
+                    },
                     "pendingAction": {
                       "anyOf": [
                         {
@@ -20551,7 +20958,8 @@
                     "links",
                     "sessions",
                     "pendingAction",
-                    "stale"
+                    "stale",
+                    "numberReassigned"
                   ],
                   "type": "object"
                 }
@@ -20629,6 +21037,37 @@
                       ],
                       "type": "object"
                     },
+                    "numberReassigned": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "at": {
+                              "type": "string"
+                            },
+                            "toCustomerId": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "at",
+                            "toCustomerId"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Someone who verified only this number (a texted code) while the record was stale booked as a new client, so the number moved to that client: merge the two if it is the same person"
+                    },
                     "pendingAction": {
                       "anyOf": [
                         {
@@ -20863,7 +21302,8 @@
                     "links",
                     "sessions",
                     "pendingAction",
-                    "stale"
+                    "stale",
+                    "numberReassigned"
                   ],
                   "type": "object"
                 }
@@ -26120,6 +26560,66 @@
           "realtime"
         ],
         "x-oasis-access": "authenticated"
+      }
+    },
+    "/api/v1/identity/links/kill": {
+      "post": {
+        "description": "Bumps the links epoch (setting `links.epoch`): every personal link, every page opened from one and every 30-day phone trust issued before end at their next use, and a reply number in chat stops running (the trust it needs is gone). Clients verify again on a new link. Needs both owner-level permissions (Billing & integrations and Roles: a Super Admin). `reason` is kept in the audit log (identity.links.killed, beside settings.update). The break-glass CLI deploy/scripts/links-kill.sh does the same; PUBLIC_LINKS_ENABLED=false closes the link routes (docs/runbook.md \"Personal links\").",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "maxLength": 300,
+                    "minLength": 3,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "epoch": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "epochBefore": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "epoch",
+                    "epochBefore"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Kill switch: end every personal link, link session and phone trust now",
+        "tags": [
+          "customers"
+        ],
+        "x-oasis-access": "set.billing + team.roles"
       }
     },
     "/api/v1/integrations/sms/devices": {

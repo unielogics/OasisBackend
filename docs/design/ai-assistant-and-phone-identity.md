@@ -212,7 +212,9 @@ Actor: permissions sched.edit + jobs.status only, audit actor "Oasis AI (SMS)", 
   5 fails → 15 min, +3 → 1 h, +3 → disabled until reset (staff notified); ≤10 fails/24 h; per session 5 tries then the
   session dies; per IP 20 fails/h; constant-time and same work when no PIN exists; wrong PIN and unknown state answer
   alike. A PIN outranks a code once set; reset by code holds member privileges 72 h + email notice (SES) + staff notice.
-- Stale-record rule: no activity 180+ days or last delivery failed as invalid number → unknown until verified.
+- Stale-record rule: no activity 180+ days or last delivery failed as invalid number → unknown until verified. (W4c fixes:
+  only proof of the CLIENT is activity: their PIN, staff, a PIN-verified booking, a live membership; a texted code proves only the
+  NUMBER, so a code-verified party on a stale record books as a new client and the number moves to it; ADR 0160 "W4c fixes".)
 - Revocation: phone change, PIN reset, merge, STOP, staff Clear PIN, LINK_EPOCH bump.
 - Squarespace: unverified emails never feed linkCustomer's email tier; checkout-intent tier first (expected email +
   product + window); no match → awaiting_match for staff; duplicate paid → flagged; abandoned after 7 d.

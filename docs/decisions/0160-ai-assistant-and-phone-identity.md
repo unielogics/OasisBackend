@@ -645,7 +645,7 @@ Fixed:
   of the number's current client: a code is refused (409 `IDENTITY_PIN_REQUIRED`), the PIN verifies (and counts) as on their own
   page and trusts the number for them, and a page verified by code before a PIN was set does not book for them.
 
-Proposed (owner or orchestrator decision; not changed):
+Proposed (owner or orchestrator decision; decided and done since: "W4c fixes" below):
 - **The stale-record rule ends with any texted code** (Medium, design): without a PIN, the new holder of a recycled number verifies
   by code (the code goes to the number they hold) on the stranger's calendar link the assistant offers for a stale record, books, and
   the booking lands on the previous holder's record (`upsertCustomerByPhone`); the record is then active again and the next turns
@@ -667,3 +667,43 @@ Proposed (owner or orchestrator decision; not changed):
   client's goes to awaiting_match for staff.
 - **Per-address limits and IPv6** (hardening): the durable per-address limits key on the full address; behind IPv6 one /64 is
   billions of addresses. Proposal: key IPv6 addresses by their /64 (or confirm the hosts have no AAAA record / IPv6 listener).
+
+### W4c fixes (the decisions on the proposals above)
+
+Each item has a test that fails on 74bdf9d and passes after it.
+
+- **B1 Stale-record re-binding** (decided: proving control of a NUMBER is not proof of being the OLD CLIENT). (a) Only proof of the
+  client ends the stale-record rule (`identity/stale.ts`): the record's creation, their PIN (`customers.identity_confirmed_at`, stamped
+  by `verifySessionPin`, and a trust granted by PIN), staff (an appointment staff created, a visit staff served (wash started or finished) unless
+  the website booked it, `POST /customers/:id/identity/confirm`), a booking made for a session verified with the client's PIN
+  (`appointments.booked_with_pin`, link pages and the assistant), a live membership. Never a texted code, a link or website booking by
+  itself or a text. The invalid-number rule compares the bounce with the record's newest proof, its creation included. (b) A party
+  who verified only the number on a stale record (a stranger's link, the client's own calendar link, a website member token) books as a
+  NEW client (`identity/rebind.ts` `bindPartyToNumber` / `reassignNumber`): the number moves to it; the old record keeps its history,
+  loses the phone (a phone change: links, sessions, trust, pending action end), is flagged (`phone_reassigned_at`, `_to`, the staff
+  view's `numberReassigned`) and the managers get `identity.number_reassigned`. On such a page the old client's name, visits, invoice,
+  PIN window and privileges stay hidden, their visits cannot be moved, and PIN set/reset, membership and payment starts answer 409
+  `IDENTITY_RECORD_UNCONFIRMED`. POST /public/bookings and /public/memberships do the same (closed by `PUBLIC_WRITES_ENABLED=false`);
+  a website booking with no code is only linked to the stale record and never ends the rule. (c) The assistant then knows only the new
+  client (its context and tools are bound to `resolveIdentity`, which never names a stale record). (d) The gate's `customers` stage
+  treats a stale record as no known customer (`stageAndConsent`). A stale PIN holder's number still needs the PIN (W4c fix 3 stands).
+  Migration `20261013010000_identity_rebinding.sql`.
+- **B2 Link booking idempotency**: the key's owner is the LINK (`link:<link id>`), resolved from the session before the key is claimed
+  (`idempotentHandler` `actor` may be async; a dead page claims nothing): a retry from a re-opened page of the same link replays its
+  booking, two links never share a key. Supersedes the per-session owner of W4c fix 2.
+- **B3 Pending in-chat actions**: `AssistantInbox.openHandoff` cancels the number's pending action, so every handoff does (AGENT, the
+  fallback, the guard, a cap, `handoff_to_staff`), as a staff takeover already did. The reply-number handler runs the turn's gate before
+  executing: the switches, then `stageAndConsent` (stage and allowlist, a non-stale client in stage customers, no opt-out); refused,
+  the action is canceled unanswered.
+- **B4 A real kill switch for links**: `POST /identity/links/kill {reason}` (owner level: `set.billing` + `team.roles`) and the
+  break-glass CLI `deploy/scripts/links-kill.sh` (`deploy/lib/links-kill.ts`), both `identity/kill.ts` `killAllLinks`: bump
+  `links.epoch`, audited `identity.links.killed`. Runbook "Personal links".
+- **P6 Spoofed first texts**: settings `assistant.new_texters_per_hour` (default 30): beyond it a first text creates no provisional
+  client or lead and gets no AI turn (stored quarantined; one `assistant.new_texters_ceiling` notice an hour); `lead_follow_up` counts
+  inside the AI SMS sub-cap; while a shop-wide cap or the budget holds a stopped conversation gets no fallback text and no handoff
+  notice of its own (one `assistant.cap` notice per cap window: the hourly cap once a clock hour).
+- **P7 Intent squatting**: an open intent's match whose order carries a phone or a name that is not the intent client's
+  (`linkedBy: 'intent_mismatch'`) goes to `awaiting_match` for staff with that client as the candidate; the intent stays open.
+- **P8 IPv6**: every per-address limit (the public and link durable limits, the in-memory rings, PIN failures per address) keys an IPv6
+  address by its /64 and an IPv4-mapped address as IPv4 (`platform/ip.ts` `ipLimitKey`); `identity_pin_failures.ip` stores that key.
+- **Runbook**: the pre-rollout checklist and the kill switches are in docs/runbook.md "Personal links".

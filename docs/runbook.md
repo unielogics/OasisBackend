@@ -538,6 +538,48 @@ the worker do not come back after the restart:
 To close the links again, set `PUBLIC_LINKS_ENABLED=false` and restart; leave `PIN_PEPPER` in the secret. Never change `PIN_PEPPER`
 while clients have PINs: a new value voids every PIN (each client sets a new one through a texted code). Never put it in an env file.
 
+**Kill switches** (from the gentlest; use the one that fits the incident):
+- **End every link, link page and phone trust now, without a restart** (a link leaked, a batch went to the wrong numbers, the tablet
+  was lost): the links epoch. Owner in the dashboard / API: `POST /api/v1/identity/links/kill {"reason": "..."}` (needs a Super
+  Admin: Billing & integrations plus Roles). On the server, break glass:
+  ```bash
+  sudo $D/links-kill.sh "lost tablet"      # prints: links epoch N -> N+1; audited as identity.links.killed
+  ```
+  Every personal link, every page opened from one and every 30-day phone trust issued before end at their next use; a reply number
+  waiting in a chat stops running (its trust is gone). Clients verify again on a new link. Nothing else changes, nothing restarts.
+- **Close the link routes** (they answer 404): `PUBLIC_LINKS_ENABLED=false` in `/etc/oasis/common.env`, restart API and worker.
+- **The assistant**: `assistant.enabled` off in Settings (no restart), or `AI_ENABLED=false` and restart; in-chat actions alone:
+  `assistant.actions_enabled` off, or `AI_ACTIONS_ENABLED=false`. Narrowing `assistant.stage` (back to `allowlist`) stops the
+  assistant and any waiting reply number for everyone outside it.
+- **The website's own writes** (`/public/otp`, `/public/bookings`, `/public/memberships`): `PUBLIC_WRITES_ENABLED` stays `false`.
+
+**A number reassigned.** When someone verifies only by a texted code on a client record that has been quiet for 180 days (or whose
+texts bounced as invalid) and books, the shop gets a new client for them and the number moves to it; the old record keeps its
+history without a phone. The managers get "Number reassigned: <name>" and the client file shows it. If it was the same person after
+all, merge the two records. When staff know a quiet client still has the number, confirming it
+(`POST /api/v1/customers/:id/identity/confirm`, cli.edit) ends the stale-record rule for them.
+
+### Before the AI and links roll out (W4c checklist)
+
+1. **`PIN_PEPPER`** in the Secrets Manager secret only: the recipe above (`gen-secrets.sh PIN_PEPPER`, then `pnpm secrets:push`).
+   `install.sh` and the app refuse it in an env file. Set it before `PUBLIC_LINKS_ENABLED=true`; never change it afterwards.
+2. **Bedrock IAM**: apply `pnpm aws:provision ... --bedrock` to the app role ([aws-setup.md](aws-setup.md)) (InvokeModel on the us. inference profiles of every model in
+   `models.ts` and their routed foundation models, under the profile condition). Then run the `verify:ai` one-token ping, keep
+   Bedrock invocation logging off, and set an AWS Budgets alarm.
+3. **`AI_*` in `/etc/oasis/common.env`**: `AI_PROVIDER=bedrock`, `AI_BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-4-6`; `AI_GUARD_JUDGE`
+   unset or `true` (false is refused in production) and `AI_GUARD_MODEL_ID` in the IAM list; `AI_ACTIONS_ENABLED=false` until the W4a /
+   W4b results are in; review `AI_DAILY_BUDGET_USD` and the turn caps; tune `AI_SMS_SEGMENTS_PER_30MIN` against
+   `SMSGATE_MAX_PER_WINDOW=120`; `AI_ENABLED=true` last.
+4. **Settings, staged**: `assistant.stage=allowlist` with the owner's and staff numbers first, then `customers`, and `everyone` only
+   with the new-texter ceiling in place (`assistant.new_texters_per_hour`, default 30 an hour; the lead follow-up counts inside the AI
+   sub-cap). `assistant.actions_enabled` off at first. Decide `leads.follow_up_enabled`.
+5. **Links**: deploy the site with the link pages and re-run `install.sh` on both hosts (the nginx `oasis_public_links` zone and
+   location: no-store, 4k bodies). Confirm `PUBLIC_SITE_URL`, then `PUBLIC_LINKS_ENABLED=true`. Know the kill switches above
+   (`links-kill.sh`, the owner's `POST /identity/links/kill`, `PUBLIC_LINKS_ENABLED=false`). Per-address limits count an IPv6 client by
+   its /64, so an AAAA record is no longer a way around them.
+6. **`PUBLIC_WRITES_ENABLED` stays `false`** (the website's own POSTs). Before Squarespace goes live: an order that matches a checkout
+   intent only by its typed email but carries another phone or name waits for staff (Memberships, awaiting match).
+
 ### The host cannot resolve its own new name (health check: "answered HTTP 000")
 
 A name created in Route 53 after a resolver already answered "no such record" stays negative in that resolver for the zone's
