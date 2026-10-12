@@ -8,7 +8,10 @@ import type { Executor, Tx } from '../../../platform/db.js'
 import { AppError } from '../../../platform/errors.js'
 import type { NewId } from '../../../platform/ids.js'
 import { decodeCursor, keysetCondition, toPage, type Page } from '../../../platform/pagination.js'
+import '../../payments/problems.js'
 import { calcOf } from '../../payments/repository.js'
+import { squareSendsRefunds } from '../../square/links.js'
+import { squareEnv } from '../../square/runtime.js'
 import { arrivalsForOrder, type Arrival } from '../matcher.js'
 import { raiseAlert, resolveAlerts } from './alerts.js'
 import { storedOrder, storedTransaction } from './codec.js'
@@ -132,6 +135,17 @@ export async function manualMatch(
         !(eventRow.type === 'refund' && eventRow.status === 'pending')
       )
         throw new AppError('SQSP_EVENT_NOT_AWAITING')
+      // a card refund Square is sending (or will send) is settled by its legs (ADR 0171 D4), never by a Squarespace order: the same
+      // guard as PaymentsService.confirmProcessor, or the leg's money would go back uncounted and unflagged
+      if (eventRow.type === 'refund') {
+        const sent = await tx
+          .selectFrom('square_refund_legs')
+          .select('id')
+          .where('ledger_event_id', '=', eventRow.id)
+          .where('origin', '=', 'api')
+          .executeTakeFirst()
+        if (sent || (eventRow.processor === 'square' && squareSendsRefunds(squareEnv()))) throw new AppError('REFUND_SENT_TO_SQUARE')
+      }
       const sameAmount = arrivals.filter((x) => x.kind === a.kind && x.amountCents === eventRow!.amount_cents)
       const sameKind = arrivals.filter((x) => x.kind === a.kind)
       if (sameAmount.length !== 1 && !(sameKind.length === 1)) throw new AppError('SQSP_MATCH_AMBIGUOUS')
@@ -300,7 +314,7 @@ async function pendingCount(tx: Executor, locationId: string, orderId: string): 
 async function loadEvent(tx: Executor, locationId: string, eventId: string) {
   const ev = await tx
     .selectFrom('ledger_events')
-    .select(['id', 'invoice_id', 'type', 'status', 'amount_cents', 'processor_state'])
+    .select(['id', 'invoice_id', 'type', 'status', 'amount_cents', 'processor_state', 'processor'])
     .where('id', '=', eventId)
     .where('location_id', '=', locationId)
     .executeTakeFirst()

@@ -143,7 +143,8 @@ reconcile do nothing, and the hook verifies nothing (no key) and answers 401.
   claimed; refunding them again by item would give their full price back a second time, so the uncovered rest the alert names is given
   back as an amount); a Square-app refund attaches to a hand-confirmed refund only when every live card payment on the invoice is
   Square's (with Squarespace or unknown card money there too it is recorded for review: a possible double count shown to staff rather
-  than a refund silently absorbed).
+  than a refund silently absorbed). Finding F: the manual Squarespace match (`manualMatch` with `eventId`) applies the same
+  `REFUND_SENT_TO_SQUARE` rule to a refund Square is sending (an API leg, or `processor square` while the job sends refunds).
 - **Wording** (design 2.7): `VOID_NOT_ALLOWED`, `EVENT_NOT_AWAITING` name the event's processor (`processorName`), `PAYMENT_LINK_REQUIRED`
   is neutral; the awaiting alert of a Square entry reads "Square has not confirmed it yet".
 - **Off by default**: with `SQUARE_PROVIDER=sim`, `SQUARE_WRITES_ENABLED=false` and `PAYMENT_PROCESSOR=squarespace` no payment reaches
