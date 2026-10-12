@@ -6,6 +6,7 @@ import { actorFromAuth } from '../../src/modules/payments/actor.js'
 import { PaymentsService, type CommandContext } from '../../src/modules/payments/commands.js'
 import { checkLedgerIntegrity } from '../../src/modules/payments/jobs-integrity.js'
 import { defaultPorts } from '../../src/modules/payments/ports.js'
+import { productionExternalAlerts } from '../../src/composition.js'
 import { sqspExternalAlerts } from '../../src/modules/payments-sync/db/queries.js'
 import { AWAITING_ALERT_MINUTES } from '../../src/modules/payments/reports.js'
 import { failedSquareRefunds, squareExternalAlerts } from '../../src/modules/square/db/alerts.js'
@@ -22,8 +23,13 @@ describe('Square refunds', () => {
   const t = useTestDb()
   useCoreRuntime()
 
-  async function paidBySquare(r: Rig, amounts: number[] = [4280]) {
-    const inv = await r.openInvoice({ items: [{ name: 'Detail', priceCents: amounts.reduce((s, a) => s + a, 0) }], taxBp: 0 })
+  /** An invoice paid in the Square POS app (one payment per amount); `squarespaceCents` adds a card payment finished in Squarespace. */
+  async function paidBySquare(r: Rig, amounts: number[] = [4280], o: { squarespaceCents?: number } = {}) {
+    const inv = await r.openInvoice({ items: [{ name: 'Detail', priceCents: amounts.reduce((s, a) => s + a, 0) + (o.squarespaceCents ?? 0) }], taxBp: 0 })
+    if (o.squarespaceCents) {
+      const sqsp = await r.staffCard(inv, o.squarespaceCents)
+      await t.db.updateTable('ledger_events').set({ processor_state: 'confirmed', sqsp_order_id: 'sqsp-order-1' }).where('id', '=', sqsp).execute()
+    }
     const pays = []
     for (const a of amounts) {
       const p = r.posPayment({ amountCents: a, note: `INV-${inv.no}` })
@@ -44,7 +50,8 @@ describe('Square refunds', () => {
     const job = { db: t.db, clock: r.clock, newId: r.newId, env: r.env, api: r.sim.api, logger: silent, locationId: r.pe.locationId }
     const legs = (eventId: string) => t.db.selectFrom('square_refund_legs').selectAll().where('ledger_event_id', '=', eventId).orderBy('created_at').execute()
     const event = (id: string) => t.db.selectFrom('ledger_events').selectAll().where('id', '=', id).executeTakeFirstOrThrow()
-    return { inv, pays, refund, job, legs, event, service, ctx }
+    const itemIds = (await t.db.selectFrom('invoice_items').select('id').where('invoice_id', '=', inv.id).execute()).map((i) => i.id)
+    return { inv, pays, refund, job, legs, event, service, ctx, itemIds }
   }
 
   it('one leg: sent with its key, tracked by the webhook to completed, the refund confirmed once', async () => {
@@ -182,12 +189,38 @@ describe('Square refunds', () => {
     expect(alerts.filter((a) => a.kind === 'square_refund_failed')).toHaveLength(1)
   })
 
+  it('a Square card refund the job has not sent yet cannot be confirmed by hand either: the job sends it, its alert offers Review', async () => {
+    const r = await coreRig(t)
+    const s = await paidBySquare(r)
+    const out = await s.refund(1500)
+    expect(await s.legs(out.event.id)).toEqual([])
+    // pressed right after the refund is recorded, before the job's next run: refused, nothing is marked refunded by hand
+    const err = await transaction(t.db, (tx) => s.service.confirmProcessor(tx, s.ctx('k-confirm'), out.event.id)).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(AppError)
+    expect((err as AppError).code).toBe('REFUND_SENT_TO_SQUARE')
+    expect((await s.event(out.event.id)).processor_state).toBe('awaiting_processor')
+    // a stalled job: the waiting alert (production wiring) offers Review, not Confirm
+    r.clock.advance((AWAITING_ALERT_MINUTES + 1) * 60_000)
+    const waiting = (await productionExternalAlerts.list(t.db, { locationId: r.pe.locationId, now: r.clock.now(), manager: true })).filter((a) => a.kind === 'awaiting_processor')
+    expect(waiting).toEqual([expect.objectContaining({ actionLabel: 'Review', desc: expect.stringMatching(/Square has not confirmed it yet$/) })])
+    // the job runs: the money really goes back through Square and the refund is confirmed by Square's answer
+    expect(await runSquareRefunds(s.job)).toMatchObject({ planned: 1, submitted: 1 })
+    const [leg] = await s.legs(out.event.id)
+    r.sim.store.advance(5_000)
+    await r.ingestRefund(leg!.square_refund_id!)
+    expect(await s.event(out.event.id)).toMatchObject({ processor_state: 'confirmed', processor_confirmed_by: 'Square' })
+    expect(await r.calc(s.inv.id)).toMatchObject({ refunded: 1500 })
+  })
+
   it('observe-only: a Square card refund nothing was sent for can still be confirmed by hand', async () => {
     const r = await coreRig(t, { SQUARE_WRITES_ENABLED: 'false' })
     const s = await paidBySquare(r)
     const out = await s.refund(1500)
     expect((await s.event(out.event.id)).processor).toBe('square')
     await runSquareRefunds(s.job)
+    r.clock.advance((AWAITING_ALERT_MINUTES + 1) * 60_000)
+    const waiting = (await productionExternalAlerts.list(t.db, { locationId: r.pe.locationId, now: r.clock.now(), manager: true })).filter((a) => a.kind === 'awaiting_processor')
+    expect(waiting).toEqual([expect.objectContaining({ actionLabel: 'Confirm' })])
     const done = await transaction(t.db, (tx) => s.service.confirmProcessor(tx, s.ctx('k-confirm'), out.event.id))
     expect(done.event.id).toBe(out.event.id)
     expect((await s.event(out.event.id)).processor_state).toBe('confirmed')
@@ -212,6 +245,48 @@ describe('Square refunds', () => {
     r.sim.store.advance(5_000)
     expect(await r.ingestRefund(again.id)).toMatchObject({ note: expect.stringMatching(/needs review/) })
     expect(await r.calc(s.inv.id)).toMatchObject({ refunded: 2000 })
+  })
+
+  it('an item refund Square only partly gave back: the items stay claimed, the rest goes back as an amount', async () => {
+    const r = await coreRig(t)
+    const s = await paidBySquare(r, [2000, 2280])
+    const out = await transaction(t.db, (tx) => s.service.refund(tx, s.ctx('k-items'), s.inv.id, { mode: 'items', itemIds: s.itemIds, dest: 'card' }))
+    expect(out.event.amountCents).toBe(4280)
+    await runSquareRefunds(s.job)
+    const [big, small] = await s.legs(out.event.id)
+    expect([big!.amount_cents, small!.amount_cents]).toEqual([2280, 2000])
+    r.sim.store.failRefund(small!.square_refund_id!)
+    r.sim.store.advance(5_000)
+    await r.ingestRefund(small!.square_refund_id!)
+    await r.ingestRefund(big!.square_refund_id!)
+    expect((await s.event(out.event.id)).processor_state).toBe('failed')
+    const [part] = await t.db.selectFrom('ledger_events').selectAll().where('parent_event_id', '=', out.event.id).execute()
+    expect(part).toMatchObject({ amount_cents: 2280, item_ids: s.itemIds })
+    // refunding the items again would give their whole price back a second time (2,280 already went back): refused
+    const again = await transaction(t.db, (tx) => s.service.refund(tx, s.ctx('k-items-2'), s.inv.id, { mode: 'items', itemIds: s.itemIds, dest: 'card' })).catch((e: unknown) => e)
+    expect((again as AppError).code).toBe('ITEM_ALREADY_REFUNDED')
+    // the 20.00 the alert names goes back as an amount, through Square again (the failed leg reserves nothing)
+    expect(await failedSquareRefunds(t.db, r.pe.locationId, new Date(0))).toEqual([expect.objectContaining({ uncoveredCents: 2000 })])
+    const rest = await s.refund(2000, 'k-rest')
+    await runSquareRefunds(s.job)
+    expect((await s.legs(rest.event.id)).map((l) => [l.square_payment_id, l.amount_cents])).toEqual([[s.pays[0]!.id, 2000]])
+    expect(await r.calc(s.inv.id)).toMatchObject({ refunded: 4280, refundable: 0 })
+  })
+
+  it('a Square app refund is not attached to a hand-confirmed refund on an invoice that also holds Squarespace card money', async () => {
+    const r = await coreRig(t, { PAYMENT_PROCESSOR: 'squarespace' })
+    const s = await paidBySquare(r, [2280], { squarespaceCents: 2000 })
+    // the staff refund 1000 of the Squarespace payment there and confirm it by hand (no order id typed in)
+    const staff = await s.refund(1000)
+    await transaction(t.db, (tx) => s.service.confirmProcessor(tx, s.ctx('k-confirm'), staff.event.id))
+    // a separate 10.00 refund made in the Square app: real money, kept apart and flagged for review
+    const pos = await r.sim.api.refunds.refund(sqKey('rf', 'pos-mixed'), { payment_id: s.pays[0]!.id, amount_money: usd(1000) })
+    r.sim.store.advance(5_000)
+    expect(await r.ingestRefund(pos.id)).toMatchObject({ note: expect.stringMatching(/needs review/) })
+    expect(await s.event(staff.event.id)).toMatchObject({ processor_state: 'confirmed', processor_ref: null })
+    expect(await r.calc(s.inv.id)).toMatchObject({ refunded: 2000 })
+    const alerts = await squareExternalAlerts.list(t.db, { locationId: r.pe.locationId, now: r.clock.now(), manager: false })
+    expect(alerts.filter((a) => a.kind === 'square_external_refund')).toHaveLength(1)
   })
 
   it('a refund Square refuses when sent (more than the payment can give back) fails at once', async () => {

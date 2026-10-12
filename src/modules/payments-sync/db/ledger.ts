@@ -98,6 +98,8 @@ export class SqspLedgerOps {
         and (e.sqsp_order_id = ${q.orderId}
           or e.processor_ref = any(${q.transactionIds}::text[])
           or ((e.processor_state = 'awaiting_processor' or (e.type = 'refund' and e.status = 'pending' and e.dest = 'card'))
+              -- a card refund Square sends (ADR 0171 D4) is settled by its Square legs, never by a Squarespace order
+              and (e.type <> 'refund' or e.processor is distinct from 'square')
               and ((e.occurred_at >= ${lo} and e.occurred_at <= ${hi})
                 or (e.resolved_at >= ${lo} and e.resolved_at <= ${hi}))))
       order by e.occurred_at, e.seq`.execute(db)

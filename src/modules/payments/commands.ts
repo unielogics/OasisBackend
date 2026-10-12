@@ -34,7 +34,7 @@ import {
 } from './repository.js'
 import type { CreditExpiry, RefundDest } from './schema.js'
 import { issueClientLink } from '../identity/links.js'
-import { activateSquareLink, squareProcessor, type PreparedSquareLink } from '../square/links.js'
+import { activateSquareLink, squareProcessor, squareSendsRefunds, type PreparedSquareLink } from '../square/links.js'
 import { squareEnv } from '../square/runtime.js'
 import './problems.js'
 
@@ -964,10 +964,12 @@ export class PaymentsService {
     const ev = await getEventForUpdate(tx, c.locationId, eventId)
     if (ev.processor_state !== 'awaiting_processor')
       throw new AppError('EVENT_NOT_AWAITING', { params: { processor: processorName(ev.processor) } })
-    // a refund sent through the Square API is settled by its legs (ADR 0171 D4): a hand confirmation would hide a leg that fails
+    // a refund sent through the Square API is settled by its legs (ADR 0171 D4): a hand confirmation would hide a leg that fails. One
+    // the job will send (processor 'square', the cutover and Square writes on) is refused too: confirmed before the job's next run, it
+    // would never be sent (the job picks only waiting refunds) yet count as refunded. Observe-only keeps the hand confirmation.
     if (ev.type === 'refund') {
       const sent = await tx.selectFrom('square_refund_legs').select('id').where('ledger_event_id', '=', ev.id).where('origin', '=', 'api').executeTakeFirst()
-      if (sent) throw new AppError('REFUND_SENT_TO_SQUARE')
+      if (sent || (ev.processor === 'square' && squareSendsRefunds(squareEnv()))) throw new AppError('REFUND_SENT_TO_SQUARE')
     }
     const now = this.d.clock.now()
     const calc = await calcOf(tx, inv.id)

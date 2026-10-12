@@ -135,7 +135,15 @@ reconcile do nothing, and the hook verifies nothing (no key) and answers 401.
   and the alert asks only for the rest (verifier finding A). `confirmProcessor` refuses a refund with API legs
   (`REFUND_SENT_TO_SQUARE`; the awaiting alert offers Review, finding B). A Square-app refund also attaches to a card refund the staff
   confirmed by hand without a reference before Square's event arrived, instead of being recorded a second time (finding C). A second
-  reassign finds the payment's live tip whatever key wrote it (finding D).
+  reassign finds the payment's live tip whatever key wrote it (finding D). Recheck (finding E): `confirmProcessor` also refuses a refund
+  with `processor square` whenever the job will send it (`PAYMENT_PROCESSOR=square` and Square writes on, `squareSendsRefunds`), legs
+  or not: confirmed before the job's next run it would never be sent yet count as refunded. The awaiting alert offers Review for it
+  (`sqspExternalAlertsWith`, wired in composition), and the Squarespace matcher no longer offers it as a candidate. Observe-only keeps
+  the hand confirmation. Finding E2: the completed part of a failed refund keeps the original's `item_ids` on purpose (the items stay
+  claimed; refunding them again by item would give their full price back a second time, so the uncovered rest the alert names is given
+  back as an amount); a Square-app refund attaches to a hand-confirmed refund only when every live card payment on the invoice is
+  Square's (with Squarespace or unknown card money there too it is recorded for review: a possible double count shown to staff rather
+  than a refund silently absorbed).
 - **Wording** (design 2.7): `VOID_NOT_ALLOWED`, `EVENT_NOT_AWAITING` name the event's processor (`processorName`), `PAYMENT_LINK_REQUIRED`
   is neutral; the awaiting alert of a Square entry reads "Square has not confirmed it yet".
 - **Off by default**: with `SQUARE_PROVIDER=sim`, `SQUARE_WRITES_ENABLED=false` and `PAYMENT_PROCESSOR=squarespace` no payment reaches

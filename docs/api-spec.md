@@ -1024,7 +1024,7 @@ is the design's day as data.
 | `PUT /invoices/:id/tip` `{tipCents}` | `pay.collect` | Untaxed; reopens a balance when the invoice was settled. |
 | `POST /invoices/:id/receipt` | `msg.send` or `pay.collect` | SMS to opted-in clients and email, through the `PaymentMessenger` port; audited; not a ledger event. |
 | `POST /invoices/:id/payment-links` `{kind: balance\|deposit, amountCents?, url?}` | `pay.collect` | Before the Square cutover: attach and text a Squarespace checkout or invoice link. With `PAYMENT_PROCESSOR=square` (ADR 0171 D3): a `balance` link is the client's personal pay page while `PUBLIC_LINKS_ENABLED` (template `payment_link_personal`, the link masked in the message row; `paymentLink.url` null, `provider personal`), else a Square link made now for exactly the balance (its lines, a "Sales tax" line and a "Tip" line, or one "Balance due" line; asserted to add up exactly); a `deposit` is a Square quick-pay link for `amountCents`. The Square call runs before the transaction (idempotency `prepare`); the link becomes active under the invoice lock (409 `CONCURRENT_UPDATE` if the amount changed meanwhile), older active links of the purpose are superseded (and deleted at Square by `square.links.sweep`). 409 `SQUARE_WRITES_OFF` (watch-only), 503 `SQUARE_UNAVAILABLE`. `paymentLink{id,url,expectedCents,purpose,sms,provider}`. |
-| `POST /ledger-events/:id/confirm-processor` `{processorRef?, sqspOrderId?}` | `pay.collect` for a payment, `pay.refund` for a refund | `awaiting_processor` to `confirmed` by hand; 409 `EVENT_NOT_AWAITING` (names the processor); 409 `REFUND_SENT_TO_SQUARE` for a refund sent through the Square API (its legs settle it; the "Card refund not confirmed" alert then offers Review, not Confirm). |
+| `POST /ledger-events/:id/confirm-processor` `{processorRef?, sqspOrderId?}` | `pay.collect` for a payment, `pay.refund` for a refund | `awaiting_processor` to `confirmed` by hand; 409 `EVENT_NOT_AWAITING` (names the processor); 409 `REFUND_SENT_TO_SQUARE` for a refund sent through the Square API, or one the Square job will send (`processor square` while `PAYMENT_PROCESSOR=square` and Square writes are on; its legs settle it; the "Card refund not confirmed" alert then offers Review, not Confirm). Observe-only: confirmed by hand as before. |
 
 Limits and roles: the limit of a kind is the highest among the roles that grant the permission (`null` unlimited, no row 2500
 cents); ledger `by` is the real person and `byRole` the names of the granting roles (`Management + Accounting`); under
@@ -2079,7 +2079,8 @@ live only: the access token refused, the catch-up behind, webhooks silent).
   (`invoice_calc_of`, `calc.ts`, `jobs-integrity.ts`), and an alert for the part that did not go back (`failedRefunds[].uncoveredCents`;
   shown as soon as a leg fails). What the completed legs gave back is written as its own confirmed card refund (`parentEventId` the
   failed one, key `square:refund-part:<event id>`, audit `square.refund_failed` names it), so the ledger counts exactly the money that
-  went back. A refund sent to Square is not confirmed by hand (409 `REFUND_SENT_TO_SQUARE`). A refund made in the Square app is attached
-  to the staff's awaiting card refund of that amount, or to one they already confirmed by hand without a reference (it takes the Square
-  refund id, audit `square.attach_refund`), or recorded as an external refund (`needs_review`, key `square:refund:<id>`, reason
+  went back; it keeps the original's `itemIds` (the items stay refunded; the rest goes back as an amount). A refund sent to Square, or
+  waiting for the job to send it, is not confirmed by hand (409 `REFUND_SENT_TO_SQUARE`). A refund made in the Square app is attached
+  to the staff's awaiting card refund of that amount, or to one they already confirmed by hand without a reference on an invoice whose
+  card money is all Square's (it takes the Square refund id, audit `square.attach_refund`), or recorded as an external refund (`needs_review`, key `square:refund:<id>`, reason
   "Refunded in Square").

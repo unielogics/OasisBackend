@@ -49962,7 +49962,7 @@
     },
     "/api/v1/ledger-events/{id}/confirm-processor": {
       "post": {
-        "description": "Needs the permission of the original action: pay.collect for a payment, pay.refund for a refund. 409 `EVENT_NOT_AWAITING` (names the processor); 409 `REFUND_SENT_TO_SQUARE` for a refund sent through the Square API (its legs settle it).",
+        "description": "Needs the permission of the original action: pay.collect for a payment, pay.refund for a refund. 409 `EVENT_NOT_AWAITING` (names the processor); 409 `REFUND_SENT_TO_SQUARE` for a refund sent through the Square API, or one the Square job will send (processor square while Square is the processor and writes are on); its legs settle it.",
         "parameters": [
           {
             "in": "path",

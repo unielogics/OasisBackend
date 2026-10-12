@@ -159,6 +159,28 @@ describe('PgLedger over the real payments ledger', () => {
     expect(ref.processorState).toBe('awaiting_processor')
   })
 
+  it('a card refund Square sends is not offered to the Squarespace matcher', async () => {
+    const { r, env, ledger, inv } = await world()
+    await addEvent(r.db, env, inv, { type: 'pay', amountCents: 20223, methodKind: 'card', method: 'Visa', at: new Date(T.getTime() - 2 * H) })
+    const square = await addEvent(r.db, env, inv, {
+      type: 'refund',
+      amountCents: 5000,
+      dest: 'card',
+      processorState: 'awaiting_processor',
+      at: new Date(T.getTime() - H),
+    })
+    const other = await addEvent(r.db, env, inv, {
+      type: 'refund',
+      amountCents: 5000,
+      dest: 'card',
+      processorState: 'awaiting_processor',
+      at: new Date(T.getTime() - H),
+    })
+    await r.db.updateTable('ledger_events').set({ processor: 'square' }).where('id', '=', square).execute()
+    const ctx = await ledger.loadContext(query())
+    expect(ctx.events.map((e) => e.id)).toEqual([other])
+  })
+
   it('confirmAwaitingEvent moves only the processor fields, once, and announces it', async () => {
     const { r, env, ledger, inv } = await world()
     const id = await addEvent(r.db, env, inv, {

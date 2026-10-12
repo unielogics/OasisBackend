@@ -259,9 +259,12 @@ The refund ledger row is the outbox: a card refund on an invoice holding Square 
 carries `processor square`. `square.refunds.submit` plans legs (newest Square payment first, each capped), sends RefundPayment with the
 leg's own key (`rf_<leg id>`, a retry answers the same refund), and `refund.*` events settle them once every leg has: all completed,
 the refund is confirmed; any failed or rejected, it is `failed` (not counted), the completed part becomes its own confirmed refund
-(key `square:refund-part:<event id>`) and an alert asks for the rest. Staff cannot confirm such a refund by hand. Refunds made in the
-Square app are attached to the staff's waiting card refund of the amount (or one they confirmed by hand before Square's event came),
-or recorded for review ("Refunded in Square").
+(key `square:refund-part:<event id>`) and an alert asks for the rest. Staff cannot confirm such a refund by hand, from the moment it
+is recorded (the job will send it: its waiting alert offers Review); in observe-only mode nothing is sent and staff still confirm it.
+The Squarespace matcher never confirms it either. The completed part keeps the original's items, so they stay refunded: the rest goes
+back as an amount (refunding the items again would give their whole price back a second time). Refunds made in the Square app are
+attached to the staff's waiting card refund of the amount (or one they confirmed by hand before Square's event came, only on an
+invoice whose card money is all Square's), or recorded for review ("Refunded in Square").
 
 ### 11.5 POS app switch
 
