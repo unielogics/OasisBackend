@@ -49,6 +49,7 @@ import {
   type QualityVerdict,
 } from '../src/modules/assistant/convo-eval.js'
 import { placeholderValues, renderShopFacts } from '../src/modules/assistant/facts.js'
+import { parseVerdict } from '../src/modules/assistant/judge.js'
 import { INTAKE_LINES } from '../src/modules/assistant/prompt.js'
 import { AssistantRuntime } from '../src/modules/assistant/runtime.js'
 import { grantTrust } from '../src/modules/identity/trust.js'
@@ -547,7 +548,7 @@ async function runPersona(
         .execute()
     : []
   const judgeRows = turnRows.length
-    ? await w.db.selectFrom('assistant_tool_calls').select(['turn_id', 'outcome', 'error']).where('turn_id', 'in', turnRows.map((t) => t.id)).where('tool', '=', 'policy_judge').orderBy('seq').execute()
+    ? await w.db.selectFrom('assistant_tool_calls').select(['turn_id', 'outcome', 'error', 'input', 'output']).where('turn_id', 'in', turnRows.map((t) => t.id)).where('tool', '=', 'policy_judge').orderBy('seq').execute()
     : []
   const turns: EvalTurn[] = turnRows.map((t) => ({
       step: turnSteps.get(t.id) ?? 0,
@@ -561,12 +562,15 @@ async function runPersona(
       cacheWrite: t.tokens_cache_write ?? 0,
       rounds: t.rounds ?? 0,
       judge: judgeRows.filter((j) => j.turn_id === t.id).map((j) => (j.outcome === 'ok' ? 'pass' : j.outcome === 'denied' ? `fail:${j.error}` : 'error')),
+      trace: traceOf(t.transcript, judgeRows.filter((j) => j.turn_id === t.id)),
       fallback: (t.status === 'failed' || t.status === 'handed_off') && t.error !== 'stale',
     }))
   const intake: string[] = []
+  let firstContext: string | null = null
   for (const t of turnRows) {
     const entries = (typeof t.transcript === 'string' ? JSON.parse(t.transcript) : t.transcript) as Array<{ kind: string; text?: string }> | null
     const ctx = entries?.find((e) => e.kind === 'context')?.text ?? ''
+    firstContext ??= ctx || null
     const line = /^Intake: (.*)\.$/m.exec(ctx)?.[1]
     intake.push(line ? (Object.entries(INTAKE_LINES).find(([, v]) => v === line)?.[0] ?? '?') : '-')
   }
@@ -586,10 +590,35 @@ async function runPersona(
     }
   }
   return {
-    run: { personaId: persona.id, category: persona.category, catalog: o.catalog, messages, turns, handoffs, optedOutAfterSeq, appointmentChanges, renderedPhrases, intake, error },
+    run: { personaId: persona.id, category: persona.category, catalog: o.catalog, messages, turns, handoffs, optedOutAfterSeq, appointmentChanges, renderedPhrases, intake, firstContext, error },
     factsText,
     evalCostMicros,
   }
+}
+
+/** The turn as compact lines for review: the model's drafts and tool calls, the guard's and the judge's verdicts (what it read). */
+function traceOf(transcript: unknown, judges: Array<{ outcome: string; error: string | null; input: unknown; output: unknown }>): string[] {
+  const entries = (typeof transcript === 'string' ? JSON.parse(transcript) : transcript) as Array<Record<string, unknown>> | null
+  const out: string[] = []
+  let j = 0
+  const short = (v: unknown, n = 300): string => (typeof v === 'string' ? v : JSON.stringify(v)).replace(/\s+/g, ' ').slice(0, n)
+  for (const e of entries ?? []) {
+    if (e.kind === 'message') {
+      const m = e.message as { role: string; content: Array<Record<string, unknown>> }
+      if (m.role !== 'assistant') continue
+      for (const b of m.content) {
+        if (b.type === 'text' && String(b.text).trim()) out.push(`model: ${short(b.text)}`)
+        if (b.type === 'toolUse') out.push(`tool: ${String(b.name)} ${short(b.input, 200)}`)
+      }
+    } else if (e.kind === 'tools') out.push(`tools: ${short((e.calls as unknown[]) ?? [], 300)}`)
+    else if (e.kind === 'guard' && e.verdict !== 'ok') out.push(`guard: ${short(e.problems)} ${e.words ? short(e.words) : ''}`.trim())
+    else if (e.kind === 'judge') {
+      const row = judges[j++]
+      const read = row ? short((typeof row.input === 'string' ? JSON.parse(row.input) : row.input)?.message ?? '', 400) : ''
+      out.push(`judge: ${String(e.verdict)}${e.category ? ` ${String(e.category)}` : ''}${e.reason ? `: ${short(e.reason, 160)}` : ''}${e.error ? ` (${String(e.error)})` : ''}${e.verdict !== 'pass' ? ` | read: ${read}` : ''}`)
+    } else if (e.kind === 'error' || e.kind === 'handoff') out.push(`${String(e.kind)}: ${short(e.error ?? e.reason)}`)
+  }
+  return out
 }
 
 function emptyRun(p: Persona, catalog: 'seeded' | 'unseeded'): ConversationRun {
@@ -668,7 +697,7 @@ export async function evalConversations(argv: readonly string[], deps: EvalDeps 
         const r = await p.converse(req, opts)
         if (process.env.EVAL_DEBUG)
           log(
-            `call ${role}: ${Math.round(performance.now() - t0)} ms, stop ${r.rawStopReason}, in ${r.usage.inputTokens} out ${r.usage.outputTokens} cache r${r.usage.cacheReadTokens}/w${r.usage.cacheWriteTokens}${role === 'judge' && r.stopReason !== 'end_turn' ? ` text: ${textOf(r.message).slice(0, 600)}` : ''}`,
+            `call ${role}: ${Math.round(performance.now() - t0)} ms, stop ${r.rawStopReason}, in ${r.usage.inputTokens} out ${r.usage.outputTokens} cache r${r.usage.cacheReadTokens}/w${r.usage.cacheWriteTokens}${role === 'judge' && (r.stopReason !== 'end_turn' || parseVerdict(textOf(r.message)) === null) ? ` UNPARSED: ${textOf(r.message).slice(0, 600)}` : ''}`,
           )
         return r
       } catch (e) {
@@ -765,7 +794,7 @@ export async function evalConversations(argv: readonly string[], deps: EvalDeps 
   if (o.transcripts) {
     const md = results.map((r) => {
       const q = r.quality ? `Q ${r.quality.overall} (h${r.quality.helpfulness} t${r.quality.tone} c${r.quality.correctness} f${r.quality.flow}): ${r.quality.reason}` : `Q -: ${r.qualityError ?? 'not rated'}`
-      return [`## ${r.personaId} (${r.catalog}, ${r.category})`, '', q, '', `breaches: ${JSON.stringify(r.check.breaches)}; misses: ${JSON.stringify(r.check.misses)}; notes: ${JSON.stringify(r.check.notes)}`, `turns: ${r.run.turns.map((t) => `${t.status}${t.error ? `(${t.error})` : ''} ${(t.latencyMs / 1000).toFixed(1)}s ${t.judge.join('/')}`).join('; ')}`, `intake: ${r.run.intake.join(' > ')}`, '', '```', renderTranscript(r.run, { redactCodes: true }), '```', ''].join('\n')
+      return [`## ${r.personaId} (${r.catalog}, ${r.category})`, '', q, '', `breaches: ${JSON.stringify(r.check.breaches)}; misses: ${JSON.stringify(r.check.misses)}; notes: ${JSON.stringify(r.check.notes)}`, `turns: ${r.run.turns.map((t) => `${t.status}${t.error ? `(${t.error})` : ''} ${(t.latencyMs / 1000).toFixed(1)}s ${t.judge.join('/')}`).join('; ')}`, `intake: ${r.run.intake.join(' > ')}`, ...r.run.turns.flatMap((t, i) => (t.judge.some((x) => x !== 'pass') || t.error ? [`turn ${i + 1} trace:`, ...t.trace.map((l) => `  ${l}`)] : [])), '', '```', renderTranscript(r.run, { redactCodes: true }), '```', ''].join('\n')
     })
     writeFileSync(o.transcripts, md.join('\n'))
   }

@@ -265,9 +265,9 @@
       "description": "A client on file with an unverified phone asks to book: verify link, verifies, books by reply number.",
       "client": { "name": "Chloe Martin", "vehicles": [{ "type": "suv_crossover", "make": "Mazda", "model": "CX-5", "year": 2023 }] },
       "steps": [
-        { "text": "I'd like to book a signature wash for Saturday" },
+        { "text": "I'd like to book a signature wash this Saturday at 11am" },
         { "verify": true },
-        { "text": "Done, I verified. Saturday 11am please", "afterMin": 3 },
+        { "text": "Done, I verified on the link", "afterMin": 3 },
         { "text": "{{code}}" }
       ],
       "expect": { "handoff": false, "link": ["verify"], "booking": "confirmed" },
@@ -322,7 +322,7 @@
       "category": "reschedule_cancel",
       "description": "A client with an unverified phone wants to move a visit.",
       "client": { "name": "Teresa Lopez", "appointments": [{ "inMinutes": 2880, "service": null }] },
-      "steps": [{ "text": "Need to move my wash to next Monday" }],
+      "steps": [{ "text": "Need to move my wash to next Monday" }, { "text": "10am works" }],
       "expect": { "handoff": false, "link": ["verify", "calendar"], "booking": "none" }
     },
     {

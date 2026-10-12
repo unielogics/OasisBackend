@@ -18,6 +18,8 @@ const EXEMPT: Record<string, string> = {
   'scripts/aws/provision.ts': 'operator tool: acts with the operator profile and must never pick up the runtime environment',
   'scripts/secrets-push.ts': 'operator tool: writes the secret with the operator profile',
   'scripts/eval-guard.ts': 'operator tool (W4): runs the output guard judge with the operator profile; reads only the AI_* settings',
+  'scripts/eval-conversations.ts':
+    'operator tool (W4b): runs personas through the runtime on the LOCAL TEST database (DATABASE_URL_TEST of .env) with the operator profile; reads only the AI_* settings',
   'scripts/openapi.ts': 'builds the document from a fixed test environment',
   'scripts/data-model.ts': 'reads only the migrations',
   'scripts/db-schema.ts': 'development: regenerates docs from a local database (DATABASE_URL from .env)',

@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import {
   checkConversation,
   formatReport,
+  markServerParts,
   parsePersonas,
   parseQualityVerdict,
   PERSONA_CATEGORIES,
@@ -132,7 +133,7 @@ describe('the hard assertions', () => {
   })
 
   it('a +44 or an opted-out number: any AI text or any model turn is a breach', () => {
-    const turn = { step: 1, status: 'replied', error: null, latencyMs: 1, costMicros: 1, tokensIn: 1, tokensOut: 1, cacheRead: 0, cacheWrite: 0, rounds: 0, judge: [], fallback: false }
+    const turn = { step: 1, status: 'replied', error: null, latencyMs: 1, costMicros: 1, tokensIn: 1, tokensOut: 1, cacheRead: 0, cacheWrite: 0, rounds: 0, judge: [], fallback: false, trace: [] }
     expect(ids(run([client('hi')], { turns: [turn] }), persona({ phone: 'uk' }))).toEqual(['no_reply_blocked'])
     expect(ids(run([client('hi'), msg({ text: DISCLOSED('Hi!') })]), persona({ optedOut: true }))).toEqual(['no_reply_blocked'])
     expect(ids(run([client('hi')]), persona({ phone: 'uk' }))).toEqual([])
@@ -169,6 +170,15 @@ describe('the flow expectations (for review, not breaches)', () => {
 })
 
 describe('the quality judge and the totals', () => {
+  it('marks the server parts of an AI text (disclosure, footer, rendered prices, safety line) for the quality judge', () => {
+    expect(markServerParts(DISCLOSED(`${RENDERED}. Name? [link:verify] ${SAFETY_LINE}`), [RENDERED])).toBe(
+      `⟦Oasis Auto Spa's automated assistant here.⟧ ⟦${RENDERED}⟧. Name? [link:verify] ⟦${SAFETY_LINE}⟧ ⟦Reply STOP to opt out.⟧`,
+    )
+    const p = qualityPrompt({ factsText: 'F', persona: persona(), run: { ...run([msg({ text: `${RENDERED}.` })]), firstContext: 'TURN CONTEXT\nMembership: Gold, active, 2 washes left this cycle.' } })
+    expect(p).toContain('<turn_context>\nTURN CONTEXT\nMembership: Gold, active, 2 washes left this cycle.\n</turn_context>')
+    expect(p).toContain(`Assistant: ⟦${RENDERED}⟧.`)
+  })
+
   it('parses the verdict out of the answer; refuses anything else', () => {
     const v = parseQualityVerdict('Here: {"helpfulness":5,"tone":4,"correctness":5,"flow":4,"overall":4,"reason":"good","policyConcerns":[]}')
     expect(v.overall).toBe(4)
