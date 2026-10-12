@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { placeholderValues } from '../../src/modules/assistant/facts.js'
 import { actionClaims, guardReply, HARD_PROBLEMS, PROBLEM_HINTS } from '../../src/modules/assistant/guard.js'
 import {
+  JUDGE_ACTION_RULE,
   JUDGE_CATEGORIES,
   JUDGE_HINTS,
   JUDGE_RUBRIC,
@@ -280,9 +281,11 @@ describe('X2/X3: the judge reads the shop facts and the server record', () => {
     expect(JUDGE_HINTS.facts).toMatch(/the team can confirm that/)
     expect(JUDGE_HINTS.action).toMatch(/never say so/i)
     expect(JUDGE_RUBRIC).toContain('(f) facts:')
-    expect(JUDGE_RUBRIC).toContain('(g) action:')
+    // rule (g) is its own system block, sent only with a server record (guard polish after W4b-fix)
+    expect(JUDGE_RUBRIC).not.toContain('(g) action:')
+    expect(JUDGE_ACTION_RULE).toContain('(g) action:')
     // a link offered to do it is no claim; pointing to a link texted earlier writes no address (W4b spot check on Bedrock)
-    expect(JUDGE_RUBRIC).toContain('Not claims: a link or an offer to book, move or cancel')
+    expect(JUDGE_ACTION_RULE).toContain('Not claims: a link or an offer to book, move or cancel')
     expect(JUDGE_RUBRIC).toContain('Pointing to a link the shop texted ("the link I texted you", "the booking link above") writes no address and passes.')
     expect(JUDGE_RUBRIC).toContain('|facts|action","ok":false}')
     const seg = [{ text: 'Yes, there is a waiting area.', trusted: false }]
@@ -293,7 +296,9 @@ describe('X2/X3: the judge reads the shop facts and the server record', () => {
     expect(req.system).toEqual([
       { text: JUDGE_RUBRIC, cache: true },
       { text: 'SHOP FACTS\nBusiness: X', cache: true },
+      { text: JUDGE_ACTION_RULE, cache: true },
     ])
+    expect(judgeRequest(seg, 120, 'abcd1234', { facts: 'SHOP FACTS\nBusiness: X' }).system).toHaveLength(2)
     expect(judgeMessage(seg, 'abcd1234', 'Done <by> the server: nothing.')).toBe(
       '<message key="abcd1234" trusted-parts="0">\nYes, there is a waiting area.\n</message>\n<own-text>\nYes, there is a waiting area.\n</own-text>\n<server-record>\nDone ‹by› the server: nothing.\n</server-record>',
     )

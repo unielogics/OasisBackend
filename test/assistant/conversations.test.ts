@@ -14,7 +14,7 @@ import type { AssistantConfig } from '../../src/modules/assistant/config.js'
 import { aiCostMicros } from '../../src/integrations/ai/cost.js'
 import { assistantConfig } from '../../src/modules/assistant/config.js'
 import { SAFETY_LINE } from '../../src/modules/assistant/guard.js'
-import { JUDGE_HINTS, JUDGE_RUBRIC, TRUSTED_CLOSE, TRUSTED_OPEN, unkeyed } from '../../src/modules/assistant/judge.js'
+import { JUDGE_HINTS, JUDGE_ACTION_RULE, JUDGE_RUBRIC, TRUSTED_CLOSE, TRUSTED_OPEN, unkeyed } from '../../src/modules/assistant/judge.js'
 import { INTAKE_LINES } from '../../src/modules/assistant/prompt.js'
 import { AssistantRuntime } from '../../src/modules/assistant/runtime.js'
 import { toBizDate } from '../../src/platform/time.js'
@@ -538,8 +538,13 @@ describe('the policy judge in a turn (design 3c, layer 3)', () => {
     expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
     expect(a.judge.requests).toHaveLength(1)
     const req = a.judge.requests[0]!
-    // the rubric, then the shop facts (W4b X2), both cached; no client data in either
-    expect(req.system).toEqual([{ text: JUDGE_RUBRIC, cache: true }, { text: expect.stringMatching(/^SHOP FACTS/), cache: true }])
+    // the rubric, then the shop facts (W4b X2), then rule (g) for the server record (guard polish after W4b-fix), all cached; no
+    // client data in any
+    expect(req.system).toEqual([
+      { text: JUDGE_RUBRIC, cache: true },
+      { text: expect.stringMatching(/^SHOP FACTS/), cache: true },
+      { text: JUDGE_ACTION_RULE, cache: true },
+    ])
     expect(req).toMatchObject({ maxTokens: 120, temperature: 0, toolChoice: 'none' })
     const message = unkeyed(JSON.stringify(req.messages))
     expect(message).toContain(`Hi Maria! ${TRUSTED_OPEN}Signature Hand Wash`)

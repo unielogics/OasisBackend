@@ -13,7 +13,7 @@ import type { AiContentBlock, AiConverseRequest, AiJson } from '../../src/integr
 import { placeholderValues } from '../../src/modules/assistant/facts.js'
 import { CARD_LINE, SAFETY_LINE } from '../../src/modules/assistant/guard.js'
 import { SAFETY_LINES } from '../../src/modules/assistant/lang.js'
-import { TRUSTED_CLOSE, TRUSTED_OPEN, unkeyed } from '../../src/modules/assistant/judge.js'
+import { JUDGE_ACTION_RULE, TRUSTED_CLOSE, TRUSTED_OPEN, unkeyed } from '../../src/modules/assistant/judge.js'
 import { INTAKE_LINES } from '../../src/modules/assistant/prompt.js'
 import { AssistantRuntime } from '../../src/modules/assistant/runtime.js'
 import { grantTrust } from '../../src/modules/identity/trust.js'
@@ -733,10 +733,12 @@ describe('W4b fixes (the conversation eval and its independent check)', () => {
       'The team can confirm that and will text you back.',
     )
     const req = a.judge.requests[0]!
-    expect(req.system).toHaveLength(2)
+    // the rubric, the facts, rule (g) for the record (guard polish after W4b-fix: its own block, sent with the record only)
+    expect(req.system).toHaveLength(3)
     expect(req.system[1]).toMatchObject({ cache: true })
     expect(req.system[1]!.text).toMatch(/^SHOP FACTS/)
     expect(req.system[0]!.text).toContain('(f) facts:')
+    expect(req.system[2]).toEqual({ text: JUDGE_ACTION_RULE, cache: true })
     const message = JSON.stringify(req.messages)
     expect(message).toContain(
       "Done by the server since the assistant's last text: nothing (nothing was booked, moved or cancelled).",

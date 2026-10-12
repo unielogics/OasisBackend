@@ -21,7 +21,7 @@ import {
   toGsm7,
   withoutQuestions,
 } from '../../src/modules/assistant/guard.js'
-import { JUDGE_RUBRIC } from '../../src/modules/assistant/judge.js'
+import { JUDGE_ACTION_RULE, JUDGE_RUBRIC, judgeRequest } from '../../src/modules/assistant/judge.js'
 import { actionSummaryIn, serverTextEs, shortDateEs, timeEs, whenIn } from '../../src/modules/assistant/lang.js'
 import { asksForFree, renderTurnContext, STATIC_RULES, type TurnContextData } from '../../src/modules/assistant/prompt.js'
 import { recordLine } from '../../src/modules/assistant/tool-runner.js'
@@ -185,11 +185,16 @@ describe('P2: the action-claim rule’s false blocks', () => {
     )
   })
 
-  it('rule (g): the record’s tool results are true; a sign-off or a restatement after a proposal is no claim', () => {
-    expect(JUDGE_RUBRIC).toContain('a saved name or vehicle, a proposal it texted, a link it sent, the open times it returned')
-    expect(JUDGE_RUBRIC).toContain('"guarde tu Honda Pilot"')
-    expect(JUDGE_RUBRIC).toContain('a friendly sign-off ("see you then", "see you Saturday at 9 once you confirm", "nos vemos el viernes")')
-    expect(JUDGE_RUBRIC).toContain('restating that proposal ("Signature Hand Wash tomorrow at 10:00 AM for your BMW 330i", "your visit is ready to cancel")')
+  it('rule (g): the record’s tool results are true; a sign-off or a restatement after a proposal is no claim; sent with a record only', () => {
+    expect(JUDGE_ACTION_RULE).toContain('a saved name or vehicle, a proposal it texted, a link it sent, the open times it returned')
+    expect(JUDGE_ACTION_RULE).toContain('"guarde tu Honda Pilot"')
+    expect(JUDGE_ACTION_RULE).toContain('a friendly sign-off ("see you then", "see you Saturday at 9 once you confirm", "nos vemos el viernes")')
+    expect(JUDGE_ACTION_RULE).toContain('restating that proposal ("Signature Hand Wash tomorrow at 10:00 AM for your BMW 330i", "your visit is ready to cancel")')
+    // the guard eval has no record: the judge never reads rule (g) there (as a rubric line it failed 20 fresh-set rows as action)
+    const seg = [{ text: 'We have openings at 9:00 and 10:30.', trusted: false }]
+    expect(judgeRequest(seg).system.map((b) => b.text)).toEqual([JUDGE_RUBRIC])
+    expect(judgeRequest(seg, 120, 'abcd1234', { record: 'Done by the server: nothing.' }).system.map((b) => b.text)).toEqual([JUDGE_RUBRIC, JUDGE_ACTION_RULE])
+    expect(JUDGE_RUBRIC).not.toContain('(g) action')
   })
 })
 
@@ -260,7 +265,7 @@ describe('P4/P5: availability only as returned; handoffs end without a question;
   it('the prompt and the rubric: a day or time named as open only when check_availability returned it in this turn', () => {
     expect(STATIC_RULES).toContain('Name a day or time as open or available ONLY when check_availability returned it in this turn')
     expect(STATIC_RULES).toContain('"Saturday at 9 AM should be available" is wrong')
-    expect(JUDGE_RUBRIC).toContain(
+    expect(JUDGE_ACTION_RULE).toContain(
       'or names a day or time as open or available for the client when <server-record> does not list it among the open times the server returned in this turn',
     )
   })
