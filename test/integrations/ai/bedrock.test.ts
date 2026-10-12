@@ -636,7 +636,7 @@ describe('the provider', () => {
     await ai.converse(request())
     expect(mock.commandCalls(ConverseCommand)[0]!.args[0].input.outputConfig).toEqual({ effort: 'low' })
     const client = createBedrockClient({ region: 'us-east-2' })
-    expect(await client.config.maxAttempts()).toBe(2)
+    expect(await client.config.maxAttempts()).toBe(1)
     expect(await client.config.region()).toBe('us-east-2')
     client.destroy()
   })

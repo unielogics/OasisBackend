@@ -14,6 +14,7 @@
 // Every failure (the model's error, refusal, cut answer or unknown stop, the guard, a cap, the loop breaker) sends the fixed
 // fallback (at most one per 2 hours) and hands the conversation to staff. Nothing runs while AI_ENABLED=false or the settings
 // switch is off: the gate refuses before anything is loaded or called.
+import { randomInt } from 'node:crypto'
 import { sql } from 'kysely'
 import type { Env } from '../../config/env.js'
 import { addUsage, aiCostMicros } from '../../integrations/ai/cost.js'
@@ -73,6 +74,8 @@ export interface TurnDeps {
   kick(conversationIds: readonly string[]): Promise<void>
   /** Monotonic milliseconds for latencies (tests may replace it). */
   nowMs?: () => number
+  /** The wait before the one retry of a throttled or timed-out call (default retryBackoffMs: 800-1500 ms; tests shorten it). */
+  retryBackoffMs?: () => number
 }
 
 export type TurnResult =
@@ -89,6 +92,21 @@ const GLOBAL_CAPS: ReadonlySet<CapKind> = new Set(['global_hour', 'global_day', 
 const COLUMNS = ['id', 'location_id', 'phone_e164', 'customer_id', 'pending_since', 'last_inbound_at', 'running_since', 'handoff_state', 'disclosed_at'] as const
 
 const ZERO_USAGE: AiUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
+
+/**
+ * W4a fix F3: a model call or a judge call that the account's quota throttled (ThrottlingException, 429), that timed out, or that
+ * met an outage (5xx: the SDK retry this replaces covered those) is retried ONCE, after RETRY_BACKOFF_MIN_MS-RETRY_BACKOFF_MAX_MS
+ * (jitter), and only while the turn deadline leaves the wait plus RETRY_MIN_ROOM_MS; each retry is a transcript entry (kind
+ * "retry") and a log line, and a retried judge call's row and transcript entry carry attempts: 2. A second failure fails closed as
+ * before (the fallback and a handoff). The Bedrock client itself no longer retries (createBedrockClient: one attempt), so this is
+ * the only retry.
+ */
+export const RETRY_BACKOFF_MIN_MS = 800
+export const RETRY_BACKOFF_MAX_MS = 1500
+export const RETRY_MIN_ROOM_MS = 3000
+export const retryBackoffMs = (): number => randomInt(RETRY_BACKOFF_MIN_MS, RETRY_BACKOFF_MAX_MS + 1)
+/** The judge's errors a retry can help (runJudge: its own 8-second timeout, the provider's timeout, the quota, an outage). */
+const RETRYABLE_JUDGE_ERRORS: ReadonlySet<string> = new Set(['timeout', 'ai:timeout', 'ai:throttled', 'ai:unavailable'])
 
 /** The caps of design section 3 that a new turn of this conversation would cross, or null. */
 export async function capReached(
@@ -366,8 +384,34 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
 
   // ---- the tool context
   const deadline = new AbortController()
+  const deadlineAt = performance.now() + d.cfg.turnDeadlineMs
   const timer = setTimeout(() => deadline.abort(new TurnAbort('deadline')), d.cfg.turnDeadlineMs)
   timer.unref?.()
+  // F3: one retry per call of a throttled or timed-out model or judge call, when the deadline leaves room (false: fail closed)
+  let retries = 0
+  const retryOnce = async (call: 'model' | 'judge', error: string): Promise<boolean> => {
+    if (deadline.signal.aborted) return false
+    const waitMs = Math.max(0, Math.round((d.retryBackoffMs ?? retryBackoffMs)()))
+    if (deadlineAt - performance.now() < waitMs + RETRY_MIN_ROOM_MS) {
+      transcript.add({ kind: 'retry', call, error, skipped: 'deadline' })
+      d.log.warn({ conversation: conv.id, turn: turnId, call, error }, 'assistant call failed; no room left before the turn deadline to retry it')
+      return false
+    }
+    retries += 1
+    transcript.add({ kind: 'retry', call, error, waitMs })
+    d.log.warn({ conversation: conv.id, turn: turnId, call, error, waitMs, retries }, 'assistant retries a throttled or timed-out call once')
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(done, waitMs)
+      function done(): void {
+        clearTimeout(t)
+        deadline.signal.removeEventListener('abort', done)
+        resolve()
+      }
+      deadline.signal.addEventListener('abort', done, { once: true })
+    })
+    if (deadline.signal.aborted) throw new TurnAbort('deadline')
+    return true
+  }
   const links = new Map<string, string>()
   const linkKinds = new Set<string>()
   let toolHandoff: HandoffRequest | null = null
@@ -435,9 +479,26 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
   let seq = 0
   let stop: string | null = null
   const call = async (req: AiConverseRequest): Promise<AiConverseResponse> => {
-    if (deadline.signal.aborted) throw new TurnAbort('deadline')
-    const signal = AbortSignal.any([deadline.signal, AbortSignal.timeout(d.cfg.callTimeoutMs)])
-    const res = await d.provider.converse(req, { signal })
+    let res: AiConverseResponse
+    for (let attempt = 0; ; attempt++) {
+      if (deadline.signal.aborted) throw new TurnAbort('deadline')
+      const callTimeout = AbortSignal.timeout(d.cfg.callTimeoutMs)
+      const signal = AbortSignal.any([deadline.signal, callTimeout])
+      try {
+        res = await d.provider.converse(req, { signal })
+        break
+      } catch (e) {
+        // the quota (throttled), a timeout (the provider's or this call's own; never the turn deadline) or an outage: retried once (F3)
+        const kind = deadline.signal.aborted
+          ? null
+          : callTimeout.aborted
+            ? 'timeout'
+            : e instanceof AiProviderError && (e.kind === 'throttled' || e.kind === 'timeout' || e.kind === 'unavailable')
+              ? e.kind
+              : null
+        if (kind === null || attempt > 0 || !(await retryOnce('model', `ai:${kind}`))) throw e
+      }
+    }
     usage = addUsage(usage, res.usage)
     model = res.model
     stop = res.rawStopReason
@@ -522,10 +583,24 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     // (3) the policy judge: the rendered reply, the server's segments trusted (the safety line too); never throws (an error fails closed)
     const judge = async (segments: readonly ReplySegment[]) => {
       const all = safety ? [...segments, { text: ' ', trusted: false }, { text: SAFETY_LINE, trusted: true }] : segments
-      const r = await runJudge(d.judge, all, { timeoutMs: d.cfg.judge.timeoutMs, maxTokens: d.cfg.judge.maxTokens, signal: deadline.signal, nowMs })
+      const run = () => runJudge(d.judge, all, { timeoutMs: d.cfg.judge.timeoutMs, maxTokens: d.cfg.judge.maxTokens, signal: deadline.signal, nowMs })
+      let r = await run()
       judgeUsage = addUsage(judgeUsage, r.usage)
+      let attempts = 1
+      // throttled or timed out: one retry when the deadline leaves room (F3); a second error fails closed below
+      if (r.outcome.kind === 'error' && RETRYABLE_JUDGE_ERRORS.has(r.outcome.error) && (await retryOnce('judge', r.outcome.error))) {
+        attempts = 2
+        r = await run()
+        judgeUsage = addUsage(judgeUsage, r.usage)
+      }
       const o = r.outcome
-      const entry = { verdict: o.kind, model: r.model, latencyMs: r.latencyMs, ...(o.kind === 'error' ? { error: o.error } : { category: o.verdict.category, reason: o.verdict.reason }) }
+      const entry = {
+        verdict: o.kind,
+        model: r.model,
+        latencyMs: r.latencyMs,
+        ...(attempts > 1 ? { attempts } : {}),
+        ...(o.kind === 'error' ? { error: o.error } : { category: o.verdict.category, reason: o.verdict.reason }),
+      }
       transcript.add({ kind: 'judge', ...entry })
       // stored for review like a tool call (redacted; the judge's message holds no phone number, id or token in the first place)
       seq += 1
@@ -538,7 +613,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
           round: rounds,
           tool: 'policy_judge',
           tool_use_id: null,
-          input: JSON.stringify({ model: r.model ?? d.cfg.judge.modelId, message: redactText(r.message) }) as never,
+          input: JSON.stringify({ model: r.model ?? d.cfg.judge.modelId, message: redactText(r.message), ...(attempts > 1 ? { attempts } : {}) }) as never,
           output: o.kind === 'error' ? null : (JSON.stringify(o.verdict) as never),
           outcome: o.kind === 'pass' ? 'ok' : o.kind === 'fail' ? 'denied' : 'error',
           error: o.kind === 'error' ? o.error.slice(0, 2000) : o.kind === 'fail' ? o.verdict.category : null,

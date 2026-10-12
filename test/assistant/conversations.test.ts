@@ -227,6 +227,8 @@ function assistant(script: SimStep[] | SimResponder, cfg: Partial<AssistantConfi
     },
     cfg,
   })
+  // the one retry of a throttled or timed-out call (F3) waits 800-1500 ms in production; a few ms here
+  rt.turnDeps.retryBackoffMs = () => 5
   const turn = async (phone: string) => {
     const c = await conversationOf(phone)
     if (!c) return { status: 'none' as const }
@@ -468,23 +470,54 @@ describe('the policy judge in a turn (design 3c, layer 3)', () => {
     expect((await w.t.db.selectFrom('assistant_turns').select(['status', 'error']).executeTakeFirstOrThrow())).toEqual({ status: 'handed_off', error: 'judge:promise' })
   })
 
-  const closed: Array<[string, SimStep, string]> = [
-    ['a timeout (8 s in production)', pass({}), 'judge:timeout'],
-    ['a provider error', { error: 'unavailable' }, 'judge:ai:unavailable'],
-    ['an answer that is not the JSON', simText('Looks fine to me.'), 'judge:unparseable'],
-    ['a cut answer', simText('{"ok":tr', { stopReason: 'max_tokens' }), 'judge:stop:max_tokens'],
+  // [what, the judge's answer (twice when retryable), the turn's error, judge calls]: a timeout, the quota or an outage is retried
+  // once (F3), then fails closed; an answer that is not the verdict fails closed at once
+  const closed: Array<[string, SimStep, string, number]> = [
+    ['a timeout (8 s in production), twice', { ...pass({}), delayMs: 2000 }, 'judge:timeout', 2],
+    ['a throttled call, twice', { error: 'throttled' }, 'judge:ai:throttled', 2],
+    ['a provider error, twice', { error: 'unavailable' }, 'judge:ai:unavailable', 2],
+    ['an answer that is not the JSON', simText('Looks fine to me.'), 'judge:unparseable', 1],
+    ['a cut answer', simText('{"ok":tr', { stopReason: 'max_tokens' }), 'judge:stop:max_tokens', 1],
   ]
-  for (const [what, step, error] of closed) {
+  for (const [what, step, error, calls] of closed) {
     it(`the judge fails closed on ${what}: no reply, the fallback and a handoff`, async () => {
-      const slow = what.startsWith('a timeout') ? { ...step, delayMs: 2000 } : step
-      const a = assistant([simText('We open at 8 AM.')], { judge: { ...assistantConfig(w.env).judge, timeoutMs: 100 } }, [slow])
+      const a = assistant([simText('We open at 8 AM.')], { judge: { ...assistantConfig(w.env).judge, timeoutMs: 100 } }, [step, step, pass()])
       await inbound(maria(), 'When do you open?')
       expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'judge_error' })
+      expect(a.judge.requests).toHaveLength(calls)
       expect((await aiTexts(maria())).map((t) => t.klass)).toEqual(['ai_fallback'])
       expect((await w.t.db.selectFrom('assistant_turns').select('error').executeTakeFirstOrThrow()).error).toBe(error)
       expect(await conversationOf(maria())).toMatchObject({ handoff_state: 'open', handoff_reason: 'judge_error' })
     })
   }
+
+  for (const [what, first] of [
+    ['throttled', { error: 'throttled' }],
+    ['timed-out', { ...pass({}), delayMs: 2000 }],
+  ] as Array<[string, SimStep]>)
+    it(`a ${what} judge call is retried once after a short wait (F3): the reply goes out; counted in the transcript`, async () => {
+      const a = assistant([simText('We open at 8 AM.')], { judge: { ...assistantConfig(w.env).judge, timeoutMs: 100 } }, [first, pass()])
+      await inbound(maria(), 'When do you open?')
+      expect(await a.turn(maria())).toMatchObject({ status: 'replied', handoff: false })
+      expect(a.judge.requests).toHaveLength(2)
+      const t = await w.t.db.selectFrom('assistant_turns').select('transcript').executeTakeFirstOrThrow()
+      const entries = t.transcript as unknown as Array<{ kind: string; call?: string; error?: string; waitMs?: number; verdict?: string; attempts?: number }>
+      expect(entries.filter((e) => e.kind === 'retry')).toEqual([{ kind: 'retry', call: 'judge', error: 'error' in first ? 'ai:throttled' : 'timeout', waitMs: 5 }])
+      expect(entries.filter((e) => e.kind === 'judge')).toMatchObject([{ verdict: 'pass', attempts: 2 }])
+      const [row] = await w.t.db.selectFrom('assistant_tool_calls').select(['outcome', 'input']).where('tool', '=', 'policy_judge').execute()
+      expect(row).toMatchObject({ outcome: 'ok', input: { attempts: 2 } })
+    })
+
+  it('no judge retry when the turn deadline leaves no room: it fails closed at once (F3)', async () => {
+    const a = assistant([simText('We open at 8 AM.')], { turnDeadlineMs: 5000 }, [{ error: 'throttled' }, pass()])
+    a.rt.turnDeps.retryBackoffMs = () => 2500
+    await inbound(maria(), 'When do you open?')
+    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'judge_error' })
+    expect(a.judge.requests).toHaveLength(1)
+    const t = await w.t.db.selectFrom('assistant_turns').select(['transcript', 'error']).executeTakeFirstOrThrow()
+    expect(t.error).toBe('judge:ai:throttled')
+    expect((t.transcript as unknown as Array<{ kind: string }>).filter((e) => e.kind === 'retry')).toEqual([{ kind: 'retry', call: 'judge', error: 'ai:throttled', skipped: 'deadline' }])
+  })
 
   it("the judge reads the rubric and the rendered reply only: never the client's phone, an id, a token or a URL", async () => {
     const a = assistant([simToolUse('send_link', { kind: 'pin', appointmentRef: null, tier: null }), simText('Hi Maria! {price:signature-hand-wash}. Your page: {link1}')])
@@ -685,10 +718,12 @@ describe('failures become the fallback and a handoff (design section 3)', () => 
   ]
   for (const [what, step] of cases) {
     it(`${what}: the fixed fallback text, the handoff, the alert`, async () => {
-      const a = assistant([step], { callTimeoutMs: 100 })
+      // the same answer twice: an outage or a timeout is retried once (F3), the rest is not
+      const a = assistant([step, step], { callTimeoutMs: 100 })
       await inbound(maria(), 'Are you open today?')
       const r = await a.turn(maria())
       expect(r).toMatchObject({ status: 'handed_off', reason: 'fallback' })
+      expect(a.provider.requests).toHaveLength(what === 'a Bedrock error' || what === 'a timeout' ? 2 : 1)
       const texts = await aiTexts(maria())
       expect(texts.map((t) => t.klass)).toEqual(['ai_fallback'])
       expect(texts[0]!.body).toMatch(/^Thanks - a team member will text you back shortly\./)
@@ -700,8 +735,28 @@ describe('failures become the fallback and a handoff (design section 3)', () => 
     })
   }
 
+  it('a throttled model call is retried once after a short wait (F3): the turn replies; the retry is in the transcript', async () => {
+    const a = assistant([{ error: 'throttled' }, simText('We are open until 6 PM today.')])
+    await inbound(maria(), 'Are you open today?')
+    expect(await a.turn(maria())).toMatchObject({ status: 'replied', handoff: false })
+    expect(a.provider.requests).toHaveLength(2)
+    expect(a.provider.requests[1]).toEqual(a.provider.requests[0])
+    const t = await w.t.db.selectFrom('assistant_turns').select(['status', 'transcript']).executeTakeFirstOrThrow()
+    expect(t.status).toBe('replied')
+    expect((t.transcript as unknown as Array<{ kind: string }>).filter((e) => e.kind === 'retry')).toEqual([{ kind: 'retry', call: 'model', error: 'ai:throttled', waitMs: 5 }])
+  })
+
+  it('a model call throttled twice: no third call, the fallback and a handoff (F3)', async () => {
+    const a = assistant([{ error: 'throttled' }, { error: 'throttled' }, simText('never sent')])
+    await inbound(maria(), 'Are you open today?')
+    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'fallback' })
+    expect(a.provider.requests).toHaveLength(2)
+    expect((await w.t.db.selectFrom('assistant_turns').select('error').executeTakeFirstOrThrow()).error).toBe('ai:throttled')
+    expect((await aiTexts(maria())).map((t) => t.klass)).toEqual(['ai_fallback'])
+  })
+
   it('at most one fallback text per conversation every 2 hours', async () => {
-    const a = assistant([{ error: 'throttled' }, { error: 'throttled' }])
+    const a = assistant([{ error: 'throttled' }, { error: 'throttled' }, { error: 'throttled' }, { error: 'throttled' }])
     await inbound(maria(), 'hello?')
     await a.turn(maria())
     // staff resolve the handoff without texting (the conversation is the AI's again)

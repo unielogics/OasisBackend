@@ -435,11 +435,15 @@ export interface BedrockClientConfig {
   credentials?: { accessKeyId: string; secretAccessKey: string; sessionToken?: string }
 }
 
-/** The runtime client the app uses: the default credential chain (the instance role), two attempts in all (one SDK retry). */
+/**
+ * The runtime client the app uses: the default credential chain (the instance role), ONE attempt (W4a fix F3): the assistant's turn
+ * retries a throttled, timed-out or unavailable call once itself, with jitter and only within its deadline, counted and logged
+ * (turn.ts retryOnce); an SDK retry under it would make that two or three.
+ */
 export function createBedrockClient(c: BedrockClientConfig): BedrockRuntimeClient {
   return new BedrockRuntimeClient({
     region: c.region,
-    maxAttempts: 2,
+    maxAttempts: 1,
     ...(c.endpoint ? { endpoint: c.endpoint } : {}),
     ...(c.credentials ? { credentials: c.credentials } : {}),
   })
