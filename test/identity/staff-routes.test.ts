@@ -2,7 +2,8 @@
 // Revoke trust (cli.edit, audited); no token, hash or full number in any answer. The authz matrix covers the permissions.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { identityModule } from '../../src/modules/identity/http/module.js'
-import { grantTrust } from '../../src/modules/identity/trust.js'
+import { resolveSession } from '../../src/modules/identity/sessions.js'
+import { evaluateTrust, grantTrust } from '../../src/modules/identity/trust.js'
 import { createTestApp, type TestApp } from '../helpers/app.js'
 import { PHONES, useIdentityWorld } from './world.js'
 
@@ -16,7 +17,8 @@ afterAll(async () => {
   await app?.close()
 })
 
-const call = (method: 'GET' | 'POST', url: string) => app.app.inject({ method, url, headers: method === 'POST' ? { 'content-type': 'application/json' } : {}, payload: method === 'POST' ? '{}' : undefined })
+const call = (method: 'GET' | 'POST', url: string, body: unknown = {}) =>
+  app.app.inject({ method, url, headers: method === 'POST' ? { 'content-type': 'application/json' } : {}, payload: method === 'POST' ? JSON.stringify(body) : undefined })
 
 async function setup() {
   const maria = await w.customer({})
@@ -77,5 +79,43 @@ describe('POST /customers/:id/identity/pin/clear and /trust/revoke', () => {
     expect(r.json()).toMatchObject({ pin: { status: 'set' }, trust: { trusted: false, revokeReason: 'staff' }, links: { live: 1 }, sessions: { live: 0 } })
     expect(await w.t.db.selectFrom('audit_log').select('action').where('action', '=', 'identity.trust.revoked').execute()).toHaveLength(1)
     expect((await call('POST', `/api/v1/customers/${w.newId()}/identity/trust/revoke`)).statusCode).toBe(404)
+  })
+})
+
+describe('POST /identity/links/kill (the links kill switch, W4c fixes B4)', () => {
+  it('bumps the links epoch: every link, page and trust issued before ends; audited with the reason; needs a reason', async () => {
+    const { s } = await setup()
+    expect((await call('POST', '/api/v1/identity/links/kill', {})).statusCode).toBe(422)
+    const r = await call('POST', '/api/v1/identity/links/kill', { reason: 'lost tablet' })
+    expect(r.statusCode, r.body).toBe(200)
+    expect(r.json()).toEqual({ epochBefore: 1, epoch: 2 })
+    await expect(resolveSession(w.t.db, s.session, w.clock.now())).rejects.toMatchObject({ code: 'IDENTITY_SESSION_INVALID' })
+    expect(await evaluateTrust(w.t.db, { locationId: w.locationId, phone: PHONES.maria, now: w.clock.now() })).toMatchObject({ trusted: false, reason: 'epoch' })
+    const audit = await w.t.db.selectFrom('audit_log').select(['action', 'after']).where('action', 'in', ['identity.links.killed', 'settings.update']).orderBy('action').execute()
+    expect(audit).toEqual([
+      { action: 'identity.links.killed', after: { epoch: 2, reason: 'lost tablet' } },
+      { action: 'settings.update', after: 2 },
+    ])
+    expect((await call('POST', '/api/v1/identity/links/kill', { reason: 'again' })).json()).toEqual({ epochBefore: 2, epoch: 3 })
+  })
+
+  it('is owner level: it needs both Billing & integrations and Roles (a Super Admin)', () => {
+    const route = app.app.routeRegistry.find((x) => x.method === 'POST' && x.url === '/api/v1/identity/links/kill')
+    expect(route?.access).toEqual({ kind: 'permission', perms: ['set.billing', 'team.roles'], mode: 'all' })
+  })
+})
+
+describe('POST /customers/:id/identity/confirm (staff confirm the number, W4c fixes B1)', () => {
+  it('ends the stale-record rule for the client (a staff action is proof of them); audited', async () => {
+    const maria = await w.customer({ createdAt: new Date(w.clock.now().getTime() - 300 * 86_400_000) })
+    expect((await call('GET', `/api/v1/customers/${maria}/identity`)).json().stale).toMatchObject({ stale: true, reason: 'inactive' })
+    const r = await call('POST', `/api/v1/customers/${maria}/identity/confirm`)
+    expect(r.statusCode, r.body).toBe(200)
+    expect(r.json().stale).toMatchObject({ stale: false, lastActivityAt: w.clock.now().toISOString() })
+    expect(await w.t.db.selectFrom('audit_log').select(['action', 'entity_id']).where('action', '=', 'identity.client.confirmed').execute()).toEqual([
+      { action: 'identity.client.confirmed', entity_id: maria },
+    ])
+    const nophone = await w.customer({ name: 'No Phone', phone: null })
+    expect((await call('POST', `/api/v1/customers/${nophone}/identity/confirm`)).statusCode).toBe(422)
   })
 })

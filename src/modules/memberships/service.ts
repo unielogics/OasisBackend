@@ -216,8 +216,9 @@ export async function syncMemberships(db: Db, d: MembershipSyncDeps): Promise<Me
         existing.inference_reason !== inf.reason)
     )
       action = { action: 'update', membershipId: existing.id, inference: inf, changes: ['grace or flags'] }
-    if (action.action === 'needs_customer' && inf.linkedBy === 'unverified_email' && inf.paidOrderCount > 0) {
-      // the email matches a client nobody verified it for: staff confirm before it activates anything (ADR 0160)
+    if (action.action === 'needs_customer' && (inf.linkedBy === 'unverified_email' || inf.linkedBy === 'intent_mismatch') && inf.paidOrderCount > 0) {
+      // the email matches a client nobody verified it for, or only a checkout intent's typed email whose order carries another phone
+      // or name: staff confirm before it activates anything (ADR 0160, W4c fixes)
       const outcome = await openAwaitingMatch(db, d, inf, plan, labelFor(inf, plan))
       if (outcome !== 'rejected') {
         report.awaitingMatch++

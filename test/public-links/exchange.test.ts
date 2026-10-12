@@ -195,13 +195,14 @@ describe('dead tokens answer 401', () => {
 })
 
 describe('what a page may show', () => {
-  it('hides the name of a stale record (no activity for 180 days) until the page is verified', async () => {
+  it('hides the name of a stale record (no activity for 180 days) even after a texted code: a code proves the number, not the client (W4c fixes)', async () => {
     const id = await h.customer({ createdAt: new Date(h.clock.now().getTime() - 200 * DAY) })
     const { session, body } = await h.page({ customerId: id })
     expect(body.client).toEqual({ firstName: '', last2: '21', tier: null })
     const v = await h.verifyByCode(session)
     expect(v.statusCode, v.body).toBe(200)
-    expect(json(v).client.firstName).toBe('Maria')
+    expect(json(v).client.firstName).toBe('')
+    expect(json(v).appointments).toBeNull()
   })
 
   it('shows no name for a placeholder client, and a stranger’s link knows nobody', async () => {
@@ -255,5 +256,15 @@ describe('limits', () => {
     expect(Number(r.headers['retry-after'])).toBeGreaterThan(0)
     expect(await h.db.selectFrom('client_link_sessions').selectAll().execute()).toEqual([])
     expect((await h.call('POST', 'exchange', { body: { token: link.token } })).statusCode).toBe(200)
+  })
+
+  it('an IPv6 client counts by its /64: another address of a spent prefix is refused, another prefix is not (W4c fixes P8)', async () => {
+    const id = await h.customer()
+    const link = await h.link({ customerId: id })
+    const start = windowStart(h.clock.now(), LINK_LIMITS.exchange.ip.windowSec)
+    await sql`insert into public_rate_limits (key, window_start, count) values (${'link_exchange:ip:2001:db8:77:1::/64'}, ${start}, 30)`.execute(h.db)
+    const r = await h.call('POST', 'exchange', { body: { token: link.token }, ip: '2001:db8:77:1:dead:beef:0:1' })
+    expect(json(r)).toMatchObject({ status: 429, code: 'PUBLIC_RATE_LIMITED' })
+    expect((await h.call('POST', 'exchange', { body: { token: link.token }, ip: '2001:db8:77:2::1' })).statusCode).toBe(200)
   })
 })

@@ -88,6 +88,45 @@ describe('POST bookings', () => {
     expect(await appointments()).toHaveLength(2)
   })
 
+  it('an Idempotency-Key belongs to the link: a retry from a re-opened page of the same link replays its booking (W4c fixes B2)', async () => {
+    const id = await h.customer()
+    await h.trust(id)
+    const link = await h.link({ customerId: id, kind: 'calendar' })
+    const a = await h.open(link.token)
+    const key = h.nextKey()
+    const ip = h.nextIp()
+    const r1 = await book(a.session, wash(), key, ip)
+    expect(r1.statusCode, r1.body).toBe(201)
+    // the page reloads (or its session idled out), opens the link again and the site retries the same request
+    const b = await h.open(link.token)
+    expect(b.res.statusCode).toBe(200)
+    const r2 = await book(b.session, wash(), key, ip)
+    expect({ status: r2.statusCode, replayed: r2.headers['idempotent-replayed'] ?? null, ref: json(r2).bookingRef }).toEqual({
+      status: 201,
+      replayed: 'true',
+      ref: json(r1).bookingRef,
+    })
+    expect(await appointments()).toHaveLength(1)
+    // a dead page claims no key: 401 before anything is stored
+    const dead = await book('x'.repeat(43), wash(), h.nextKey(), ip)
+    expect(dead.statusCode).toBe(401)
+    expect(await h.db.selectFrom('idempotency_keys').select('key').execute()).toHaveLength(1)
+  })
+
+  it('two different links of one client behind one address never share a key', async () => {
+    const id = await h.customer()
+    await h.trust(id)
+    const a = await h.page({ customerId: id, kind: 'calendar' })
+    const b = await h.page({ customerId: id, kind: 'book_again' })
+    const key = h.nextKey()
+    const ip = h.nextIp()
+    expect((await book(a.session, wash(), key, ip)).statusCode).toBe(201)
+    const r2 = await book(b.session, wash({ startMin: 14 * 60 }), key, ip)
+    expect(r2.statusCode, r2.body).toBe(201)
+    expect(r2.headers['idempotent-replayed']).toBeUndefined()
+    expect(await appointments()).toHaveLength(2)
+  })
+
   it('a calendar link books three visits at most, a book-again link one', async () => {
     const { session } = await trustedPage()
     for (const startMin of [13 * 60, 14 * 60, 15 * 60]) expect((await book(session, wash({ startMin }))).statusCode).toBe(201)

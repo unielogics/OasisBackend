@@ -127,6 +127,15 @@ declare module '../customers/schema.js' {
     email_verified: Generated<boolean>
     /** Bumped on every phone change; a link issued for another version is dead. */
     phone_version: Generated<number>
+    /** The last proof of being this client (their PIN, staff confirming the number); migration 20261013010000. */
+    identity_confirmed_at: Date | null
+    /** The number moved to a new client after a party verified only the number on this stale record (staff flag). */
+    phone_reassigned_at: Date | null
+    phone_reassigned_to: string | null
+  }
+  interface AppointmentsTable {
+    /** Booked by a link page or the assistant for a session verified with this client's own PIN (migration 20261013010000). */
+    booked_with_pin: Generated<boolean>
   }
 }
 

@@ -5,7 +5,8 @@
 //   - is never cached (Cache-Control: no-store) and answers JSON only (a POST in another content type is 415), with <, > and & escaped
 //     in the JSON text so no answer can be read as markup;
 //   - refuses an Origin outside the allowlist when one is sent (403), on reads as well as writes, and sets or reads no cookie;
-//   - is limited per client address in memory (the first ring) and by durable counters per address, link, session and number.
+//   - is limited per client address in memory (the first ring) and by durable counters per address (an IPv6 address by its /64),
+//     link, session and number.
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import { access } from '../../../../http/access.js'
 import { allowedOrigins } from '../../../../http/hooks.js'
@@ -14,8 +15,8 @@ import type { AppInstance } from '../../../../http/types.js'
 import { z } from '../../../../http/zod.js'
 import { transaction, type Executor } from '../../../../platform/db.js'
 import { AppError } from '../../../../platform/errors.js'
+import { ipLimitKey } from '../../../../platform/ip.js'
 import type { ScryptParams } from '../../../auth/password.js'
-import { hashToken } from '../../../auth/tokens.js'
 import { consumeLink } from '../../../identity/links.js'
 import { confirmStepUpCode, requestStepUpCode, type StepUpPurpose } from '../../../identity/codes.js'
 import { identityDeps, type IdentityDeps, type IdentityQueue } from '../../../identity/deps.js'
@@ -192,7 +193,7 @@ export function registerLinkRoutes(d: LinkRoutesDeps): void {
       },
     },
     async (req) => {
-      await limit([{ key: `link_exchange:ip:${req.ip}`, rule: LINK_LIMITS.exchange.ip }])
+      await limit([{ key: `link_exchange:ip:${ipLimitKey(req.ip)}`, rule: LINK_LIMITS.exchange.ip }])
       const ex = await exchangeLink(app.db, { token: req.body.token, ip: req.ip, now: app.clock.now() })
       return { session: ex.session, ...(await stateOf(ex.view)) }
     },
@@ -290,7 +291,7 @@ export function registerLinkRoutes(d: LinkRoutesDeps): void {
       },
     },
     async (req) => {
-      await limit([{ key: `link_code_confirm:ip:${req.ip}`, rule: LINK_LIMITS.codeConfirm.ip }])
+      await limit([{ key: `link_code_confirm:ip:${ipLimitKey(req.ip)}`, rule: LINK_LIMITS.codeConfirm.ip }])
       const out = await confirmStepUpCode(id(), { session: bearerOf(req), challengeId: req.body.challengeId, code: req.body.code, ip: req.ip, requestId: req.id })
       if (out.verified) await complete(out.session, ['verify'])
       return { verified: out.verified, ...(await stateOf(await session(app.db, req, { touch: false }))) }
@@ -314,7 +315,7 @@ export function registerLinkRoutes(d: LinkRoutesDeps): void {
       },
     },
     async (req) => {
-      await limit([{ key: `link_pin:ip:${req.ip}`, rule: LINK_LIMITS.pin.ip }])
+      await limit([{ key: `link_pin:ip:${ipLimitKey(req.ip)}`, rule: LINK_LIMITS.pin.ip }])
       const s = await verifySessionPin(id(), { session: bearerOf(req), pin: req.body.pin, ip: req.ip, requestId: req.id })
       await complete(s, ['verify'])
       return { verified: true, ...(await stateOf(await session(app.db, req, { touch: false }))) }
@@ -339,7 +340,7 @@ export function registerLinkRoutes(d: LinkRoutesDeps): void {
     async (req) => {
       const s0 = await session(app.db, req, { touch: false })
       await limit([
-        { key: `link_pin:ip:${req.ip}`, rule: LINK_LIMITS.pin.ip },
+        { key: `link_pin:ip:${ipLimitKey(req.ip)}`, rule: LINK_LIMITS.pin.ip },
         { key: `link_pin_set:session:${s0.tokenHash}`, rule: LINK_LIMITS.pin.session },
       ])
       const s = await setSessionPin(id(), { session: bearerOf(req), pin: req.body.pin, ip: req.ip, requestId: req.id })
@@ -366,7 +367,7 @@ export function registerLinkRoutes(d: LinkRoutesDeps): void {
     async (req) => {
       const s0 = await session(app.db, req, { touch: false })
       await limit([
-        { key: `link_pin:ip:${req.ip}`, rule: LINK_LIMITS.pin.ip },
+        { key: `link_pin:ip:${ipLimitKey(req.ip)}`, rule: LINK_LIMITS.pin.ip },
         { key: `link_pin_set:session:${s0.tokenHash}`, rule: LINK_LIMITS.pin.session },
       ])
       const s = await resetSessionPin(id(), { session: bearerOf(req), pin: req.body.pin, ip: req.ip, requestId: req.id })
@@ -398,14 +399,15 @@ export function registerLinkRoutes(d: LinkRoutesDeps): void {
         return { status: 201, body: await bookOnLink(tx, deps, s, reqOf(req), req.body as z.infer<typeof BookingBody>) }
       },
       {
-        // the key belongs to the page's session (its token's hash), not to the address: the body names no client, so two pages behind
-        // one address sending the same key and body must not get each other's stored booking (W4c review)
-        actor: (req) => `link:${hashToken(bearerOf(req))}`,
+        // the key belongs to the LINK (resolved from the page's session before the key is claimed), not to the address or the page:
+        // the body names no client, so two links behind one address never get each other's stored booking, and a retry from a
+        // re-opened page of the same link (a new session) replays its stored booking instead of booking twice (W4c fixes)
+        actor: async (req) => `link:${(await session(app.db, req, { touch: false })).link.id}`,
         // on the pool, before the transaction opens: the session (401 first) and the durable limits (a refused booking still counts)
         prepare: async (req) => {
           const s = await session(app.db, req, { touch: false })
           await limit([
-            { key: `link_booking:ip:${req.ip}`, rule: LINK_LIMITS.booking.ip },
+            { key: `link_booking:ip:${ipLimitKey(req.ip)}`, rule: LINK_LIMITS.booking.ip },
             { key: `link_booking:link:${s.link.id}`, rule: LINK_LIMITS.booking.link },
             { key: `link_booking:phone:${s.phone}`, rule: LINK_LIMITS.booking.phone },
           ])
@@ -435,7 +437,7 @@ export function registerLinkRoutes(d: LinkRoutesDeps): void {
     async (req) => {
       const s0 = await session(app.db, req, { touch: false })
       await limit([
-        { key: `link_reschedule:ip:${req.ip}`, rule: LINK_LIMITS.reschedule.ip },
+        { key: `link_reschedule:ip:${ipLimitKey(req.ip)}`, rule: LINK_LIMITS.reschedule.ip },
         { key: `link_reschedule:phone:${s0.phone}`, rule: LINK_LIMITS.reschedule.phone },
       ])
       return transaction(app.db, async (tx) => rescheduleOnLink(tx, deps, await session(tx, req, { forUpdate: true }), reqOf(req), req.params.ref, req.body))
@@ -461,7 +463,7 @@ export function registerLinkRoutes(d: LinkRoutesDeps): void {
     async (req) => {
       const s0 = await session(app.db, req, { touch: false })
       await limit([
-        { key: `link_membership:ip:${req.ip}`, rule: LINK_LIMITS.membership.ip },
+        { key: `link_membership:ip:${ipLimitKey(req.ip)}`, rule: LINK_LIMITS.membership.ip },
         { key: `link_membership:phone:${s0.phone}`, rule: LINK_LIMITS.membership.phone },
       ])
       const out = await transaction(app.db, async (tx) => startMembership(tx, deps, await session(tx, req, { forUpdate: true }), reqOf(req), req.body))
@@ -488,7 +490,7 @@ export function registerLinkRoutes(d: LinkRoutesDeps): void {
     async (req) => {
       const s0 = await session(app.db, req, { touch: false })
       await limit([
-        { key: `link_pay:ip:${req.ip}`, rule: LINK_LIMITS.pay.ip },
+        { key: `link_pay:ip:${ipLimitKey(req.ip)}`, rule: LINK_LIMITS.pay.ip },
         { key: `link_pay:phone:${s0.phone}`, rule: LINK_LIMITS.pay.phone },
       ])
       return transaction(app.db, async (tx) => startPayment(tx, deps, await session(tx, req, { forUpdate: true }), reqOf(req)))

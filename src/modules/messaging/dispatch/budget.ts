@@ -71,12 +71,13 @@ export function nextFit(usage: readonly UsagePoint[], from: Date, cost: number, 
   return null
 }
 
-// The AI's sub-cap (ADR 0160, design section 2): the texts the assistant sends (its answers, its fallback, personal links and
-// reply numbers) together never spend more than AI_SMS_SEGMENTS_PER_30MIN segments of a device's 30-minute window. They are lane 1,
-// so they never touch lane 0's reserve either: a flood of texts to the AI cannot delay a ready-for-pickup text.
+// The AI's sub-cap (ADR 0160, design section 2): the texts the assistant sends (its answers, its fallback, personal links, reply
+// numbers and the lead's one automatic follow-up, which a spoofed first text also triggers: W4c fixes) together never spend more than
+// AI_SMS_SEGMENTS_PER_30MIN segments of a device's 30-minute window. They never touch lane 0's reserve either: a flood of texts to
+// the AI cannot delay a ready-for-pickup text.
 
 /** The classes the AI sub-cap counts. */
-export const AI_CAPPED_CLASSES: ReadonlySet<string> = new Set(['ai_reply', 'ai_fallback', 'personal_link', 'action_confirm'])
+export const AI_CAPPED_CLASSES: ReadonlySet<string> = new Set(['ai_reply', 'ai_fallback', 'personal_link', 'action_confirm', 'lead_follow_up'])
 
 export interface AiCapConfig {
   /** Segments the AI classes may spend inside `windowMs` (AI_SMS_SEGMENTS_PER_30MIN). */

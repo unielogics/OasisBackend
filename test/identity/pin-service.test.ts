@@ -135,6 +135,20 @@ describe('verifySessionPin', () => {
     await expect(tryPin(s, PIN)).rejects.toMatchObject({ code: 'IDENTITY_PIN_LOCKED' })
   })
 
+  it('an IPv6 client is one address per /64: 20 wrong PINs from addresses of one prefix, then 429 (W4c fixes P8)', async () => {
+    const pages = []
+    for (let i = 0; i < 5; i++) pages.push((await w.session({ customerId: null, kind: 'calendar', phone: `+1201555012${i}` })).session)
+    let n = 0
+    for (const p of pages)
+      for (let i = 0; i < 4 && n < 20; i++, n++) await expect(tryPin(p, '9372', `2001:db8:1:2:${n.toString(16)}::1`)).rejects.toMatchObject({ code: 'IDENTITY_PIN_INVALID' })
+    await expect(tryPin(pages[4]!, '9372', '2001:db8:1:2:ffff:ffff:ffff:fffe')).rejects.toMatchObject({ code: 'IDENTITY_TOO_MANY_TRIES', status: 429 })
+    // another /64 is another client; the rows keep the prefix, never the full address
+    const other = (await w.session({ customerId: null, kind: 'calendar', phone: PHONES.stranger })).session
+    await expect(tryPin(other, '9372', '2001:db8:1:3::1')).rejects.toMatchObject({ code: 'IDENTITY_PIN_INVALID' })
+    const stored = (await w.t.db.selectFrom('identity_pin_failures').select('ip').where('ip', 'like', '2001:db8:%').execute()).map((r) => r.ip)
+    expect(new Set(stored)).toEqual(new Set(['2001:db8:1:2::/64', '2001:db8:1:3::/64']))
+  })
+
   it('an address gets 20 wrong PINs an hour, whatever the numbers; another address is unaffected', async () => {
     const pages = []
     for (let i = 0; i < 5; i++) pages.push((await w.session({ customerId: null, kind: 'calendar', phone: `+1201555012${i}` })).session)

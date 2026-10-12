@@ -17,6 +17,8 @@ describe('AI foundation settings', () => {
       'assistant.staff_pause_hours': 12,
       'assistant.faq': [],
       'assistant.actions_enabled': false,
+      // the welcome flow's hourly ceiling of new provisional clients (W4c fixes P6)
+      'assistant.new_texters_per_hour': 30,
       'reminders.offsets_min': [1440, 120],
       'reminders.confirm_request': true,
       'reminders.category_prep': {},
@@ -48,6 +50,8 @@ describe('AI foundation settings', () => {
     expect(parseSetting('assistant.allowlist', ['+12015550142'])).toEqual(['+12015550142'])
     bad('assistant.allowlist', ['2015550142'])
     bad('assistant.stage', 'staff')
+    bad('assistant.new_texters_per_hour', 0)
+    bad('assistant.new_texters_per_hour', 1001)
     bad('assistant.staff_pause_hours', 0)
     bad('assistant.staff_pause_hours', 73)
     expect(parseSetting('assistant.faq', [{ q: 'Do you take cards?', a: 'Yes, every major card.' }])).toHaveLength(1)

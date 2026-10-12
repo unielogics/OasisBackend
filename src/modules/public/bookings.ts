@@ -12,6 +12,8 @@ import { addDays, fmtT, toBizDate, wallToInstant } from '../../platform/time.js'
 import type { Tx } from '../../platform/db.js'
 import { DateTime } from 'luxon'
 import { findCustomerByPhone, isVipCustomer, updateCustomer } from '../customers/service.js'
+import { reassignNumber } from '../identity/rebind.js'
+import { staleRecord } from '../identity/stale.js'
 import { loadPlans } from '../memberships/plans.js'
 import { logActivity } from '../scheduling/appointments.js'
 import { createAppointment } from '../scheduling/booking.js'
@@ -150,15 +152,41 @@ export async function createWebBooking(
 
   await assertOnTheGrid(tx, d, loc, input.date, input.startMin)
   const start = wallToInstant(input.date, input.startMin, loc.tz)
-  const existing = await findCustomerByPhone(tx, phone)
+  let existing = await findCustomerByPhone(tx, phone)
+  let reboundId: string | null = null
+  // A member token proves the NUMBER (a texted code), not the client the shop has on file for it: on a record the stale-record rule
+  // holds, the caller becomes a new client and the number moves to them; the old record keeps its history and is flagged for staff
+  // (identity/rebind.ts, ADR 0160 W4c fixes). Without a token the booking is only linked to the stale record (below), which changes
+  // nothing on it and never ends the rule.
+  if (
+    verified &&
+    existing &&
+    verified.customerId === existing.id &&
+    (await staleRecord(tx, { locationId: loc.id, customerId: existing.id, phone, now })).stale
+  ) {
+    const moved = await reassignNumber(tx, d.app, {
+      from: existing.id,
+      locationId: loc.id,
+      phone,
+      name: input.name.trim().replace(/\s+/g, ' ') || null,
+      email: input.email?.trim() || null,
+      smsOptIn: input.smsConsent ? 'online' : null,
+      source: 'online',
+      audit: websiteActor(loc, r).audit,
+    })
+    const fresh = await findCustomerByPhone(tx, phone)
+    if (!fresh || fresh.id !== moved.customerId) throw new AppError('CONCURRENT_UPDATE')
+    existing = fresh
+    reboundId = moved.customerId
+  }
   // The record of a customer the shop already has changes only when the caller proved the number (a member token issued for this
   // customer) or by staff. Anyone else's booking is linked to that customer and leaves the record alone: no name, email, consent
   // or vehicle from a form that proves nothing about who typed the number (review 2026-10-10).
-  const proven = verified !== null && existing !== undefined && verified.customerId === existing.id
+  const proven = verified !== null && existing !== undefined && (verified.customerId === existing.id || existing.id === reboundId)
   const linkOnly = existing !== undefined && !proven
   // Member and VIP privileges (no fee, VIP-held times, the longer online window) follow the verified owner only: a number typed
   // without its code books as anyone's would, and the answer cannot tell a member's number from a stranger's (review 2026-10-10).
-  const privileges = proven ? await privilegesOf(tx, loc.id, existing.id) : { member: false, vip: false }
+  const privileges = proven && existing ? await privilegesOf(tx, loc.id, existing.id) : { member: false, vip: false }
   const member = privileges.member
   const fee = await getSetting(tx, loc.id, 'booking.guest_fee')
   const dueCents = member ? 0 : fee.value.cents
@@ -188,7 +216,7 @@ export async function createWebBooking(
   let booked
   try {
     booked = await createAppointment(tx, c, actor, {
-      customer: linkOnly ? { id: existing.id } : { name: input.name, phone, email: input.email ?? null, smsOptIn: input.smsConsent },
+      customer: linkOnly && existing ? { id: existing.id } : { name: input.name, phone, email: input.email ?? null, smsOptIn: input.smsConsent },
       vehicle: linkOnly ? null : vehicleOf(input.vehicle),
       serviceId: pkg.id,
       addonIds: addons.map((a) => a.id),

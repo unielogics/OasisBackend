@@ -1,7 +1,9 @@
 // The reply-number handler (ADR 0160, design sections 0 and 3; the W2d ActionCodeHandler port; wave W3b). A digits-only text from a
 // number with an in-chat action waiting for its reply number comes here, inside the webhook's transaction, before any model:
 //   1. the kill switches: with AI_ENABLED or assistant.enabled off the action is canceled and nothing is said (the AI is off); with
-//      AI_ACTIONS_ENABLED or assistant.actions_enabled off it is canceled and the client is told a team member will text back;
+//      AI_ACTIONS_ENABLED or assistant.actions_enabled off it is canceled and the client is told a team member will text back; the
+//      turn's stage and opt-out rules (messaging/assistant/gate.ts stageAndConsent: the allowlist, a known non-stale client in the
+//      customers stage, no opt-out) cancel it unanswered;
 //   2. the number is checked against the pending action of THIS phone only (identity/pending-actions.ts confirmPendingAction): a
 //      wrong number counts a try (3 tries lock it), an expired one is refused, and the phone's trust is checked again;
 //   3. the confirmed action runs as the assistant's actor (createAppointment channel online, source sms_ai | rescheduleAppointment |
@@ -15,8 +17,10 @@ import * as audit from '../../../platform/audit.js'
 import { getSetting } from '../../../platform/settings.js'
 import { fmtT, toBizDate, wallToInstant } from '../../../platform/time.js'
 import { findPendingAction, cancelPendingActions, completePendingAction, confirmPendingAction, failPendingAction, type ConfirmedAction } from '../../identity/pending-actions.js'
+import { evaluateTrust } from '../../identity/trust.js'
 import { markLeadBooked } from '../../leads/service.js'
-import { loadCustomerTarget } from '../../messaging/db/recipients.js'
+import { stageAndConsent } from '../../messaging/assistant/gate.js'
+import { hasActiveOptOut, loadCustomerTarget } from '../../messaging/db/recipients.js'
 import { loadBoardServices } from '../../public/availability-loader.js'
 import { getAppointment, logActivity } from '../../scheduling/appointments.js'
 import { createAppointment } from '../../scheduling/booking.js'
@@ -50,6 +54,18 @@ export const createActionCodeHandler: CreateActionCodeHandler = (deps): ActionCo
     if (!(await actionsOn(tx, deps.env, input.locationId))) {
       const n = await cancelPendingActions(tx, { locationId: input.locationId, phone: input.phone, now: at, error: 'in-chat actions are switched off' })
       if (n > 0) await answer(tx, deps, input, null, { templateKey: 'action_unavailable' })
+      return
+    }
+    // the same stage and opt-out rules as a turn: a narrowed stage (a kill switch) or an opt-out ends the action unanswered
+    const refused = await stageAndConsent(tx, {
+      locationId: input.locationId,
+      phone: input.phone,
+      customerId: input.customerId,
+      optedOut: await hasActiveOptOut(tx, input.locationId, input.phone),
+      now: at,
+    })
+    if (refused) {
+      await cancelPendingActions(tx, { locationId: input.locationId, phone: input.phone, now: at, error: `the assistant does not serve this number now (${refused})` })
       return
     }
     const outcome = await confirmPendingAction(tx, { locationId: input.locationId, phone: input.phone, code: input.code, now: at })
@@ -157,7 +173,10 @@ async function execute(tx: Tx, deps: AssistantDeps, input: ActionCodeInput, acti
           .where('deleted_at', 'is', null)
           .executeTakeFirst()
       : undefined
+    // a trust granted by the client's own PIN makes the visit proof of them for the stale-record rule (a code's never does)
+    const trust = await evaluateTrust(tx, { locationId: loc, phone: input.phone, now, customerId: customer.id })
     const booked = await createAppointment(tx, sched, actor, {
+      bookedWithPin: trust.trusted && trust.verifiedBy === 'pin',
       customer: { id: customer.id },
       vehicle: vehicle ?? null,
       serviceId: pkg.id,

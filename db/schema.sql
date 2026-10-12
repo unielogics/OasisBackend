@@ -415,6 +415,7 @@ CREATE TABLE public.appointments (
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     arrival_token_expires_at timestamp with time zone,
     categories text[] DEFAULT '{}'::text[] NOT NULL,
+    booked_with_pin boolean DEFAULT false NOT NULL,
     CONSTRAINT appointments_categories_check CHECK (((array_position(categories, NULL::text) IS NULL) AND (cardinality(categories) <= 10))),
     CONSTRAINT appointments_check CHECK ((scheduled_end > scheduled_start)),
     CONSTRAINT appointments_check1 CHECK (((status <> 'cleaning'::text) OR (bay_id IS NOT NULL))),
@@ -918,6 +919,9 @@ CREATE TABLE public.customers (
     email_verified boolean DEFAULT false NOT NULL,
     phone_version integer DEFAULT 0 NOT NULL,
     archived_at timestamp with time zone,
+    identity_confirmed_at timestamp with time zone,
+    phone_reassigned_at timestamp with time zone,
+    phone_reassigned_to uuid,
     CONSTRAINT customers_archived_is_deleted CHECK (((archived_at IS NULL) OR (deleted_at IS NOT NULL))),
     CONSTRAINT customers_check CHECK (((NOT synthetic) OR (phone_e164 IS NULL) OR (phone_e164 ~ '^\+1[0-9]{3}55501[0-9]{2}$'::text))),
     CONSTRAINT customers_check1 CHECK (((merged_into IS NULL) OR (merged_into <> id))),
@@ -5242,6 +5246,13 @@ ALTER TABLE ONLY public.customer_pins
 
 ALTER TABLE ONLY public.customers
     ADD CONSTRAINT customers_merged_into_fkey FOREIGN KEY (merged_into) REFERENCES public.customers(id);
+
+--
+-- Name: customers customers_phone_reassigned_to_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customers
+    ADD CONSTRAINT customers_phone_reassigned_to_fkey FOREIGN KEY (phone_reassigned_to) REFERENCES public.customers(id) ON DELETE SET NULL;
 
 --
 -- Name: email_suppressions email_suppressions_cleared_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

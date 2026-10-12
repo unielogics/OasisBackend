@@ -92,9 +92,10 @@ describe('membership checkouts', () => {
       ['superseded', 'ana.ruiz@example.com', 'link'],
       ['open', 'ana.ruiz@example.com', 'link'],
     ])
-    // the order carries the confirmed email (not the one on file), another phone, and the plan's product
+    // the order carries the confirmed email (not the one on file), her own phone and name (W4c fixes: another phone or name would wait
+    // for staff, see below), and the plan's product
     r.advance(2 * H)
-    const o = r.store.createOrder({ email: 'ana.ruiz@example.com', name: 'Ana R', phone: '9735550100', lineItems: [item('MEM-GOLD', 'Gold')] })
+    const o = r.store.createOrder({ email: 'ana.ruiz@example.com', name: 'Ana R', phone: '2015550188', lineItems: [item('MEM-GOLD', 'Gold')] })
     await sync(r)
     const p = await pass(r)
     expect(p.sync).toMatchObject({ intentsMatched: 1, updated: 1, needsCustomer: 0, awaitingMatch: 0 })
@@ -340,6 +341,29 @@ describe('membership checkouts', () => {
     expect(twice.statusCode).toBe(409)
     expect(twice.json()).toMatchObject({ code: 'MEMBERSHIP_CHECKOUT_NOT_WAITING' })
     await app.close()
+  })
+
+  it('an order matching an open intent only by its typed email but carrying another phone or name waits for staff (W4c fixes P7)', async () => {
+    const r = rig()
+    const { env, manager } = await setup(r)
+    const ana = await makeCustomer(r.db, env, { name: 'Ana Ruiz', email: null, phone: '+12015550188' })
+    const started = await transaction(r.db, (tx) => openCheckoutIntent(tx, dctx(r), { customerId: ana, planKey: 'premium', email: 'ana.ruiz@example.com' }, SYSTEM))
+    r.advance(H)
+    // someone Oasis does not know pays with Ana's typed email within the window
+    const o = r.store.createOrder({ email: 'ana.ruiz@example.com', name: 'Eve Squatter', phone: '9735550100', lineItems: [item('MEM-GOLD', 'Gold')] })
+    await sync(r)
+    const p = await pass(r)
+    expect(p.sync).toMatchObject({ intentsMatched: 0, awaitingMatch: 1, updated: 0, created: 0 })
+    expect(await memberOf(r, ana)).toMatchObject({ id: started.membershipId, status: 'pending' })
+    const rows = await checkouts(r)
+    expect(rows.map((c) => [c.state, c.origin])).toEqual([
+      ['open', 'link'],
+      ['awaiting_match', 'sync'],
+    ])
+    const [note] = await r.db.selectFrom('notifications').select(['kind', 'body', 'employee_id']).execute()
+    expect(note).toMatchObject({ kind: 'membership.awaiting_match', employee_id: manager.employeeId })
+    expect(note!.body).toContain('the order\'s phone or name is not theirs')
+    expect((await openAlerts(r)).map((a) => [a.code, a.sqsp_order_id])).toEqual([['membership_awaiting_match', o.orderId]])
   })
 
   it('a rejected waiting order goes back to "needs a customer", and the pending membership the sync opened for it is canceled', async () => {

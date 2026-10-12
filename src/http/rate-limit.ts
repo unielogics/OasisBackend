@@ -1,4 +1,5 @@
-// Request rate limits (SEC-14). Three layers, all in memory (@fastify/rate-limit's store):
+// Request rate limits (SEC-14). Three layers, all in memory (@fastify/rate-limit's store); a client address is an IPv6 address's /64
+// (platform/ip.ts):
 //   1. Before authentication, every rate-limited route (and an unmatched path) counts against its client address, with a ceiling
 //      of RATE_LIMIT_PER_MIN x PRE_AUTH_IP_FACTOR a minute. It runs ahead of the session lookup, so a flood costs no database work
 //      once it is over the ceiling; the factor leaves room for several staff behind one shop address.
@@ -9,6 +10,7 @@
 import rateLimit from '@fastify/rate-limit'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import { AppError } from '../platform/errors.js'
+import { ipLimitKey } from '../platform/ip.js'
 import type { AppInstance } from './types.js'
 
 export const PRE_AUTH_IP_FACTOR = 4
@@ -43,17 +45,17 @@ export async function installRateLimits(app: AppInstance): Promise<RateLimits> {
     max,
     timeWindow: '1 minute',
     hook: 'preHandler',
-    keyGenerator: (req) => req.auth?.userId ?? req.ip,
+    keyGenerator: (req) => req.auth?.userId ?? ipLimitKey(req.ip),
   })
   const perAddress = app.createRateLimit({
     max: max * PRE_AUTH_IP_FACTOR,
     timeWindow: '1 minute',
-    keyGenerator: (req) => `ip:${req.ip}`,
+    keyGenerator: (req) => `ip:${ipLimitKey(req.ip)}`,
   })
   const perCaller = app.createRateLimit({
     max,
     timeWindow: '1 minute',
-    keyGenerator: (req) => (req.auth ? `user:${req.auth.userId}` : `ip:${req.ip}`),
+    keyGenerator: (req) => (req.auth ? `user:${req.auth.userId}` : `ip:${ipLimitKey(req.ip)}`),
   })
 
   app.addHook('onRequest', async (req, reply) => {

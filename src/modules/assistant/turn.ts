@@ -260,14 +260,14 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     return { tokens_in: all.inputTokens, tokens_out: all.outputTokens, tokens_cache_read: all.cacheReadTokens, tokens_cache_write: all.cacheWriteTokens }
   }
 
-  const finishHandoff = async (o: { reason: string; status: 'handed_off' | 'failed'; fallback: boolean; error?: string; summary?: string; usage?: AiUsage; model?: string | null; rounds?: number; stop?: string | null }): Promise<TurnResult> => {
+  const finishHandoff = async (o: { reason: string; status: 'handed_off' | 'failed'; fallback: boolean; notify?: boolean; error?: string; summary?: string; usage?: AiUsage; model?: string | null; rounds?: number; stop?: string | null }): Promise<TurnResult> => {
     transcript.add({ kind: 'handoff', reason: o.reason })
     const usage = o.usage ?? ZERO_USAGE
     const fallbackId = await transaction(d.db, async (tx) => {
       await tx.selectFrom('assistant_conversations').select('id').where('id', '=', conv.id).forUpdate().executeTakeFirstOrThrow()
       const c = ref(state.threadCustomerId)
       const msg = o.fallback ? await sendFallback(tx, hd, c, { turnId, everyMs: d.cfg.fallbackEveryMs }) : null
-      await openTurnHandoff(tx, hd, c, { reason: o.reason, summary: o.summary ?? HANDOFF_SUMMARIES[o.reason] ?? HANDOFF_SUMMARIES.fallback! })
+      await openTurnHandoff(tx, hd, c, { reason: o.reason, summary: o.summary ?? HANDOFF_SUMMARIES[o.reason] ?? HANDOFF_SUMMARIES.fallback!, notify: o.notify !== false })
       await tx
         .updateTable('assistant_turns')
         .set({
@@ -333,8 +333,11 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
   if (conv.last_inbound_at && now.getTime() - conv.last_inbound_at.getTime() > d.cfg.staleMarkerMs) return finishHandoff({ reason: 'stale', status: 'handed_off', fallback: false })
 
   if (cap) {
-    if (GLOBAL_CAPS.has(cap)) await notifyCapOnce(d, { locationId: conv.location_id, cap, now, tz })
-    return finishHandoff({ reason: `cap:${cap}`, status: 'handed_off', fallback: true })
+    // a shop-wide cap (or the budget) tells the managers once per cap window, and the conversations it stops get no fallback text and
+    // no notice of their own: a flood of (spoofed) numbers must not turn into a flood of texts and notifications (W4c fixes)
+    const global = GLOBAL_CAPS.has(cap)
+    if (global) await notifyCapOnce(d, { locationId: conv.location_id, cap, now, tz })
+    return finishHandoff({ reason: `cap:${cap}`, status: 'handed_off', fallback: !global, notify: !global })
   }
   if (await noProgress(d.db, { conversationId: conv.id, now, turns: d.cfg.noProgressTurns })) return finishHandoff({ reason: 'no_progress', status: 'handed_off', fallback: true })
 
@@ -723,9 +726,10 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
   }
 }
 
-/** A shop-wide cap (or the budget) tells the managers once per business day. */
+/** A shop-wide cap (or the budget) tells the managers once per cap window: the hourly cap once an hour, the others once a business day. */
 async function notifyCapOnce(d: TurnDeps, o: { locationId: string; cap: CapKind; now: Date; tz: string }): Promise<void> {
-  const sourceRef = `assistant_cap:${o.cap}:${toBizDate(o.now, o.tz)}`
+  const window = o.cap === 'global_hour' ? new Date(Math.floor(o.now.getTime() / 3600_000) * 3600_000).toISOString() : toBizDate(o.now, o.tz)
+  const sourceRef = `assistant_cap:${o.cap}:${window}`
   await transaction(d.db, async (tx) => {
     const seen = await tx.selectFrom('notifications').select('id').where('location_id', '=', o.locationId).where('source_ref', '=', sourceRef).limit(1).executeTakeFirst()
     if (seen) return

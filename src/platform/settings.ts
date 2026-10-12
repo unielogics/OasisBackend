@@ -117,6 +117,9 @@ export const settingDefs = {
     default: [] as { q: string; a: string }[],
   },
   'assistant.actions_enabled': { schema: z.boolean(), default: false },
+  // The welcome flow's ceiling (W4c fixes, before stage everyone): at most this many NEW provisional clients from first texts an hour;
+  // beyond it a first text is stored for staff without a client, a lead or an AI reply (one notice to the managers an hour).
+  'assistant.new_texters_per_hour': { schema: z.number().int().min(1).max(1000), default: 30 },
   // Reminders (plan I): reminders.offsets_min above keeps its shape; the confirmation request ("Reply C") for booked visits, and
   // per-category preparation lines appended to the reminder (e.g. tint: "Plan for 2–3 hours.").
   'reminders.confirm_request': { schema: z.boolean(), default: true },

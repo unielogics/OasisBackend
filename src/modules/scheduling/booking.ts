@@ -69,6 +69,11 @@ export interface BookingInput {
   vip?: boolean
   /** The customer text queued instead of the booking thanks (the website's confirmation); none when `null`. */
   message?: { templateKey: string; vars: TemplateVars } | null
+  /**
+   * A link page or the assistant books for a session verified with this client's own PIN (ADR 0160, W4c fixes): the stale-record
+   * rule counts the visit as the client's activity (a booking proven only by the number never is).
+   */
+  bookedWithPin?: boolean
 }
 
 export interface BookingResult {
@@ -242,6 +247,7 @@ export async function createAppointment(
       source: input.source ?? (input.walkIn ? 'walk_in' : 'dashboard'),
       notes: clean(input.notes),
       special_instructions: clean(input.specialInstructions),
+      booked_with_pin: input.bookedWithPin === true,
       // a job's system actor is not a users row
       created_by: isUuid(actor.auth.userId) ? actor.auth.userId : null,
     })

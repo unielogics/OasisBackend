@@ -706,7 +706,7 @@ describe('failures become the fallback and a handoff (design section 3)', () => 
 })
 
 describe('caps (design section 3)', () => {
-  it('the daily budget switches the AI off for the day: no model call, the fallback, one notice to the managers', async () => {
+  it('the daily budget switches the AI off for the day: no model call, one notice to the managers', async () => {
     const a = assistant([simText('We are open until 6 PM today.', { usage: { inputTokens: 1000, outputTokens: 1000 } })], {
       caps: { perNumberHour: 8, perNumberDay: 25, unknownDay: 10, globalHour: 100, globalDay: 600, dailyBudgetMicros: 10_000 },
     })
@@ -730,6 +730,30 @@ describe('caps (design section 3)', () => {
     for (const c of caps) expect(c).toMatchObject({ source_ref: `assistant_cap:budget:${toBizDate(w.clock.now(), 'America/New_York')}`, title: 'The assistant is off until tomorrow' })
     // once per day: Liam's capped turn added no second notice
     expect(caps.length).toBe(capsAfterMaria)
+  })
+
+  it('while a shop-wide cap holds a stopped conversation gets no fallback text and pages nobody; one cap notice per hour (W4c fixes P6)', async () => {
+    const a = assistant([simText('We are open until 6 PM today.')], {
+      caps: { perNumberHour: 8, perNumberDay: 25, unknownDay: 10, globalHour: 1, globalDay: 600, dailyBudgetMicros: 1_000_000_000 },
+    })
+    await inbound(maria(), 'Open today?')
+    expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
+    const liam = w.customer('Liam Chen').phone
+    w.clock.advance(70_000)
+    await inbound(liam, 'Hi, are you open?')
+    expect(await a.turn(liam)).toMatchObject({ status: 'handed_off', reason: 'cap:global_hour', fallbackMessageId: null })
+    expect(await aiTexts(liam)).toEqual([])
+    // the conversation is the staff's (open handoff, the thread unread), but no per-conversation notice: only the cap's
+    expect(await conversationOf(liam)).toMatchObject({ handoff_state: 'open', handoff_reason: 'cap:global_hour' })
+    expect((await notifications()).filter((x) => x.kind === 'assistant.handoff')).toEqual([])
+    const capNotices = () => notifications().then((all) => [...new Set(all.filter((x) => x.kind === 'assistant.cap').map((x) => x.source_ref))])
+    expect(await capNotices()).toEqual([`assistant_cap:global_hour:${new Date(Math.floor(w.clock.now().getTime() / 3_600_000) * 3_600_000).toISOString()}`])
+    // the same hour (the cap's window): another stopped number adds no notice and gets no text
+    w.clock.advance(70_000)
+    await inbound(STRANGER, 'hello?')
+    expect(await a.turn(STRANGER)).toMatchObject({ status: 'handed_off', reason: 'cap:global_hour', fallbackMessageId: null })
+    expect(await capNotices()).toHaveLength(1)
+    expect((await notifications()).filter((x) => x.kind === 'assistant.handoff')).toEqual([])
   })
 
   it('per number: the 9th turn of an hour gets the fallback instead of a model call', async () => {

@@ -1,5 +1,5 @@
-// The AI's sub-cap in the dispatcher (ADR 0160, design sections 2 and 10): ai_reply, ai_fallback, personal_link and action_confirm
-// together never spend more than AI_SMS_SEGMENTS_PER_30MIN of a device's 30-minute window, and never lane 0's reserve, so a flood
+// The AI's sub-cap in the dispatcher (ADR 0160, design sections 2 and 10): ai_reply, ai_fallback, personal_link, action_confirm and
+// lead_follow_up together never spend more than AI_SMS_SEGMENTS_PER_30MIN of a device's 30-minute window, and never lane 0's reserve, so a flood
 // of texts to the AI cannot delay the shop's own texts.
 import { describe, expect, it } from 'vitest'
 import { AI_CAP_WINDOW_MS, AI_CAPPED_CLASSES, aiCapAllows, aiUsedInWindow, type UsagePoint } from '../../src/modules/messaging/dispatch/budget.js'
@@ -16,7 +16,14 @@ describe('aiCapAllows', () => {
   it('counts only the AI classes inside the window', () => {
     const usage = [...pts('ai_reply', 0, 1, 2), ...pts('personal_link', 3), ...pts('ready', 4, 5), ...pts('ai_fallback', -31)]
     expect(aiUsedInWindow(usage, at(10), AI_CAP_WINDOW_MS)).toBe(4)
-    expect(AI_CAPPED_CLASSES).toEqual(new Set(['ai_reply', 'ai_fallback', 'personal_link', 'action_confirm']))
+    expect(AI_CAPPED_CLASSES).toEqual(new Set(['ai_reply', 'ai_fallback', 'personal_link', 'action_confirm', 'lead_follow_up']))
+  })
+
+  it('counts the lead follow-up inside the sub-cap: spoofed first texts cannot buy follow-ups past it (W4c fixes P6)', () => {
+    const full = pts('ai_reply', ...Array.from({ length: 12 }, (_, i) => i))
+    expect(aiCapAllows('lead_follow_up', full, at(12), 1, cap)).toBe(false)
+    expect(aiCapAllows('lead_follow_up', pts('ai_reply', 0), at(12), 1, cap)).toBe(true)
+    expect(aiUsedInWindow(pts('lead_follow_up', 1, 2), at(10), AI_CAP_WINDOW_MS)).toBe(2)
   })
 
   it('refuses an AI text that would pass the cap; other classes are not its business', () => {

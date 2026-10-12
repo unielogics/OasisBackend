@@ -205,6 +205,33 @@ describe('the gate', () => {
     expect((await lastInbox()).decision).toBe('assistant')
   })
 
+  it('stage customers: a record the stale-record rule holds is no known customer (its number may have changed hands; W4c fixes B1 d)', async () => {
+    const phone = '+13055550177'
+    const id = w.newId()
+    const old = new Date(w.clock.now().getTime() - 300 * 86_400_000)
+    await w.t.db
+      .insertInto('customers')
+      .values({ id, full_name: 'Olga Previous', phone_e164: phone, source: 'dashboard', sms_opted_in: true, sms_opt_in_source: 'dashboard', sms_opt_in_at: old, created_at: old, updated_at: old })
+      .execute()
+    try {
+      await assistantOn('customers')
+      await inbound(phone, 'hi, is this the car wash?')
+      // filed in the old record's thread for staff (unread, alerted), never to the assistant
+      expect(await lastInbox()).toMatchObject({ decision: 'message', assistant_conversation_id: null })
+      expect(await conversations()).toEqual([])
+      // proof of the client (staff confirmed the number) makes them a customer again
+      await w.t.db.updateTable('customers').set({ identity_confirmed_at: w.clock.now() }).where('id', '=', id).execute()
+      await inbound(phone, 'hi again')
+      expect((await lastInbox()).decision).toBe('assistant')
+    } finally {
+      await sql`delete from assistant_conversations where phone_e164 = ${phone}`.execute(w.t.db)
+      await sql`delete from messages where customer_id = ${id}`.execute(w.t.db)
+      await sql`delete from message_threads where customer_id = ${id}`.execute(w.t.db)
+      await sql`update sms_inbox set customer_id = null, message_id = null where from_e164 = ${phone}`.execute(w.t.db).catch(() => undefined)
+      await sql`delete from customers where id = ${id}`.execute(w.t.db).catch(() => undefined)
+    }
+  })
+
   it('AI_ENABLED is read from the environment: with it off no setting turns the assistant on', async () => {
     await assistantOn()
     const gate = w.rt.assistant().gate

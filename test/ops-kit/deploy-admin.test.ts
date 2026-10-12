@@ -7,6 +7,7 @@ import { PasswordHasher } from '../../src/modules/auth/password.js'
 import { createIdGenerator } from '../../src/platform/ids.js'
 import { ensureLocation } from '../../src/platform/locations.js'
 import { resetPassword } from '../../deploy/lib/reset-password.js'
+import { killLinks } from '../../deploy/lib/links-kill.js'
 import { useOwnSchema } from './own-schema.js'
 import { makeUser } from '../helpers/factories.js'
 import { testDatabaseUrl } from '../helpers/env.js'
@@ -139,6 +140,43 @@ describe('reset-password (break-glass for a locked-out Super Admin)', () => {
       expect(r.out).not.toContain('typed-on-stdin-passphrase')
       const bad = await sh(script('reset-password.sh'), ['not-an-address'], env)
       expect(bad.code).toBe(2)
+    } finally {
+      w.cleanup()
+    }
+  }, 60_000)
+})
+
+describe('links-kill (the personal links kill switch, W4c fixes B4)', () => {
+  it('bumps links.epoch with an audit row naming the reason; refuses without a reason; works end to end through links-kill.sh', async () => {
+    const newId = createIdGenerator(t.clock)
+    await ensureLocation(t.db, newId, { timezone: 'America/New_York' })
+    const epoch = async () => (await sql<{ v: unknown }>`select value as v from settings where key = 'links.epoch'`.execute(t.db)).rows[0]?.v ?? 1
+    const before = Number(await epoch())
+    await expect(killLinks(t.db, { reason: ' ' })).rejects.toThrow(/reason/)
+    const r = await killLinks(t.db, { reason: 'lost tablet' })
+    expect(r).toMatchObject({ epochBefore: before, epoch: before + 1 })
+    const audit = (
+      await sql<{ actor_name: string; after: unknown }>`select actor_name, after from audit_log where action = 'identity.links.killed'`.execute(t.db)
+    ).rows
+    expect(audit).toEqual([{ actor_name: 'break-glass CLI', after: { epoch: before + 1, reason: 'lost tablet' } }])
+
+    const w = tempDir('oasis-links-kill-')
+    try {
+      const etc = path.join(w.dir, 'etc')
+      mkdirSync(etc, { recursive: true })
+      writeFileSync(path.join(etc, 'common.env'), `DATABASE_URL=${testDatabaseUrl()}\nDB_SEARCH_PATH=${t.schema},public\n`)
+      writeFileSync(path.join(etc, 'api.env'), '')
+      mkdirSync(path.join(w.dir, 'prefix/current'), { recursive: true })
+      symlinkSync(REPO, path.join(w.dir, 'prefix/current/backend'))
+      const env = { OASIS_ETC: etc, OASIS_PREFIX: path.join(w.dir, 'prefix'), OASIS_RUN_AS: '', OASIS_ALLOW_NONROOT: '1', NODE_ENV: 'development' }
+      const sh1 = await sh(script('links-kill.sh'), ['incident 42'], env)
+      expect(sh1.code, sh1.out).toBe(0)
+      expect(sh1.stdout).toMatch(new RegExp(`links epoch ${before + 1} -> ${before + 2}`))
+      expect(Number(await epoch())).toBe(before + 2)
+      expect((await sh(script('links-kill.sh'), [], env)).code).toBe(2)
+      const help = await sh(script('links-kill.sh'), ['--help'], env)
+      expect(help.code).toBe(0)
+      expect(help.stdout).toMatch(/kill switch/)
     } finally {
       w.cleanup()
     }

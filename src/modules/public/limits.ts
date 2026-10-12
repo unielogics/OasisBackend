@@ -1,4 +1,5 @@
-// Durable fixed-window counters for the public routes (ADR 0150): per phone number and per client address, shared by every API
+// Durable fixed-window counters for the public routes (ADR 0150): per phone number and per client address (an IPv6 address by its
+// /64: platform/ip.ts ipLimitKey), shared by every API
 // process through the public_rate_limits table (the in-memory per-route limit of src/http/rate-limit.ts is only the first ring
 // and forgets on restart). One upsert per request; the window is `windowSec` wide and starts on a multiple of it, so two
 // processes and two requests always agree on which row a request belongs to.
@@ -6,6 +7,7 @@ import { sql } from 'kysely'
 import type { Clock } from '../../platform/clock.js'
 import type { Executor } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
+import { ipLimitKey } from '../../platform/ip.js'
 import './problems.js'
 import './schema.js'
 
@@ -33,9 +35,11 @@ export type PhoneLimitedAction = 'otpRequest' | 'booking' | 'membership'
 const KEY_PREFIX: Record<PhoneLimitedAction, string> = { otpRequest: 'otp', booking: 'booking', membership: 'membership' }
 
 /** The three checks of an action that names a number, in the order they are charged: the address, the number from it, the number. */
-export function publicLimitChecks(action: PhoneLimitedAction, ip: string, phone: string): { key: string; rule: LimitRule }[] {
+export function publicLimitChecks(action: PhoneLimitedAction, address: string, phone: string): { key: string; rule: LimitRule }[] {
   const rules = PUBLIC_LIMITS[action]
   const p = KEY_PREFIX[action]
+  // an IPv6 client counts by its /64 (platform/ip.ts)
+  const ip = ipLimitKey(address)
   return [
     { key: `${p}:ip:${ip}`, rule: rules.ip },
     { key: `${p}:phone_ip:${phone}:${ip}`, rule: rules.phoneIp },

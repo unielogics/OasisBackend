@@ -1,7 +1,8 @@
 // The conversation side of the inbound path on Postgres (ADR 0160, design section 3), all inside the caller's transaction:
 //   - the durable marker: a text the assistant takes sets assistant_conversations.pending_since (the oldest unanswered text of a
 //     burst), last_inbound_at and the client, and links the sms_inbox row; the turn (wave 3) clears it once it answered;
-//   - AGENT: an open handoff on the number's conversation (no AI on it until staff resolve it);
+//   - AGENT and every other handoff: an open handoff on the number's conversation (no AI on it until staff resolve it); a pending
+//     in-chat action of the number is canceled;
 //   - the staff takeover: a staff text on a thread pauses the AI there for assistant.staff_pause_hours and resolves an open handoff;
 //   - whether an in-chat action waits for its reply number from a phone.
 import { sql } from 'kysely'
@@ -79,6 +80,9 @@ export function createPgAssistantInbox(o: { newId: NewId }): AssistantInbox {
           .execute()
       }
       await tx.updateTable('sms_inbox').set({ assistant_conversation_id: conversationId }).where('id', '=', i.inboxId).execute()
+      // every handoff (AGENT, the fallback, the guard, a cap, handoff_to_staff) ends an in-chat action waiting for its reply number:
+      // the chat is the staff's now, so a reply number texted before it no longer runs anything (ADR 0160, W4c fixes)
+      await cancelPendingActions(tx, { locationId: i.locationId, phone: i.phone, now: i.at, error: `handed to staff: ${reason}` })
       return { conversationId, alreadyOpen }
     },
   }

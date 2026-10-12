@@ -1,6 +1,7 @@
 // The 30-day phone trust and the stale-record rule (ADR 0160, design sections 0, 5 and 10): granted on a verification for 30 days,
 // re-checked on every read; it ends on a phone change, PIN reset or clear, merge, STOP, a staff revoke and an epoch bump; a record
-// quiet for 180 days, or whose last text bounced as an invalid number, is unknown until verified again.
+// quiet for 180 days, or whose last text bounced as an invalid number, is unknown until the client proves it again (their PIN or
+// staff: a texted code proves only the number, W4c fixes).
 import { describe, expect, it } from 'vitest'
 import { updateCustomer } from '../../src/modules/customers/service.js'
 import { revokeForMerge, revokeForOptOut } from '../../src/modules/identity/revoke.js'
@@ -13,6 +14,8 @@ const DAY = 86_400_000
 
 const grant = (customerId: string, phone: string = PHONES.maria) =>
   w.tx((tx) => grantTrust(tx, { locationId: w.locationId, phone, customerId, verifiedBy: 'code', now: w.clock.now() }))
+const grantPin = (customerId: string, phone: string = PHONES.maria) =>
+  w.tx((tx) => grantTrust(tx, { locationId: w.locationId, phone, customerId, verifiedBy: 'pin', now: w.clock.now() }))
 const trust = (phone: string = PHONES.maria, customerId?: string) =>
   evaluateTrust(w.t.db, { locationId: w.locationId, phone, now: w.clock.now(), customerId })
 
@@ -131,7 +134,7 @@ describe('staleRecord', () => {
       expect(isInvalidNumberError(e), String(e)).toBe(false)
   })
 
-  it('a record quiet for 180 days is stale; a verification or a newer record is activity, a text from the number never is', async () => {
+  it('a record quiet for 180 days is stale; a PIN or a newer record is activity, a texted code or a text from the number never is (W4c fixes)', async () => {
     const old = new Date(w.clock.now().getTime() - 200 * DAY)
     const maria = await w.customer({ createdAt: old })
     const verdict = () => staleRecord(w.t.db, { locationId: w.locationId, customerId: maria, phone: PHONES.maria, now: w.clock.now() })
@@ -141,9 +144,12 @@ describe('staleRecord', () => {
     await inbound(PHONES.maria, new Date(w.clock.now().getTime() - 179 * DAY))
     await inbound(PHONES.maria, w.clock.now())
     expect(await verdict()).toMatchObject({ stale: true, reason: 'inactive', lastActivityAt: old })
-    // a verification is activity; 181 days after it, a fresh text from the number still is not
+    // a texted code proves the number, not the client: no activity
     w.advance(2 * DAY)
     await grant(maria)
+    expect(await verdict()).toMatchObject({ stale: true, reason: 'inactive', lastActivityAt: old })
+    // the client's own PIN is; 181 days after it, a fresh text from the number still is not
+    await grantPin(maria)
     expect(await verdict()).toMatchObject({ stale: false, reason: null, lastActivityAt: w.clock.now() })
     w.advance(181 * DAY)
     await inbound(PHONES.maria, w.clock.now())
@@ -152,13 +158,17 @@ describe('staleRecord', () => {
     expect((await staleRecord(w.t.db, { locationId: w.locationId, customerId: fresh, phone: PHONES.liam, now: w.clock.now() })).stale).toBe(false)
   })
 
-  it('a record whose last final text bounced as an invalid number is stale until verified again; a later delivery clears it', async () => {
+  it('a record whose last final text bounced as an invalid number is stale until the client proves it (PIN) again; a later delivery clears it', async () => {
     const maria = await w.customer({})
     const verdict = () => staleRecord(w.t.db, { locationId: w.locationId, customerId: maria, phone: PHONES.maria, now: w.clock.now() })
+    w.advance(60_000)
     await outbound(PHONES.maria, 'failed', 'Invalid destination address', w.clock.now())
     expect(await verdict()).toMatchObject({ stale: true, reason: 'invalid_number' })
     w.advance(60_000)
     await grant(maria)
+    expect(await verdict()).toMatchObject({ stale: true, reason: 'invalid_number' })
+    w.advance(60_000)
+    await grantPin(maria)
     expect((await verdict()).stale).toBe(false)
     w.advance(60_000)
     await outbound(PHONES.maria, 'failed', 'Invalid destination address', w.clock.now())

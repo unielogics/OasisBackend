@@ -1,7 +1,8 @@
 // Staff routes of the identity core (ADR 0160, design sections 5 and 8): a client's phone identity, masked (cli.view: the client
-// file's Overview), and two actions with cli.edit: Clear PIN (the client verifies by texted code again; every link, session and the
-// trust end) and Revoke trust (the number must verify again on a link page before the AI acts for it; live sessions end too). Both
-// are audited. Nothing here sends a text or exposes a token, hash or code.
+// file's Overview), and three actions with cli.edit: Clear PIN (the client verifies by texted code again; every link, session and the
+// trust end), Revoke trust (the number must verify again on a link page before the AI acts for it; live sessions end too) and
+// Confirm the number (a staff action ends the stale-record rule, W4c fixes); and the links' kill switch (owner level: the links
+// epoch). All audited. Nothing here sends a text or exposes a token, hash or code.
 import { access } from '../../../http/access.js'
 import { auditContextOf } from '../../../http/authorizer.js'
 import type { AppInstance } from '../../../http/types.js'
@@ -12,7 +13,10 @@ import { AppError } from '../../../platform/errors.js'
 import { clearCustomerPin } from '../pin-service.js'
 import { revokeSessions } from '../sessions.js'
 import { identityStateOf, type IdentityState } from '../staff-view.js'
+import { killAllLinks } from '../kill.js'
 import { cancelPendingActions } from '../pending-actions.js'
+import { confirmClientIdentity } from '../rebind.js'
+import { storedUserId } from '../../settings/http/runtime.js'
 import { revokeTrust } from '../trust.js'
 
 const TAGS = ['customers']
@@ -47,6 +51,10 @@ const IdentityStateDto = z.object({
     .object({ stale: z.boolean(), reason: z.enum(['inactive', 'invalid_number']).nullable(), lastActivityAt: z.string() })
     .nullable()
     .describe('The stale-record rule: no activity for 180 days, or the last text bounced as an invalid number'),
+  numberReassigned: z
+    .object({ at: z.string(), toCustomerId: z.string().nullable() })
+    .nullable()
+    .describe('Someone who verified only this number (a texted code) while the record was stale booked as a new client, so the number moved to that client: merge the two if it is the same person'),
 })
 
 const d = (x: Date | null): string | null => (x ? x.toISOString() : null)
@@ -68,6 +76,7 @@ export function identityDto(s: IdentityState): z.infer<typeof IdentityStateDto> 
     sessions: s.sessions,
     pendingAction: s.pendingAction ? { kind: s.pendingAction.kind, expiresAt: s.pendingAction.expiresAt.toISOString() } : null,
     stale: s.stale ? { stale: s.stale.stale, reason: s.stale.reason, lastActivityAt: s.stale.lastActivityAt.toISOString() } : null,
+    numberReassigned: s.numberReassigned ? { at: s.numberReassigned.at.toISOString(), toCustomerId: s.numberReassigned.toCustomerId } : null,
   }
 }
 
@@ -148,5 +157,63 @@ export function registerIdentityStaffRoutes(app: AppInstance): void {
         })
         return identityDto((await identityStateOf(tx, { locationId, customerId: req.params.id, now }))!)
       }),
+  )
+
+  app.post(
+    '/customers/:id/identity/confirm',
+    {
+      config: { access: access.perm('cli.edit') },
+      schema: {
+        tags: TAGS,
+        summary: 'Confirm the number still belongs to this client',
+        description:
+          'Staff confirmed with the client (in person or on the phone) that the number on file is still theirs: a staff action is proof of the client, so the stale-record rule (180 days without proof, or a bounce as an invalid number) no longer holds the record and the assistant and the link pages know the client again. A texted code never does this (it proves only the number). 422 `IDENTITY_NO_PHONE` for a client without a number. Audited as identity.client.confirmed.',
+        params: IdParams,
+        response: { 200: IdentityStateDto },
+      },
+    },
+    async (req) =>
+      transaction(app.db, async (tx) => {
+        const locationId = req.auth!.locationId
+        const now = app.clock.now()
+        const before = await identityStateOf(tx, { locationId, customerId: req.params.id, now })
+        if (!before) throw new AppError('NOT_FOUND')
+        if (!before.phone) throw new AppError('IDENTITY_NO_PHONE')
+        await confirmClientIdentity(tx, { customerId: req.params.id, now })
+        await audit.record(tx, {
+          locationId,
+          action: 'identity.client.confirmed',
+          entityType: 'customer',
+          entityId: req.params.id,
+          before: { stale: before.stale?.stale ?? null },
+          after: { stale: false },
+          ctx: auditContextOf(req),
+        })
+        return identityDto((await identityStateOf(tx, { locationId, customerId: req.params.id, now }))!)
+      }),
+  )
+
+  app.post(
+    '/identity/links/kill',
+    {
+      config: { access: access.perm('set.billing', 'team.roles') },
+      schema: {
+        tags: TAGS,
+        summary: 'Kill switch: end every personal link, link session and phone trust now',
+        description:
+          'Bumps the links epoch (setting `links.epoch`): every personal link, every page opened from one and every 30-day phone trust issued before end at their next use, and a reply number in chat stops running (the trust it needs is gone). Clients verify again on a new link. Needs both owner-level permissions (Billing & integrations and Roles: a Super Admin). `reason` is kept in the audit log (identity.links.killed, beside settings.update). The break-glass CLI deploy/scripts/links-kill.sh does the same; PUBLIC_LINKS_ENABLED=false closes the link routes (docs/runbook.md "Personal links").',
+        body: z.object({ reason: z.string().trim().min(3).max(300) }).strict(),
+        response: { 200: z.object({ epoch: z.number().int(), epochBefore: z.number().int() }) },
+      },
+    },
+    async (req) =>
+      transaction(app.db, async (tx) =>
+        killAllLinks(tx, {
+          locationId: req.auth!.locationId,
+          reason: req.body.reason,
+          updatedBy: await storedUserId(tx, req.auth!.userId),
+          audit: auditContextOf(req),
+        }),
+      ),
   )
 }

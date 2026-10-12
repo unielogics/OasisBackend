@@ -16,11 +16,12 @@ export interface IdempotentHandlerOptions<Req, P> {
    */
   prepare?: (req: Req) => Promise<P>
   /**
-   * Who owns the key when the request has no signed-in user (default: `anon:<address>`). A route that acts for a bearer session
-   * that is not in the body (the personal-link pages) names the session here, so two pages behind one address can never replay each
-   * other's stored answer with the same key and body (W4c review).
+   * Who owns the key when the request has no signed-in user (default: `anon:<address>`). A route that acts for something that is not
+   * in the body (the personal-link pages: their link) names it here, so two links behind one address can never replay each other's
+   * stored answer with the same key and body, while a retry from a re-opened page of the same link replays its own (W4c fixes). It
+   * is resolved before the key is claimed; what it throws answers the request and claims nothing.
    */
-  actor?: (req: Req) => string
+  actor?: (req: Req) => string | Promise<string>
 }
 
 export function idempotentHandler<Req extends FastifyRequest = FastifyRequest, P = undefined>(
@@ -32,6 +33,7 @@ export function idempotentHandler<Req extends FastifyRequest = FastifyRequest, P
     const header = req.headers['idempotency-key']
     const key = typeof header === 'string' ? header : undefined
     const prepare = o.prepare ? () => o.prepare!(req) : undefined
+    const owner = key ? (req.auth?.userId ?? (o.actor ? await o.actor(req) : `anon:${req.ip}`)) : ''
     // The onRequest/preHandler hooks already rejected a missing key on 'required' routes.
     const out = key
       ? await runIdempotent(
@@ -39,7 +41,7 @@ export function idempotentHandler<Req extends FastifyRequest = FastifyRequest, P
           app.clock,
           {
             key,
-            actor: req.auth?.userId ?? (o.actor ? o.actor(req) : `anon:${req.ip}`),
+            actor: owner,
             method: req.method,
             url: req.url,
             route: req.routeOptions.url ?? req.url,

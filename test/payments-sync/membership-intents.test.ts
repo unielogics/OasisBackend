@@ -59,6 +59,32 @@ const ana: CustomerRef = { id: 'c-ana', emails: [], unverifiedEmails: ['ana@exam
 const bob: CustomerRef = { id: 'c-bob', emails: ['bob@example.com'], phones: ['+12015550199'] }
 const product = { key: 'prod-gold', productId: 'prod-gold', sku: 'MEM-PREMIUM', tier: 'premium' }
 
+describe('an intent-only match whose order carries another phone or name waits for staff (W4c fixes P7)', () => {
+  const at = '2026-10-12T09:00:00Z'
+  const who = (over: Record<string, unknown> = {}) => ({ email: 'ana@example.com', orderId: 'o-x', createdOn: new Date(at), product, ...over })
+  const anaIntent = intent({ client: { phone: '+12015550188', name: 'Ana Ruiz' } })
+
+  it('her own phone and name (any spelling), or none on the order: the intent takes it', () => {
+    const mine = { customerId: 'c-ana', by: 'checkout_intent', intent: { id: 'i1', fresh: true } }
+    expect(linkCustomer(who({ phone: '(201) 555-0188', name: 'ANA RUIZ' }), [], [anaIntent])).toEqual(mine)
+    expect(linkCustomer(who({ name: 'Ana M. Ruiz' }), [], [anaIntent])).toEqual(mine)
+    expect(linkCustomer(who({ name: 'Ana R' }), [], [anaIntent])).toEqual(mine)
+    expect(linkCustomer(who({ name: 'ana' }), [], [anaIntent])).toEqual(mine)
+    expect(linkCustomer(who(), [], [anaIntent])).toEqual(mine)
+  })
+
+  it('another phone or another name: awaiting_match for staff with her as the candidate; the intent stays open', () => {
+    const waits = { by: 'intent_mismatch', candidateCustomerId: 'c-ana' }
+    expect(linkCustomer(who({ phone: '(973) 555-0101' }), [], [anaIntent])).toEqual(waits)
+    expect(linkCustomer(who({ phone: '(201) 555-0188', name: 'Eve Squatter' }), [], [anaIntent])).toEqual(waits)
+    expect(linkCustomer(who({ name: 'Ana Smith' }), [], [anaIntent])).toEqual(waits)
+    // a client with no phone on file never matches an order that carries one
+    expect(linkCustomer(who({ phone: '(201) 555-0188' }), [], [intent({ client: { name: 'Ana Ruiz' } })])).toEqual(waits)
+    const [inf] = inferMemberships([order({ at, customerPhone: '(973) 555-0101', customerName: 'Eve Squatter' })], map, [], new Date('2026-10-12T10:00:00Z'), {}, [anaIntent])
+    expect(inf).toMatchObject({ customerId: undefined, linkedBy: 'intent_mismatch', candidateCustomerId: 'c-ana', checkoutMatches: [] })
+  })
+})
+
 describe('linkCustomer: the checkout-intent tier', () => {
   const who = (at: string, over: Record<string, unknown> = {}) => ({
     email: 'ANA@example.com',

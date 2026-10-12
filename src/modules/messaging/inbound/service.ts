@@ -46,7 +46,7 @@ export interface InboundEffects {
    * The welcome flow (owner, 2026-10-11): a stranger's text the assistant takes. Creates the provisional client (wave 3) in the same
    * transaction and returns it, or null to leave the text with the stranger. Absent: strangers stay strangers until the turn.
    */
-  adoptNewTexter?(cmd: { phone: string; inboxId: string; receivedAt: Date }): Promise<{ customerId: string } | null>
+  adoptNewTexter?(cmd: { phone: string; inboxId: string; receivedAt: Date }): Promise<{ customerId: string } | { refused: 'ceiling' } | null>
   /** AGENT: a handoff on the number's conversation (no AI until staff resolve it). */
   handoff?(cmd: { phone: string; customerId: string | null; inboxId: string; reason: string }): Promise<void>
   /** A reply number for a pending in-chat action (the code itself never leaves this call). */
@@ -197,6 +197,12 @@ export class InboundService {
           // is in that client's thread from the start (read: the AI answers it)
           if (customerId === null && this.effects.adoptNewTexter) {
             const adopted = await this.effects.adoptNewTexter({ phone: cmd.phone, inboxId: row.id, receivedAt: now })
+            // the hourly ceiling of new provisional clients: the text stays in the inbox for staff (quarantined as an unknown
+            // sender's), with no client, no lead and no AI reply (W4c fixes)
+            if (adopted && 'refused' in adopted) {
+              quarantined = true
+              break
+            }
             if (adopted) {
               customerId = adopted.customerId
               await this.effects.storeMessage({

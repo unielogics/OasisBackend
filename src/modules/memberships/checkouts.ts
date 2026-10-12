@@ -63,9 +63,12 @@ export async function loadIntentRefs(db: Executor, locationId: string): Promise<
   const rows = await db
     .selectFrom('membership_checkouts as c')
     .leftJoin('sqsp_orders as o', 'o.id', 'c.matched_order_id')
+    .leftJoin('customers as k', 'k.id', 'c.customer_id')
     .select((eb) => [
       'c.id',
       'c.customer_id',
+      'k.phone_e164 as client_phone',
+      'k.full_name as client_name',
       'c.membership_id',
       'c.state',
       'c.plan_key',
@@ -115,6 +118,7 @@ export async function loadIntentRefs(db: Executor, locationId: string): Promise<
     orderId: r.sqsp_order_id ?? undefined,
     orderSqspCustomerId: r.order_sqsp_customer_id ?? undefined,
     ...(r.order_held_by_another === true ? { orderHeldByAnother: true } : {}),
+    client: { phone: r.client_phone ?? undefined, name: r.client_name ?? undefined },
   }))
 }
 
@@ -220,7 +224,10 @@ export async function openAwaitingMatch(
           sqsp_product_key: inf.productKey,
           started_at: now,
           review_flags: JSON.stringify([]),
-          inference_reason: `Squarespace order ${order.order_number} matches this client only by an email nobody verified: waiting for staff to confirm`,
+          inference_reason:
+            inf.linkedBy === 'intent_mismatch'
+              ? `Squarespace order ${order.order_number} matches this client's checkout email but not their phone or name: waiting for staff to confirm`
+              : `Squarespace order ${order.order_number} matches this client only by an email nobody verified: waiting for staff to confirm`,
           last_synced_at: now,
           created_at: now,
           updated_at: now,
@@ -262,7 +269,10 @@ export async function openAwaitingMatch(
     })
     const first = customer.full_name.trim().split(/\s+/)[0] ?? customer.full_name
     const who = customer.phone_e164 ? `${customer.full_name} (${formatPhoneDisplay(customer.phone_e164)})` : customer.full_name
-    const message = `Squarespace order ${order.order_number} (${planLabel}) was paid with ${inf.email ?? 'an email'}, which matches ${who} only through an email nobody verified. Confirm with the client before it activates their membership, then match or reject it in Memberships.`
+    const message =
+      inf.linkedBy === 'intent_mismatch'
+        ? `Squarespace order ${order.order_number} (${planLabel}) was paid with the email ${who} typed on their membership page, but the order's phone or name is not theirs. Confirm with the client before it activates their membership, then match or reject it in Memberships.`
+        : `Squarespace order ${order.order_number} (${planLabel}) was paid with ${inf.email ?? 'an email'}, which matches ${who} only through an email nobody verified. Confirm with the client before it activates their membership, then match or reject it in Memberships.`
     await notifyManagers(
       tx,
       {

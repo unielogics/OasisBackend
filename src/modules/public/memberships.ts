@@ -8,13 +8,15 @@ import type { Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
 import { formatPhoneDisplay } from '../../platform/phone.js'
 import { findCustomerByPhone, updateCustomer, upsertCustomerByPhone, upsertVehicleByPlate, type CustomerRecord } from '../customers/service.js'
+import { reassignNumber } from '../identity/rebind.js'
+import { staleRecord } from '../identity/stale.js'
 import { ensurePlans, loadPlans, planByKey } from '../memberships/plans.js'
 import { notifyManagers } from '../messaging/notify.js'
 import { raiseAlert } from '../payments-sync/db/alerts.js'
 import { listProductRows } from '../payments-sync/db/product-map.js'
 import type { ProductMapEntry } from '../payments-sync/product-map.js'
 import { parseVehicleLabel } from './bookings.js'
-import type { PublicDeps, PublicLocation, PublicRequest } from './deps.js'
+import { websiteActor, type PublicDeps, type PublicLocation, type PublicRequest } from './deps.js'
 import { enforceLimits, publicLimitChecks } from './limits.js'
 import { phoneOrThrow, resolveMemberToken } from './otp.js'
 import './problems.js'
@@ -95,7 +97,27 @@ export async function joinWeb(
 
   const verified = input.memberToken ? await resolveMemberToken(tx, loc, input.memberToken, now) : null
   if (verified && verified.phoneE164 !== phone) throw new AppError('PUBLIC_TOKEN_PHONE_MISMATCH')
-  const existing = await findCustomerByPhone(tx, phone)
+  let existing = await findCustomerByPhone(tx, phone)
+  // A member token proves the number, not the client on file for it: on a record the stale-record rule holds, the caller joins as a
+  // new client and the number moves to them (identity/rebind.ts, ADR 0160 W4c fixes); the old record is flagged for staff.
+  if (
+    verified &&
+    existing &&
+    verified.customerId === existing.id &&
+    (await staleRecord(tx, { locationId: loc.id, customerId: existing.id, phone, now })).stale
+  ) {
+    await reassignNumber(tx, d.app, {
+      from: existing.id,
+      locationId: loc.id,
+      phone,
+      name: input.name.trim() || null,
+      email: input.email.trim() || null,
+      smsOptIn: input.smsConsent ? 'online' : null,
+      source: 'online',
+      audit: websiteActor(loc, r).audit,
+    })
+    existing = undefined
+  }
   // A customer the shop already has: only the owner of the number (a member token issued for this customer) or staff change the
   // record or attach a membership to it. Anyone else gets the same answer as a new member, and staff are asked to confirm with
   // the customer: nothing is written to the record, nothing is texted, and nothing tells the caller the number is known, or a

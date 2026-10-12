@@ -21,7 +21,9 @@ import type { ProductMap, ResolvedProduct, Tier } from './product-map.js'
  * order (see `holdsOrder`: then the intent is ignored and the other tiers decide); then the Squarespace customer id, then an email
  * the client VERIFIED (customers.email_verified), then the phone. An email nobody verified never links: an order that
  * matches a client only that way waits for staff ('unverified_email', the awaiting_match state). A second paid order of the same
- * plan while the first period still runs is a duplicate: flagged, and never moves the period.
+ * plan while the first period still runs is a duplicate: flagged, and never moves the period. An open intent only names the email its
+ * client typed: an order matching it alone but carrying another phone or name than the client's waits for staff too
+ * ('intent_mismatch', awaiting_match; W4c fixes).
  */
 export interface MembershipConfig {
   /** Days after period end during which the member is still active (Squarespace retries failed renewals). Default 7. */
@@ -77,6 +79,8 @@ export interface CheckoutIntentRef {
    * client holds (their link of any source, their membership row). It binds nothing: neither that order nor renewals (F1).
    */
   orderHeldByAnother?: boolean
+  /** The intent's client as on file (loadIntentRefs): an open intent takes only an order whose phone and name, when it carries them, are theirs. */
+  client?: { phone?: string; name?: string }
 }
 
 export type LinkedBy =
@@ -85,6 +89,7 @@ export type LinkedBy =
   | 'email'
   | 'phone'
   | 'unverified_email'
+  | 'intent_mismatch'
   | 'ambiguous'
   | 'none'
 
@@ -109,7 +114,10 @@ export interface MembershipInference {
   personKey: string
   customerId?: string
   linkedBy: LinkedBy
-  /** linkedBy 'unverified_email': the one client whose unverified email the order carries (never linked by the inference). */
+  /**
+   * linkedBy 'unverified_email': the one client whose unverified email the order carries; 'intent_mismatch': the client of the open
+   * intent whose email the order carries with another phone or name. Never linked by the inference: staff confirm (awaiting_match).
+   */
   candidateCustomerId?: string
   /** Open checkout intents an order of this person matched (intent id, Squarespace order id): the sync marks them matched. */
   checkoutMatches: { intentId: string; orderId: string }[]
@@ -205,7 +213,7 @@ export interface CustomerLink {
   by: LinkedBy
   /** by 'checkout_intent': the intent that linked; `fresh` when it was still open (this order consumes it). */
   intent?: { id: string; fresh: boolean }
-  /** by 'unverified_email': the client staff are asked about. */
+  /** by 'unverified_email' or 'intent_mismatch': the client staff are asked about. */
   candidateCustomerId?: string
   /** An intent that named this order but was ignored because another client holds the order (the other tiers linked it). */
   intentConflict?: string
@@ -215,6 +223,8 @@ export interface CustomerLink {
 export interface OrderIdentity {
   email?: string
   phone?: string
+  /** The name on the order (billing name). */
+  name?: string
   sqspCustomerId?: string
   /** The Squarespace order id, the moment it was placed and its membership product: needed by the checkout-intent tier. */
   orderId?: string
@@ -234,6 +244,42 @@ function productFits(intent: CheckoutIntentRef, product: NonNullable<OrderIdenti
       sameKey(intent.productKey, product.key)
     )
   return product.tier !== undefined && product.tier === intent.planKey
+}
+
+const nameWords = (n: string | undefined): string[] =>
+  (n ?? '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .split(/[^a-z]+/)
+    .filter(Boolean)
+
+/**
+ * Two names can be the same person's: the same words; or the same first word and nothing that conflicts: one of them is the first
+ * name alone ("Nina" / "Nina New"), or the last words agree, an initial standing for a word ("Maria L. Delgado", "Ana R" / "Ana Ruiz").
+ */
+export function sameName(a: string | undefined, b: string | undefined): boolean {
+  const x = nameWords(a)
+  const y = nameWords(b)
+  if (x.length === 0 || y.length === 0) return false
+  if (x.join(' ') === y.join(' ')) return true
+  if (x[0] !== y[0]) return false
+  if (x.length === 1 || y.length === 1) return true
+  const lx = x[x.length - 1]!
+  const ly = y[y.length - 1]!
+  return lx === ly || (lx.length === 1 && ly.startsWith(lx)) || (ly.length === 1 && lx.startsWith(ly))
+}
+
+/**
+ * The order carries a phone or a name, and it is not the intent client's (a client with none on file matches nothing). An intent
+ * whose client was not loaded (`client` absent: never from loadIntentRefs, which always sets it) is not checked.
+ */
+function notTheClient(who: OrderIdentity, intent: CheckoutIntentRef): boolean {
+  if (!intent.client) return false
+  const phone = normalizePhone(who.phone)
+  if (phone !== undefined && normalizePhone(intent.client?.phone) !== phone) return true
+  if (nameWords(who.name).length > 0 && !sameName(who.name, intent.client?.name)) return true
+  return false
 }
 
 /** The one client a set of intents names, or 'ambiguous' when they name several. */
@@ -298,6 +344,9 @@ function intentFor(
   const fits = (i: CheckoutIntentRef): boolean => email !== undefined && normalizeEmail(i.expectedEmail) === email && productFits(i, product)
   const open = oneClient(usable(intents.filter((i) => i.state === 'open' && fits(i) && i.startedAt.getTime() <= at && at <= i.expiresAt.getTime())))
   if (open === 'ambiguous') return { link: { by: 'ambiguous' }, refused }
+  // the intent only names the email its client typed: an order carrying another phone or name may be anyone who used that email
+  // (W4c fixes, "intent squatting"), so staff confirm it (awaiting_match) and the intent stays open
+  if (open && notTheClient(who, open)) return { link: { by: 'intent_mismatch', candidateCustomerId: open.customerId }, refused }
   if (open) return { link: { customerId: open.customerId, by: 'checkout_intent', intent: { id: open.id, fresh: true } }, refused }
   // A renewal after a checkout of this client matched. When the bound order names its Squarespace customer, a renewal is an order of
   // that same Squarespace customer (Squarespace renews with the customer's current email, which may differ); only when it names none
@@ -383,6 +432,7 @@ export function inferMemberships(
       {
         email: order.customerEmail,
         phone: order.customerPhone,
+        name: order.customerName,
         sqspCustomerId: order.customerId,
         orderId: order.id,
         createdOn: order.createdOn,
@@ -473,7 +523,7 @@ export function inferMemberships(
       personKey,
       customerId: link.customerId,
       linkedBy: link.by,
-      candidateCustomerId: link.by === 'unverified_email' ? link.candidateCustomerId : undefined,
+      candidateCustomerId: link.by === 'unverified_email' || link.by === 'intent_mismatch' ? link.candidateCustomerId : undefined,
       checkoutMatches: list.flatMap((c) =>
         c.link.intent?.fresh ? [{ intentId: c.link.intent.id, orderId: c.order.id }] : [],
       ),

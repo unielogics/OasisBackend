@@ -1,6 +1,7 @@
 // The PIN rules on a link page (ADR 0160, design section 5):
 //   - verify: constant time and the same scrypt work whether or not the client has a PIN; a wrong PIN and a PIN where none exists
-//     answer alike (IDENTITY_PIN_INVALID); per page 5 tries then the session ends; per client address 20 wrong an hour; per client
+//     answer alike (IDENTITY_PIN_INVALID); per page 5 tries then the session ends; per client address (IPv6: its /64) 20 wrong an
+//     hour; per client
 //     10 wrong in any 24 hours; the lockout schedule 5 wrong -> 15 minutes, 3 more -> 1 hour, 3 more -> disabled until reset (staff
 //     notified). A right PIN clears the consecutive count (not the 24-hour count) and verifies the page and the number for 30 days.
 //   - set: only after a code confirmed on this page within 10 minutes, only while no PIN exists, blocklist; bumps the PIN version, so
@@ -13,6 +14,7 @@ import * as audit from '../../platform/audit.js'
 import type { AuditContext } from '../../platform/audit.js'
 import type { Executor, Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
+import { ipLimitKey } from '../../platform/ip.js'
 import type { NewId } from '../../platform/ids.js'
 import { getLocation } from '../../platform/locations.js'
 import { maskPhone } from '../../platform/phone.js'
@@ -23,6 +25,7 @@ import { PIN_AFTER_CODE_MS, pinOwnerOf, pinStateOf } from './codes.js'
 import { liveCustomer } from './common.js'
 import type { IdentityDeps } from './deps.js'
 import { pinProblem } from './pin.js'
+import { confirmClientIdentity, isStale } from './rebind.js'
 import { revokeIdentity } from './revoke.js'
 import { countSessionFailure, markSessionVerified, resolveSession, type SessionView } from './sessions.js'
 import { grantTrust } from './trust.js'
@@ -74,12 +77,14 @@ export async function verifySessionPin(
       return { ok: false, error: e as AppError }
     }
     const locationId = s.link.locationId
-    if (o.ip) {
+    // the per-address count keys an IPv6 client by its /64 (platform/ip.ts): the rows store that key, never more of the address
+    const ip = o.ip ? ipLimitKey(o.ip) : null
+    if (ip) {
       const ipFails = await tx
         .selectFrom('identity_pin_failures')
         .select((eb) => [eb.fn.countAll<string>().as('n'), eb.fn.min('at').as('oldest')])
         .where('location_id', '=', locationId)
-        .where('ip', '=', o.ip)
+        .where('ip', '=', ip)
         .where('at', '>', new Date(now.getTime() - HOUR))
         .executeTakeFirstOrThrow()
       if (Number(ipFails.n) >= PIN_FAILS_PER_IP_HOUR) {
@@ -115,7 +120,7 @@ export async function verifySessionPin(
     if (!right) {
       await tx
         .insertInto('identity_pin_failures')
-        .values({ id: d.newId(), location_id: locationId, customer_id: hasPin ? row!.customer_id : null, phone_e164: s.phone, ip: o.ip, at: now })
+        .values({ id: d.newId(), location_id: locationId, customer_id: hasPin ? row!.customer_id : null, phone_e164: s.phone, ip, at: now })
         .execute()
       if (row && hasPin) {
         const failures = row.failed_attempts + 1
@@ -146,6 +151,8 @@ export async function verifySessionPin(
       .execute()
     await markSessionVerified(tx, s.tokenHash, 'pin', now)
     await grantTrust(tx, { locationId, phone: s.phone, customerId: row!.customer_id, verifiedBy: 'pin', now })
+    // the client's own PIN is proof of being them: it ends the stale-record rule (a texted code never does, W4c fixes)
+    await confirmClientIdentity(tx, { customerId: row!.customer_id, now })
     await audit.record(tx, {
       locationId,
       action: 'identity.pin.verified',
@@ -230,6 +237,8 @@ export async function setSessionPin(
     if (!s.customerId) throw new AppError('IDENTITY_UNKNOWN_CLIENT')
     const row = await tx.selectFrom('customer_pins').selectAll().where('customer_id', '=', s.customerId).forUpdate().executeTakeFirst()
     if (row?.pin_hash) throw new AppError('IDENTITY_PIN_EXISTS')
+    // a code proves the number, not the client: a stale record gets no PIN from it (the PIN would then un-hide it, W4c fixes)
+    if (await isStale(tx, { locationId: s.link.locationId, customerId: s.customerId, phone: s.phone, now })) throw new AppError('IDENTITY_RECORD_UNCONFIRMED')
     if (!(await recentCodeOf(tx, s, ['link_verify', 'pin_set'], now, row?.cleared_at ?? null))) throw new AppError('IDENTITY_CODE_REQUIRED')
     checkNewPin(o.pin, s.phone)
     const hash = await d.pins.hash(s.customerId, o.pin)
@@ -285,6 +294,7 @@ export async function resetSessionPin(
     if (!s.customerId) throw new AppError('IDENTITY_UNKNOWN_CLIENT')
     const row = await tx.selectFrom('customer_pins').selectAll().where('customer_id', '=', s.customerId).forUpdate().executeTakeFirst()
     if (!row?.pin_hash) throw new AppError('IDENTITY_PIN_NOT_SET')
+    if (await isStale(tx, { locationId: s.link.locationId, customerId: s.customerId, phone: s.phone, now })) throw new AppError('IDENTITY_RECORD_UNCONFIRMED')
     if (!(await recentCodeOf(tx, s, ['pin_reset'], now, row.set_at))) throw new AppError('IDENTITY_CODE_REQUIRED')
     checkNewPin(o.pin, s.phone)
     const hash = await d.pins.hash(s.customerId, o.pin)

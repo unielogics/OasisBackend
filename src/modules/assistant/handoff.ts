@@ -81,7 +81,12 @@ export async function sendFallback(tx: Tx, d: HandoffDeps, c: ConversationRef, o
  * thread unread and refreshes the alerts. `reason` is stored on the conversation (fallback, guard, cap:<kind>, lease_timeout, the
  * model's handoff_to_staff reason, ...); `summary` is the alert's text.
  */
-export async function openTurnHandoff(tx: Tx, d: HandoffDeps, c: ConversationRef, o: { reason: string; summary: string }): Promise<{ alreadyOpen: boolean }> {
+export async function openTurnHandoff(
+  tx: Tx,
+  d: HandoffDeps,
+  c: ConversationRef,
+  o: { reason: string; summary: string; notify?: boolean },
+): Promise<{ alreadyOpen: boolean }> {
   const now = d.clock.now()
   const newest = await tx
     .selectFrom('sms_inbox')
@@ -107,6 +112,13 @@ export async function openTurnHandoff(tx: Tx, d: HandoffDeps, c: ConversationRef
       .where('location_id', '=', c.locationId)
       .where('customer_id', '=', c.threadCustomerId)
       .execute()
+  // `notify: false` (a shop-wide cap: its one notice per window already told the managers) pages nobody for this conversation
+  if (o.notify !== false) await notifyHandoff(tx, d, c, r.conversationId, o.summary)
+  await realtime.publish(tx, { locationId: c.locationId, channel: 'ops', type: 'alerts.changed', payload: { source: 'sms', kind: 'ai_handoff' } })
+  return { alreadyOpen: false }
+}
+
+async function notifyHandoff(tx: Tx, d: HandoffDeps, c: ConversationRef, conversationId: string, summary: string): Promise<void> {
   const who = await whoOf(tx, c)
   await notifyManagers(
     tx,
@@ -114,15 +126,13 @@ export async function openTurnHandoff(tx: Tx, d: HandoffDeps, c: ConversationRef
       locationId: c.locationId,
       kind: 'assistant.handoff',
       title: `${who}: the assistant handed the chat to the team — reply in Messages`,
-      body: o.summary.slice(0, 500),
+      body: summary.slice(0, 500),
       entityType: c.threadCustomerId ? 'customer' : null,
       entityId: c.threadCustomerId,
-      sourceRef: handoffSourceRef(r.conversationId),
+      sourceRef: handoffSourceRef(conversationId),
     },
     { newId: d.newId, clock: d.clock },
   )
-  await realtime.publish(tx, { locationId: c.locationId, channel: 'ops', type: 'alerts.changed', payload: { source: 'sms', kind: 'ai_handoff' } })
-  return { alreadyOpen: false }
 }
 
 /** Marks the client's thread unread (texts the AI took but will not answer now) and refreshes the alerts. */

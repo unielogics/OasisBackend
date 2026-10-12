@@ -91,6 +91,13 @@ registerProblems({
     title: 'Too many links',
     detail: 'This number already got {what}. Try again later.',
   },
+  // the stale-record rule holds the record and the page proved only the number (a texted code): its PIN, membership and payment pages
+  // wait for the client's PIN or for staff (W4c fixes)
+  IDENTITY_RECORD_UNCONFIRMED: {
+    status: 409,
+    title: 'We need to confirm it’s you',
+    detail: 'We could not confirm this number is still yours. Enter your PIN, or call or text us and we’ll sort it out.',
+  },
   IDENTITY_NOT_TRUSTED: {
     status: 403,
     title: 'Verification needed',

@@ -71,7 +71,7 @@ describe('NewTexters.adopt through the webhook', () => {
   it('an AI-created client fails canSendSms for broadcasts (transactional consent only), and passes for a transactional text', async () => {
     await w.assistantOn()
     const adopted = await w.tx((tx) => createNewTexters(w.deps).adopt(tx, { locationId: w.locationId, phone: STRANGER2, inboxId: w.newId(), receivedAt: w.clock.now() }))
-    const target = await loadCustomerTarget(w.t.db, w.locationId, adopted!.customerId)
+    const target = await loadCustomerTarget(w.t.db, w.locationId, (adopted as { customerId: string }).customerId)
     const ctx = { now: w.clock.now(), environment: 'test' as const, allowlist: [STRANGER2] }
     expect(canSendSms(target!.recipient, { klass: 'broadcast' }, ctx)).toMatchObject({ allowed: false })
     expect(canSendSms(target!.recipient, { klass: 'booking_thanks' }, ctx)).toMatchObject({ allowed: true })
@@ -99,5 +99,30 @@ describe('NewTexters.adopt through the webhook', () => {
     await inbound(STRANGER, 'hello again')
     expect(await clientsOf(STRANGER)).toMatchObject([{ id: c!.id, deleted_at: null, archived_at: null }])
     expect((await w.t.db.selectFrom('leads').select('status').executeTakeFirstOrThrow()).status).toBe('new')
+  })
+
+  it('the hourly ceiling of new provisional clients: beyond it a first text creates nothing and gets no AI turn; one notice an hour (W4c fixes P6)', async () => {
+    await w.assistantOn()
+    await w.setting('assistant.new_texters_per_hour', 1)
+    w.rt.useAssistant({ newTexters: createNewTexters(w.deps) })
+    const THIRD = '+13055550197'
+    await inbound(STRANGER, 'How much is a wash?')
+    expect(await clientsOf(STRANGER)).toHaveLength(1)
+    await inbound(STRANGER2, 'How much is a wash?')
+    await inbound(THIRD, 'tint price?')
+    // stored for staff as an unknown sender's text: no client, no lead, nothing waiting for the assistant
+    expect(await clientsOf(STRANGER2)).toEqual([])
+    expect(await clientsOf(THIRD)).toEqual([])
+    const rows = await w.t.db.selectFrom('sms_inbox').select(['from_e164', 'quarantined', 'assistant_conversation_id']).where('from_e164', 'in', [STRANGER2, THIRD]).execute()
+    expect(rows).toEqual(expect.arrayContaining([{ from_e164: STRANGER2, quarantined: true, assistant_conversation_id: null }, { from_e164: THIRD, quarantined: true, assistant_conversation_id: null }]))
+    expect((await w.t.db.selectFrom('leads').select('phone_e164').execute()).map((l) => l.phone_e164)).toEqual([STRANGER])
+    const pendingFor = await w.t.db.selectFrom('assistant_conversations').select('phone_e164').where('pending_since', 'is not', null).execute()
+    expect(pendingFor.map((c) => c.phone_e164)).not.toContain(STRANGER2)
+    const notices = await w.t.db.selectFrom('notifications').select(['kind', 'source_ref']).where('kind', '=', 'assistant.new_texters_ceiling').execute()
+    expect(new Set(notices.map((x) => x.source_ref)).size).toBe(1)
+    // the next hour has room again
+    w.clock.advance(61 * 60_000)
+    await inbound(STRANGER2, 'still there?')
+    expect(await clientsOf(STRANGER2)).toHaveLength(1)
   })
 })

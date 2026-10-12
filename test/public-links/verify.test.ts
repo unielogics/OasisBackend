@@ -75,9 +75,12 @@ describe('texted codes', () => {
 })
 
 describe('a stranger’s link whose number a client with a PIN owns (W4c review)', () => {
-  /** Maria (created long ago: a stale record) sets her PIN on her own page; the trust it leaves is dropped. */
+  /**
+   * Maria sets her PIN on her own page (a code never sets one on a stale record: W4c fixes); the trust it leaves is dropped and 200
+   * quiet days make her record stale.
+   */
   async function mariaWithPin(pin = '4826'): Promise<string> {
-    const id = await h.customer({ createdAt: new Date(h.clock.now().getTime() - 200 * DAY) })
+    const id = await h.customer()
     const own = await h.page({ customerId: id })
     expect((await h.verifyByCode(own.session)).statusCode).toBe(200)
     expect((await h.call('POST', 'pin', { session: own.session, body: { pin } })).statusCode).toBe(200)
@@ -111,7 +114,7 @@ describe('a stranger’s link whose number a client with a PIN owns (W4c review)
   })
 
   it('a page verified by code before she set her PIN does not book onto her record', async () => {
-    const id = await h.customer({ createdAt: new Date(h.clock.now().getTime() - 200 * DAY) })
+    const id = await h.customer()
     const { session } = await h.page({ customerId: null, phone: PHONES.maria })
     expect((await h.verifyByCode(session)).statusCode).toBe(200)
     // meanwhile Maria sets a PIN on her own page (a verify link: a calendar one would supersede the stranger's calendar link)

@@ -10,7 +10,7 @@ const w = useToolWorld()
 const DAY = 86_400_000
 
 const adopt = (phone: string) =>
-  w.tx((tx) => createNewTexters(w.deps).adopt(tx, { locationId: w.locationId, phone, inboxId: w.newId(), receivedAt: w.clock.now() }))
+  w.tx(async (tx) => (await createNewTexters(w.deps).adopt(tx, { locationId: w.locationId, phone, inboxId: w.newId(), receivedAt: w.clock.now() })) as { customerId: string } | null)
 const runJob = async () => {
   const j = createLeadJobs(w.deps).find((d) => d.name === PROVISIONAL_ARCHIVE_JOB)!
   expect(j.name).toBe('leads.provisional_archive')

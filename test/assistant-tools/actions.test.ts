@@ -337,3 +337,52 @@ describe('propose_reschedule and propose_cancel', () => {
     expect(await run('propose_cancel', probe, { appointmentRef: 'A1', reason: 'x' })).toMatchObject({ ok: false, error: 'not_found' })
   })
 })
+
+describe('what ends a pending action (W4c fixes B3)', () => {
+  it('AGENT opens a handoff and cancels the pending action: the reply number texted before it no longer runs (C12)', async () => {
+    const probe = await trustedMaria()
+    w.rt.useAssistant({ actionCodes: handler() })
+    await run('propose_booking', probe, BOOK)
+    const code = await lastCode(maria().phone)
+    await inbound(maria().phone, 'AGENT')
+    const handoff = await w.t.db.selectFrom('assistant_conversations').select('handoff_state').where('phone_e164', '=', maria().phone).executeTakeFirst()
+    await inbound(maria().phone, code)
+    expect({ handoff: handoff?.handoff_state, booked: (await appointmentsOf(maria().id)).length, state: (await pending()).at(-1)?.state }).toEqual({
+      handoff: 'open',
+      booked: 0,
+      state: 'canceled',
+    })
+  })
+
+  it('every other handoff (the fallback, the guard, a cap, handoff_to_staff) cancels it too: they all open it through the inbox', async () => {
+    const probe = await trustedMaria()
+    await run('propose_booking', probe, BOOK)
+    const { createPgAssistantInbox } = await import('../../src/modules/messaging/assistant/inbox.js')
+    await w.tx((tx) =>
+      createPgAssistantInbox({ newId: w.newId }).openHandoff(tx, { locationId: w.locationId, phone: maria().phone, customerId: maria().id, inboxId: w.newId(), reason: 'fallback', at: w.clock.now() }),
+    )
+    expect((await pending()).at(-1)).toMatchObject({ state: 'canceled', error: 'handed to staff: fallback' })
+  })
+
+  it('narrowing the stage to an allowlist without the number stops its pending action, unanswered (C13)', async () => {
+    const probe = await trustedMaria()
+    w.rt.useAssistant({ actionCodes: handler() })
+    await run('propose_booking', probe, BOOK)
+    const code = await lastCode(maria().phone)
+    await w.setting('assistant.stage', 'allowlist')
+    await w.setting('assistant.allowlist', [])
+    const before = (await aiTexts(maria().id)).length
+    await inbound(maria().phone, code)
+    expect({ booked: (await appointmentsOf(maria().id)).length, state: (await pending()).at(-1)?.state }).toEqual({ booked: 0, state: 'canceled' })
+    expect((await aiTexts(maria().id)).length).toBe(before)
+  })
+
+  it('an opt-out of the number stops it as well (the handler runs the turn’s stage and opt-out rules)', async () => {
+    const probe = await trustedMaria()
+    await run('propose_booking', probe, BOOK)
+    const code = await lastCode(maria().phone)
+    await w.t.db.insertInto('sms_opt_outs').values({ id: w.newId(), location_id: w.locationId, phone_e164: maria().phone, opted_out_at: w.clock.now(), source: 'keyword' } as never).execute()
+    await reply(maria().phone, code, maria().id)
+    expect({ booked: (await appointmentsOf(maria().id)).length, state: (await pending()).at(-1)?.state }).toEqual({ booked: 0, state: 'canceled' })
+  })
+})

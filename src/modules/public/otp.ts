@@ -7,6 +7,7 @@ import { createHash, randomInt } from 'node:crypto'
 import { advisoryXactLock, type Db, type Executor, type Tx } from '../../platform/db.js'
 import * as audit from '../../platform/audit.js'
 import { AppError } from '../../platform/errors.js'
+import { ipLimitKey } from '../../platform/ip.js'
 import { maskPhone, normalizeTextableNanp } from '../../platform/phone.js'
 import { hashToken, newToken, safeEqual } from '../auth/tokens.js'
 import { findCustomerByPhone, type CustomerRecord } from '../customers/service.js'
@@ -209,7 +210,7 @@ export async function verifyOtp(
   input: { challengeId: string; code: string },
 ): Promise<OtpVerified> {
   const { db, clock } = d.app
-  await enforceLimits(db, clock, [{ key: `otp_verify:ip:${r.ip}`, rule: PUBLIC_LIMITS.otpVerify.ip }])
+  await enforceLimits(db, clock, [{ key: `otp_verify:ip:${ipLimitKey(r.ip)}`, rule: PUBLIC_LIMITS.otpVerify.ip }])
   const now = clock.now()
   const code = input.code.replace(/\D/g, '')
   // the attempt counter must survive a wrong code, so the outcome is decided inside the transaction and thrown after it

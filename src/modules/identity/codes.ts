@@ -7,6 +7,7 @@
 import { advisoryXactLock, type Executor } from '../../platform/db.js'
 import * as audit from '../../platform/audit.js'
 import { AppError } from '../../platform/errors.js'
+import { ipLimitKey } from '../../platform/ip.js'
 import { maskPhone } from '../../platform/phone.js'
 import { safeEqual } from '../auth/tokens.js'
 import { loadCustomerTarget, strangerRecipient } from '../messaging/db/recipients.js'
@@ -16,6 +17,7 @@ import type { IdentityDeps } from './deps.js'
 import type { OtpPurpose } from './schema.js'
 import { ownerOf } from './common.js'
 import { countSessionFailure, markSessionVerified, resolveSession, type SessionView } from './sessions.js'
+import { staleRecord } from './stale.js'
 import { grantTrust } from './trust.js'
 import './problems.js'
 import '../public/problems.js'
@@ -89,8 +91,11 @@ export async function requestStepUpCode(
   if (o.purpose === 'link_verify' && pin.set) throw new AppError('IDENTITY_PIN_REQUIRED')
   if (o.purpose === 'pin_set' && pin.set) throw new AppError('IDENTITY_PIN_EXISTS')
   if (o.purpose === 'pin_reset' && !pin.set) throw new AppError('IDENTITY_PIN_NOT_SET')
+  // a code proves the number, not the client: on a record the stale-record rule holds it never sets or resets the PIN (W4c fixes)
+  if (o.purpose !== 'link_verify' && s.customerId && (await staleRecord(d.db, { locationId: s.link.locationId, customerId: s.customerId, phone: s.phone, now })).stale)
+    throw new AppError('IDENTITY_RECORD_UNCONFIRMED')
   await enforceLimits(d.db, d.clock, [
-    { key: `link_code:ip:${o.ip}`, rule: LINK_CODE_LIMITS.ip },
+    { key: `link_code:ip:${ipLimitKey(o.ip)}`, rule: LINK_CODE_LIMITS.ip },
     { key: `link_code:session:${s.tokenHash}`, rule: LINK_CODE_LIMITS.session },
     { key: `link_code:phone:${s.phone}`, rule: LINK_CODE_LIMITS.phone },
   ])

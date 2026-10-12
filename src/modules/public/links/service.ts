@@ -2,7 +2,8 @@
 // codes and trust (src/modules/identity/**). The routes (http/routes.ts) resolve the bearer session and call these; everything a
 // client sees of their own record goes through `linkState`, which shows a name, appointments or an invoice only as far as the page
 // has earned it: the first name and the last two digits of the number to the holder of the link, the appointments once the number is
-// verified, nothing personal while the stale-record rule says the record may belong to a previous holder of the number.
+// verified, nothing personal while the stale-record rule says the record may belong to a previous holder of the number (until the
+// client's own PIN proves them: a texted code proves only the number, and a booking it allows makes a new client, W4c fixes).
 //
 //   bookings            a verified page books through createAppointment (channel online, source link), like the website does for a
 //                       verified member: member privileges (no fee, the VIP rules) only for the link's own client, never while a PIN
@@ -26,11 +27,12 @@ import { getSetting } from '../../../platform/settings.js'
 import { DEFAULT_TZ, fmtT, toBizDate, wallToInstant } from '../../../platform/time.js'
 import type { AuthContext } from '../../../http/authorizer.js'
 import { checkCheckoutUrl, listPlanPublic } from '../../catalog/plans.js'
-import { getCustomer, isVipCustomer, updateCustomer, upsertCustomerByPhone, upsertVehicleByPlate } from '../../customers/service.js'
+import { getCustomer, isVipCustomer, updateCustomer, upsertVehicleByPlate } from '../../customers/service.js'
 import { evaluateTrust } from '../../identity/trust.js'
 import { pinOwnerOf, pinStateOf } from '../../identity/codes.js'
 import { consumeLink } from '../../identity/links.js'
 import { memberPrivilegesHeldUntil } from '../../identity/pin-service.js'
+import { bindPartyToNumber } from '../../identity/rebind.js'
 import { STEP_UP_MAX_AGE_MS, hasFreshStepUp, type SessionView } from '../../identity/sessions.js'
 import { staleRecord } from '../../identity/stale.js'
 import { PIN_AFTER_CODE_MS } from '../../identity/codes.js'
@@ -110,7 +112,7 @@ const schedulingCtx = (d: LinkDeps, loc: LinkLocation): SchedulingCtx => ({
 // ---- what the page may show ---------------------------------------------------------------------------------------------------
 
 export interface ClientView {
-  /** "" for a stranger's link, a placeholder name, or a record the stale-record rule hides until the number is verified. */
+  /** "" for a stranger's link, a placeholder name, or a record the stale-record rule hides until the client's PIN proves them. */
   firstName: string
   /** The last two digits of the link's number ("BOOKING FOR MARIA ••51"). */
   last2: string
@@ -172,9 +174,9 @@ export async function linkState(db: Executor, s: SessionView, now: Date): Promis
   const loc = await linkLocation(db, s.link.locationId)
   const verified = s.trust === 'verified'
   const customer = s.customerId ? await getCustomer(db, s.customerId) : undefined
-  const stale = customer ? (await staleRecord(db, { locationId: loc.id, customerId: customer.id, phone: s.phone, now })).stale : false
-  // a record that may be a previous holder's (180 days without activity, an invalid-number bounce) is nobody until verified
-  const known = customer !== undefined && (!stale || verified)
+  // a record that may be a previous holder's (180 days without activity, an invalid-number bounce) is nobody until the client's own
+  // PIN (or staff) proves them: a texted code proves only the number, and its booking makes a new client (W4c fixes)
+  const known = customer !== undefined && (await clientProven(db, s, now))
   const held = customer ? await memberPrivilegesHeldUntil(db, customer.id, now) : null
   let tier: PublicTier | null = null
   if (known && customer) {
@@ -202,7 +204,7 @@ export async function linkState(db: Executor, s: SessionView, now: Date): Promis
     stepUp: {
       method: pin.set ? 'pin' : 'code',
       freshUntil: fresh,
-      canSetPinUntil: customer && !pin.set ? await pinWindow(db, s, now) : customer && pin.set ? await pinWindow(db, s, now, true) : null,
+      canSetPinUntil: known && !pin.set ? await pinWindow(db, s, now) : known && pin.set ? await pinWindow(db, s, now, true) : null,
     },
     appointments: verified && known && customer ? await upcomingOf(db, loc, customer.id, s.link.appointmentId, now) : null,
     invoice: s.link.kind === 'pay' && s.link.invoiceId && known ? await invoiceView(db, s.link.invoiceId) : null,
@@ -313,6 +315,21 @@ export function requireFresh(s: SessionView, now: Date): void {
   if (!hasFreshStepUp(s, now)) throw new AppError('IDENTITY_STEP_UP_REQUIRED', { meta: { need: 'fresh' } })
 }
 
+/**
+ * The page's own client is proven for it: their record is not held by the stale-record rule, or the page holds their PIN (a PIN
+ * entered here, or the number's live trust granted by PIN). A texted code proves only the number (W4c fixes).
+ */
+export async function clientProven(db: Executor, s: SessionView, now: Date): Promise<boolean> {
+  if (!s.customerId) return false
+  if (s.trust === 'verified' && s.verifiedBy === 'pin') return true
+  return !(await staleRecord(db, { locationId: s.link.locationId, customerId: s.customerId, phone: s.phone, now })).stale
+}
+
+/** 409 IDENTITY_RECORD_UNCONFIRMED when the page's client is not proven (a stale record behind a page verified by code). */
+async function requireProven(db: Executor, s: SessionView, now: Date): Promise<void> {
+  if (!(await clientProven(db, s, now))) throw new AppError('IDENTITY_RECORD_UNCONFIRMED')
+}
+
 async function requireNoHold(db: Executor, customerId: string, now: Date, tz: string): Promise<void> {
   const held = await memberPrivilegesHeldUntil(db, customerId, now)
   if (held)
@@ -325,11 +342,13 @@ async function requireNoHold(db: Executor, customerId: string, now: Date, tz: st
 /**
  * What the page's own client is entitled to: no fee with an active membership; the VIP slot rules as a VIP client (the staff's
  * list) or an active member of the plan the website sells as VIP. Nothing while a PIN reset holds member privileges, and nothing for
- * a page that is not verified or has no client.
+ * a page that is not verified or has no client, nor for a stale record the page proved only by a texted code.
  */
 export async function privilegesOf(db: Executor, s: SessionView, now: Date): Promise<{ member: boolean; vip: boolean }> {
   const none = { member: false, vip: false }
   if (s.trust !== 'verified' || !s.customerId) return none
+  // a stale record behind a page that proved only the number is not this page's (W4c fixes)
+  if (!(await clientProven(db, s, now))) return none
   if (await memberPrivilegesHeldUntil(db, s.customerId, now)) return none
   const listed = await isVipCustomer(db, s.link.locationId, s.customerId)
   const m = await activeMembership(db, s.customerId)
@@ -401,7 +420,9 @@ export async function bookOnLink(tx: Tx, d: LinkDeps, s: SessionView, r: LinkReq
   const name = input.name?.trim().replace(/\s+/g, ' ') ?? ''
   const email = input.email?.trim() || null
   let customerId: string
-  if (s.customerId) {
+  // the PIN this page holds is its client's (or, on a stranger's link, the number's client's): such a booking is proof of them
+  const pinOf = s.trust === 'verified' && s.verifiedBy === 'pin' ? await pinOwnerOf(tx, s) : null
+  if (s.customerId && (await clientProven(tx, s, now))) {
     const c = await getCustomer(tx, s.customerId)
     if (!c || c.deletedAt || c.mergedInto) throw new AppError('IDENTITY_SESSION_INVALID')
     customerId = c.id
@@ -412,22 +433,30 @@ export async function bookOnLink(tx: Tx, d: LinkDeps, s: SessionView, r: LinkReq
     if (email && !c.email) patch.email = email
     if (Object.keys(patch).length) await updateCustomer(tx, { id: c.id, patch })
   } else {
-    if (!name) throw bad('name', 'Enter your name.')
+    // a stranger's link, or a client's link whose record the stale-record rule holds while this page proved only the number
+    if (!s.customerId && !name) throw bad('name', 'Enter your name.')
     // the number's client (the booking lands on their record) has a PIN: a page verified by a texted code does not book for them
     // (a PIN set after this page's code, or a page verified before this rule): only their PIN does (W4c review)
-    if (s.verifiedBy !== 'pin' && (await pinStateOf(tx, await pinOwnerOf(tx, s))).set) throw new AppError('IDENTITY_PIN_REQUIRED')
-    const created = await upsertCustomerByPhone(tx, {
-      newId: d.app.newId,
-      now,
-      fullName: name,
+    if (!s.customerId && s.verifiedBy !== 'pin' && (await pinStateOf(tx, await pinOwnerOf(tx, s))).set) throw new AppError('IDENTITY_PIN_REQUIRED')
+    // proving the number is not proving the client on a stale record: the party becomes a new client and the number moves to them
+    // (identity/rebind.ts); otherwise the number's client (or a new one when nobody holds the number)
+    const bound = await bindPartyToNumber(tx, d.app, {
+      locationId: s.link.locationId,
       phone: s.phone,
+      provenByPinOf: pinOf,
+      name: name || null,
       email,
-      source: 'online',
       smsOptIn: input.smsConsent ? 'online' : null,
+      source: 'online',
+      // a stranger's link stays the new client's page; a client's link died with the old record's phone
+      keepLinkId: s.customerId ? null : s.link.id,
+      keepSessionHash: s.customerId ? null : s.tokenHash,
+      audit: linkAudit(r),
     })
-    customerId = created.customer.id
+    customerId = bound.customerId
   }
-  const privileges = await privilegesOf(tx, s, now)
+  // member privileges are the page's own client's only (never a new client's that took the number)
+  const privileges = customerId === s.customerId ? await privilegesOf(tx, s, now) : { member: false, vip: false }
   const fee = await getSetting(tx, loc.id, 'booking.guest_fee')
   const dueCents = privileges.member ? 0 : fee.value.cents
   const how = fee.value.collect
@@ -449,6 +478,7 @@ export async function bookOnLink(tx: Tx, d: LinkDeps, s: SessionView, r: LinkReq
       source: 'link',
       channel: 'online',
       vip: privileges.vip,
+      bookedWithPin: pinOf !== null && pinOf === customerId,
       message: {
         templateKey: 'booking_confirmed_web',
         vars: {
@@ -521,8 +551,9 @@ export async function rescheduleOnLink(
   const now = d.app.clock.now()
   const loc = await linkLocation(tx, s.link.locationId)
   const seq = REF.exec(ref)?.[1]
+  // a stale record's visits are not shown to a page that proved only the number, nor moved by it (W4c fixes)
   const a =
-    seq && s.customerId
+    seq && s.customerId && (await clientProven(tx, s, now))
       ? await tx
           .selectFrom('appointments')
           .select(['id', 'status', 'scheduled_start', 'duration_min', 'customer_id'])
@@ -598,6 +629,8 @@ export async function startMembership(
   const now = d.app.clock.now()
   requireFresh(s, now)
   if (!s.customerId || !s.link.planKey) throw new AppError('LINK_WRONG_PURPOSE')
+  // a code proves the number: on a stale record a membership waits for the client's PIN or staff (W4c fixes)
+  await requireProven(tx, s, now)
   const loc = await linkLocation(tx, s.link.locationId)
   await requireNoHold(tx, s.customerId, now, loc.tz)
   await consumeLink(tx, s.link.id, now)
@@ -669,6 +702,7 @@ export async function startPayment(tx: Tx, d: LinkDeps, s: SessionView, r: LinkR
   const now = d.app.clock.now()
   requireFresh(s, now)
   if (!s.customerId || !s.link.invoiceId) throw new AppError('LINK_WRONG_PURPOSE')
+  await requireProven(tx, s, now)
   const loc = await linkLocation(tx, s.link.locationId)
   await requireNoHold(tx, s.customerId, now, loc.tz)
   const inv = await tx

@@ -13,6 +13,7 @@ there, every healthy deploy refreshes it; docs/deployment.md, "Privilege separat
 | `scripts/backup.sh`, `restore-drill.sh`, `ledger-check.sh` | snapshot-consistent dumps with retention; restore into a scratch copy and verify; the ledger invariants on their own |
 | `scripts/tailscale-serve.sh` | exposes only `/hooks/smsgate` on the tailnet |
 | `scripts/bootstrap-admin.sh`, `reset-password.sh` | the first Super Admin; break-glass password reset |
+| `scripts/links-kill.sh` | the personal links' kill switch: bumps the links epoch (every link, link page and phone trust ends) |
 | `scripts/secrets-rotate.sh`, `gen-secrets.sh` | rotate `SECRETS_KEY` safely (and store it in the secret); generate secrets (`--secret`: the file for `pnpm secrets:push`) |
 | `scripts/oasis-admin.sh` | the tablet and the Squarespace connection from the command line (no dashboard screen yet) |
 | `scripts/verify.sh` | runs `pnpm verify:*` from the current release with the production environment |

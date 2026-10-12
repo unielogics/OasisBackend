@@ -21,7 +21,7 @@ export type AssistantGateReason =
   | 'ai_disabled'
   /** Settings assistant.enabled=false. */
   | 'assistant_disabled'
-  /** The number is not in the current stage (allowlist: not listed; customers: no client behind it). */
+  /** The number is not in the current stage (allowlist: not listed; customers: no client behind it, or a stale record). */
   | 'not_in_stage'
   /** Not a US/CA mobile number (normalizeTextableNanp): international, toll-free, premium, landline, short code, alphanumeric. */
   | 'not_textable'
@@ -154,7 +154,12 @@ export interface NewTexterInput {
  * the inbox rows linked to the conversation). Never called for keywords, codes, AGENT or picture-only texts.
  */
 export interface NewTexters {
-  adopt(tx: Tx, input: NewTexterInput): Promise<{ customerId: string } | null>
+  /**
+   * The client the text is filed under, null when nothing was adopted (the assistant is off: routing goes on as before), or
+   * `{ refused: 'ceiling' }` when the hourly ceiling of new provisional clients is reached: the text is stored for staff without a
+   * client and the assistant does not answer it.
+   */
+  adopt(tx: Tx, input: NewTexterInput): Promise<{ customerId: string } | { refused: 'ceiling' } | null>
 }
 
 /** Default: no client is created here (until wave 3 wires the welcome flow). */

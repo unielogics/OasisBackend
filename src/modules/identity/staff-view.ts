@@ -1,6 +1,6 @@
 // What staff see of a client's phone identity (the client file's Overview: "Website PIN: Set · trusted to Nov 9", ADR 0160 design
-// section 8): the PIN state, the number's trust, how many links and sessions are live, a pending in-chat action and the stale-record
-// verdict. Numbers are masked to their last four digits; no token, hash or code ever leaves the server.
+// section 8): the PIN state, the number's trust, how many links and sessions are live, a pending in-chat action, the stale-record
+// verdict and the "number reassigned" flag. Numbers are masked to their last four digits; no token, hash or code ever leaves the server.
 import type { Executor } from '../../platform/db.js'
 import { maskPhone } from '../../platform/phone.js'
 import { pinStateOf } from './codes.js'
@@ -36,6 +36,8 @@ export interface IdentityState {
   sessions: { live: number }
   pendingAction: { kind: PendingActionKind; expiresAt: Date } | null
   stale: { stale: boolean; reason: 'inactive' | 'invalid_number' | null; lastActivityAt: Date } | null
+  /** The number was moved to a new client (a party verified only the number on this stale record): the staff flag. */
+  numberReassigned: { at: Date; toCustomerId: string | null } | null
 }
 
 /** The client's identity state, or null when the client does not exist (or was merged or deleted). */
@@ -92,6 +94,7 @@ export async function identityStateOf(db: Executor, o: { locationId: string; cus
     .where('expires_at', '>', now)
     .executeTakeFirst()
   const stale = c.phoneE164 ? await staleRecord(db, { locationId: o.locationId, customerId: c.id, phone: c.phoneE164, now }) : null
+  const moved = await db.selectFrom('customers').select(['phone_reassigned_at', 'phone_reassigned_to']).where('id', '=', c.id).executeTakeFirstOrThrow()
   return {
     customerId: c.id,
     phone: c.phoneE164 ? maskPhone(c.phoneE164) : null,
@@ -113,5 +116,6 @@ export async function identityStateOf(db: Executor, o: { locationId: string; cus
     sessions: { live: Number(sessions.n) },
     pendingAction: action ? { kind: action.kind, expiresAt: action.expires_at } : null,
     stale,
+    numberReassigned: moved.phone_reassigned_at ? { at: moved.phone_reassigned_at, toCustomerId: moved.phone_reassigned_to } : null,
   }
 }
