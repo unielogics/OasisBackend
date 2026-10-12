@@ -117,8 +117,13 @@ missed minute (proved in `test/jobs/runtime.test.ts`), so they are `stately` now
   from them.
 * **Logs.** `job started` and `job finished` / `job failed` with `job`, `jobId`, `attempt`, `durationMs` (and `final` on a
   failure); never the payload. The logger masks phone numbers and emails in error text.
-* **Shutdown.** `stop()` stops taking jobs, lets running handlers finish for up to 60 s (the worker) and fails the rest back to
-  the queue for a retry. Give the service manager a stop timeout above 60 s.
+* **Shutdown.** `stop()` stops taking jobs and aborts `JobContext.signal`, so a long handler returns after its current step
+  (`sms.dispatch` ends its 55 s window after the tick in progress), and lets running handlers finish for up to 30 s (the
+  worker). A job the shutdown interrupts (still running at that deadline, or failing while the worker stops) goes back to the
+  queue as a retry that costs none of its own retries: it is not recorded as a failure, not dead-lettered and not reported,
+  also with retryLimit 0. The service manager's stop timeout must stay above the drain (`TimeoutStopSec=45`, checked by
+  `test/ops-kit/deploy-config.test.ts`): a worker killed mid-drain leaves its jobs active until they expire, and a periodic
+  tick then dead-letters (until 2026-10-12, every deploy that caught `sms.dispatch` with over 45 s of its window left).
 
 ### Daylight saving time
 

@@ -17,8 +17,14 @@ Status: accepted (2026-10-07). Catalogue: `docs/jobs.md`.
 * **`stately` instead of `singleton` for periodic jobs** (`sms.dispatch`, `sqsp.sync`, `sqsp.contacts`, `sqsp.reconcile`). The
   `singleton` policy allows one active run but any number queued; after a worker outage it holds one queued run per missed
   minute (test: five queued with `singleton`, one with `stately`). `stately` is one queued plus one active.
-* **Shutdown drains**: `stop()` gives running handlers `shutdownTimeoutMs` (60 s in the worker: `sms.dispatch` holds a 55 s window)
-  and fails the rest back to the queue.
+* **Shutdown drains**: `stop()` stops taking jobs, aborts `JobContext.signal` (`sms.dispatch` ends its 55 s window after the
+  current tick) and gives running handlers `shutdownTimeoutMs` (30 s in the worker, under the unit's `TimeoutStopSec=45`). A job
+  the shutdown interrupts is handed back as a retry with one more allowed attempt, so pg-boss's own fail never makes it final:
+  no dead letter, no failure in `job_runs`, no report. (2026-10-12: the drain was 60 s, the unit killed the worker at 45 s, and
+  pg-boss's fail of an interrupted job used the job's own retry count: a deploy that caught `sms.dispatch` with over 45 s of its
+  window left had it killed, and the run (`retryLimit: 0`) dead-lettered when it expired, holding the stately queue until then.)
+  The dead-letter report counts the failure streak against the queue's configured limit, since an interrupted attempt is in the
+  job's limit but never in the streak.
 * **`startWorker()` is the worker's factory** (`src/worker.ts`); the file runs `main()` only when started as a program, so tests
   boot the same code the service runs.
 

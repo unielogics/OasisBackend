@@ -334,6 +334,126 @@ describe('shutdown', () => {
     await h.waitFor(async () => (await h.states(schema, 'test.cut')).includes('completed'), 30_000)
     expect(effects).toEqual([1])
   })
+
+  // Periodic ticks mostly have retryLimit 0: failed with that count by pg-boss's own shutdown (or by expiry after a kill), a run a
+  // deploy interrupted dead-lettered. A job the shutdown interrupts goes back as a retry that costs none of the job's retries.
+  it('hands a retryLimit-0 job still running at the deadline back as a retry: no dead letter, no report, the next worker runs it', async () => {
+    const schema = h.newSchema()
+    const dead: DeadLetterInfo[] = []
+    let dying = true
+    const effects: number[] = []
+    const tick = def({
+      name: 'test.tick',
+      retryLimit: 0,
+      retryDelaySeconds: 1,
+      handler: async () => {
+        if (dying) return void (await sleep(4000)) // ignores the shutdown signal: still running at the deadline
+        effects.push(effects.length + 1)
+      },
+    })
+    const first = await h.start({
+      schema,
+      shutdownTimeoutMs: 1000,
+      definitions: [tick],
+      onDeadLetter: async (i) => void dead.push(i),
+    })
+    await first.jobs.enqueue('test.tick', {})
+    await h.waitFor(async () => (await h.states(schema, 'test.tick')).includes('active'))
+    await first.stop()
+    expect(await h.states(schema, 'test.tick')).toEqual(['retry'])
+    expect(await h.rows(schema, 'test.tick.dead')).toEqual([])
+    expect(h.logs.map((l) => l.msg)).toContain(
+      'shutdown: jobs still running at the deadline are handed back to the queue',
+    )
+
+    dying = false
+    await h.start({ schema, definitions: [tick], onDeadLetter: async (i) => void dead.push(i) })
+    await h.waitFor(async () => (await h.states(schema, 'test.tick')).includes('completed'), 30_000)
+    expect(effects).toEqual([1])
+    expect(await h.rows(schema, 'test.tick.dead')).toEqual([])
+    expect(dead).toEqual([])
+    const run = await h.t.db
+      .selectFrom('job_runs')
+      .selectAll()
+      .where('name', '=', 'test.tick')
+      .executeTakeFirstOrThrow()
+    expect(run).toMatchObject({ failures: 0, consecutive_failures: 0, last_outcome: 'completed' })
+  })
+
+  it('tells handlers to wrap up; one that fails because the worker stops is handed back, never recorded or reported as failed', async () => {
+    const dead: DeadLetterInfo[] = []
+    const w = await h.start({
+      shutdownTimeoutMs: 10_000,
+      definitions: [
+        def({
+          name: 'test.aborts',
+          retryLimit: 0,
+          handler: async (ctx) => {
+            await new Promise<void>((resolve) =>
+              ctx.signal!.addEventListener('abort', () => resolve(), { once: true }),
+            )
+            throw new Error('stopped half way')
+          },
+        }),
+      ],
+      onDeadLetter: async (i) => void dead.push(i),
+    })
+    await w.jobs.enqueue('test.aborts', {})
+    await h.waitFor(async () => (await h.states(w.schema, 'test.aborts')).includes('active'))
+    const began = Date.now()
+    await w.stop()
+    expect(Date.now() - began).toBeLessThan(5000) // the handler returned when told; nothing waited for the deadline
+    expect(await h.states(w.schema, 'test.aborts')).toEqual(['retry'])
+    expect(await h.rows(w.schema, 'test.aborts.dead')).toEqual([])
+    expect(dead).toEqual([])
+    expect(h.logs.find((l) => l.job === 'test.aborts' && l.level === 40)).toMatchObject({
+      msg: 'job interrupted by shutdown: handed back to the queue',
+      err: 'stopped half way',
+    })
+    const run = await h.t.db
+      .selectFrom('job_runs')
+      .selectAll()
+      .where('name', '=', 'test.aborts')
+      .executeTakeFirstOrThrow()
+    expect(run).toMatchObject({ failures: 0, consecutive_failures: 0 })
+  })
+
+  it('a job handed back by a shutdown that then fails for real is dead-lettered and reported once', async () => {
+    const schema = h.newSchema()
+    const dead: DeadLetterInfo[] = []
+    let stopping = true
+    const later = def({
+      name: 'test.later',
+      retryLimit: 0,
+      retryDelaySeconds: 1,
+      handler: async (ctx) => {
+        if (stopping) {
+          await new Promise<void>((resolve) =>
+            ctx.signal!.addEventListener('abort', () => resolve(), { once: true }),
+          )
+          throw new Error('interrupted')
+        }
+        throw new Error('disk full')
+      },
+    })
+    const first = await h.start({
+      schema,
+      definitions: [later],
+      onDeadLetter: async (i) => void dead.push(i),
+    })
+    await first.jobs.enqueue('test.later', { orderId: 'abc' })
+    await h.waitFor(async () => (await h.states(schema, 'test.later')).includes('active'))
+    await first.stop()
+    expect(await h.states(schema, 'test.later')).toEqual(['retry'])
+
+    stopping = false
+    await h.start({ schema, definitions: [later], onDeadLetter: async (i) => void dead.push(i) })
+    await h.waitFor(async () => (await h.states(schema, 'test.later')).includes('failed'), 30_000)
+    expect(dead).toHaveLength(1)
+    expect(dead[0]).toMatchObject({ name: 'test.later', attempts: 2, error: 'disk full' })
+    const dl = await h.rows(schema, 'test.later.dead')
+    expect(dl.map((r) => r.data)).toEqual([{ orderId: 'abc' }])
+  })
 })
 
 describe('queue and schedule upkeep', () => {

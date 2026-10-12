@@ -8,7 +8,10 @@
 //   - every run is logged at start and finish (job name, job id, attempt, duration: never the payload) and recorded in
 //     job_runs, which is what "last run / last success / last error" are read from;
 //   - the final failure of a job (retries exhausted) is reported through onDeadLetter, once per failure streak;
-//   - stop() drains: running handlers get shutdownTimeoutMs to finish, the rest are failed back to the queue for retry.
+//   - stop() drains: it stops taking jobs and aborts JobContext.signal (a long handler such as sms.dispatch's window returns
+//     after its current step), running handlers get shutdownTimeoutMs to finish, and a job the shutdown interrupted (still
+//     running at the deadline, or failing while the worker stops) goes back to the queue as a retry that costs none of its own
+//     retries: it is never dead-lettered, recorded as a failure or reported, even with retryLimit 0.
 import { performance } from 'node:perf_hooks'
 import PgBoss from 'pg-boss'
 import { sql } from 'kysely'
@@ -22,6 +25,11 @@ export interface JobContext {
   db: Db
   clock: Clock
   logger: Logger
+  /**
+   * Aborted when the worker begins to stop (always set by the worker). A handler that loops or waits checks it and returns
+   * after its current step; whatever is still running at the shutdown deadline is handed back to the queue.
+   */
+  signal?: AbortSignal
 }
 
 export interface JobDefinition<Data extends object = Record<string, never>> {
@@ -136,7 +144,10 @@ export interface JobsConfig {
   definitions: readonly JobDefinition<never>[]
   tz: string
   pollSeconds?: number
-  /** How long stop() lets running handlers finish before failing them back to the queue. Default 30 s. */
+  /**
+   * How long stop() lets running handlers finish before handing them back to the queue. Default 30 s. Keep it well under the
+   * service manager's stop timeout, or the process is killed mid-drain and its jobs stay active until they expire.
+   */
   shutdownTimeoutMs?: number
   /** Extra pg-boss constructor options (tests shorten the maintenance interval); merged over the defaults. */
   boss?: Partial<PgBoss.ConstructorOptions>
@@ -150,6 +161,14 @@ export const deadLetterQueueOf = (name: string): string => `${name}.dead`
 const DEAD_LETTER_RETENTION_MINUTES = 30 * 24 * 60
 const WORKER_STALE_MS = 10 * 60_000
 const MAX_ERROR_LENGTH = 500
+const DEFAULT_RETRY_LIMIT = 3
+/** The retries a queue is configured with (a job handed back by a shutdown carries one more; see handBack). */
+const retryLimitOf = (def: { retryLimit?: number }): number => def.retryLimit ?? DEFAULT_RETRY_LIMIT
+/**
+ * After stop() stops taking jobs, a fetch pg-boss already sent can still hand over a job (one query round trip). stop() waits at
+ * least this long before it decides nothing is running, so such a job is drained like the others instead of being left active.
+ */
+const FETCH_SETTLE_MS = 500
 
 const iso = (d: Date | null | undefined): string | null => (d ? d.toISOString() : null)
 
@@ -230,9 +249,23 @@ export function createJobs(cfg: JobsConfig): Jobs {
   })
   boss.on('error', (err: Error) => cfg.logger.error({ err: err.message }, 'pg-boss error'))
   let started = false
-  const ctx: JobContext = { db: cfg.db, clock: cfg.clock, logger: cfg.logger }
+  let working = false
+  const shutdown = new AbortController()
+  /** Jobs whose handlers run in this process: id -> job name. */
+  const running = new Map<string, string>()
+  const ctx: JobContext = { db: cfg.db, clock: cfg.clock, logger: cfg.logger, signal: shutdown.signal }
   const defs = cfg.definitions as readonly JobDefinition<object>[]
   const tbl = (name: string) => sql.table(`${schema}.${name}`)
+
+  /**
+   * Gives jobs the shutdown interrupted one more allowed attempt, so pg-boss's own fail (of the handler's error, or of whatever
+   * still runs when it stops) makes them a retry: never a final failure and a dead letter, also with retryLimit 0. Only active
+   * rows change; the retry runs on the next worker after the queue's retry delay.
+   */
+  async function handBack(ids: string[]): Promise<void> {
+    await sql`update ${tbl('job')} set retry_limit = retry_limit + 1
+      where id = any(${ids}::uuid[]) and state = 'active'`.execute(cfg.db)
+  }
 
   async function recordStart(name: string, jobId: string, attempt: number, at: Date): Promise<void> {
     await cfg.db
@@ -308,14 +341,24 @@ export function createJobs(cfg: JobsConfig): Jobs {
     } catch (err) {
       const durationMs = Math.round(performance.now() - began)
       const message = maskText((err as Error).message ?? String(err)).slice(0, MAX_ERROR_LENGTH)
+      if (shutdown.signal.aborted) {
+        // the worker is stopping, which may be why it failed: an interruption, not a failure of the job
+        await handBack([job.id]).catch((e: Error) => log.error({ err: e.message }, 'job not handed back'))
+        log.warn(
+          { attempt, durationMs, err: message },
+          'job interrupted by shutdown: handed back to the queue',
+        )
+        throw err
+      }
       const final = job.retryCount >= job.retryLimit
       log.error({ attempt, durationMs, final, err: message }, 'job failed')
       const streak = await recordFinish(def.name, cfg.clock.now(), durationMs, message).catch((e: Error) => {
         log.warn({ err: e.message }, 'job_runs: failure not recorded')
         return 0
       })
-      // once per failure streak: the attempt that ends the first exhausted retry cycle after a success
-      if (final && cfg.onDeadLetter && streak === job.retryLimit + 1)
+      // once per failure streak: the attempt that ends the first exhausted retry cycle after a success. Counted against the
+      // queue's limit: an attempt a shutdown interrupted is in the job's limit (handBack) but never in the streak.
+      if (final && cfg.onDeadLetter && streak === retryLimitOf(def) + 1)
         await cfg
           .onDeadLetter({ name: def.name, jobId: job.id, attempts: attempt, error: message })
           .catch((e: Error) => log.warn({ err: e.message }, 'dead-letter notification failed'))
@@ -428,7 +471,7 @@ export function createJobs(cfg: JobsConfig): Jobs {
           const options = {
             name: def.name,
             policy: def.policy ?? 'standard',
-            retryLimit: def.retryLimit ?? 3,
+            retryLimit: retryLimitOf(def),
             retryDelay: def.retryDelaySeconds ?? 30,
             retryBackoff: true,
             deadLetter: dead,
@@ -440,13 +483,19 @@ export function createJobs(cfg: JobsConfig): Jobs {
         }
       })
       if (!workers) return
+      working = true
       const wanted = new Set<string>()
       for (const def of defs) {
         await boss.work(
           def.name,
           { pollingIntervalSeconds: cfg.pollSeconds ?? 2, includeMetadata: true },
           async (jobs: PgBoss.JobWithMetadata<object>[]) => {
-            for (const job of jobs) await runOne(def, job)
+            for (const job of jobs) running.set(job.id, def.name)
+            try {
+              for (const job of jobs) await runOne(def, job)
+            } finally {
+              for (const job of jobs) running.delete(job.id)
+            }
           },
         )
         if (def.cron) {
@@ -510,7 +559,7 @@ export function createJobs(cfg: JobsConfig): Jobs {
             cron: sched?.cron ?? def.cron ?? null,
             tz: sched?.timezone ?? (def.cron ? (def.tz ?? cfg.tz) : null),
             policy: q?.policy ?? def.policy ?? 'standard',
-            retryLimit: q?.retryLimit ?? def.retryLimit ?? 3,
+            retryLimit: q?.retryLimit ?? retryLimitOf(def),
             retryDelaySeconds: q?.retryDelay ?? def.retryDelaySeconds ?? 30,
             expireInSeconds: q?.expireInSeconds ?? def.expireInSeconds ?? null,
             nextRunAt: iso(next),
@@ -541,7 +590,30 @@ export function createJobs(cfg: JobsConfig): Jobs {
       }
     },
     async stop() {
-      if (started) await boss.stop({ graceful: true, timeout: cfg.shutdownTimeoutMs ?? 30_000, close: true })
+      if (!started) return
+      // The drain is ours, not pg-boss's: its graceful stop fails what still runs with the job's own retry count, which
+      // dead-letters a job with retryLimit 0 (sms.dispatch, most periodic ticks). Handlers are told to wrap up first.
+      shutdown.abort()
+      if (working) {
+        for (const def of defs) await boss.offWork(def.name)
+        const began = performance.now()
+        const timeoutMs = cfg.shutdownTimeoutMs ?? 30_000
+        const settled = (): boolean =>
+          performance.now() - began >= Math.min(FETCH_SETTLE_MS, timeoutMs) && running.size === 0
+        while (!settled() && performance.now() - began < timeoutMs)
+          await new Promise((r) => setTimeout(r, 50))
+        if (running.size > 0) {
+          cfg.logger.warn(
+            { jobs: [...new Set(running.values())], timeoutMs },
+            'shutdown: jobs still running at the deadline are handed back to the queue',
+          )
+          await handBack([...running.keys()]).catch((e: Error) =>
+            cfg.logger.error({ err: e.message }, 'shutdown: jobs not handed back'),
+          )
+        }
+      }
+      // pg-boss fails what still runs (a retry now, see handBack) and closes its pool
+      await boss.stop({ graceful: true, timeout: 1000, close: true })
       started = false
     },
   }

@@ -1,5 +1,6 @@
 // A worker process killed with SIGKILL in the middle of a job: pg-boss notices the abandoned job when it expires, retries it
-// on another worker, and the retry produces no second effect because the job is idempotent.
+// on another worker, and the retry produces no second effect because the job is idempotent. And the worker program stopped
+// with SIGTERM, as systemd stops it on a deploy: it drains and exits 0, also in the middle of an sms.dispatch window.
 import { spawn, type ChildProcess } from 'node:child_process'
 import path from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
@@ -8,6 +9,7 @@ import { runReminders } from '../../src/modules/messaging/jobs/reminders.js'
 import { jobDefinitions } from '../../src/platform/job-registry.js'
 import { createJobs, type JobDefinition } from '../../src/platform/jobs.js'
 import { testDatabaseUrl } from '../helpers/env.js'
+import { sleep } from '../helpers/sse.js'
 import { useWorld } from '../messaging-db/world.js'
 import { useJobsHarness } from './harness.js'
 
@@ -188,5 +190,71 @@ describe('a worker killed mid-job', () => {
     expect(out).toContain('worker stopping')
     expect(out).toContain('worker stopped')
     expect(out).not.toMatch(/\+1305\d{7}/)
+  }, 150_000)
+
+  // Production, 2026-10-09..11: a deploy's SIGTERM caught sms.dispatch in its 55 s window, the drain waited for it, systemd killed
+  // the worker at TimeoutStopSec=45, the run stayed active until it expired and was dead-lettered (retryLimit 0), and no text went
+  // out for those minutes because the stately queue held the next run behind it.
+  it('the worker program stopped by SIGTERM mid-dispatch exits 0 within a tick: the run completes, no dead letter, no notice', async () => {
+    const schema = h.newSchema()
+    const child = spawn(process.execPath, ['--import', 'tsx', path.resolve('src/worker.ts')], {
+      env: {
+        ...process.env,
+        NODE_ENV: 'test',
+        DATABASE_URL: testDatabaseUrl(),
+        DB_SEARCH_PATH: `${w.t.schema},public`,
+        PGBOSS_SCHEMA: schema,
+        CLOCK_FREEZE_AT: w.clock.now().toISOString(),
+        LOG_LEVEL: 'info',
+        JOBS_ENABLED: 'true',
+        SMS_DISPATCH_MODE: 'jobs',
+        SMS_TICK_INTERVAL_MS: '500',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    children.push(child)
+    let out = ''
+    child.stdout!.on('data', (d: Buffer) => (out += d.toString()))
+    child.stderr!.on('data', (d: Buffer) => (out += d.toString()))
+    const exited = new Promise<number | null>((resolve) => child.once('exit', (code) => resolve(code)))
+    await h.waitFor(
+      async () =>
+        out.includes('worker started')
+          ? true
+          : child.exitCode !== null
+            ? Promise.reject(new Error(out))
+            : false,
+      60_000,
+    )
+
+    const producer = createJobs({
+      connectionString: testDatabaseUrl(),
+      schema,
+      db: w.t.db,
+      clock: w.clock,
+      logger: h.logger(),
+      enabled: true,
+      tz: 'America/New_York',
+      definitions: jobDefinitions,
+    })
+    await producer.start({ workers: false })
+    await producer.enqueue('sms.dispatch', {})
+    await producer.stop()
+    // mid-window: the run is active and has ticked for a while
+    await h.waitFor(async () => (await h.states(schema, 'sms.dispatch')).includes('active'), 60_000)
+    await sleep(2000)
+
+    const began = Date.now()
+    child.kill('SIGTERM')
+    expect(await exited).toBe(0)
+    expect(Date.now() - began).toBeLessThan(15_000) // systemd kills it at 45 s
+    const states = await h.states(schema, 'sms.dispatch')
+    expect(states).toContain('completed')
+    expect(states.filter((s) => s === 'active' || s === 'failed')).toEqual([])
+    expect(await h.rows(schema, 'sms.dispatch.dead')).toEqual([])
+    expect(
+      await w.t.db.selectFrom('notifications').select('id').where('kind', '=', 'job.failed').execute(),
+    ).toEqual([])
+    expect(out).not.toContain('handed back')
   }, 150_000)
 })
