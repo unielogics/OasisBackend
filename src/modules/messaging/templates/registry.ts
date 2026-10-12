@@ -356,6 +356,16 @@ export const TEMPLATES = {
     editable: false,
     source: 'new: book-again link (ADR 0160)',
   }),
+  personal_link_card: t({
+    key: 'personal_link_card',
+    label: 'Card link',
+    klass: 'personal_link',
+    body: 'Save a card with Oasis Auto Spa on this secure page: {link} It expires in 24 hours.',
+    required: ['link'],
+    optional: ['first'],
+    editable: false,
+    source: 'new: save a card with Square, fresh PIN or code on the page (ADR 0171 D7)',
+  }),
   // The picked-up thank-you (status texts, wave W3d). {receipt} is "Paid in full: $54.00." when nothing is owed and no receipt text
   // went in the last 2 hours. The variant with the book-again link is picked_up_link: a personal link is a secret (only its hash is
   // stored), so it rides in the personal_link class, whose message row keeps the link masked and whose outbox body is wiped.

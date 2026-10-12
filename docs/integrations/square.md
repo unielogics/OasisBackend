@@ -221,7 +221,9 @@ failed), card auto-update and forget, fail a refund, faults (429, 500, a dropped
 ## 10. What comes next
 
 See ADR 0171, "What the later waves add": cards on file and fees (Q3a); memberships on Square (Q3b); the website and dashboard (Q3c,
-Q3e); `SQSP_SYNC_MODE` (Squarespace history mode) still to build.
+Q3e); `SQSP_SYNC_MODE` (Squarespace history mode) still to build. Their shared foundation is built (ADR 0171, "The cards
+foundation"): the client's Square customer (`cu_<client id>`, found again by `reference_id` after a crash), saving a card (`cd_<attempt>`)
+with the client's versioned consent, removing it (DisableCard), and the card link kind `card` (`#/k`).
 
 ## 11. The core (wave Q2b)
 

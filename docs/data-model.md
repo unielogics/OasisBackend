@@ -48,6 +48,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261014200000_square_foundation.sql` | Square foundation (ADR 0171, wave Q1b): `webhook_log.provider` gains `square` (deliveries and Events API catch-up, deduplicated on Square's `event_id`), and `square_state` (merchant, events enabled, webhook subscription, catch-up watermark, last reconcile and test) |
 | `20261014300000_redeem_per_line.sql` | membership coverage per line (ADR 0170, wave Q2a review): drops `uq_credit_redeem_appointment` (an inclusion may cover several lines of a visit, and a line changed after settlement is given back and redeemed again; the idempotency key names each redeem) and indexes `membership_credit_events (appointment_id)` |
 | `20261014400000_square_core.sql` | Square core (ADR 0171, wave Q2b): `ledger_events.source` gains `square`, `processor` (`squarespace\|square`, backfilled for Squarespace rows) and `processor_order_id`; the guard trigger re-created (both mutable; `method`, `brand`, `last4` only on the move awaiting -> confirmed); `invoice_calc_of` leaves a refund the processor reported failed out of `refunded` and `ref_orig`; `payment_links` gain the Square columns, kinds `square_order\|square_quick_pay`, state `pending`, `origin`, a nullable `url`; `square_payments` (mirror and match), `square_refund_legs`, `square_pos_intents` |
+| `20261014500000_square_cards.sql` | Cards on file, the shared foundation of waves Q3a and Q3b (ADR 0171 D7): `client_links.kind` gains `card` (#/k); `square_customer_links` (one Square customer per client and location), `customer_cards` (Square's card id, brand, last 4, expiry, postal, fingerprint, `state active\|disabled\|forgotten\|expired`, `created_via`), `card_consents` (purposes, versioned text with its SHA-256 and snapshot, time, IP, browser, link and page; append-only except the revoke columns, guard trigger `card_consents_guard`), `square_charges` (fees and balances on a saved card, `proposed` until staff confirm) |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -295,7 +296,7 @@ HMAC. Location-scoped tables lead their unique keys with `location_id`; a phone 
 | `assistant_conversations`   | One per `(location_id, phone_e164)`: `customer_id` (null for a stranger), the durable marker `pending_since`, `last_inbound_at`, the turn lease `running_since`, `handoff_state open\|resolved` with reason and time, `last_fallback_at`, `disclosed_at`, the client's `language` (`en`\|`es`, the server's own words follow it). |
 | `assistant_turns`           | One per answer: `status running\|replied\|handed_off\|skipped\|failed` (one running per conversation), `trust unknown\|known\|trusted`, `provider sim\|bedrock`, `model`, `prompt_version`, `rounds`, token counts, `cost_micros`, `stop_reason`, `latency_ms`, `reply_message_id`, redacted `transcript`, `error`. |
 | `assistant_tool_calls`      | `(turn_id, seq)` unique: `round`, `tool`, provider `tool_use_id`, redacted `input`/`output`, `outcome ok\|error\|denied`, `latency_ms`.                                                                                                            |
-| `client_links`              | A personal link: `token_hash` unique (sha256 of a 32-byte base64url token), `kind calendar\|verify\|pin\|membership\|pay\|book_again`, `customer_id` (null only for a stranger's calendar or book-again link), `phone_e164`, appointment/invoice/plan bindings (the plan: fk `(location_id, plan_key)` to the location's plans), `pin_version`, `phone_version`, `epoch`, `issued_by`, `expires_at` (after `created_at`), `uses` of `max_uses`, `consumed_at`, `revoked_at` + `revoke_reason`. |
+| `client_links`              | A personal link: `token_hash` unique (sha256 of a 32-byte base64url token), `kind calendar\|verify\|pin\|membership\|pay\|book_again\|card` (card since `20261014500000_square_cards.sql`), `customer_id` (null only for a stranger's calendar or book-again link), `phone_e164`, appointment/invoice/plan bindings (the plan: fk `(location_id, plan_key)` to the location's plans), `pin_version`, `phone_version`, `epoch`, `issued_by`, `expires_at` (after `created_at`), `uses` of `max_uses`, `consumed_at`, `revoked_at` + `revoke_reason`. |
 | `client_link_sessions`      | The bearer session a link is exchanged for, by `token_hash`: `trust link\|verified`, `verified_by pin\|code`, `step_up_at`, `failed_attempts`, `idle_expires_at` (15 minutes) within `expires_at` (1 hour), `revoked_at`, `ip`.                    |
 | `customer_pins`             | pk `customer_id`: `pin_hash` (null once cleared, the row keeps counting), `version` (bumped on set, reset, clear), `failed_attempts`, `lock_level` 0-3, `locked_until`, `set_at`, `reset_hold_until`, `cleared_at`.                            |
 | `phone_trust`               | pk `(location_id, phone_e164)`: the client, `verified_at`, `verified_by pin\|code`, `expires_at` (+30 days at most, an hour of slack), `revoked_at` + `revoke_reason`, `epoch` (the links epoch it was granted in, migration `20261011020000`).                                                                                                 |
@@ -352,10 +353,12 @@ Columns added to existing tables:
 | `appointment_addons.list_price_cents`, `.discount_bp`, `.price_basis`                                             | the same per add-on                                                                                                                            |
 | `invoice_items.list_cents`, `.discount_bp`, `.price_basis`; `invoices.vehicle_class_label`                          | the regular price of a line at the size (null, or at least `price_cents`), the member % off and the basis; the size on the invoice           |
 
-## Square (migrations `20261014200000_square_foundation.sql` and `20261014400000_square_core.sql`, ADR 0171)
+## Square (migrations `20261014200000_square_foundation.sql`, `20261014400000_square_core.sql` and `20261014500000_square_cards.sql`, ADR 0171)
 
 The foundation (Q1b) moves no money; the core (Q2b) adds the ledger columns (`ledger_events.processor`, `processor_order_id`), the
-Square payment mirror, the refund legs and the POS intents. Saved cards and consents come with Q3a; subscriptions with Q3b.
+Square payment mirror, the refund legs and the POS intents. The cards tables (the Q3 shared foundation) hold the client's Square
+customer, saved cards, consents and the charges proposed on a saved card; what fills them comes with Q3a (cards on file and fees)
+and Q3b (subscriptions).
 
 | Table          | Purpose                                                                                                                                         |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -364,6 +367,10 @@ Square payment mirror, the refund legs and the POS intents. Saved cards and cons
 | `square_payments` | The mirror of every Square payment of our location as last re-fetched (`square_payment_id` unique; status, source type, product, order, reference, note, receipt, `amount_cents` (tip excluded), `tip_cents`, `total_cents`, `refunded_cents`, card brand and last four, Square customer, buyer email, Square times) and Oasis's decision: `classification link\|charge\|membership\|pos_intent\|counter\|ignored`, `match_state pending\|matched\|unmatched\|ignored` (matched = `invoice_id` and `event_id` set; ignored = an `ignore_reason`), `match_after` (a counter payment waits SQUARE_MATCH_DELAY_SECONDS), `tip_event_id`, `rule` (R1 to R4a, link, cash_entry, manual, reassign), `confidence`, ranked `candidates` (jsonb), `variance`, who decided and when |
 | `square_refund_legs` | One Square refund of one Square payment for one ledger refund (the refund row is the outbox): `ledger_event_id`, `square_payment_id`, `amount_cents`, `origin api\|pos` (a refund made in the Square app that Oasis attached or recorded), `idempotency_key` (rf_<leg id>) and `square_refund_id` unique, `state to_submit\|pending\|completed\|failed\|rejected`, `error`, `attempts`, times |
 | `square_pos_intents` | "Open Square POS" from the dashboard (SQUARE_POS_API_ENABLED): the invoice, the staff card entry it wrote (`ledger_event_id`), `amount_cents`, the random `callback_state` and the note `code` (OAS-PI-xxxxxx), both unique, `status open\|callback_ok\|callback_error\|matched\|expired`, the callback's transaction ids or error, the matched `square_payment_id`, `expires_at` |
+| `square_customer_links` | The client's Square customer, one per client and location (`src/modules/square/customers.ts` ensureSquareCustomer: this row, else SearchCustomers by `reference_id` = the client's uuid, else CreateCustomer with key `cu_<client id>`): `customer_id`, `square_customer_id` (both unique per location), `linked_by created\|found\|staff` |
+| `customer_cards` | A card saved with Square (`src/modules/square/cards.ts` saveCardOnFile, CreateCard key `cd_<attempt>`): the client, their Square customer, `square_card_id` (unique), `brand`, `last4`, `exp_month`, `exp_year`, `card_type`, `postal`, `fingerprint` (never a card number), `state active\|disabled\|forgotten\|expired` (`disabled_at` set exactly when not active, with `disabled_reason`), `created_via card_link\|membership_link\|staff\|square` |
+| `card_consents` | The client's OK to charge a saved card, one row per acceptance: `purposes` (a non-empty subset of `membership_billing`, `no_show_fee`, `late_cancel_fee`, `balance`), `text_version`, `text_sha256` and `text_snapshot` (the exact wording shown, `src/modules/square/consents.ts`), `accepted_at`, `ip`, `user_agent`, `link_id` (no foreign key: links are purged, the consent is kept), `session_hash` (the page's session token hash); `revoked_at`, `revoked_by`, `revoke_reason` set together, once. Append-only (trigger `card_consents_guard`: no delete, no other change) |
+| `square_charges` | A charge on a saved card: `purpose no_show_fee\|late_cancel_fee\|balance`, `amount_cents`, `state proposed\|charging\|charged\|declined\|unknown\|waived` (charged only after staff confirm: any other state than proposed has `decided_at`; charged has the Square payment id), `idempotency_key` (`ch_<id>`, unique), the invoice and/or appointment, the card and consent, `square_payment_id` (unique), the `ledger_event_id` it was recorded as, `error`, `attempts`, who proposed and decided |
 
 Square deliveries and catch-up events share `webhook_log` (provider `square`, `external_id` = Square's `event_id`): whichever claims the
 event first processes it; the raw body and the headers without the signature are kept for the 90-day trail.
@@ -436,7 +443,7 @@ Operations design day re-anchored on **today** in the business time zone with th
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (116 tables, 1 view, 14 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (120 tables, 1 view, 15 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -766,6 +773,30 @@ Primary key `(location_id)`. `(location_id)` references `locations(id)` on delet
 
 Primary key `(location_id, weekday)`. `(location_id)` references `locations(id)` on delete cascade. 4 check constraints.
 
+#### `card_consents`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `customer_id` | uuid | no |  |
+| `card_id` | uuid | no |  |
+| `purposes` | text[] | no |  |
+| `text_version` | text | no |  |
+| `text_sha256` | text | no |  |
+| `text_snapshot` | text | no |  |
+| `accepted_at` | timestamp with time zone | no |  |
+| `ip` | inet | yes |  |
+| `user_agent` | text | yes |  |
+| `link_id` | uuid | yes |  |
+| `session_hash` | text | yes |  |
+| `revoked_at` | timestamp with time zone | yes |  |
+| `revoked_by` | text | yes |  |
+| `revoke_reason` | text | yes |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. `(card_id)` references `customer_cards(id)`. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. 8 check constraints. Index `card_consents_card_idx` `(card_id)` where `revoked_at IS NULL`. Index `card_consents_customer_idx` `(customer_id, accepted_at)`. Trigger: `card_consents_guard`.
+
 #### `catalog_categories`
 
 | Column | Type | Null | Default |
@@ -891,6 +922,31 @@ Primary key `(id)`. Unique `(apply_event_id, lot_event_id)`. `(apply_event_id)` 
 | `recorded_at` | timestamp with time zone | no | `app_now()` |
 
 Primary key `(lot_event_id)`. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. `(lot_event_id)` references `ledger_events(id)`. 1 check constraint. Index `credit_expiries_customer_idx` `(customer_id)`.
+
+#### `customer_cards`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `customer_id` | uuid | no |  |
+| `square_customer_id` | text | no |  |
+| `square_card_id` | text | no |  |
+| `brand` | text | yes |  |
+| `last4` | text | yes |  |
+| `exp_month` | smallint | yes |  |
+| `exp_year` | smallint | yes |  |
+| `card_type` | text | yes |  |
+| `postal` | text | yes |  |
+| `fingerprint` | text | yes |  |
+| `state` | text | no | `'active'::text` |
+| `created_via` | text | no |  |
+| `disabled_at` | timestamp with time zone | yes |  |
+| `disabled_reason` | text | yes |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. Unique `(square_card_id)`. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. 8 check constraints. Index `customer_cards_customer_idx` `(customer_id, created_at)`.
 
 #### `customer_pins`
 
@@ -2377,6 +2433,49 @@ Primary key `(id)`. Unique `(location_id, sqsp_txn_id)`. `(location_id)` referen
 
 Primary key `(id)`. Unique `(location_id, sqsp_subscription_id)`. `(location_id)` references `locations(id)` on delete cascade. 1 check constraint.
 
+#### `square_charges`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `customer_id` | uuid | no |  |
+| `card_id` | uuid | yes |  |
+| `consent_id` | uuid | yes |  |
+| `purpose` | text | no |  |
+| `amount_cents` | integer | no |  |
+| `state` | text | no | `'proposed'::text` |
+| `idempotency_key` | text | no |  |
+| `invoice_id` | uuid | yes |  |
+| `appointment_id` | uuid | yes |  |
+| `square_payment_id` | text | yes |  |
+| `ledger_event_id` | uuid | yes |  |
+| `error` | text | yes |  |
+| `attempts` | integer | no | `0` |
+| `proposed_by` | text | yes |  |
+| `decided_by` | text | yes |  |
+| `decided_by_user_id` | uuid | yes |  |
+| `decided_at` | timestamp with time zone | yes |  |
+| `charged_at` | timestamp with time zone | yes |  |
+| `waive_reason` | text | yes |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. Unique `(idempotency_key)`. Unique `(square_payment_id)`. `(appointment_id)` references `appointments(id)`. `(card_id)` references `customer_cards(id)`. `(consent_id)` references `card_consents(id)`. `(customer_id)` references `customers(id)`. `(decided_by_user_id)` references `users(id)` on delete set null. `(invoice_id)` references `invoices(id)`. `(ledger_event_id)` references `ledger_events(id)`. `(location_id)` references `locations(id)` on delete cascade. 8 check constraints. Index `square_charges_customer_idx` `(customer_id)`. Index `square_charges_invoice_idx` `(invoice_id)` where `invoice_id IS NOT NULL`. Index `square_charges_open_idx` `(location_id, created_at)` where `state = ANY (ARRAY['proposed'::text, 'charging'::text, 'unknown'::text])`.
+
+#### `square_customer_links`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `customer_id` | uuid | no |  |
+| `square_customer_id` | text | no |  |
+| `linked_by` | text | no |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. Unique `(location_id, customer_id)`. Unique `(location_id, square_customer_id)`. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. 2 check constraints.
+
 #### `square_payments`
 
 | Column | Type | Null | Default |
@@ -2714,6 +2813,7 @@ Primary key `(id)`. Unique `(provider, external_id)`. 2 check constraints. Index
 - view `invoice_calc`
 - function `app_now() returns timestamp with time zone`
 - function `audit_log_immutable() returns trigger`
+- function `card_consents_guard() returns trigger`
 - function `catalog_default_category(p_kind text, p_tags text[]) returns text`
 - function `credit_allocations_guard() returns trigger`
 - function `customers_email_unverify() returns trigger`

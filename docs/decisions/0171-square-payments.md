@@ -1,6 +1,7 @@
 # 0171 Square for everything: pay-by-link, memberships, counter payments and cards on file
 Status: accepted (2026-10-12, owner plan "Square payments + prices by vehicle size", decisions 1 to 9); wave Q1b (the foundation) and
-wave Q2b (the core: ledger, counter matching, payment and deposit links, API refunds) built
+wave Q2b (the core: ledger, counter matching, payment and deposit links, API refunds) built; the cards foundation shared by waves Q3a
+and Q3b built
 
 The shop already takes cards at the counter with the Square POS app and reader. The owner wants Square for everything: payment links,
 memberships billed monthly, counter payments recorded in Oasis without typing, and cards on file. Today payments are Squarespace-shaped
@@ -153,6 +154,42 @@ reconcile do nothing, and the hook verifies nothing (no key) and answers 401.
   `https://<domain>/hooks/square`.
 - Sandbox: SQR-12 drives Oasis's own link builder and refund leg planner against the sandbox (11 PASS, 2026-10-12).
 
+## The cards foundation (shared by waves Q3a and Q3b, built)
+
+- **Migration** `20261014500000_square_cards.sql`: `client_links.kind` gains `card`; `square_customer_links` (one Square customer per
+  client and location, both ids unique per location, `linked_by created|found|staff`); `customer_cards` (Square's card id, brand,
+  last 4, expiry, card type, postal, fingerprint, `state active|disabled|forgotten|expired`, `created_via
+  card_link|membership_link|staff|square`; never a card number); `card_consents` (purposes from `membership_billing`, `no_show_fee`,
+  `late_cancel_fee`, `balance`; `text_version`, `text_sha256`, `text_snapshot`; `accepted_at`, `ip`, `user_agent`, `link_id`,
+  `session_hash`; append-only except `revoked_at/by/reason`, set once, trigger `card_consents_guard`); `square_charges` (`proposed`
+  until a staff member confirms, then `charging|charged|declined|unknown`, or `waived`; `purpose no_show_fee|late_cancel_fee|balance`;
+  `idempotency_key` `ch_<id>`; the invoice and/or appointment; `square_payment_id` unique). Kysely types in
+  `src/modules/square/db/cards-schema.ts`.
+- **Square customer** (`src/modules/square/customers.ts` `ensureSquareCustomer`): the link row, else SearchCustomers by `reference_id`
+  = the client's uuid (a crashed attempt's customer is found, never duplicated), else CreateCustomer with `cu_<client id>` and a body
+  that depends only on the client (so a retry is the same request); an email is optional (set by UpdateCustomer when given: a
+  membership needs one, a saved card does not).
+- **Consent** (`src/modules/square/consents.ts`): versioned wording, v1 as approved in the plan's brief ("Save this card with Square so
+  Oasis Auto Spa can charge it for: <purposes>. Charges are made only after the shop confirms them, except your membership’s monthly
+  payment. You can remove the card any time from your link or by asking us."), purposes listed in a fixed order, the box unchecked by
+  default, a new consent only on the current version. **OWNER:** the wording is v1 until the owner changes it (a change is a new
+  version; old consents keep their text).
+- **Saving and removing** (`src/modules/square/cards.ts`): `saveCardOnFile` checks the consent before any call, ensures the customer,
+  sends CreateCard (`cd_<keyBase>`: the caller names the attempt, an enrollment or a link plus its Idempotency-Key) outside any
+  transaction, then writes the card and the consent in one transaction (audit `card.saved`); a retry of the attempt answers the stored
+  card. A refused card is 422 `CARD_DECLINED` with a client-readable reason. `disableCard` sends DisableCard first (nothing changes if
+  Square does not answer or is watch-only), then disables the card and revokes its live consents (audit `card.disabled`). The
+  simulator already took the sandbox's test nonces (`cnon:card-nonce-ok` saves; every declined nonce is INVALID_CARD_DATA on CreateCard,
+  as the sandbox answers).
+- **Card link** `card` (`#/k/<token>`): 24 hours, 3 uses, 20 exchanges, a fresh PIN or code for its action (`LINK_POLICY.fresh`, true
+  also for membership and pay); template `personal_link_card`. The website's `LinkKind` and the `#/k` page are the site package's
+  (wave Q3a).
+- **Declared routes** (STUB, no behaviour): `POST /public/links/cards`, `DELETE /public/links/cards/:cardId` (Q3a,
+  `http/card-routes.ts`), `POST /public/links/membership/subscribe`, `GET /public/links/membership/status` (Q3b,
+  `http/subscribe-routes.ts`): closed like every link route, 501 `LINK_ACTION_NOT_READY` when open. `registerLinkRoutes` hands both
+  files a `LinkRouteKit` (guard, config, session, limits) so they follow the link routes' rules.
+- **Off by default**: nothing writes the new tables while personal links are closed and Square writes are off.
+
 ## Sandbox findings (2026-10-12, `pnpm verify:square --secret oasis/sandbox/square`, 10 PASS)
 
 Recorded in `docs/integrations/square.md` section 8; the ones that change later waves:
@@ -201,7 +238,8 @@ Recorded in `docs/integrations/square.md` section 8; the ones that change later 
 | Wave | Adds |
 |---|---|
 | Q2b (built) | Migration `20261014400000_square_core.sql`: `ledger_events.processor` / `processor_order_id`, the guard trigger re-created, failed refunds out of `invoice_calc_of` (D4); `square_payments` mirror, `square_refund_legs`, `square_pos_intents`; `SquareLedgerOps` with the announce tail extracted to `payments/announce.ts`; the classifier and matcher (R1 to R5), the unmatched queue routes and alerts; payment and deposit links with `square.links.sweep`; API refunds (`square.refunds.submit`); the real `payment` and `refund` ingest handlers. `SQSP_SYNC_MODE` was not part of the wave's brief and is still to build. |
-| Q3a | Cards on file: the site's card component and CSP, link kind `card`, `square_customer_links`, `customer_cards`, `card_consents`, `square_charges`, the fee proposal and charge; the `card` and `customer` handlers. |
+| Q3 shared (built) | Migration `20261014500000_square_cards.sql` (`square_customer_links`, `customer_cards`, `card_consents`, `square_charges`, link kind `card`), `ensureSquareCustomer`, the consent wording, `saveCardOnFile` / `disableCard`, the declared (stub) card and Square membership link routes (section "The cards foundation"). |
+| Q3a | Cards on file: the site's card component and CSP, the card routes and page, the fee proposal and charge; the `card` and `customer` handlers. |
 | Q3b | Memberships on Square: catalog sync of the tier x size prices, enrollment with resume, billing webhooks (`invoice` and `subscription` handlers), the failure policy (D10), staff actions. |
 | Q3c, Q3e | The website's v2 catalog, join and pay pages; the dashboard's billing block, saved cards and Settings, Billing & integrations (Square status and Test connection). |
 | Q4 | The adversarial money and security review, and a sandbox end-to-end run on a disposable stack. |

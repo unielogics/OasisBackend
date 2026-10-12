@@ -4,7 +4,8 @@
 import type { Generated } from 'kysely'
 import type { JsonColumn, JsonValue } from '../../platform/schema.js'
 
-export type ClientLinkKind = 'calendar' | 'verify' | 'pin' | 'membership' | 'pay' | 'book_again'
+/** `card` (#/k, ADR 0171 D7): the page where a client saves a card with Square (wave Q3; the website's LinkKind follows with Q3a). */
+export type ClientLinkKind = 'calendar' | 'verify' | 'pin' | 'membership' | 'pay' | 'book_again' | 'card'
 export type ClientLinkIssuer = 'assistant' | 'staff' | 'system'
 /** Why a link or a phone's trust ended before its time. */
 export type IdentityRevokeReason =

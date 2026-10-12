@@ -1,5 +1,5 @@
 // Personal links (ADR 0160, design section 5). A link is a 32-byte random token (base64url, 43 characters) in the fragment of a
-// website URL (https://oasisautospanj.com/#/c|m|p|pin|v/<token>), texted only to the number on file. Only its SHA-256 is stored.
+// website URL (https://oasisautospanj.com/#/c|m|p|pin|v|k/<token>), texted only to the number on file. Only its SHA-256 is stored.
 // It is bound to its kind, the client, the number, the appointment / invoice / plan it is for, and to the client's PIN version,
 // phone version and the links epoch at issue time: a PIN change, a phone change or an epoch bump kills it without touching the row.
 // Opening (the exchange for a session) uses nothing; a completion (a booking, a verification, a checkout started) consumes one use.
@@ -26,18 +26,22 @@ export interface LinkPolicy {
   /** Sessions the link can be exchanged for in its life (re-exchange after a session ends counts). */
   maxExchanges: number
   /** The website route of the fragment: #/<path>/<token>. */
-  path: 'c' | 'm' | 'p' | 'pin' | 'v'
+  path: 'c' | 'm' | 'p' | 'pin' | 'v' | 'k'
+  /** Its action (a membership, a payment, saving a card) needs a PIN or code entered on the page in the last 5 minutes (requireFresh). */
+  fresh: boolean
 }
 
 /** Per kind: verify and PIN links 15 minutes, single use, at most 5 exchanges; calendar 72 h (3 bookings); book again 14 days;
- * membership 24 h; payment until paid or void, at most 7 days. */
+ * membership 24 h; payment until paid or void, at most 7 days; card (ADR 0171 D7: save a card with Square) 24 h, 3 saves.
+ * Memberships, payments and saving a card need a fresh PIN or code on the page. */
 export const LINK_POLICY: Record<ClientLinkKind, LinkPolicy> = {
-  verify: { ttlMs: 15 * MIN, maxUses: 1, maxExchanges: 5, path: 'v' },
-  pin: { ttlMs: 15 * MIN, maxUses: 1, maxExchanges: 5, path: 'pin' },
-  calendar: { ttlMs: 72 * HOUR, maxUses: 3, maxExchanges: 30, path: 'c' },
-  book_again: { ttlMs: 14 * DAY, maxUses: 1, maxExchanges: 30, path: 'c' },
-  membership: { ttlMs: 24 * HOUR, maxUses: 3, maxExchanges: 20, path: 'm' },
-  pay: { ttlMs: 7 * DAY, maxUses: 3, maxExchanges: 30, path: 'p' },
+  verify: { ttlMs: 15 * MIN, maxUses: 1, maxExchanges: 5, path: 'v', fresh: false },
+  pin: { ttlMs: 15 * MIN, maxUses: 1, maxExchanges: 5, path: 'pin', fresh: false },
+  calendar: { ttlMs: 72 * HOUR, maxUses: 3, maxExchanges: 30, path: 'c', fresh: false },
+  book_again: { ttlMs: 14 * DAY, maxUses: 1, maxExchanges: 30, path: 'c', fresh: false },
+  membership: { ttlMs: 24 * HOUR, maxUses: 3, maxExchanges: 20, path: 'm', fresh: true },
+  pay: { ttlMs: 7 * DAY, maxUses: 3, maxExchanges: 30, path: 'p', fresh: true },
+  card: { ttlMs: 24 * HOUR, maxUses: 3, maxExchanges: 20, path: 'k', fresh: true },
 }
 
 /** Links the assistant may text one number: at most 3 a day, and one of a kind an hour (design section 4, send_link). */

@@ -6,7 +6,7 @@ import { json, useLinksHarness } from './harness.js'
 
 const h = useLinksHarness({ env: { PUBLIC_LINKS_ENABLED: 'false' } })
 
-const ROUTES: ['GET' | 'POST', string, unknown][] = [
+const ROUTES: ['GET' | 'POST' | 'DELETE', string, unknown][] = [
   ['POST', 'exchange', { token: 'x'.repeat(43) }],
   ['POST', 'exchange', { nonsense: true }],
   ['GET', 'me', undefined],
@@ -20,6 +20,11 @@ const ROUTES: ['GET' | 'POST', string, unknown][] = [
   ['POST', 'appointments/OAS-00001/reschedule', {}],
   ['POST', 'membership/start', { email: 'not-an-email' }],
   ['POST', 'pay/start', { extra: 1 }],
+  ['POST', 'deposit/start', { bookingRef: 1 }],
+  ['POST', 'cards', { sourceId: 'cnon:card-nonce-ok', purposes: ['nope'] }],
+  ['DELETE', 'cards/not-a-uuid', undefined],
+  ['POST', 'membership/subscribe', { email: 'x' }],
+  ['GET', 'membership/status', undefined],
 ]
 
 // the date, request id, body length (the problem names the path) and the shared address counter differ per request

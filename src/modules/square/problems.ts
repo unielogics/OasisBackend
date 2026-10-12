@@ -48,6 +48,32 @@ registerProblems({
     title: 'Square POS switch is off',
     detail: 'Opening the Square POS app from Oasis is not turned on.',
   },
+  // cards on file (ADR 0171 D7, wave Q3): the client reads these on the card and membership pages
+  CARD_CONSENT_INVALID: {
+    status: 422,
+    title: 'Pick what the card is for',
+    detail: 'Tick what we may charge this card for.',
+  },
+  CARD_CONSENT_OUTDATED: {
+    status: 409,
+    title: 'The wording changed',
+    detail: 'The card terms were updated. Reload the page, read them and try again.',
+  },
+  CARD_DECLINED: {
+    status: 422,
+    title: 'Card not saved',
+    detail: 'Square could not save this card. Check the details or try another card.',
+  },
+  SQUARE_CUSTOMER_TAKEN: {
+    status: 409,
+    title: 'Square customer already linked',
+    detail: 'This client’s Square customer is linked to another client. Ask the shop to sort it out.',
+  },
+  CARD_NOT_FOUND: {
+    status: 404,
+    title: 'Card not found',
+    detail: 'That card is not on file.',
+  },
   SQUARE_POS_INTENT_UNKNOWN: {
     status: 404,
     title: 'Unknown Square POS request',

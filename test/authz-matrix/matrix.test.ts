@@ -51,6 +51,11 @@ const PUBLIC_ROUTES = new Set([
   'POST /api/v1/public/links/pay/start',
   // the booking deposit by Square link (ADR 0171): a verified calendar page, same guards as pay/start
   'POST /api/v1/public/links/deposit/start',
+  // Square on the link pages (ADR 0171 D7, D8; declared by the Q3 shared foundation, built by Q3a and Q3b): same guards
+  'POST /api/v1/public/links/cards',
+  'DELETE /api/v1/public/links/cards/:cardId',
+  'POST /api/v1/public/links/membership/subscribe',
+  'GET /api/v1/public/links/membership/status',
 ])
 
 /** 403 codes a permitted caller may still get from a business rule, keyed by "METHOD url". Empty with the generic {} body. */

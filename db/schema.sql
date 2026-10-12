@@ -38,6 +38,27 @@ end
 $$;
 
 --
+-- Name: card_consents_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.card_consents_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+  if tg_op = 'DELETE' then
+    raise exception 'card_consents is append-only: rows cannot be deleted' using errcode = 'restrict_violation';
+  end if;
+  if old.revoked_at is not null then
+    raise exception 'card_consents: a revoked consent cannot change' using errcode = 'restrict_violation';
+  end if;
+  if (to_jsonb(new) - array['revoked_at', 'revoked_by', 'revoke_reason']) is distinct from
+     (to_jsonb(old) - array['revoked_at', 'revoked_by', 'revoke_reason']) then
+    raise exception 'card_consents is append-only: only the revoke columns can be set' using errcode = 'restrict_violation';
+  end if;
+  return new;
+end $$;
+
+--
 -- Name: catalog_default_category(text, text[]); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -788,6 +809,38 @@ CREATE TABLE public.business_hours (
 );
 
 --
+-- Name: card_consents; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.card_consents (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    card_id uuid NOT NULL,
+    purposes text[] NOT NULL,
+    text_version text NOT NULL,
+    text_sha256 text NOT NULL,
+    text_snapshot text NOT NULL,
+    accepted_at timestamp with time zone NOT NULL,
+    ip inet,
+    user_agent text,
+    link_id uuid,
+    session_hash text,
+    revoked_at timestamp with time zone,
+    revoked_by text,
+    revoke_reason text,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT card_consents_check CHECK ((((revoked_at IS NULL) = (revoke_reason IS NULL)) AND ((revoked_at IS NULL) = (revoked_by IS NULL)))),
+    CONSTRAINT card_consents_purposes_check CHECK ((((cardinality(purposes) >= 1) AND (cardinality(purposes) <= 4)) AND (purposes <@ ARRAY['membership_billing'::text, 'no_show_fee'::text, 'late_cancel_fee'::text, 'balance'::text]))),
+    CONSTRAINT card_consents_revoke_reason_check CHECK (((revoke_reason IS NULL) OR (revoke_reason = ANY (ARRAY['client_removed'::text, 'staff_removed'::text, 'card_disabled'::text, 'card_forgotten'::text, 'card_expired'::text, 'replaced'::text, 'customer_deleted'::text])))),
+    CONSTRAINT card_consents_session_hash_check CHECK (((session_hash IS NULL) OR (session_hash ~ '^[0-9a-f]{64}$'::text))),
+    CONSTRAINT card_consents_text_sha256_check CHECK ((text_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT card_consents_text_snapshot_check CHECK ((btrim(text_snapshot) <> ''::text)),
+    CONSTRAINT card_consents_text_version_check CHECK ((text_version ~ '^v[0-9]{1,4}$'::text)),
+    CONSTRAINT card_consents_user_agent_check CHECK (((user_agent IS NULL) OR (length(user_agent) <= 512)))
+);
+
+--
 -- Name: catalog_categories; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -880,7 +933,7 @@ CREATE TABLE public.client_links (
     CONSTRAINT client_links_epoch_check CHECK ((epoch >= 1)),
     CONSTRAINT client_links_expiry_check CHECK ((expires_at > created_at)),
     CONSTRAINT client_links_issued_by_check CHECK ((issued_by = ANY (ARRAY['assistant'::text, 'staff'::text, 'system'::text]))),
-    CONSTRAINT client_links_kind_check CHECK ((kind = ANY (ARRAY['calendar'::text, 'verify'::text, 'pin'::text, 'membership'::text, 'pay'::text, 'book_again'::text]))),
+    CONSTRAINT client_links_kind_check CHECK ((kind = ANY (ARRAY['calendar'::text, 'verify'::text, 'pin'::text, 'membership'::text, 'pay'::text, 'book_again'::text, 'card'::text]))),
     CONSTRAINT client_links_max_uses_check CHECK ((max_uses >= 1)),
     CONSTRAINT client_links_membership_plan_check CHECK (((kind <> 'membership'::text) OR (plan_key IS NOT NULL))),
     CONSTRAINT client_links_pay_invoice_check CHECK (((kind <> 'pay'::text) OR (invoice_id IS NOT NULL))),
@@ -949,6 +1002,39 @@ CREATE TABLE public.credit_expiries (
     expires_at timestamp with time zone NOT NULL,
     recorded_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     CONSTRAINT credit_expiries_expired_cents_check CHECK ((expired_cents > 0))
+);
+
+--
+-- Name: customer_cards; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_cards (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    square_customer_id text NOT NULL,
+    square_card_id text NOT NULL,
+    brand text,
+    last4 text,
+    exp_month smallint,
+    exp_year smallint,
+    card_type text,
+    postal text,
+    fingerprint text,
+    state text DEFAULT 'active'::text NOT NULL,
+    created_via text NOT NULL,
+    disabled_at timestamp with time zone,
+    disabled_reason text,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT customer_cards_check CHECK (((state = 'active'::text) = (disabled_at IS NULL))),
+    CONSTRAINT customer_cards_created_via_check CHECK ((created_via = ANY (ARRAY['card_link'::text, 'membership_link'::text, 'staff'::text, 'square'::text]))),
+    CONSTRAINT customer_cards_disabled_reason_check CHECK (((disabled_reason IS NULL) OR (disabled_reason = ANY (ARRAY['client_removed'::text, 'staff_removed'::text, 'square_disabled'::text, 'square_forgotten'::text, 'expired'::text, 'customer_deleted'::text])))),
+    CONSTRAINT customer_cards_exp_month_check CHECK (((exp_month IS NULL) OR ((exp_month >= 1) AND (exp_month <= 12)))),
+    CONSTRAINT customer_cards_exp_year_check CHECK (((exp_year IS NULL) OR ((exp_year >= 2000) AND (exp_year <= 2200)))),
+    CONSTRAINT customer_cards_last4_check CHECK (((last4 IS NULL) OR (last4 ~ '^[0-9]{4}$'::text))),
+    CONSTRAINT customer_cards_postal_check CHECK (((postal IS NULL) OR (length(postal) <= 12))),
+    CONSTRAINT customer_cards_state_check CHECK ((state = ANY (ARRAY['active'::text, 'disabled'::text, 'forgotten'::text, 'expired'::text])))
 );
 
 --
@@ -2764,6 +2850,59 @@ CREATE TABLE public.sqsp_webhook_subscriptions (
 );
 
 --
+-- Name: square_charges; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.square_charges (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    card_id uuid,
+    consent_id uuid,
+    purpose text NOT NULL,
+    amount_cents integer NOT NULL,
+    state text DEFAULT 'proposed'::text NOT NULL,
+    idempotency_key text NOT NULL,
+    invoice_id uuid,
+    appointment_id uuid,
+    square_payment_id text,
+    ledger_event_id uuid,
+    error text,
+    attempts integer DEFAULT 0 NOT NULL,
+    proposed_by text,
+    decided_by text,
+    decided_by_user_id uuid,
+    decided_at timestamp with time zone,
+    charged_at timestamp with time zone,
+    waive_reason text,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT square_charges_amount_cents_check CHECK ((amount_cents > 0)),
+    CONSTRAINT square_charges_attempts_check CHECK ((attempts >= 0)),
+    CONSTRAINT square_charges_check CHECK (((state <> 'charged'::text) OR (square_payment_id IS NOT NULL))),
+    CONSTRAINT square_charges_check1 CHECK (((state = 'proposed'::text) OR (decided_at IS NOT NULL))),
+    CONSTRAINT square_charges_check2 CHECK (((invoice_id IS NOT NULL) OR (appointment_id IS NOT NULL))),
+    CONSTRAINT square_charges_idempotency_key_check CHECK ((length(idempotency_key) <= 45)),
+    CONSTRAINT square_charges_purpose_check CHECK ((purpose = ANY (ARRAY['no_show_fee'::text, 'late_cancel_fee'::text, 'balance'::text]))),
+    CONSTRAINT square_charges_state_check CHECK ((state = ANY (ARRAY['proposed'::text, 'charging'::text, 'charged'::text, 'declined'::text, 'unknown'::text, 'waived'::text])))
+);
+
+--
+-- Name: square_customer_links; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.square_customer_links (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    square_customer_id text NOT NULL,
+    linked_by text NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT square_customer_links_linked_by_check CHECK ((linked_by = ANY (ARRAY['created'::text, 'found'::text, 'staff'::text]))),
+    CONSTRAINT square_customer_links_square_customer_id_check CHECK ((btrim(square_customer_id) <> ''::text))
+);
+
+--
 -- Name: square_payments; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3303,6 +3442,13 @@ ALTER TABLE ONLY public.business_hours
     ADD CONSTRAINT business_hours_pkey PRIMARY KEY (location_id, weekday);
 
 --
+-- Name: card_consents card_consents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.card_consents
+    ADD CONSTRAINT card_consents_pkey PRIMARY KEY (id);
+
+--
 -- Name: catalog_categories catalog_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3364,6 +3510,20 @@ ALTER TABLE ONLY public.credit_allocations
 
 ALTER TABLE ONLY public.credit_expiries
     ADD CONSTRAINT credit_expiries_pkey PRIMARY KEY (lot_event_id);
+
+--
+-- Name: customer_cards customer_cards_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_cards
+    ADD CONSTRAINT customer_cards_pkey PRIMARY KEY (id);
+
+--
+-- Name: customer_cards customer_cards_square_card_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_cards
+    ADD CONSTRAINT customer_cards_square_card_id_key UNIQUE (square_card_id);
 
 --
 -- Name: customer_pins customer_pins_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -4129,6 +4289,48 @@ ALTER TABLE ONLY public.sqsp_webhook_subscriptions
     ADD CONSTRAINT sqsp_webhook_subscriptions_pkey PRIMARY KEY (id);
 
 --
+-- Name: square_charges square_charges_idempotency_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_charges
+    ADD CONSTRAINT square_charges_idempotency_key_key UNIQUE (idempotency_key);
+
+--
+-- Name: square_charges square_charges_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_charges
+    ADD CONSTRAINT square_charges_pkey PRIMARY KEY (id);
+
+--
+-- Name: square_charges square_charges_square_payment_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_charges
+    ADD CONSTRAINT square_charges_square_payment_id_key UNIQUE (square_payment_id);
+
+--
+-- Name: square_customer_links square_customer_links_location_id_customer_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_customer_links
+    ADD CONSTRAINT square_customer_links_location_id_customer_id_key UNIQUE (location_id, customer_id);
+
+--
+-- Name: square_customer_links square_customer_links_location_id_square_customer_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_customer_links
+    ADD CONSTRAINT square_customer_links_location_id_square_customer_id_key UNIQUE (location_id, square_customer_id);
+
+--
+-- Name: square_customer_links square_customer_links_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_customer_links
+    ADD CONSTRAINT square_customer_links_pkey PRIMARY KEY (id);
+
+--
 -- Name: square_payments square_payments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4489,6 +4691,18 @@ CREATE INDEX audit_log_entity_idx ON public.audit_log USING btree (entity_type, 
 CREATE INDEX audit_log_location_at_idx ON public.audit_log USING btree (location_id, at DESC);
 
 --
+-- Name: card_consents_card_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX card_consents_card_idx ON public.card_consents USING btree (card_id) WHERE (revoked_at IS NULL);
+
+--
+-- Name: card_consents_customer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX card_consents_customer_idx ON public.card_consents USING btree (customer_id, accepted_at);
+
+--
 -- Name: checklist_tasks_service_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4553,6 +4767,12 @@ CREATE INDEX credit_allocations_lot_idx ON public.credit_allocations USING btree
 --
 
 CREATE INDEX credit_expiries_customer_idx ON public.credit_expiries USING btree (customer_id);
+
+--
+-- Name: customer_cards_customer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX customer_cards_customer_idx ON public.customer_cards USING btree (customer_id, created_at);
 
 --
 -- Name: customers_archived_phone_idx; Type: INDEX; Schema: public; Owner: -
@@ -5179,6 +5399,24 @@ CREATE INDEX sqsp_transactions_order_idx ON public.sqsp_transactions USING btree
 CREATE INDEX sqsp_transactions_state_idx ON public.sqsp_transactions USING btree (location_id, state, created_on) WHERE (state = ANY (ARRAY['new'::text, 'deferred'::text, 'manual'::text]));
 
 --
+-- Name: square_charges_customer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX square_charges_customer_idx ON public.square_charges USING btree (customer_id);
+
+--
+-- Name: square_charges_invoice_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX square_charges_invoice_idx ON public.square_charges USING btree (invoice_id) WHERE (invoice_id IS NOT NULL);
+
+--
+-- Name: square_charges_open_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX square_charges_open_idx ON public.square_charges USING btree (location_id, created_at) WHERE (state = ANY (ARRAY['proposed'::text, 'charging'::text, 'unknown'::text]));
+
+--
 -- Name: square_payments_invoice_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5411,6 +5649,12 @@ CREATE INDEX webhook_log_received_idx ON public.webhook_log USING btree (receive
 --
 
 CREATE TRIGGER audit_log_no_update_delete BEFORE DELETE OR UPDATE ON public.audit_log FOR EACH ROW EXECUTE FUNCTION public.audit_log_immutable();
+
+--
+-- Name: card_consents card_consents_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER card_consents_guard BEFORE DELETE OR UPDATE ON public.card_consents FOR EACH ROW EXECUTE FUNCTION public.card_consents_guard();
 
 --
 -- Name: credit_allocations credit_allocations_guard; Type: TRIGGER; Schema: public; Owner: -
@@ -5721,6 +5965,27 @@ ALTER TABLE ONLY public.business_hours
     ADD CONSTRAINT business_hours_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
+-- Name: card_consents card_consents_card_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.card_consents
+    ADD CONSTRAINT card_consents_card_id_fkey FOREIGN KEY (card_id) REFERENCES public.customer_cards(id);
+
+--
+-- Name: card_consents card_consents_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.card_consents
+    ADD CONSTRAINT card_consents_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: card_consents card_consents_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.card_consents
+    ADD CONSTRAINT card_consents_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
 -- Name: catalog_categories catalog_categories_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5845,6 +6110,20 @@ ALTER TABLE ONLY public.credit_expiries
 
 ALTER TABLE ONLY public.credit_expiries
     ADD CONSTRAINT credit_expiries_lot_event_id_fkey FOREIGN KEY (lot_event_id) REFERENCES public.ledger_events(id);
+
+--
+-- Name: customer_cards customer_cards_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_cards
+    ADD CONSTRAINT customer_cards_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: customer_cards customer_cards_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_cards
+    ADD CONSTRAINT customer_cards_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 -- Name: customer_pins customer_pins_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -7014,6 +7293,76 @@ ALTER TABLE ONLY public.sqsp_transactions
 
 ALTER TABLE ONLY public.sqsp_webhook_subscriptions
     ADD CONSTRAINT sqsp_webhook_subscriptions_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: square_charges square_charges_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_charges
+    ADD CONSTRAINT square_charges_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id);
+
+--
+-- Name: square_charges square_charges_card_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_charges
+    ADD CONSTRAINT square_charges_card_id_fkey FOREIGN KEY (card_id) REFERENCES public.customer_cards(id);
+
+--
+-- Name: square_charges square_charges_consent_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_charges
+    ADD CONSTRAINT square_charges_consent_id_fkey FOREIGN KEY (consent_id) REFERENCES public.card_consents(id);
+
+--
+-- Name: square_charges square_charges_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_charges
+    ADD CONSTRAINT square_charges_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: square_charges square_charges_decided_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_charges
+    ADD CONSTRAINT square_charges_decided_by_user_id_fkey FOREIGN KEY (decided_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: square_charges square_charges_invoice_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_charges
+    ADD CONSTRAINT square_charges_invoice_id_fkey FOREIGN KEY (invoice_id) REFERENCES public.invoices(id);
+
+--
+-- Name: square_charges square_charges_ledger_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_charges
+    ADD CONSTRAINT square_charges_ledger_event_id_fkey FOREIGN KEY (ledger_event_id) REFERENCES public.ledger_events(id);
+
+--
+-- Name: square_charges square_charges_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_charges
+    ADD CONSTRAINT square_charges_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: square_customer_links square_customer_links_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_customer_links
+    ADD CONSTRAINT square_customer_links_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: square_customer_links square_customer_links_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_customer_links
+    ADD CONSTRAINT square_customer_links_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 -- Name: square_payments square_payments_decided_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

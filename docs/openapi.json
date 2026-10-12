@@ -73705,6 +73705,249 @@
         "x-oasis-idempotency": "required"
       }
     },
+    "/api/v1/public/links/cards": {
+      "post": {
+        "description": "Bearer session (`Authorization: Bearer <session>` from the exchange); no cookie. Wave Q3a. Until then: 501 `LINK_ACTION_NOT_READY` (404 while personal links are closed).",
+        "operationId": "saveClientLinkCard",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "cardholderName": {
+                    "maxLength": 100,
+                    "type": "string"
+                  },
+                  "consentVersion": {
+                    "description": "The consent wording the page showed (the current one, else 409 CARD_CONSENT_OUTDATED)",
+                    "pattern": "^v[0-9]{1,4}$",
+                    "type": "string"
+                  },
+                  "postalCode": {
+                    "maxLength": 12,
+                    "type": "string"
+                  },
+                  "purposes": {
+                    "description": "What the client ticked (the box starts unchecked)",
+                    "items": {
+                      "enum": [
+                        "membership_billing",
+                        "no_show_fee",
+                        "late_cancel_fee",
+                        "balance"
+                      ],
+                      "type": "string"
+                    },
+                    "maxItems": 4,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "sourceId": {
+                    "description": "The Web Payments SDK token of the card (cnon:...); used once, never stored",
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "verificationToken": {
+                    "description": "The SDK’s buyer verification (3-D Secure) token",
+                    "maxLength": 4096,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "sourceId",
+                  "consentVersion",
+                  "purposes"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "card": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "brand": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "expMonth": {
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "expYear": {
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "id": {
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+                          "type": "string"
+                        },
+                        "last4": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "state": {
+                          "enum": [
+                            "active",
+                            "disabled",
+                            "forgotten",
+                            "expired"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "brand",
+                        "last4",
+                        "expMonth",
+                        "expYear",
+                        "state"
+                      ],
+                      "type": "object"
+                    },
+                    "consent": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "purposes": {
+                          "items": {
+                            "enum": [
+                              "membership_billing",
+                              "no_show_fee",
+                              "late_cancel_fee",
+                              "balance"
+                            ],
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "version": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "version",
+                        "purposes"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "card",
+                    "consent"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Save a card with Square (card or membership link, fresh PIN or code) — not built yet",
+        "tags": [
+          "public-links"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
+    "/api/v1/public/links/cards/{cardId}": {
+      "delete": {
+        "description": "Bearer session (`Authorization: Bearer <session>` from the exchange); no cookie. Wave Q3a. Until then: 501 `LINK_ACTION_NOT_READY` (404 while personal links are closed).",
+        "operationId": "removeClientLinkCard",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cardId",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "cardId": {
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+                      "type": "string"
+                    },
+                    "state": {
+                      "enum": [
+                        "active",
+                        "disabled",
+                        "forgotten",
+                        "expired"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "cardId",
+                    "state"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Remove a saved card (card link, fresh PIN or code) — not built yet",
+        "tags": [
+          "public-links"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
     "/api/v1/public/links/deposit/start": {
       "post": {
         "description": "Bearer session (`Authorization: Bearer <session>` from the exchange); no cookie. The booking fee is a deposit toward the visit (ADR 0150, ADR 0171 D2). For one of the page's client's upcoming visits (`bookingRef` OAS-n, booked or confirmed) whose booking asked for a deposit link (booking.guest_fee.collect `link` with PAYMENT_PROCESSOR=square): `{status: \"redirect\", redirectUrl}` a Square quick-pay link for exactly the deposit (an active one is reused); `paid` the deposit is already paid; `none` no deposit link is owed for that visit; `link_pending` Square did not answer (the shop texts the link). Needs a verified page (401 `LINK_WRONG_PURPOSE` on another kind of link, 403 `IDENTITY_STEP_UP_REQUIRED`); 404 for a booking that is not the page client’s. Uses no completion of the link. Limits as pay/start.",
@@ -73787,7 +74030,7 @@
     },
     "/api/v1/public/links/exchange": {
       "post": {
-        "description": "The token is the 43-character value after `#/c/`, `#/m/`, `#/p/`, `#/pin/` or `#/v/`; it is sent only in this body and never logged. Opening uses nothing of the link. 401 `IDENTITY_LINK_INVALID` (`meta.reason` `not_found` | `expired` | `used` | `revoked`) for a token that is unknown, of another shape, expired, used up, superseded, revoked (STOP, a PIN or phone change, a links-epoch bump, staff) or past its exchanges. 30 exchanges per address every 10 minutes.",
+        "description": "The token is the 43-character value after `#/c/`, `#/m/`, `#/p/`, `#/pin/`, `#/v/` or `#/k/`; it is sent only in this body and never logged. Opening uses nothing of the link. 401 `IDENTITY_LINK_INVALID` (`meta.reason` `not_found` | `expired` | `used` | `revoked`) for a token that is unknown, of another shape, expired, used up, superseded, revoked (STOP, a PIN or phone change, a links-epoch bump, staff) or past its exchanges. 30 exchanges per address every 10 minutes.",
         "operationId": "exchangeClientLink",
         "requestBody": {
           "content": {
@@ -74093,7 +74336,8 @@
                         "pin",
                         "membership",
                         "pay",
-                        "book_again"
+                        "book_again",
+                        "card"
                       ],
                       "type": "string"
                     },
@@ -74564,7 +74808,8 @@
                         "pin",
                         "membership",
                         "pay",
-                        "book_again"
+                        "book_again",
+                        "card"
                       ],
                       "type": "string"
                     },
@@ -74830,6 +75075,181 @@
         },
         "security": [],
         "summary": "Start the plan’s Squarespace checkout (membership link, fresh PIN or code)",
+        "tags": [
+          "public-links"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
+    "/api/v1/public/links/membership/status": {
+      "get": {
+        "description": "Bearer session (`Authorization: Bearer <session>` from the exchange); no cookie. Wave Q3b. Until then: 501 `LINK_ACTION_NOT_READY` (404 while personal links are closed).",
+        "operationId": "getClientLinkMembershipStatus",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "membershipRef": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "status": {
+                      "enum": [
+                        "none",
+                        "pending",
+                        "active",
+                        "failed"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "membershipRef"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Where the Square membership enrollment stands (membership link) — not built yet",
+        "tags": [
+          "public-links"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
+    "/api/v1/public/links/membership/subscribe": {
+      "post": {
+        "description": "Bearer session (`Authorization: Bearer <session>` from the exchange); no cookie. Wave Q3b. Until then: 501 `LINK_ACTION_NOT_READY` (404 while personal links are closed).",
+        "operationId": "subscribeClientLinkMembership",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "cardholderName": {
+                    "maxLength": 100,
+                    "type": "string"
+                  },
+                  "consentVersion": {
+                    "pattern": "^v[0-9]{1,4}$",
+                    "type": "string"
+                  },
+                  "email": {
+                    "description": "The email Square sends the membership’s receipts to",
+                    "format": "email",
+                    "maxLength": 254,
+                    "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+                    "type": "string"
+                  },
+                  "planClass": {
+                    "description": "The vehicle size the membership is priced at (ADR 0170); absent: the tier’s cheapest priced size",
+                    "pattern": "^[a-z][a-z0-9_]{0,31}$",
+                    "type": "string"
+                  },
+                  "postalCode": {
+                    "maxLength": 12,
+                    "type": "string"
+                  },
+                  "sourceId": {
+                    "description": "The Web Payments SDK token of the card (cnon:...); used once, never stored",
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "vehicles": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "car": {
+                          "maxLength": 80,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "plate": {
+                          "maxLength": 15,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "car"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 5,
+                    "type": "array"
+                  },
+                  "verificationToken": {
+                    "maxLength": 4096,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "email",
+                  "sourceId",
+                  "consentVersion"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "membershipRef": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "status": {
+                      "enum": [
+                        "none",
+                        "pending",
+                        "active",
+                        "failed"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "membershipRef"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Join with a card, billed monthly by Square (membership link, fresh PIN or code) — not built yet",
         "tags": [
           "public-links"
         ],
@@ -75205,7 +75625,8 @@
                         "pin",
                         "membership",
                         "pay",
-                        "book_again"
+                        "book_again",
+                        "card"
                       ],
                       "type": "string"
                     },
@@ -75697,7 +76118,8 @@
                         "pin",
                         "membership",
                         "pay",
-                        "book_again"
+                        "book_again",
+                        "card"
                       ],
                       "type": "string"
                     },
@@ -76270,7 +76692,8 @@
                         "pin",
                         "membership",
                         "pay",
-                        "book_again"
+                        "book_again",
+                        "card"
                       ],
                       "type": "string"
                     },
@@ -76762,7 +77185,8 @@
                         "pin",
                         "membership",
                         "pay",
-                        "book_again"
+                        "book_again",
+                        "card"
                       ],
                       "type": "string"
                     },

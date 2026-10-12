@@ -121,7 +121,7 @@ describe('templates', () => {
   })
 
   it('a personal link per kind, each carrying the link', () => {
-    for (const kind of ['calendar', 'verify', 'pin', 'membership', 'pay', 'book_again'] as const) {
+    for (const kind of ['calendar', 'verify', 'pin', 'membership', 'pay', 'book_again', 'card'] as const) {
       const key = `personal_link_${kind}`
       expect(TEMPLATES[key as keyof typeof TEMPLATES].klass, key).toBe('personal_link')
       const text = renderTemplate(key, { first: 'Maria', link: 'https://oasisautospanj.com/#/c/TOKEN', plan: 'Gold' }).text

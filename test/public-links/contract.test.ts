@@ -20,6 +20,10 @@ const EXPECTED: [string, string, 'required' | undefined][] = [
   ['POST', '/api/v1/public/links/membership/start', undefined],
   ['POST', '/api/v1/public/links/pay/start', undefined],
   ['POST', '/api/v1/public/links/deposit/start', undefined],
+  ['POST', '/api/v1/public/links/cards', undefined],
+  ['DELETE', '/api/v1/public/links/cards/:cardId', undefined],
+  ['POST', '/api/v1/public/links/membership/subscribe', undefined],
+  ['GET', '/api/v1/public/links/membership/status', undefined],
 ]
 
 describe('the personal-link API contract', () => {

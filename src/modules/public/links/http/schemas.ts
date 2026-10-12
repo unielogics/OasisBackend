@@ -68,7 +68,7 @@ export const PlanView = z.object({
 })
 
 export const LinkStateView = z.object({
-  kind: z.enum(['calendar', 'verify', 'pin', 'membership', 'pay', 'book_again']),
+  kind: z.enum(['calendar', 'verify', 'pin', 'membership', 'pay', 'book_again', 'card']),
   expiresAt: iso.describe('The session’s hard end (one hour after the exchange)'),
   idleExpiresAt: iso.describe('The session’s idle end (15 minutes after the last request)'),
   link: z.object({ expiresAt: iso }),

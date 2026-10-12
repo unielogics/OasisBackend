@@ -1,5 +1,5 @@
 // The personal-link API (ADR 0160, design section 5, wave W3c): /api/v1/public/links/*. The website's link pages
-// (https://oasisautospanj.com/#/c|m|p|pin|v/<token>) exchange the token from the URL fragment, in a POST body and nowhere else, for a
+// (https://oasisautospanj.com/#/c|m|p|pin|v|k/<token>) exchange the token from the URL fragment, in a POST body and nowhere else, for a
 // bearer session (Authorization: Bearer <session>, held in the page's memory) and act through it. Every route:
 //   - answers the same 404 as an unknown route, before validation, any limit or any record, while PUBLIC_LINKS_ENABLED is false;
 //   - is never cached (Cache-Control: no-store) and answers JSON only (a POST in another content type is 415), with <, > and & escaped
@@ -65,6 +65,8 @@ import {
   RescheduleResult,
   StepResult,
 } from './schemas.js'
+import { registerCardLinkRoutes } from './card-routes.js'
+import { registerSubscribeLinkRoutes } from './subscribe-routes.js'
 import '../problems.js'
 
 const TAGS = ['public-links']
@@ -130,6 +132,36 @@ export interface LinkRoutesDeps {
   scrypt?: ScryptParams
 }
 
+/**
+ * What every link route is built with, handed to the route files of later waves (card-routes.ts: cards on file, wave Q3a;
+ * subscribe-routes.ts: memberships on Square, wave Q3b) so they follow the same rules as the routes here.
+ */
+export interface LinkRouteKit {
+  app: AppInstance
+  deps: LinkDeps
+  /** Spread into every route's options: closed = the unknown-route 404, no-store, the Origin allowlist, JSON only, escaped JSON. */
+  guard: {
+    onRequest: (req: FastifyRequest, reply: FastifyReply) => Promise<void>
+    preValidation: (req: FastifyRequest) => Promise<void>
+    onSend: (req: FastifyRequest, reply: FastifyReply, payload: unknown) => Promise<unknown>
+  }
+  /** The route config: public with a reason, the in-memory per-address limit per minute, optionally a required Idempotency-Key. */
+  cfg: typeof linkRouteConfig
+  /** The page's session from its bearer header (401 IDENTITY_SESSION_INVALID). */
+  session: (db: Executor, req: FastifyRequest, o?: { touch?: boolean; forUpdate?: boolean }) => Promise<SessionView>
+  /** Durable limits (public_rate_limits): 429 PUBLIC_RATE_LIMITED. */
+  limit: (checks: { key: string; rule: LimitRule }[]) => Promise<void>
+  /** `/public/links` + path. */
+  path: (p: string) => string
+  reqOf: (req: FastifyRequest) => LinkRequest
+  tags: string[]
+  bearerNote: string
+}
+
+export function linkRouteConfig(reason: string, max: number, extra: { idempotency?: 'required' } = {}) {
+  return { access: access.public(reason), rateLimit: { max, timeWindow: '1 minute' }, ...extra }
+}
+
 export function registerLinkRoutes(d: LinkRoutesDeps): void {
   const { app } = d
   const origins = allowedOrigins(app.env)
@@ -167,11 +199,7 @@ export function registerLinkRoutes(d: LinkRoutesDeps): void {
       return /json/i.test(String(reply.getHeader('content-type') ?? '')) ? escapeJson(payload) : payload
     },
   }
-  const cfg = (reason: string, max: number, extra: { idempotency?: 'required' } = {}) => ({
-    access: access.public(reason),
-    rateLimit: { max, timeWindow: '1 minute' },
-    ...extra,
-  })
+  const cfg = linkRouteConfig
   const session = (db: Executor, req: FastifyRequest, o: { touch?: boolean; forUpdate?: boolean } = {}): Promise<SessionView> =>
     resolveSession(db, bearerOf(req), app.clock.now(), o)
   const limit = (checks: { key: string; rule: LimitRule }[]): Promise<void> => enforceLimits(app.db, app.clock, checks)
@@ -198,7 +226,7 @@ export function registerLinkRoutes(d: LinkRoutesDeps): void {
         operationId: 'exchangeClientLink',
         summary: 'Open a personal link: the token for a bearer session and what the page may show',
         description:
-          'The token is the 43-character value after `#/c/`, `#/m/`, `#/p/`, `#/pin/` or `#/v/`; it is sent only in this body and never logged. Opening uses nothing of the link. ' +
+          'The token is the 43-character value after `#/c/`, `#/m/`, `#/p/`, `#/pin/`, `#/v/` or `#/k/`; it is sent only in this body and never logged. Opening uses nothing of the link. ' +
           '401 `IDENTITY_LINK_INVALID` (`meta.reason` `not_found` | `expired` | `used` | `revoked`) for a token that is unknown, of another shape, expired, used up, superseded, revoked (STOP, a PIN or phone change, a links-epoch bump, staff) or past its exchanges. 30 exchanges per address every 10 minutes.',
         body: ExchangeBody,
         response: { 200: ExchangeResult },
@@ -539,4 +567,9 @@ export function registerLinkRoutes(d: LinkRoutesDeps): void {
       return startSquareDeposit(deps, (db, o) => session(db, req, o), reqOf(req), req.body.bookingRef, req.log)
     },
   )
+
+  // Square on the link pages (ADR 0171 D7, D8): cards on file (wave Q3a) and memberships billed by Square (wave Q3b)
+  const kit: LinkRouteKit = { app, deps, guard, cfg, session, limit, path: P, reqOf, tags: TAGS, bearerNote }
+  registerCardLinkRoutes(kit)
+  registerSubscribeLinkRoutes(kit)
 }

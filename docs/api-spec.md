@@ -440,10 +440,14 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/public/links/appointments/:ref/reschedule` | public |  |
 | GET | `/api/v1/public/links/availability` | public |  |
 | POST | `/api/v1/public/links/bookings` | public | required |
+| POST | `/api/v1/public/links/cards` | public |  |
+| DELETE | `/api/v1/public/links/cards/:cardId` | public |  |
 | POST | `/api/v1/public/links/deposit/start` | public |  |
 | POST | `/api/v1/public/links/exchange` | public |  |
 | GET | `/api/v1/public/links/me` | public |  |
 | POST | `/api/v1/public/links/membership/start` | public |  |
+| GET | `/api/v1/public/links/membership/status` | public |  |
+| POST | `/api/v1/public/links/membership/subscribe` | public |  |
 | POST | `/api/v1/public/links/pay/start` | public |  |
 | POST | `/api/v1/public/links/pin` | public |  |
 | POST | `/api/v1/public/links/pin/reset` | public |  |
@@ -1887,7 +1891,8 @@ matrix's `PUBLIC_ROUTES`; tests in `test/public-links/*.test.ts`.
 availability, bookings (1). `verify` (`#/v`, 15 min, single use): verification only (the step that verifies the page uses it up).
 `pin` (`#/pin`, 15 min): verification and choosing / resetting the PIN (the PIN step uses it up). `membership` (`#/m`, 24 h, the plan
 it was sent for): `membership/start` (3). `pay` (`#/p`, until paid or void, at most 7 days, the invoice it was sent for):
-`pay/start` (3). Opening a link uses nothing; the numbers in brackets are its completions.
+`pay/start` (3). `card` (`#/k`, 24 h, ADR 0171 D7, migration `20261014500000_square_cards.sql`): saving a card with Square
+(3; the routes are declared, built by wave Q3a). Opening a link uses nothing; the numbers in brackets are its completions.
 
 **Verified and fresh.** A page is **verified** when its session started inside the number's live 30-day trust, or once a PIN or a
 texted code was entered on it. Bookings and reschedules need verified. Memberships and payments need **fresh**: a PIN or code entered
@@ -1906,7 +1911,7 @@ The exchange (with `session` added), `GET me` and every verification step answer
 
 ```
 {
-  kind: calendar | verify | pin | membership | pay | book_again,
+  kind: calendar | verify | pin | membership | pay | book_again | card,
   expiresAt,            // the session's hard end (1 hour after the exchange)
   idleExpiresAt,        // the session's idle end (15 minutes after the last call)
   link: { expiresAt },
@@ -1952,6 +1957,15 @@ The exchange (with `session` added), `GET me` and every verification step answer
 | `POST /public/links/membership/start` | `{email, planClass?, vehicles? [{car, plate?}] (≤5)}` (strict; `planClass` as in section 26.4: 422 `TIER_CLASS_UNPRICED`, stored on the membership and the checkout) | 200 `{redirectUrl, membershipRef "OAS-M-1A2B3C4D", checkoutExpiresAt}`: send the browser to `redirectUrl`, the plan's Squarespace checkout (https on squarespace.com only, checked again on the way out). Membership pages with a **fresh** step-up. A pending membership of the link's plan (reused when one is pending) and a checkout intent (W2e `openCheckoutIntent`): the typed email, the plan's product, 72 hours; the membership activates when the Squarespace sync matches the paid order to the intent. The page should say the email must be the one they pay with: it is stored only on the intent, never as the client's email or a verified email, so an email alone never links an order (design section 10); an order that matches only the intent's email but carries another phone or name waits for staff (`awaiting_match`, W4c fixes). `vehicles` are added to the client (`car` like "2021 Tesla Model 3"). One completion of the link. 409 `IDENTITY_RECORD_UNCONFIRMED` on a stale record proven only by a code, 409 `LINK_ALREADY_MEMBER` "You already have a membership. Text us to change your plan." (a live membership held, or shared as a household member), 409 `LINK_CHECKOUT_UNAVAILABLE` "Joining online isn’t open right now. Text us and we’ll help you join." (no checkout link in Settings yet), 403 `LINK_PRIVILEGES_HELD`, 422 `body.email` "Enter a valid email.". |
 | `POST /public/links/pay/start` | `{}` | 200 `{status: "redirect", redirectUrl}`: the payment URL staff attached to the invoice, only https on a `PAYMENT_LINK_HOSTS` host (default squarespace.com, square.link, square.site) with no user, password or port; one completion of the link. With `PAYMENT_PROCESSOR=square` (ADR 0171 D3): a Square link for exactly the current balance, reused while it is active for that amount, else made now in two transactions around the Square call (409 `CONCURRENT_UPDATE` if the balance changed during the call; 422 `PAY_NOTHING_TO_COLLECT`); `link_pending` only when Square does not answer or is watch-only. 200 `{status: "link_pending", redirectUrl: null}`: the invoice has no allowed URL; tell the client the shop will text a payment link (the managers get one `payments.link_requested` notice "Text Maria a payment link", not repeated while unread). Payment pages with a **fresh** step-up; 403 `LINK_PRIVILEGES_HELD`; 409 `IDENTITY_RECORD_UNCONFIRMED` on a stale record proven only by a code. A paid or voided invoice has already ended the page (401 `IDENTITY_SESSION_INVALID`). |
 | `POST /public/links/deposit/start` | `{bookingRef}` | (ADR 0171 D2, `PAYMENT_PROCESSOR=square`) A verified calendar or book-again page pays the deposit of one of its client's upcoming visits (booked or confirmed) whose booking asked for a deposit link (`booking.guest_fee.collect` `link`): 200 `{status: "redirect", redirectUrl, amountCents}` a Square quick-pay link for exactly the deposit (an active one reused); `paid`; `none` (no deposit link owed for that visit, or Squarespace is still the processor); `link_pending` (Square did not answer). 404 for a booking that is not the page client's. Uses no completion of the link. Limits as pay/start. |
+
+**Declared for waves Q3a and Q3b, not built yet** (ADR 0171 D7, D8; `src/modules/public/links/http/card-routes.ts` and
+`subscribe-routes.ts`, marked STUB): `POST /public/links/cards` (body `{sourceId, verificationToken?, consentVersion, purposes[]
+(membership_billing | no_show_fee | late_cancel_fee | balance, at least one), cardholderName?, postalCode?}`, strict), `DELETE
+/public/links/cards/:cardId`, `POST /public/links/membership/subscribe` (body `{email, planClass?, vehicles?, sourceId,
+verificationToken?, consentVersion, cardholderName?, postalCode?}`, strict) and `GET /public/links/membership/status`. They follow
+every rule of 28.1 (closed: the unknown-route 404) and validate their bodies (422); with personal links open they answer 501
+`LINK_ACTION_NOT_READY` "This page can’t do that yet. Text us and we’ll help." and write nothing. Their behaviour, limits and
+answers are specified by the waves that build them.
 
 ### 28.4 Flows the website builds
 
@@ -2053,7 +2067,8 @@ real turn, guard and judge (ADR 0160, W3 integration).
 
 Everything here is off by default (`SQUARE_PROVIDER=sim`: an in-process simulator answers, nothing reaches Square;
 `SQUARE_WRITES_ENABLED=false`: nothing is created or changed at Square; `PAYMENT_PROCESSOR=squarespace`: links, refunds and deposits
-stay as before). Cards on file come with wave Q3a, memberships with Q3b (ADR 0171, "What the later waves add").
+stay as before). Cards on file come with wave Q3a, memberships with Q3b (ADR 0171, "What the later waves add"); their shared
+foundation (the cards tables, the client's Square customer, saving and removing a card with the client's consent) is section 30.10.
 
 ### 30.1 `POST /hooks/square` (webhook, public through nginx: POST only, zone `oasis_hooks`, 1 MB)
 
@@ -2172,3 +2187,24 @@ live only: the access token refused, the catch-up behind, webhooks silent).
   to the staff's awaiting card refund of that amount, or to one they already confirmed by hand without a reference on an invoice whose
   card money is all Square's (it takes the Square refund id, audit `square.attach_refund`), or recorded as an external refund (`needs_review`, key `square:refund:<id>`, reason
   "Refunded in Square").
+
+### 30.10 Cards on file: the shared foundation (waves Q3a and Q3b build on it)
+
+No route of its own yet (the link routes are declared in section 28); the services the next waves call:
+
+* `src/modules/square/customers.ts` `ensureSquareCustomer(deps, {customerId, email?})`: the client's Square customer from
+  `square_customer_links`, else SearchCustomers by `reference_id` = the client's uuid (linked `found`), else CreateCustomer with key
+  `cu_<client id>` (name and number only, so a retry is the same request; linked `created`); a given email is set at Square when it is
+  missing or different. 404 `NOT_FOUND` for an unknown, merged or deleted client; 409 `SQUARE_CUSTOMER_TAKEN` when the Square customer
+  is already another client's.
+* `src/modules/square/consents.ts`: the versioned consent wording (v1: "Save this card with Square so Oasis Auto Spa can charge it for:
+  <purposes>. Charges are made only after the shop confirms them, except your membership’s monthly payment. You can remove the card
+  any time from your link or by asking us."), unchecked by default on the page, with its SHA-256. 422 `CARD_CONSENT_INVALID` (no or
+  an unknown purpose), 409 `CARD_CONSENT_OUTDATED` (not the current version: reload).
+* `src/modules/square/cards.ts` `saveCardOnFile`: the consent is checked first, then the Square customer, then CreateCard with key
+  `cd_<keyBase>` outside any transaction, then one transaction writing `customer_cards` and `card_consents` (audit `card.saved`); a
+  retry of the same attempt answers the same card and consent. 422 `CARD_DECLINED` with the client-readable reason in `detail`, 409
+  `SQUARE_WRITES_OFF` (watch-only), 503 `SQUARE_UNAVAILABLE`. `disableCard`: DisableCard at Square, the card `disabled` and its live
+  consents revoked (audit `card.disabled`); 404 `CARD_NOT_FOUND` for another client's or location's card; idempotent.
+* Nothing calls them while `PUBLIC_LINKS_ENABLED=false` (the routes are closed) and `SQUARE_WRITES_ENABLED=false` (nothing is created
+  at Square).

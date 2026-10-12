@@ -54,7 +54,7 @@ export interface LinksHarness {
   readonly locationId: string
   /** Package or add-on key by seeded name. */
   key(name: string): string
-  call(method: 'GET' | 'POST', path: string, o?: CallOptions): Promise<LightMyRequestResponse>
+  call(method: 'GET' | 'POST' | 'DELETE', path: string, o?: CallOptions): Promise<LightMyRequestResponse>
   /** Inserts a live, opted-in client (not synthetic) and returns its id. */
   customer(o?: { name?: string; phone?: string; email?: string | null; createdAt?: Date; needsDetails?: boolean }): Promise<string>
   link(o: Partial<IssueLinkInput> & { customerId: string | null }): Promise<IssuedLink>
