@@ -534,7 +534,7 @@
       "client": { "name": "Zoe Turner", "trusted": true },
       "steps": [
         { "text": "Book a signature wash tomorrow at 1pm please" },
-        { "text": "{{code}}", "from": "alt" },
+        { "text": "{{code}}", "from": "alt", "orElse": "It's my Honda Civic, a sedan. Please book it." },
         { "text": "{{code}}" }
       ],
       "expect": { "booking": "confirmed" }

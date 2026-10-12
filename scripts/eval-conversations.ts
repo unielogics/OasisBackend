@@ -484,13 +484,18 @@ async function runPersona(
     handoffState = c?.handoff_state ?? null
     if (optedOutAfterSeq === null && (await hasActiveOptOut(w.db, w.locationId, phones.primary)) && !persona.optedOut) optedOutAfterSeq = lastInboundSeq
   }
+  const usedCodes = new Set<string>()
   const send = async (text: string, from: 'primary' | 'alt', afterMin: number, burst: string[] | null): Promise<void> => {
     w.clock.advance(Math.round(afterMin * 60_000))
     const texts = burst ?? [text]
     let last = 0
     for (const [i, t0] of texts.entries()) {
       if (i > 0) w.clock.advance(2_000)
-      const t = t0.replace(/\{\{code\}\}/g, lastCode ?? '0000')
+      // a number texted from the wrong phone confirms nothing: it stays unused for the right one
+      const t = t0.replace(/\{\{code\}\}/g, () => {
+        if (lastCode && from === 'primary') usedCodes.add(lastCode)
+        return lastCode ?? '0000'
+      })
       seq += 1
       last = seq
       messages.push({ seq, step: currentStep, dir: 'in', phone: from, text: t, klass: null, templateKey: null, senderKind: null, links: [] })
@@ -511,7 +516,11 @@ async function runPersona(
         continue
       }
       if ('burst' in step) await send('', 'primary', step.afterMin, step.burst)
-      else await send(step.text, step.from, step.afterMin, null)
+      else if (step.text.includes('{{code}}') && (lastCode === null || usedCodes.has(lastCode))) {
+        // the assistant asked one more question before proposing: answer it, then text the number once the server sent one
+        await send(step.orElse ?? 'Yes, please go ahead.', 'primary', step.afterMin, null)
+        if (lastCode !== null && !usedCodes.has(lastCode)) await send(step.text, step.from, 1, null)
+      } else await send(step.text, step.from, step.afterMin, null)
     }
     if (persona.simulate && o.providers.simulator) {
       for (let i = 0; i < persona.simulate.maxTurns; i++) {

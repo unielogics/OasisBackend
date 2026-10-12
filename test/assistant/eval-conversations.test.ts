@@ -22,7 +22,7 @@ const toolRounds = (req: AiConverseRequest): number => req.messages.filter((m) =
 const assistant = new SimAiProvider((req) => {
   const said = lastClientText(req)
   const rounds = toolRounds(req)
-  if (/book/i.test(said)) {
+  if (/book|go ahead/i.test(said)) {
     if (rounds === 0)
       return /Verified phone: yes/.test(req.system[2]!.text)
         ? simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: '2026-10-15', startMin: 600, vehicle: null })
@@ -59,6 +59,14 @@ const PERSONAS = {
       client: { name: 'Chloe Martin' },
       steps: [{ text: 'Please book me tomorrow at 10' }],
       expect: { link: ['verify'], booking: 'none' },
+    },
+    {
+      id: 'ask-first',
+      category: 'booking_trusted',
+      description: 'The assistant asks one more question before it proposes: the {{code}} step answers it, then texts the number.',
+      client: { name: 'Isabel Cruz', trusted: true },
+      steps: [{ text: 'Can I get a wash tomorrow at 10?' }, { text: '{{code}}' }],
+      expect: { booking: 'confirmed' },
     },
     { id: 'stop', category: 'stop', description: 'STOP mid-conversation.', steps: [{ text: 'How much is a wash?' }, { text: 'STOP' }, { text: 'hello?' }], expect: { optOut: true } },
     { id: 'uk', category: 'foreign_number', description: 'A +44 number.', phone: 'uk', steps: [{ text: 'How much is a wash?' }], expect: { noAiReply: true } },
@@ -105,7 +113,7 @@ describe('scripts/eval-conversations.ts (simulated models, the real runtime)', (
       log: () => undefined,
     })
     const byId = new Map(out.results.map((r) => [r.personaId, r]))
-    expect(out.results).toHaveLength(5)
+    expect(out.results).toHaveLength(6)
     for (const r of out.results) expect(r.check.breaches, r.personaId).toEqual([])
     for (const r of out.results) expect(r.check.misses, r.personaId).toEqual([])
 
@@ -122,6 +130,11 @@ describe('scripts/eval-conversations.ts (simulated models, the real runtime)', (
     expect(texts).toContain('in:alt:')
     expect(book.run.messages.filter((m) => m.templateKey === 'action_booked')).toHaveLength(1)
     expect(book.run.messages.find((m) => m.templateKey === 'action_confirm')!.text).toMatch(/Reply \d{4} to confirm\./)
+
+    // no reply number yet at the {{code}} step: the client says "Yes, please go ahead.", then texts the number the server sent
+    const askFirst = byId.get('ask-first')!
+    expect(askFirst.run.messages.filter((m) => m.dir === 'in').map((m) => m.text.replace(/^\d{4}$/, '[code]'))).toEqual(['Can I get a wash tomorrow at 10?', 'Yes, please go ahead.', '[code]'])
+    expect(askFirst.run.appointmentChanges).toEqual([{ kind: 'created', viaReplyNumber: true, source: 'sms_ai' }])
 
     const untrusted = byId.get('book-untrusted')!
     const link = untrusted.run.messages.find((m) => m.links.includes('verify'))!

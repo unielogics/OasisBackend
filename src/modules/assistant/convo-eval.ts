@@ -36,6 +36,11 @@ const Step = z.union([
     text: z.string().min(1),
     /** "alt": the persona's second phone (a reply number sent by the wrong phone). */
     from: z.enum(['primary', 'alt']).default('primary'),
+    /**
+     * For a {{code}} step: what the client texts when no new reply number came yet (the assistant asked one more question first);
+     * the reply number follows as soon as the server texts one (default "Yes, please go ahead.").
+     */
+    orElse: z.string().min(1).nullable().default(null),
     /** Simulated minutes since the previous step (default 1). */
     afterMin: z.number().min(0).max(24 * 60).default(1),
   }),
@@ -363,7 +368,7 @@ The shop's rules for the assistant (binding):
 - STOP or "stop texting me" ends the conversation (no further texts). AGENT or asking for a person hands the chat to the team.
 - After a handoff (the assistant's own, AGENT, or the server's fallback text) the assistant stays SILENT by design until a team member replies: unanswered client texts after a handoff are correct; judge the conversation up to the handoff.
 
-How to read the transcript: text between ⟦ and ⟧ inside the assistant's messages was inserted by the SERVER, not written by the assistant: the rendered prices (from the shop's price list, correct by construction), the security line after verify/PIN/membership/payment links, and the automated-assistant disclosure and STOP footer on the first text. "[link:<kind>]" is a personal link the server texted. The TURN CONTEXT is what the server told the assistant about the client (name, membership and washes left, vehicles, appointments, verified phone): facts from it are correct.
+How to read the transcript: text between ⟦ and ⟧ inside the assistant's messages was inserted by the SERVER, not written by the assistant: the rendered prices (from the shop's price list, correct by construction), the security line after verify/PIN/membership/payment links, and the automated-assistant disclosure and STOP footer on the first text. "[link:<kind>]" is a personal link the server texted. "[assistant looked up: ...]" lines are the server tools the assistant called before answering (open times, the catalog, the client's appointments): what it says from them is real data. The TURN CONTEXT is what the server told the assistant about the client (name, membership and washes left, vehicles, appointments, verified phone): facts from it are correct.
 
 Rate the ASSISTANT from 1 (bad) to 5 (excellent) on:
 - helpfulness: did the client get what they needed, or a sensible next step (link, handoff), without needless back-and-forth?
@@ -397,9 +402,16 @@ export function markServerParts(text: string, renderedPhrases: readonly string[]
 }
 
 /** The transcript as the quality judge (and the report) reads it: no phone number, links by kind. */
-export function renderTranscript(run: ConversationRun, o: { redactCodes?: boolean; markServer?: boolean } = {}): string {
+export function renderTranscript(run: ConversationRun, o: { redactCodes?: boolean; markServer?: boolean; lookups?: boolean } = {}): string {
   const lines: string[] = []
+  const shown = new Set<number>()
   for (const m of run.messages) {
+    // what the assistant looked up before its answer (tool calls), so a time it offers after check_availability reads as real
+    if (o.lookups && isAiWritten(m) && !shown.has(m.step)) {
+      shown.add(m.step)
+      const calls = run.turns.filter((t) => t.step === m.step).flatMap((t) => t.trace.filter((l) => l.startsWith('tool: ')).map((l) => l.slice(6, 160)))
+      if (calls.length > 0) lines.push(`[assistant looked up: ${calls.join('; ')}]`)
+    }
     let text = o.markServer && isAiWritten(m) ? markServerParts(m.text, run.renderedPhrases) : m.text
     if (o.redactCodes) text = text.replace(/\b\d{4}\b(?= to confirm)/g, '[code]').replace(/^\d{4}$/, '[code]')
     if (m.dir === 'in') lines.push(`Client${m.phone === 'alt' ? ' (from a DIFFERENT phone)' : ''}: ${text}`)
@@ -430,7 +442,7 @@ export function qualityPrompt(o: { factsText: string; persona: Persona; run: Con
     '</persona>',
     ...(o.run.firstContext ? ['<turn_context>', o.run.firstContext, '</turn_context>'] : []),
     '<transcript>',
-    renderTranscript(o.run, { redactCodes: false, markServer: true }) || '(no texts)',
+    renderTranscript(o.run, { redactCodes: false, markServer: true, lookups: true }) || '(no texts)',
     '</transcript>',
     'Now rate the assistant in this transcript. Answer with the JSON object only.',
   ].join('\n')
