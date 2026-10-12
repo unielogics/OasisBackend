@@ -5575,6 +5575,8 @@ CREATE INDEX square_charges_open_idx ON public.square_charges USING btree (locat
 --
 
 CREATE UNIQUE INDEX square_charges_request_key_idx ON public.square_charges USING btree (location_id, request_key) WHERE (request_key IS NOT NULL);
+
+--
 -- Name: square_enrollments_membership_idx; Type: INDEX; Schema: public; Owner: -
 --
 
