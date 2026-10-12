@@ -27,11 +27,51 @@ export const Retention = z.object({
   prev30: z.number().int(),
 })
 
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+
+/** The billing block of a membership billed by Square (ADR 0171 wave Q3b). */
+export const SquareBillingView = z.object({
+  status: z.enum(['ok', 'failed']).describe('failed: a renewal Square could not charge (in grace until pastDueOn, past due until cancelOn)'),
+  squareStatus: z.string().nullable().describe('Square’s status of the subscription: ACTIVE, PAUSED, CANCELED, DEACTIVATED, PENDING'),
+  failedAt: z.string().nullable(),
+  notifiedAt: z.string().nullable().describe('When the client was texted the card link (and emailed Square’s invoice page)'),
+  pastDueOn: isoDate.nullable(),
+  cancelOn: isoDate.nullable(),
+  monthlyCents: z.number().int().nullable().describe('The monthly price billed (grandfathered until Move members)'),
+  card: z
+    .object({ brand: z.string().nullable(), last4: z.string().nullable(), expMonth: z.number().int().nullable(), expYear: z.number().int().nullable(), state: z.string() })
+    .nullable(),
+  cancelAt: isoDate.nullable().describe('Square ends the membership on this date (cancel at period end; undo while scheduled)'),
+  pauseAt: isoDate.nullable().describe('Square pauses the membership on this date (the next billing date)'),
+  change: z
+    .object({
+      kind: z.enum(['change', 'move']),
+      planKey: z.string(),
+      planClass: z.string(),
+      monthlyCents: z.number().int(),
+      effectiveDate: z.string().nullable(),
+      swapAfter: z.string().nullable(),
+    })
+    .nullable()
+    .describe('A tier or size change at the next billing date (staff), or a price move after its notice (Move members)'),
+  lastInvoice: z
+    .object({
+      status: z.string(),
+      amountCents: z.number().int(),
+      dueDate: isoDate.nullable(),
+      paidAt: z.string().nullable(),
+      refundedCents: z.number().int(),
+      payUrl: z.string().nullable().describe('Square’s own page for the invoice'),
+    })
+    .nullable(),
+  enrollment: z.object({ state: z.string(), failure: z.string().nullable() }).nullable().describe('A membership that has not started: its latest enrollment'),
+})
+
 export const MembershipView = z.object({
   id: z.string(),
   customerId: z.string(),
   status: Status,
-  source: z.enum(['squarespace', 'manual']),
+  source: z.enum(['squarespace', 'manual', 'square']).describe('square: billed by a Square subscription (ADR 0171 wave Q3b)'),
   plan: z.object({
     key: PlanKey,
     name: z.string(),
@@ -80,6 +120,7 @@ export const MembershipView = z.object({
     .describe(
       'The live Squarespace checkout: an open intent from a personal link waiting for its order, or a paid order that matches the client only through an unverified email and waits for staff (awaiting_match; confirm or reject it under /membership-checkouts)',
     ),
+  billing: SquareBillingView.nullable().describe('How Square bills it (source square); null for any other membership'),
   version: z.number().int(),
 })
 

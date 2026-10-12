@@ -1,9 +1,11 @@
-// The ingest handlers of wave Q2b installed into the Q1b runtime (runtime.ts squareIngest): payment.* events decide the payment
-// (mirror, classification, link payments at once, counter payments after SQUARE_MATCH_DELAY_SECONDS), refund.* events move the
-// refund legs or record a refund made in the Square app. Wave Q3a: card.* events keep the saved cards in step (an automatic update, a
-// card disabled or forgotten at Square), customer.deleted closes the cards of a Square customer deleted at Square. Subscription
-// invoices and subscriptions keep the foundation's logging handlers until wave Q3b.
+// The ingest handlers installed into the Q1b runtime (runtime.ts squareIngest): payment.* events decide the payment (mirror,
+// classification, link payments at once, counter payments after SQUARE_MATCH_DELAY_SECONDS) and refund.* events move the refund
+// legs or record a refund made in the Square app (wave Q2b); card.* events keep the saved cards in step (an automatic update, a card
+// disabled or forgotten at Square) and customer.deleted closes the cards of a Square customer deleted at Square (wave Q3a);
+// invoice.* and subscription.* drive the memberships billed by Square, and a membership refund follows its refund.* events (wave
+// Q3b, memberships/square/billing.ts).
 import { createIdGenerator } from '../../platform/ids.js'
+import { ingestMembershipRefund, ingestSquareSubscription, ingestSubscriptionInvoice } from '../memberships/square/billing.js'
 import { paymentFacts, refundFacts } from './facts.js'
 import { noopSquareIngest, type SquareIngest, type SquareIngestContext } from './ingest.js'
 import { decideSquarePayment, type SquarePaymentDeps } from './payments.js'
@@ -34,7 +36,9 @@ export const squareCoreIngest: SquareIngest = {
     return out === 'ignored' ? { status: 'ignored', note: `payment ${p.status.toLowerCase()}` } : { status: 'processed', note: `payment ${out}` }
   },
   async refund(ctx, r) {
-    return ingestSquareRefund(ctx.tx, depsOf(ctx), refundFacts(r))
+    const facts = refundFacts(r)
+    // a membership payment's refund (wave Q3b) is the membership's; every other refund moves the ledger's legs
+    return (await ingestMembershipRefund(ctx, facts)) ?? ingestSquareRefund(ctx.tx, depsOf(ctx), facts)
   },
   async card(ctx, card, cardId) {
     return ingestSquareCard(ctx.tx, cardDepsOf(ctx), card, cardId, ctx.event.type)
@@ -42,5 +46,7 @@ export const squareCoreIngest: SquareIngest = {
   async customer(ctx, customer, customerId) {
     return ingestSquareCustomer(ctx.tx, cardDepsOf(ctx), customer, customerId)
   },
+  invoice: ingestSubscriptionInvoice,
+  subscription: ingestSquareSubscription,
 }
 

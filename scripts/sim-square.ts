@@ -9,6 +9,7 @@
  *   POST /__sim/pos/payment {amountCents, tipCents?, note?, sourceType CARD|CASH, customerId?}   a counter (POS app) payment
  *   POST /__sim/pos/refund {paymentId, amountCents}       a refund made in the Square app
  *   POST /__sim/subscriptions/:id/bill {outcome paid|failed}
+ *   POST /__sim/invoices/:id/pay {nonce?}                  the client pays an open subscription invoice from its page
  *   POST /__sim/cards/:id/auto-update {last4?, expYear?} | /__sim/cards/:id/forget
  *   POST /__sim/refunds/:id/fail {status FAILED|REJECTED}
  *   POST /__sim/faults {status 429|500, hang?, times, path?, method?}

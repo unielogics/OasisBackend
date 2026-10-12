@@ -5,9 +5,12 @@ import type { JsonValue } from '../../platform/schema.js'
 /** A tier's key: a slug (^[a-z][a-z0-9_]{0,31}$), gold and vip by default (premium and executive before ADR 0170, kept in legacy_key). */
 export type PlanKey = string
 export type InclusionMode = 'per_cycle' | 'every_visit'
-export type TierPriceSquareState = 'pending' | 'synced' | 'failed'
+/** pending until synced to Square as a plan variation; retired: a superseded price no subscription used, deleted at Square (wave Q3b). */
+export type TierPriceSquareState = 'pending' | 'synced' | 'failed' | 'retired'
 export type MembershipStatus = 'pending' | 'active' | 'past_due' | 'paused' | 'canceled'
-export type MembershipSource = 'squarespace' | 'manual'
+/** square: billed by a Square subscription (ADR 0171 wave Q3b). */
+export type MembershipSource = 'squarespace' | 'manual' | 'square'
+export type MembershipBillingStatus = 'ok' | 'failed'
 export type CreditKind = 'grant' | 'reserve' | 'redeem' | 'restore' | 'protect' | 'expire'
 
 export interface MembershipPlansTable {
@@ -56,6 +59,8 @@ export interface MembershipTierPricesTable {
   square_variation_id: string | null
   square_state: Generated<TierPriceSquareState>
   square_synced_at: Date | null
+  /** Why the last sync of this price failed (wave Q3b). */
+  square_error: string | null
   created_by: string | null
   created_at: Generated<Date>
 }
@@ -133,6 +138,40 @@ export interface MembershipsTable {
   plan_class: Generated<string>
   /** The tier price row being billed (wave Q3b). */
   tier_price_id: string | null
+  // memberships billed by Square (migration 20261014600000, ADR 0171 wave Q3b)
+  square_subscription_id: string | null
+  square_customer_id: string | null
+  /** The saved card the subscription charges (customer_cards). */
+  card_id: string | null
+  /** Square's status of the subscription as last read (PENDING, ACTIVE, PAUSED, CANCELED, DEACTIVATED). */
+  square_status: string | null
+  billing_status: Generated<MembershipBillingStatus>
+  payment_failed_at: Date | null
+  failure_notified_at: Date | null
+  /** Shop-local dates (yyyy-mm-dd; a date column is read as its text) Square scheduled: the next billing date. */
+  cancel_effective_at: string | null
+  pause_effective_at: string | null
+  scheduled_change: ColumnType<ScheduledChange | null, string | null | undefined, string | null>
+  /** Variations whose scheduled swap was undone this billing period: never sent again in it (Square locks the subscription). */
+  swap_undone_variations: Generated<string[]>
+  square_synced_at: Date | null
+}
+
+/** A tier or size change Square will make at the next billing date (staff), or a price move after its notice ("Move members"). */
+export interface ScheduledChange {
+  kind: 'change' | 'move'
+  toTierPriceId: string
+  fromTierPriceId: string | null
+  planKey: string
+  planClass: string
+  monthlyCents: number
+  /** The date Square makes the swap (the next billing date), once SwapPlan was sent. */
+  effectiveDate: string | null
+  /** move: SwapPlan is sent on or after this instant (the notice's end). */
+  swapAfter?: string | null
+  noticeSentAt?: string | null
+  requestedAt: string
+  by: string
 }
 
 export interface MembershipCreditEventsTable {

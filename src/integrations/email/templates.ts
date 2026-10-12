@@ -2,7 +2,15 @@ import type { EmailRequest } from '../ports/email.js'
 import { EmailError } from './errors.js'
 import { renderHtml, renderText, type Doc } from './content.js'
 
-export type TemplateKey = 'receipt' | 'staff_invite' | 'password_reset' | 'device_alert' | 'closure_notice' | 'pin_reset_notice'
+export type TemplateKey =
+  | 'receipt'
+  | 'staff_invite'
+  | 'password_reset'
+  | 'device_alert'
+  | 'closure_notice'
+  | 'pin_reset_notice'
+  | 'membership_payment_failed'
+  | 'membership_price_change'
 
 type VarKind = 'text' | 'multiline' | 'url' | 'cents' | 'int' | 'items'
 interface VarSpec {
@@ -257,6 +265,62 @@ const defs: TemplateDef[] = [
         },
         { t: 'note', text: `For your safety, membership changes and payments through your links wait until ${v.holdLabel}.` },
         { t: 'p', text: 'If this was you, there is nothing else to do. If it was not, call or text us right away.' },
+      ],
+      footer: footer(v),
+    }),
+  },
+  {
+    // a membership renewal Square could not charge (ADR 0171 wave Q3b, plan decision 7): Square's own page for the invoice (not a
+    // personal link: those go by text only); perks stay on for the grace days
+    key: 'membership_payment_failed',
+    vars: {
+      customerName: { kind: 'text', max: 120 },
+      tierName: { kind: 'text', required: true, max: 80 },
+      amountCents: { kind: 'cents', required: true },
+      payUrl: { kind: 'url' },
+      graceDays: { kind: 'int', required: true },
+      ...shopVars,
+    },
+    build: (v) => ({
+      subject: `Your ${v.shopName} membership payment didn’t go through`,
+      heading: 'Your payment didn’t go through',
+      blocks: [
+        {
+          t: 'p',
+          text:
+            `${hello(v.customerName)}\nWe couldn’t charge ${formatCents(v.amountCents as number)} for your ${v.tierName} membership. ` +
+            `Your perks stay on for ${v.graceDays} days while you sort it out.`,
+        },
+        ...(v.payUrl
+          ? [{ t: 'button' as const, label: 'Pay this month', url: String(v.payUrl) }]
+          : [{ t: 'p' as const, text: 'Reply to this email or text us and we’ll help.' }]),
+        { t: 'note', text: 'We also texted you a secure link to update your card.' },
+      ],
+      footer: footer(v),
+    }),
+  },
+  {
+    // "Move members" (plan decision 8): the notice before a member's price moves to the tier's current price
+    key: 'membership_price_change',
+    vars: {
+      customerName: { kind: 'text', max: 120 },
+      tierName: { kind: 'text', required: true, max: 80 },
+      fromCents: { kind: 'cents', required: true },
+      toCents: { kind: 'cents', required: true },
+      dateLabel: { kind: 'text', required: true, max: 80 },
+      ...shopVars,
+    },
+    build: (v) => ({
+      subject: `Your ${v.shopName} membership price`,
+      heading: 'Your membership price is changing',
+      blocks: [
+        {
+          t: 'p',
+          text:
+            `${hello(v.customerName)}\nYour ${v.tierName} membership will be ${formatCents(v.toCents as number)} a month ` +
+            `(now ${formatCents(v.fromCents as number)}) from your first bill after ${v.dateLabel}.`,
+        },
+        { t: 'p', text: 'Questions, or want to change your plan? Reply to this email or text us.' },
       ],
       footer: footer(v),
     }),

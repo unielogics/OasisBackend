@@ -232,7 +232,7 @@ CREATE FUNCTION public.membership_tier_prices_guard() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 declare
-  mutable text[] := array['superseded_at', 'square_variation_id', 'square_state', 'square_synced_at'];
+  mutable text[] := array['superseded_at', 'square_variation_id', 'square_state', 'square_synced_at', 'square_error'];
 begin
   if tg_op = 'DELETE' then
     if exists (select 1 from membership_plans p where p.id = old.plan_id) then
@@ -832,7 +832,7 @@ CREATE TABLE public.card_consents (
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     CONSTRAINT card_consents_check CHECK ((((revoked_at IS NULL) = (revoke_reason IS NULL)) AND ((revoked_at IS NULL) = (revoked_by IS NULL)))),
     CONSTRAINT card_consents_purposes_check CHECK ((((cardinality(purposes) >= 1) AND (cardinality(purposes) <= 4)) AND (purposes <@ ARRAY['membership_billing'::text, 'no_show_fee'::text, 'late_cancel_fee'::text, 'balance'::text]))),
-    CONSTRAINT card_consents_revoke_reason_check CHECK (((revoke_reason IS NULL) OR (revoke_reason = ANY (ARRAY['client_removed'::text, 'staff_removed'::text, 'card_disabled'::text, 'card_forgotten'::text, 'card_expired'::text, 'replaced'::text, 'customer_deleted'::text])))),
+    CONSTRAINT card_consents_revoke_reason_check CHECK (((revoke_reason IS NULL) OR (revoke_reason = ANY (ARRAY['client_removed'::text, 'staff_removed'::text, 'card_disabled'::text, 'card_forgotten'::text, 'card_expired'::text, 'replaced'::text, 'customer_deleted'::text, 'membership_failed'::text])))),
     CONSTRAINT card_consents_session_hash_check CHECK (((session_hash IS NULL) OR (session_hash ~ '^[0-9a-f]{64}$'::text))),
     CONSTRAINT card_consents_text_sha256_check CHECK ((text_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT card_consents_text_snapshot_check CHECK ((btrim(text_snapshot) <> ''::text)),
@@ -1030,7 +1030,7 @@ CREATE TABLE public.customer_cards (
     expiry_notice_for text,
     CONSTRAINT customer_cards_check CHECK (((state = 'active'::text) = (disabled_at IS NULL))),
     CONSTRAINT customer_cards_created_via_check CHECK ((created_via = ANY (ARRAY['card_link'::text, 'membership_link'::text, 'staff'::text, 'square'::text]))),
-    CONSTRAINT customer_cards_disabled_reason_check CHECK (((disabled_reason IS NULL) OR (disabled_reason = ANY (ARRAY['client_removed'::text, 'staff_removed'::text, 'square_disabled'::text, 'square_forgotten'::text, 'expired'::text, 'customer_deleted'::text])))),
+    CONSTRAINT customer_cards_disabled_reason_check CHECK (((disabled_reason IS NULL) OR (disabled_reason = ANY (ARRAY['client_removed'::text, 'staff_removed'::text, 'square_disabled'::text, 'square_forgotten'::text, 'expired'::text, 'customer_deleted'::text, 'membership_failed'::text])))),
     CONSTRAINT customer_cards_exp_month_check CHECK (((exp_month IS NULL) OR ((exp_month >= 1) AND (exp_month <= 12)))),
     CONSTRAINT customer_cards_exp_year_check CHECK (((exp_year IS NULL) OR ((exp_year >= 2000) AND (exp_year <= 2200)))),
     CONSTRAINT customer_cards_expiry_notice_for_check CHECK (((expiry_notice_for IS NULL) OR (expiry_notice_for ~ '^[0-9]{4}-[0-9]{2}$'::text))),
@@ -1806,10 +1806,12 @@ CREATE TABLE public.membership_tier_prices (
     square_synced_at timestamp with time zone,
     created_by uuid,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    square_error text,
     CONSTRAINT membership_tier_prices_check CHECK (((superseded_at IS NULL) OR (superseded_at >= effective_from))),
     CONSTRAINT membership_tier_prices_monthly_cents_check CHECK (((monthly_cents >= 0) AND (monthly_cents <= 10000000))),
     CONSTRAINT membership_tier_prices_price_version_check CHECK ((price_version >= 1)),
-    CONSTRAINT membership_tier_prices_square_state_check CHECK ((square_state = ANY (ARRAY['pending'::text, 'synced'::text, 'failed'::text]))),
+    CONSTRAINT membership_tier_prices_square_error_check CHECK (((square_error IS NULL) OR (length(square_error) <= 300))),
+    CONSTRAINT membership_tier_prices_square_state_check CHECK ((square_state = ANY (ARRAY['pending'::text, 'synced'::text, 'failed'::text, 'retired'::text]))),
     CONSTRAINT membership_tier_prices_square_variation_id_check CHECK (((square_variation_id IS NULL) OR (length(square_variation_id) <= 64)))
 );
 
@@ -1847,9 +1849,28 @@ CREATE TABLE public.memberships (
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     plan_class text NOT NULL,
     tier_price_id uuid,
+    square_subscription_id text,
+    square_customer_id text,
+    card_id uuid,
+    square_status text,
+    billing_status text DEFAULT 'ok'::text NOT NULL,
+    payment_failed_at timestamp with time zone,
+    failure_notified_at timestamp with time zone,
+    cancel_effective_at date,
+    pause_effective_at date,
+    scheduled_change jsonb,
+    swap_undone_variations text[] DEFAULT '{}'::text[] NOT NULL,
+    square_synced_at timestamp with time zone,
+    CONSTRAINT memberships_billing_failed_check CHECK (((billing_status = 'failed'::text) = (payment_failed_at IS NOT NULL))),
+    CONSTRAINT memberships_billing_status_check CHECK ((billing_status = ANY (ARRAY['ok'::text, 'failed'::text]))),
     CONSTRAINT memberships_check CHECK (((current_period_end IS NULL) OR (current_period_start IS NULL) OR (current_period_end > current_period_start))),
     CONSTRAINT memberships_plan_label_check CHECK ((btrim(plan_label) <> ''::text)),
-    CONSTRAINT memberships_source_check CHECK ((source = ANY (ARRAY['squarespace'::text, 'manual'::text]))),
+    CONSTRAINT memberships_scheduled_change_check CHECK (((scheduled_change IS NULL) OR (jsonb_typeof(scheduled_change) = 'object'::text))),
+    CONSTRAINT memberships_source_check CHECK ((source = ANY (ARRAY['squarespace'::text, 'manual'::text, 'square'::text]))),
+    CONSTRAINT memberships_square_check CHECK (((source <> 'square'::text) OR ((square_customer_id IS NOT NULL) OR (status = ANY (ARRAY['pending'::text, 'canceled'::text]))))),
+    CONSTRAINT memberships_square_customer_id_check CHECK (((square_customer_id IS NULL) OR (length(square_customer_id) <= 64))),
+    CONSTRAINT memberships_square_status_check CHECK (((square_status IS NULL) OR (square_status ~ '^[A-Z_]{1,20}$'::text))),
+    CONSTRAINT memberships_square_subscription_id_check CHECK (((square_subscription_id IS NULL) OR (length(square_subscription_id) <= 64))),
     CONSTRAINT memberships_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text, 'past_due'::text, 'paused'::text, 'canceled'::text])))
 );
 
@@ -2912,6 +2933,53 @@ CREATE TABLE public.square_customer_links (
 );
 
 --
+-- Name: square_enrollments; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.square_enrollments (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
+    membership_id uuid NOT NULL,
+    link_id uuid,
+    plan_id uuid NOT NULL,
+    tier_price_id uuid NOT NULL,
+    plan_class text NOT NULL,
+    square_variation_id text NOT NULL,
+    monthly_cents integer NOT NULL,
+    email text NOT NULL,
+    state text DEFAULT 'started'::text NOT NULL,
+    square_customer_id text,
+    card_id uuid,
+    consent_id uuid,
+    square_subscription_id text,
+    start_date date NOT NULL,
+    failure_code text,
+    failure_detail text,
+    cleanup text DEFAULT 'none'::text NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    last_attempt_at timestamp with time zone,
+    started_at timestamp with time zone NOT NULL,
+    finished_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT square_enrollments_attempts_check CHECK ((attempts >= 0)),
+    CONSTRAINT square_enrollments_check CHECK (((state = ANY (ARRAY['failed'::text, 'abandoned'::text])) = (failure_code IS NOT NULL))),
+    CONSTRAINT square_enrollments_check1 CHECK (((state = ANY (ARRAY['started'::text, 'customer_ready'::text])) OR (state = ANY (ARRAY['failed'::text, 'abandoned'::text])) OR (card_id IS NOT NULL))),
+    CONSTRAINT square_enrollments_check2 CHECK (((state <> ALL (ARRAY['subscribed'::text, 'active'::text])) OR (square_subscription_id IS NOT NULL))),
+    CONSTRAINT square_enrollments_cleanup_check CHECK ((cleanup = ANY (ARRAY['none'::text, 'pending'::text, 'done'::text]))),
+    CONSTRAINT square_enrollments_email_check CHECK ((((length(email) >= 3) AND (length(email) <= 254)) AND (POSITION(('@'::text) IN (email)) > 1))),
+    CONSTRAINT square_enrollments_failure_code_check CHECK (((failure_code IS NULL) OR (failure_code = ANY (ARRAY['card_declined'::text, 'square_unavailable'::text, 'subscription_refused'::text, 'first_payment_failed'::text, 'deactivated'::text, 'expired'::text, 'superseded'::text])))),
+    CONSTRAINT square_enrollments_failure_detail_check CHECK (((failure_detail IS NULL) OR (length(failure_detail) <= 300))),
+    CONSTRAINT square_enrollments_monthly_cents_check CHECK ((monthly_cents >= 0)),
+    CONSTRAINT square_enrollments_plan_class_check CHECK ((plan_class ~ '^[a-z][a-z0-9_]{0,31}$'::text)),
+    CONSTRAINT square_enrollments_square_customer_id_check CHECK (((square_customer_id IS NULL) OR (length(square_customer_id) <= 64))),
+    CONSTRAINT square_enrollments_square_subscription_id_check CHECK (((square_subscription_id IS NULL) OR (length(square_subscription_id) <= 64))),
+    CONSTRAINT square_enrollments_square_variation_id_check CHECK ((length(square_variation_id) <= 64)),
+    CONSTRAINT square_enrollments_state_check CHECK ((state = ANY (ARRAY['started'::text, 'customer_ready'::text, 'card_saved'::text, 'subscribed'::text, 'active'::text, 'failed'::text, 'abandoned'::text])))
+);
+
+--
 -- Name: square_payments; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3050,6 +3118,50 @@ CREATE TABLE public.square_state (
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     CONSTRAINT square_state_environment_check CHECK ((environment = ANY (ARRAY['sandbox'::text, 'production'::text, 'sim'::text]))),
     CONSTRAINT square_state_last_catchup_events_check CHECK ((last_catchup_events >= 0))
+);
+
+--
+-- Name: square_subscription_invoices; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.square_subscription_invoices (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    membership_id uuid NOT NULL,
+    square_invoice_id text NOT NULL,
+    square_subscription_id text NOT NULL,
+    square_order_id text,
+    status text NOT NULL,
+    amount_cents integer NOT NULL,
+    paid_cents integer DEFAULT 0 NOT NULL,
+    due_date date,
+    period_start timestamp with time zone,
+    period_end timestamp with time zone,
+    public_url text,
+    paid_at timestamp with time zone,
+    applied_at timestamp with time zone,
+    failed_at timestamp with time zone,
+    canceled_at timestamp with time zone,
+    square_payment_id text,
+    refunded_cents integer DEFAULT 0 NOT NULL,
+    square_refund_id text,
+    refunded_at timestamp with time zone,
+    refund_status text,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT square_subscription_invoices_amount_cents_check CHECK ((amount_cents >= 0)),
+    CONSTRAINT square_subscription_invoices_check CHECK (((period_end IS NULL) OR (period_start IS NULL) OR (period_end > period_start))),
+    CONSTRAINT square_subscription_invoices_check1 CHECK ((refunded_cents <= paid_cents)),
+    CONSTRAINT square_subscription_invoices_paid_cents_check CHECK ((paid_cents >= 0)),
+    CONSTRAINT square_subscription_invoices_public_url_check CHECK (((public_url IS NULL) OR ((public_url ~ '^https://'::text) AND (length(public_url) <= 2048)))),
+    CONSTRAINT square_subscription_invoices_refund_status_check CHECK (((refund_status IS NULL) OR (refund_status = ANY (ARRAY['PENDING'::text, 'COMPLETED'::text, 'FAILED'::text, 'REJECTED'::text])))),
+    CONSTRAINT square_subscription_invoices_refunded_cents_check CHECK ((refunded_cents >= 0)),
+    CONSTRAINT square_subscription_invoices_square_invoice_id_check CHECK ((length(square_invoice_id) <= 64)),
+    CONSTRAINT square_subscription_invoices_square_order_id_check CHECK (((square_order_id IS NULL) OR (length(square_order_id) <= 64))),
+    CONSTRAINT square_subscription_invoices_square_payment_id_check CHECK (((square_payment_id IS NULL) OR (length(square_payment_id) <= 64))),
+    CONSTRAINT square_subscription_invoices_square_refund_id_check CHECK (((square_refund_id IS NULL) OR (length(square_refund_id) <= 64))),
+    CONSTRAINT square_subscription_invoices_square_subscription_id_check CHECK ((length(square_subscription_id) <= 64)),
+    CONSTRAINT square_subscription_invoices_status_check CHECK ((status ~ '^[A-Z_]{1,24}$'::text))
 );
 
 --
@@ -4340,6 +4452,13 @@ ALTER TABLE ONLY public.square_customer_links
     ADD CONSTRAINT square_customer_links_pkey PRIMARY KEY (id);
 
 --
+-- Name: square_enrollments square_enrollments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_enrollments
+    ADD CONSTRAINT square_enrollments_pkey PRIMARY KEY (id);
+
+--
 -- Name: square_payments square_payments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4401,6 +4520,20 @@ ALTER TABLE ONLY public.square_refund_legs
 
 ALTER TABLE ONLY public.square_state
     ADD CONSTRAINT square_state_pkey PRIMARY KEY (location_id);
+
+--
+-- Name: square_subscription_invoices square_subscription_invoices_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_subscription_invoices
+    ADD CONSTRAINT square_subscription_invoices_pkey PRIMARY KEY (id);
+
+--
+-- Name: square_subscription_invoices square_subscription_invoices_square_invoice_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_subscription_invoices
+    ADD CONSTRAINT square_subscription_invoices_square_invoice_id_key UNIQUE (square_invoice_id);
 
 --
 -- Name: standing_occurrences standing_occurrences_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -5042,6 +5175,12 @@ CREATE INDEX membership_inclusions_plan_idx ON public.membership_inclusions USIN
 CREATE INDEX membership_tier_prices_plan_idx ON public.membership_tier_prices USING btree (plan_id, class_key, effective_from);
 
 --
+-- Name: memberships_billing_failed_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX memberships_billing_failed_idx ON public.memberships USING btree (location_id, payment_failed_at) WHERE (billing_status = 'failed'::text);
+
+--
 -- Name: memberships_plan_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5436,6 +5575,16 @@ CREATE INDEX square_charges_open_idx ON public.square_charges USING btree (locat
 --
 
 CREATE UNIQUE INDEX square_charges_request_key_idx ON public.square_charges USING btree (location_id, request_key) WHERE (request_key IS NOT NULL);
+-- Name: square_enrollments_membership_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX square_enrollments_membership_idx ON public.square_enrollments USING btree (membership_id, started_at);
+
+--
+-- Name: square_enrollments_open_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX square_enrollments_open_idx ON public.square_enrollments USING btree (location_id, state, started_at) WHERE ((state = ANY (ARRAY['started'::text, 'customer_ready'::text, 'card_saved'::text, 'subscribed'::text])) OR (cleanup = 'pending'::text));
 
 --
 -- Name: square_payments_invoice_idx; Type: INDEX; Schema: public; Owner: -
@@ -5478,6 +5627,18 @@ CREATE INDEX square_refund_legs_open_idx ON public.square_refund_legs USING btre
 --
 
 CREATE INDEX square_refund_legs_payment_idx ON public.square_refund_legs USING btree (square_payment_id);
+
+--
+-- Name: square_subscription_invoices_membership_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX square_subscription_invoices_membership_idx ON public.square_subscription_invoices USING btree (membership_id, created_at);
+
+--
+-- Name: square_subscription_invoices_order_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX square_subscription_invoices_order_idx ON public.square_subscription_invoices USING btree (square_order_id) WHERE (square_order_id IS NOT NULL);
 
 --
 -- Name: standing_occurrences_appointment_idx; Type: INDEX; Schema: public; Owner: -
@@ -5576,10 +5737,22 @@ CREATE UNIQUE INDEX uq_membership_plans_legacy_key ON public.membership_plans US
 CREATE UNIQUE INDEX uq_membership_tier_prices_current ON public.membership_tier_prices USING btree (plan_id, class_key) WHERE (superseded_at IS NULL);
 
 --
+-- Name: uq_membership_tier_prices_square_variation; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_membership_tier_prices_square_variation ON public.membership_tier_prices USING btree (square_variation_id) WHERE (square_variation_id IS NOT NULL);
+
+--
 -- Name: uq_memberships_customer_live; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE UNIQUE INDEX uq_memberships_customer_live ON public.memberships USING btree (customer_id) WHERE (status = ANY (ARRAY['pending'::text, 'active'::text, 'past_due'::text, 'paused'::text]));
+
+--
+-- Name: uq_memberships_square_subscription; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_memberships_square_subscription ON public.memberships USING btree (square_subscription_id) WHERE (square_subscription_id IS NOT NULL);
 
 --
 -- Name: uq_public_otp_active_phone; Type: INDEX; Schema: public; Owner: -
@@ -5610,6 +5783,18 @@ CREATE UNIQUE INDEX uq_sqsp_products_product ON public.sqsp_products USING btree
 --
 
 CREATE UNIQUE INDEX uq_sqsp_products_sku ON public.sqsp_products USING btree (location_id, lower(sku)) WHERE (sku IS NOT NULL);
+
+--
+-- Name: uq_square_enrollments_live; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_square_enrollments_live ON public.square_enrollments USING btree (membership_id) WHERE (state = ANY (ARRAY['started'::text, 'customer_ready'::text, 'card_saved'::text, 'subscribed'::text]));
+
+--
+-- Name: uq_square_enrollments_subscription; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_square_enrollments_subscription ON public.square_enrollments USING btree (square_subscription_id) WHERE (square_subscription_id IS NOT NULL);
 
 --
 -- Name: uq_vehicles_customer_plate; Type: INDEX; Schema: public; Owner: -
@@ -6665,6 +6850,13 @@ ALTER TABLE ONLY public.membership_tier_prices
     ADD CONSTRAINT membership_tier_prices_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.membership_plans(id) ON DELETE CASCADE;
 
 --
+-- Name: memberships memberships_card_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.memberships
+    ADD CONSTRAINT memberships_card_id_fkey FOREIGN KEY (card_id) REFERENCES public.customer_cards(id);
+
+--
 -- Name: memberships memberships_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -7386,6 +7578,55 @@ ALTER TABLE ONLY public.square_customer_links
     ADD CONSTRAINT square_customer_links_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
+-- Name: square_enrollments square_enrollments_card_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_enrollments
+    ADD CONSTRAINT square_enrollments_card_id_fkey FOREIGN KEY (card_id) REFERENCES public.customer_cards(id);
+
+--
+-- Name: square_enrollments square_enrollments_consent_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_enrollments
+    ADD CONSTRAINT square_enrollments_consent_id_fkey FOREIGN KEY (consent_id) REFERENCES public.card_consents(id);
+
+--
+-- Name: square_enrollments square_enrollments_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_enrollments
+    ADD CONSTRAINT square_enrollments_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
+
+--
+-- Name: square_enrollments square_enrollments_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_enrollments
+    ADD CONSTRAINT square_enrollments_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: square_enrollments square_enrollments_membership_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_enrollments
+    ADD CONSTRAINT square_enrollments_membership_id_fkey FOREIGN KEY (membership_id) REFERENCES public.memberships(id);
+
+--
+-- Name: square_enrollments square_enrollments_plan_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_enrollments
+    ADD CONSTRAINT square_enrollments_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.membership_plans(id);
+
+--
+-- Name: square_enrollments square_enrollments_tier_price_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_enrollments
+    ADD CONSTRAINT square_enrollments_tier_price_id_fkey FOREIGN KEY (tier_price_id) REFERENCES public.membership_tier_prices(id);
+
+--
 -- Name: square_payments square_payments_decided_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -7468,6 +7709,20 @@ ALTER TABLE ONLY public.square_refund_legs
 
 ALTER TABLE ONLY public.square_state
     ADD CONSTRAINT square_state_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: square_subscription_invoices square_subscription_invoices_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_subscription_invoices
+    ADD CONSTRAINT square_subscription_invoices_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: square_subscription_invoices square_subscription_invoices_membership_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_subscription_invoices
+    ADD CONSTRAINT square_subscription_invoices_membership_id_fkey FOREIGN KEY (membership_id) REFERENCES public.memberships(id);
 
 --
 -- Name: standing_occurrences standing_occurrences_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

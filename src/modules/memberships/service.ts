@@ -28,6 +28,7 @@ import {
 } from '../payments-sync/membership.js'
 import type { ProductMap } from '../payments-sync/product-map.js'
 import { loadIntentRefs, markIntentsMatched, openAwaitingMatch } from './checkouts.js'
+import './square/problems.js'
 import { grantCycleCredits } from './credits.js'
 import { resolvePlanClass } from './plan-class.js'
 import { ensurePlans, loadPlans, planByKey, type Plan } from './plans.js'
@@ -290,6 +291,11 @@ export async function syncMemberships(db: Db, d: MembershipSyncDeps): Promise<Me
       ].filter(Boolean),
     )
     const existing = inf.customerId ? await currentMembership(db, inf.customerId) : undefined
+    // a membership Square bills (ADR 0171 wave Q3b) is driven by Square's events, never by the Squarespace inference
+    if (existing?.source === 'square') {
+      report.held++
+      continue
+    }
     const em: ExistingMembership | undefined = existing && {
       id: existing.id,
       customerId: existing.customer_id,
@@ -624,6 +630,13 @@ export async function patchMembership(
   if (!cur) throw new AppError('MEMBERSHIP_NOT_FOUND')
   if (p.expectedVersion !== undefined && p.expectedVersion !== cur.version)
     throw new AppError('VERSION_CONFLICT')
+  // Square bills it (ADR 0171 wave Q3b): its status, plan, size and renewal follow Square (the billing actions); only the
+  // auto-apply flag and a note are edited here
+  if (cur.source === 'square') {
+    const touches = [p.status, p.planKey, p.planClass, p.planLabel, p.renewsAt].some((v) => v !== undefined)
+    if (touches) throw new AppError('MEMBERSHIP_BILLED_BY_SQUARE')
+    return patchSquareMembership(tx, d, cur, p, actor)
+  }
   const now = d.clock.now()
   const plans = await loadPlans(tx, d.locationId)
   const plan = p.planKey ? planByKey(plans, p.planKey) : plans.find((x) => x.id === cur.plan_id)
@@ -690,6 +703,33 @@ export async function patchMembership(
   })
   if (row.status === 'active' && row.current_period_start)
     await grantCycleCredits(tx, d, { id, currentPeriodStart: row.current_period_start }, plan, actor.name)
+  return row
+}
+
+/** The edits a membership billed by Square takes here: the auto-apply flag and a note (kept in the audit). */
+async function patchSquareMembership(
+  tx: Tx,
+  d: { locationId: string; clock: Clock },
+  cur: MembershipRow,
+  p: MembershipPatch,
+  actor: PatchActor,
+): Promise<MembershipRow> {
+  const now = d.clock.now()
+  const row = await tx
+    .updateTable('memberships')
+    .set((eb) => ({ auto_apply: p.autoApply ?? cur.auto_apply, updated_at: now, version: eb('version', '+', 1) }))
+    .where('id', '=', cur.id)
+    .returningAll()
+    .executeTakeFirstOrThrow()
+  await audit.record(tx, {
+    locationId: d.locationId,
+    action: 'membership.edited',
+    entityType: 'membership',
+    entityId: cur.id,
+    before: { autoApply: cur.auto_apply },
+    after: { autoApply: row.auto_apply, note: p.note ?? null },
+    ctx: actor.audit,
+  })
   return row
 }
 

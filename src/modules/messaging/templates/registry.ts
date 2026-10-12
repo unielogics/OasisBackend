@@ -378,6 +378,40 @@ export const TEMPLATES = {
     editable: false,
     source: 'new: fee charged on a saved card after staff confirm (ADR 0171 D7)',
   }),
+  // Memberships billed by Square (ADR 0171 wave Q3b). A renewal Square could not charge (day 0 of plan decision 7): the client's own
+  // card page (a personal link, a secretVar) and Square's page for the invoice; perks stay on for now.
+  membership_payment_failed: t({
+    key: 'membership_payment_failed',
+    label: 'Membership payment failed',
+    klass: 'personal_link',
+    body: 'Hi {first}, your Oasis Auto Spa {tier} payment didn’t go through. Update your card on this secure page: {link}{#pay_url} Or pay this month here: {pay_url}{/pay_url} Your perks stay on while we sort it out.',
+    required: ['link', 'tier', 'first'],
+    optional: ['pay_url'],
+    editable: false,
+    source: 'new: failed membership renewal, day 0 (ADR 0171 D10, plan decision 7)',
+  }),
+  // The first payment of a membership joined online failed: it did not start; a new membership page to try another card.
+  membership_join_retry: t({
+    key: 'membership_join_retry',
+    label: 'Membership did not start',
+    klass: 'personal_link',
+    body: 'Your first Oasis Auto Spa {tier} payment didn’t go through, so your membership hasn’t started. Try another card on this secure page: {link}',
+    required: ['link', 'tier'],
+    optional: ['first'],
+    editable: false,
+    source: 'new: first membership payment failed (ADR 0171 wave Q3b)',
+  }),
+  // "Move members" (plan decision 8): the notice before a member's price moves to the tier's current price.
+  membership_price_change: t({
+    key: 'membership_price_change',
+    label: 'Membership price change',
+    klass: 'payment_link',
+    body: 'Hi {first}, your Oasis Auto Spa {tier} membership will be {price}/month from your first bill after {date}. Questions? Just reply here.',
+    required: ['tier', 'price', 'date', 'first'],
+    optional: [],
+    editable: false,
+    source: 'new: Move members, 30-day notice (ADR 0171 D9, plan decision 8)',
+  }),
   // The picked-up thank-you (status texts, wave W3d). {receipt} is "Paid in full: $54.00." when nothing is owed and no receipt text
   // went in the last 2 hours. The variant with the book-again link is picked_up_link: a personal link is a secret (only its hash is
   // stored), so it rides in the personal_link class, whose message row keeps the link masked and whose outbox body is wiped.

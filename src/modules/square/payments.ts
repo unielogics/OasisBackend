@@ -112,6 +112,20 @@ async function intentOf(tx: Tx, d: SquarePaymentDeps, f: SquarePaymentFacts): Pr
   return i ? { id: i.id, invoiceId: i.invoice_id, ledgerEventId: i.ledger_event_id, amountCents: i.amount_cents } : null
 }
 
+/** A card-on-file payment by the Square customer of a membership Square bills (wave Q3b): possibly a subscription invoice's. */
+async function maybeMembershipPayment(tx: Tx, d: SquarePaymentDeps, f: SquarePaymentFacts): Promise<boolean> {
+  if (f.entryMethod !== 'ON_FILE' || !f.customerId) return false
+  const m = await tx
+    .selectFrom('memberships')
+    .select('id')
+    .where('location_id', '=', d.locationId)
+    .where('source', '=', 'square')
+    .where('square_customer_id', '=', f.customerId)
+    .limit(1)
+    .executeTakeFirst()
+  return !!m
+}
+
 export async function classifyContextFor(tx: Tx, d: SquarePaymentDeps, f: SquarePaymentFacts, ops: SquareLedgerOps): Promise<ClassifyContext> {
   const keyed = await tx.selectFrom('ledger_events').select('id').where('idempotency_key', '=', payKey(f.paymentId)).executeTakeFirst()
   const live = keyed ? true : !!(await ops.livePayOf(tx, f.paymentId))
@@ -120,10 +134,13 @@ export async function classifyContextFor(tx: Tx, d: SquarePaymentDeps, f: Square
     squareLocationId: squareLocationId(d.env as Env),
     inLedger: live,
     link: await linkOf(tx, d, f.orderId),
-    // a card-on-file charge (wave Q3a); subscription invoices (wave Q3b) do not exist yet
+    // a card-on-file charge (wave Q3a)
     charge: chargeId !== null,
     chargeId,
-    membership: false,
+    // the payment of a membership's subscription invoice (wave Q3b): its order is the invoice's (never an Oasis invoice's money)
+    membership: f.orderId
+      ? !!(await tx.selectFrom('square_subscription_invoices').select('id').where('square_order_id', '=', f.orderId).executeTakeFirst())
+      : false,
     posIntent: await intentOf(tx, d, f),
   }
 }
@@ -299,9 +316,15 @@ export async function decideSquarePayment(tx: Tx, d: SquarePaymentDeps, f: Squar
       return 'matched'
     }
     case 'membership':
-      // not reachable before wave Q3b
-      await setClass(c.kind)
-      return 'pending'
+      // a membership's monthly payment (wave Q3b): Square bills it and the invoice events apply it; never matched to an invoice
+      await setClass('membership', {
+        match_state: 'ignored',
+        ignore_reason: 'other',
+        ignore_note: 'membership payment (Square subscription)',
+        decided_by: 'Square',
+        decided_at: now,
+      })
+      return 'ignored'
     case 'pos_intent':
     case 'counter': {
       const classification = c.kind
@@ -311,6 +334,12 @@ export async function decideSquarePayment(tx: Tx, d: SquarePaymentDeps, f: Squar
         return 'pending'
       }
       await setClass(classification, { match_after: after })
+      // a card-on-file payment of a client whose membership Square bills may be that membership's (its invoice event not in yet):
+      // never recorded on a visit's invoice by itself; staff see it, and the invoice event takes it out as a membership payment
+      if (c.kind === 'counter' && (await maybeMembershipPayment(tx, d, f))) {
+        await markUnmatched(tx, d, row, [], 'a card-on-file payment of a client billed by a Square membership: it may be a membership payment')
+        return 'unmatched'
+      }
       return runMatcher(tx, d, ops, f, row, c.kind === 'pos_intent' ? c.intent : null, o.payer)
     }
   }

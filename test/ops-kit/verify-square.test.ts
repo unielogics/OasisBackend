@@ -34,6 +34,8 @@ describe('verify:square', () => {
       'SQR-10': 'SKIP',
       'SQR-11': 'PASS',
       'SQR-12': 'PASS',
+      'SQR-13': 'PASS',
+      'SQR-14': 'PASS',
     })
     expect(r.out).toContain('resume: refused: 400 INVALID_REQUEST_ERROR/INVALID_DATE')
     expect(r.out).toContain('unpaid invoice: invoice UNPAID: CreatePayment on its order refused: 403')

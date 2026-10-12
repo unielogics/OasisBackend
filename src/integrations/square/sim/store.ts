@@ -766,6 +766,11 @@ export class SquareSimStore {
     }
     s.version = Number(s.version) + 1
     this.emit('subscription.updated', 'subscription', id, { subscription: s })
+    // a new card on a subscription with a failed invoice: Square tries the invoice again with it (sandbox finding, wave Q2b)
+    if (patch.card_id !== undefined && this.cards.get(String(patch.card_id))?.enabled) {
+      const open = (s.invoice_ids as string[] | undefined)?.map((x) => this.invoices.get(x)).find((x) => x?.status === 'SCHEDULED')
+      if (open) this.payInvoice(String(open.id))
+    }
     return clone(s)
   }
 
@@ -908,16 +913,9 @@ export class SquareSimStore {
     const card = s.card_id ? this.cards.get(String(s.card_id)) : undefined
     const result = outcome ?? (card?.enabled ? 'paid' : card ? 'failed' : undefined)
     if (result === 'paid' && card) {
-      this.orderOwner.set(String(order.id), 'payment')
-      this.createPayment({ source_id: card.id, customer_id: s.customer_id, order_id: order.id, amount_money: usd(price), location_id: this.locationId, autocomplete: true })
-      this.orderOwner.set(String(order.id), 'invoice')
-      inv.status = 'PAID'
-      ;(inv.payment_requests as Obj[])[0]!.total_completed_amount_money = usd(price)
-      inv.version = 2
-      inv.updated_at = this.iso()
+      this.chargeInvoice(inv, String(card.id))
       s.charged_through_date = end
       s.paid_until_date = end
-      this.emit('invoice.payment_made', 'invoice', invId, { invoice: inv })
     } else if (result === 'failed' || (result === 'paid' && !card)) {
       inv.status = 'SCHEDULED'
       this.emit('invoice.scheduled_charge_failed', 'invoice', invId, { invoice: inv })
@@ -951,6 +949,65 @@ export class SquareSimStore {
   }
 
   // ---- invoices ----------------------------------------------------------------------------------------------------------------
+
+  /** Pays an open subscription invoice with a saved card or a card nonce: the payment carries the invoice's order. */
+  private chargeInvoice(inv: Obj, sourceId: string): Obj {
+    const req = (inv.payment_requests as Obj[])[0]!
+    const amount = (req.computed_amount_money as Money).amount
+    const orderId = String(inv.order_id)
+    this.orderOwner.set(orderId, 'payment')
+    let payment: Obj
+    try {
+      payment = this.createPayment({
+        source_id: sourceId,
+        customer_id: (inv.primary_recipient as Obj).customer_id,
+        order_id: orderId,
+        amount_money: usd(amount),
+        location_id: this.locationId,
+        autocomplete: true,
+      })
+    } finally {
+      this.orderOwner.set(orderId, 'invoice')
+    }
+    inv.status = 'PAID'
+    req.total_completed_amount_money = usd(amount)
+    inv.version = Number(inv.version) + 1
+    inv.updated_at = this.iso()
+    this.emit('invoice.payment_made', 'invoice', String(inv.id), { invoice: inv })
+    return payment
+  }
+
+  /** The client pays a subscription invoice from its public page (controls), or Square's retry after a card update. */
+  payInvoice(id: string, o: { nonce?: string } = {}): Obj {
+    const inv = this.get(this.invoices, id, 'Invoice')
+    if (!['UNPAID', 'SCHEDULED', 'PARTIALLY_PAID'].includes(String(inv.status)))
+      throw new SimError(400, 'INVALID_REQUEST_ERROR', 'BAD_REQUEST', `Invoice \`${id}\` is ${String(inv.status)}.`)
+    const sub = this.subscriptions.get(String(inv.subscription_id ?? ''))
+    const source = o.nonce ?? (sub?.card_id ? String(sub.card_id) : '')
+    if (!source) throw new SimError(400, 'INVALID_REQUEST_ERROR', 'BAD_REQUEST', 'No card to pay the invoice with.')
+    this.chargeInvoice(inv, source)
+    if (sub) {
+      sub.paid_until_date = sub.charged_through_date
+      sub.version = Number(sub.version) + 1
+      this.emit('subscription.updated', 'subscription', String(sub.id), { subscription: sub })
+    }
+    return clone(inv)
+  }
+
+  /** CancelInvoice: an open invoice only (version must match); Square stops asking for it. */
+  cancelInvoice(id: string, version: unknown): Obj {
+    const inv = this.get(this.invoices, id, 'Invoice')
+    if (version !== undefined && Number(version) !== Number(inv.version))
+      throw new SimError(400, 'INVALID_REQUEST_ERROR', 'VERSION_MISMATCH', 'The invoice version does not match.')
+    // the sandbox answers a canceled and a paid invoice alike (2026-10-12)
+    if (!['UNPAID', 'SCHEDULED', 'PARTIALLY_PAID'].includes(String(inv.status)))
+      throw new SimError(400, 'INVALID_REQUEST_ERROR', 'BAD_REQUEST', 'Can only cancel an unpaid or scheduled invoice')
+    inv.status = 'CANCELED'
+    inv.version = Number(inv.version) + 1
+    inv.updated_at = this.iso()
+    this.emit('invoice.canceled', 'invoice', id, { invoice: inv })
+    return clone(inv)
+  }
 
   getInvoice(id: string): Obj {
     return clone(this.get(this.invoices, id, 'Invoice'))

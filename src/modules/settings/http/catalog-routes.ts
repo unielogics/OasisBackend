@@ -115,7 +115,7 @@ const TierPriceView = z.object({
   monthlyCents: Cents,
   priceVersion: z.number().int(),
   effectiveFrom: z.iso.datetime(),
-  squareState: z.enum(['pending', 'synced', 'failed']).optional().describe('Staff with set.services only'),
+  squareState: z.enum(['pending', 'synced', 'failed', 'retired']).optional().describe('Staff with set.services only; retired: a superseded price deleted at Square (never a current one)'),
 })
 
 export const TierView = z.object({
