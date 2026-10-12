@@ -1301,8 +1301,8 @@ is read-only for payments; Oasis owns the ledger. Polling is the baseline; the w
 |---|---|---|
 | `GET /customers/:id/membership` | `cli.view` | `{membership, upgrade, history}`: plan (colours, tint, perks, percent perks as display data), status, renewal (`renewsAt`, `renewLabel`), months active, credits per rule (`left: null` = unlimited), retention, flags; for a non-member the upgrade candidacy (3 or more completed visits in 60 days); history (visits, lifetime spend, average days between visits, favourite package). |
 | `GET /memberships?status&plan&q&limit&cursor` | `cli.member` | members by customer name with a count per status. |
-| `POST /memberships` | `cli.member` | a member by hand (no subscription data): active, this cycle's credits granted. `409 MEMBERSHIP_EXISTS`. |
-| `PATCH /memberships/:id` | `cli.member` | `{status?, planKey?, planLabel?, renewsOn?, autoApply?, note?, expectedVersion?}`; holds against the inference until a newer paid order; `412` on a stale version; audited. |
+| `POST /memberships` | `cli.member` | a member by hand (no subscription data): active, this cycle's credits granted. `409 MEMBERSHIP_EXISTS`. `409 MEMBERSHIP_CLIENT_UNCONFIRMED` "Confirm who this client is first" on a record the stale-record rule holds (a staff membership is proof of the client, so it would hand the record to whoever holds the number now; W4c re-review 3, D3): staff confirm the client (`POST /customers/:id/identity/confirm`, audited) or create a new client. |
+| `PATCH /memberships/:id` | `cli.member` | `{status?, planKey?, planLabel?, renewsOn?, autoApply?, note?, expectedVersion?}`; holds against the inference until a newer paid order; `412` on a stale version; audited. An edit leaving the membership active, past due or paused on a stale record: `409 MEMBERSHIP_CLIENT_UNCONFIRMED` (canceling is allowed). |
 | `POST /appointments/:id/membership-perks/apply` | `cli.member`, **Idempotency-Key** | applies one credit as a system `adjust` (reason "Membership credit") equal to the package line. `404 MEMBERSHIP_NOT_FOUND`, `409 MEMBERSHIP_NOT_ACTIVE`, `MEMBERSHIP_NOT_ELIGIBLE`, `MEMBERSHIP_NO_CREDIT`, `MEMBERSHIP_CREDIT_APPLIED`, `MEMBERSHIP_NO_BALANCE`, `MEMBERSHIP_NO_INVOICE`, `MEMBERSHIP_APPOINTMENT_CLOSED`. |
 
 The Operations appointment file's `membership` (and the board's member badge) now come from the real port: `plan` is the label sold,
@@ -1597,7 +1597,10 @@ no card fields exist). Limits: section 26 (10 an hour per address, 2 a day per n
   vehicle or membership) and nothing is texted; the managers get `membership.web_join` "Website join to confirm: <customer> (Gold)"
   with the reference, what was typed and either "Call or text them to confirm; if they did join, add the Gold membership on their
   record and text them the Squarespace checkout link" or "They already have a Gold membership (active): check with them before
-  changing anything"; an audit row `membership.web_join_unverified`. The answer is the same 201 as any join's, so a join can not tell
+  changing anything", or, on a record the stale-record rule holds (W4c re-review 3, D3), "Careful: this number's record has been
+  quiet for N days — the texter may be a new holder of the number: confirm who they are before adding a membership; if they are
+  new, create a new client" (staff memberships on such a record answer 409 `MEMBERSHIP_CLIENT_UNCONFIRMED` until staff confirm
+  the client); an audit row `membership.web_join_unverified` (`after.staleRecord`). The answer is the same 201 as any join's, so a join can not tell
   whether a number is known or a member.
 
 201 `{memberRef "OAS-M-1A2B3C4D", status: "pending_payment", next: "checkout_link_by_sms", tier, plan, confirmationBy}`

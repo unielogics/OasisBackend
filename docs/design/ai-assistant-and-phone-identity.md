@@ -221,14 +221,26 @@ Actor: permissions sched.edit + jobs.status only, audit actor "Oasis AI (SMS)", 
   staff action on it (`manual_status_at` while live or paused), never as "live now". The rule holds provisional records ("New
   texter …") too, and an archived provisional record it holds is never restored by a text (a new provisional client is made; the
   old one is flagged "number reassigned"). A PIN outranks a code on the website as on the links (a member token for a PIN holder's
-  number: 409 IDENTITY_PIN_REQUIRED), and the website's code check shows a stale record to nobody.
+  number: 409 IDENTITY_PIN_REQUIRED), and the website's code check shows a stale record to nobody. W4c re-review 3: a paid-up
+  member is never stale (a membership with a matched payment whose paid period, plus 14 days of grace, covers now is current proof;
+  a lapsed one counts from its last payment; an invalid-number bounce still holds the record); staff adding a membership, or
+  setting one live, on a stale record get 409 MEMBERSHIP_CLIENT_UNCONFIRMED until they confirm the client (POST
+  /customers/:id/identity/confirm, audited), and the website join's staff notice on a stale record says the joiner may be a new
+  holder of the number ("confirm who they are before adding a membership; if they are new, create a new client").
+- KNOWN LIMIT (W4c re-review 3, D4): carriers recycle a number after about 30–90 days, well inside the 180-day window, and a paid-up
+  member is never stale for inactivity; until the rule holds a record, the number's new holder is that client to the assistant (name,
+  visits, balance, membership). Changes still need the PIN rules, reply numbers and confirmations; an invalid-number bounce ends the
+  window at once. Proposed owner decision for W5: the assistant discusses balance and membership details only with a verified
+  (trusted) phone; appointment dates and times stay available to the number on file.
 - Revocation: phone change, PIN reset, merge, STOP, staff Clear PIN, LINK_EPOCH bump.
 - Squarespace: unverified emails never feed linkCustomer's email tier; checkout-intent tier first (expected email +
   product + window); no match → awaiting_match for staff; duplicate paid → flagged; abandoned after 7 d. A stale record is
   no match by its phone or an unverified email for an order placed since it went stale (the order → "needs a customer" for
   staff, nothing written on the record), and
   the contacts job never links a Squarespace contact to it by phone; its Squarespace links made while it was not stale, staff
-  links and a verified email still link (W4c re-review 2).
+  links and a verified email still link (W4c re-review 2). A Squarespace customer that already PAID on the record (on its
+  membership row with a matched payment, or on a paid order linked to it) is that client: its orders link whatever the record's
+  staleness and whatever made the contact link (W4c re-review 3, D1: a yearly member's renewal stays hers).
 
 ## 6. Status texts (port from lifecycle.finish())
 Checked in (manual arrive: queue +3 min, drop if cleaning starts), wash started (existing in_progress), running late

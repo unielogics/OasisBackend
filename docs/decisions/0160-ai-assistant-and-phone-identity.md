@@ -764,3 +764,43 @@ Each item has a test that fails on b125a7e and passes after it (the re-reviewer'
   own handoff such as a late cancel; `ToolContext.handoffRequested()`), `propose_booking`, `propose_reschedule` and
   `propose_cancel` answer `unavailable` and create nothing: no pending action, no reply-number text. The handoff itself still
   opens when the turn ends.
+
+### W4c re-review 3 fixes (the third re-review of 19385cd: the yearly renewal regression and the staff join route)
+
+Orchestrator decisions; each code item (D1–D3) has a test that fails on 19385cd and passes after it (test/memberships/paid-up-member.test.ts,
+test/memberships/stale-staff.test.ts, test/public-http/memberships.test.ts).
+
+- **D1 A Squarespace customer that already paid on a client's record is that client** [the probe "REAL MEMBER yearly renewal"]:
+  N1 left a real member's renewal unlinked when her contact was linked by an email nobody verified and her record had gone stale
+  (Yara Year: yearly member, no visit, renewal on day 364 → "needs a customer" with the "new holder" alert, her membership past
+  due). `memberships/service.ts` `customerRefs` now puts into `CustomerRef.sqspCustomerIds` every Squarespace customer that already
+  PAID on the record: the one on a membership row of theirs a matched payment reached (`last_paid_at` set), and the one on a paid
+  order already linked to them (`sqsp_orders.customer_id`, a payment state where money was taken). Its orders link to the record in
+  the Squarespace-customer tier, whatever the record's staleness and whatever made the contact link (phone, an email verified or
+  not); it is also a held id (F1: another client's intent never takes its orders). A NEW Squarespace customer never paid on the
+  record, so one reaching a stale record by its phone or an unverified email still links nothing (N1 and the re-review's routes
+  stand). Consequence: a legacy member's renewal from the Squarespace customer on their membership row now links to them instead of
+  waiting for staff (test/memberships/checkouts.test.ts F1 cases updated; a row no matched payment reached still links nothing).
+- **D2 A paid-up member is never stale** (`identity/stale.ts`): a live (active, past due or paused) membership with a matched
+  payment whose paid period covers now (its `current_period_end`, else the plan's billing interval after `last_paid_at`, plus
+  `PAID_UP_GRACE_DAYS` = 14) is current proof of the client. A lapsed one counts from its `last_paid_at` as before (so the record is
+  stale 180 days after the last payment, `staleSince` from there); a canceled one and a hand-made one (no matched payment) are not
+  paid up. Kept (fixer's call, within "never stale" for inactivity): a bounce as an invalid number after the record's newest PIN or
+  creation still holds a paid-up member's record, since the number itself is gone and carriers reissue it.
+- **D3 Staff memberships on a stale record**: a staff membership is a staff action, and a staff action is proof of the client, so on
+  a stale record it handed the old client's record to whoever holds the number now (a website join with that number told staff to
+  "add the membership on their record"). `createManualMembership` (POST /memberships) and `patchMembership` (PATCH
+  /memberships/:id, when the edit leaves the membership active, past due or paused; canceling is allowed) answer 409
+  `MEMBERSHIP_CLIENT_UNCONFIRMED` on a record the rule holds, until staff confirm the client (`POST /customers/:id/identity/confirm`,
+  audited `identity.client.confirmed`, which ends the rule) or create a new client. The website join's staff notice on a stale record
+  (`public/memberships.ts` `unverifiedJoin`) says "Careful: this number's record has been quiet for N days — the texter may be a new
+  holder of the number: confirm who they are before adding a membership; if they are new, create a new client" (or "this number's
+  last text bounced as an invalid number"), and its audit row carries `staleRecord`.
+- **D4 Known limit: the 180-day window.** Carriers recycle a disconnected number after about 30 to 90 days, well inside the 180 days
+  the stale-record rule waits; and a paid-up member (D2) is never stale for inactivity at all. Until a record goes stale, whoever
+  holds its number is that client to the assistant: a new holder texting within the window is greeted by the old client's name and
+  can ask about their visits, balance and membership (a texted code proves only the number; the link pages' PIN rules, the reply
+  numbers and the in-chat action confirmations still guard every change, and an invalid-number bounce still ends the window at
+  once). **Proposed owner decision for W5:** the assistant discusses balance and membership details only with a VERIFIED (trusted)
+  phone (a PIN or code verification within the 30-day trust); appointment dates and times stay available to the number on file, as
+  the shop's own reminder texts already send them there.
