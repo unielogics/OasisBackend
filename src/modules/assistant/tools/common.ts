@@ -11,7 +11,6 @@ import { isVipCustomer } from '../../customers/service.js'
 import { memberPrivilegesHeldUntil } from '../../identity/pin-service.js'
 import { loadPlans } from '../../memberships/plans.js'
 import { activeMembership } from '../../public/members.js'
-import { tierOfPlan } from '../../public/tiers.js'
 import { computeSlots, type Slot } from '../../scheduling/availability.js'
 import { engineInput, loadDayData, sameDayGuaranteesUsed } from '../../scheduling/availability-loader.js'
 import { getVipSettings } from '../../settings/vip.js'
@@ -70,7 +69,7 @@ export async function privilegesOf(db: Executor, locationId: string, customerId:
   const listed = await isVipCustomer(db, locationId, customerId)
   if (!m) return { member: false, vip: listed }
   const plan = (await loadPlans(db, locationId)).find((p) => p.id === m.planId)
-  return { member: true, vip: listed || (plan !== undefined && tierOfPlan(plan.key) === 'vip') }
+  return { member: true, vip: listed || plan?.vipBooking === true }
 }
 
 /** Open future bookings the assistant made for the client. */

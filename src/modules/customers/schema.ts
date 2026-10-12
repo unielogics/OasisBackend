@@ -40,7 +40,16 @@ export interface VehiclesTable {
   plate: string | null
   deleted_at: Date | null
   created_at: Generated<Date>
+  /** vehicle_classes.key of the car's size (migration 20261014100000, ADR 0170); null when nobody said. */
+  vehicle_class: string | null
+  /** Who said the size: staff, the client, the AI assistant, or the legacy vehicle_type backfill. */
+  vehicle_class_source: VehicleClassSource | null
 }
+
+export type VehicleClassSource = 'staff' | 'client' | 'ai' | 'legacy'
+/** How a visit line was priced (ADR 0170): legacy (before sizes), the size's own price, the first size's (size unknown), the starting
+ * price (the size has no price), or the service's base price (no size prices). */
+export type PriceBasis = 'legacy' | 'class' | 'unknown_class' | 'estimated' | 'base'
 
 export type AppointmentStatus =
   'booked' | 'confirmed' | 'arrived' | 'cleaning' | 'completed' | 'canceled' | 'no_show'
@@ -86,6 +95,13 @@ export interface AppointmentsTable {
   created_by: string | null
   created_at: Generated<Date>
   updated_at: Generated<Date>
+  // the size snapshot (migration 20261014100200, ADR 0170; written from wave Q2)
+  vehicle_class: string | null
+  vehicle_class_label: string | null
+  class_confirmed_at: Date | null
+  list_price_cents: number | null
+  discount_bp: number | null
+  price_basis: Generated<PriceBasis>
 }
 
 export interface AppointmentAddonsTable {
@@ -97,6 +113,9 @@ export interface AppointmentAddonsTable {
   added_by: string | null
   added_at: Generated<Date>
   removed_at: Date | null
+  list_price_cents: number | null
+  discount_bp: number | null
+  price_basis: Generated<PriceBasis>
 }
 
 export type OverrideKind = 'capacity' | 'hours' | 'closure' | 'vip_hold' | 'same_day_guarantee'

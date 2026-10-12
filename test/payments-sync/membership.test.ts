@@ -58,13 +58,17 @@ describe('tier normalisation', () => {
     ['Essentials Plus', 'essential'],
     ['EXECUTIVE club', 'executive'],
     ['Exotic', 'exotic'],
-    ['Gold', undefined],
+    // the website's tiers (ADR 0170): their keys are tier words too
+    ['Gold', 'gold'],
+    ['VIP club', 'vip'],
+    ['Platinum', undefined],
     ['Impremium', undefined],
     ['', undefined],
   ])('%s -> %s', (label, tier) => expect(normalizeTier(label)).toBe(tier))
 
   it('a membership entry must name a tier; an entry needs a product id or sku', () => {
-    expect(() => new ProductMap([{ sku: 'X', kind: 'membership', tierLabel: 'Gold' }])).toThrow(/tier/)
+    expect(() => new ProductMap([{ sku: 'X', kind: 'membership', tierLabel: 'Platinum' }])).toThrow(/tier/)
+    expect(() => new ProductMap([{ sku: 'X', kind: 'membership', tier: 'Not A Key' }])).toThrow()
     expect(() => new ProductMap([{ kind: 'service' }])).toThrow(/productId or a sku/)
   })
 
@@ -85,6 +89,24 @@ describe('tier normalisation', () => {
     })
     expect(m.resolve({ sku: 'unknown' })).toBeUndefined()
     expect(ProductMap.fromJson(undefined).size).toBe(0)
+  })
+
+  it('an old tier name resolves to the tier that carries it as its legacy key (premium -> gold, executive -> vip: ADR 0170)', () => {
+    const aliases = new Map([
+      ['premium', 'gold'],
+      ['executive', 'vip'],
+    ])
+    const m = new ProductMap(
+      [
+        { sku: 'MEM-PREM', kind: 'membership', tierLabel: 'Premium Care' },
+        { sku: 'MEM-EXEC', kind: 'membership', tier: 'executive' },
+        { sku: 'MEM-GOLD', kind: 'membership', tier: 'gold' },
+        { sku: 'MEM-ESS', kind: 'membership', tierLabel: 'Essential' },
+      ],
+      aliases,
+    )
+    expect(['MEM-PREM', 'MEM-EXEC', 'MEM-GOLD', 'MEM-ESS'].map((sku) => m.resolve({ sku })?.tier)).toEqual(['gold', 'vip', 'gold', 'essential'])
+    expect(m.resolve({ sku: 'MEM-PREM' })?.planLabel).toBe('Premium Care')
   })
 })
 

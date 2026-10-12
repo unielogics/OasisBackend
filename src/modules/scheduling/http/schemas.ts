@@ -497,7 +497,7 @@ export const AppointmentFile = z.object({
       plan: z.string(),
       creditsLeft: z.number().int().nullable(),
       creditAvailable: z.boolean(),
-      planKey: z.enum(['essential', 'premium', 'executive', 'exotic']).optional(),
+      planKey: z.string().optional().describe('The tier’s key (gold, vip, …; ADR 0170)'),
       renewsAt: z.string().nullable().optional(),
       renewLabel: z.string().nullable().optional(),
       creditsUsed: z.number().int().optional(),

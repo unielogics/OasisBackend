@@ -225,7 +225,7 @@ describe('membership inference from subscription orders', () => {
     ).toHaveLength(0)
     const phone = await member(r, byPhone)
     expect(phone).toMatchObject({
-      plan_label: 'Executive',
+      plan_label: 'VIP',
       last_sqsp_order_id: o3.orderId,
       status: 'active',
       source: 'squarespace',
@@ -367,17 +367,17 @@ describe('membership inference from subscription orders', () => {
     await sync(r)
     await pass(r)
     const m = await member(r, c)
-    expect(m.plan_label).toBe('Executive')
+    expect(m.plan_label).toBe('VIP')
     expect(flags(m)).toContain('tier_changed')
     const plan = await r.db
       .selectFrom('membership_plans')
       .select('key')
       .where('id', '=', m.plan_id)
       .executeTakeFirstOrThrow()
-    expect(plan.key).toBe('executive')
+    expect(plan.key).toBe('vip')
     const grants = await r.db
       .selectFrom('membership_credit_events')
-      .select(['rule_id', 'qty'])
+      .select(['inclusion_id', 'qty'])
       .where('membership_id', '=', m.id)
       .where('cycle_start', '=', m.current_period_start!)
       .where('kind', '=', 'grant')

@@ -29,7 +29,7 @@ describe('staff memberships on a stale record (W4c re-review 3, D3)', () => {
   it('POST /memberships refuses on a stale record (nothing written, still stale) until staff confirm the client', async () => {
     const id = await quietClient(200)
     expect((await stale(id)).stale).toBe(true)
-    const res = await m.send(m.superS(), 'POST', '/memberships', { customerId: id, planKey: 'premium', planLabel: 'Gold' })
+    const res = await m.send(m.superS(), 'POST', '/memberships', { customerId: id, planKey: 'gold', planLabel: 'Gold' })
     expect(res.statusCode, res.body).toBe(409)
     const body = res.json() as { code: string; detail: string }
     expect(body.code).toBe('MEMBERSHIP_CLIENT_UNCONFIRMED')
@@ -43,19 +43,19 @@ describe('staff memberships on a stale record (W4c re-review 3, D3)', () => {
     expect(
       await m.h.t.db.selectFrom('audit_log').select('action').where('entity_id', '=', id).where('action', '=', 'identity.client.confirmed').execute(),
     ).toHaveLength(1)
-    const created = await m.send(m.superS(), 'POST', '/memberships', { customerId: id, planKey: 'premium', planLabel: 'Gold' })
+    const created = await m.send(m.superS(), 'POST', '/memberships', { customerId: id, planKey: 'gold', planLabel: 'Gold' })
     expect(created.statusCode, created.body).toBe(201)
   })
 
   it('a client who is not stale gets the membership as before', async () => {
     const id = await quietClient(20)
-    const res = await m.send(m.superS(), 'POST', '/memberships', { customerId: id, planKey: 'premium' })
+    const res = await m.send(m.superS(), 'POST', '/memberships', { customerId: id, planKey: 'gold' })
     expect(res.statusCode, res.body).toBe(201)
   })
 
   it('PATCH /memberships/:id refuses to set a stale record’s membership live (a staff action is proof) but may cancel it', async () => {
     const id = await quietClient(400)
-    const plan = await m.h.t.db.selectFrom('membership_plans').select('id').where('key', '=', 'premium').executeTakeFirstOrThrow()
+    const plan = await m.h.t.db.selectFrom('membership_plans').select('id').where('key', '=', 'gold').executeTakeFirstOrThrow()
     const mid = m.h.t.app.newId()
     const long = new Date(m.h.clock.now().getTime() - 300 * DAY)
     await m.h.t.db

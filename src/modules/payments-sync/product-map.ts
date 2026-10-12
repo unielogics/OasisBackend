@@ -2,16 +2,24 @@ import { z } from 'zod'
 
 /**
  * Squarespace product/SKU to Oasis meaning. The Orders API carries no subscription flag and no tier, so the mapping is
- * the only source of truth for "this order is a Premium membership payment" and for "this order is one of ours at all".
+ * the only source of truth for "this order is a Gold membership payment" and for "this order is one of ours at all".
+ *
+ * ADR 0170: tiers are editable and keyed by a slug. A product names its tier by key; the old fixed keys (premium, executive) stay
+ * valid and resolve through the tier's legacy_key (buildProductMap passes the aliases, so a resolved tier is always the current key).
  */
-export const TIERS = ['essential', 'premium', 'executive', 'exotic'] as const
-export type Tier = (typeof TIERS)[number]
+export type Tier = string
+
+/** A tier key: a lowercase slug. */
+export const TIER_KEY = /^[a-z][a-z0-9_]{0,31}$/
+
+/** The tier names a product label is read for, in this order: the design's four (old keys included) and the website's two. */
+export const TIER_WORDS = ['essential', 'premium', 'executive', 'exotic', 'gold', 'vip'] as const
 
 /** "Premium Care" normalises to premium; matching is by whole word so "Essentials Plus" is essential too. */
 export function normalizeTier(label: string | null | undefined): Tier | undefined {
   if (!label) return undefined
   const words = label.toLowerCase().match(/[a-z]+/g) ?? []
-  for (const tier of TIERS) {
+  for (const tier of TIER_WORDS) {
     if (words.some((w) => w === tier || w === `${tier}s`)) return tier
   }
   return undefined
@@ -24,7 +32,7 @@ const entrySchema = z
     kind: z.enum(['membership', 'service']),
     /** Membership display label as sold, e.g. "Premium Care"; the tier is derived from it. */
     tierLabel: z.string().min(1).optional(),
-    tier: z.enum(TIERS).optional(),
+    tier: z.string().regex(TIER_KEY).optional(),
     intervalMonths: z.number().int().min(1).max(12).default(1),
     label: z.string().optional(),
   })
@@ -50,7 +58,11 @@ export class ProductMap {
   private readonly byProduct = new Map<string, ParsedEntry>()
   private readonly bySku = new Map<string, ParsedEntry>()
 
-  constructor(entries: readonly ProductMapEntry[] = []) {
+  /** `aliases`: old tier key -> current key (a tier's legacy_key), applied to every resolved tier. */
+  constructor(
+    entries: readonly ProductMapEntry[] = [],
+    private readonly aliases: ReadonlyMap<string, string> = new Map(),
+  ) {
     for (const raw of entries) {
       const e = entrySchema.parse(raw)
       if (e.productId) this.byProduct.set(e.productId, e)
@@ -73,9 +85,10 @@ export class ProductMap {
     const bySku = li.sku ? this.bySku.get(li.sku.trim().toLowerCase()) : undefined
     const e = byId ?? bySku
     if (!e) return undefined
+    const tier = e.kind === 'membership' ? (e.tier ?? normalizeTier(e.tierLabel)) : undefined
     return {
       kind: e.kind,
-      tier: e.kind === 'membership' ? (e.tier ?? normalizeTier(e.tierLabel)) : undefined,
+      tier: tier === undefined ? undefined : (this.aliases.get(tier) ?? tier),
       planLabel: e.kind === 'membership' ? (e.tierLabel ?? e.label) : undefined,
       intervalMonths: e.intervalMonths,
       label: e.label,

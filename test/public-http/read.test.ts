@@ -114,7 +114,7 @@ describe('GET /public/availability', () => {
 })
 
 describe('GET /public/catalog', () => {
-  it('lists the live packages and add-ons with keys, durations and prices in cents, and the two website plans', async () => {
+  it('lists the live packages and add-ons with keys, durations and prices in cents; no tier is set up here, so none is sold', async () => {
     const r = await h.get('public/catalog')
     expect(r.statusCode).toBe(200)
     expect(r.headers['cache-control']).toBe('public, max-age=60')
@@ -124,10 +124,8 @@ describe('GET /public/catalog', () => {
     expect(express.priceCents).toBeGreaterThan(0)
     expect(b.addons.find((a: { name: string }) => a.name === 'Wax')).toMatchObject({ key: 'wax' })
     expect(b.addons.every((a: { priceCents: number }) => Number.isInteger(a.priceCents))).toBe(true)
-    expect(b.plans.map((p: { key: string; name: string; planKey: string; priceCents: null }) => [p.key, p.name, p.planKey, p.priceCents])).toEqual([
-      ['gold', 'Gold', 'premium', null],
-      ['vip', 'VIP', 'executive', null],
-    ])
+    // the tiers sold online are the active public ones (ADR 0170): this world has none (test/catalog-settings/website-seed.test.ts)
+    expect(b.plans).toEqual([])
     expect(new Set(b.services.map((s: { key: string }) => s.key)).size).toBe(b.services.length)
     expect([...keysOf(b)].filter((k) => /customer|phone|email|^id$|Id$/.test(k))).toEqual([])
   })

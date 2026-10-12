@@ -143,7 +143,7 @@ describe('POST bookings', () => {
   it('member privileges follow the page’s own client: an active member pays no fee, never during a PIN reset hold', async () => {
     const { id, session } = await trustedPage()
     await h.db.transaction().execute((tx) =>
-      createManualMembership(tx, { locationId: h.locationId, clock: h.clock, newId: h.newId }, { customerId: id, planKey: 'premium', planLabel: 'Gold' }, { userId: 'test', name: 'Test', audit: {} }),
+      createManualMembership(tx, { locationId: h.locationId, clock: h.clock, newId: h.newId }, { customerId: id, planKey: 'gold', planLabel: 'Gold' }, { userId: 'test', name: 'Test', audit: {} }),
     )
     const r = await book(session, wash())
     expect(r.statusCode, r.body).toBe(201)
@@ -222,7 +222,7 @@ describe('POST bookings', () => {
     expect(json(await book(session, wash({ startMin: 13 * 60 + 5 })))).toMatchObject({ status: 422, errors: [{ path: 'body.startMin' }] })
     expect(json(await book(session, wash({ serviceKey: 'no-such-wash' })))).toMatchObject({ status: 422, errors: [{ path: 'body.serviceKey' }] })
     expect(json(await book(session, wash({ extra: 1 })))).toMatchObject({ status: 422 })
-    const pay = await h.page({ customerId: id, kind: 'membership', planKey: 'premium' })
+    const pay = await h.page({ customerId: id, kind: 'membership', planKey: 'gold' })
     expect(json(await book(pay.session, wash()))).toMatchObject({ status: 401, code: 'LINK_WRONG_PURPOSE' })
     // nothing was booked and the refused attempts used none of the link's bookings
     expect(await appointments()).toEqual([])
@@ -256,7 +256,7 @@ describe('GET availability', () => {
     expect((await h.call('GET', 'availability?days=99', { session })).statusCode).toBe(422)
     expect((await h.call('GET', 'availability?service=nope', { session })).statusCode).toBe(422)
     expect((await h.call('GET', 'availability', {})).statusCode).toBe(401)
-    const m = await h.page({ customerId: id, kind: 'membership', planKey: 'premium' })
+    const m = await h.page({ customerId: id, kind: 'membership', planKey: 'gold' })
     expect(json(await h.call('GET', 'availability', { session: m.session }))).toMatchObject({ status: 401, code: 'LINK_WRONG_PURPOSE' })
   })
 })

@@ -2,7 +2,10 @@
 import type { ColumnType, Generated } from 'kysely'
 import type { JsonValue } from '../../platform/schema.js'
 
-export type PlanKey = 'essential' | 'premium' | 'executive' | 'exotic'
+/** A tier's key: a slug (^[a-z][a-z0-9_]{0,31}$), gold and vip by default (premium and executive before ADR 0170, kept in legacy_key). */
+export type PlanKey = string
+export type InclusionMode = 'per_cycle' | 'every_visit'
+export type TierPriceSquareState = 'pending' | 'synced' | 'failed'
 export type MembershipStatus = 'pending' | 'active' | 'past_due' | 'paused' | 'canceled'
 export type MembershipSource = 'squarespace' | 'manual'
 export type CreditKind = 'grant' | 'reserve' | 'redeem' | 'restore' | 'protect' | 'expire'
@@ -28,8 +31,62 @@ export interface MembershipPlansTable {
   monthly_price_cents: number | null
   /** https://...squarespace.com/... only (the membership link redirects there). */
   checkout_url: string | null
-  /** The name the website and the assistant use (Gold, VIP). */
+  /** The name the website and the assistant use (Gold, VIP). Deprecated (ADR 0170): the tier's name is the one name. */
   public_label: string | null
+  // the tier fields (migration 20261014100100, ADR 0170)
+  member_discount_bp: Generated<number>
+  public: Generated<boolean>
+  vip_booking: Generated<boolean>
+  max_vehicles: number | null
+  price_version: Generated<number>
+  square_plan_id: string | null
+  legacy_key: string | null
+}
+
+/** A tier's monthly price at a size; append-only (a save supersedes the current row). One Square plan variation each (wave Q3b). */
+export interface MembershipTierPricesTable {
+  id: string
+  location_id: string
+  plan_id: string
+  class_key: string
+  monthly_cents: number
+  effective_from: Generated<Date>
+  superseded_at: Date | null
+  price_version: number
+  square_variation_id: string | null
+  square_state: Generated<TierPriceSquareState>
+  square_synced_at: Date | null
+  created_by: string | null
+  created_at: Generated<Date>
+}
+
+/** What a tier includes: per_cycle visits a cycle (null = unlimited) or an add-on on every visit; the services it covers. */
+export interface MembershipInclusionsTable {
+  id: string
+  plan_id: string
+  label: string
+  mode: Generated<InclusionMode>
+  per_cycle: number | null
+  auto_apply: Generated<boolean>
+  sort: Generated<number>
+  active: Generated<boolean>
+  created_at: Generated<Date>
+  updated_at: Generated<Date>
+}
+
+export interface MembershipInclusionServicesTable {
+  inclusion_id: string
+  service_id: string
+}
+
+/** The other customers a membership covers (written from wave Q2). */
+export interface MembershipHouseholdTable {
+  id: string
+  membership_id: string
+  customer_id: string
+  added_at: Generated<Date>
+  added_by: string | null
+  removed_at: Date | null
 }
 
 export interface PlanCreditRulesTable {
@@ -72,6 +129,10 @@ export interface MembershipsTable {
   version: Generated<number>
   created_at: Generated<Date>
   updated_at: Generated<Date>
+  /** The size the membership is priced at (required; a row written without one gets the location's smallest active size). */
+  plan_class: Generated<string>
+  /** The tier price row being billed (wave Q3b). */
+  tier_price_id: string | null
 }
 
 export interface MembershipCreditEventsTable {
@@ -89,6 +150,13 @@ export interface MembershipCreditEventsTable {
   actor_user_id: string | null
   idempotency_key: string | null
   created_at: Generated<Date>
+  /** The inclusion the event belongs to (backfilled from rule_id; new events name only this). */
+  inclusion_id: string | null
+  service_id: string | null
+  line_cents: number | null
+  covered_cents: number | null
+  plan_class: string | null
+  visit_class: string | null
 }
 
 export type MembershipCheckoutState =
@@ -124,6 +192,7 @@ export interface MembershipCheckoutsTable {
   state: Generated<MembershipCheckoutState>
   matched_order_id: string | null
   matched_at: Date | null
+  plan_class: string | null
   version: Generated<number>
   created_at: Generated<Date>
   updated_at: Generated<Date>
@@ -135,6 +204,10 @@ declare module '../../platform/schema.js' {
     membership_plans: MembershipPlansTable
     plan_credit_rules: PlanCreditRulesTable
     memberships: MembershipsTable
+    membership_tier_prices: MembershipTierPricesTable
+    membership_inclusions: MembershipInclusionsTable
+    membership_inclusion_services: MembershipInclusionServicesTable
+    membership_household: MembershipHouseholdTable
     membership_credit_events: MembershipCreditEventsTable
   }
 }

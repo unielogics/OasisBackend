@@ -18,6 +18,7 @@ import '../../src/modules/catalog/schema.js'
 import '../../src/modules/customers/schema.js'
 import '../../src/modules/settings/schema.js'
 import type { SeedContext, SeedProfile } from './index.js'
+import { pricingDefaultsProfile } from './pricing-defaults.js'
 import { websiteCatalogProfile } from './website-catalog.js'
 
 // Catalog ---------------------------------------------------------------------------------------------------------
@@ -737,6 +738,8 @@ export const domainSeedProfiles: Record<string, SeedProfile> = {
   },
   // the website's services, prices and plans as the catalog (ADR 0160); run after `catalog` in production
   'website-catalog': websiteCatalogProfile,
+  // the owner's two starting prices (ADR 0170): Signature Hand Wash at Compact car $40, Gold at Compact car $129/month
+  'pricing-defaults': pricingDefaultsProfile,
   base: {
     description:
       'Reference data every environment needs: roles and employees (people) plus the domain reference data',

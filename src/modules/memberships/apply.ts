@@ -5,7 +5,8 @@
 // Both create a system `adjust` event (reason "Membership credit") equal to the package line through the Payments command layer,
 // so tax falls with it exactly as the design's never-applied credit implies, exempt from the actor's adjust limit (the staff
 // member needs cli.member, or only jobs.status for the automatic one, not pay.adjust) and still attributed to the real person.
-// Percent perks stay display-only. One credit per appointment, enforced here and by a partial unique index.
+// Percent perks stay display-only. One credit per appointment, enforced here (the partial unique index allows one per inclusion
+// since ADR 0170, for wave Q2's settleMembershipVisit). The credit is the inclusion that names the visit's package (ADR 0170).
 import { sql } from 'kysely'
 import type { AuditContext } from '../../platform/audit.js'
 import type { Clock } from '../../platform/clock.js'
@@ -15,8 +16,8 @@ import type { NewId } from '../../platform/ids.js'
 import type { PayActor } from '../payments/actor.js'
 import { PaymentsService, type AdjustResult } from '../payments/commands.js'
 import { calcOf } from '../payments/repository.js'
-import { creditSummaries, eligibleRule } from './credits.js'
-import { loadPlans, type CreditRule } from './plans.js'
+import { creditSummaries, eligibleInclusion } from './credits.js'
+import { loadPlans, type Inclusion } from './plans.js'
 import type { MembershipsTable } from './schema.js'
 import type { Selectable } from 'kysely'
 import './problems.js'
@@ -89,9 +90,9 @@ function blockError(b: Block): AppError {
 }
 
 interface Ready {
-  appt: { id: string; price_cents: number }
+  appt: { id: string; price_cents: number; service_id: string }
   membership: Selectable<MembershipsTable>
-  rule: CreditRule
+  rule: Inclusion
   invoiceId: string
   discount: number
 }
@@ -104,7 +105,7 @@ async function evaluate(
   const appt = await tx
     .selectFrom('appointments as a')
     .innerJoin('services as s', 's.id', 'a.service_id')
-    .select(['a.id', 'a.customer_id', 'a.status', 'a.price_cents', 's.tags'])
+    .select(['a.id', 'a.customer_id', 'a.status', 'a.price_cents', 'a.service_id'])
     .where('a.id', '=', appointmentId)
     .where('a.location_id', '=', d.locationId)
     .executeTakeFirst()
@@ -144,7 +145,7 @@ async function evaluate(
       plans,
     )
   ).get(membership.id)!
-  const pick = eligibleRule(plan, summary, appt.tags)
+  const pick = eligibleInclusion(plan, summary, appt.service_id)
   if (!pick) return { ok: false, block: 'not_eligible' }
   if (!pick.covered) return { ok: false, block: 'no_credit' }
 
@@ -166,7 +167,7 @@ async function evaluate(
     .executeTakeFirst()
   const discount = Math.min(pkg?.price_cents ?? appt.price_cents, calc.sub)
   if (discount <= 0) return { ok: false, block: 'no_balance' }
-  return { ok: true, ready: { appt, membership, rule: pick.rule, invoiceId: invoice.id, discount } }
+  return { ok: true, ready: { appt, membership, rule: pick.inclusion, invoiceId: invoice.id, discount } }
 }
 
 async function redeem(
@@ -197,9 +198,9 @@ async function redeem(
   )
   const cycle = r.membership.current_period_start!
   await sql`
-    insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, rule_id, appointment_id, invoice_id,
-      ledger_event_id, note, actor, actor_user_id, idempotency_key, created_at)
-    values (${d.newId()}, ${r.membership.id}, ${cycle}, 'redeem', 1, ${r.rule.id}, ${r.appt.id}, ${r.invoiceId},
+    insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, inclusion_id, service_id, appointment_id,
+      invoice_id, ledger_event_id, note, actor, actor_user_id, idempotency_key, created_at)
+    values (${d.newId()}, ${r.membership.id}, ${cycle}, 'redeem', 1, ${r.rule.id}, ${r.appt.service_id}, ${r.appt.id}, ${r.invoiceId},
       ${result.event.id}, ${`${r.rule.label} on ${r.appt.id}${o.auto ? ' (auto-applied)' : ''}`}, ${c.actor.name}, ${c.actor.userId},
       ${`redeem:${r.appt.id}`}, ${d.clock.now()})`.execute(tx)
   const plans = await loadPlans(tx, d.locationId)

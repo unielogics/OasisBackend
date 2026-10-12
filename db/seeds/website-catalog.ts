@@ -1,23 +1,22 @@
-// Seed profile `website-catalog` (ADR 0160, plan A): the website's current services and prices ("Oasis Site v2", the WASH, DURING,
-// TINT, detail and "more" lists, the two plans and the 20% guest rule) become the production catalog, so Settings is the one
-// source and nothing public changes on the day the website starts reading it.
+// Seed profile `website-catalog` (ADR 0160, plan A; reworked by ADR 0170): the website's current services ("Oasis Site v2", the WASH,
+// DURING, TINT, detail and "more" lists) and the two tiers it sells become the production catalog, so Settings is the one source.
 //
-//   creates or updates   the 2 washes, 2 tint packages (priced by the tint matrix), 2 details, 4 quote-only services and the
-//                        9 add-ons, with category, public name, description, member price (the guest price follows the markup),
-//                        VIP inclusion, durations, order, tags and a starting checklist (only onto an empty one);
+//   creates or updates   the 2 washes, 2 tint packages (one per film, named by a tag), 2 details, 4 quote-only services and the
+//                        9 add-ons, with category, public name, description, VIP inclusion (read by the old public catalog only),
+//                        durations, order, tags and a starting checklist (only onto an empty one);
 //   adopts               an existing service of the same kind and name (case-insensitive) or one of its `adopt` names
 //                        (the dashboard design's "Wax" becomes "Hand wax", keeping its id and checklist);
 //   deactivates          every other active service (never deletes: appointments and invoices snapshot them; reversible in
 //                        Settings), and re-derives the categories of the visits not yet finished;
-//   sets                 catalog.tint_matrix, catalog.guest_markup_pct = 20, and the Gold (premium) and VIP (executive) plans'
-//                        public name, monthly price and perks (the checkout URLs are left as they are: the owner pastes them).
+//   sets                 the Gold and VIP tiers' name and perks, sold online (the checkout URLs are left as they are).
 //
-// Members' credits: a plan's credit rules redeem on service tags (memberships/design-plans.ts). The washes carry the tags of the
-// washes they replace (Signature, exterior + interior, is the premium wash; Exterior is the express wash), so every plan redeems
-// what it redeemed before. The rules themselves are the memberships package's and are NOT changed here: the website's perks
-// ("4 hand washes a month") differ from the rules' counts, and the executive "Executive detail" credit covers no website service.
-// Each run logs a WARNING line per credit rule that covers no active service: align the rules (owner decision) before this runs
-// in production (ADR 0160 W2a).
+// Prices are NOT set here (ADR 0170, plan decision 9: the website's figures were wrong): a service keeps the price it has, a new one
+// starts at $0 with no price by size, and the owner fills Settings → Prices by size (the `pricing-defaults` profile seeds only the
+// $40 Signature Hand Wash at Compact car and Gold at $129 a month). Run it together with `pricing-defaults`, and switch the website
+// to the live catalog only once the grid is filled. The member/guest prices, the guest markup and the tint matrix are not written.
+//
+// Members' coverage: a tier's inclusions name the services they cover. Each run logs a WARNING line per inclusion of an active tier
+// that covers no active service: align the inclusions in Settings → Memberships before members redeem.
 //
 // Idempotent: a second run changes nothing (no version bump, no audit row). A run after the owner edited the catalog resets these
 // fields to the website's content again, so run it once (production) and edit in Settings afterwards. Every change is audited under
@@ -26,10 +25,9 @@
 // Durations: the design's own for the washes ("about 45 min", "about 30 min"); the rest are the seed's choices, for the owner to
 // review in Settings (listed in WEBSITE_DURATIONS_CHOSEN).
 import { sql } from 'kysely'
-import { ensurePlans, loadPlans, ruleCovers } from '../../src/modules/memberships/plans.js'
+import { ensurePlans, inclusionCovers, loadPlans } from '../../src/modules/memberships/plans.js'
 import type { PlanKey } from '../../src/modules/memberships/schema.js'
 import { refreshOpenAppointmentCategories } from '../../src/modules/catalog/appointment-categories.js'
-import { withMarkup, type TintMatrix } from '../../src/modules/catalog/pricing.js'
 import type { ServiceKind, VipInclusion } from '../../src/modules/catalog/schema.js'
 import { ensureDomainDefaults } from '../../src/modules/settings/defaults.js'
 import * as audit from '../../src/platform/audit.js'
@@ -46,8 +44,6 @@ export interface WebsiteService {
   adopt?: string[]
   category: 'wash' | 'addons' | 'tint' | 'detail' | 'quote'
   description: string | null
-  /** What a member pays, in dollars (null for quote-only and tint packages, which the tint matrix prices). */
-  memberDollars: number | null
   durationMin: number
   vipInclusion: VipInclusion
   vipNote: string | null
@@ -57,8 +53,6 @@ export interface WebsiteService {
   /** The checklist a new (or task-less) service starts with. */
   tasks: string[]
 }
-
-export const WEBSITE_GUEST_MARKUP_PCT = 20
 
 const MEMBER_WASH_NOTE = 'Included with Gold and VIP (4 washes a month)'
 const TINT_TASKS = ['Clean and prep the glass', 'Cut the film to fit', 'Apply and squeegee the film', 'Edge check and curing notes']
@@ -70,7 +64,6 @@ export const WEBSITE_SERVICES: readonly WebsiteService[] = [
     name: 'Signature Hand Wash',
     category: 'wash',
     description: 'Exterior + interior',
-    memberDollars: 45,
     durationMin: 45,
     vipInclusion: 'included',
     vipNote: MEMBER_WASH_NOTE,
@@ -91,7 +84,6 @@ export const WEBSITE_SERVICES: readonly WebsiteService[] = [
     name: 'Exterior Hand Wash',
     category: 'wash',
     description: 'Foam, hand wash, wheels, hand dry',
-    memberDollars: 32,
     durationMin: 30,
     vipInclusion: 'included',
     vipNote: MEMBER_WASH_NOTE,
@@ -112,7 +104,6 @@ export const WEBSITE_SERVICES: readonly WebsiteService[] = [
     name: 'Carbon window tint',
     category: 'tint',
     description: 'Carbon film: a deep matte look and solid heat control at a lower price · side & rear windows',
-    memberDollars: null,
     durationMin: 180,
     vipInclusion: 'none',
     vipNote: null,
@@ -127,7 +118,6 @@ export const WEBSITE_SERVICES: readonly WebsiteService[] = [
     category: 'tint',
     description:
       'Ceramic film: blocks the most heat without looking darker, and won’t interfere with phone or GPS signals · side & rear windows',
-    memberDollars: null,
     durationMin: 180,
     vipInclusion: 'none',
     vipNote: null,
@@ -142,7 +132,6 @@ export const WEBSITE_SERVICES: readonly WebsiteService[] = [
     name: 'Interior detail',
     category: 'detail',
     description: 'Shampoo, steam, leather, glass',
-    memberDollars: 149,
     durationMin: 150,
     vipInclusion: 'none',
     vipNote: null,
@@ -156,7 +145,6 @@ export const WEBSITE_SERVICES: readonly WebsiteService[] = [
     name: 'Full detail',
     category: 'detail',
     description: 'Inside and out, clay bar + sealant',
-    memberDollars: 249,
     durationMin: 240,
     vipInclusion: 'none',
     vipNote: null,
@@ -189,8 +177,7 @@ export const WEBSITE_SERVICES: readonly WebsiteService[] = [
       name,
       category: 'quote',
       description: null,
-      memberDollars: null,
-      durationMin,
+        durationMin,
       vipInclusion: 'none',
       vipNote: null,
       quoteOnly: true,
@@ -202,24 +189,23 @@ export const WEBSITE_SERVICES: readonly WebsiteService[] = [
   // DURING: add during your wash (the design's order)
   ...(
     [
-      ['Hand wax', ['Wax'], 'Carnauba, buffed by hand', 39, 'included', null, ['Apply carnauba wax', 'Buff off haze']],
-      ['Engine bay wash', ['Engine bay cleaning'], 'Degrease and dress', 45, 'included', null, ['Cover electricals', 'Degrease engine bay', 'Dress plastics']],
-      ['Leather conditioning', [], 'Clean, condition, matte finish', 35, 'allowance', '2× / mo', ['Clean leather surfaces', 'Apply conditioner', 'Buff to matte finish']],
-      ['Stain removal', [], 'Seats and carpets, when needed', 59, 'allowance', '1× / mo', ['Pre-treat stains', 'Extract and rinse', 'Dry and check']],
-      ['Tire shine & dressing', [], 'Satin or gloss', 12, 'none', null, ['Clean tire walls', 'Apply dressing (satin or gloss)']],
-      ['Rain-repellent glass', ['Rain repellent'], 'Windshield and side glass', 25, 'none', null, ['Clean glass', 'Apply rain repellent to windshield and side glass']],
-      ['Odor removal', [], 'Enzyme treatment', 30, 'none', null, ['Enzyme treatment on fabrics', 'Odor neutralizer cycle']],
-      ['Pet hair removal', [], 'Rubber brush and vacuum', 35, 'none', null, ['Rubber-brush pet hair', 'Lint-roll upholstery', 'Vacuum seat seams']],
-      ['Interior deep clean', [], 'Seats, carpets, vents', 60, 'none', null, ['Deep vacuum seats & carpets', 'Steam clean vents & cupholders', 'Wipe door jambs & panels']],
+      ['Hand wax', ['Wax'], 'Carnauba, buffed by hand', 'included', null, ['Apply carnauba wax', 'Buff off haze']],
+      ['Engine bay wash', ['Engine bay cleaning'], 'Degrease and dress', 'included', null, ['Cover electricals', 'Degrease engine bay', 'Dress plastics']],
+      ['Leather conditioning', [], 'Clean, condition, matte finish', 'allowance', '2× / mo', ['Clean leather surfaces', 'Apply conditioner', 'Buff to matte finish']],
+      ['Stain removal', [], 'Seats and carpets, when needed', 'allowance', '1× / mo', ['Pre-treat stains', 'Extract and rinse', 'Dry and check']],
+      ['Tire shine & dressing', [], 'Satin or gloss', 'none', null, ['Clean tire walls', 'Apply dressing (satin or gloss)']],
+      ['Rain-repellent glass', ['Rain repellent'], 'Windshield and side glass', 'none', null, ['Clean glass', 'Apply rain repellent to windshield and side glass']],
+      ['Odor removal', [], 'Enzyme treatment', 'none', null, ['Enzyme treatment on fabrics', 'Odor neutralizer cycle']],
+      ['Pet hair removal', [], 'Rubber brush and vacuum', 'none', null, ['Rubber-brush pet hair', 'Lint-roll upholstery', 'Vacuum seat seams']],
+      ['Interior deep clean', [], 'Seats, carpets, vents', 'none', null, ['Deep vacuum seats & carpets', 'Steam clean vents & cupholders', 'Wipe door jambs & panels']],
     ] as const
   ).map(
-    ([name, adopt, description, member, vipInclusion, vipNote, tasks], i): WebsiteService => ({
+    ([name, adopt, description, vipInclusion, vipNote, tasks], i): WebsiteService => ({
       kind: 'addon',
       name,
       adopt: [...adopt],
       category: 'addons',
       description,
-      memberDollars: member,
       durationMin: 0,
       vipInclusion,
       vipNote,
@@ -236,57 +222,28 @@ export const WEBSITE_DURATIONS_CHOSEN: Readonly<Record<string, number>> = Object
   WEBSITE_SERVICES.filter((s) => s.kind === 'package' && s.category !== 'wash').map((s) => [s.name, s.durationMin]),
 )
 
-const VLT = [5, 20, 35, 50, 70]
-const TINT_DOLLARS: Record<'carbon' | 'ceramic', Record<'sedan' | 'suv' | 'truck', [number, number]>> = {
-  carbon: { sedan: [229, 279], suv: [269, 329], truck: [249, 299] },
-  ceramic: { sedan: [379, 449], suv: [429, 529], truck: [399, 479] },
-}
-
-/** The website's TINT and VEH tables: vehicle type × film, member ranges as shown ("VIP $229–$279"), guest = member + 20%. */
-export const WEBSITE_TINT_MATRIX: TintMatrix = {
-  vehicleTypes: [
-    { key: 'sedan', label: 'Sedan / Coupe' },
-    { key: 'suv', label: 'SUV / Crossover' },
-    { key: 'truck', label: 'Truck / Van' },
-  ],
-  films: [
-    { key: 'carbon', label: 'Carbon', vlt: VLT },
-    { key: 'ceramic', label: 'Ceramic', vlt: VLT },
-  ],
-  prices: (['sedan', 'suv', 'truck'] as const).flatMap((vehicle) =>
-    (['carbon', 'ceramic'] as const).map((film) => {
-      const [lo, hi] = TINT_DOLLARS[film][vehicle]
-      return {
-        vehicle,
-        film,
-        memberMinCents: lo * 100,
-        memberMaxCents: hi * 100,
-        guestMinCents: withMarkup(lo * 100, WEBSITE_GUEST_MARKUP_PCT),
-        guestMaxCents: withMarkup(hi * 100, WEBSITE_GUEST_MARKUP_PCT),
-      }
-    }),
-  ),
-}
+/** The tint films the tint packages name by a tag (catalog.tint_films), with the website's VLT shades. */
+export const WEBSITE_TINT_FILMS = [
+  { key: 'carbon', label: 'Carbon', vlt: [5, 20, 35, 50, 70] },
+  { key: 'ceramic', label: 'Ceramic', vlt: [5, 20, 35, 50, 70] },
+]
 
 export interface WebsitePlan {
   key: PlanKey
-  publicLabel: string
-  monthlyDollars: number
+  name: string
   perks: string[]
 }
 
-/** The join flow's two plans (joinVM's T): Gold over the premium plan, VIP over executive (src/modules/public/tiers.ts). */
+/** The join flow's two tiers (joinVM's T), sold online; their prices are set in Settings (pricing-defaults seeds Gold's). */
 export const WEBSITE_PLANS: readonly WebsitePlan[] = [
   {
-    key: 'premium',
-    publicLabel: 'Gold',
-    monthlyDollars: 99,
+    key: 'gold',
+    name: 'Gold',
     perks: ['4 hand washes a month, interior included', 'Share across household cars', 'No booking fees', 'Member prices on everything else'],
   },
   {
-    key: 'executive',
-    publicLabel: 'VIP',
-    monthlyDollars: 169,
+    key: 'vip',
+    name: 'VIP',
     perks: ['Everything in Gold', 'Wax every wash + engine bay', 'Leather 2× and stain removal 1× a month', 'Priority booking and same-day guarantee'],
   },
 ]
@@ -297,7 +254,6 @@ interface Row {
   id: string
   kind: ServiceKind
   name: string
-  price_cents: number
   duration_min: number
   tags: string[]
   sort: number
@@ -305,8 +261,6 @@ interface Row {
   category: string
   public_name: string | null
   description: string | null
-  member_price_cents: number | null
-  guest_price_cents: number | null
   vip_inclusion: VipInclusion
   vip_note: string | null
   quote_only: boolean
@@ -315,7 +269,6 @@ interface Row {
 
 const FIELDS = [
   'name',
-  'price_cents',
   'duration_min',
   'tags',
   'sort',
@@ -323,8 +276,6 @@ const FIELDS = [
   'category',
   'public_name',
   'description',
-  'member_price_cents',
-  'guest_price_cents',
   'vip_inclusion',
   'vip_note',
   'quote_only',
@@ -333,18 +284,10 @@ const FIELDS = [
 
 type Desired = Pick<Row, (typeof FIELDS)[number]>
 
-/** The row a website entry wants. The plain price (what a booking charges today) is the guest price. */
-export function desiredRow(s: WebsiteService, tint: TintMatrix, markupPct: number): Desired {
-  const member = s.memberDollars === null ? null : s.memberDollars * 100
-  let plain = member === null ? 0 : withMarkup(member, markupPct)
-  if (s.category === 'tint') {
-    const film = s.tags.find((t) => tint.films.some((f) => f.key === t))
-    const guests = tint.prices.filter((p) => p.film === film).map((p) => p.guestMinCents)
-    plain = guests.length ? Math.min(...guests) : 0
-  }
+/** The row a website entry wants (no price: ADR 0170). */
+export function desiredRow(s: WebsiteService): Desired {
   return {
     name: s.name,
-    price_cents: plain,
     duration_min: s.kind === 'addon' ? 0 : s.durationMin,
     tags: s.tags,
     sort: s.sort,
@@ -352,8 +295,6 @@ export function desiredRow(s: WebsiteService, tint: TintMatrix, markupPct: numbe
     category: s.category,
     public_name: s.name,
     description: s.description,
-    member_price_cents: member,
-    guest_price_cents: null,
     vip_inclusion: s.vipInclusion,
     vip_note: s.vipNote,
     quote_only: s.quoteOnly,
@@ -384,7 +325,7 @@ export interface WebsiteCatalogResult {
   settings: string[]
   plans: string[]
   appointmentsUpdated: number
-  /** "plan: rule label" of every credit rule of an active plan that covers no active package after the run (members could not redeem it). */
+  /** "tier: inclusion label" of every inclusion of an active tier that covers no active service after the run. */
   uncoveredRules: string[]
 }
 
@@ -402,27 +343,23 @@ export async function seedWebsiteCatalog(ctx: SeedContext): Promise<WebsiteCatal
     uncoveredRules: [],
   }
 
-  // settings first: the tint packages' plain price comes from the matrix
-  for (const [key, value] of [
-    ['catalog.guest_markup_pct', WEBSITE_GUEST_MARKUP_PCT],
-    ['catalog.tint_matrix', WEBSITE_TINT_MATRIX],
-  ] as const) {
-    const cur = await getSetting(tx, location.id, key)
-    if (eq(cur.value, value)) continue
-    await updateSetting(tx, { locationId: location.id, key, value, audit: ACTOR })
-    out.settings.push(key)
+  // the tint films the tint packages name (only when the setting is still empty: the owner may have edited it)
+  const films = await getSetting(tx, location.id, 'catalog.tint_films')
+  if (films.value.length === 0) {
+    await updateSetting(tx, { locationId: location.id, key: 'catalog.tint_films', value: WEBSITE_TINT_FILMS, audit: ACTOR })
+    out.settings.push('catalog.tint_films')
   }
 
   const claimed = new Set<string>()
   for (const s of WEBSITE_SERVICES) {
-    const want = desiredRow(s, WEBSITE_TINT_MATRIX, WEBSITE_GUEST_MARKUP_PCT)
+    const want = desiredRow(s)
     const row = await findRow(ctx, s, claimed)
     let id: string
     if (!row) {
       id = ctx.newId()
       await tx
         .insertInto('services')
-        .values({ id, location_id: location.id, kind: s.kind, short_name: null, bookable_desk: true, sqsp_sku: null, ...want })
+        .values({ id, location_id: location.id, kind: s.kind, short_name: null, bookable_desk: true, sqsp_sku: null, price_cents: 0, ...want })
         .execute()
       await audit.record(tx, { locationId: location.id, action: 'catalog.seed.create', entityType: 'service', entityId: id, after: want, ctx: ACTOR })
       out.created.push(s.name)
@@ -486,11 +423,15 @@ export async function seedWebsiteCatalog(ctx: SeedContext): Promise<WebsiteCatal
   for (const p of WEBSITE_PLANS) {
     const cur = await tx
       .selectFrom('membership_plans')
-      .select(['public_label', 'monthly_price_cents', 'perks'])
+      .select(['name', 'perks', 'public'])
       .where('location_id', '=', location.id)
       .where('key', '=', p.key)
-      .executeTakeFirstOrThrow()
-    const want = { public_label: p.publicLabel, monthly_price_cents: p.monthlyDollars * 100, perks: p.perks }
+      .executeTakeFirst()
+    if (!cur) {
+      ctx.log(`website-catalog: no ${p.key} tier, skipped`)
+      continue
+    }
+    const want = { name: p.name, perks: p.perks, public: true }
     if (eq(cur, want)) continue
     await tx
       .updateTable('membership_plans')
@@ -505,23 +446,23 @@ export async function seedWebsiteCatalog(ctx: SeedContext): Promise<WebsiteCatal
   if (out.created.length + out.updated.length + out.deactivated.length > 0)
     out.appointmentsUpdated = await refreshOpenAppointmentCategories(tx, location.id)
 
-  const activeTags = (
+  const activeIds = (
     await tx
       .selectFrom('services')
-      .select('tags')
+      .select('id')
       .where('location_id', '=', location.id)
-      .where('kind', '=', 'package')
       .where('active', '=', true)
       .execute()
-  ).map((r) => r.tags)
+  ).map((r) => r.id)
   for (const p of (await loadPlans(tx, location.id)).filter((x) => x.active))
-    for (const r of p.rules) if (!activeTags.some((tags) => ruleCovers(r, tags))) out.uncoveredRules.push(`${p.key}: ${r.label}`)
+    for (const r of p.inclusions.filter((i) => i.active))
+      if (!activeIds.some((id) => inclusionCovers(r, id))) out.uncoveredRules.push(`${p.key}: ${r.label}`)
   return out
 }
 
 export const websiteCatalogProfile: SeedProfile = {
   description:
-    'The website’s services and prices as the production catalog: washes, add-ons, tint (matrix), details, quote-only services, Gold/VIP plans; other services deactivated',
+    'The website’s services as the production catalog (no prices: ADR 0170): washes, add-ons, tint, details, quote-only services, the Gold/VIP tiers’ perks; other services deactivated',
   async run(ctx) {
     const r = await seedWebsiteCatalog(ctx)
     ctx.log(
@@ -531,7 +472,7 @@ export const websiteCatalogProfile: SeedProfile = {
     )
     for (const rule of r.uncoveredRules)
       ctx.log(
-        `WARNING website-catalog: credit rule "${rule}" covers no active package; align the plans’ credit rules before members redeem (ADR 0160 W2a)`,
+        `WARNING website-catalog: inclusion "${rule}" covers no active service; align it in Settings → Memberships before members redeem (ADR 0170)`,
       )
   },
 }

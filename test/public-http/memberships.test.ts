@@ -39,7 +39,7 @@ async function existingCustomer(phone: string, o: { member?: boolean } = {}): Pr
   return h.db.transaction().execute(async (tx) => {
     const { customer } = await upsertCustomerByPhone(tx, { newId: h.newId, now: h.clock.now(), fullName: 'Olga Owner', phone, email: 'olga@example.test', source: 'dashboard' })
     if (o.member)
-      await createManualMembership(tx, { locationId: h.locationId, clock: h.clock, newId: h.newId }, { customerId: customer.id, planKey: 'premium', planLabel: 'Gold' }, { userId: 'test', name: 'Test', audit: {} })
+      await createManualMembership(tx, { locationId: h.locationId, clock: h.clock, newId: h.newId }, { customerId: customer.id, planKey: 'gold', planLabel: 'Gold' }, { userId: 'test', name: 'Test', audit: {} })
     return customer.id
   })
 }
@@ -131,7 +131,7 @@ describe('joining on the website', () => {
     expect(b).toMatchObject({ status: 'pending_payment', next: 'checkout_link_by_sms', tier: 'gold', plan: 'Gold', confirmationBy: 'sms' })
     expect(b.memberRef).toMatch(/^OAS-M-[0-9A-F]{8}$/)
     const m = await h.db.selectFrom('memberships').innerJoin('membership_plans', 'membership_plans.id', 'memberships.plan_id').select(['memberships.id', 'status', 'source', 'plan_label', 'key', 'sqsp_product_key', 'manual_status_at', 'current_period_start', 'inference_reason', 'customer_id']).executeTakeFirstOrThrow()
-    expect(m).toMatchObject({ status: 'pending', source: 'manual', plan_label: 'Gold', key: 'premium', sqsp_product_key: null, manual_status_at: null, current_period_start: null })
+    expect(m).toMatchObject({ status: 'pending', source: 'manual', plan_label: 'Gold', key: 'gold', sqsp_product_key: null, manual_status_at: null, current_period_start: null })
     expect(m.inference_reason).toMatch(/product map has no product/)
     expect(b.memberRef).toBe(`OAS-M-${m.id.replace(/-/g, '').slice(-8).toUpperCase()}`)
     const c = await h.db.selectFrom('customers').selectAll().where('id', '=', m.customer_id).executeTakeFirstOrThrow()
@@ -147,7 +147,7 @@ describe('joining on the website', () => {
     expect(n.length).toBeGreaterThan(0)
     expect(new Set(n.map((x) => x.kind))).toEqual(new Set(['membership.web_join']))
     expect(n[0]!.title).toBe('Website join: send Jo the Gold checkout link')
-    expect(n[0]!.body).toMatch(/^Jo Joiner \(\(201\) 555-0103\) joined Gold on the website\. The Squarespace product map has no product for the Premium plan/)
+    expect(n[0]!.body).toMatch(/^Jo Joiner \(\(201\) 555-0103\) joined Gold on the website\. The Squarespace product map has no product for the Gold plan/)
     expect(n[0]).toMatchObject({ entity_type: 'membership', entity_id: m.id })
     const alerts = await h.db.selectFrom('sqsp_alerts').select(['code', 'message', 'resolved_at']).execute()
     expect(alerts).toHaveLength(1)
@@ -166,7 +166,7 @@ describe('joining on the website', () => {
 
   it('with the tier’s product mapped: the pending membership carries the product key and staff are told which link to send', async () => {
     await ensurePlans(h.db, { locationId: h.locationId, clock: h.clock, newId: h.newId })
-    const exec = await h.db.selectFrom('membership_plans').select('id').where('key', '=', 'executive').executeTakeFirstOrThrow()
+    const exec = await h.db.selectFrom('membership_plans').select('id').where('key', '=', 'vip').executeTakeFirstOrThrow()
     await sql`insert into sqsp_products (id, location_id, sqsp_product_id, sku, name, kind, plan_id, plan_label, interval_months, active, created_at, updated_at)
       values (${h.newId()}, ${h.locationId}, 'prod-vip-1', 'VIP-MONTHLY', 'VIP Membership (monthly)', 'membership', ${exec.id}, 'VIP', 1, true, app_now(), app_now())`.execute(h.db)
     const r = await join(joinBody({ tier: 'vip' }))

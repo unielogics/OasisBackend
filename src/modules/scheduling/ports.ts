@@ -9,6 +9,7 @@ import type { StorageProvider } from '../../integrations/ports/storage.js'
 import { renderTemplate, type TemplateVars } from '../messaging/templates/render.js'
 import { QUICK_REPLIES } from '../messaging/templates/registry.js'
 import type { SmsClass } from '../messaging/policy/classes.js'
+import type { MemberContext } from '../catalog/price-book.js'
 import type { Actor, SchedulingCtx } from './context.js'
 import type { SettlementKind, SettlementView } from './cancellation.js'
 import type { AppointmentRecord } from './appointments.js'
@@ -401,8 +402,9 @@ export interface MembershipInfo {
   creditsLeft: number | null
   /** An unused eligible credit exists for this appointment. */
   creditAvailable: boolean
-  /** Additive display data from the Memberships vertical for the Membership tab; the in-memory port leaves them out. */
-  planKey?: 'essential' | 'premium' | 'executive' | 'exotic'
+  /** Additive display data from the Memberships vertical for the Membership tab; the in-memory port leaves them out. The tier's key
+   * (a slug: gold, vip by default; ADR 0170). */
+  planKey?: string
   /** Renewal instant (ISO) and its label in the business timezone ("Jul 12, 2026"). */
   renewsAt?: string | null
   renewLabel?: string | null
@@ -453,6 +455,12 @@ export interface MembershipPort {
    * credits" on) is why the visit did not happen. null when nothing was held or the closure was not the cause.
    */
   releaseCredit?(tx: Tx, c: SchedulingCtx, appointmentId: string): Promise<ReleasedCredit | null>
+  /**
+   * What the price book needs to price a visit for this customer (ADR 0170): the ACTIVE membership they hold or share as a household
+   * member, with the tier's % off, the plan size and the inclusions with this cycle's credits; null for anyone else. Wave Q2's
+   * booking paths call it; absent = everyone is priced as a guest.
+   */
+  pricingFor?(db: Executor, c: { locationId: string; customerId: string }): Promise<MemberContext | null>
   /** For appointments of clients without a live membership: the upgrade candidacy (appointment file, Membership tab). */
   upgradeCandidates?(
     db: Executor,
@@ -466,6 +474,11 @@ export const noMemberships: MembershipPort = { forAppointments: async () => new 
 export class InMemoryMemberships implements MembershipPort {
   /** customer id -> membership */
   readonly byCustomer = new Map<string, MembershipInfo>()
+  /** customer id -> what the price book prices them as (a test sets it; absent = a guest) */
+  readonly pricing = new Map<string, MemberContext>()
+  async pricingFor(_db: Executor, c: { locationId: string; customerId: string }): Promise<MemberContext | null> {
+    return this.pricing.get(c.customerId) ?? null
+  }
   async forAppointments(_db: Executor, refs: MembershipRef[]): Promise<Map<string, MembershipInfo>> {
     const out = new Map<string, MembershipInfo>()
     for (const r of refs) {

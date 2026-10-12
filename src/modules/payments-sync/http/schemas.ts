@@ -108,7 +108,8 @@ export const ConnectionBody = z
   })
   .strict()
 
-const Plan = z.enum(['essential', 'premium', 'executive', 'exotic'])
+/** A tier key (gold, vip, …) or an old one (premium, executive), which resolves to the tier that carries it (ADR 0170). */
+const Plan = z.string().regex(/^[a-z][a-z0-9_]{0,31}$/, 'Use a tier key such as gold')
 
 export const ProductInput = z
   .object({

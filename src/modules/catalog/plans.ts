@@ -1,16 +1,15 @@
-// The membership plans' public fields (ADR 0160, plan A): the label the website and the assistant sell a plan under (Gold, VIP),
-// its monthly price, its perks (also what the dashboard's Membership tab lists) and the Squarespace subscription checkout the
-// membership link redirects to. The checkout URL is internal: the public catalog never carries it (only a verified membership link
-// leads there, design section 5). The plans themselves (credit rules, discounts, colours) stay the memberships module's.
-import type { Executor, Tx } from '../../platform/db.js'
-import * as audit from '../../platform/audit.js'
+// The membership tiers' public fields (ADR 0160, plan A; ADR 0170): the name the website and the assistant sell a tier under, its
+// starting monthly price (the lowest of its prices by size), its perks (also what the dashboard's Membership tab lists) and the
+// Squarespace subscription checkout the membership link redirects to. The checkout URL is internal: the public catalog never carries
+// it (only a verified membership link leads there, design section 5). Tiers are edited in Settings → Memberships (catalog/tiers.ts);
+// the old per-plan save (PUT /catalog/plans/{key}) is retired (410).
+import type { Executor } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
-import * as realtime from '../../platform/realtime.js'
 import '../memberships/schema.js'
+import { loadTierCells, tierFromPrice } from './price-book.js'
 import type { PlanKey } from '../memberships/schema.js'
-import { PUBLIC_TIERS, type PublicTier } from '../public/tiers.js'
+import type { PublicTier } from '../public/tiers.js'
 
-export const PLAN_KEYS: readonly PlanKey[] = ['essential', 'premium', 'executive', 'exotic']
 export const MAX_PERKS = 12
 export const MAX_PERK_LENGTH = 120
 
@@ -23,48 +22,48 @@ export interface PlanPublicFields {
 
 export interface PlanPublic extends PlanPublicFields {
   key: PlanKey
-  /** The dashboard's plan name (Premium, Executive). */
+  /** The tier's name (Gold, VIP). */
   name: string
   active: boolean
-  /** The website tier sold over this plan (gold = premium, vip = executive), or null. */
+  /** The key the website sells it under (the key of a public tier), or null for a tier not sold online. */
   websiteTier: PublicTier | null
   version: number
 }
 
-const COLUMNS = ['key', 'name', 'active', 'version', 'public_label', 'monthly_price_cents', 'perks', 'checkout_url', 'sort'] as const
-
-type Row = {
-  key: PlanKey
-  name: string
-  active: boolean
-  version: number
-  public_label: string | null
-  monthly_price_cents: number | null
-  perks: string[]
-  checkout_url: string | null
-}
-
-const toPlan = (r: Row): PlanPublic => ({
-  key: r.key,
-  name: r.name,
-  active: r.active,
-  version: r.version,
-  publicLabel: r.public_label,
-  monthlyPriceCents: r.monthly_price_cents,
-  perks: r.perks,
-  checkoutUrl: r.checkout_url,
-  websiteTier: PUBLIC_TIERS.find((t) => t.planKey === r.key)?.key ?? null,
-})
-
+/**
+ * Every tier with its public fields, in tier order. monthlyPriceCents is the tier's starting price: the lowest of its current prices
+ * over the active sizes (null: no price yet, not sold online); publicLabel is the tier's name.
+ */
 export async function listPlanPublic(db: Executor, locationId: string): Promise<PlanPublic[]> {
-  const rows = await db
-    .selectFrom('membership_plans')
-    .select([...COLUMNS])
-    .where('location_id', '=', locationId)
-    .orderBy('sort')
-    .orderBy('key')
-    .execute()
-  return rows.map(toPlan)
+  const [rows, cells, classes] = await Promise.all([
+    db
+      .selectFrom('membership_plans')
+      .select(['id', 'key', 'name', 'active', 'public', 'version', 'perks', 'checkout_url'])
+      .where('location_id', '=', locationId)
+      .orderBy('sort')
+      .orderBy('key')
+      .execute(),
+    loadTierCells(db, locationId),
+    db
+      .selectFrom('vehicle_classes')
+      .select(['key', 'label', 'sort'])
+      .where('location_id', '=', locationId)
+      .where('active', '=', true)
+      .orderBy('sort')
+      .orderBy('key')
+      .execute(),
+  ])
+  return rows.map((r) => ({
+    key: r.key,
+    name: r.name,
+    active: r.active,
+    version: r.version,
+    publicLabel: r.name,
+    monthlyPriceCents: tierFromPrice({ classes }, cells.get(r.id) ?? [])?.monthlyCents ?? null,
+    perks: r.perks,
+    checkoutUrl: r.checkout_url,
+    websiteTier: r.public ? r.key : null,
+  }))
 }
 
 const invalid = (path: string, message: string): AppError =>
@@ -114,70 +113,4 @@ export function normalizePlanPublic(f: PlanPublicFields): PlanPublicFields {
   if (new Set(perks.map((p) => p.toLowerCase())).size !== perks.length) throw invalid('perks', 'A perk is listed twice.')
   const checkoutUrl = f.checkoutUrl === null || f.checkoutUrl.trim() === '' ? null : checkCheckoutUrl(f.checkoutUrl)
   return { publicLabel: label, monthlyPriceCents: price, perks, checkoutUrl }
-}
-
-const auditOf = (p: PlanPublicFields) => ({
-  publicLabel: p.publicLabel,
-  monthlyPriceCents: p.monthlyPriceCents,
-  perks: p.perks,
-  checkoutUrl: p.checkoutUrl,
-})
-
-const same = (a: PlanPublicFields, b: PlanPublicFields): boolean =>
-  a.publicLabel === b.publicLabel &&
-  a.monthlyPriceCents === b.monthlyPriceCents &&
-  a.checkoutUrl === b.checkoutUrl &&
-  a.perks.length === b.perks.length &&
-  a.perks.every((p, i) => p === b.perks[i])
-
-export async function putPlanPublic(
-  tx: Tx,
-  input: { locationId: string; key: string; fields: PlanPublicFields; expectedVersion?: number; audit?: audit.AuditContext },
-): Promise<{ plan: PlanPublic; changed: boolean }> {
-  const row = (PLAN_KEYS as readonly string[]).includes(input.key)
-    ? await tx
-        .selectFrom('membership_plans')
-        .select([...COLUMNS])
-        .where('location_id', '=', input.locationId)
-        .where('key', '=', input.key as PlanKey)
-        .forUpdate()
-        .executeTakeFirst()
-    : undefined
-  if (!row) throw new AppError('NOT_FOUND', { detail: 'That plan does not exist' })
-  if (input.expectedVersion !== undefined && input.expectedVersion !== row.version)
-    throw new AppError('VERSION_CONFLICT', { meta: { currentVersion: row.version } })
-  const before = toPlan(row)
-  const next = normalizePlanPublic(input.fields)
-  if (same(before, next)) return { plan: before, changed: false }
-  const updated = await tx
-    .updateTable('membership_plans')
-    .set((eb) => ({
-      public_label: next.publicLabel,
-      monthly_price_cents: next.monthlyPriceCents,
-      perks: next.perks,
-      checkout_url: next.checkoutUrl,
-      version: eb('version', '+', 1),
-      updated_at: eb.fn('app_now', []),
-    }))
-    .where('location_id', '=', input.locationId)
-    .where('key', '=', row.key)
-    .returning([...COLUMNS])
-    .executeTakeFirstOrThrow()
-  const plan = toPlan(updated)
-  await audit.record(tx, {
-    locationId: input.locationId,
-    action: 'catalog.plan.update',
-    entityType: 'membership_plan',
-    entityId: plan.key,
-    before: auditOf(before),
-    after: auditOf(plan),
-    ctx: input.audit,
-  })
-  await realtime.publish(tx, {
-    locationId: input.locationId,
-    channel: 'settings',
-    type: 'settings.changed',
-    payload: { section: 'catalog', key: 'plans', plan: plan.key, version: plan.version },
-  })
-  return { plan, changed: true }
 }

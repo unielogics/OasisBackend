@@ -23,7 +23,7 @@ async function tokenFor(phone: string): Promise<string> {
 async function member(phone: string, name = 'Mia Member', email = 'mia@example.test'): Promise<string> {
   return h.db.transaction().execute(async (tx) => {
     const { customer } = await upsertCustomerByPhone(tx, { newId: h.newId, now: h.clock.now(), fullName: name, phone, email, source: 'dashboard' })
-    await createManualMembership(tx, { locationId: h.locationId, clock: h.clock, newId: h.newId }, { customerId: customer.id, planKey: 'premium', planLabel: 'Gold' }, { userId: 'test', name: 'Test', audit: {} })
+    await createManualMembership(tx, { locationId: h.locationId, clock: h.clock, newId: h.newId }, { customerId: customer.id, planKey: 'gold', planLabel: 'Gold' }, { userId: 'test', name: 'Test', audit: {} })
     return customer.id
   })
 }
@@ -234,7 +234,7 @@ describe('a member booking', () => {
   it('a verified member of the website’s VIP tier gets the VIP rules too; a verified Gold member does not', async () => {
     const vip = await h.db.transaction().execute(async (tx) => {
       const { customer } = await upsertCustomerByPhone(tx, { newId: h.newId, now: h.clock.now(), fullName: 'Vic Vip', phone: PHONES.joiner, source: 'dashboard' })
-      await createManualMembership(tx, { locationId: h.locationId, clock: h.clock, newId: h.newId }, { customerId: customer.id, planKey: 'executive', planLabel: 'VIP' }, { userId: 'test', name: 'Test', audit: {} })
+      await createManualMembership(tx, { locationId: h.locationId, clock: h.clock, newId: h.newId }, { customerId: customer.id, planKey: 'vip', planLabel: 'VIP' }, { userId: 'test', name: 'Test', audit: {} })
       return customer.id
     })
     expect(await h.db.selectFrom('vip_clients').select('customer_id').where('customer_id', '=', vip).execute()).toEqual([])

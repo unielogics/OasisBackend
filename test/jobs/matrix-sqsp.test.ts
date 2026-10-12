@@ -173,7 +173,7 @@ describe('the Squarespace read side and the membership pass, twice each through 
     expect(await states()).toEqual([])
     const customer = r.newId()
     await r.db.insertInto('customers').values({ id: customer, full_name: 'Web Joiner', source: 'online' }).execute()
-    const plan = await r.db.selectFrom('membership_plans').select('id').where('key', '=', 'premium').executeTakeFirstOrThrow()
+    const plan = await r.db.selectFrom('membership_plans').select('id').where('key', '=', 'gold').executeTakeFirstOrThrow()
     await r.db
       .insertInto('memberships')
       .values({ id: r.newId(), location_id: r.locationId, customer_id: customer, plan_id: plan.id, plan_label: 'Gold', status: 'pending', source: 'manual', started_at: r.clock.now() })

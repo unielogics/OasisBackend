@@ -43,7 +43,7 @@ describe('membership checkouts', () => {
         { sku: 'MEM-VIP', kind: 'membership', plan: 'executive', planLabel: 'VIP' },
       ]),
     )
-    await r.db.updateTable('membership_plans').set({ checkout_url: GOLD_URL, public_label: 'Gold' }).where('key', '=', 'premium').execute()
+    await r.db.updateTable('membership_plans').set({ checkout_url: GOLD_URL, public_label: 'Gold' }).where('key', '=', 'gold').execute()
     // a manager receives the staff notices
     const roles = await transaction(r.db, (tx) => ensureDefaultRoles(tx, r.newId))
     const manager = await makeUser(r.db, r.newId, { first: 'Gerald' })
@@ -76,7 +76,7 @@ describe('membership checkouts', () => {
     const { env } = await setup(r)
     const ana = await makeCustomer(r.db, env, { name: 'Ana Ruiz', email: 'old-ana@example.com', phone: '+12015550188' })
     const started = await transaction(r.db, (tx) =>
-      openCheckoutIntent(tx, dctx(r), { customerId: ana, planKey: 'premium', email: ' Ana.Ruiz@Example.com ', linkId: null }, SYSTEM),
+      openCheckoutIntent(tx, dctx(r), { customerId: ana, planKey: 'gold', email: ' Ana.Ruiz@Example.com ', linkId: null }, SYSTEM),
     )
     expect(started).toMatchObject({ checkoutUrl: GOLD_URL, membershipCreated: true })
     expect(started.expiresAt.getTime() - r.clock.now().getTime()).toBe(72 * H)
@@ -85,7 +85,7 @@ describe('membership checkouts', () => {
     // a second start (the client came back) supersedes the first intent and reuses the pending membership
     r.advance(H)
     const again = await transaction(r.db, (tx) =>
-      openCheckoutIntent(tx, dctx(r), { customerId: ana, planKey: 'premium', email: 'ana.ruiz@example.com' }, SYSTEM),
+      openCheckoutIntent(tx, dctx(r), { customerId: ana, planKey: 'gold', email: 'ana.ruiz@example.com' }, SYSTEM),
     )
     expect(again).toMatchObject({ membershipId: started.membershipId, membershipCreated: false })
     expect((await checkouts(r)).map((c) => [c.state, c.expected_email, c.origin])).toEqual([
@@ -121,7 +121,7 @@ describe('membership checkouts', () => {
     expect(await memberOf(r, ana)).toMatchObject({ status: 'active', paid_order_count: 2 })
     // a member cannot start another checkout
     await expect(
-      transaction(r.db, (tx) => openCheckoutIntent(tx, dctx(r), { customerId: ana, planKey: 'premium', email: 'a@example.com' }, SYSTEM)),
+      transaction(r.db, (tx) => openCheckoutIntent(tx, dctx(r), { customerId: ana, planKey: 'gold', email: 'a@example.com' }, SYSTEM)),
     ).rejects.toMatchObject({ code: 'MEMBERSHIP_EXISTS' })
   })
 
@@ -135,7 +135,7 @@ describe('membership checkouts', () => {
         id,
         location_id: r.locationId,
         customer_id: customerId,
-        plan_id: (await r.db.selectFrom('membership_plans').select('id').where('key', '=', 'premium').executeTakeFirstOrThrow()).id,
+        plan_id: (await r.db.selectFrom('membership_plans').select('id').where('key', '=', 'gold').executeTakeFirstOrThrow()).id,
         plan_label: 'Gold',
         status: 'active',
         source: 'squarespace',
@@ -173,7 +173,7 @@ describe('membership checkouts', () => {
     // a month later Eve starts a checkout naming Bob's email, and Bob's renewal arrives inside her window
     r.advance(30 * D)
     const started = await transaction(r.db, (tx) =>
-      openCheckoutIntent(tx, dctx(r), { customerId: eve, planKey: 'premium', email: 'bob@example.com' }, SYSTEM),
+      openCheckoutIntent(tx, dctx(r), { customerId: eve, planKey: 'gold', email: 'bob@example.com' }, SYSTEM),
     )
     r.advance(H)
     const o2 = r.store.createOrder({ email: 'bob@example.com', name: 'Bob Legacy', lineItems: [item('MEM-GOLD', 'Gold')] })
@@ -209,7 +209,7 @@ describe('membership checkouts', () => {
       r.advance(31 * D)
       // Eve tries again each month: a new intent on her pending membership
       if (month === 2)
-        await transaction(r.db, (tx) => openCheckoutIntent(tx, dctx(r), { customerId: eve, planKey: 'premium', email: 'bob@example.com' }, SYSTEM))
+        await transaction(r.db, (tx) => openCheckoutIntent(tx, dctx(r), { customerId: eve, planKey: 'gold', email: 'bob@example.com' }, SYSTEM))
       r.advance(H)
       r.store.createOrder({ email: 'bob@example.com', name: 'Bob Legacy', lineItems: [item('MEM-GOLD', 'Gold')] })
       await sync(r)
@@ -238,7 +238,7 @@ describe('membership checkouts', () => {
       expect(await r.db.selectFrom('sqsp_customer_links').select('customer_id').execute()).toEqual([])
       r.advance(30 * D)
       const started = await transaction(r.db, (tx) =>
-        openCheckoutIntent(tx, dctx(r), { customerId: eve, planKey: 'premium', email: 'meg@example.com' }, SYSTEM),
+        openCheckoutIntent(tx, dctx(r), { customerId: eve, planKey: 'gold', email: 'meg@example.com' }, SYSTEM),
       )
       r.advance(H)
       const o2 = r.store.createOrder({ email: 'meg@example.com', name: 'Meg', lineItems: [item('MEM-GOLD', 'Gold')] })
@@ -267,7 +267,7 @@ describe('membership checkouts', () => {
     const nina = await makeCustomer(r.db, env, { name: 'Nina New', email: 'nina@example.com', phone: '+12015550133' })
     const eve = await makeCustomer(r.db, env, { name: 'Eve Taker', email: 'eve@example.com', phone: '+12015550122' })
     const started = await transaction(r.db, (tx) =>
-      openCheckoutIntent(tx, dctx(r), { customerId: nina, planKey: 'premium', email: 'nina@example.com' }, SYSTEM),
+      openCheckoutIntent(tx, dctx(r), { customerId: nina, planKey: 'gold', email: 'nina@example.com' }, SYSTEM),
     )
     r.advance(H)
     const o1 = r.store.createOrder({ email: 'nina@example.com', name: 'Nina', lineItems: [item('MEM-GOLD', 'Gold')] })
@@ -286,7 +286,7 @@ describe('membership checkouts', () => {
     // Eve names Nina's email; Nina's next renewal arrives inside Eve's window and is still Nina's
     r.advance(29 * D)
     const eves = await transaction(r.db, (tx) =>
-      openCheckoutIntent(tx, dctx(r), { customerId: eve, planKey: 'premium', email: 'nina@example.com' }, SYSTEM),
+      openCheckoutIntent(tx, dctx(r), { customerId: eve, planKey: 'gold', email: 'nina@example.com' }, SYSTEM),
     )
     r.advance(H)
     const o3 = r.store.createOrder({ email: 'nina@example.com', name: 'Nina', lineItems: [item('MEM-GOLD', 'Gold')] })
@@ -306,7 +306,7 @@ describe('membership checkouts', () => {
     const { env } = await setup(r)
     const c = await makeCustomer(r.db, env, { name: 'No Url' })
     await expect(
-      transaction(r.db, (tx) => openCheckoutIntent(tx, dctx(r), { customerId: c, planKey: 'executive', email: 'x@example.com' }, SYSTEM)),
+      transaction(r.db, (tx) => openCheckoutIntent(tx, dctx(r), { customerId: c, planKey: 'vip', email: 'x@example.com' }, SYSTEM)),
     ).rejects.toMatchObject({ code: 'MEMBERSHIP_CHECKOUT_UNAVAILABLE' })
   })
 
@@ -360,7 +360,7 @@ describe('membership checkouts', () => {
     const r = rig()
     const { env, manager } = await setup(r)
     const ana = await makeCustomer(r.db, env, { name: 'Ana Ruiz', email: null, phone: '+12015550188' })
-    const started = await transaction(r.db, (tx) => openCheckoutIntent(tx, dctx(r), { customerId: ana, planKey: 'premium', email: 'ana.ruiz@example.com' }, SYSTEM))
+    const started = await transaction(r.db, (tx) => openCheckoutIntent(tx, dctx(r), { customerId: ana, planKey: 'gold', email: 'ana.ruiz@example.com' }, SYSTEM))
     r.advance(H)
     // someone Oasis does not know pays with Ana's typed email within the window
     const o = r.store.createOrder({ email: 'ana.ruiz@example.com', name: 'Eve Squatter', phone: '9735550100', lineItems: [item('MEM-GOLD', 'Gold')] })
@@ -450,7 +450,7 @@ describe('membership checkouts', () => {
     expect(await sweepCheckouts(r.db, dctx(r))).toEqual({ expired: 0, abandoned: 0 })
     const ana = await makeCustomer(r.db, env, { name: 'Ana Ruiz' })
     const started = await transaction(r.db, (tx) =>
-      openCheckoutIntent(tx, dctx(r), { customerId: ana, planKey: 'premium', email: 'ana@example.com' }, SYSTEM),
+      openCheckoutIntent(tx, dctx(r), { customerId: ana, planKey: 'gold', email: 'ana@example.com' }, SYSTEM),
     )
     // a website join (POST /public/memberships) leaves the same kind of pending membership, without an intent
     const web = await makeCustomer(r.db, env, { name: 'Web Joiner' })
@@ -461,7 +461,7 @@ describe('membership checkouts', () => {
         id: webId,
         location_id: r.locationId,
         customer_id: web,
-        plan_id: (await r.db.selectFrom('membership_plans').select('id').where('key', '=', 'premium').executeTakeFirstOrThrow()).id,
+        plan_id: (await r.db.selectFrom('membership_plans').select('id').where('key', '=', 'gold').executeTakeFirstOrThrow()).id,
         plan_label: 'Gold',
         status: 'pending',
         source: 'manual',
@@ -497,7 +497,7 @@ describe('membership checkouts', () => {
     const { env } = await setup(r)
     const staff = { userId: 'test', name: 'Gerald', audit: { actor: { name: 'Gerald' } } }
     const sam = await makeCustomer(r.db, env, { name: 'Sam Staffmade' })
-    const made = await transaction(r.db, (tx) => createManualMembership(tx, dctx(r), { customerId: sam, planKey: 'premium' }, staff))
+    const made = await transaction(r.db, (tx) => createManualMembership(tx, dctx(r), { customerId: sam, planKey: 'gold' }, staff))
     r.advance(10 * D)
     await transaction(r.db, (tx) => patchMembership(tx, dctx(r), made.id, { status: 'pending' }, staff))
     // a website join staff touched (any hand edit) is staff's too
@@ -509,7 +509,7 @@ describe('membership checkouts', () => {
         id: webId,
         location_id: r.locationId,
         customer_id: web,
-        plan_id: (await r.db.selectFrom('membership_plans').select('id').where('key', '=', 'premium').executeTakeFirstOrThrow()).id,
+        plan_id: (await r.db.selectFrom('membership_plans').select('id').where('key', '=', 'gold').executeTakeFirstOrThrow()).id,
         plan_label: 'Gold',
         status: 'pending',
         source: 'manual',
@@ -528,7 +528,7 @@ describe('membership checkouts', () => {
     const { env } = await setup(r)
     const ana = await makeCustomer(r.db, env, { name: 'Ana Ruiz' })
     const open = () =>
-      transaction(r.db, (tx) => openCheckoutIntent(tx, dctx(r), { customerId: ana, planKey: 'premium', email: 'ana@example.com' }, SYSTEM))
+      transaction(r.db, (tx) => openCheckoutIntent(tx, dctx(r), { customerId: ana, planKey: 'gold', email: 'ana@example.com' }, SYSTEM))
     const first = await open()
     r.advance(6 * D + 23 * H)
     const second = await open()

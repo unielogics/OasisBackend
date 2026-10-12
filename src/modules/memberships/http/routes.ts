@@ -112,31 +112,39 @@ export function registerMembershipRoutes(app: AppInstance): void {
       config: { access: access.perm('cli.view') },
       schema: {
         tags: [TAG],
-        summary: 'The membership plans with their credit rules and each rule’s auto-apply flag',
+        summary: 'The membership tiers with what they include and each inclusion’s auto-apply flag',
         description:
-          'Display data (perks, discount basis points) and the rules a visit can redeem. A rule with `autoApply` redeems itself when a covered visit is completed (default off).',
+          'Display data (perks, discount basis points), the member % off and the inclusions a visit can redeem (ADR 0170: each names the services it covers; `rules` is the same list under its old name). An inclusion with `autoApply` applies itself when a covered visit is completed.',
         response: { 200: PlansResult },
       },
     },
     async (req) => {
       const plans = await loadPlans(app.db, auth(req).locationId)
       return {
-        plans: plans.map((p) => ({
-          id: p.id,
-          key: p.key,
-          name: p.name,
-          perks: p.perks,
-          addonDiscountBp: p.addonDiscountBp,
-          serviceDiscountBp: p.serviceDiscountBp,
-          rules: p.rules.map((r) => ({
+        plans: plans.map((p) => {
+          const inclusions = p.inclusions.map((r) => ({
             id: r.id,
             label: r.label,
-            includeTags: r.includeTags,
-            excludeTags: r.excludeTags,
+            mode: r.mode,
             perCycle: r.perCycle,
             autoApply: r.autoApply,
-          })),
-        })),
+            active: r.active,
+            serviceIds: r.serviceIds,
+          }))
+          return {
+            id: p.id,
+            key: p.key,
+            name: p.name,
+            active: p.active,
+            perks: p.perks,
+            addonDiscountBp: p.addonDiscountBp,
+            serviceDiscountBp: p.serviceDiscountBp,
+            memberDiscountBp: p.memberDiscountBp,
+            vipBooking: p.vipBooking,
+            inclusions,
+            rules: inclusions,
+          }
+        }),
       }
     },
   )
@@ -147,9 +155,9 @@ export function registerMembershipRoutes(app: AppInstance): void {
       config: { access: access.perm('cli.member') },
       schema: {
         tags: [TAG],
-        summary: 'Turn a credit rule’s auto-apply on or off',
+        summary: 'Turn an inclusion’s auto-apply on or off',
         description:
-          'With it on, completing a visit the rule covers redeems one credit by itself (a system adjust on the invoice, one per appointment). Audited.',
+          'With it on, completing a visit the inclusion covers redeems one credit by itself (a system adjust on the invoice, one per appointment). The id is the inclusion’s (the credit rule’s id for one made from a rule, ADR 0170). Audited.',
         params: RuleParams,
         body: RulePatch,
         response: { 200: PlanRule },
@@ -160,35 +168,42 @@ export function registerMembershipRoutes(app: AppInstance): void {
       const body = req.body as z.infer<typeof RulePatch>
       return app.db.transaction().execute(async (tx) => {
         const rule = await tx
-          .selectFrom('plan_credit_rules as r')
+          .selectFrom('membership_inclusions as r')
           .innerJoin('membership_plans as p', 'p.id', 'r.plan_id')
-          .select(['r.id', 'r.label', 'r.auto_apply', 'r.include_tags', 'r.exclude_tags', 'r.per_cycle'])
+          .select(['r.id', 'r.label', 'r.auto_apply', 'r.mode', 'r.per_cycle', 'r.active'])
           .where('r.id', '=', req.params.id)
           .where('p.location_id', '=', a.locationId)
           .forUpdate('r')
           .executeTakeFirst()
-        if (!rule) throw new AppError('NOT_FOUND', { detail: 'That credit rule does not exist' })
+        if (!rule) throw new AppError('NOT_FOUND', { detail: 'That inclusion does not exist' })
         await tx
-          .updateTable('plan_credit_rules')
-          .set({ auto_apply: body.autoApply })
+          .updateTable('membership_inclusions')
+          .set((eb) => ({ auto_apply: body.autoApply, updated_at: eb.fn('app_now', []) }))
           .where('id', '=', rule.id)
           .execute()
         await audit.record(tx, {
           locationId: a.locationId,
           action: 'membership.rule.update',
-          entityType: 'plan_credit_rule',
+          entityType: 'membership_inclusion',
           entityId: rule.id,
           before: { autoApply: rule.auto_apply },
           after: { autoApply: body.autoApply, label: rule.label },
           ctx: auditContextOf(req),
         })
+        const services = await tx
+          .selectFrom('membership_inclusion_services')
+          .select('service_id')
+          .where('inclusion_id', '=', rule.id)
+          .orderBy('service_id')
+          .execute()
         return {
           id: rule.id,
           label: rule.label,
-          includeTags: rule.include_tags,
-          excludeTags: rule.exclude_tags,
-          perCycle: rule.per_cycle,
+          mode: rule.mode,
+          perCycle: rule.mode === 'every_visit' ? null : rule.per_cycle,
           autoApply: body.autoApply,
+          active: rule.active,
+          serviceIds: services.map((x) => x.service_id),
         }
       })
     },
@@ -214,7 +229,11 @@ export function registerMembershipRoutes(app: AppInstance): void {
         .innerJoin('membership_plans as p', 'p.id', 'm.plan_id')
         .where('m.location_id', '=', c.locationId)
       if (q.status) base = base.where('m.status', '=', q.status)
-      if (q.plan) base = base.where('p.key', '=', q.plan)
+      // a tier by its key or its old key (premium = gold, executive = vip: ADR 0170)
+      if (q.plan) {
+        const plan = q.plan
+        base = base.where((eb) => eb.or([eb('p.key', '=', plan), eb('p.legacy_key', '=', plan)]))
+      }
       if (q.q) base = base.where('cu.full_name', 'ilike', `%${q.q.replace(/[%_\\]/g, (m) => `\\${m}`)}%`)
       let page = base.selectAll('m').select('cu.full_name as customer_name')
       if (q.cursor) {

@@ -2,6 +2,9 @@
 // rebuilt when any of them (or the business date) changes, rendered byte-stable for the prompt cache, prices as starting prices.
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { sql } from 'kysely'
+import { seedLegacyWebsitePrices } from '../fixtures/legacy-website-prices.js'
+import { putTierPrices, requireTier } from '../../src/modules/catalog/tiers.js'
+import { createIdGenerator } from '../../src/platform/ids.js'
 import { runSeed } from '../../db/seeds/index.js'
 import { loadEnv, type Env } from '../../src/config/env.js'
 import { FixedClock, PARITY_NOW } from '../../src/platform/clock.js'
@@ -33,6 +36,7 @@ beforeEach(async () => {
   await runSeed({ db: t.db, clock, profile: 'catalog' })
   await runSeed({ db: t.db, clock, profile: 'website-catalog' })
   locationId = (await t.db.selectFrom('locations').select('id').executeTakeFirstOrThrow()).id
+  await seedLegacyWebsitePrices(t.db, clock, locationId)
 })
 
 afterAll(async () => {
@@ -187,7 +191,9 @@ describe('the shop facts document', () => {
     expect(renderShopFacts(f1)).toContain('pay a booking fee, paid through a payment link')
     expect(placeholderValues(f1).get('{fee}')).toBe('Guests pay a $30 booking fee')
 
-    await sql`update services set member_price_cents = 4700, version = version + 1 where public_name = 'Signature Hand Wash'`.execute(t.db)
+    // a price by size (ADR 0170): $56 at a sedan, $47 for members at 16.67% off
+    await sql`update service_class_prices set price_cents = 5600
+      where class_key = 'sedan' and service_id = (select id from services where public_name = 'Signature Hand Wash')`.execute(t.db)
     const f2 = await s.get(locationId)
     expect(f2.version).not.toBe(f1.version)
     const sig = f2.catalog.items.find((i) => i.name === 'Signature Hand Wash')!
@@ -199,7 +205,14 @@ describe('the shop facts document', () => {
     expect(f3.version).not.toBe(f2.version)
     expect(f3.closures).toEqual([expect.objectContaining({ date: '2026-06-20', name: 'Team day', type: 'closed' })])
 
-    await sql`update membership_plans set monthly_price_cents = 10900 where public_label = 'Gold'`.execute(t.db)
+    await t.db.transaction().execute(async (tx) => {
+      const gold = await requireTier(tx, locationId, 'gold')
+      await putTierPrices(tx, { newId: createIdGenerator(clock), now: clock.now() }, {
+        locationId,
+        userId: null,
+        rows: [{ tierKey: 'gold', priceVersion: gold.priceVersion, cells: [{ class: 'sedan', monthlyCents: 10900 }] }],
+      })
+    })
     const f4 = await s.get(locationId)
     expect(f4.plans.find((p) => p.key === 'gold')!.monthlyPriceCents).toBe(10900)
     expect(placeholderValues(f4).get('{plan:gold}')).toBe('Gold is $109 a month')

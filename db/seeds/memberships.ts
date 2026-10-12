@@ -6,7 +6,7 @@
 import { sql } from 'kysely'
 import { DESIGN_PLANS } from '../../src/modules/memberships/design-plans.js'
 import { grantCycleCredits } from '../../src/modules/memberships/credits.js'
-import { ensurePlans, loadPlans } from '../../src/modules/memberships/plans.js'
+import { ensurePlans, loadPlans, planByKey } from '../../src/modules/memberships/plans.js'
 import type { PlanKey } from '../../src/modules/memberships/schema.js'
 import { addMonths } from '../../src/modules/payments-sync/membership.js'
 import { addDays, bizDayBounds, toBizDate } from '../../src/platform/time.js'
@@ -59,7 +59,8 @@ export const membershipsProfile: SeedProfile = {
         .where('status', 'in', ['pending', 'active', 'past_due', 'paused'])
         .executeTakeFirst()
       if (live) continue
-      const plan = plans.find((p) => p.key === planKeyOf(label))!
+      // the design's labels name the old keys (Premium Care -> premium, now the gold tier's legacy key: ADR 0170)
+      const plan = planByKey(plans, planKeyOf(label))!
       const months = 8 + ((DESIGN_VISITS[name] ?? 0) % 6)
       const id = newId()
       await tx
@@ -82,9 +83,9 @@ export const membershipsProfile: SeedProfile = {
         .execute()
       await grantCycleCredits(tx, d, { id, currentPeriodStart: periodStart }, plan, 'Seed')
       if (name === 'Priya Nair') {
-        const rule = plan.rules[0]!
+        const rule = plan.inclusions[0]!
         await sql`
-          insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, rule_id, note, actor, idempotency_key, created_at)
+          insert into membership_credit_events (id, membership_id, cycle_start, kind, qty, inclusion_id, note, actor, idempotency_key, created_at)
           values (${newId()}, ${id}, ${periodStart}, 'redeem', 1, ${rule.id}, 'Seed: an earlier visit this cycle', 'Seed',
             ${`seed:redeem:${id}`}, ${now})
           on conflict (idempotency_key) do nothing`.execute(tx)

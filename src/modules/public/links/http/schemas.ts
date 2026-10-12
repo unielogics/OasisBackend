@@ -1,7 +1,7 @@
 // Request and response schemas of the personal-link API (ADR 0160, design section 5). Bodies are strict except the code request's,
 // which ignores what it does not know (a `phone` sent with it is dropped: the code only ever goes to the link's own number).
 import { z } from '../../../../http/zod.js'
-import { BizDate } from '../../http/schemas.js'
+import { BizDate, TierKey } from '../../http/schemas.js'
 
 const iso = z.string()
 const isoOrNull = z.string().nullable()
@@ -13,7 +13,7 @@ export const ExchangeBody = z
 export const ClientView = z.object({
   firstName: z.string().describe('Empty for a stranger’s link, a name the shop does not have yet, or a record the stale-record rule hides'),
   last2: z.string().describe('The last two digits of the number the link was texted to'),
-  tier: z.enum(['gold', 'vip']).nullable(),
+  tier: TierKey.nullable(),
 })
 
 export const AppointmentView = z.object({
@@ -40,7 +40,7 @@ export const InvoiceView = z.object({
 })
 
 export const PlanView = z.object({
-  tier: z.enum(['gold', 'vip']).nullable(),
+  tier: TierKey.nullable(),
   planKey: z.string(),
   name: z.string(),
   monthlyPriceCents: z.number().int().nullable(),

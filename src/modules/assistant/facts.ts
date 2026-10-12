@@ -90,6 +90,17 @@ async function sourceFingerprint(db: Executor, locationId: string, from: string,
       (select md5(coalesce(string_agg(row_to_json(x)::text, ',' order by x.id), '')) from services x where x.location_id = ${locationId}),
       (select md5(coalesce(string_agg(row_to_json(x)::text, ',' order by x.key), '')) from catalog_categories x where x.location_id = ${locationId}),
       (select md5(coalesce(string_agg(row_to_json(x)::text, ',' order by x.id), '')) from membership_plans x where x.location_id = ${locationId}),
+      -- the prices by size and the tiers' prices and inclusions (ADR 0170): the catalog's starting prices and tint rows come from them
+      (select md5(coalesce(string_agg(row_to_json(x)::text, ',' order by x.key), '')) from vehicle_classes x where x.location_id = ${locationId}),
+      (select md5(coalesce(string_agg(row_to_json(x)::text, ',' order by x.service_id, x.class_key), '')) from service_class_prices x
+         where x.location_id = ${locationId}),
+      (select md5(coalesce(string_agg(row_to_json(x)::text, ',' order by x.id), '')) from membership_tier_prices x
+         where x.location_id = ${locationId} and x.superseded_at is null),
+      (select md5(coalesce(string_agg(row_to_json(i)::text || coalesce(s.ids, ''), ',' order by i.id), ''))
+         from membership_inclusions i join membership_plans p on p.id = i.plan_id
+         left join lateral (select string_agg(service_id::text, ',' order by service_id) as ids
+                            from membership_inclusion_services where inclusion_id = i.id) s on true
+         where p.location_id = ${locationId}),
       (select md5(coalesce(string_agg(row_to_json(x)::text, ',' order by x.weekday), '')) from business_hours x where x.location_id = ${locationId}),
       (select md5(coalesce(string_agg(row_to_json(x)::text, ',' order by x.id), '')) from closures x
          where x.location_id = ${locationId} and x.deleted_at is null and x.date >= ${from}::date and x.date <= ${to}::date),

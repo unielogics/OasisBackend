@@ -375,7 +375,7 @@ describe('send_link', () => {
 
   it('a membership link needs the plan the tier sells to be set up', async () => {
     const probe = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'caller' })
-    const hasPlan = await w.t.db.selectFrom('membership_plans').select('id').where('key', '=', 'premium').executeTakeFirst()
+    const hasPlan = await w.t.db.selectFrom('membership_plans').select('id').where('key', '=', 'gold').executeTakeFirst()
     const r = await run('send_link', probe.ctx, { kind: 'membership', appointmentRef: null, tier: 'gold' })
     expect(r).toMatchObject(hasPlan ? { ok: true } : { ok: false, error: 'unavailable' })
     expect(await run('send_link', probe.ctx, { kind: 'membership', appointmentRef: null, tier: null })).toMatchObject({ ok: false, error: 'invalid' })

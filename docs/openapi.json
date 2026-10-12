@@ -1848,12 +1848,7 @@
                               "type": "string"
                             },
                             "planKey": {
-                              "enum": [
-                                "essential",
-                                "premium",
-                                "executive",
-                                "exotic"
-                              ],
+                              "description": "The tier’s key (gold, vip, …; ADR 0170)",
                               "type": "string"
                             },
                             "renewLabel": {
@@ -15913,7 +15908,7 @@
     },
     "/api/v1/catalog": {
       "get": {
-        "description": "Active services only; `includeInactive=true` (retired ones too) needs set.services. Each part carries its own `version` (the token its save takes).",
+        "description": "Active services only; `includeInactive=true` (retired ones too) needs set.services. Each part carries its own `version` (the token its save takes): a price row carries its service’s version, a tier its `version` (PUT /catalog/tiers/{key}) and `priceVersion` (PUT /catalog/tier-prices). Square fields of the tiers are shown to set.services holders only. `tintMatrix`, `guestMarkup` and `plans` are the deprecated pre-size data, read only (ADR 0170).",
         "operationId": "getCatalogSettings",
         "parameters": [
           {
@@ -15964,7 +15959,7 @@
                           },
                           "effective": {
                             "additionalProperties": false,
-                            "description": "The starting prices the website and the assistant state (design §3b; a tint package: the lowest prices of its film in the tint matrix)",
+                            "description": "The starting prices the website and the assistant state: the regular starting price, and the member one at the lowest % off of the public tiers that have a price (ADR 0170)",
                             "properties": {
                               "guestPriceCents": {
                                 "maximum": 9007199254740991,
@@ -16005,7 +16000,7 @@
                                 "type": "null"
                               }
                             ],
-                            "description": "null: the member price plus the guest markup, rounded half up to whole dollars"
+                            "description": "Deprecated (ADR 0170): the stored pre-size guest price, read only"
                           },
                           "id": {
                             "type": "string"
@@ -16028,13 +16023,13 @@
                                 "type": "null"
                               }
                             ],
-                            "description": "null: the plain price"
+                            "description": "Deprecated (ADR 0170): the stored pre-size member price, read only"
                           },
                           "name": {
                             "type": "string"
                           },
                           "priceCents": {
-                            "description": "What a booking charges. For an item priced on the website (a member price, or a tint film) it follows the guest price; otherwise it is the plain price, which is also the member price",
+                            "description": "The starting price (the lowest price over the active sizes) for a service priced by size, kept in step by every grid save; otherwise the base price a booking charges",
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
                             "type": "integer"
@@ -16069,6 +16064,7 @@
                             "type": "integer"
                           },
                           "vipInclusion": {
+                            "description": "Deprecated (ADR 0170): VIP members get the VIP tier’s inclusions",
                             "enum": [
                               "included",
                               "allowance",
@@ -16084,7 +16080,8 @@
                               {
                                 "type": "null"
                               }
-                            ]
+                            ],
+                            "description": "Deprecated (ADR 0170)"
                           },
                           "visibleOnline": {
                             "type": "boolean"
@@ -16165,8 +16162,38 @@
                       "minimum": -9007199254740991,
                       "type": "integer"
                     },
+                    "guestFee": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "cents": {
+                          "description": "The booking fee guests pay toward the visit (members pay none)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "collect": {
+                          "enum": [
+                            "counter",
+                            "link"
+                          ],
+                          "type": "string"
+                        },
+                        "version": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "cents",
+                        "collect",
+                        "version"
+                      ],
+                      "type": "object"
+                    },
                     "guestMarkup": {
                       "additionalProperties": false,
+                      "description": "Deprecated (ADR 0170): the stored pre-size markup, read only",
                       "properties": {
                         "pct": {
                           "maximum": 9007199254740991,
@@ -16184,6 +16211,12 @@
                         "version"
                       ],
                       "type": "object"
+                    },
+                    "missingPrices": {
+                      "description": "Cells not set over the listed services and the active sizes (“N prices not set”)",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
                     },
                     "packages": {
                       "items": {
@@ -16212,7 +16245,7 @@
                           },
                           "effective": {
                             "additionalProperties": false,
-                            "description": "The starting prices the website and the assistant state (design §3b; a tint package: the lowest prices of its film in the tint matrix)",
+                            "description": "The starting prices the website and the assistant state: the regular starting price, and the member one at the lowest % off of the public tiers that have a price (ADR 0170)",
                             "properties": {
                               "guestPriceCents": {
                                 "maximum": 9007199254740991,
@@ -16253,7 +16286,7 @@
                                 "type": "null"
                               }
                             ],
-                            "description": "null: the member price plus the guest markup, rounded half up to whole dollars"
+                            "description": "Deprecated (ADR 0170): the stored pre-size guest price, read only"
                           },
                           "id": {
                             "type": "string"
@@ -16276,13 +16309,13 @@
                                 "type": "null"
                               }
                             ],
-                            "description": "null: the plain price"
+                            "description": "Deprecated (ADR 0170): the stored pre-size member price, read only"
                           },
                           "name": {
                             "type": "string"
                           },
                           "priceCents": {
-                            "description": "What a booking charges. For an item priced on the website (a member price, or a tint film) it follows the guest price; otherwise it is the plain price, which is also the member price",
+                            "description": "The starting price (the lowest price over the active sizes) for a service priced by size, kept in step by every grid save; otherwise the base price a booking charges",
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
                             "type": "integer"
@@ -16317,6 +16350,7 @@
                             "type": "integer"
                           },
                           "vipInclusion": {
+                            "description": "Deprecated (ADR 0170): VIP members get the VIP tier’s inclusions",
                             "enum": [
                               "included",
                               "allowance",
@@ -16332,7 +16366,8 @@
                               {
                                 "type": "null"
                               }
-                            ]
+                            ],
+                            "description": "Deprecated (ADR 0170)"
                           },
                           "visibleOnline": {
                             "type": "boolean"
@@ -16364,6 +16399,7 @@
                       "type": "array"
                     },
                     "plans": {
+                      "description": "Deprecated (ADR 0170): the tiers’ public fields; read `tiers`",
                       "items": {
                         "additionalProperties": false,
                         "properties": {
@@ -16382,12 +16418,6 @@
                             "description": "The Squarespace subscription checkout (internal: never in the public catalog)"
                           },
                           "key": {
-                            "enum": [
-                              "essential",
-                              "premium",
-                              "executive",
-                              "exotic"
-                            ],
                             "type": "string"
                           },
                           "monthlyPriceCents": {
@@ -16400,10 +16430,11 @@
                               {
                                 "type": "null"
                               }
-                            ]
+                            ],
+                            "description": "The tier’s starting monthly price over the active sizes"
                           },
                           "name": {
-                            "description": "The dashboard plan’s name",
+                            "description": "The tier’s name",
                             "type": "string"
                           },
                           "perks": {
@@ -16420,7 +16451,8 @@
                               {
                                 "type": "null"
                               }
-                            ]
+                            ],
+                            "description": "The tier’s name (deprecated)"
                           },
                           "version": {
                             "maximum": 9007199254740991,
@@ -16430,17 +16462,13 @@
                           "websiteTier": {
                             "anyOf": [
                               {
-                                "enum": [
-                                  "gold",
-                                  "vip"
-                                ],
                                 "type": "string"
                               },
                               {
                                 "type": "null"
                               }
                             ],
-                            "description": "The website tier sold over this plan"
+                            "description": "The key the website sells it under (a public tier), or null"
                           }
                         },
                         "required": [
@@ -16458,8 +16486,329 @@
                       },
                       "type": "array"
                     },
+                    "prices": {
+                      "description": "One row per listed service (packages, then add-ons)",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "cells": {
+                            "description": "The sizes that have a price, in size order (a size not listed is not set)",
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "cents": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "class": {
+                                  "type": "string"
+                                },
+                                "maxCents": {
+                                  "anyOf": [
+                                    {
+                                      "maximum": 9007199254740991,
+                                      "minimum": -9007199254740991,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "description": "The “up to” price of a range (tint); null = one price"
+                                }
+                              },
+                              "required": [
+                                "class",
+                                "cents",
+                                "maxCents"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "fromCents": {
+                            "description": "The starting price: the lowest over the active sizes, else the base price",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "missing": {
+                            "description": "Active sizes without a price (priced at the starting price, confirm at the shop)",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "serviceId": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "description": "The service’s version: the token a grid save of this row takes",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "serviceId",
+                          "version",
+                          "cells",
+                          "fromCents",
+                          "missing"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "tiers": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "active": {
+                            "type": "boolean"
+                          },
+                          "bgColour": {
+                            "type": "string"
+                          },
+                          "checkoutUrl": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The Squarespace subscription checkout (internal: never in the public catalog)"
+                          },
+                          "colour": {
+                            "description": "#RRGGBB: the board badge colour",
+                            "type": "string"
+                          },
+                          "fromMonthlyCents": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The lowest current price over the active sizes; null = no price, not sold online"
+                          },
+                          "inclusions": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "active": {
+                                  "type": "boolean"
+                                },
+                                "autoApply": {
+                                  "description": "Applied by itself when a covered visit is completed",
+                                  "type": "boolean"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "mode": {
+                                  "enum": [
+                                    "per_cycle",
+                                    "every_visit"
+                                  ],
+                                  "type": "string"
+                                },
+                                "perCycle": {
+                                  "anyOf": [
+                                    {
+                                      "maximum": 9007199254740991,
+                                      "minimum": -9007199254740991,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "description": "per_cycle: visits a billing cycle, null = unlimited; always null for every_visit"
+                                },
+                                "serviceIds": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "label",
+                                "mode",
+                                "perCycle",
+                                "autoApply",
+                                "active",
+                                "serviceIds"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "key": {
+                            "description": "Never changes",
+                            "type": "string"
+                          },
+                          "legacyKey": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The key before ADR 0170 (premium, executive)"
+                          },
+                          "maxVehicles": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "memberDiscountBp": {
+                            "description": "The member % off every line the membership does not cover (1000 = 10%)",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "perks": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "prices": {
+                            "description": "The current monthly price of each size that has one, in size order",
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "class": {
+                                  "type": "string"
+                                },
+                                "effectiveFrom": {
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+                                  "type": "string"
+                                },
+                                "monthlyCents": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "priceVersion": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "squareState": {
+                                  "description": "Staff with set.services only",
+                                  "enum": [
+                                    "pending",
+                                    "synced",
+                                    "failed"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "class",
+                                "monthlyCents",
+                                "priceVersion",
+                                "effectiveFrom"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "priceVersion": {
+                            "description": "The token a tier-price save of this tier takes",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "public": {
+                            "description": "Sold on the website and by the assistant",
+                            "type": "boolean"
+                          },
+                          "sold": {
+                            "description": "Memberships, links or checkouts name it: it can be turned off, never deleted",
+                            "type": "boolean"
+                          },
+                          "sort": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "squarePlanId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Staff with set.services only"
+                          },
+                          "version": {
+                            "description": "The token PUT /catalog/tiers/{key} takes",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "vipBooking": {
+                            "description": "Members get the VIP slot rules",
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "name",
+                          "colour",
+                          "bgColour",
+                          "sort",
+                          "active",
+                          "public",
+                          "vipBooking",
+                          "memberDiscountBp",
+                          "maxVehicles",
+                          "perks",
+                          "checkoutUrl",
+                          "legacyKey",
+                          "priceVersion",
+                          "version",
+                          "inclusions",
+                          "prices",
+                          "fromMonthlyCents",
+                          "sold"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
                     "tintMatrix": {
                       "additionalProperties": false,
+                      "description": "Deprecated (ADR 0170): the stored pre-size matrix, read only",
                       "properties": {
                         "films": {
                           "items": {
@@ -16574,12 +16923,55 @@
                         "version"
                       ],
                       "type": "object"
+                    },
+                    "vehicleClasses": {
+                      "description": "Every size in size order, turned-off ones included",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "active": {
+                            "type": "boolean"
+                          },
+                          "key": {
+                            "description": "Never changes: prices, tiers, vehicles, memberships and visits refer to it",
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "sort": {
+                            "description": "Size order, smallest first",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "version": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "sort",
+                          "active",
+                          "version"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
                     }
                   },
                   "required": [
                     "categories",
                     "packages",
                     "addons",
+                    "vehicleClasses",
+                    "prices",
+                    "missingPrices",
+                    "tiers",
+                    "guestFee",
                     "tintMatrix",
                     "guestMarkup",
                     "guestBookingFeeCents",
@@ -16592,7 +16984,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Settings → Catalog in one call: categories, every service’s website fields, tint matrix, guest markup, plans",
+        "summary": "Settings → Catalog in one call: categories, every service’s website fields, vehicle sizes, prices by size, membership tiers, booking fee",
         "tags": [
           "catalog"
         ],
@@ -16930,8 +17322,138 @@
         "x-oasis-access": "set.services"
       }
     },
+    "/api/v1/catalog/guest-fee": {
+      "get": {
+        "operationId": "getCatalogGuestFee",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "cents": {
+                      "description": "The booking fee guests pay toward the visit (members pay none)",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "collect": {
+                      "enum": [
+                        "counter",
+                        "link"
+                      ],
+                      "type": "string"
+                    },
+                    "version": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "cents",
+                    "collect",
+                    "version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "The booking fee guests pay toward the visit, and how it is collected (ETag = version)",
+        "tags": [
+          "catalog"
+        ],
+        "x-oasis-access": "authenticated"
+      },
+      "put": {
+        "description": "A deposit toward the visit guests pay (members pay none; ADR 0150), settled by the cancel and no-show rules. `version` (or If-Match) required (0 before the first save): 428 without, 412 when stale. Audited `settings.update`; publishes `settings.changed {key: \"booking.guest_fee\"}`.",
+        "operationId": "putCatalogGuestFee",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "cents": {
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
+                  },
+                  "collect": {
+                    "enum": [
+                      "counter",
+                      "link"
+                    ],
+                    "type": "string"
+                  },
+                  "version": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "cents",
+                  "collect"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "cents": {
+                      "description": "The booking fee guests pay toward the visit (members pay none)",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "collect": {
+                      "enum": [
+                        "counter",
+                        "link"
+                      ],
+                      "type": "string"
+                    },
+                    "version": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "cents",
+                    "collect",
+                    "version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Save the booking fee (0 to $1,000) and how it is collected (at the counter or by a payment link)",
+        "tags": [
+          "catalog"
+        ],
+        "x-oasis-access": "set.services"
+      }
+    },
     "/api/v1/catalog/guest-markup": {
       "get": {
+        "description": "Read only (ADR 0170): a member price is the regular price less the tier’s % off now.",
         "operationId": "getCatalogGuestMarkup",
         "responses": {
           "200": {
@@ -16962,71 +17484,22 @@
             "description": "Default Response"
           }
         },
-        "summary": "The guest markup in percent over the member price (ETag = version)",
+        "summary": "Deprecated: the stored pre-size guest markup (ETag = version)",
         "tags": [
           "catalog"
         ],
         "x-oasis-access": "authenticated"
       },
       "put": {
-        "description": "Applies to every service without its own guest price: guest = member × (100 + pct) / 100, rounded half up to whole dollars; what such a service charges at booking (`priceCents`) moves with it (audited `catalog.price.sync`). `version` (or If-Match) required (0 before the first save). Publishes `settings.changed {section: \"catalog\", key: \"catalog.guest_markup_pct\"}`.",
+        "deprecated": true,
+        "description": "Retired (ADR 0170): answers 410 CATALOG_ROUTE_RETIRED. Prices are set per vehicle size (PUT /catalog/prices) and tiers in PUT /catalog/tiers/{key} and PUT /catalog/tier-prices.",
         "operationId": "putCatalogGuestMarkup",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": false,
-                "properties": {
-                  "pct": {
-                    "maximum": 9007199254740991,
-                    "minimum": -9007199254740991,
-                    "type": "integer"
-                  },
-                  "version": {
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": "integer"
-                  }
-                },
-                "required": [
-                  "pct"
-                ],
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "pct": {
-                      "maximum": 9007199254740991,
-                      "minimum": -9007199254740991,
-                      "type": "integer"
-                    },
-                    "version": {
-                      "maximum": 9007199254740991,
-                      "minimum": -9007199254740991,
-                      "type": "integer"
-                    }
-                  },
-                  "required": [
-                    "pct",
-                    "version"
-                  ],
-                  "type": "object"
-                }
-              }
-            },
             "description": "Default Response"
           }
         },
-        "summary": "Save the guest markup (0 to 200 percent)",
+        "summary": "Retired: save the guest markup",
         "tags": [
           "catalog"
         ],
@@ -17035,6 +17508,7 @@
     },
     "/api/v1/catalog/plans": {
       "get": {
+        "description": "Read `GET /catalog/tiers` instead (ADR 0170).",
         "operationId": "listCatalogPlans",
         "responses": {
           "200": {
@@ -17062,12 +17536,6 @@
                             "description": "The Squarespace subscription checkout (internal: never in the public catalog)"
                           },
                           "key": {
-                            "enum": [
-                              "essential",
-                              "premium",
-                              "executive",
-                              "exotic"
-                            ],
                             "type": "string"
                           },
                           "monthlyPriceCents": {
@@ -17080,10 +17548,11 @@
                               {
                                 "type": "null"
                               }
-                            ]
+                            ],
+                            "description": "The tier’s starting monthly price over the active sizes"
                           },
                           "name": {
-                            "description": "The dashboard plan’s name",
+                            "description": "The tier’s name",
                             "type": "string"
                           },
                           "perks": {
@@ -17100,7 +17569,8 @@
                               {
                                 "type": "null"
                               }
-                            ]
+                            ],
+                            "description": "The tier’s name (deprecated)"
                           },
                           "version": {
                             "maximum": 9007199254740991,
@@ -17110,17 +17580,13 @@
                           "websiteTier": {
                             "anyOf": [
                               {
-                                "enum": [
-                                  "gold",
-                                  "vip"
-                                ],
                                 "type": "string"
                               },
                               {
                                 "type": "null"
                               }
                             ],
-                            "description": "The website tier sold over this plan"
+                            "description": "The key the website sells it under (a public tier), or null"
                           }
                         },
                         "required": [
@@ -17149,7 +17615,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "The membership plans’ public fields: public name, monthly price, perks, Squarespace checkout link",
+        "summary": "Deprecated: the tiers’ public fields (name, starting monthly price, perks, Squarespace checkout link)",
         "tags": [
           "catalog"
         ],
@@ -17158,7 +17624,8 @@
     },
     "/api/v1/catalog/plans/{key}": {
       "put": {
-        "description": "All four fields, replaced together; `version` (or If-Match) is required (the plan’s version): 428 without, 412 when stale. Perks: up to 12, each up to 120 characters, trimmed, blanks dropped, no duplicates (they are also what the Membership tab lists). `checkoutUrl` is the plan’s Squarespace subscription checkout: https on squarespace.com or a subdomain, no user, password or port (422 otherwise); it never appears in the public catalog. Publishes `settings.changed {section: \"catalog\", key: \"plans\"}`.",
+        "deprecated": true,
+        "description": "Retired (ADR 0170): answers 410 CATALOG_ROUTE_RETIRED. Prices are set per vehicle size (PUT /catalog/prices) and tiers in PUT /catalog/tiers/{key} and PUT /catalog/tier-prices.",
         "operationId": "putCatalogPlan",
         "parameters": [
           {
@@ -17166,75 +17633,101 @@
             "name": "key",
             "required": true,
             "schema": {
-              "enum": [
-                "essential",
-                "premium",
-                "executive",
-                "exotic"
-              ],
               "type": "string"
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "summary": "Retired: save a plan’s public fields",
+        "tags": [
+          "catalog"
+        ],
+        "x-oasis-access": "set.services"
+      }
+    },
+    "/api/v1/catalog/prices": {
+      "put": {
+        "description": "Each row names a service and the version it was edited at (its service’s version: 428 when a row has none, 412 VERSION_CONFLICT when stale with `meta.row` and `meta.serviceId` naming the row; nothing is saved). Cells: a size and a regular price in cents (0 to $100,000), `maxCents` for an “up to” price (a range, tint), or `cents: null` to clear it (not set: priced at the starting price, confirm at the shop). Sizes a row does not list keep their price. 422 for an unknown size, a size twice in a row, a service twice. Every changed row bumps the service’s version, sets `priceCents` to the new starting price, is audited (`catalog.price.update`) and publishes `settings.changed {section: \"services\"}`; the save publishes `settings.changed {section: \"catalog\", key: \"prices\"}`.",
+        "operationId": "putCatalogPrices",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "additionalProperties": false,
                 "properties": {
-                  "checkoutUrl": {
-                    "anyOf": [
-                      {
-                        "maxLength": 4096,
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "monthlyPriceCents": {
-                    "anyOf": [
-                      {
-                        "maximum": 9007199254740991,
-                        "minimum": -9007199254740991,
-                        "type": "integer"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "perks": {
+                  "rows": {
                     "items": {
-                      "maxLength": 500,
-                      "type": "string"
-                    },
-                    "maxItems": 40,
-                    "type": "array"
-                  },
-                  "publicLabel": {
-                    "anyOf": [
-                      {
-                        "maxLength": 200,
-                        "type": "string"
+                      "additionalProperties": false,
+                      "properties": {
+                        "cells": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "cents": {
+                                "anyOf": [
+                                  {
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "class": {
+                                "maxLength": 64,
+                                "type": "string"
+                              },
+                              "maxCents": {
+                                "anyOf": [
+                                  {
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null
+                              }
+                            },
+                            "required": [
+                              "class",
+                              "cents"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 24,
+                          "type": "array"
+                        },
+                        "serviceId": {
+                          "maxLength": 64,
+                          "type": "string"
+                        },
+                        "version": {
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        }
                       },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "version": {
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": "integer"
+                      "required": [
+                        "serviceId",
+                        "cells"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 200,
+                    "type": "array"
                   }
                 },
                 "required": [
-                  "publicLabel",
-                  "monthlyPriceCents",
-                  "perks",
-                  "checkoutUrl"
+                  "rows"
                 ],
                 "type": "object"
               }
@@ -17249,96 +17742,92 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
-                    "active": {
-                      "type": "boolean"
-                    },
-                    "changed": {
-                      "type": "boolean"
-                    },
-                    "checkoutUrl": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ],
-                      "description": "The Squarespace subscription checkout (internal: never in the public catalog)"
-                    },
-                    "key": {
-                      "enum": [
-                        "essential",
-                        "premium",
-                        "executive",
-                        "exotic"
-                      ],
-                      "type": "string"
-                    },
-                    "monthlyPriceCents": {
-                      "anyOf": [
-                        {
-                          "maximum": 9007199254740991,
-                          "minimum": -9007199254740991,
-                          "type": "integer"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "name": {
-                      "description": "The dashboard plan’s name",
-                      "type": "string"
-                    },
-                    "perks": {
-                      "items": {
-                        "type": "string"
-                      },
-                      "type": "array"
-                    },
-                    "publicLabel": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "version": {
+                    "missingPrices": {
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
                       "type": "integer"
                     },
-                    "websiteTier": {
-                      "anyOf": [
-                        {
-                          "enum": [
-                            "gold",
-                            "vip"
-                          ],
-                          "type": "string"
+                    "rows": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "cells": {
+                            "description": "The sizes that have a price, in size order (a size not listed is not set)",
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "cents": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "class": {
+                                  "type": "string"
+                                },
+                                "maxCents": {
+                                  "anyOf": [
+                                    {
+                                      "maximum": 9007199254740991,
+                                      "minimum": -9007199254740991,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "description": "The “up to” price of a range (tint); null = one price"
+                                }
+                              },
+                              "required": [
+                                "class",
+                                "cents",
+                                "maxCents"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "changed": {
+                            "type": "boolean"
+                          },
+                          "fromCents": {
+                            "description": "The starting price: the lowest over the active sizes, else the base price",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "missing": {
+                            "description": "Active sizes without a price (priced at the starting price, confirm at the shop)",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "serviceId": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "description": "The service’s version: the token a grid save of this row takes",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          }
                         },
-                        {
-                          "type": "null"
-                        }
-                      ],
-                      "description": "The website tier sold over this plan"
+                        "required": [
+                          "serviceId",
+                          "version",
+                          "cells",
+                          "fromCents",
+                          "missing",
+                          "changed"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
                     }
                   },
                   "required": [
-                    "key",
-                    "name",
-                    "active",
-                    "websiteTier",
-                    "publicLabel",
-                    "monthlyPriceCents",
-                    "perks",
-                    "checkoutUrl",
-                    "version",
-                    "changed"
+                    "rows",
+                    "missingPrices"
                   ],
                   "type": "object"
                 }
@@ -17347,7 +17836,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Save a plan’s public name, monthly price, perks and checkout link",
+        "summary": "Save rows of the price grid (services × vehicle sizes), all or nothing",
         "tags": [
           "catalog"
         ],
@@ -17399,7 +17888,7 @@
                     },
                     "effective": {
                       "additionalProperties": false,
-                      "description": "The starting prices the website and the assistant state (design §3b; a tint package: the lowest prices of its film in the tint matrix)",
+                      "description": "The starting prices the website and the assistant state: the regular starting price, and the member one at the lowest % off of the public tiers that have a price (ADR 0170)",
                       "properties": {
                         "guestPriceCents": {
                           "maximum": 9007199254740991,
@@ -17440,7 +17929,7 @@
                           "type": "null"
                         }
                       ],
-                      "description": "null: the member price plus the guest markup, rounded half up to whole dollars"
+                      "description": "Deprecated (ADR 0170): the stored pre-size guest price, read only"
                     },
                     "id": {
                       "type": "string"
@@ -17463,13 +17952,13 @@
                           "type": "null"
                         }
                       ],
-                      "description": "null: the plain price"
+                      "description": "Deprecated (ADR 0170): the stored pre-size member price, read only"
                     },
                     "name": {
                       "type": "string"
                     },
                     "priceCents": {
-                      "description": "What a booking charges. For an item priced on the website (a member price, or a tint film) it follows the guest price; otherwise it is the plain price, which is also the member price",
+                      "description": "The starting price (the lowest price over the active sizes) for a service priced by size, kept in step by every grid save; otherwise the base price a booking charges",
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
                       "type": "integer"
@@ -17504,6 +17993,7 @@
                       "type": "integer"
                     },
                     "vipInclusion": {
+                      "description": "Deprecated (ADR 0170): VIP members get the VIP tier’s inclusions",
                       "enum": [
                         "included",
                         "allowance",
@@ -17519,7 +18009,8 @@
                         {
                           "type": "null"
                         }
-                      ]
+                      ],
+                      "description": "Deprecated (ADR 0170)"
                     },
                     "visibleOnline": {
                       "type": "boolean"
@@ -17553,14 +18044,14 @@
             "description": "Default Response"
           }
         },
-        "summary": "A package’s or add-on’s website fields with the prices the website shows (ETag = version)",
+        "summary": "A package’s or add-on’s website fields with the starting prices the website shows (ETag = version)",
         "tags": [
           "catalog"
         ],
         "x-oasis-access": "authenticated"
       },
       "put": {
-        "description": "All fields, replaced together; `version` (or If-Match) is required: 428 without, 412 VERSION_CONFLICT when stale (the service’s version, shared with checklist and catalog edits). Texts are trimmed (blank = none). 422: an unknown or turned-off category (a service may keep a category that was turned off later), a price outside 0..$100,000, a guest price without a member price or below it, `allowance` without a `vipNote`. The member and guest prices (`effective`) are the starting prices the website and the assistant state; for an item priced on the website (a member price, or a tint film) what a booking charges (`priceCents`) is set to its guest price by the same save. A category change re-derives `categories` on the visits not yet finished that hold the service (`appointmentsUpdated`). Publishes `settings.changed {section: \"services\"}`.",
+        "description": "All fields, replaced together; `version` (or If-Match) is required: 428 without, 412 VERSION_CONFLICT when stale (the service’s version, shared with checklist, price and catalog edits). Texts are trimmed (blank = none). 422: an unknown or turned-off category (a service may keep a category that was turned off later). Prices are not website fields (ADR 0170): they are set per vehicle size (PUT /catalog/prices); what VIP members get is the VIP tier’s inclusions. A category change re-derives `categories` on the visits not yet finished that hold the service (`appointmentsUpdated`). Publishes `settings.changed {section: \"services\"}`.",
         "operationId": "putCatalogService",
         "parameters": [
           {
@@ -17595,30 +18086,6 @@
                       }
                     ]
                   },
-                  "guestPriceCents": {
-                    "anyOf": [
-                      {
-                        "maximum": 9007199254740991,
-                        "minimum": -9007199254740991,
-                        "type": "integer"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "memberPriceCents": {
-                    "anyOf": [
-                      {
-                        "maximum": 9007199254740991,
-                        "minimum": -9007199254740991,
-                        "type": "integer"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
                   "publicName": {
                     "anyOf": [
                       {
@@ -17643,25 +18110,6 @@
                     "minimum": 0,
                     "type": "integer"
                   },
-                  "vipInclusion": {
-                    "enum": [
-                      "included",
-                      "allowance",
-                      "none"
-                    ],
-                    "type": "string"
-                  },
-                  "vipNote": {
-                    "anyOf": [
-                      {
-                        "maxLength": 400,
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
                   "visibleOnline": {
                     "type": "boolean"
                   }
@@ -17670,10 +18118,6 @@
                   "category",
                   "publicName",
                   "description",
-                  "memberPriceCents",
-                  "guestPriceCents",
-                  "vipInclusion",
-                  "vipNote",
                   "quoteOnly",
                   "visibleOnline",
                   "sort"
@@ -17722,7 +18166,7 @@
                     },
                     "effective": {
                       "additionalProperties": false,
-                      "description": "The starting prices the website and the assistant state (design §3b; a tint package: the lowest prices of its film in the tint matrix)",
+                      "description": "The starting prices the website and the assistant state: the regular starting price, and the member one at the lowest % off of the public tiers that have a price (ADR 0170)",
                       "properties": {
                         "guestPriceCents": {
                           "maximum": 9007199254740991,
@@ -17763,7 +18207,7 @@
                           "type": "null"
                         }
                       ],
-                      "description": "null: the member price plus the guest markup, rounded half up to whole dollars"
+                      "description": "Deprecated (ADR 0170): the stored pre-size guest price, read only"
                     },
                     "id": {
                       "type": "string"
@@ -17786,13 +18230,13 @@
                           "type": "null"
                         }
                       ],
-                      "description": "null: the plain price"
+                      "description": "Deprecated (ADR 0170): the stored pre-size member price, read only"
                     },
                     "name": {
                       "type": "string"
                     },
                     "priceCents": {
-                      "description": "What a booking charges. For an item priced on the website (a member price, or a tint film) it follows the guest price; otherwise it is the plain price, which is also the member price",
+                      "description": "The starting price (the lowest price over the active sizes) for a service priced by size, kept in step by every grid save; otherwise the base price a booking charges",
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
                       "type": "integer"
@@ -17827,6 +18271,7 @@
                       "type": "integer"
                     },
                     "vipInclusion": {
+                      "description": "Deprecated (ADR 0170): VIP members get the VIP tier’s inclusions",
                       "enum": [
                         "included",
                         "allowance",
@@ -17842,7 +18287,8 @@
                         {
                           "type": "null"
                         }
-                      ]
+                      ],
+                      "description": "Deprecated (ADR 0170)"
                     },
                     "visibleOnline": {
                       "type": "boolean"
@@ -17878,7 +18324,1541 @@
             "description": "Default Response"
           }
         },
-        "summary": "Save a package’s or add-on’s website fields (category, public name, description, prices, VIP, quote-only, online, order)",
+        "summary": "Save a package’s or add-on’s website fields (category, public name, description, quote-only, online, order)",
+        "tags": [
+          "catalog"
+        ],
+        "x-oasis-access": "set.services"
+      }
+    },
+    "/api/v1/catalog/tier-prices": {
+      "put": {
+        "description": "Each row names a tier and the `priceVersion` it was edited at (428 when a row has none, 412 VERSION_CONFLICT naming the row in `meta.row` and `meta.tierKey` when stale; nothing is saved). Cells: a size and a monthly price in cents (0 to $100,000), or `monthlyCents: null` to clear it (that size is not sold). Sizes a row does not list keep their price. Prices are append-only: a changed size supersedes its current price and adds a new one at the tier’s next `priceVersion` with Square state `pending` (synced to Square later); members keep the price they joined at. Audited `catalog.tier_price.update`; publishes `settings.changed {section: \"catalog\", key: \"tier_prices\"}`.",
+        "operationId": "putCatalogTierPrices",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "rows": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "cells": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "class": {
+                                "maxLength": 64,
+                                "type": "string"
+                              },
+                              "monthlyCents": {
+                                "anyOf": [
+                                  {
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "class",
+                              "monthlyCents"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 24,
+                          "type": "array"
+                        },
+                        "priceVersion": {
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "tierKey": {
+                          "maxLength": 64,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "tierKey",
+                        "cells"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 24,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "rows"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "changed": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "tiers": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "active": {
+                            "type": "boolean"
+                          },
+                          "bgColour": {
+                            "type": "string"
+                          },
+                          "checkoutUrl": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The Squarespace subscription checkout (internal: never in the public catalog)"
+                          },
+                          "colour": {
+                            "description": "#RRGGBB: the board badge colour",
+                            "type": "string"
+                          },
+                          "fromMonthlyCents": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The lowest current price over the active sizes; null = no price, not sold online"
+                          },
+                          "inclusions": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "active": {
+                                  "type": "boolean"
+                                },
+                                "autoApply": {
+                                  "description": "Applied by itself when a covered visit is completed",
+                                  "type": "boolean"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "mode": {
+                                  "enum": [
+                                    "per_cycle",
+                                    "every_visit"
+                                  ],
+                                  "type": "string"
+                                },
+                                "perCycle": {
+                                  "anyOf": [
+                                    {
+                                      "maximum": 9007199254740991,
+                                      "minimum": -9007199254740991,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "description": "per_cycle: visits a billing cycle, null = unlimited; always null for every_visit"
+                                },
+                                "serviceIds": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "label",
+                                "mode",
+                                "perCycle",
+                                "autoApply",
+                                "active",
+                                "serviceIds"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "key": {
+                            "description": "Never changes",
+                            "type": "string"
+                          },
+                          "legacyKey": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The key before ADR 0170 (premium, executive)"
+                          },
+                          "maxVehicles": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "memberDiscountBp": {
+                            "description": "The member % off every line the membership does not cover (1000 = 10%)",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "perks": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "prices": {
+                            "description": "The current monthly price of each size that has one, in size order",
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "class": {
+                                  "type": "string"
+                                },
+                                "effectiveFrom": {
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+                                  "type": "string"
+                                },
+                                "monthlyCents": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "priceVersion": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "squareState": {
+                                  "description": "Staff with set.services only",
+                                  "enum": [
+                                    "pending",
+                                    "synced",
+                                    "failed"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "class",
+                                "monthlyCents",
+                                "priceVersion",
+                                "effectiveFrom"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "priceVersion": {
+                            "description": "The token a tier-price save of this tier takes",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "public": {
+                            "description": "Sold on the website and by the assistant",
+                            "type": "boolean"
+                          },
+                          "sold": {
+                            "description": "Memberships, links or checkouts name it: it can be turned off, never deleted",
+                            "type": "boolean"
+                          },
+                          "sort": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "squarePlanId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Staff with set.services only"
+                          },
+                          "version": {
+                            "description": "The token PUT /catalog/tiers/{key} takes",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "vipBooking": {
+                            "description": "Members get the VIP slot rules",
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "name",
+                          "colour",
+                          "bgColour",
+                          "sort",
+                          "active",
+                          "public",
+                          "vipBooking",
+                          "memberDiscountBp",
+                          "maxVehicles",
+                          "perks",
+                          "checkoutUrl",
+                          "legacyKey",
+                          "priceVersion",
+                          "version",
+                          "inclusions",
+                          "prices",
+                          "fromMonthlyCents",
+                          "sold"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "tiers",
+                    "changed"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Save rows of the tier × size monthly price grid, all or nothing",
+        "tags": [
+          "catalog"
+        ],
+        "x-oasis-access": "set.services"
+      }
+    },
+    "/api/v1/catalog/tiers": {
+      "get": {
+        "description": "Square fields (`squarePlanId`, each price’s `squareState`) are shown to set.services holders only.",
+        "operationId": "listCatalogTiers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "tiers": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "active": {
+                            "type": "boolean"
+                          },
+                          "bgColour": {
+                            "type": "string"
+                          },
+                          "checkoutUrl": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The Squarespace subscription checkout (internal: never in the public catalog)"
+                          },
+                          "colour": {
+                            "description": "#RRGGBB: the board badge colour",
+                            "type": "string"
+                          },
+                          "fromMonthlyCents": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The lowest current price over the active sizes; null = no price, not sold online"
+                          },
+                          "inclusions": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "active": {
+                                  "type": "boolean"
+                                },
+                                "autoApply": {
+                                  "description": "Applied by itself when a covered visit is completed",
+                                  "type": "boolean"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "mode": {
+                                  "enum": [
+                                    "per_cycle",
+                                    "every_visit"
+                                  ],
+                                  "type": "string"
+                                },
+                                "perCycle": {
+                                  "anyOf": [
+                                    {
+                                      "maximum": 9007199254740991,
+                                      "minimum": -9007199254740991,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "description": "per_cycle: visits a billing cycle, null = unlimited; always null for every_visit"
+                                },
+                                "serviceIds": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "label",
+                                "mode",
+                                "perCycle",
+                                "autoApply",
+                                "active",
+                                "serviceIds"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "key": {
+                            "description": "Never changes",
+                            "type": "string"
+                          },
+                          "legacyKey": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The key before ADR 0170 (premium, executive)"
+                          },
+                          "maxVehicles": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "memberDiscountBp": {
+                            "description": "The member % off every line the membership does not cover (1000 = 10%)",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "perks": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "prices": {
+                            "description": "The current monthly price of each size that has one, in size order",
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "class": {
+                                  "type": "string"
+                                },
+                                "effectiveFrom": {
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+                                  "type": "string"
+                                },
+                                "monthlyCents": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "priceVersion": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "squareState": {
+                                  "description": "Staff with set.services only",
+                                  "enum": [
+                                    "pending",
+                                    "synced",
+                                    "failed"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "class",
+                                "monthlyCents",
+                                "priceVersion",
+                                "effectiveFrom"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "priceVersion": {
+                            "description": "The token a tier-price save of this tier takes",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "public": {
+                            "description": "Sold on the website and by the assistant",
+                            "type": "boolean"
+                          },
+                          "sold": {
+                            "description": "Memberships, links or checkouts name it: it can be turned off, never deleted",
+                            "type": "boolean"
+                          },
+                          "sort": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "squarePlanId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Staff with set.services only"
+                          },
+                          "version": {
+                            "description": "The token PUT /catalog/tiers/{key} takes",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "vipBooking": {
+                            "description": "Members get the VIP slot rules",
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "name",
+                          "colour",
+                          "bgColour",
+                          "sort",
+                          "active",
+                          "public",
+                          "vipBooking",
+                          "memberDiscountBp",
+                          "maxVehicles",
+                          "perks",
+                          "checkoutUrl",
+                          "legacyKey",
+                          "priceVersion",
+                          "version",
+                          "inclusions",
+                          "prices",
+                          "fromMonthlyCents",
+                          "sold"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "tiers"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "The membership tiers with their inclusions and monthly prices by size",
+        "tags": [
+          "catalog"
+        ],
+        "x-oasis-access": "authenticated"
+      },
+      "post": {
+        "description": "`key` is immutable once created (a lowercase slug, up to 32); it cannot be a key or an old key (premium, executive) another tier holds (409 TIER_KEY_TAKEN). At most 12 tiers. The tier starts without prices (not sold online until it has one): set them with PUT /catalog/tier-prices. Body fields as PUT /catalog/tiers/{key}. Publishes `settings.changed {section: \"catalog\", key: \"tiers\"}`.",
+        "operationId": "createCatalogTier",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "active": {
+                    "type": "boolean"
+                  },
+                  "bgColour": {
+                    "anyOf": [
+                      {
+                        "maxLength": 16,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "checkoutUrl": {
+                    "anyOf": [
+                      {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "colour": {
+                    "maxLength": 16,
+                    "type": "string"
+                  },
+                  "inclusions": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "active": {
+                          "type": "boolean"
+                        },
+                        "autoApply": {
+                          "type": "boolean"
+                        },
+                        "id": {
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+                          "type": "string"
+                        },
+                        "label": {
+                          "maxLength": 200,
+                          "type": "string"
+                        },
+                        "mode": {
+                          "enum": [
+                            "per_cycle",
+                            "every_visit"
+                          ],
+                          "type": "string"
+                        },
+                        "perCycle": {
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "serviceIds": {
+                          "items": {
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+                            "type": "string"
+                          },
+                          "maxItems": 100,
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "mode",
+                        "perCycle",
+                        "autoApply",
+                        "serviceIds"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 40,
+                    "type": "array"
+                  },
+                  "key": {
+                    "maxLength": 64,
+                    "type": "string"
+                  },
+                  "maxVehicles": {
+                    "anyOf": [
+                      {
+                        "maximum": 9007199254740991,
+                        "minimum": -9007199254740991,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "memberDiscountBp": {
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "maxLength": 200,
+                    "type": "string"
+                  },
+                  "perks": {
+                    "items": {
+                      "maxLength": 500,
+                      "type": "string"
+                    },
+                    "maxItems": 40,
+                    "type": "array"
+                  },
+                  "public": {
+                    "type": "boolean"
+                  },
+                  "sort": {
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
+                  },
+                  "vipBooking": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "key",
+                  "name",
+                  "colour",
+                  "sort",
+                  "active",
+                  "public",
+                  "vipBooking",
+                  "memberDiscountBp",
+                  "maxVehicles",
+                  "perks",
+                  "checkoutUrl",
+                  "inclusions"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "active": {
+                      "type": "boolean"
+                    },
+                    "bgColour": {
+                      "type": "string"
+                    },
+                    "checkoutUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The Squarespace subscription checkout (internal: never in the public catalog)"
+                    },
+                    "colour": {
+                      "description": "#RRGGBB: the board badge colour",
+                      "type": "string"
+                    },
+                    "fromMonthlyCents": {
+                      "anyOf": [
+                        {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The lowest current price over the active sizes; null = no price, not sold online"
+                    },
+                    "inclusions": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "active": {
+                            "type": "boolean"
+                          },
+                          "autoApply": {
+                            "description": "Applied by itself when a covered visit is completed",
+                            "type": "boolean"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "mode": {
+                            "enum": [
+                              "per_cycle",
+                              "every_visit"
+                            ],
+                            "type": "string"
+                          },
+                          "perCycle": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "per_cycle: visits a billing cycle, null = unlimited; always null for every_visit"
+                          },
+                          "serviceIds": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label",
+                          "mode",
+                          "perCycle",
+                          "autoApply",
+                          "active",
+                          "serviceIds"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "key": {
+                      "description": "Never changes",
+                      "type": "string"
+                    },
+                    "legacyKey": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The key before ADR 0170 (premium, executive)"
+                    },
+                    "maxVehicles": {
+                      "anyOf": [
+                        {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "memberDiscountBp": {
+                      "description": "The member % off every line the membership does not cover (1000 = 10%)",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "perks": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "prices": {
+                      "description": "The current monthly price of each size that has one, in size order",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "class": {
+                            "type": "string"
+                          },
+                          "effectiveFrom": {
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+                            "type": "string"
+                          },
+                          "monthlyCents": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "priceVersion": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "squareState": {
+                            "description": "Staff with set.services only",
+                            "enum": [
+                              "pending",
+                              "synced",
+                              "failed"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "class",
+                          "monthlyCents",
+                          "priceVersion",
+                          "effectiveFrom"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "priceVersion": {
+                      "description": "The token a tier-price save of this tier takes",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "public": {
+                      "description": "Sold on the website and by the assistant",
+                      "type": "boolean"
+                    },
+                    "sold": {
+                      "description": "Memberships, links or checkouts name it: it can be turned off, never deleted",
+                      "type": "boolean"
+                    },
+                    "sort": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "squarePlanId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Staff with set.services only"
+                    },
+                    "version": {
+                      "description": "The token PUT /catalog/tiers/{key} takes",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "vipBooking": {
+                      "description": "Members get the VIP slot rules",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "name",
+                    "colour",
+                    "bgColour",
+                    "sort",
+                    "active",
+                    "public",
+                    "vipBooking",
+                    "memberDiscountBp",
+                    "maxVehicles",
+                    "perks",
+                    "checkoutUrl",
+                    "legacyKey",
+                    "priceVersion",
+                    "version",
+                    "inclusions",
+                    "prices",
+                    "fromMonthlyCents",
+                    "sold"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Add a membership tier",
+        "tags": [
+          "catalog"
+        ],
+        "x-oasis-access": "set.services",
+        "x-oasis-idempotency": "optional"
+      }
+    },
+    "/api/v1/catalog/tiers/{key}": {
+      "delete": {
+        "description": "409 TIER_IN_USE when a membership (any status), a personal link, a checkout or a Squarespace product names it: turn it off instead. Its price history goes with it. If-Match is enforced when sent.",
+        "operationId": "deleteCatalogTier",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "removed": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "removed"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Delete a membership tier that was never sold",
+        "tags": [
+          "catalog"
+        ],
+        "x-oasis-access": "set.services"
+      },
+      "put": {
+        "description": "The whole tier, replaced together; `version` (or If-Match) is required: 428 without, 412 when stale. The key never changes. `memberDiscountBp` 0 to 10000 (the member % off every line the membership does not cover, rounded to whole dollars); `vipBooking` gives members the VIP slot rules; `maxVehicles` 1 to 20 or null; perks up to 12, each up to 120 characters, trimmed, no duplicates; `checkoutUrl` a Squarespace checkout (https on squarespace.com) or null. `inclusions` replace the tier’s list in order: an `id` keeps an existing inclusion (its credit history follows it), no `id` adds one; an inclusion left out is deleted, or turned off when credits name it. Each covers `serviceIds` (at least one service of the catalog), `mode` per_cycle (`perCycle` visits a cycle, null = unlimited) or every_visit (`perCycle` null), and `autoApply`. Audited `catalog.tier.update`; publishes `settings.changed {section: \"catalog\", key: \"tiers\"}`.",
+        "operationId": "putCatalogTier",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "active": {
+                    "type": "boolean"
+                  },
+                  "bgColour": {
+                    "anyOf": [
+                      {
+                        "maxLength": 16,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "checkoutUrl": {
+                    "anyOf": [
+                      {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "colour": {
+                    "maxLength": 16,
+                    "type": "string"
+                  },
+                  "inclusions": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "active": {
+                          "type": "boolean"
+                        },
+                        "autoApply": {
+                          "type": "boolean"
+                        },
+                        "id": {
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+                          "type": "string"
+                        },
+                        "label": {
+                          "maxLength": 200,
+                          "type": "string"
+                        },
+                        "mode": {
+                          "enum": [
+                            "per_cycle",
+                            "every_visit"
+                          ],
+                          "type": "string"
+                        },
+                        "perCycle": {
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "serviceIds": {
+                          "items": {
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+                            "type": "string"
+                          },
+                          "maxItems": 100,
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "mode",
+                        "perCycle",
+                        "autoApply",
+                        "serviceIds"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 40,
+                    "type": "array"
+                  },
+                  "maxVehicles": {
+                    "anyOf": [
+                      {
+                        "maximum": 9007199254740991,
+                        "minimum": -9007199254740991,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "memberDiscountBp": {
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "maxLength": 200,
+                    "type": "string"
+                  },
+                  "perks": {
+                    "items": {
+                      "maxLength": 500,
+                      "type": "string"
+                    },
+                    "maxItems": 40,
+                    "type": "array"
+                  },
+                  "public": {
+                    "type": "boolean"
+                  },
+                  "sort": {
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
+                  },
+                  "version": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "vipBooking": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name",
+                  "colour",
+                  "sort",
+                  "active",
+                  "public",
+                  "vipBooking",
+                  "memberDiscountBp",
+                  "maxVehicles",
+                  "perks",
+                  "checkoutUrl",
+                  "inclusions"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "active": {
+                      "type": "boolean"
+                    },
+                    "bgColour": {
+                      "type": "string"
+                    },
+                    "changed": {
+                      "type": "boolean"
+                    },
+                    "checkoutUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The Squarespace subscription checkout (internal: never in the public catalog)"
+                    },
+                    "colour": {
+                      "description": "#RRGGBB: the board badge colour",
+                      "type": "string"
+                    },
+                    "fromMonthlyCents": {
+                      "anyOf": [
+                        {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The lowest current price over the active sizes; null = no price, not sold online"
+                    },
+                    "inclusions": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "active": {
+                            "type": "boolean"
+                          },
+                          "autoApply": {
+                            "description": "Applied by itself when a covered visit is completed",
+                            "type": "boolean"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "mode": {
+                            "enum": [
+                              "per_cycle",
+                              "every_visit"
+                            ],
+                            "type": "string"
+                          },
+                          "perCycle": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "per_cycle: visits a billing cycle, null = unlimited; always null for every_visit"
+                          },
+                          "serviceIds": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label",
+                          "mode",
+                          "perCycle",
+                          "autoApply",
+                          "active",
+                          "serviceIds"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "key": {
+                      "description": "Never changes",
+                      "type": "string"
+                    },
+                    "legacyKey": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The key before ADR 0170 (premium, executive)"
+                    },
+                    "maxVehicles": {
+                      "anyOf": [
+                        {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "memberDiscountBp": {
+                      "description": "The member % off every line the membership does not cover (1000 = 10%)",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "perks": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "prices": {
+                      "description": "The current monthly price of each size that has one, in size order",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "class": {
+                            "type": "string"
+                          },
+                          "effectiveFrom": {
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+                            "type": "string"
+                          },
+                          "monthlyCents": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "priceVersion": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "squareState": {
+                            "description": "Staff with set.services only",
+                            "enum": [
+                              "pending",
+                              "synced",
+                              "failed"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "class",
+                          "monthlyCents",
+                          "priceVersion",
+                          "effectiveFrom"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "priceVersion": {
+                      "description": "The token a tier-price save of this tier takes",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "public": {
+                      "description": "Sold on the website and by the assistant",
+                      "type": "boolean"
+                    },
+                    "sold": {
+                      "description": "Memberships, links or checkouts name it: it can be turned off, never deleted",
+                      "type": "boolean"
+                    },
+                    "sort": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "squarePlanId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Staff with set.services only"
+                    },
+                    "version": {
+                      "description": "The token PUT /catalog/tiers/{key} takes",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "vipBooking": {
+                      "description": "Members get the VIP slot rules",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "name",
+                    "colour",
+                    "bgColour",
+                    "sort",
+                    "active",
+                    "public",
+                    "vipBooking",
+                    "memberDiscountBp",
+                    "maxVehicles",
+                    "perks",
+                    "checkoutUrl",
+                    "legacyKey",
+                    "priceVersion",
+                    "version",
+                    "inclusions",
+                    "prices",
+                    "fromMonthlyCents",
+                    "sold",
+                    "changed"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Save a membership tier: name, colour, perks, member % off, VIP booking, car cap, online, inclusions",
         "tags": [
           "catalog"
         ],
@@ -17887,6 +19867,7 @@
     },
     "/api/v1/catalog/tint-matrix": {
       "get": {
+        "description": "Read only (ADR 0170): tint packages are priced per vehicle size now (PUT /catalog/prices).",
         "operationId": "getCatalogTintMatrix",
         "responses": {
           "200": {
@@ -18014,120 +19995,259 @@
             "description": "Default Response"
           }
         },
-        "summary": "The tint price matrix: vehicle types × films, member and guest ranges, VLT options (ETag = version)",
+        "summary": "Deprecated: the stored pre-size tint matrix (ETag = version)",
         "tags": [
           "catalog"
         ],
         "x-oasis-access": "authenticated"
       },
       "put": {
-        "description": "`version` (or If-Match) is required (0 before the first save): 428 without, 412 VERSION_CONFLICT when stale. Keys are lowercase (letters, digits, underscore); a price row names a listed vehicle type and film, each pair once, each range not ending below its start; VLT values 1..100. A tint package names its film by a tag (e.g. `ceramic`) and shows that film’s lowest prices; what it charges at booking (`priceCents`) moves to the film’s lowest guest price (audited `catalog.price.sync`). Publishes `settings.changed {section: \"catalog\", key: \"catalog.tint_matrix\"}`.",
+        "deprecated": true,
+        "description": "Retired (ADR 0170): answers 410 CATALOG_ROUTE_RETIRED. Prices are set per vehicle size (PUT /catalog/prices) and tiers in PUT /catalog/tiers/{key} and PUT /catalog/tier-prices.",
         "operationId": "putCatalogTintMatrix",
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "summary": "Retired: save the tint matrix",
+        "tags": [
+          "catalog"
+        ],
+        "x-oasis-access": "set.services"
+      }
+    },
+    "/api/v1/catalog/vehicle-classes": {
+      "get": {
+        "operationId": "listVehicleClasses",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "vehicleClasses": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "active": {
+                            "type": "boolean"
+                          },
+                          "key": {
+                            "description": "Never changes: prices, tiers, vehicles, memberships and visits refer to it",
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "sort": {
+                            "description": "Size order, smallest first",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "version": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "label",
+                          "sort",
+                          "active",
+                          "version"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "vehicleClasses"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "The vehicle sizes in size order, turned-off ones included, with their versions",
+        "tags": [
+          "catalog"
+        ],
+        "x-oasis-access": "authenticated"
+      },
+      "post": {
+        "description": "`key` is immutable once created: a lowercase letter, then letters, digits or underscores (up to 32). `label` up to 40 characters, unique (case-insensitively). `sort` defaults to after the last (size order, smallest first). 409 CLASS_KEY_TAKEN; 422 CLASS_LIMIT past 12 sizes. A new size has no prices (“not set”). Publishes `settings.changed {section: \"catalog\", key: \"vehicle_classes\"}`.",
+        "operationId": "createVehicleClass",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "additionalProperties": false,
                 "properties": {
-                  "films": {
-                    "items": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "key": {
-                          "maxLength": 32,
-                          "type": "string"
-                        },
-                        "label": {
-                          "maxLength": 40,
-                          "type": "string"
-                        },
-                        "vlt": {
-                          "items": {
-                            "maximum": 9007199254740991,
-                            "minimum": -9007199254740991,
-                            "type": "integer"
-                          },
-                          "maxItems": 10,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "key",
-                        "label",
-                        "vlt"
-                      ],
-                      "type": "object"
-                    },
-                    "maxItems": 20,
-                    "type": "array"
+                  "active": {
+                    "type": "boolean"
                   },
-                  "prices": {
-                    "items": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "film": {
-                          "maxLength": 32,
-                          "type": "string"
-                        },
-                        "guestMaxCents": {
-                          "maximum": 9007199254740991,
-                          "minimum": -9007199254740991,
-                          "type": "integer"
-                        },
-                        "guestMinCents": {
-                          "maximum": 9007199254740991,
-                          "minimum": -9007199254740991,
-                          "type": "integer"
-                        },
-                        "memberMaxCents": {
-                          "maximum": 9007199254740991,
-                          "minimum": -9007199254740991,
-                          "type": "integer"
-                        },
-                        "memberMinCents": {
-                          "maximum": 9007199254740991,
-                          "minimum": -9007199254740991,
-                          "type": "integer"
-                        },
-                        "vehicle": {
-                          "maxLength": 32,
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "vehicle",
-                        "film",
-                        "memberMinCents",
-                        "memberMaxCents",
-                        "guestMinCents",
-                        "guestMaxCents"
-                      ],
-                      "type": "object"
-                    },
-                    "maxItems": 400,
-                    "type": "array"
+                  "key": {
+                    "maxLength": 64,
+                    "type": "string"
                   },
-                  "vehicleTypes": {
-                    "items": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "key": {
-                          "maxLength": 32,
-                          "type": "string"
-                        },
-                        "label": {
-                          "maxLength": 40,
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "key",
-                        "label"
-                      ],
-                      "type": "object"
+                  "label": {
+                    "maxLength": 200,
+                    "type": "string"
+                  },
+                  "sort": {
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "key",
+                  "label"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "active": {
+                      "type": "boolean"
                     },
-                    "maxItems": 20,
-                    "type": "array"
+                    "key": {
+                      "description": "Never changes: prices, tiers, vehicles, memberships and visits refer to it",
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "sort": {
+                      "description": "Size order, smallest first",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "version": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "label",
+                    "sort",
+                    "active",
+                    "version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Add a vehicle size",
+        "tags": [
+          "catalog"
+        ],
+        "x-oasis-access": "set.services",
+        "x-oasis-idempotency": "optional"
+      }
+    },
+    "/api/v1/catalog/vehicle-classes/{key}": {
+      "delete": {
+        "description": "409 CLASS_IN_USE (meta names the counts) while any price, tier price (current or past), membership, vehicle or visit uses it: turn it off instead. The last size that is on cannot be deleted (422). If-Match is enforced when sent.",
+        "operationId": "deleteVehicleClass",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "removed": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "removed"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Delete a vehicle size nothing uses",
+        "tags": [
+          "catalog"
+        ],
+        "x-oasis-access": "set.services"
+      },
+      "patch": {
+        "description": "`version` (or If-Match) is optional and enforced when sent. The last size that is on cannot be turned off (422). A size that is off is not offered and its prices are kept but not used; turning one on or off moves the starting price of the services priced on it (audited `catalog.price.sync`). Publishes `settings.changed {section: \"catalog\", key: \"vehicle_classes\"}`.",
+        "operationId": "updateVehicleClass",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "active": {
+                    "type": "boolean"
+                  },
+                  "label": {
+                    "maxLength": 200,
+                    "type": "string"
+                  },
+                  "sort": {
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
                   },
                   "version": {
                     "maximum": 9007199254740991,
@@ -18135,11 +20255,6 @@
                     "type": "integer"
                   }
                 },
-                "required": [
-                  "vehicleTypes",
-                  "films",
-                  "prices"
-                ],
                 "type": "object"
               }
             }
@@ -18153,105 +20268,24 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
-                    "films": {
-                      "items": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "key": {
-                            "maxLength": 32,
-                            "type": "string"
-                          },
-                          "label": {
-                            "maxLength": 40,
-                            "type": "string"
-                          },
-                          "vlt": {
-                            "items": {
-                              "maximum": 9007199254740991,
-                              "minimum": -9007199254740991,
-                              "type": "integer"
-                            },
-                            "maxItems": 10,
-                            "type": "array"
-                          }
-                        },
-                        "required": [
-                          "key",
-                          "label",
-                          "vlt"
-                        ],
-                        "type": "object"
-                      },
-                      "maxItems": 20,
-                      "type": "array"
+                    "active": {
+                      "type": "boolean"
                     },
-                    "prices": {
-                      "items": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "film": {
-                            "maxLength": 32,
-                            "type": "string"
-                          },
-                          "guestMaxCents": {
-                            "maximum": 9007199254740991,
-                            "minimum": -9007199254740991,
-                            "type": "integer"
-                          },
-                          "guestMinCents": {
-                            "maximum": 9007199254740991,
-                            "minimum": -9007199254740991,
-                            "type": "integer"
-                          },
-                          "memberMaxCents": {
-                            "maximum": 9007199254740991,
-                            "minimum": -9007199254740991,
-                            "type": "integer"
-                          },
-                          "memberMinCents": {
-                            "maximum": 9007199254740991,
-                            "minimum": -9007199254740991,
-                            "type": "integer"
-                          },
-                          "vehicle": {
-                            "maxLength": 32,
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "vehicle",
-                          "film",
-                          "memberMinCents",
-                          "memberMaxCents",
-                          "guestMinCents",
-                          "guestMaxCents"
-                        ],
-                        "type": "object"
-                      },
-                      "maxItems": 400,
-                      "type": "array"
+                    "changed": {
+                      "type": "boolean"
                     },
-                    "vehicleTypes": {
-                      "items": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "key": {
-                            "maxLength": 32,
-                            "type": "string"
-                          },
-                          "label": {
-                            "maxLength": 40,
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "key",
-                          "label"
-                        ],
-                        "type": "object"
-                      },
-                      "maxItems": 20,
-                      "type": "array"
+                    "key": {
+                      "description": "Never changes: prices, tiers, vehicles, memberships and visits refer to it",
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "sort": {
+                      "description": "Size order, smallest first",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
                     },
                     "version": {
                       "maximum": 9007199254740991,
@@ -18260,10 +20294,12 @@
                     }
                   },
                   "required": [
-                    "vehicleTypes",
-                    "films",
-                    "prices",
-                    "version"
+                    "key",
+                    "label",
+                    "sort",
+                    "active",
+                    "version",
+                    "changed"
                   ],
                   "type": "object"
                 }
@@ -18272,7 +20308,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Save the whole tint price matrix",
+        "summary": "Rename, reorder or turn a vehicle size on or off (the key never changes)",
         "tags": [
           "catalog"
         ],
@@ -21659,12 +23695,7 @@
                                   "type": "string"
                                 },
                                 "key": {
-                                  "enum": [
-                                    "essential",
-                                    "premium",
-                                    "executive",
-                                    "exotic"
-                                  ],
+                                  "pattern": "^[a-z][a-z0-9_]{0,31}$",
                                   "type": "string"
                                 },
                                 "label": {
@@ -29492,12 +31523,7 @@
                           "plan": {
                             "anyOf": [
                               {
-                                "enum": [
-                                  "essential",
-                                  "premium",
-                                  "executive",
-                                  "exotic"
-                                ],
+                                "pattern": "^[a-z][a-z0-9_]{0,31}$",
                                 "type": "string"
                               },
                               {
@@ -29572,12 +31598,7 @@
                         "additionalProperties": false,
                         "properties": {
                           "key": {
-                            "enum": [
-                              "essential",
-                              "premium",
-                              "executive",
-                              "exotic"
-                            ],
+                            "pattern": "^[a-z][a-z0-9_]{0,31}$",
                             "type": "string"
                           },
                           "name": {
@@ -29717,12 +31738,7 @@
                         "plan": {
                           "anyOf": [
                             {
-                              "enum": [
-                                "essential",
-                                "premium",
-                                "executive",
-                                "exotic"
-                              ],
+                              "pattern": "^[a-z][a-z0-9_]{0,31}$",
                               "type": "string"
                             },
                             {
@@ -29839,12 +31855,7 @@
                           "plan": {
                             "anyOf": [
                               {
-                                "enum": [
-                                  "essential",
-                                  "premium",
-                                  "executive",
-                                  "exotic"
-                                ],
+                                "pattern": "^[a-z][a-z0-9_]{0,31}$",
                                 "type": "string"
                               },
                               {
@@ -29919,12 +31930,7 @@
                         "additionalProperties": false,
                         "properties": {
                           "key": {
-                            "enum": [
-                              "essential",
-                              "premium",
-                              "executive",
-                              "exotic"
-                            ],
+                            "pattern": "^[a-z][a-z0-9_]{0,31}$",
                             "type": "string"
                           },
                           "name": {
@@ -48229,12 +50235,7 @@
                                   "type": "string"
                                 },
                                 "key": {
-                                  "enum": [
-                                    "essential",
-                                    "premium",
-                                    "executive",
-                                    "exotic"
-                                  ],
+                                  "pattern": "^[a-z][a-z0-9_]{0,31}$",
                                   "type": "string"
                                 },
                                 "label": {
@@ -48882,12 +50883,7 @@
                                   "type": "string"
                                 },
                                 "key": {
-                                  "enum": [
-                                    "essential",
-                                    "premium",
-                                    "executive",
-                                    "exotic"
-                                  ],
+                                  "pattern": "^[a-z][a-z0-9_]{0,31}$",
                                   "type": "string"
                                 },
                                 "label": {
@@ -49065,7 +51061,7 @@
     },
     "/api/v1/membership-plans": {
       "get": {
-        "description": "Display data (perks, discount basis points) and the rules a visit can redeem. A rule with `autoApply` redeems itself when a covered visit is completed (default off).",
+        "description": "Display data (perks, discount basis points), the member % off and the inclusions a visit can redeem (ADR 0170: each names the services it covers; `rules` is the same list under its old name). An inclusion with `autoApply` applies itself when a covered visit is completed.",
         "responses": {
           "200": {
             "content": {
@@ -49077,6 +51073,9 @@
                       "items": {
                         "additionalProperties": false,
                         "properties": {
+                          "active": {
+                            "type": "boolean"
+                          },
                           "addonDiscountBp": {
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
@@ -49085,47 +51084,28 @@
                           "id": {
                             "type": "string"
                           },
-                          "key": {
-                            "enum": [
-                              "essential",
-                              "premium",
-                              "executive",
-                              "exotic"
-                            ],
-                            "type": "string"
-                          },
-                          "name": {
-                            "type": "string"
-                          },
-                          "perks": {
-                            "items": {
-                              "type": "string"
-                            },
-                            "type": "array"
-                          },
-                          "rules": {
+                          "inclusions": {
                             "items": {
                               "additionalProperties": false,
                               "properties": {
-                                "autoApply": {
+                                "active": {
                                   "type": "boolean"
                                 },
-                                "excludeTags": {
-                                  "items": {
-                                    "type": "string"
-                                  },
-                                  "type": "array"
+                                "autoApply": {
+                                  "type": "boolean"
                                 },
                                 "id": {
                                   "type": "string"
                                 },
-                                "includeTags": {
-                                  "items": {
-                                    "type": "string"
-                                  },
-                                  "type": "array"
-                                },
                                 "label": {
+                                  "type": "string"
+                                },
+                                "mode": {
+                                  "description": "per_cycle: perCycle visits a billing cycle; every_visit: on every visit",
+                                  "enum": [
+                                    "per_cycle",
+                                    "every_visit"
+                                  ],
                                   "type": "string"
                                 },
                                 "perCycle": {
@@ -49139,16 +51119,102 @@
                                       "type": "null"
                                     }
                                   ],
-                                  "description": "null = unlimited"
+                                  "description": "null = unlimited (always null for every_visit)"
+                                },
+                                "serviceIds": {
+                                  "description": "The services the inclusion covers",
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
                                 }
                               },
                               "required": [
                                 "id",
                                 "label",
-                                "includeTags",
-                                "excludeTags",
+                                "mode",
                                 "perCycle",
-                                "autoApply"
+                                "autoApply",
+                                "active",
+                                "serviceIds"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "key": {
+                            "pattern": "^[a-z][a-z0-9_]{0,31}$",
+                            "type": "string"
+                          },
+                          "memberDiscountBp": {
+                            "description": "The member % off, in basis points (ADR 0170)",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "perks": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "rules": {
+                            "description": "The inclusions under their old name (deprecated)",
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "active": {
+                                  "type": "boolean"
+                                },
+                                "autoApply": {
+                                  "type": "boolean"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "mode": {
+                                  "description": "per_cycle: perCycle visits a billing cycle; every_visit: on every visit",
+                                  "enum": [
+                                    "per_cycle",
+                                    "every_visit"
+                                  ],
+                                  "type": "string"
+                                },
+                                "perCycle": {
+                                  "anyOf": [
+                                    {
+                                      "maximum": 9007199254740991,
+                                      "minimum": -9007199254740991,
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "description": "null = unlimited (always null for every_visit)"
+                                },
+                                "serviceIds": {
+                                  "description": "The services the inclusion covers",
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "label",
+                                "mode",
+                                "perCycle",
+                                "autoApply",
+                                "active",
+                                "serviceIds"
                               ],
                               "type": "object"
                             },
@@ -49158,15 +51224,22 @@
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
                             "type": "integer"
+                          },
+                          "vipBooking": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
                           "id",
                           "key",
                           "name",
+                          "active",
                           "perks",
                           "addonDiscountBp",
                           "serviceDiscountBp",
+                          "memberDiscountBp",
+                          "vipBooking",
+                          "inclusions",
                           "rules"
                         ],
                         "type": "object"
@@ -49184,7 +51257,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "The membership plans with their credit rules and each rule’s auto-apply flag",
+        "summary": "The membership tiers with what they include and each inclusion’s auto-apply flag",
         "tags": [
           "memberships"
         ],
@@ -49193,7 +51266,7 @@
     },
     "/api/v1/membership-plans/rules/{id}": {
       "patch": {
-        "description": "With it on, completing a visit the rule covers redeems one credit by itself (a system adjust on the invoice, one per appointment). Audited.",
+        "description": "With it on, completing a visit the inclusion covers redeems one credit by itself (a system adjust on the invoice, one per appointment). The id is the inclusion’s (the credit rule’s id for one made from a rule, ADR 0170). Audited.",
         "parameters": [
           {
             "in": "path",
@@ -49232,25 +51305,24 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
-                    "autoApply": {
+                    "active": {
                       "type": "boolean"
                     },
-                    "excludeTags": {
-                      "items": {
-                        "type": "string"
-                      },
-                      "type": "array"
+                    "autoApply": {
+                      "type": "boolean"
                     },
                     "id": {
                       "type": "string"
                     },
-                    "includeTags": {
-                      "items": {
-                        "type": "string"
-                      },
-                      "type": "array"
-                    },
                     "label": {
+                      "type": "string"
+                    },
+                    "mode": {
+                      "description": "per_cycle: perCycle visits a billing cycle; every_visit: on every visit",
+                      "enum": [
+                        "per_cycle",
+                        "every_visit"
+                      ],
                       "type": "string"
                     },
                     "perCycle": {
@@ -49264,16 +51336,24 @@
                           "type": "null"
                         }
                       ],
-                      "description": "null = unlimited"
+                      "description": "null = unlimited (always null for every_visit)"
+                    },
+                    "serviceIds": {
+                      "description": "The services the inclusion covers",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
                     }
                   },
                   "required": [
                     "id",
                     "label",
-                    "includeTags",
-                    "excludeTags",
+                    "mode",
                     "perCycle",
-                    "autoApply"
+                    "autoApply",
+                    "active",
+                    "serviceIds"
                   ],
                   "type": "object"
                 }
@@ -49282,7 +51362,7 @@
             "description": "Default Response"
           }
         },
-        "summary": "Turn a credit rule’s auto-apply on or off",
+        "summary": "Turn an inclusion’s auto-apply on or off",
         "tags": [
           "memberships"
         ],
@@ -49312,12 +51392,7 @@
             "name": "plan",
             "required": false,
             "schema": {
-              "enum": [
-                "essential",
-                "premium",
-                "executive",
-                "exotic"
-              ],
+              "pattern": "^[a-z][a-z0-9_]{0,31}$",
               "type": "string"
             }
           },
@@ -49686,12 +51761,7 @@
                                 "type": "string"
                               },
                               "key": {
-                                "enum": [
-                                  "essential",
-                                  "premium",
-                                  "executive",
-                                  "exotic"
-                                ],
+                                "pattern": "^[a-z][a-z0-9_]{0,31}$",
                                 "type": "string"
                               },
                               "label": {
@@ -49889,12 +51959,7 @@
                     "type": "string"
                   },
                   "planKey": {
-                    "enum": [
-                      "essential",
-                      "premium",
-                      "executive",
-                      "exotic"
-                    ],
+                    "pattern": "^[a-z][a-z0-9_]{0,31}$",
                     "type": "string"
                   },
                   "planLabel": {
@@ -50195,12 +52260,7 @@
                               "type": "string"
                             },
                             "key": {
-                              "enum": [
-                                "essential",
-                                "premium",
-                                "executive",
-                                "exotic"
-                              ],
+                              "pattern": "^[a-z][a-z0-9_]{0,31}$",
                               "type": "string"
                             },
                             "label": {
@@ -50411,12 +52471,7 @@
                     ]
                   },
                   "planKey": {
-                    "enum": [
-                      "essential",
-                      "premium",
-                      "executive",
-                      "exotic"
-                    ],
+                    "pattern": "^[a-z][a-z0-9_]{0,31}$",
                     "type": "string"
                   },
                   "planLabel": {
@@ -50723,12 +52778,7 @@
                               "type": "string"
                             },
                             "key": {
-                              "enum": [
-                                "essential",
-                                "premium",
-                                "executive",
-                                "exotic"
-                              ],
+                              "pattern": "^[a-z][a-z0-9_]{0,31}$",
                               "type": "string"
                             },
                             "label": {
@@ -56524,7 +58574,7 @@
                             "type": "string"
                           },
                           "priceCents": {
-                            "description": "What a booking charges (kept for the website’s booking flow): the guest price for an item priced on the website. Not a price to state: state memberPriceCents / guestPriceCents",
+                            "description": "The starting price (kept for the website’s booking flow; what a booking of an unknown size charges). Not a price to state: state memberPriceCents / guestPriceCents",
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
                             "type": "integer"
@@ -56616,19 +58666,18 @@
                       "type": "integer"
                     },
                     "guestMarkupPct": {
+                      "description": "Always 0 (ADR 0170): both prices are given",
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
                       "type": "integer"
                     },
                     "plans": {
+                      "description": "The tiers sold online (active and public), in tier order",
                       "items": {
                         "additionalProperties": false,
                         "properties": {
                           "key": {
-                            "enum": [
-                              "gold",
-                              "vip"
-                            ],
+                            "description": "The tier’s key (gold, vip, …)",
                             "type": "string"
                           },
                           "name": {
@@ -56641,6 +58690,7 @@
                             "type": "array"
                           },
                           "planKey": {
+                            "description": "The tier’s key (the same as key since ADR 0170)",
                             "type": "string"
                           },
                           "planName": {
@@ -56761,7 +58811,7 @@
                             "type": "string"
                           },
                           "priceCents": {
-                            "description": "What a booking charges (kept for the website’s booking flow): the guest price for an item priced on the website. Not a price to state: state memberPriceCents / guestPriceCents",
+                            "description": "The starting price (kept for the website’s booking flow; what a booking of an unknown size charges). Not a price to state: state memberPriceCents / guestPriceCents",
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
                             "type": "integer"
@@ -56867,7 +58917,7 @@
                                 "type": "integer"
                               },
                               "guestMinCents": {
-                                "description": "The guest \"from\" price of this vehicle type and film (design §3b)",
+                                "description": "The regular \"from\" price of this size and film (design §3b)",
                                 "maximum": 9007199254740991,
                                 "minimum": -9007199254740991,
                                 "type": "integer"
@@ -56878,7 +58928,7 @@
                                 "type": "integer"
                               },
                               "memberMinCents": {
-                                "description": "The member \"from\" price of this vehicle type and film (design §3b)",
+                                "description": "The member \"from\" price of this size and film (design §3b)",
                                 "maximum": 9007199254740991,
                                 "minimum": -9007199254740991,
                                 "type": "integer"
@@ -56900,6 +58950,7 @@
                           "type": "array"
                         },
                         "vehicleTypes": {
+                          "description": "The active vehicle sizes",
                           "items": {
                             "additionalProperties": false,
                             "properties": {
@@ -57920,10 +59971,7 @@
                         "tier": {
                           "anyOf": [
                             {
-                              "enum": [
-                                "gold",
-                                "vip"
-                              ],
+                              "pattern": "^[a-z][a-z0-9_]{0,31}$",
                               "type": "string"
                             },
                             {
@@ -58085,10 +60133,7 @@
                             "tier": {
                               "anyOf": [
                                 {
-                                  "enum": [
-                                    "gold",
-                                    "vip"
-                                  ],
+                                  "pattern": "^[a-z][a-z0-9_]{0,31}$",
                                   "type": "string"
                                 },
                                 {
@@ -58304,10 +60349,7 @@
                         "tier": {
                           "anyOf": [
                             {
-                              "enum": [
-                                "gold",
-                                "vip"
-                              ],
+                              "pattern": "^[a-z][a-z0-9_]{0,31}$",
                               "type": "string"
                             },
                             {
@@ -58469,10 +60511,7 @@
                             "tier": {
                               "anyOf": [
                                 {
-                                  "enum": [
-                                    "gold",
-                                    "vip"
-                                  ],
+                                  "pattern": "^[a-z][a-z0-9_]{0,31}$",
                                   "type": "string"
                                 },
                                 {
@@ -58853,10 +60892,7 @@
                         "tier": {
                           "anyOf": [
                             {
-                              "enum": [
-                                "gold",
-                                "vip"
-                              ],
+                              "pattern": "^[a-z][a-z0-9_]{0,31}$",
                               "type": "string"
                             },
                             {
@@ -59018,10 +61054,7 @@
                             "tier": {
                               "anyOf": [
                                 {
-                                  "enum": [
-                                    "gold",
-                                    "vip"
-                                  ],
+                                  "pattern": "^[a-z][a-z0-9_]{0,31}$",
                                   "type": "string"
                                 },
                                 {
@@ -59258,10 +61291,7 @@
                         "tier": {
                           "anyOf": [
                             {
-                              "enum": [
-                                "gold",
-                                "vip"
-                              ],
+                              "pattern": "^[a-z][a-z0-9_]{0,31}$",
                               "type": "string"
                             },
                             {
@@ -59423,10 +61453,7 @@
                             "tier": {
                               "anyOf": [
                                 {
-                                  "enum": [
-                                    "gold",
-                                    "vip"
-                                  ],
+                                  "pattern": "^[a-z][a-z0-9_]{0,31}$",
                                   "type": "string"
                                 },
                                 {
@@ -59744,10 +61771,7 @@
                         "tier": {
                           "anyOf": [
                             {
-                              "enum": [
-                                "gold",
-                                "vip"
-                              ],
+                              "pattern": "^[a-z][a-z0-9_]{0,31}$",
                               "type": "string"
                             },
                             {
@@ -59909,10 +61933,7 @@
                             "tier": {
                               "anyOf": [
                                 {
-                                  "enum": [
-                                    "gold",
-                                    "vip"
-                                  ],
+                                  "pattern": "^[a-z][a-z0-9_]{0,31}$",
                                   "type": "string"
                                 },
                                 {
@@ -60149,10 +62170,7 @@
                         "tier": {
                           "anyOf": [
                             {
-                              "enum": [
-                                "gold",
-                                "vip"
-                              ],
+                              "pattern": "^[a-z][a-z0-9_]{0,31}$",
                               "type": "string"
                             },
                             {
@@ -60314,10 +62332,7 @@
                             "tier": {
                               "anyOf": [
                                 {
-                                  "enum": [
-                                    "gold",
-                                    "vip"
-                                  ],
+                                  "pattern": "^[a-z][a-z0-9_]{0,31}$",
                                   "type": "string"
                                 },
                                 {
@@ -60494,10 +62509,7 @@
                     "type": "boolean"
                   },
                   "tier": {
-                    "enum": [
-                      "gold",
-                      "vip"
-                    ],
+                    "pattern": "^[a-z][a-z0-9_]{0,31}$",
                     "type": "string"
                   },
                   "vehicles": {
@@ -60576,10 +62588,7 @@
                       "type": "string"
                     },
                     "tier": {
-                      "enum": [
-                        "gold",
-                        "vip"
-                      ],
+                      "pattern": "^[a-z][a-z0-9_]{0,31}$",
                       "type": "string"
                     }
                   },
@@ -60629,10 +62638,7 @@
                       "type": "string"
                     },
                     "tier": {
-                      "enum": [
-                        "gold",
-                        "vip"
-                      ],
+                      "pattern": "^[a-z][a-z0-9_]{0,31}$",
                       "type": "string"
                     }
                   },
@@ -60785,10 +62791,7 @@
                         "tier": {
                           "anyOf": [
                             {
-                              "enum": [
-                                "gold",
-                                "vip"
-                              ],
+                              "pattern": "^[a-z][a-z0-9_]{0,31}$",
                               "type": "string"
                             },
                             {

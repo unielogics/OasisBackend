@@ -9,7 +9,8 @@ import { actorFromAuth } from '../payments/actor.js'
 import { PaymentsService } from '../payments/commands.js'
 import { defaultPorts } from '../payments/ports.js'
 import { autoApplyMembershipCredit } from './apply.js'
-import { creditSummaries, eligibleRule } from './credits.js'
+import { loadMemberContext } from '../catalog/price-book.js'
+import { creditSummaries, eligibleInclusion } from './credits.js'
 import { restoreClosureCredit } from './emergency.js'
 import { loadPlans } from './plans.js'
 import { memberMonths, retentionOf, upgradeOf, visitCounts } from './retention.js'
@@ -38,10 +39,10 @@ export const dbMembershipPort: MembershipPort = {
     )
     const counts = await visitCounts(db, locationId, [...new Set(members.map((m) => m.customer_id))], now)
     const apptIds = refs.map((r) => r.appointmentId)
-    const tags = await sql<{ id: string; tags: string[]; redeemed: boolean }>`
-      select a.id, s.tags,
+    const tags = await sql<{ id: string; service_id: string; redeemed: boolean }>`
+      select a.id, a.service_id,
         exists (select 1 from membership_credit_events e where e.appointment_id = a.id and e.kind = 'redeem') as redeemed
-      from appointments a join services s on s.id = a.service_id
+      from appointments a
       where a.id = any(${apptIds}::uuid[])`.execute(db)
     const tagsOf = new Map(tags.rows.map((t) => [t.id, t]))
     for (const r of refs) {
@@ -51,7 +52,7 @@ export const dbMembershipPort: MembershipPort = {
       if (!plan) continue
       const cs = credits.get(m.id)!
       const t = tagsOf.get(r.appointmentId)
-      const rule = t && !t.redeemed ? eligibleRule(plan, cs, t.tags) : undefined
+      const rule = t && !t.redeemed ? eligibleInclusion(plan, cs, t.service_id) : undefined
       const ret = retentionOf(counts.get(m.customer_id) ?? { cur30: 0, prev30: 0 }, m.started_at, now)
       out.set(r.appointmentId, {
         plan: m.plan_label,
@@ -82,6 +83,8 @@ export const dbMembershipPort: MembershipPort = {
     )
     return r
   },
+
+  pricingFor: (db, c) => loadMemberContext(db, c.locationId, c.customerId),
 
   releaseCredit: (tx, c, appointmentId) =>
     restoreClosureCredit(tx, { clock: c.clock, newId: c.newId }, appointmentId),

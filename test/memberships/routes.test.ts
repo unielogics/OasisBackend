@@ -53,7 +53,7 @@ describe('membership routes', () => {
       m.limited(),
       'POST',
       '/memberships',
-      { customerId: cid, planKey: 'premium' },
+      { customerId: cid, planKey: 'gold' },
       false,
     )
     expect(dup.statusCode).toBe(409)
@@ -64,7 +64,7 @@ describe('membership routes', () => {
           m.limited(),
           'POST',
           '/memberships',
-          { customerId: '00000000-0000-7000-8000-000000000000', planKey: 'premium' },
+          { customerId: '00000000-0000-7000-8000-000000000000', planKey: 'gold' },
           false,
         )
       ).statusCode,
@@ -163,7 +163,7 @@ describe('membership routes', () => {
     }
     expect(all.items.map((i) => i.customer.name)).toEqual(['Maria Delgado', 'Priya Nair', 'Sofia Marchetti'])
     expect(all.counts).toEqual({ pending: 0, active: 2, past_due: 0, paused: 1, canceled: 0 })
-    expect(all.items[1]?.plan).toMatchObject({ key: 'premium', label: 'Premium Care' })
+    expect(all.items[1]?.plan).toMatchObject({ key: 'gold', label: 'Premium Care' })
     const active = (await m.get(m.limited(), '/memberships?status=active')).json() as { items: unknown[] }
     expect(active.items).toHaveLength(2)
     const exec = (await m.get(m.limited(), '/memberships?plan=executive')).json() as { items: unknown[] }

@@ -17,6 +17,17 @@ const cents = z.number().int().min(0).max(10_000_000)
  * The tint price matrix (ADR 0160): vehicle types x films, each pair with a member and a guest price range, and the VLT (visible
  * light transmission, %) options each film comes in. Seeded from the website in wave 2.
  */
+/** The tint films (catalog.tint_films, ADR 0170): key (a tint package's tag), label and VLT shades; keys listed once. */
+const tintFilms = z
+  .array(z.object({ key: catalogKey, label, vlt: z.array(z.number().int().min(1).max(100)).max(10) }).strict())
+  .max(20)
+  .superRefine((films, ctx) =>
+    films.forEach(
+      (f, i) =>
+        films.findIndex((x) => x.key === f.key) !== i && ctx.addIssue({ code: 'custom', path: [i, 'key'], message: `"${f.key}" is listed twice` }),
+    ),
+  )
+
 const tintMatrix = z
   .object({
     vehicleTypes: z.array(z.object({ key: catalogKey, label }).strict()).max(20),
@@ -150,6 +161,11 @@ export const settingDefs = {
   'catalog.tint_matrix': {
     schema: tintMatrix,
     default: { vehicleTypes: [], films: [], prices: [] } as z.infer<typeof tintMatrix>,
+  },
+  // The tint films (ADR 0170): the film a tint package names by a tag, its label and VLT shades; the packages are priced by size.
+  'catalog.tint_films': {
+    schema: tintFilms,
+    default: [] as z.infer<typeof tintFilms>,
   },
   // Personal links carry the epoch they were issued in; bumping it kills every link and session at once (incident switch).
   'links.epoch': { schema: z.number().int().min(1).max(1_000_000), default: 1 },

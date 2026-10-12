@@ -33,7 +33,7 @@ describe('Squarespace accounts and the records they pay on (W4c re-review 4, E1-
         { sku: 'MEM-GOLD-Y', kind: 'membership', plan: 'premium', planLabel: 'Gold yearly', intervalMonths: 12 },
       ]),
     )
-    await r.db.updateTable('membership_plans').set({ checkout_url: GOLD_URL, public_label: 'Gold' }).where('key', '=', 'premium').execute()
+    await r.db.updateTable('membership_plans').set({ checkout_url: GOLD_URL, public_label: 'Gold' }).where('key', '=', 'gold').execute()
     return env
   }
   const sync = (r: Rig) => {
@@ -194,7 +194,7 @@ describe('Squarespace accounts and the records they pay on (W4c re-review 4, E1-
       openCheckoutIntent(
         tx,
         { locationId: r.locationId, clock: r.clock, newId: r.newId },
-        { customerId: dina, planKey: 'premium', email: 'family@example.com' },
+        { customerId: dina, planKey: 'gold', email: 'family@example.com' },
         SYSTEM,
       ),
     )
