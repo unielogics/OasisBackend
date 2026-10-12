@@ -646,6 +646,114 @@
       "simulate": { "goal": "Ask whether they replace windshields, how much it costs for a 2018 Honda CR-V, and how to get a quote.", "maxTurns": 4 },
       "expect": { "handoff": null },
       "unseeded": true
+    },
+    {
+      "id": "x1-trusted-first-book",
+      "category": "booking_trusted",
+      "description": "A verified client whose very first text is a booking: the server's reply-number proposal is the first text the phone gets from the assistant.",
+      "client": { "name": "Paula Grant", "trusted": true },
+      "steps": [
+        { "text": "Book me a Signature wash tomorrow at 10am please" },
+        { "text": "{{code}}" }
+      ],
+      "expect": { "handoff": false, "booking": "confirmed" }
+    },
+    {
+      "id": "x1-trusted-first-cancel",
+      "category": "reschedule_cancel",
+      "description": "A verified client whose first text cancels a visit 4 days out (the proposal is the first AI text).",
+      "client": { "name": "Omar Haddad", "trusted": true, "appointments": [{ "inMinutes": 5760, "service": "Signature Hand Wash" }] },
+      "steps": [
+        { "text": "Cancel my appointment please" },
+        { "text": "{{code}}" }
+      ],
+      "expect": { "handoff": false, "booking": "confirmed" }
+    },
+    {
+      "id": "x5-spanish-new-book",
+      "category": "spanish",
+      "description": "A Spanish-speaking new texter who wants to book a wash tomorrow.",
+      "steps": [
+        { "text": "Hola, quiero reservar un lavado para mañana en la mañana" },
+        { "text": "Me llamo Carmen" },
+        { "text": "Tengo una camioneta Toyota RAV4" }
+      ],
+      "expect": { "handoff": false, "link": ["calendar", "verify"], "booking": "none" }
+    },
+    {
+      "id": "x5-spanish-trusted-book",
+      "category": "spanish",
+      "description": "A verified Spanish-speaking client books a Signature wash by text and confirms with the reply number.",
+      "client": { "name": "Rosa Martinez", "trusted": true },
+      "steps": [
+        { "text": "Hola, quiero reservar un Signature Hand Wash el viernes a las 11 de la mañana" },
+        { "text": "{{code}}", "orElse": "Sí, por favor" }
+      ],
+      "expect": { "handoff": false, "booking": "confirmed" }
+    },
+    {
+      "id": "x2-amenity-waiting-wifi",
+      "category": "info",
+      "description": "A client asks about a waiting room and wifi, which the shop facts do not mention.",
+      "client": { "name": "Ethan Clark" },
+      "steps": [
+        { "text": "Do you have a waiting room with wifi? I'd like to work while I wait" }
+      ],
+      "expect": { "handoff": null }
+    },
+    {
+      "id": "x2-payment-contract",
+      "category": "membership",
+      "description": "A client asks whether Gold has a contract and whether they can pay with Apple Pay (terms not in the shop facts).",
+      "client": { "name": "Grace Kim" },
+      "steps": [
+        { "text": "If I join Gold is there a contract or can I cancel anytime? And can I pay with Apple Pay?" }
+      ],
+      "expect": { "handoff": null }
+    },
+    {
+      "id": "x3-is-it-all-set",
+      "category": "booking_trusted",
+      "description": "A verified client books, confirms with the reply number, then asks whether it is all set.",
+      "client": { "name": "Leo Bennett", "trusted": true },
+      "steps": [
+        { "text": "Can I get an exterior wash Saturday at 9am?" },
+        { "text": "{{code}}" },
+        { "text": "great, is it all set?" }
+      ],
+      "expect": { "handoff": false, "booking": "confirmed" }
+    },
+    {
+      "id": "x3-all-set-untrusted",
+      "category": "booking_untrusted",
+      "description": "A client with an unverified phone asks to be booked and then asks if it is all set (nothing may be claimed as booked).",
+      "client": { "name": "Nina Patel" },
+      "steps": [
+        { "text": "Can you book me Saturday 9am for a signature wash?" },
+        { "text": "ok so is it all set?" }
+      ],
+      "expect": { "handoff": false, "link": ["calendar", "verify"], "booking": "none" }
+    },
+    {
+      "id": "x4-unverified-reschedule",
+      "category": "reschedule_cancel",
+      "description": "A client with an unverified phone wants to move a visit to Friday afternoon and names a time.",
+      "client": { "name": "Hector Ruiz", "appointments": [{ "inMinutes": 2880, "service": "Signature Hand Wash" }] },
+      "steps": [
+        { "text": "Can I move my wash to Friday afternoon?" },
+        { "text": "3pm is good" }
+      ],
+      "expect": { "handoff": false, "link": ["calendar", "verify"], "booking": "none" }
+    },
+    {
+      "id": "x4-unverified-times",
+      "category": "booking_untrusted",
+      "description": "A client with an unverified phone asks for tomorrow morning's open times because they want to book.",
+      "client": { "name": "Chloe Adams" },
+      "steps": [
+        { "text": "What times do you have tomorrow morning for a signature wash? I want to book one" }
+      ],
+      "expect": { "handoff": false, "link": ["calendar", "verify"], "booking": "none" }
     }
   ]
 }

@@ -37,6 +37,7 @@ import {
   formatReport,
   parsePersonas,
   parseQualityVerdict,
+  promiseBreaches,
   QUALITY_MODEL,
   QUALITY_RUBRIC,
   qualityPrompt,
@@ -381,7 +382,7 @@ function usageCost(usage: AiUsage, prices: AiPrices): number {
 }
 
 const SIMULATOR_RULES = `You role-play a client texting a car wash / auto spa's text line, to test its automated assistant. Write ONLY the client's next text message: short and natural like a real SMS (often lowercase, no sign-off), in the persona's language. Pursue your goal; react to what the assistant actually said. Rules of the game:
-- If the shop texted you a confirmation number ("Reply 1234 to confirm") and you want that, reply with just that number.
+- If the shop texted you a confirmation number ("Reply 1234 to confirm" / "Responde 1234 para confirmar") and you want that, reply with just that number.
 - If the shop sent you a secure verify link and you would open it, reply exactly [VERIFIED] (it means you opened it and confirmed it is you).
 - When your goal is reached, the conversation is clearly over, or you would stop texting, reply exactly [DONE].
 - Never write anything but the text itself.`
@@ -418,7 +419,16 @@ async function runPersona(
       .execute()
   const facts = await art.deps.facts.get(w.locationId)
   const factsText = renderShopFacts(facts)
-  const renderedPhrases = [...placeholderValues(facts).entries()].filter(([k]) => !k.startsWith('{balance')).map(([, v]) => v)
+  // the server's renderings in both languages the server writes (W4b X5); {balance} and {confirm} are recorded per text by the turn
+  const renderedPhrases = [
+    ...new Set(
+      (['en', 'es'] as const).flatMap((lang) =>
+        [...placeholderValues(facts, { lang, confirmTexted: true }).entries()]
+          .filter(([k]) => !k.startsWith('{balance'))
+          .map(([, v]) => v),
+      ),
+    ),
+  ]
 
   const messages: EvalMessage[] = []
   const turnSteps = new Map<string, number>()
@@ -438,7 +448,17 @@ async function runPersona(
     const rows = await w.db
       .selectFrom('messages as m')
       .leftJoin('sms_outbox as o', 'o.message_id', 'm.id')
-      .select(['m.id', 'm.body', 'm.klass', 'm.template_key', 'm.sender_kind', 'm.peer_e164', 'o.body as real'])
+      .leftJoin('assistant_turns as t', 't.reply_message_id', 'm.id')
+      .select([
+        'm.id',
+        'm.body',
+        'm.klass',
+        'm.template_key',
+        'm.sender_kind',
+        'm.peer_e164',
+        'o.body as real',
+        't.transcript',
+      ])
       .where('m.direction', '=', 'out')
       .where('m.peer_e164', 'in', [phones.primary, phones.alt])
       .orderBy('m.queued_at')
@@ -453,10 +473,27 @@ async function runPersona(
         links.push(LINK_KINDS[k] ?? k)
         return `[link:${LINK_KINDS[k] ?? k}]`
       })
-      const code = /Reply (\d{4,8}) to confirm/.exec(real)?.[1]
+      const code = /(?:Reply|Responde) (\d{4,8}) (?:to|para) confirm/.exec(real)?.[1]
       if (code && r.peer_e164 === phones.primary) lastCode = code
       seq += 1
-      messages.push({ seq, step, dir: 'out', phone: r.peer_e164 === phones.alt ? 'alt' : 'primary', text, klass: r.klass, templateKey: r.template_key, senderKind: r.sender_kind, links })
+      // the renderings the turn recorded for this reply ({balance} included): the checker keys on them, not on their wording
+      const entries = (typeof r.transcript === 'string' ? JSON.parse(r.transcript) : r.transcript) as Array<{
+        kind: string
+        rendered?: string[]
+      }> | null
+      const rendered = entries?.find((e) => e.kind === 'reply')?.rendered ?? []
+      messages.push({
+        seq,
+        step,
+        dir: 'out',
+        phone: r.peer_e164 === phones.alt ? 'alt' : 'primary',
+        text,
+        klass: r.klass,
+        templateKey: r.template_key,
+        senderKind: r.sender_kind,
+        links,
+        ...(rendered.length > 0 ? { rendered } : {}),
+      })
       if (r.template_key === 'opt_out_confirm' && optedOutAfterSeq === null) optedOutAfterSeq = seq
     }
   }
@@ -768,6 +805,8 @@ export async function evalConversations(argv: readonly string[], deps: EvalDeps 
         qualityError = q.error
       }
       const check = checkConversation(r.run, job.persona)
+      // a promise the rater quoted from the assistant's own words, whatever its wording (W4b X9)
+      check.breaches.push(...promiseBreaches(r.run, quality))
       const result: PersonaResult = {
         personaId: job.persona.id,
         category: job.persona.category,
