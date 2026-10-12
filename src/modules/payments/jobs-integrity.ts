@@ -17,7 +17,7 @@ import { notifyManagers } from '../messaging/notify.js'
 import { calcInvoice, type CalcEvent, type InvoiceCalc } from './calc.js'
 import { invoiceLabel } from './format.js'
 import { calcFromRow } from './repository.js'
-import type { InvoiceCalcRow, LedgerType, RefundDest, RefundStatus } from './schema.js'
+import type { InvoiceCalcRow, LedgerType, ProcessorState, RefundDest, RefundStatus } from './schema.js'
 
 export const LEDGER_INTEGRITY_JOB = 'ledger.integrity_check'
 export const LEDGER_GUARDS = [
@@ -114,7 +114,8 @@ async function checkCalc(
     amount_cents: number
     status: RefundStatus
     dest: RefundDest | null
-  }>`select invoice_id, type, amount_cents, status, dest from ledger_events where location_id = ${locationId}`.execute(
+    processor_state: ProcessorState
+  }>`select invoice_id, type, amount_cents, status, dest, processor_state from ledger_events where location_id = ${locationId}`.execute(
     db,
   )
   const views = await sql<InvoiceCalcRow & { id: string }>`
@@ -128,7 +129,7 @@ async function checkCalc(
   for (const e of events.rows)
     eventsOf.set(e.invoice_id, [
       ...(eventsOf.get(e.invoice_id) ?? []),
-      { type: e.type, amountCents: Number(e.amount_cents), status: e.status, dest: e.dest },
+      { type: e.type, amountCents: Number(e.amount_cents), status: e.status, dest: e.dest, processorState: e.processor_state },
     ])
   const viewOf = new Map(views.rows.map((v) => [v.id, v]))
   const findings: IntegrityFinding[] = []

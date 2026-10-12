@@ -89,8 +89,9 @@ export const sqspExternalAlerts: ExternalAlertSource = {
       invoice_no: number
       client_name: string
       appointment_id: string | null
+      processor: 'square' | 'squarespace' | null
     }>`
-      select e.id, e.type, e.amount_cents, e.occurred_at, i.invoice_no, i.client_name, i.appointment_id
+      select e.id, e.type, e.amount_cents, e.occurred_at, i.invoice_no, i.client_name, i.appointment_id, e.processor
       from ledger_events e join invoices i on i.id = e.invoice_id
       where e.location_id = ${ctx.locationId} and e.processor_state = 'awaiting_processor' and e.occurred_at <= ${cutoff}
         and not exists (select 1 from ledger_events v where v.voids_event_id = e.id)
@@ -103,7 +104,8 @@ export const sqspExternalAlerts: ExternalAlertSource = {
         kind: 'awaiting_processor',
         tone: 'amber',
         title: `${e.type === 'refund' ? 'Card refund' : 'Card payment'} not confirmed · ${e.client_name}`,
-        desc: `${formatUsd(e.amount_cents)} on INV-${e.invoice_no} recorded ${ageLabel(minutes)} ago · finish it in Squarespace`,
+        // processor-neutral (ADR 0171, design 2.7): a Square entry waits on Square's webhook; anything else is finished in Squarespace
+        desc: `${formatUsd(e.amount_cents)} on INV-${e.invoice_no} recorded ${ageLabel(minutes)} ago · ${e.processor === 'square' ? 'Square has not confirmed it yet' : 'finish it in Squarespace'}`,
         actionLabel: 'Confirm',
         appointmentId: e.appointment_id,
         priority: 0,

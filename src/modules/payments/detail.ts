@@ -17,6 +17,7 @@ import {
   type ItemRow,
 } from './repository.js'
 import type { CreditExpiry, InvoiceStatus } from './schema.js'
+import { squareEnv } from '../square/runtime.js'
 
 export const EXPIRY_LABELS: Record<CreditExpiry, string> = {
   none: 'No expiry',
@@ -60,6 +61,10 @@ export interface LedgerEventDto {
   awaitingProcessor: boolean
   processorRef: string | null
   sqspOrderId: string | null
+  /** Which processor took (or is to take) the card money: squarespace, square, or null (cash, credit, nothing yet). */
+  processor: EventRow['processor']
+  /** The Square order of a Square payment (a link's order, a POS order). */
+  processorOrderId: string | null
   needsReview: boolean
   /** Pending refunds only: whether the caller can approve it now, and why not. */
   canApprove: boolean
@@ -129,8 +134,10 @@ export interface InvoiceDetail {
   taxBp: number
   tipCents: number
   paymentLinkUrl: string | null
-  /** Count of awaiting_processor events on this invoice (card money recorded but not yet seen in Squarespace). */
+  /** Count of awaiting_processor events on this invoice (card money recorded but not yet confirmed by its processor). */
   awaitingProcessorCount: number
+  /** Who takes new card money (PAYMENT_PROCESSOR, ADR 0171) and whether "Open Square POS" is on (SQUARE_POS_API_ENABLED). */
+  processing: { processor: 'squarespace' | 'square'; squarePosAppSwitch: boolean }
   version: number
   items: InvoiceItemDto[]
   adjustments: AdjustmentLineDto[]
@@ -203,6 +210,8 @@ export function toEventDto(
     awaitingProcessor: e.processor_state === 'awaiting_processor',
     processorRef: e.processor_ref,
     sqspOrderId: e.sqsp_order_id,
+    processor: e.processor,
+    processorOrderId: e.processor_order_id,
     needsReview: e.needs_review,
     canApprove: rights.canApprove,
     approveBlock: rights.block,
@@ -252,9 +261,13 @@ export async function buildDetail(db: Executor, c: DetailContext, inv: InvoiceRo
   const voidedIds = new Set(
     events.filter((e) => e.type === 'void' && e.voids_event_id).map((e) => e.voids_event_id!),
   )
+  // a refund the processor reported failed gave nothing back: its items can be refunded again
   const claimed = new Set(
-    events.filter((e) => e.type === 'refund' && e.status !== 'denied').flatMap((e) => e.item_ids),
+    events
+      .filter((e) => e.type === 'refund' && e.status !== 'denied' && e.processor_state !== 'failed')
+      .flatMap((e) => e.item_ids),
   )
+  const env = squareEnv()
   const dto = events.map((e) =>
     toEventDto(e, { now: c.now, tz: c.tz, actor: c.actor, rules: c.rules, voidedIds }),
   )
@@ -281,6 +294,7 @@ export async function buildDetail(db: Executor, c: DetailContext, inv: InvoiceRo
     tipCents: inv.tip_cents,
     paymentLinkUrl: inv.payment_link_url,
     awaitingProcessorCount: events.filter((e) => e.processor_state === 'awaiting_processor').length,
+    processing: { processor: env.PAYMENT_PROCESSOR, squarePosAppSwitch: env.SQUARE_POS_API_ENABLED },
     version: inv.version,
     items: items.map((i) => ({
       id: i.id,

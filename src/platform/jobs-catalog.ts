@@ -177,7 +177,7 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
   },
   'payments.lag-scan': {
     owner: 'payments',
-    purpose: 'Publishes reconciliation.stale when card money has waited for Squarespace more than 2 hours.',
+    purpose: 'Publishes reconciliation.stale when card money has waited for its processor (Squarespace, or Square) more than 2 hours.',
     idempotency:
       'Read-only apart from the advisory event, which repeats while the condition holds (the dashboard debounces).',
     clock: 'Injected clock.',
@@ -285,9 +285,9 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
   'square.event.process': {
     owner: 'square',
     purpose:
-      'Processes one Square event claimed in webhook_log (provider square, key event_id): re-fetches its object by id (payment, refund, invoice, subscription, card, customer; amounts in the payload are never trusted), ignores another merchant or location, and runs the ingest handler under an advisory lock per object. This wave the handlers only log (ADR 0171); later waves record payments, refunds, cards and memberships.',
+      'Processes one Square event claimed in webhook_log (provider square, key event_id): re-fetches its object by id (payment, refund, invoice, subscription, card, customer; amounts in the payload are never trusted), ignores another merchant or location, and runs the ingest handler under an advisory lock per object (ADR 0171). Payments (wave Q2b): the mirror row, the classification, a link payment recorded at once, a counter payment matched after SQUARE_MATCH_DELAY_SECONDS; refunds: the refund legs moved, a refund made in the Square app attached or recorded for review. Invoices, subscriptions, cards and customers only log until waves Q3a and Q3b.',
     idempotency:
-      'The webhook_log row is claimed once per event id (by the hook or the catch-up) and closed processed or ignored; a processed or ignored row is skipped; the handlers are keyed on Square ids.',
+      'The webhook_log row is claimed once per event id (by the hook or the catch-up) and closed processed or ignored; a processed or ignored row is skipped; a payment is decided once (advisory lock square:payment:<id>, the mirror row, ledger keys square:pay:<id> and square:tip:<id>, and no second live pay of one Square payment), a refund once (its leg, or key square:refund:<id>).',
     clock: 'Injected clock for the row times.',
     enqueuedBy: 'POST /hooks/square after signature verification (singleton key = the event id)',
     tests: 'test/square-db/hook.test.ts, test/square-db/jobs.test.ts, test/jobs/matrix-square.test.ts, test/jobs/registry.test.ts',
@@ -305,10 +305,47 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
   'square.reconcile': {
     owner: 'square',
     purpose:
-      'Nightly 03:45 while SQUARE_PROVIDER=live: lists the payments and refunds of the last 72 hours at our location and keeps the counts (by status, source and product) in square_state; this wave records only (the matcher, link sweep and subscription drift come with Q2b and Q3b).',
-    idempotency: 'Read-only towards Square; overwrites the last summary.',
+      'Nightly 03:45 while SQUARE_PROVIDER=live: lists the payments and refunds of the last 72 hours at our location, keeps the counts (by status, source and product) in square_state, and decides every completed payment Oasis has not decided and records every completed refund it has not (the webhook and the catch-up both missed them), through the same paths as the webhook (wave Q2b). The subscription drift check comes with Q3b.',
+    idempotency: 'Read-only towards Square; overwrites the last summary; payments and refunds go through the same advisory locks, mirror states and ledger keys as the webhook, so a second run (or a racing webhook) records nothing again.',
     clock: 'Injected clock for the 72-hour window.',
     tests: 'test/square-db/jobs.test.ts, test/jobs/matrix-square.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'square.payments.match': {
+    owner: 'square',
+    purpose:
+      'Every minute: the counter (POS) payments past SQUARE_MATCH_DELAY_SECONDS go through the matcher (ADR 0171 D6, plan decision 5): recorded automatically only on strong evidence (R1 the invoice number in the note, R2 a POS intent, R3 one staff "Square reader" entry of that amount, R4 one open invoice of that balance backed by the payer\'s identity; amount alone only with SQUARE_POS_AUTOMATCH=amount); everything else waits in the "Square payments to match" queue with ranked candidates. Finds nothing with the defaults (no payment reaches the mirror while SQUARE_PROVIDER=sim).',
+    idempotency:
+      'Each payment in its own transaction under the advisory lock square:payment:<id>; only mirror rows still pending are decided; the ledger ops re-check under the invoice lock and never write a second live pay of one Square payment.',
+    clock: 'Injected clock against match_after (the payment time plus the delay).',
+    tests: 'test/square-db/matching.test.ts, test/square-db/race.test.ts, test/jobs/matrix-square.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'square.links.sweep': {
+    owner: 'square',
+    purpose:
+      'Every minute: cancels the active Square payment links whose invoice no longer owes exactly their amount (canceled, paid or changed; a deposit paid; older than 7 days), gives up on pending rows nobody activated (10 minutes; a booking\'s deposit request after a day), and deletes the canceled links at Square (404 counts as done; only with SQUARE_WRITES_ENABLED). Nothing to do with the defaults (no Square link exists before PAYMENT_PROCESSOR=square).',
+    idempotency: 'State moves only forward (active -> canceled/expired, square_deleted_at set once); a second run finds nothing to change.',
+    clock: 'Injected clock for the link and pending ages.',
+    tests: 'test/square-db/links.test.ts, test/jobs/matrix-square.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'square.deposit-link': {
+    owner: 'square',
+    purpose:
+      'Every minute while PAYMENT_PROCESSOR=square and SQUARE_WRITES_ENABLED: each booking\'s deposit request (booking.guest_fee.collect link; written by the website, personal-link and assistant booking paths) becomes a Square quick-pay link for the deposit, texted to the client (ADR 0171 D2: a deposit toward the visit, settled by the cancel and no-show rules). A deposit already paid or a canceled visit drops the request. Skipped with the defaults.',
+    idempotency: 'The link is created with the key pl_<row id> (a retry answers the same link) and made live once (pending -> active); the text carries the key payment_link:<row id>.',
+    clock: 'Injected clock.',
+    tests: 'test/square-db/deposits.test.ts, test/jobs/matrix-square.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'square.refunds.submit': {
+    owner: 'square',
+    purpose:
+      'Every minute while PAYMENT_PROCESSOR=square and SQUARE_WRITES_ENABLED: card refunds written for Square money (the refund ledger row is the outbox, ADR 0171 D4) get their legs (newest Square payment first, each capped by what it can still give back) and are sent with RefundPayment; a refund the Square money cannot cover, or a leg Square refuses, marks the refund failed (it stops counting as refunded) and alerts the staff. Skipped with the defaults.',
+    idempotency: 'Legs are planned once per refund under the invoice lock; each leg is sent with its own key rf_<leg id> (a retry answers the same refund) and moves only forward (to_submit -> pending -> completed | failed | rejected).',
+    clock: 'Injected clock.',
+    tests: 'test/square-db/refunds.test.ts, test/jobs/matrix-square.test.ts, test/jobs/registry.test.ts',
     status: 'built',
   },
   'membership.cycle': {

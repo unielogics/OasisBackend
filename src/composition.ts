@@ -8,9 +8,11 @@ import { createDbPaymentOutbox } from './modules/messaging/adapters/payments.js'
 import { MessagingClosureNotifier, MessagingEmergencyNotifier } from './modules/messaging/adapters/settings.js'
 import { MessagingRuntime, runtimeFor, type LoggerLike } from './modules/messaging/runtime.js'
 import { combineExternalAlerts, sqspCardHints, sqspExternalAlerts, sqspUnmatched } from './modules/payments-sync/db/queries.js'
+import { processorCardHints, squareExternalAlerts, squareReconciliation } from './modules/square/db/alerts.js'
+import { configureSquareMessenger } from './modules/square/runtime.js'
 import { createGatewayFor } from './modules/payments/module.js'
 import { createPaymentMessenger, type PaymentMessenger } from './modules/payments/messenger.js'
-import { defaultPorts as defaultPaymentsPorts, type PaymentsPorts } from './modules/payments/ports.js'
+import { defaultPorts as defaultPaymentsPorts, linkHostsFromEnv, type PaymentsPorts } from './modules/payments/ports.js'
 import { ledgerRevenueSource } from './modules/payments/revenue.js'
 import type { ExternalAlertSource, SchedulingPorts } from './modules/scheduling/ports.js'
 import { syncChecklistTemplate } from './modules/scheduling/checklist-sync.js'
@@ -22,8 +24,11 @@ import type { Clock } from './platform/clock.js'
 import { createIdGenerator, type NewId } from './platform/ids.js'
 import type { Db } from './platform/db.js'
 
-/** Needs Attention alerts 10-12: unread replies and a down SMS device (messaging), Squarespace money waiting (payments-sync). */
-export const productionExternalAlerts: ExternalAlertSource = combineExternalAlerts(messagingAlertSource, sqspExternalAlerts)
+/**
+ * Needs Attention alerts 10-12: unread replies and a down SMS device (messaging), money waiting on its processor (payments-sync), and
+ * Square (ADR 0171): payments to match, failed card refunds, invoices overpaid through Square, Square's health.
+ */
+export const productionExternalAlerts: ExternalAlertSource = combineExternalAlerts(messagingAlertSource, sqspExternalAlerts, squareExternalAlerts)
 
 type MessagingDeps = Pick<AppDeps, 'db' | 'clock' | 'env'> & { newId?: NewId }
 
@@ -115,12 +120,25 @@ export function productionPaymentsPorts(): Partial<PaymentsPorts> {
   return {
     messenger: {
       sendPaymentLink: (tx, n) => pick().sendPaymentLink(tx, n),
+      sendPersonalPayLink: (tx, n) => pick().sendPersonalPayLink!(tx, n),
       sendReceipt: (tx, n) => pick().sendReceipt(tx, n),
     },
-    // the reconciliation lists and the card hint read the Squarespace sync tables
-    unmatched: sqspUnmatched,
-    cardHints: sqspCardHints,
+    // the reconciliation lists read the Squarespace sync tables and the Square mirror; the card hint follows the processor
+    unmatched: { ...sqspUnmatched, squareSection: squareReconciliation },
+    cardHints: processorCardHints(sqspCardHints),
+    linkHosts: linkHostsFromEnv(process.env.PAYMENT_LINK_HOSTS, {
+      processor: process.env.PAYMENT_PROCESSOR === 'square' ? 'square' : 'squarespace',
+      production: process.env.NODE_ENV === 'production',
+    }),
   }
+}
+
+/**
+ * The Square jobs text payment links (a booking's deposit link) through this process's messaging queue (server and worker). Until
+ * this runs, they use the payments module's default messenger (the dev outbox outside production).
+ */
+export function configureProductionSquare(deps: MessagingDeps): void {
+  configureSquareMessenger(() => paymentMessengerFor(messagingRuntimeFor(deps)))
 }
 
 /**

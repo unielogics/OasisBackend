@@ -24,8 +24,10 @@ export function createDbPaymentOutbox(rt: MessagingRuntime): PaymentOutbox {
         customerId: m.customerId,
         recipient: target.recipient,
         appointmentId: await appointmentOf(tx, m.invoiceId),
-        text: m.body,
-        klass: m.klass,
+        // a personal pay link (ADR 0171): rendered from its template with the link as a secretVar (stored masked)
+        ...(m.template
+          ? { templateKey: m.template.key, vars: m.template.vars, secretVars: m.template.secretVars }
+          : { text: m.body, klass: m.klass }),
         purpose: m.klass,
         senderKind: 'system',
         dedupeKey: m.dedupeKey,

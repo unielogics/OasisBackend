@@ -13,7 +13,7 @@ export interface LagScanResult {
 }
 
 /**
- * Card money recorded in Oasis that Squarespace has not confirmed within 2 hours (review B8): publishes a
+ * Card money recorded in Oasis that its processor (Squarespace or Square) has not confirmed within 2 hours (review B8): publishes a
  * `reconciliation.stale` event on the payments channel for every location that has any, so the dashboard can raise the
  * alert. Read-only otherwise and idempotent: running it twice only repeats the (advisory) event.
  */

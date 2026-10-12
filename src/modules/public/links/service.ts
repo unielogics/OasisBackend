@@ -13,7 +13,9 @@
 //                       openCheckoutIntent) with the email the client typed (never a verified email: it is only the intent's
 //                       expected email), then the plan's squarespace.com checkout URL
 //   pay/start           a fresh PIN or code on a payment link: the invoice's staff-attached payment URL when its host is allowed,
-//                       else {status: link_pending} and one notice to the managers to text a payment link
+//                       else {status: link_pending} and one notice to the managers to text a payment link. With
+//                       PAYMENT_PROCESSOR=square the route goes to square/public.ts instead: a Square link for the exact balance,
+//                       made (or reused) at click time
 import { DateTime } from 'luxon'
 import { sql } from 'kysely'
 import type { AppInstance } from '../../../http/types.js'
@@ -50,6 +52,7 @@ import { checkSlot } from '../../scheduling/slots.js'
 import { loadBoardServices } from '../availability-loader.js'
 import { bookingRefOf, dollars, isPlaceholderName, parseVehicleLabel, publicSlotError, vehicleOf, whenWord, type WebVehicle } from '../bookings.js'
 import { activeMembership } from '../members.js'
+import { feeHow, requestDepositLink } from '../../square/deposits.js'
 import { memberRefOf } from '../memberships.js'
 import { tierKeyOf, type PublicTier } from '../tiers.js'
 import './problems.js'
@@ -326,11 +329,11 @@ export async function clientProven(db: Executor, s: SessionView, now: Date): Pro
 }
 
 /** 409 IDENTITY_RECORD_UNCONFIRMED when the page's client is not proven (a stale record behind a page verified by code). */
-async function requireProven(db: Executor, s: SessionView, now: Date): Promise<void> {
+export async function requireProven(db: Executor, s: SessionView, now: Date): Promise<void> {
   if (!(await clientProven(db, s, now))) throw new AppError('IDENTITY_RECORD_UNCONFIRMED')
 }
 
-async function requireNoHold(db: Executor, customerId: string, now: Date, tz: string): Promise<void> {
+export async function requireNoHold(db: Executor, customerId: string, now: Date, tz: string): Promise<void> {
   const held = await memberPrivilegesHeldUntil(db, customerId, now)
   if (held)
     throw new AppError('LINK_PRIVILEGES_HELD', {
@@ -494,6 +497,8 @@ export async function bookOnLink(tx: Tx, d: LinkDeps, s: SessionView, r: LinkReq
     throw e
   }
   const appointmentId = booked.appointment.id
+  // the deposit by Square link (ADR 0171 D2): a request the job square.deposit-link turns into a texted quick-pay link
+  await requestDepositLink(tx, { newId: d.app.newId, clock: d.app.clock }, { locationId: loc.id, appointmentId, cents: dueCents, collect: how })
   await logActivity(tx, c, {
     appointmentId,
     text: privileges.member
@@ -511,7 +516,7 @@ export async function bookOnLink(tx: Tx, d: LinkDeps, s: SessionView, r: LinkReq
     status: 'booked',
     start: booked.appointment.scheduledStart,
     end: booked.appointment.scheduledEnd,
-    deposit: { dueCents, how },
+    deposit: { dueCents, how: feeHow(how) },
     confirmationBy: booked.messageQueued ? 'sms' : 'none',
     service: { key: pkg.key, name: pkg.name },
     addons: addons.map((a) => ({ key: a.key, name: a.name })),
@@ -692,12 +697,8 @@ export function payHostAllowed(url: string, hosts: readonly string[]): boolean {
 
 export const payRequestSourceRef = (invoiceId: string): string => `pay_link_request:${invoiceId}`
 
-/**
- * POST pay/start: a payment link with a fresh PIN or code. The invoice's payment URL (attached by staff) when its host is allowed:
- * one completion of the link and {status: redirect}. Without one: {status: link_pending}, and the managers are asked once (until
- * they read it) to text the client a payment link.
- */
-export async function startPayment(tx: Tx, d: LinkDeps, s: SessionView, r: LinkRequest): Promise<PayStartResult> {
+/** The checks of pay/start (a payment link, a fresh PIN or code, the page's own proven client, no PIN-reset hold): its invoice. */
+export async function payPageInvoice(tx: Tx, d: LinkDeps, s: SessionView) {
   requireKind(s, ['pay'])
   const now = d.app.clock.now()
   requireFresh(s, now)
@@ -712,6 +713,16 @@ export async function startPayment(tx: Tx, d: LinkDeps, s: SessionView, r: LinkR
     .where('location_id', '=', loc.id)
     .executeTakeFirst()
   if (!inv || inv.customer_id !== s.customerId) throw new AppError('LINK_WRONG_PURPOSE')
+  return { loc, inv, customerId: s.customerId, now }
+}
+
+/**
+ * POST pay/start: a payment link with a fresh PIN or code. The invoice's payment URL (attached by staff) when its host is allowed:
+ * one completion of the link and {status: redirect}. Without one: {status: link_pending}, and the managers are asked once (until
+ * they read it) to text the client a payment link.
+ */
+export async function startPayment(tx: Tx, d: LinkDeps, s: SessionView, r: LinkRequest): Promise<PayStartResult> {
+  const { loc, inv, now } = await payPageInvoice(tx, d, s)
   const url = inv.payment_link_url
   if (url && payHostAllowed(url, d.linkHosts)) {
     await consumeLink(tx, s.link.id, now)
@@ -734,7 +745,7 @@ export async function startPayment(tx: Tx, d: LinkDeps, s: SessionView, r: LinkR
     .where('read_at', 'is', null)
     .executeTakeFirst()
   if (!waiting) {
-    const c = await getCustomer(tx, s.customerId)
+    const c = await getCustomer(tx, inv.customer_id)
     const who = c?.fullName ?? 'A client'
     await notifyManagers(
       tx,

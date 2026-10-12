@@ -67,6 +67,17 @@ describe('square:webhooks', () => {
     expect(webhooksScriptEnv({ ...base, SQUARE_WEBHOOK_URL: 'not a url' })).toEqual({ ok: false, message: expect.stringMatching(/SQUARE_WEBHOOK_URL/) })
   })
 
+  it('in production registers only https://<domain>/hooks/square, as the environment contract requires (Q1b leftover N1)', () => {
+    const base = { SQUARE_ACCESS_TOKEN: 'test-token-not-real-0001' }
+    const refused = { ok: false, message: expect.stringMatching(/must be https:\/\/<domain>\/hooks\/square in production/) }
+    for (const url of ['http://oasis.example.com/hooks/square', 'https://oasis.example.com/hooks/square/', 'https://oasis.example.com/other', 'https://oasis.example.com/hooks/squarespace'])
+      for (const prod of [{ NODE_ENV: 'production' }, { SQUARE_ENVIRONMENT: 'production' }])
+        expect(webhooksScriptEnv({ ...base, ...prod, SQUARE_WEBHOOK_URL: url }), `${url} ${JSON.stringify(prod)}`).toEqual(refused)
+    expect(webhooksScriptEnv({ ...base, NODE_ENV: 'production', SQUARE_ENVIRONMENT: 'production', SQUARE_WEBHOOK_URL: URL_ }).ok).toBe(true)
+    // a sandbox stack outside production may register another path (a tunnel to a test stack)
+    expect(webhooksScriptEnv({ ...base, SQUARE_WEBHOOK_URL: 'https://tunnel.example.com/x/hooks/square' }).ok).toBe(true)
+  })
+
   describe('the program', () => {
     let server: Server | undefined
     afterEach(async () => {

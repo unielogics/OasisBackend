@@ -89,7 +89,7 @@ describe('Square routes', () => {
     expect(row.missing).toEqual(expect.arrayContaining(['SQUARE_PROVIDER=live', 'SQUARE_ACCESS_TOKEN', 'SQUARE_WEBHOOK_URL']))
     expect(row.missing.some((m: string) => m.startsWith('Events API not enabled'))).toBe(true)
     expect(row.warnings).toEqual(expect.arrayContaining([expect.stringMatching(/observe-only/), expect.stringMatching(/PAYMENT_PROCESSOR=squarespace/)]))
-    expect(row.details).toMatchObject({ token: 'not set', processor: 'squarespace', unmatched: null })
+    expect(row.details).toMatchObject({ token: 'not set', processor: 'squarespace', unmatched: 0, failedRefunds: 0, pendingEnrollments: null })
     await app.close()
     const live = await appWith(liveEnvVars)
     const sim = simFor(t.clock)

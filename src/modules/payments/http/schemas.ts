@@ -125,11 +125,13 @@ export const LedgerEvent = z.object({
   at: z.string(),
   atLabel: z.string(),
   resolvedAt: z.string().nullable(),
-  source: z.enum(['oasis', 'squarespace', 'system', 'seed']),
+  source: z.enum(['oasis', 'squarespace', 'system', 'seed', 'square']),
   processorState: z.enum(['na', 'awaiting_processor', 'confirmed', 'failed']),
   awaitingProcessor: z.boolean(),
   processorRef: z.string().nullable(),
   sqspOrderId: z.string().nullable(),
+  processor: z.enum(['squarespace', 'square']).nullable(),
+  processorOrderId: z.string().nullable(),
   needsReview: z.boolean(),
   canApprove: z.boolean(),
   approveBlock: z.enum(['permission', 'limit', 'self']).nullable(),
@@ -184,6 +186,10 @@ export const InvoiceDetail = z.object({
   tipCents: z.number().int(),
   paymentLinkUrl: z.string().nullable(),
   awaitingProcessorCount: z.number().int(),
+  processing: z.object({
+    processor: z.enum(['squarespace', 'square']).describe('PAYMENT_PROCESSOR: who takes new card money, links and refunds'),
+    squarePosAppSwitch: z.boolean().describe('SQUARE_POS_API_ENABLED: "Open Square POS" (POST /invoices/{id}/square-pos-intents)'),
+  }),
   version: z.number().int(),
   items: z.array(
     z.object({
@@ -238,10 +244,13 @@ export const PaymentLinkResult = z.object({
   invoice: InvoiceDetail,
   paymentLink: z.object({
     id: z.string(),
-    url: z.string(),
+    url: z.string().nullable().describe('null for the client’s personal pay page (its link is a secret only their text carries)'),
     expectedCents: z.number().int(),
     purpose: z.enum(['balance', 'deposit']),
     sms: z.string(),
+    provider: z
+      .enum(['squarespace', 'square', 'personal'])
+      .describe('squarespace: a pasted checkout link; square: a Square link for the exact amount; personal: the client’s own pay page'),
   }),
 })
 export const CollectResult = z.object({
@@ -372,6 +381,37 @@ export const ApprovalsResult = z.object({
   ),
 })
 
+/** One Square payment waiting for a person (GET /payments/square/unmatched, the reconciliation). */
+export const SquareCandidate = z.object({
+  invoiceId: z.string(),
+  invoiceNo: z.number().int(),
+  client: z.string(),
+  balanceCents: z.number().int(),
+  awaitingEventId: z.string().nullable().describe('The staff card entry of the same amount on that invoice: applying confirms it'),
+  score: z.number(),
+  why: z.array(z.string()),
+})
+
+export const SquarePaymentToMatch = z.object({
+  paymentId: z.string().describe('Square payment id'),
+  matchState: z.enum(['pending', 'unmatched']).describe('pending: the matcher has not decided yet (counter payments wait a little)'),
+  classification: z.string().nullable(),
+  amountCents: z.number().int().describe('The sale, tip excluded'),
+  tipCents: z.number().int(),
+  totalCents: z.number().int(),
+  refundedCents: z.number().int(),
+  method: z.string().describe('"Visa ••4242", "Cash", "Square"'),
+  sourceType: z.string().nullable(),
+  brand: z.string().nullable(),
+  last4: z.string().nullable(),
+  note: z.string().nullable(),
+  receiptNumber: z.string().nullable(),
+  product: z.string().nullable().describe('SQUARE_POS, ECOMMERCE_API, ...'),
+  createdAt: z.string(),
+  ageMinutes: z.number().int(),
+  candidates: z.array(SquareCandidate).describe('Best first (at most 5)'),
+})
+
 export const ReconciliationResult = z.object({
   thresholdMinutes: z.number().int(),
   awaitingProcessor: z.array(
@@ -414,6 +454,24 @@ export const ReconciliationResult = z.object({
       bizDate: z.string(),
     }),
   ),
+  square: z
+    .object({
+      paymentsToMatch: z.array(SquarePaymentToMatch),
+      failedRefunds: z.array(
+        z.object({
+          eventId: z.string(),
+          invoiceId: z.string(),
+          label: z.string(),
+          client: z.string(),
+          amountCents: z.number().int(),
+          occurredAt: z.string(),
+          refundedCents: z.number().int().describe('What Square did give back before a leg failed'),
+          errors: z.array(z.string()),
+        }),
+      ),
+      refundsInFlight: z.number().int(),
+    })
+    .describe('Square (ADR 0171): payments to match, card refunds Square refused (no longer counted as refunded), refund legs on their way'),
 })
 
 export const ClientCreditResult = z.object({

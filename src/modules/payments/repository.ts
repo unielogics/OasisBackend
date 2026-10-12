@@ -133,7 +133,8 @@ export async function getEventForUpdate(tx: Tx, locationId: string, eventId: str
  * What can still go back to the original payment methods in a given destination. Store credit never comes back as money:
  * a refund to card or cash is capped by the non-credit payments (voids taken back out) less the card and cash refunds already
  * paid and the ones waiting for approval, which reserve that money too. A refund to card is further capped by what was paid by
- * card or wallet. `excludeEventId` leaves one request out (its own approval).
+ * card or wallet. A card refund the processor reported failed gave nothing back and reserves nothing (ADR 0171 D4).
+ * `excludeEventId` leaves one request out (its own approval).
  */
 export async function originalRefundCap(
   db: Executor,
@@ -145,11 +146,11 @@ export async function originalRefundCap(
   const r = await sql<{ orig: string | number; card: string | number }>`
     select coalesce(sum(case e.type when 'pay' then e.amount_cents else -e.amount_cents end)
                       filter (where e.type in ('pay', 'void')), 0)
-           - coalesce(sum(e.amount_cents) filter (where e.type = 'refund' and e.dest <> 'credit'
+           - coalesce(sum(e.amount_cents) filter (where e.type = 'refund' and e.dest <> 'credit' and e.processor_state <> 'failed'
                       and e.status in ('done', 'pending') and e.id is distinct from ${skip}::uuid), 0) as orig,
            coalesce(sum(case e.type when 'pay' then e.amount_cents else -e.amount_cents end)
                       filter (where e.type in ('pay', 'void') and e.method_kind in ('card', 'apple_pay')), 0)
-           - coalesce(sum(e.amount_cents) filter (where e.type = 'refund' and e.dest = 'card'
+           - coalesce(sum(e.amount_cents) filter (where e.type = 'refund' and e.dest = 'card' and e.processor_state <> 'failed'
                       and e.status in ('done', 'pending') and e.id is distinct from ${skip}::uuid), 0) as card
     from ledger_events e where e.invoice_id = ${invoiceId}`.execute(db)
   const orig = Number(r.rows[0]?.orig ?? 0)
@@ -161,7 +162,7 @@ export async function originalRefundCap(
 export async function refundedItemIds(db: Executor, invoiceId: string): Promise<Set<string>> {
   const r = await sql<{ id: string }>`
     select distinct unnest(item_ids)::text as id from ledger_events
-    where invoice_id = ${invoiceId} and type = 'refund' and status in ('done', 'pending')`.execute(db)
+    where invoice_id = ${invoiceId} and type = 'refund' and status in ('done', 'pending') and processor_state <> 'failed'`.execute(db)
   return new Set(r.rows.map((x) => x.id))
 }
 
@@ -173,11 +174,22 @@ const BRANDS: Record<string, string> = {
   jcb: 'JCB',
 }
 
-/** A brand-only display label ("Visa"); a card with no known brand reads "Card". Never invents digits. */
-export function cardLabel(brand: string | null | undefined): { label: string; brand: string | null } {
-  const key = brand?.trim().toLowerCase() ?? ''
+/** Square's card_brand names (VISA, AMERICAN_EXPRESS, DISCOVER_DINERS, ...) as the brand keys above. */
+const BRAND_ALIASES: Record<string, string> = {
+  american_express: 'amex',
+  discover_diners: 'discover',
+}
+
+/**
+ * The display label of a card: the brand ("Visa"), and "Visa ••4242" when a processor reported the last four digits (Square does;
+ * staff entries never carry digits). A card with no known brand reads "Card". Never invents digits.
+ */
+export function cardLabel(brand: string | null | undefined, last4?: string | null): { label: string; brand: string | null } {
+  const raw = brand?.trim().toLowerCase() ?? ''
+  const key = BRAND_ALIASES[raw] ?? raw
   const name = BRANDS[key]
-  return name ? { label: name, brand: key } : { label: 'Card', brand: null }
+  const digits = last4 && /^[0-9]{4}$/.test(last4) ? ` ••${last4}` : ''
+  return name ? { label: `${name}${digits}`, brand: key } : { label: `Card${digits}`, brand: null }
 }
 
 export const kindOfMethodLabel = (m: string | null | undefined): MethodKind => {

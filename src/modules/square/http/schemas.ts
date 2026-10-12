@@ -43,6 +43,7 @@ export const SquareIntegrationView = z.object({
       bySource: z.record(z.string(), z.number().int()),
       byProduct: z.record(z.string(), z.number().int()),
       complete: z.boolean(),
+      decided: z.number().int().optional().describe('Payments the reconcile decided itself (missed by the webhook and the catch-up)'),
     })
     .nullable(),
 })

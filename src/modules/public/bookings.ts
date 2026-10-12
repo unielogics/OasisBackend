@@ -23,6 +23,7 @@ import { loadBoardServices } from './availability-loader.js'
 import { schedulingCtx, websiteActor, type PublicDeps, type PublicLocation, type PublicRequest } from './deps.js'
 import { enforceLimits, publicLimitChecks } from './limits.js'
 import { activeMembership } from './members.js'
+import { feeHow, requestDepositLink } from '../square/deposits.js'
 import { phoneOrThrow, resolveMemberToken } from './otp.js'
 import '../identity/problems.js'
 import './problems.js'
@@ -244,6 +245,8 @@ export async function createWebBooking(
     throw e
   }
   const appointmentId = booked.appointment.id
+  // the deposit by Square link (ADR 0171 D2): a request the job square.deposit-link turns into a texted quick-pay link
+  await requestDepositLink(tx, { newId: d.app.newId, clock: d.app.clock }, { locationId: loc.id, appointmentId, cents: dueCents, collect: how })
   if (linkOnly)
     await logActivity(tx, c, { appointmentId, text: unverifiedDetails(input), channels: ['internal'], actor })
   if (typedNameNote) await logActivity(tx, c, { appointmentId, text: typedNameNote, channels: ['internal'], actor })
@@ -263,7 +266,7 @@ export async function createWebBooking(
     start: booked.appointment.scheduledStart,
     end: booked.appointment.scheduledEnd,
     bayCount: await baysLeft(tx, d, loc, pkg.durationMin, start),
-    deposit: { dueCents, how },
+    deposit: { dueCents, how: feeHow(how) },
     // what the policy did is the verified owner's to know; anyone else is told what they asked for (a STOP or a missing opt-in on
     // the record of a known number would otherwise show through)
     confirmationBy: verified ? (booked.messageQueued ? 'sms' : 'none') : input.smsConsent ? 'sms' : 'none',

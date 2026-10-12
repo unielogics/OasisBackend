@@ -21,6 +21,7 @@ import { chargeJoinLimits, joinWeb, memberRefOf } from '../memberships.js'
 import { phoneOrThrow, requestOtp, verifyOtp } from '../otp.js'
 import { loadPlans } from '../../memberships/plans.js'
 import { publicTierOf } from '../tiers.js'
+import { feeHow } from '../../square/deposits.js'
 import {
   AVAILABILITY_RAW_QUERY,
   AvailabilityQuery,
@@ -283,7 +284,7 @@ async function decoy(tx: Tx, l: PublicLocation, b: z.infer<typeof BookingBody>):
     start: start.toISOString(),
     end: new Date(start.getTime() + 45 * MS_PER_MIN).toISOString(),
     bayCount: 1,
-    deposit: { dueCents: fee.value.cents, how: fee.value.collect },
+    deposit: { dueCents: fee.value.cents, how: feeHow(fee.value.collect) },
     confirmationBy: 'sms',
     service: { key: b.serviceKey, name: b.serviceKey },
     addons: [],

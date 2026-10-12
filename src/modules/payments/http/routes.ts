@@ -6,10 +6,14 @@ import { auditContextOf } from '../../../http/authorizer.js'
 import { idempotentHandler } from '../../../http/idempotent.js'
 import type { AppInstance } from '../../../http/types.js'
 import { z } from '../../../http/zod.js'
+import type { Tx } from '../../../platform/db.js'
 import { AppError } from '../../../platform/errors.js'
+import type { IdempotentResult } from '../../../platform/idempotency.js'
 import { getSetting } from '../../../platform/settings.js'
 import { actorFromAuth } from '../actor.js'
-import { PaymentsService, type CommandContext } from '../commands.js'
+import { PaymentsService, linkDelivery, type CommandContext } from '../commands.js'
+import { prepareSquareLink, type PreparedSquareLink } from '../../square/links.js'
+import { squareApi, squareEnv } from '../../square/runtime.js'
 import { creditEntries, summarize } from '../credit-summary.js'
 import { loadCreditLots } from '../credit.js'
 import { invoiceDetail, type DetailContext } from '../detail.js'
@@ -96,6 +100,38 @@ export function registerPaymentsRoutes(
   // The wrapper writes the reply itself (status, replay header), which the response-schema typing of the route cannot see.
   const idem = (fn: Parameters<typeof idempotentHandler<FastifyRequest>>[0]): never =>
     idempotentHandler(fn) as never
+  /**
+   * A Square payment link is created for the exact amount BEFORE the command's transaction (the idempotency prepare hook: after the
+   * key is claimed, never on a replay, outside every invoice lock); the command then makes it live under the lock (ADR 0171 D3).
+   * Nothing is prepared before the cutover (PAYMENT_PROCESSOR=squarespace) or for the personal pay page.
+   */
+  const prepareLink = async (
+    req: FastifyRequest,
+    kind: 'balance' | 'deposit',
+    amountCents?: number,
+  ): Promise<PreparedSquareLink | undefined> => {
+    const env = squareEnv()
+    if (linkDelivery(env, kind) !== 'square') return undefined
+    const a = auth(req)
+    return prepareSquareLink(
+      { db: app.db, clock: app.clock, newId: app.newId, env, api: squareApi(env), logger: req.log },
+      {
+        locationId: a.locationId,
+        invoiceId: (req.params as { id: string }).id,
+        purpose: kind,
+        ...(amountCents !== undefined ? { amountCents } : {}),
+        origin: 'staff',
+        createdBy: a.userId,
+      },
+    )
+  }
+  const idemLink = (
+    fn: (req: FastifyRequest, tx: Tx, prepared: PreparedSquareLink | undefined) => Promise<IdempotentResult>,
+    prepare: (req: FastifyRequest) => Promise<PreparedSquareLink | undefined>,
+  ): never =>
+    idempotentHandler<FastifyRequest, PreparedSquareLink | undefined>((req, tx, _reply, prepared) => fn(req, tx, prepared), {
+      prepare,
+    }) as never
 
   // --- reads --------------------------------------------------------------------------------------------------------
 
@@ -195,7 +231,7 @@ export function registerPaymentsRoutes(
       schema: {
         tags: [TAG],
         summary:
-          'Card money waiting on Squarespace for more than 2 hours, unmatched Squarespace records, overpaid invoices',
+          'Card money waiting on its processor for more than 2 hours, unmatched Squarespace records, the Square section (payments to match, failed refunds), overpaid invoices',
         response: { 200: ReconciliationResult },
       },
     },
@@ -240,22 +276,27 @@ export function registerPaymentsRoutes(
         tags: [TAG],
         summary: 'Collect the full balance: card, cash or a payment link',
         description:
-          'Cash records a `pay`. Card records a `pay` that counts immediately with `processorState: awaiting_processor` (completed in Squarespace; label is the card brand only). ' +
-          '`payment_link` creates a payment link and queues the SMS; no ledger event. 422 `PAY_NOTHING_TO_COLLECT` when the balance is 0.',
+          'Cash records a `pay`. Card (the "Square reader" tender) records a `pay` that counts immediately with `processorState: awaiting_processor`, until the processor confirms it (Square: the counter matcher, rule R3; Squarespace: the sync or staff); its label is the card brand only. ' +
+          '`payment_link` sends a payment link and queues the SMS; no ledger event. Before the Square cutover (PAYMENT_PROCESSOR=squarespace) it is the pasted Squarespace URL (`url`, or the one on the invoice). With Square: the client\'s personal pay page while personal links are on (PUBLIC_LINKS_ENABLED; `paymentLink.url` is null), else a Square link made now for the exact balance (`url` ignored; 409 `CONCURRENT_UPDATE` if the balance changed meanwhile, 409 `SQUARE_WRITES_OFF` while Square is watch-only, 503 `SQUARE_UNAVAILABLE`). 422 `PAY_NOTHING_TO_COLLECT` when the balance is 0.',
         params: IdParams,
         body: CollectBody,
         response: { 201: CollectResult },
       },
     },
-    idem(async (req, tx) => {
-      const r = await service.collect(
-        tx,
-        commandCtx(req),
-        (req.params as P).id,
-        req.body as z.infer<typeof CollectBody>,
-      )
-      return { status: 201, body: r }
-    }),
+    idemLink(
+      async (req, tx, prepared) => {
+        const r = await service.collect(
+          tx,
+          commandCtx(req),
+          (req.params as P).id,
+          req.body as z.infer<typeof CollectBody>,
+          prepared,
+        )
+        return { status: 201, body: r }
+      },
+      (req) =>
+        (req.body as z.infer<typeof CollectBody>).method === 'payment_link' ? prepareLink(req, 'balance') : Promise.resolve(undefined),
+    ),
   )
 
   app.post(
@@ -409,7 +450,7 @@ export function registerPaymentsRoutes(
       config: { access: access.perm('pay.void'), ...mutate },
       schema: {
         tags: [TAG],
-        summary: 'Void a cash payment or a card payment still awaiting Squarespace',
+        summary: 'Void a cash payment or a card payment still awaiting its processor',
         params: IdParams,
         body: VoidBody,
         response: { 201: EventResult },
@@ -473,23 +514,32 @@ export function registerPaymentsRoutes(
       config: { access: access.perm('pay.collect'), ...mutate },
       schema: {
         tags: [TAG],
-        summary: 'Attach a Squarespace checkout or invoice link and text it to the client',
+        summary: 'Send the client a payment link (Squarespace pasted, Square made for the exact amount, or their personal pay page)',
         description:
-          'The link must be HTTPS on an allowed host. `balance` expects the current balance (or `amountCents`); `deposit` needs `amountCents`. No ledger event until the sync or staff record the payment.',
+          'Before the Square cutover (PAYMENT_PROCESSOR=squarespace): the pasted link must be HTTPS on an allowed host; `balance` expects the current balance (or `amountCents`); `deposit` needs `amountCents`. ' +
+          'With Square: a `balance` link is the client\'s personal pay page while personal links are on (the exact amount is fixed when they pay; `paymentLink.url` is null), else a Square link for the exact balance; a `deposit` is a Square quick-pay link for `amountCents` (never more than the balance). The pasted `url` is ignored. Older active Square links of the same purpose are superseded and deleted at Square by the sweep. 409 `CONCURRENT_UPDATE` (the amount changed meanwhile), 409 `SQUARE_WRITES_OFF`, 503 `SQUARE_UNAVAILABLE`. ' +
+          'No ledger event until the payment arrives.',
         params: IdParams,
         body: PaymentLinkBody,
         response: { 201: PaymentLinkResult },
       },
     },
-    idem(async (req, tx) => ({
-      status: 201,
-      body: await service.attachPaymentLink(
-        tx,
-        commandCtx(req),
-        (req.params as P).id,
-        req.body as z.infer<typeof PaymentLinkBody>,
-      ),
-    })),
+    idemLink(
+      async (req, tx, prepared) => ({
+        status: 201,
+        body: await service.attachPaymentLink(
+          tx,
+          commandCtx(req),
+          (req.params as P).id,
+          req.body as z.infer<typeof PaymentLinkBody>,
+          prepared,
+        ),
+      }),
+      (req) => {
+        const b = req.body as z.infer<typeof PaymentLinkBody>
+        return prepareLink(req, b.kind, b.kind === 'deposit' ? b.amountCents : undefined)
+      },
+    ),
   )
 
   app.post(
@@ -498,7 +548,7 @@ export function registerPaymentsRoutes(
       config: { access: access.anyPerm('pay.collect', 'pay.refund'), ...mutate },
       schema: {
         tags: [TAG],
-        summary: 'Confirm that a card payment or refund was completed in Squarespace',
+        summary: 'Confirm by hand that a card payment or refund was completed at the processor',
         description:
           'Needs the permission of the original action: pay.collect for a payment, pay.refund for a refund.',
         params: z.object({ id: z.string().uuid() }),

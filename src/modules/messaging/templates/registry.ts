@@ -150,6 +150,18 @@ export const TEMPLATES = {
     editable: true,
     source: 'cc-domain 7.9 quick reply + link',
   }),
+  // Staff "Send link" with personal links on (ADR 0171 D3): the client's own pay page, where a Square link for the exact balance is
+  // made at click time. The link is a secretVar: the message row keeps it masked, the outbox body is wiped once final.
+  payment_link_personal: t({
+    key: 'payment_link_personal',
+    label: 'Payment link (personal, staff)',
+    klass: 'payment_link',
+    body: 'Your Oasis Auto Spa invoice {invoice} is ready. Review and pay it on this secure page: {link}',
+    required: ['link', 'invoice'],
+    optional: [],
+    editable: false,
+    source: 'new: staff Send link texts the personal pay link (ADR 0171)',
+  }),
   closure_notice: t({
     key: 'closure_notice',
     label: 'Closure notice',

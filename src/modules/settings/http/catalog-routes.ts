@@ -143,7 +143,7 @@ export const TierView = z.object({
 
 export const GuestFeeView = z.object({
   cents: Cents.describe('The booking fee guests pay toward the visit (members pay none)'),
-  collect: z.enum(['counter', 'link']),
+  collect: z.enum(['counter', 'link', 'card_hold']),
   version: z.number().int(),
 })
 
@@ -934,10 +934,10 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
       schema: {
         tags: TAGS,
         operationId: 'putCatalogGuestFee',
-        summary: 'Save the booking fee (0 to $1,000) and how it is collected (at the counter or by a payment link)',
+        summary: 'Save the booking fee (0 to $1,000) and how it is collected (at the counter, by a payment link, or a saved card)',
         description:
-          'A deposit toward the visit guests pay (members pay none; ADR 0150), settled by the cancel and no-show rules. `version` (or If-Match) required (0 before the first save): 428 without, 412 when stale. Audited `settings.update`; publishes `settings.changed {key: "booking.guest_fee"}`.',
-        body: z.object({ cents: Cents, collect: z.enum(['counter', 'link']), version: Version.optional() }).strict(),
+          'A deposit toward the visit guests pay (members pay none; ADR 0150), settled by the cancel and no-show rules. `collect`: `counter`; `link` (with PAYMENT_PROCESSOR=square a Square quick-pay link is created and texted after each online booking, ADR 0171); `card_hold` (wave Q3a; accepted now, collected at the counter until then). `version` (or If-Match) required (0 before the first save): 428 without, 412 when stale. Audited `settings.update`; publishes `settings.changed {key: "booking.guest_fee"}`.',
+        body: z.object({ cents: Cents, collect: z.enum(['counter', 'link', 'card_hold']), version: Version.optional() }).strict(),
         response: { 200: GuestFeeView },
       },
     },

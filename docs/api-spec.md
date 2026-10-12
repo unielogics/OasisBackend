@@ -391,6 +391,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/invoices/:id/refunds` | pay.refund | required |
 | POST | `/api/v1/invoices/:id/refunds/:eventId/approve` | pay.refund | required |
 | POST | `/api/v1/invoices/:id/refunds/:eventId/deny` | pay.refund | required |
+| POST | `/api/v1/invoices/:id/square-pos-intents` | pay.collect | required |
 | PUT | `/api/v1/invoices/:id/tip` | pay.collect | required |
 | POST | `/api/v1/invoices/:id/void` | pay.void | required |
 | GET | `/api/v1/leads` | cli.view |  |
@@ -421,6 +422,11 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/api/v1/payments/export.csv` | pay.reports |  |
 | GET | `/api/v1/payments/invoices` | pay.reports |  |
 | GET | `/api/v1/payments/reconciliation` | pay.reports | set.billing |  |
+| POST | `/api/v1/payments/square/:paymentId/apply` | pay.collect | required |
+| POST | `/api/v1/payments/square/:paymentId/ignore` | pay.collect | required |
+| POST | `/api/v1/payments/square/:paymentId/reassign` | pay.void | required |
+| POST | `/api/v1/payments/square/pos-callback` | pay.collect | required |
+| GET | `/api/v1/payments/square/unmatched` | pay.reports |  |
 | GET | `/api/v1/payments/summary` | pay.reports |  |
 | GET | `/api/v1/public/availability` | public |  |
 | POST | `/api/v1/public/bookings` | public | required |
@@ -429,6 +435,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/public/links/appointments/:ref/reschedule` | public |  |
 | GET | `/api/v1/public/links/availability` | public |  |
 | POST | `/api/v1/public/links/bookings` | public | required |
+| POST | `/api/v1/public/links/deposit/start` | public |  |
 | POST | `/api/v1/public/links/exchange` | public |  |
 | GET | `/api/v1/public/links/me` | public |  |
 | POST | `/api/v1/public/links/membership/start` | public |  |

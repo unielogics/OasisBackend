@@ -72,7 +72,7 @@ registerProblems({
     status: 422,
     title: 'Can’t void this payment',
     detail:
-      'Only a cash payment or a card payment still waiting on Squarespace can be voided. Refund confirmed card payments instead',
+      'Only a cash payment or a card payment still waiting on {processor} can be voided. Refund confirmed card payments instead',
   },
   PAYMENT_ALREADY_VOIDED: {
     status: 409,
@@ -82,7 +82,7 @@ registerProblems({
   EVENT_NOT_AWAITING: {
     status: 409,
     title: 'Nothing to confirm',
-    detail: 'This entry is not waiting on Squarespace',
+    detail: 'This entry is not waiting on {processor}',
   },
   ADDON_REMOVE_OVERPAID: {
     status: 409,
@@ -92,7 +92,7 @@ registerProblems({
   PAYMENT_LINK_REQUIRED: {
     status: 422,
     title: 'Payment link needed',
-    detail: 'Paste the Squarespace payment link for this invoice first',
+    detail: 'Paste the payment link for this invoice first',
   },
   PAYMENT_LINK_HOST: {
     status: 422,

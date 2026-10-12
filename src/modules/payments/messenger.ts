@@ -17,6 +17,11 @@ export interface QueuedSms {
   body: string
   klass: 'receipt' | 'payment_link'
   dedupeKey: string
+  /**
+   * A message built from a template whose secret values (a personal link) must never be stored readable: the outbox renders the
+   * template with them, the message row keeps them masked. `body` then holds the template text with its {placeholders}.
+   */
+  template?: { key: string; vars: Record<string, string>; secretVars: Record<string, string> }
 }
 
 export interface QueuedEmail {
@@ -60,6 +65,15 @@ export interface PaymentLinkNotice {
   dedupeKey: string
 }
 
+export interface PersonalPayLinkNotice {
+  invoiceId: string
+  invoiceNo: number
+  customerId: string
+  /** The personal pay link (https://.../#/p/<token>): a secret, texted as a secretVar and stored masked. */
+  url: string
+  dedupeKey: string
+}
+
 export interface ReceiptNotice {
   invoiceId: string
   invoiceNo: number
@@ -73,6 +87,8 @@ export interface ReceiptNotice {
 
 export interface PaymentMessenger {
   sendPaymentLink(tx: Tx, n: PaymentLinkNotice): Promise<{ state: DeliveryState; messageId: string | null }>
+  /** Staff "Send link" with personal links on (ADR 0171 D3): the client's own pay page, template payment_link_personal. */
+  sendPersonalPayLink?(tx: Tx, n: PersonalPayLinkNotice): Promise<{ state: DeliveryState; messageId: string | null }>
   sendReceipt(tx: Tx, n: ReceiptNotice): Promise<{ sms: DeliveryState; email: DeliveryState }>
 }
 
@@ -104,6 +120,9 @@ export function receiptSmsBody(
   return `Oasis Auto Spa receipt ${invoiceLabel(n.invoiceNo)}: total ${formatUsd(n.totalCents)}, paid ${formatUsd(net)}. Thank you!`
 }
 
+/** The text of template payment_link_personal (messaging/templates/registry.ts) with its placeholders. */
+export const personalPayLinkBody = 'Your Oasis Auto Spa invoice {invoice} is ready. Review and pay it on this secure page: {link}'
+
 export function createPaymentMessenger(outbox: PaymentOutbox): PaymentMessenger {
   return {
     async sendPaymentLink(tx, n) {
@@ -117,6 +136,21 @@ export function createPaymentMessenger(outbox: PaymentOutbox): PaymentMessenger 
         body: `Here is your secure payment link: ${n.url}`,
         klass: 'payment_link',
         dedupeKey: n.dedupeKey,
+      })
+      return { state: 'queued', messageId: r.messageId }
+    },
+    async sendPersonalPayLink(tx, n) {
+      const c = await contactOf(tx, n.customerId)
+      if (!c.phone) return { state: 'no_contact', messageId: null }
+      if (c.smsOptedOut || !c.smsOptedIn) return { state: 'skipped_opt_out', messageId: null }
+      const r = await outbox.queueSms(tx, {
+        customerId: n.customerId,
+        invoiceId: n.invoiceId,
+        toE164: c.phone,
+        body: personalPayLinkBody,
+        klass: 'payment_link',
+        dedupeKey: n.dedupeKey,
+        template: { key: 'payment_link_personal', vars: { invoice: invoiceLabel(n.invoiceNo) }, secretVars: { link: n.url } },
       })
       return { state: 'queued', messageId: r.messageId }
     },
