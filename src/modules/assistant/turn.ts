@@ -42,7 +42,7 @@ import { AI_ACTOR_NAME, type AssistantLog, type AssistantQueue, type HandoffRequ
 import type { AssistantConfig } from './config.js'
 import { appointmentRefs, loadAppointmentRefs, loadConversation, loadTurnContext, resolveIdentity } from './context.js'
 import { factLiterals, openingWindow, placeholderValues, renderShopFacts } from './facts.js'
-import { CARD_LINE, cutAfterFirstQuestion, cutAtSentence, guardReply, HARD_PROBLEMS, looksLikeCardNumber, MAX_REPLY_CHARS, SAFETY_LINE, SAFETY_LINK_KINDS, type GuardProblem, type ReplySegment } from './guard.js'
+import { CARD_LINE, cutAfterFirstQuestion, cutAtSentence, guardReply, HARD_PROBLEMS, isolatePlaceholders, looksLikeCardNumber, MAX_REPLY_CHARS, SAFETY_LINE, SAFETY_LINK_KINDS, type GuardProblem, type ReplySegment } from './guard.js'
 import { JUDGE_HINTS, runJudge } from './judge.js'
 import { HANDOFF_SUMMARIES, markUnanswered, openTurnHandoff, recipientOf, sendFallback, type ConversationRef, type HandoffDeps } from './handoff.js'
 import type { AssistantGate, AssistantInbox } from './ports.js'
@@ -517,6 +517,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     let rewriteUsed = false
     let shortenUsed = false
     let judgeRewriteUsed = false
+    let isolateUsed = false
     const fix = async (draft: string, problems: readonly GuardProblem[], words: readonly string[] = [], instruction?: string): Promise<string> => {
       messages.push({ role: 'user', content: [{ type: 'text', text: instruction ?? rewriteInstruction(draft, problems, words) }] })
       transcript.add({ kind: 'message', message: messages[messages.length - 1]! })
@@ -596,6 +597,12 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
         }
         const hard = v.problems.filter((p) => HARD_PROBLEMS.has(p))
         if (hard.length > 0 || (v.problems.includes('questions') && !rewriteUsed)) {
+          // the rewrite still trips only the placement rule: the server isolates the placeholders itself, once (each its own sentence)
+          if (rewriteUsed && !isolateUsed && hard.length === 1 && hard[0] === 'placement') {
+            isolateUsed = true
+            draft = isolatePlaceholders(v.text, values)
+            continue
+          }
           // the rewrite still trips a rule: the fallback and a person (promise words: "policy_words", anything else: "guard")
           if (rewriteUsed) {
             if (v.problems.includes('promise_words'))

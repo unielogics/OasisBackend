@@ -220,6 +220,25 @@ const CLAUSE_BEFORE = /(?:^|[.!?;:]|\s-)\s*$/
 /** ... and ends one: the text's end, or . ! ? ; : , or a spaced dash right after it. */
 const CLAUSE_AFTER = /^(?:\s*$|\s*[.!?;:,]|\s+-(?:\s|$))/
 
+/**
+ * The last resort for `placement` (W4 live eval: "{confirm}. As a guest, {fee}." survived its rewrite, so a booking that was already
+ * texted for confirmation ended in the fallback): every sentence that holds a misplaced placeholder is replaced by its placeholders
+ * alone, each its own sentence ("As a guest, {fee}." -> "{fee}."). The rendering names its own subject, so dropping the words around
+ * it can only lose a lead-in, never attach an amount to the wrong thing. Other sentences stay as written.
+ */
+export function isolatePlaceholders(text: string, values: ReadonlyMap<string, string>): string {
+  const misplaced = new Set(misplacedPlaceholders(text, values))
+  if (misplaced.size === 0) return text
+  return text
+    .split(/(?<=[.!?;:])\s+/)
+    .map((sentence) => {
+      const own = [...sentence.matchAll(BRACED)].map((m) => m[0]).filter((p) => values.has(p))
+      if (!own.some((p) => misplaced.has(p))) return sentence
+      return own.map((p) => `${p}.`).join(' ')
+    })
+    .join(' ')
+}
+
 /** The amount placeholders of a text that do not stand as their own clause ("Window tint {price:signature-hand-wash}"). */
 export function misplacedPlaceholders(text: string, values: ReadonlyMap<string, string>): string[] {
   const out: string[] = []

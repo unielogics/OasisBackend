@@ -314,11 +314,23 @@ describe('the pricing rule in a turn (design sections 3b and 3c: amounts are ser
     expect((await aiTexts(maria()))[0]!.body).toContain('Gold is $99 a month. Without it: Guests pay a $30 booking fee.')
   })
 
-  it('a placeholder attached to another noun gets one rewrite; then the fallback (design 3c, layer 1)', async () => {
+  it('a placeholder attached to another noun gets one rewrite; then the server isolates it (design 3c, layer 1; W4 live eval)', async () => {
     const a = assistant([simText('Window tint {price:signature-hand-wash}.'), simText('Your total {price:interior-detail}.')])
     await inbound(maria(), 'How much is tint?')
-    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'guard' })
+    expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
     expect(JSON.stringify(a.provider.requests[1]!.messages.at(-1))).toContain('Write each price placeholder as its own sentence')
+    // "Your total" is dropped: the rendering names its own subject, so nothing is tied to the wrong noun; no third model call
+    const texts = await aiTexts(maria())
+    expect(texts.map((t) => t.klass)).toEqual(['ai_reply'])
+    expect(texts[0]!.body).toMatch(/Interior Detail starts at \$149/i)
+    expect(texts[0]!.body).not.toMatch(/total/i)
+    expect(a.provider.requests).toHaveLength(2)
+  })
+
+  it('a rewrite that still trips another rule besides placement: the fallback (the server isolates placement alone)', async () => {
+    const a = assistant([simText('Window tint {price:signature-hand-wash}.'), simText('Your total {price:interior-detail}, about 5 dollars off.')])
+    await inbound(maria(), 'How much is tint?')
+    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'guard' })
     expect((await aiTexts(maria())).map((t) => t.klass)).toEqual(['ai_fallback'])
   })
 

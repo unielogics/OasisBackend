@@ -19,6 +19,7 @@ import {
   hostSkeleton,
   isTimeList,
   MAX_REPLY_CHARS,
+  isolatePlaceholders,
   misplacedPlaceholders,
   moneyWords,
   promiseWords,
@@ -179,6 +180,20 @@ describe('(1) self-contained renderings: each placeholder its own clause (c)', (
     ])
       expect(g(bad, { balance: true }), bad).toMatchObject({ kind: 'fix', problems: expect.arrayContaining(['placement']) })
     expect(misplacedPlaceholders('Window tint {price:signature-hand-wash}. {plan:gold}.', values)).toEqual(['{price:signature-hand-wash}'])
+  })
+
+  it('the last resort for placement: each sentence with a misplaced placeholder becomes its placeholders alone (W4 live eval)', () => {
+    const v = new Map([...values, ['{confirm}', 'I just texted you the details with how to confirm']])
+    expect(isolatePlaceholders('{confirm}. As a guest, {fee}.', v)).toBe('{confirm}. {fee}.')
+    expect(isolatePlaceholders('Also note that as a non-member, {fee}. See you soon!', v)).toBe('{fee}. See you soon!')
+    expect(isolatePlaceholders('Wash plus tint: {price:signature-hand-wash} plus {price:tint:sedan:carbon}.', v)).toBe(
+      'Wash plus tint: {price:signature-hand-wash}. {price:tint:sedan:carbon}.',
+    )
+    expect(isolatePlaceholders('Your total {price:interior-detail} today', v)).toBe('{price:interior-detail}.')
+    // nothing misplaced: unchanged; links are not amounts
+    expect(isolatePlaceholders('Hi! {plan:gold}. Pick a time: {link1}', v)).toBe('Hi! {plan:gold}. Pick a time: {link1}')
+    for (const t of ['{confirm}. As a guest, {fee}.', 'Your total {price:interior-detail} today', 'Two washes cost twice {price:signature-hand-wash}.'])
+      expect(misplacedPlaceholders(isolatePlaceholders(t, v), v), t).toEqual([])
   })
 
   it('an unknown key, {balance} without get_balance, a broken brace are refused', () => {

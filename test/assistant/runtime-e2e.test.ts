@@ -534,6 +534,24 @@ describe('W4 live eval: what the eval on Bedrock found in these seams', () => {
     expect((await outTexts(maria())).at(-1)!.body).not.toContain(CARD_LINE)
   })
 
+  it('a placeholder still misplaced after its rewrite: the server isolates it, the proposal’s reply goes out (no fallback)', async () => {
+    // on Bedrock "{confirm}. As a guest, {fee}." survived the rewrite: the client had the reply number AND the fallback text
+    await setting('assistant.actions_enabled', true)
+    await w.tx((tx) => grantTrust(tx, { locationId: w.locationId, phone: maria(), customerId: w.customer('Maria Delgado').id, verifiedBy: 'pin', now: w.clock.now() }))
+    const a = assistant([
+      simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: MONDAY, startMin: TEN_AM, vehicle: null }),
+      simText('{confirm}. As a guest, {fee}.'),
+      simText('{confirm}. As a guest, {fee}.'),
+    ])
+    await inbound(maria(), 'Book me a Signature wash Monday at 10')
+    expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
+    const texts = await outTexts(maria())
+    expect(texts.map((t) => t.klass)).toEqual(['action_confirm', 'ai_reply'])
+    expect(texts[1]!.body).toContain('I just texted you the details with how to confirm. Guests pay a $25 booking fee.')
+    expect(a.provider.requests).toHaveLength(3)
+    expect(await handoffAlerts()).toEqual([])
+  })
+
   it('a client on file without a lead: open times open no lead (only the welcome flow and note_interest do)', async () => {
     const a = assistant([simToolUse('check_availability', { serviceKey: 'signature-hand-wash', date: MONDAY, partOfDay: null }), simText('Monday has openings at 10:00 AM.')])
     await inbound(maria(), 'Any openings Monday?')
