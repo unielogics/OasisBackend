@@ -1125,7 +1125,9 @@ export function offersLink(text: string, o: { statement?: boolean } = {}): boole
 export function withHandoffText(before: string, after: string): string {
   const norm = (x: string): string => x.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, '').replace(/\s+/g, ' ').trim()
   const b = norm(before)
-  const TEAM = /\b(?:text you back|will text you|reach out|get back to you|te escribir|te contactar|te respond)/i
+  // "a team member will text you back / reach out / give you a call", "someone will be in touch", "el equipo te escribirá"
+  const TEAM =
+    /\b(?:team\s+member|someone|somebody|staff|a\s+person|the\s+team|our\s+team|equipo|alguien)\b[^.!?]{0,40}\b(?:will|'ll|is\s+going\s+to|te\s+(?:escribir|contactar|llamar|respond))|\b(?:text\s+you\s+back|will\s+text\s+you|reach\s+out|get\s+back\s+to\s+you|give\s+you\s+a\s+call|call\s+you\s+(?:back|shortly|soon)|be\s+in\s+touch|te\s+escribir|te\s+contactar|te\s+llamar)/i
   const kept = sentencesOf(after.trim()).filter((x) => {
     const n = norm(x)
     return n !== '' && !b.includes(n) && !(TEAM.test(x) && TEAM.test(before))

@@ -53,7 +53,7 @@ describe('AI environment', () => {
     expect(off.AI_GUARD_JUDGE).toBeUndefined()
     expect(off.AI_GUARD_MODEL_ID).toBeUndefined()
     const prices = aiPricesFromEnv(off)
-    expect(judgeConfig(off, prices)).toEqual({ enabled: false, modelId: 'us.anthropic.claude-sonnet-4-6', timeoutMs: 8000, maxTokens: 120, prices })
+    expect(judgeConfig(off, prices)).toEqual({ enabled: false, modelId: 'us.anthropic.claude-sonnet-4-6', timeoutMs: 8000, maxTokens: 256, prices })
     const on = loadEnv({ ...base, AI_ENABLED: 'true' })
     expect(judgeConfig(on, prices).enabled).toBe(true)
     expect(judgeConfig(loadEnv({ ...base, AI_ENABLED: 'true', AI_GUARD_JUDGE: 'false' }), prices).enabled).toBe(false)

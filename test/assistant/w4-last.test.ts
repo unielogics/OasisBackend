@@ -218,6 +218,14 @@ describe('L7: the flow', () => {
       "I can't confirm a free wash. A team member will text you back shortly.",
     )
     expect(withHandoffText('Sorry about that!', 'Sorry about that! Someone will text you back soon.')).toBe('Sorry about that! Someone will text you back soon.')
+    // Bedrock spot check (sim-confused-texter): two ways of saying the team will be in touch went out back to back
+    expect(
+      withHandoffText(
+        "I'm sorry about that! A team member will give you a call shortly.",
+        'A team member will reach out to you shortly. You can also call us directly at (201) 598-6304.',
+      ),
+    ).toBe("I'm sorry about that! A team member will give you a call shortly. You can also call us directly at (201) 598-6304.")
+    expect(withHandoffText('Lo siento.', 'El equipo te escribirá pronto.')).toBe('Lo siento. El equipo te escribirá pronto.')
   })
 
   it('a reply that offers a link it did not send', () => {
