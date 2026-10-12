@@ -22,7 +22,6 @@ import { getSetting } from '../../platform/settings.js'
 import { addDays, fmtT, toBizDate, tryParseT } from '../../platform/time.js'
 import { normalizeE164 } from '../../integrations/sms/phone.js'
 import { DEFAULT_SITE_URL } from '../identity/links.js'
-import { promiseWords } from './guard.js'
 import { loadPublicCatalog } from '../public/catalog.js'
 import { getArrivalSettings } from '../settings/arrival.js'
 import { listLiveClosures } from '../settings/closures.js'
@@ -417,8 +416,16 @@ export const perksPlaceholder = (planKey: string): string => `{perks:${planKey}}
  * wording; the team speaks to those.
  */
 export function textablePerks(perks: readonly string[]): string[] {
-  return perks.map((x) => x.replace(/\s+/g, ' ').trim().replace(/[.;]+$/, '')).filter((x) => x !== '' && promiseWords(x).length === 0)
+  return perks.map((x) => x.replace(/\s+/g, ' ').trim().replace(/[.;]+$/, '')).filter((x) => x !== '' && !PERK_PROMISE.test(x))
 }
+
+/**
+ * Promise wording a server-written perk never carries (the deterministic guard left promise words to the policy judge in W4a,
+ * but the server's own texts are not judged, so the perks keep this short list): free (not "feel free" or "<word>-free"),
+ * guarantee/warranty, refund, discount, coupon, complimentary, gratis/gratuito, descuento, reembolso, garantía.
+ */
+const PERK_PROMISE =
+  /(?<![\p{L}-])(?:free|guarantee[ds]?|guaranteed|warrant(?:y|ies)|refunds?|discounts?|coupons?|complimentary|gratis|gratuit[oa]s?|descuentos?|reembolsos?|garant[ií]as?)(?![\p{L}-])/iu
 
 /** A plan's perks as one phrase, "Gold includes: 4 hand washes a month, interior included; no booking fees; ...", or null. */
 export function perksWords(p: { label: string; perks: readonly string[] }): string | null {
