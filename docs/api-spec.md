@@ -2381,7 +2381,9 @@ made then). The summary also adds `refundedCents` (refunds done; a failed card r
 `{state, requestedCents, paidCents, refundedCents, pendingRefundCents, keptCents, refundFailed, refundSending, link {state, sentAt,
 expiresAt, createdAt} | null}`. `state`: `requested` (a deposit link asked for: being made, or made and not texted), `link_sent`,
 `link_expired` (lapsed or withdrawn unpaid; withdrawn because the deposit was paid some other way gives null), `paid` (deposit
-payments, less voids, on an open visit); for a canceled visit holding money: `refund_pending` (a refund waits for approval: no longer
+payments, less voids, on an open visit; a deposit paid by link and then voided gives null; a partial refund shows in
+`refundedCents`); on an open visit also `refund_pending` (a refund waiting for approval would leave the invoice holding less than the
+deposit) and `refunded` (the invoice holds nothing any more; refunds are kept per invoice, not per payment); for a canceled visit holding money: `refund_pending` (a refund waits for approval: no longer
 read as kept), `refunded` (all of it given back; `refundSending` while a card refund is still on its way), `kept` (some or all stays;
 `keptCents`, partial refunds in `refundedCents`, `refundFailed` when a card refund failed). The link's URL is never in it.
 
@@ -2411,7 +2413,8 @@ cancel or pause on or before it), `card.label` ("Visa ••4242"), `change.plan
 paidAt, dueDate, refundedCents}` and `lastFailed {amountCents, failedAt, dueDate, paid, payUrl}`.
 
 **The tier price grid** (`GET /catalog/tiers`, the tiers of `GET /catalog`, every tier answer; `set.services` holders only) adds to each
-price `squareError` (why the last sync failed; null unless `failed`) and `squareSyncedAt`; `squareState` is the real state the catalog
+price `squareError` (the last sync problem in plain words: why it failed when `failed`, or, on a `pending` price, why it is being made
+again because Square lost its plan variation; null once synced and when there was none) and `squareSyncedAt`; `squareState` is the real state the catalog
 sync keeps (`pending` until synced, always while `SQUARE_MEMBERSHIPS_ENABLED` is off).
 
 **Saved cards** (`GET /customers/:id/cards`, section 30.11) already carry each consent's `version`, `acceptedAt` and `purposes`

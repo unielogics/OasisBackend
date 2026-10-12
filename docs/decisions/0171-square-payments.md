@@ -316,8 +316,9 @@ nothing changes with the defaults (every Square tender off while `PAYMENT_PROCES
   charge route picks without a `cardId`). The card query runs only when saved cards can be charged; its clock is the database's
   `app_now()` when the caller has none (the summary seam has no clock).
 - **The deposit state** (`payments/deposit-view.ts`, pure `depositViewOf` + batched facts): requested / link_sent / link_expired / paid
-  on an open visit; refund_pending / refunded / kept on a canceled one (Q2c N1: a refund waiting for approval is no longer read as
-  kept). "Paid" counts only payments flagged as deposits (a part payment is not a deposit request); a canceled visit counts all money
+  on an open visit, plus refund_pending / refunded when a refund waiting for approval would leave the invoice holding less than the
+  deposit or nothing is held any more (refunds are kept per invoice, not per payment; a deposit paid by link and then voided gives
+  null); refund_pending / refunded / kept on a canceled one (Q2c N1: a refund waiting for approval is no longer read as kept). "Paid" counts only payments flagged as deposits (a part payment is not a deposit request); a canceled visit counts all money
   paid, as the cancellation settlement does. The link's URL is never exposed.
 - **Receipts**: `receiptNumber` / `receiptUrl` on the ledger rows of Square payments, from the `square_payments` mirror; the URL only on
   Square's receipt hosts over https (anything else null), so a forged or odd URL in a mirrored payment never becomes a link.
@@ -326,7 +327,8 @@ nothing changes with the defaults (every Square tender off while `PAYMENT_PROCES
   collect mode stay on `PUT /catalog/guest-fee` (`set.services`), the card fees on `PUT /settings/card-fees`. The processor switches
   are read only (they are deploy-time environment).
 - **Memberships**: the billing block adds the plan size label, the next charge date, the card label, the last paid and last failed
-  invoice and the names of a scheduled change; the tier price grid adds each price's `squareError` and `squareSyncedAt`.
+  invoice and the names of a scheduled change; the tier price grid adds each price's `squareError` (the last sync problem: why a `failed` price failed, or why a `pending`
+  one is being made again after Square lost its variation) and `squareSyncedAt`.
 
 ## Sandbox findings (2026-10-12, `pnpm verify:square --secret oasis/sandbox/square`, 10 PASS)
 

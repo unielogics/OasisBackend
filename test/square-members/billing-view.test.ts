@@ -1,8 +1,10 @@
 // The billing block of a membership billed by Square as the dashboard reads it (wave Q3 dashapi, reusing wave Q3b's view): the plan
 // size, the monthly price, the next charge date, the card with its label, the last paid and the last failed payment, and a scheduled
-// change named in words; and the tier price grid with each cell's real Square state (synced, failed with its error, pending).
+// change named in words; and the tier price grid with each cell's real Square state (synced, failed with its error, pending, pending
+// with the reason after Square lost a price).
 import { describe, expect, it } from 'vitest'
 import { useLinksHarness } from '../public-links/harness.js'
+import { runCatalogSync } from '../../src/modules/memberships/square/catalog-sync.js'
 import { DAY, useSquareMembers } from './rig.js'
 
 const h = useLinksHarness()
@@ -95,5 +97,24 @@ describe('the tier price grid carries each cell’s Square state', () => {
       .execute()
     const again = ((await staff('GET', '/catalog/tiers')).body.tiers as Json[]).find((t) => t.key === 'gold')!
     expect((again.prices as Json[]).find((p) => p.class === 'large_car')).toMatchObject({ squareState: 'failed', squareError: 'Square did not accept the price' })
+  })
+
+  it('a price Square lost reads pending with the reason until it is made again (F2)', async () => {
+    const r = rigOf()
+    await r.price('gold', 'compact_car', 12900)
+    const row = await h.db
+      .selectFrom('membership_tier_prices')
+      .select(['square_variation_id'])
+      .where('class_key', '=', 'compact_car')
+      .where('superseded_at', 'is', null)
+      .executeTakeFirstOrThrow()
+    r.sim.store.catalog.delete(row.square_variation_id!)
+    expect(await runCatalogSync(r.steps(), h.locationId, { drift: true })).toMatchObject({ recreated: 1 })
+    const cell = async () =>
+      ((((await staff('GET', '/catalog/tiers')).body.tiers as Json[]).find((t) => t.key === 'gold')!.prices as Json[]).find((p) => p.class === 'compact_car'))
+    expect(await cell()).toMatchObject({ squareState: 'pending', squareError: expect.any(String), squareSyncedAt: null })
+    expect(((await cell()) as Json).squareError).not.toBe('')
+    expect(await runCatalogSync(r.steps(), h.locationId)).toMatchObject({ variationsCreated: 1 })
+    expect(await cell()).toMatchObject({ squareState: 'synced', squareError: null, squareSyncedAt: expect.any(String) })
   })
 })

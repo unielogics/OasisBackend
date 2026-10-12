@@ -121,7 +121,7 @@ const TierPriceView = z.object({
     .describe(
       'Staff with set.services only. The real state of the price at Square (wave Q3b syncs it): pending (not synced yet; always while SQUARE_MEMBERSHIPS_ENABLED is off), synced (a plan variation exists), failed (the last sync failed: see squareError; the next sync tries again), retired (a superseded price deleted at Square; never a current one)',
     ),
-  squareError: z.string().nullable().optional().describe('Staff with set.services only: why the last sync failed (plain words); null unless failed'),
+  squareError: z.string().nullable().optional().describe('Staff with set.services only: the last sync problem in plain words: why it failed when failed, or, on a pending price, why it is being made again (Square lost its plan variation); null once synced and when there was none'),
   squareSyncedAt: z.iso.datetime().nullable().optional().describe('Staff with set.services only: when it was last synced to Square'),
 })
 

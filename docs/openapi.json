@@ -1403,7 +1403,7 @@
                                   "description": "What the newest deposit link asks for; null without one"
                                 },
                                 "state": {
-                                  "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                  "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                   "enum": [
                                     "requested",
                                     "link_sent",
@@ -2466,7 +2466,7 @@
                                       "description": "What the newest deposit link asks for; null without one"
                                     },
                                     "state": {
-                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                       "enum": [
                                         "requested",
                                         "link_sent",
@@ -4422,7 +4422,7 @@
                                       "description": "What the newest deposit link asks for; null without one"
                                     },
                                     "state": {
-                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                       "enum": [
                                         "requested",
                                         "link_sent",
@@ -5171,7 +5171,7 @@
                                   "description": "What the newest deposit link asks for; null without one"
                                 },
                                 "state": {
-                                  "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                  "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                   "enum": [
                                     "requested",
                                     "link_sent",
@@ -5782,7 +5782,7 @@
                                   "description": "What the newest deposit link asks for; null without one"
                                 },
                                 "state": {
-                                  "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                  "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                   "enum": [
                                     "requested",
                                     "link_sent",
@@ -6550,7 +6550,7 @@
                                       "description": "What the newest deposit link asks for; null without one"
                                     },
                                     "state": {
-                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                       "enum": [
                                         "requested",
                                         "link_sent",
@@ -7501,7 +7501,7 @@
                                       "description": "What the newest deposit link asks for; null without one"
                                     },
                                     "state": {
-                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                       "enum": [
                                         "requested",
                                         "link_sent",
@@ -8398,7 +8398,7 @@
                                       "description": "What the newest deposit link asks for; null without one"
                                     },
                                     "state": {
-                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                       "enum": [
                                         "requested",
                                         "link_sent",
@@ -9307,7 +9307,7 @@
                                       "description": "What the newest deposit link asks for; null without one"
                                     },
                                     "state": {
-                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                       "enum": [
                                         "requested",
                                         "link_sent",
@@ -10419,7 +10419,7 @@
                                       "description": "What the newest deposit link asks for; null without one"
                                     },
                                     "state": {
-                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                       "enum": [
                                         "requested",
                                         "link_sent",
@@ -11294,7 +11294,7 @@
                                       "description": "What the newest deposit link asks for; null without one"
                                     },
                                     "state": {
-                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                       "enum": [
                                         "requested",
                                         "link_sent",
@@ -18231,7 +18231,7 @@
                                       "description": "What the newest deposit link asks for; null without one"
                                     },
                                     "state": {
-                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                       "enum": [
                                         "requested",
                                         "link_sent",
@@ -19107,7 +19107,7 @@
                                       "description": "What the newest deposit link asks for; null without one"
                                     },
                                     "state": {
-                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                       "enum": [
                                         "requested",
                                         "link_sent",
@@ -20314,7 +20314,7 @@
                                       "description": "What the newest deposit link asks for; null without one"
                                     },
                                     "state": {
-                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                       "enum": [
                                         "requested",
                                         "link_sent",
@@ -21189,7 +21189,7 @@
                                       "description": "What the newest deposit link asks for; null without one"
                                     },
                                     "state": {
-                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                       "enum": [
                                         "requested",
                                         "link_sent",
@@ -22095,7 +22095,7 @@
                                       "description": "What the newest deposit link asks for; null without one"
                                     },
                                     "state": {
-                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                       "enum": [
                                         "requested",
                                         "link_sent",
@@ -23005,7 +23005,7 @@
                                       "description": "What the newest deposit link asks for; null without one"
                                     },
                                     "state": {
-                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                       "enum": [
                                         "requested",
                                         "link_sent",
@@ -23899,7 +23899,7 @@
                                       "description": "What the newest deposit link asks for; null without one"
                                     },
                                     "state": {
-                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                       "enum": [
                                         "requested",
                                         "link_sent",
@@ -24801,7 +24801,7 @@
                                       "description": "What the newest deposit link asks for; null without one"
                                     },
                                     "state": {
-                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                       "enum": [
                                         "requested",
                                         "link_sent",
@@ -29621,7 +29621,7 @@
                                       "type": "null"
                                     }
                                   ],
-                                  "description": "Staff with set.services only: why the last sync failed (plain words); null unless failed"
+                                  "description": "Staff with set.services only: the last sync problem in plain words: why it failed when failed, or, on a pending price, why it is being made again (Square lost its plan variation); null once synced and when there was none"
                                 },
                                 "squareState": {
                                   "description": "Staff with set.services only. The real state of the price at Square (wave Q3b syncs it): pending (not synced yet; always while SQUARE_MEMBERSHIPS_ENABLED is off), synced (a plan variation exists), failed (the last sync failed: see squareError; the next sync tries again), retired (a superseded price deleted at Square; never a current one)",
@@ -31506,7 +31506,7 @@
                                       "type": "null"
                                     }
                                   ],
-                                  "description": "Staff with set.services only: why the last sync failed (plain words); null unless failed"
+                                  "description": "Staff with set.services only: the last sync problem in plain words: why it failed when failed, or, on a pending price, why it is being made again (Square lost its plan variation); null once synced and when there was none"
                                 },
                                 "squareState": {
                                   "description": "Staff with set.services only. The real state of the price at Square (wave Q3b syncs it): pending (not synced yet; always while SQUARE_MEMBERSHIPS_ENABLED is off), synced (a plan variation exists), failed (the last sync failed: see squareError; the next sync tries again), retired (a superseded price deleted at Square; never a current one)",
@@ -31807,7 +31807,7 @@
                                       "type": "null"
                                     }
                                   ],
-                                  "description": "Staff with set.services only: why the last sync failed (plain words); null unless failed"
+                                  "description": "Staff with set.services only: the last sync problem in plain words: why it failed when failed, or, on a pending price, why it is being made again (Square lost its plan variation); null once synced and when there was none"
                                 },
                                 "squareState": {
                                   "description": "Staff with set.services only. The real state of the price at Square (wave Q3b syncs it): pending (not synced yet; always while SQUARE_MEMBERSHIPS_ENABLED is off), synced (a plan variation exists), failed (the last sync failed: see squareError; the next sync tries again), retired (a superseded price deleted at Square; never a current one)",
@@ -32261,7 +32261,7 @@
                                 "type": "null"
                               }
                             ],
-                            "description": "Staff with set.services only: why the last sync failed (plain words); null unless failed"
+                            "description": "Staff with set.services only: the last sync problem in plain words: why it failed when failed, or, on a pending price, why it is being made again (Square lost its plan variation); null once synced and when there was none"
                           },
                           "squareState": {
                             "description": "Staff with set.services only. The real state of the price at Square (wave Q3b syncs it): pending (not synced yet; always while SQUARE_MEMBERSHIPS_ENABLED is off), synced (a plan variation exists), failed (the last sync failed: see squareError; the next sync tries again), retired (a superseded price deleted at Square; never a current one)",
@@ -32772,7 +32772,7 @@
                                 "type": "null"
                               }
                             ],
-                            "description": "Staff with set.services only: why the last sync failed (plain words); null unless failed"
+                            "description": "Staff with set.services only: the last sync problem in plain words: why it failed when failed, or, on a pending price, why it is being made again (Square lost its plan variation); null once synced and when there was none"
                           },
                           "squareState": {
                             "description": "Staff with set.services only. The real state of the price at Square (wave Q3b syncs it): pending (not synced yet; always while SQUARE_MEMBERSHIPS_ENABLED is off), synced (a plan variation exists), failed (the last sync failed: see squareError; the next sync tries again), retired (a superseded price deleted at Square; never a current one)",
@@ -116899,7 +116899,7 @@
                                       "description": "What the newest deposit link asks for; null without one"
                                     },
                                     "state": {
-                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit; for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
+                                      "description": "requested: a deposit link is asked for (being made, or made and not texted); link_sent: texted, not paid; link_expired: the link lapsed or was withdrawn unpaid; paid: a deposit paid on an open visit (a partial refund shows in refundedCents; a deposit paid by link and then voided gives null); on an open visit also refund_pending (a refund waiting for approval would leave the invoice holding less than the deposit) and refunded (the invoice holds nothing any more); for a canceled visit holding money: refund_pending (a refund waits for approval), refunded (all of it given back), kept (some or all of it stays)",
                                       "enum": [
                                         "requested",
                                         "link_sent",
