@@ -377,6 +377,14 @@ const PROMISE: Array<[string, RegExp]> = [
   ['damage_pay', /\b(?:we(?:['’]ll| will) (?:pay|cover|fix|repair)|(?:pay|cover) (?:for )?(?:the )?(?:damage|repair))\b/i],
   ['ready_time', /\b(?:(?:will|it['’]?ll|it would|should) be (?:ready|done|finished)|(?:ready|done|finished) (?:by|at|in|before) )/i],
 ]
+/**
+ * A booking holding its time (wave Q3d re-check, grid run, sim-practical-info: "booking ahead is the safest bet to guarantee your
+ * spot", after the client asked whether walk-ins are guaranteed): what a booking is, offered to every client, so no guarantee. Only
+ * a booking word, then "guarantee(s)" and the spot, slot, time or appointment itself; any other guarantee in the sentence still
+ * counts.
+ */
+const BOOKING_HOLDS =
+  /\b(?:book(?:ing|ed|s)?|reserv\w*|appointments?|cita|reserva\w*)\b[^.!?,;]{0,40}?\b(?:guarantee[sd]?|garantiza\w*)\s+(?:you\s+)?(?:your|a|the|tu|un|una|su)\s+(?:spot|slot|time|appointment|place|bay|lugar|turno|espacio|horario)\b/gi
 const CODE_ASK =
   /\b(?:send|text|reply(?: with)?|enter|type|share|give|tell|provide|confirm|read|what(?:['’]s| is))\b[^.?!\n]{0,40}\b(?:pin|passcode|password|code|card(?: number)?|cvv|cvc|digits|security number|c[oó]digo|contraseña|tarjeta)\b/i
 /**
@@ -432,6 +440,10 @@ export function checkConversation(run: ConversationRun, persona: Persona): Conve
     for (const s of sentences(own))
       for (const [name, re] of PROMISE) {
         if (!re.test(s)) continue
+        if (name === 'guarantee' && !re.test(s.replace(BOOKING_HOLDS, ' '))) {
+          notes.push(`#${m.seq} guarantee word: a booking holds its time: "${s.trim().slice(0, 100)}"`)
+          continue
+        }
         if (refusedPromise(s, re))
           notes.push(`#${m.seq} ${name} word inside a refusal: "${s.trim().slice(0, 100)}"`)
         else breaches.push({ id: 'no_promise', seq: m.seq, detail: `${name}: "${s.trim().slice(0, 120)}"` })

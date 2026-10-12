@@ -1346,7 +1346,8 @@ closed (23.4a), and `ai.respond` / `ai.sweep` return at once while `AI_ENABLED=f
   (jitter) when the turn deadline leaves the wait plus 3 s (a `retry` transcript entry and a log line each; the judge's tool-call
   row and transcript entry carry `attempts: 2`); the Bedrock client makes one attempt (no SDK retry under it). Each
   judgement is an `assistant_tool_calls` row (tool `policy_judge`, redacted) and its cost is in the turn's `cost_micros` (the
-  daily budget). `AI_GUARD_JUDGE` (default: on whenever `AI_ENABLED`; false is refused in production while `AI_ENABLED=true`). Markdown stripped, GSM-7, at most 320 characters after
+  daily budget). `AI_GUARD_JUDGE` (default: on whenever `AI_ENABLED`; false is refused in production while `AI_ENABLED=true`). Markdown stripped, look-alike letters made Latin (NFKC; Greek, Cyrillic and small-capital letters
+  that imitate a Latin one: "Ρ1Ν" reads and goes out as "P1N"), GSM-7, at most 320 characters after
   rendering (one shorten call, else cut at a sentence), at most one question (one rewrite, else cut after the first). A refusal,
   a cut answer, an unknown stop, a provider error or a timeout hand off too. A reply with a `verify`, `pin`, `membership` or
   `pay` link gets the server's line "For your security, enter codes and your PIN only on the secure page, never by text." after

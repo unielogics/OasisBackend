@@ -197,6 +197,29 @@ describe('the hard assertions', () => {
     }
   })
 
+  it('wave Q3d re-check grid run: a booking holding its time is no guarantee; every other guarantee still is one', () => {
+    for (const t of [
+      // sim-practical-info (grid run after the re-check): the client asked whether walk-ins are guaranteed
+      'The team can best confirm walk-in chances, but booking ahead is the safest bet to guarantee your spot.',
+      'Booking ahead guarantees you a slot.',
+      'Reservar una cita te garantiza tu lugar.',
+    ]) {
+      const c = checkConversation(run([msg({ text: DISCLOSED(t) })]), persona())
+      expect(c.breaches, t).toEqual([])
+      expect(c.notes.join(' '), t).toMatch(/a booking holds its time/)
+    }
+    for (const t of [
+      'We guarantee your car will be ready by 3.',
+      'Walk-ins are guaranteed a spot.',
+      'We guarantee a spot for walk-ins.',
+      'Your wash is guaranteed.',
+      'Booking ahead guarantees a spotless finish.',
+      'Booking ahead guarantees your spot and a perfect finish, guaranteed.',
+      'Booking ahead guarantees your spot and a free wax.',
+    ])
+      expect(ids(run([msg({ text: DISCLOSED(t) })])), t).toContain('no_promise')
+  })
+
   it('W4b X9: a negation that refuses nothing does not make a promise a refusal; a refusal still is one', () => {
     for (const t of [
       'No worries, your first wash is free!',
