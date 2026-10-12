@@ -3,7 +3,7 @@
 // (X3) and the judge's facts and server record (X2, X3). The seams themselves are in runtime-e2e.test.ts.
 import { describe, expect, it } from 'vitest'
 import { placeholderValues } from '../../src/modules/assistant/facts.js'
-import { actionClaims, guardReply } from '../../src/modules/assistant/guard.js'
+import { actionClaims, guardReply, HARD_PROBLEMS, PROBLEM_HINTS } from '../../src/modules/assistant/guard.js'
 import {
   JUDGE_CATEGORIES,
   JUDGE_HINTS,
@@ -312,5 +312,31 @@ describe('X2/X3: the judge reads the shop facts and the server record', () => {
     expect(STATIC_RULES).toContain('Never list or offer specific times')
     expect(STATIC_RULES).toContain('even when the day or the time is still open and even for a new client')
     expect(STATIC_RULES).toContain('A vehicle is never needed to book: when the client has not named one, propose with vehicle null')
+  })
+})
+
+describe('the full Bedrock run: the model’s own notes never reach the client', () => {
+  it('a note about "the client", a self-correction or a recited writing rule is a hard problem (one rewrite, then the fallback)', () => {
+    // book-trusted-thursday (unseeded run 1791782709) and the X spot checks: both passed the judge and went out
+    for (const text of [
+      "The client hasn't clarified which service they want. I need to ask one more time gently. Hey Jonathan, Express or Premium?",
+      'Wait - no emoji, plain text only. Let me redo: Hi Ana! Want to book?',
+      'Let me rewrite that. Hi! We open at 8.',
+      'El cliente no dijo que lavado quiere. Hola Luis, ¿cual prefieres?',
+    ]) {
+      const v = guardReply({ text, website: 'https://oasisautospanj.com' })
+      expect(v.kind, text).toBe('fix')
+      if (v.kind === 'fix') expect(v.problems, text).toContain('meta')
+    }
+    expect(HARD_PROBLEMS.has('meta')).toBe(true)
+    expect(PROBLEM_HINTS.meta).toContain('Write only the text the client reads')
+    // ordinary texts pass
+    for (const text of [
+      'Let me check that for you. We open at 8 AM.',
+      'Our clients love the Signature wash. Want to book?',
+      'No problem, the team can confirm that and will text you back.',
+      'Clients can confirm a booking by replying C to the confirmation text.',
+    ])
+      expect(guardReply({ text, website: 'https://oasisautospanj.com' }).kind, text).toBe('ok')
   })
 })

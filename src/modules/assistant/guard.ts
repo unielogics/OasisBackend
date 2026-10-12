@@ -84,9 +84,11 @@ export type GuardProblem =
   | 'too_long'
   /** W4b X3: says something is booked, moved, cancelled, confirmed or "all set" while the server executed no such action. */
   | 'action_claim'
+  /** The model's own notes in the text: "the client" in the third person, a self-correction, a recited writing rule. */
+  | 'meta'
 
 /** Problems only a rewrite can fix; a reply that still has one after the rewrite becomes the fallback. */
-export const HARD_PROBLEMS: ReadonlySet<GuardProblem> = new Set(['empty', 'unknown_placeholder', 'placement', 'money', 'digits', 'secret', 'url'])
+export const HARD_PROBLEMS: ReadonlySet<GuardProblem> = new Set(['empty', 'unknown_placeholder', 'placement', 'money', 'digits', 'secret', 'url', 'meta'])
 
 /**
  * A piece of the rendered reply as the judge reads it: `trusted` = inserted by the server (rendered placeholders, links, the shop's
@@ -707,6 +709,25 @@ const CLAIM_ES = new RegExp(
 const CLAIM_EXCEPT =
   /\b(?:until|once|after|before|when|whenever|if|unless|not|never|nothing|no|yet|cannot|can't|won't|will|would|could|can|should|be|to\s+get|want|like|need|let|hasta|cuando|una\s+vez|antes|todavia|aun|nada|quieres|puedes|para)\b|n't\b|'ll\b|\bsi\s+(?!,)/i
 
+/**
+ * The model's notes to itself in a text (full Bedrock run, unseeded: "The client hasn't clarified which service they want. I need to
+ * ask one more time gently. Hey Jonathan, ..."; a spot check: "Wait - no emoji, plain text only. Let me redo: ..."): the judge passed
+ * both. A text to the client never names "the client" or "the user" in the third person, corrects its own draft or recites a rule.
+ */
+const META = new RegExp(
+  [
+    "\\b(?:the\\s+(?:client|user)|el\\s+(?:cliente|usuario)|la\\s+(?:clienta|usuaria))(?:'s)?\\s+(?:has|hasn'?t|had|is|isn'?t|was|wasn'?t|wants?|said|asked|did|didn'?t|does|doesn'?t|needs?|seems|may|might|will|would|can|could|no|ya|quiere|dijo|pidio|pregunto|necesita|parece|todavia|aun|aún|tiene|esta|está)\\b",
+    '\\blet\\s+me\\s+(?:redo|rewrite|revise|rephrase|try\\s+(?:that\\s+)?again)\\b',
+    '\\b(?:plain\\s+text\\s+only|no\\s+emojis?)\\b',
+  ].join('|'),
+  'i',
+)
+
+/** The model's notes to itself in the text (see META). */
+export function metaNotes(text: string): string[] {
+  return [...text.matchAll(new RegExp(META.source, 'gi'))].map((m) => m[0].trim())
+}
+
 /** The model's claims that an action was done ("you're all set", "I've booked you"): questions and conditional sentences excluded. */
 export function actionClaims(text: string): string[] {
   const out: string[] = []
@@ -761,6 +782,7 @@ export function guardReply(i: GuardInput): GuardVerdict {
     ),
   )
   if (i.checkActionClaims) flag('action_claim', actionClaims(raw))
+  flag('meta', metaNotes(raw))
   // the form: one question, the length after rendering
   const rendered = toGsm7(renderPlaceholders(text, values))
   if ((rendered.match(/\?/g) ?? []).length > 1) problems.push('questions')
@@ -786,6 +808,7 @@ export const PROBLEM_HINTS: Record<GuardProblem, string> = {
   url: 'Never write a web address or anything shaped like one (name.com, name dot com, an IP address, http, www): only the shop website exactly as in SHOP FACTS, or a {linkN} placeholder a tool gave you. If it was a missing space after a full stop or a comma, add the space.',
   questions: 'Ask at most one question per text.',
   too_long: `Keep it under ${MAX_REPLY_CHARS - 20} characters.`,
+  meta: 'Write only the text the client reads, to them: never a note about "the client", your reasoning, a correction of your own draft or a rule about how to write.',
   action_claim:
     'Nothing was booked, moved or cancelled by the server: never say it is booked, confirmed, moved, cancelled, reserved, done or "all set". To book or change it, give the booking link (send_link) or, for a verified phone, propose it and write "{confirm}."; a visit the client already has reads "you have <service> on <day> at <time>".',
 }
