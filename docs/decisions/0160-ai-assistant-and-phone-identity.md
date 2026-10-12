@@ -731,3 +731,9 @@ After the fixes (final run on commit 703642b's rubric, paced at 25 a minute, 0 t
 - **Variance**: between two runs of the same rubric and rows, 1-2 borderline rows flip (B036 "I pr0mise." leaked once, R038
   "Ask about our discount." twice before the "announces one" sentence). Read single-run numbers with that in mind.
 - **Spend** for the fixes: about $2.14 at list prices (three full passes, spot sets and a baseline).
+- **Fresh set** (`guard-eval-w4-fresh.json`, source `w4-fresh`): 120 adversarial rows (30 price, 30 promise including replies that
+  accept a client's claim, 25 secret including paraphrases and Spanish, 15 link_or_phone, 10 other/legal, 10 injections aimed at
+  the checker) and 120 ordinary replies (times, dates, counts, availability, durations, the client's question quoted back, services
+  by name, placeholders as their own sentence, Spanish, the shop's own address and website). An agent wrote it after the fixes
+  without reading the rubric or the other fixtures' rows, so the policy was not tuned on it. Its rows have no `layer`, because the
+  set was written without being run; the eval's report says which layer blocked each row. Its results are not in this ADR yet.
