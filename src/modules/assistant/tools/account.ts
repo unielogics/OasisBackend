@@ -2,7 +2,7 @@
 // welcome flow's placeholder stands) and their vehicles (added to their own record). The client is ctx.identity's, never an input.
 import { sql } from 'kysely'
 import { z } from 'zod/v4'
-import { transaction } from '../../../platform/db.js'
+import { transaction, type Tx } from '../../../platform/db.js'
 import { AppError } from '../../../platform/errors.js'
 import { fmtT, minutesOfDay, toBizDate } from '../../../platform/time.js'
 import { listVehicles, updateCustomer, upsertVehicleByPlate } from '../../customers/service.js'
@@ -117,24 +117,74 @@ export function cleanPersonName(raw: string): string | null {
 export const setMyName: AssistantTool<ToolInputs['set_my_name']> = {
   name: 'set_my_name',
   description:
-    'Saves the name a NEW client just told you (only while their record has no name yet; a name on file is never changed by text). Letters only, first and last name.',
+    'Saves the name a NEW client told you, exactly as they gave it: their first name, plus their last name ONLY if they said it (never invent, guess or repeat one). While the record still has no name, or when they correct a name you saved in this conversation, it saves it; a name on file otherwise is never changed by text. Letters only.',
   input: z.strictObject({ fullName: z.string().min(1).max(80) }),
   minTrust: TOOL_MIN_TRUST.set_my_name,
   async run(ctx, { fullName }) {
     const customerId = ctx.identity.customerId
     if (!customerId) return fail('not_allowed', 'There is no client record for this number yet.')
     const name = cleanPersonName(fullName)
-    if (!name) return fail('invalid', 'That does not look like a person’s name. Ask for their first and last name.')
+    if (!name) return fail('invalid', 'That does not look like a person’s name. Ask for their first name.')
     return transaction(ctx.db, async (tx) => {
-      // the record decides, not the turn's view: a name on file (or a client staff completed) is never replaced
-      const locked = await tx.selectFrom('customers').select(['full_name', 'phone_e164']).where('id', '=', customerId).forUpdate().executeTakeFirst()
-      if (!locked || locked.phone_e164 !== ctx.identity.phone || !(await isProvisionalClient(tx, customerId)))
+      // the record decides, not the turn's view: a name on file (or a client staff completed) is never replaced; the one exception
+      // (W4b X7) is the client correcting the name the assistant itself saved in this conversation, while it still stands as saved
+      const locked = await tx
+        .selectFrom('customers')
+        .select(['full_name', 'phone_e164'])
+        .where('id', '=', customerId)
+        .forUpdate()
+        .executeTakeFirst()
+      if (!locked || locked.phone_e164 !== ctx.identity.phone)
+        return fail('not_allowed', 'There is no client record for this number.')
+      const provisional = await isProvisionalClient(tx, customerId)
+      if (
+        !provisional &&
+        !(await namedInThisConversation(tx, {
+          conversationId: ctx.conversationId,
+          customerId,
+          current: locked.full_name,
+        }))
+      )
         return fail('not_allowed', 'This client already has a name on file; it is not changed by text.')
+      if (!provisional && locked.full_name === name)
+        return ok({ saved: true, firstName: name.split(' ')[0]!, unchanged: true })
       await updateCustomer(tx, { id: customerId, patch: { fullName: name, needsDetails: false } })
-      await ctx.audit(tx, 'assistant.client.named', { entityType: 'customer', entityId: customerId, before: { name: locked.full_name }, after: { name } })
+      await ctx.audit(tx, provisional ? 'assistant.client.named' : 'assistant.client.renamed', {
+        entityType: 'customer',
+        entityId: customerId,
+        before: { name: locked.full_name },
+        after: { name },
+      })
       return ok({ saved: true, firstName: name.split(' ')[0]! })
     })
   },
+}
+
+/**
+ * Whether the client's current name is the one set_my_name saved in this conversation (its last successful call, cleaned the same
+ * way): then the client may still correct it by text (W4b X7: a model padded "Rosa Rosa" and the client's "Rosa Garcia" was
+ * refused). A name staff changed since, or one from before the conversation, is never changed by text.
+ */
+async function namedInThisConversation(
+  tx: Tx,
+  o: { conversationId: string; customerId: string; current: string },
+): Promise<boolean> {
+  const last = await tx
+    .selectFrom('assistant_tool_calls as c')
+    .innerJoin('assistant_turns as t', 't.id', 'c.turn_id')
+    .select(['c.input'])
+    .where('t.conversation_id', '=', o.conversationId)
+    .where('c.tool', '=', 'set_my_name')
+    .where('c.outcome', '=', 'ok')
+    .orderBy('c.created_at', 'desc')
+    .orderBy('c.seq', 'desc')
+    .limit(1)
+    .executeTakeFirst()
+  if (!last) return false
+  const input = (typeof last.input === 'string' ? JSON.parse(last.input) : last.input) as {
+    fullName?: unknown
+  }
+  return typeof input.fullName === 'string' && cleanPersonName(input.fullName) === o.current
 }
 
 const word = z.string().min(1).max(40)

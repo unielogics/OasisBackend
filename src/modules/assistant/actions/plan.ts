@@ -3,6 +3,7 @@
 // is an assistant_pending_actions row whose 4-digit reply number is texted by the server ("Signature Hand Wash, Sat Jun 20 at
 // 10:00 AM. Reply 4821 to confirm.") and stored only hashed; the model never sees it. The payload holds server-side ids (never an
 // input of the model) and is validated again when the right number comes back.
+import { actionSummaryIn } from '../lang.js'
 import { z } from 'zod/v4'
 import type { Executor } from '../../../platform/db.js'
 import { getSetting } from '../../../platform/settings.js'
@@ -57,10 +58,9 @@ export function serviceWithAddons(service: string, addons: readonly string[]): s
   return `${service} + ${named}${addons.length > 2 ? ` +${addons.length - 2} more` : ''}`
 }
 
-/** The action_confirm summary (the template adds ". Reply NNNN to confirm."). */
+/** The action_confirm summary in English (the template adds ". Reply NNNN to confirm."); lang.ts actionSummaryIn has both languages. */
 export function actionSummary(
   a: { kind: 'book'; service: string; when: string } | { kind: 'reschedule'; service: string; when: string } | { kind: 'cancel'; service: string; when: string },
 ): string {
-  const s = a.kind === 'book' ? `${a.service}, ${a.when}` : a.kind === 'reschedule' ? `Move your ${a.service} to ${a.when}` : `Cancel your ${a.service} ${a.when.startsWith('today') || a.when.startsWith('tomorrow') ? '' : 'on '}${a.when}`
-  return s.length > 140 ? `${s.slice(0, 137)}...` : s
+  return actionSummaryIn('en', a)
 }

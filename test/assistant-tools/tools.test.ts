@@ -106,9 +106,11 @@ describe('public facts: business info, services (starting prices only), membersh
     const stranger = await w.ctx({ customerId: null, phone: STRANGER, trust: 'unknown' })
     const s = data(await run('get_membership_info', stranger.ctx, {}))
     expect(s.plans).toEqual([
-      { tier: 'gold', label: 'Gold', priceKey: '{plan:gold}', perks: ['4 hand washes a month'] },
-      { tier: 'vip', label: 'VIP', priceKey: '{plan:vip}', perks: ['Everything in Gold'] },
+      { tier: 'gold', label: 'Gold', priceKey: '{plan:gold}', perksKey: '{perks:gold}', perks: ['4 hand washes a month'] },
+      { tier: 'vip', label: 'VIP', priceKey: '{plan:vip}', perksKey: '{perks:vip}', perks: ['Everything in Gold'] },
     ])
+    // the perks go out only server-written (W4 live eval: the judge failed them in the model's own words)
+    expect(s.perksRule).toMatch(/Never describe a plan.s perks in your own words/)
     expect(JSON.stringify(s)).not.toMatch(/Cents|\$\d/)
     expect(s.mine).toBeNull()
     const own = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'caller' })
@@ -120,10 +122,22 @@ describe('public facts: business info, services (starting prices only), membersh
 })
 
 describe('check_availability', () => {
-  it('lists open start times of a day from the slot engine (online rules), with startMin, filtered by part of day', async () => {
-    const { ctx } = await w.ctx({ customerId: null, phone: STRANGER, trust: 'unknown' })
-    const d = data(await run('check_availability', ctx, { serviceKey: 'express-hand-wash', date: '2026-06-15', partOfDay: null }))
-    expect(d).toMatchObject({ date: '2026-06-15', dateLabel: 'Mon Jun 15', closed: false, serviceKey: 'express-hand-wash' })
+  it('lists open start times of a day from the slot engine (online rules), with startMin, filtered by part of day (a phone that books by text)', async () => {
+    await w.trust(maria().phone, maria().id)
+    const { ctx } = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'trusted' })
+    const d = data(
+      await run('check_availability', ctx, {
+        serviceKey: 'express-hand-wash',
+        date: '2026-06-15',
+        partOfDay: null,
+      }),
+    )
+    expect(d).toMatchObject({
+      date: '2026-06-15',
+      dateLabel: 'Mon Jun 15',
+      closed: false,
+      serviceKey: 'express-hand-wash',
+    })
     const times = d.times as { time: string; startMin: number }[]
     expect(times.length).toBeGreaterThan(0)
     expect(times.length).toBeLessThanOrEqual(12)
@@ -136,15 +150,98 @@ describe('check_availability', () => {
   })
 
   it('refuses unknown or quote-only services, past dates and dates beyond the window; a closed day suggests the next open dates', async () => {
-    const { ctx } = await w.ctx({ customerId: null, phone: STRANGER, trust: 'unknown' })
-    expect(await run('check_availability', ctx, { serviceKey: 'nope', date: '2026-06-15', partOfDay: null })).toMatchObject({ ok: false, error: 'invalid' })
-    expect(await run('check_availability', ctx, { serviceKey: 'express-hand-wash', date: '2026-06-12', partOfDay: null })).toMatchObject({ ok: false, error: 'invalid' })
-    expect(await run('check_availability', ctx, { serviceKey: 'express-hand-wash', date: '2027-06-01', partOfDay: null })).toMatchObject({ ok: false, error: 'invalid', message: expect.stringMatching(/days ahead/) })
-    await w.t.db.insertInto('closures').values({ id: w.newId(), location_id: w.locationId, date: '2026-06-16', name: 'Staff training', type: 'closed', source: 'manual' } as never).execute()
-    const closed = data(await run('check_availability', ctx, { serviceKey: 'express-hand-wash', date: '2026-06-16', partOfDay: null }))
+    await w.trust(maria().phone, maria().id)
+    const { ctx } = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'trusted' })
+    expect(
+      await run('check_availability', ctx, { serviceKey: 'nope', date: '2026-06-15', partOfDay: null }),
+    ).toMatchObject({ ok: false, error: 'invalid' })
+    expect(
+      await run('check_availability', ctx, {
+        serviceKey: 'express-hand-wash',
+        date: '2026-06-12',
+        partOfDay: null,
+      }),
+    ).toMatchObject({ ok: false, error: 'invalid' })
+    expect(
+      await run('check_availability', ctx, {
+        serviceKey: 'express-hand-wash',
+        date: '2027-06-01',
+        partOfDay: null,
+      }),
+    ).toMatchObject({ ok: false, error: 'invalid', message: expect.stringMatching(/days ahead/) })
+    await w.t.db
+      .insertInto('closures')
+      .values({
+        id: w.newId(),
+        location_id: w.locationId,
+        date: '2026-06-16',
+        name: 'Staff training',
+        type: 'closed',
+        source: 'manual',
+      } as never)
+      .execute()
+    const closed = data(
+      await run('check_availability', ctx, {
+        serviceKey: 'express-hand-wash',
+        date: '2026-06-16',
+        partOfDay: null,
+      }),
+    )
     expect(closed).toMatchObject({ closed: true, times: [] })
     expect((closed.nextOpenDates as { date: string }[])[0]!.date).toBe('2026-06-17')
     await w.t.db.deleteFrom('closures').where('date', '=', '2026-06-16').execute()
+  })
+
+  it('W4b X4: a phone that cannot book by text gets no times to pick in the chat but the calendar link for this same reply, once per turn', async () => {
+    // a stranger (the welcome flow), a client on file whose phone is not verified, a verified phone with in-chat booking off
+    for (const c of [
+      { customerId: null, phone: STRANGER, trust: 'unknown' as const },
+      { customerId: david().id, phone: david().phone, trust: 'caller' as const },
+      { customerId: maria().id, phone: maria().phone, trust: 'trusted' as const, actionsEnabled: false },
+    ]) {
+      await sql`delete from client_links`.execute(w.t.db)
+      const { ctx, links } = await w.ctx(c)
+      const d = data(
+        await run('check_availability', ctx, {
+          serviceKey: 'express-hand-wash',
+          date: '2026-06-15',
+          partOfDay: 'morning',
+        }),
+      )
+      expect(d).toMatchObject({
+        date: '2026-06-15',
+        dateLabel: 'Mon Jun 15',
+        closed: false,
+        hasOpenTimes: true,
+        bookingLink: '{link1}',
+        // W4 final check L2: the parts of the day with open times (for the judge's record; the model is given no times)
+        openParts: expect.arrayContaining(['morning']),
+        partOfDay: 'morning',
+      })
+      expect(d).not.toHaveProperty('times')
+      expect(JSON.stringify(d)).not.toMatch(/startMin|\d{1,2}:\d\d/)
+      expect(String(d.instruction)).toMatch(/link to pick a time: \{link1\}/)
+      expect(String(d.instruction)).toMatch(/Do not list or offer specific times/)
+      expect(links.map((l) => l.kind)).toEqual(['calendar'])
+      // asked again in the same turn (another day): the same link, no second one
+      const again = data(
+        await run('check_availability', ctx, {
+          serviceKey: 'express-hand-wash',
+          date: '2026-06-16',
+          partOfDay: null,
+        }),
+      )
+      expect(again.bookingLink).toBe('{link1}')
+      expect(links).toHaveLength(1)
+    }
+    // the next turn within the hour: no second calendar link (one per kind an hour); they pick the time on the one texted
+    const next = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'trusted', actionsEnabled: false })
+    const d = data(await run('check_availability', next.ctx, { serviceKey: 'express-hand-wash', date: '2026-06-15', partOfDay: null }))
+    expect(d).toMatchObject({ bookingLink: null, linkAlreadyTexted: true, hasOpenTimes: true })
+    expect(String(d.instruction)).toContain('the booking link I texted you')
+    expect(String(d.instruction)).not.toMatch(/3 days/)
+    expect(String(d.instruction)).toContain('If they say they cannot find it, say a team member will text it to them and call handoff_to_staff')
+    expect(next.links).toEqual([])
   })
 })
 
@@ -261,7 +358,13 @@ describe('send_link', () => {
   it('keeps its limits: one of a kind an hour, three a day', async () => {
     const probe = await w.ctx({ customerId: maria().id, phone: maria().phone, trust: 'caller' })
     expect(await run('send_link', probe.ctx, { kind: 'calendar', appointmentRef: null, tier: null })).toMatchObject({ ok: true })
-    expect(await run('send_link', probe.ctx, { kind: 'calendar', appointmentRef: null, tier: null })).toMatchObject({ ok: false, error: 'rate_limited' })
+    const limited = await run('send_link', probe.ctx, { kind: 'calendar', appointmentRef: null, tier: null })
+    expect(limited).toMatchObject({ ok: false, error: 'rate_limited' })
+    // the model points to the link already texted and never tells the client about a limit (W4 live eval)
+    expect(JSON.stringify(limited)).toMatch(/point them to it .*Never mention a limit or a count/)
+    // full Bedrock run 1791780753: "It's good for 3 days so no rush!" and "scroll up" to a client who could not find the link
+    expect(JSON.stringify(limited)).toContain('never tell them how long it works')
+    expect(JSON.stringify(limited)).toContain('If they say they cannot find it, say a team member will text it to them and call handoff_to_staff')
     expect(await run('send_link', probe.ctx, { kind: 'verify', appointmentRef: null, tier: null })).toMatchObject({ ok: true })
     expect(await run('send_link', probe.ctx, { kind: 'pin', appointmentRef: null, tier: null })).toMatchObject({ ok: true })
     w.clock.advance(61 * 60_000)

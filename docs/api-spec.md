@@ -1176,21 +1176,27 @@ closed (23.4a), and `ai.respond` / `ai.sweep` return at once while `AI_ENABLED=f
   "Openings: 9:10, 9:40, 10:20"), 5+ spelled digits, an extension, a vanity number, look-alike letters for digits (`digits`; the
   shop's own numbers, address, catalog and plan names excepted, punctuation and the state name normalised; client-entered text such
   as a vehicle never is); anything host-shaped incl. "period com", "punto com", "-dot-", ";com",
-  "<word> com slash", an IP, "http", "hxxp", "www", "://" but `{linkN}` and the shop's own host as plain text (`url`); unambiguous
-  secret words (pin, passcode, password, OTP, CVV, card number, código, contraseña, clave, ...; English "code"/"digits" only in a
-  secret sense: "the code we sent", "your code", "a verification code", "6-digit number", "digits on your card", not "promo/ZIP/
-  dress/area code") (`secret`) and
-  promise words (free, discount, refund, coupon, guarantee, warranty, complimentary, on the house, % off, gratis, gratuito,
-  descuento, reembolso, garantía, ...) (`promise_words`), on the plain text and a skeleton; the client's own first name and
-  vehicles are skipped by these two word lists only (the money, digit and host rules read them; the judge never trusts them). Ordinary numbers pass ("2 to 3 days", "open 8 to 6", "bay 2", "October 12,
-  2026"). Each problem gets one rewrite call, then the fallback (`policy_words` for promise words, else `guard`). (3) The POLICY
+  "<word> com slash", an IP, "http", "hxxp", "www", "://" but `{linkN}` and the shop's own host as plain text (`url`); an
+  unambiguous secret REQUEST only (W4a): a request verb (send, reply, text, tell, type, give, share, read, provide, confirm, "let
+  me know"; envía, manda, dime, dame, pasa, escribe, responde, ...), "what is your", "cuál es tu" or "need your", then in the same
+  clause a PIN, passcode, password, OTP, CVV, card number/details, a verification/security/one-time code, "the/your code", "the 6
+  digits", "the digits on your card" (contraseña, clave, código but not código postal/promocional, número de tu tarjeta), or such
+  a secret followed by "please" (`secret`), on the plain text and a skeleton; the shop's own sending ("we'll text you a code") is
+  no request, and a mention ("I lost the code", "ZIP code", a quoted PIN, a security notice of the model's own) is the judge's.
+  There is no promise word list (W4a): promises are the judge's. The client's own first name and vehicles are skipped by the
+  secret request check only (the money, digit and host rules read them; the judge never trusts them). Ordinary numbers pass ("2
+  to 3 days", "open 8 to 6", "bay 2", "October 12, 2026"). Each problem gets one rewrite call, then the fallback (`guard`). (3) The POLICY
   JUDGE: every reply that passed is read once more, rendered, by one extra model call (`AI_GUARD_MODEL_ID`, default
   `AI_BEDROCK_MODEL_ID`; temperature 0, at most 120 tokens, 8 s) with a fixed, cached rubric; the server's segments (rendered
   placeholders, links as "[link]", the safety line, the shop's phone numbers, address and website; never client-entered text) are
-  marked trusted; it never
-  sees the client's phone, an id, a token or a URL. It answers strict JSON `{ok, category: none|price|promise|secret|
-  link_or_phone|other, reason}`. A fail gets one rewrite with the category's hint, then the guard and the judge again, then the
-  fallback (`policy_judge`); a judge error, timeout or an answer that is not the JSON fails closed (fallback, `judge_error`). Each
+  marked trusted with markers keyed per message (`<message key trusted-parts>`, `⟦K⟧…⟦/K⟧`, then the model's own text alone in
+  `<own-text>`; stored unkeyed); it never sees the client's phone, an id, a token or a URL. It answers strict JSON, the reason
+  first, `{reason, category: none|price|promise|secret|link_or_phone|other, ok}` on one line, and stops after it (stop sequence;
+  W4a, ADR 0160). A fail gets one rewrite with the category's hint, then the guard and the judge again, then the
+  fallback (`policy_judge`); a judge error, timeout or an answer that is not the JSON fails closed (fallback, `judge_error`). A
+  model or judge call that was throttled (ThrottlingException, 429), timed out or met an outage is retried ONCE after 800-1500 ms
+  (jitter) when the turn deadline leaves the wait plus 3 s (a `retry` transcript entry and a log line each; the judge's tool-call
+  row and transcript entry carry `attempts: 2`); the Bedrock client makes one attempt (no SDK retry under it). Each
   judgement is an `assistant_tool_calls` row (tool `policy_judge`, redacted) and its cost is in the turn's `cost_micros` (the
   daily budget). `AI_GUARD_JUDGE` (default: on whenever `AI_ENABLED`; false is refused in production while `AI_ENABLED=true`). Markdown stripped, GSM-7, at most 320 characters after
   rendering (one shorten call, else cut at a sentence), at most one question (one rewrite, else cut after the first). A refusal,

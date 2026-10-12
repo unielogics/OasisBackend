@@ -39,7 +39,9 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261011050000_membership_matching.sql` | membership matching (ADR 0160 W2e): checkout row origin (link or sync), state rejected, nullable checkout_url, email_verified drops on an email change  |
 | `20261012020000_assistant_tools.sql` | `vehicles.vehicle_type` (the tint price class `set_my_vehicle` records) and `customers.archived_at` (the welcome flow's 30-day archive of nameless, never-booked provisional clients) (ADR 0160, W3b) |
 | `20261012030000_link_bookings.sql` | appointment `source` `link`: a visit booked on a personal link page (ADR 0160, W3c link API)                                                       |
+| `20261012100000_location_address.sql` | the shop’s street address for the existing location when none is set (the assistant’s shop facts read it; ADR 0160, W4b) |
 | `20261013010000_identity_rebinding.sql` | stale-record re-binding (ADR 0160, W4c fixes): `customers.identity_confirmed_at` (proof of the client: their PIN, staff), `customers.phone_reassigned_at` / `phone_reassigned_to` (the number moved to a new client), `appointments.booked_with_pin` |
+| `20261013090000_assistant_language.sql` | `assistant_conversations.language` (`en`\|`es`): the client's language, detected from their texts; the server's own words in the conversation follow it (ADR 0160, W4b X5) |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -282,7 +284,7 @@ HMAC. Location-scoped tables lead their unique keys with `location_id`; a phone 
 | Table                       | Key columns and rules                                                                                                                                                                                                                         |
 | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `catalog_categories`        | pk `(location_id, key)`: `label`, `colour` (#RRGGBB), `sort`, `active`, `version`. Defaults wash, addons, tint, detail, quote in the website palette (seeded for existing locations; `ensureDomainDefaults` for new ones).                    |
-| `assistant_conversations`   | One per `(location_id, phone_e164)`: `customer_id` (null for a stranger), the durable marker `pending_since`, `last_inbound_at`, the turn lease `running_since`, `handoff_state open\|resolved` with reason and time, `last_fallback_at`, `disclosed_at`. |
+| `assistant_conversations`   | One per `(location_id, phone_e164)`: `customer_id` (null for a stranger), the durable marker `pending_since`, `last_inbound_at`, the turn lease `running_since`, `handoff_state open\|resolved` with reason and time, `last_fallback_at`, `disclosed_at`, the client's `language` (`en`\|`es`, the server's own words follow it). |
 | `assistant_turns`           | One per answer: `status running\|replied\|handed_off\|skipped\|failed` (one running per conversation), `trust unknown\|known\|trusted`, `provider sim\|bedrock`, `model`, `prompt_version`, `rounds`, token counts, `cost_micros`, `stop_reason`, `latency_ms`, `reply_message_id`, redacted `transcript`, `error`. |
 | `assistant_tool_calls`      | `(turn_id, seq)` unique: `round`, `tool`, provider `tool_use_id`, redacted `input`/`output`, `outcome ok\|error\|denied`, `latency_ms`.                                                                                                            |
 | `client_links`              | A personal link: `token_hash` unique (sha256 of a 32-byte base64url token), `kind calendar\|verify\|pin\|membership\|pay\|book_again`, `customer_id` (null only for a stranger's calendar or book-again link), `phone_e164`, appointment/invoice/plan bindings (the plan: fk `(location_id, plan_key)` to the location's plans), `pin_version`, `phone_version`, `epoch`, `issued_by`, `expires_at` (after `created_at`), `uses` of `max_uses`, `consumed_at`, `revoked_at` + `revoke_reason`. |
@@ -564,8 +566,9 @@ Primary key `(location_id)`. `(location_id)` references `locations(id)` on delet
 | `disclosed_at` | timestamp with time zone | yes |  |
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `updated_at` | timestamp with time zone | no | `app_now()` |
+| `language` | text | no | `'en'::text` |
 
-Primary key `(id)`. Unique `(location_id, phone_e164)`. `(customer_id)` references `customers(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. 4 check constraints. Index `assistant_conversations_customer_idx` `(customer_id)` where `customer_id IS NOT NULL`. Index `assistant_conversations_handoff_idx` `(location_id, handoff_at)` where `handoff_state = 'open'::text`. Index `assistant_conversations_pending_idx` `(pending_since)` where `pending_since IS NOT NULL`. Index `assistant_conversations_running_idx` `(running_since)` where `running_since IS NOT NULL`.
+Primary key `(id)`. Unique `(location_id, phone_e164)`. `(customer_id)` references `customers(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. 5 check constraints. Index `assistant_conversations_customer_idx` `(customer_id)` where `customer_id IS NOT NULL`. Index `assistant_conversations_handoff_idx` `(location_id, handoff_at)` where `handoff_state = 'open'::text`. Index `assistant_conversations_pending_idx` `(pending_since)` where `pending_since IS NOT NULL`. Index `assistant_conversations_running_idx` `(running_since)` where `running_since IS NOT NULL`.
 
 #### `assistant_pending_actions`
 

@@ -50,6 +50,11 @@ export interface AiConverseRequest {
   maxTokens: number
   /** Sampling temperature, 0 to 1 (unset: the model's default). The output guard's judge uses 0. */
   temperature?: number
+  /**
+   * The model stops when it writes one of these (not blank; the sequence itself is not in the answer, stopReason 'stop_sequence').
+   * The output guard's judge stops after its one-line JSON object.
+   */
+  stopSequences?: string[]
   effort?: 'low' | 'medium' | 'high'
 }
 

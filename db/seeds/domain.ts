@@ -645,11 +645,20 @@ export async function seedDomainReference(ctx: SeedContext): Promise<void> {
  * the default settings, the two bays and the packages and add-ons with their checklists. Nothing fabricated: no closures,
  * no emergency history, no VIP holds, no customers (the owner adds and edits all of that in Settings).
  */
+/**
+ * The shop's street address as the website shows it ("Oasis Site v2", ADDRESS block). locations.address had no writer, so the
+ * assistant's shop facts had no address and it could only point clients to the website (W4 live eval); migration
+ * 20261012100000_location_address backfills the existing location the same way.
+ */
+export const SHOP_ADDRESS = '468 River Drive, Garfield, NJ 07026'
+
 export async function seedCatalogReference(ctx: SeedContext): Promise<void> {
   await ensureDomainDefaults(ctx.tx, ctx.location.id)
   await seedBays(ctx)
   await seedCatalog(ctx)
-  ctx.log('catalog: default settings, bays, packages and add-ons with their checklists')
+  // only when none is set: an address the owner entered stays
+  await ctx.tx.updateTable('locations').set({ address: SHOP_ADDRESS }).where('id', '=', ctx.location.id).where('address', 'is', null).execute()
+  ctx.log('catalog: default settings, bays, packages and add-ons with their checklists, the address')
 }
 
 export async function seedDomainDesign(ctx: SeedContext): Promise<void> {
@@ -723,7 +732,7 @@ export const domainSeedProfiles: Record<string, SeedProfile> = {
   'domain-design': domainDesign,
   catalog: {
     description:
-      'Production reference data: default settings, the two bays, the packages and add-ons with their checklists; no closures, history, holds or customers',
+      'Production reference data: default settings, the two bays, the packages and add-ons with their checklists, the street address; no closures, history, holds or customers',
     run: seedCatalogReference,
   },
   // the website's services, prices and plans as the catalog (ADR 0160); run after `catalog` in production

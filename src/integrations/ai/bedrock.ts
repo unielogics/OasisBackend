@@ -51,7 +51,12 @@ export interface BedrockProviderOptions {
   effortMode?: BedrockEffortMode
   /** Used when a request names no effort (AI_EFFORT). */
   defaultEffort?: 'low' | 'medium' | 'high'
-  /** Tool specs go out with strict: true (the default; the schemas must be strict-compatible). */
+  /**
+   * Tool specs go out with strict: true only when this is true. Default off (W4 live eval, 2026-10-11): Bedrock compiles the strict
+   * tools into one grammar per request, and the assistant's fifteen tools came to 335 MB (over its 300 MB limit: every turn was
+   * refused with ValidationException) after about 17 s; half of them still took 51 s. Strict also refuses minimum/maximum. The
+   * tools' zod schemas validate every input on the server anyway (tool-runner refuses an input they reject and tells the model).
+   */
   strictTools?: boolean
   /** Monotonic milliseconds for the latency (tests); a duration, not a time of day, so not the Clock. */
   now?: () => number
@@ -123,7 +128,7 @@ export function toConverseInput(
         name: t.name,
         description: t.description,
         inputSchema: { json: doc(t.inputSchema) },
-        ...(o.strictTools === false ? {} : { strict: true }),
+        ...(o.strictTools === true ? { strict: true } : {}),
       },
     }))
     if (req.cacheTools) list.push({ cachePoint: CACHE_POINT })
@@ -147,6 +152,9 @@ export function toConverseInput(
       `maxTokens must be a positive integer (got ${req.maxTokens})`,
     )
 
+  // Bedrock refuses a blank stop sequence (ValidationException "is blank"; measured W4a)
+  if (req.stopSequences?.some((s) => s.trim() === ''))
+    throw new AiProviderError('invalid_request', 'a stop sequence must not be blank (Bedrock refuses it)')
   if (req.temperature !== undefined && !(Number.isFinite(req.temperature) && req.temperature >= 0 && req.temperature <= 1))
     throw new AiProviderError('invalid_request', `temperature must be between 0 and 1 (got ${req.temperature})`)
 
@@ -156,7 +164,11 @@ export function toConverseInput(
     modelId: o.modelId,
     messages,
     ...(system.length ? { system } : {}),
-    inferenceConfig: { maxTokens: req.maxTokens, ...(req.temperature !== undefined ? { temperature: req.temperature } : {}) },
+    inferenceConfig: {
+      maxTokens: req.maxTokens,
+      ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
+      ...(req.stopSequences?.length ? { stopSequences: [...req.stopSequences] } : {}),
+    },
     ...(toolConfig ? { toolConfig } : {}),
   }
   if (effort && mode === 'output_config') input.outputConfig = { effort }
@@ -428,11 +440,15 @@ export interface BedrockClientConfig {
   credentials?: { accessKeyId: string; secretAccessKey: string; sessionToken?: string }
 }
 
-/** The runtime client the app uses: the default credential chain (the instance role), two attempts in all (one SDK retry). */
+/**
+ * The runtime client the app uses: the default credential chain (the instance role), ONE attempt (W4a fix F3): the assistant's turn
+ * retries a throttled, timed-out or unavailable call once itself, with jitter and only within its deadline, counted and logged
+ * (turn.ts retryOnce); an SDK retry under it would make that two or three.
+ */
 export function createBedrockClient(c: BedrockClientConfig): BedrockRuntimeClient {
   return new BedrockRuntimeClient({
     region: c.region,
-    maxAttempts: 2,
+    maxAttempts: 1,
     ...(c.endpoint ? { endpoint: c.endpoint } : {}),
     ...(c.credentials ? { credentials: c.credentials } : {}),
   })

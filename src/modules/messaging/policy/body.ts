@@ -3,9 +3,12 @@ import { classSpec, type SmsClass } from './classes.js'
 
 export const STOP_FOOTER = 'Reply STOP to opt out.'
 
-/** True when the text already tells the reader how to opt out ("Reply STOP"): a customer's name that happens to be "stop" does not count. */
+/**
+ * True when the text already tells the reader how to opt out ("Reply STOP", or in Spanish "Responde STOP": the assistant writes its
+ * footer in the conversation's language, ADR 0160 W4b): a customer's name that happens to be "stop" does not count.
+ */
 export function hasStopNotice(body: string): boolean {
-  return /\b(reply|text|send)\s+stop\b/i.test(body)
+  return /\b(reply|text|send|responde|contesta|envia|envía|escribe)\s+stop\b/i.test(body)
 }
 
 /**

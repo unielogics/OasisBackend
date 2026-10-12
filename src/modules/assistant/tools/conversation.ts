@@ -12,10 +12,12 @@ import { tierSpec } from '../../public/tiers.js'
 import { noteLeadInterest, openLead } from '../../leads/service.js'
 import { TOOL_MIN_TRUST, type AssistantTool, type ToolContext, type ToolInputs } from '../contract.js'
 import { atLeast, fail, json, ok, ownAppointment, withHandoff } from './common.js'
+import { conversationVoice, serverTextEs } from '../lang.js'
 
 export const noteInterest: AssistantTool<ToolInputs['note_interest']> = {
   name: 'note_interest',
-  description: 'Records which service categories the texter is interested in (category keys from the catalog), for the team’s lead list.',
+  description:
+    'Records what the texter wants (category keys from the catalog, e.g. wash, tint, detail). Call it as soon as they say it, even in their first text and without asking again: it saves their lead for the team and moves the welcome intake on to its next step.',
   input: z.strictObject({ categories: z.array(z.string().max(32)).min(1).max(5) }),
   minTrust: TOOL_MIN_TRUST.note_interest,
   async run(ctx, { categories }) {
@@ -52,75 +54,117 @@ export const sendLink: AssistantTool<ToolInputs['send_link']> = {
     tier: z.enum(['gold', 'vip']).nullable(),
   }),
   minTrust: TOOL_MIN_TRUST.send_link,
-  async run(ctx, input) {
-    if (!ctx.env.PUBLIC_LINKS_ENABLED) return fail('unavailable', 'Personal links are not available right now. Offer to have a team member text back.')
-    const id = ctx.identity
-    const client = id.customerId
-    // a stranger (no client) or a record the stale rule hides gets only what proves the number: verify, or a calendar for a stranger
-    if (input.kind === 'verify' && !client) return fail('not_allowed', 'There is no client record for this number yet; ask their name first.')
-    if (input.kind === 'calendar' && client && !atLeast(id.trust, 'caller'))
-      return fail('needs_verification', 'This number has to be verified first: send a verify link.')
-    if ((input.kind === 'pin' || input.kind === 'membership' || input.kind === 'pay') && (!client || !atLeast(id.trust, 'caller')))
-      return fail('not_allowed', 'That link is only for a client on file; send a verify link first.')
-    if (input.kind === 'membership' && !input.tier) return fail('invalid', 'Say which plan: tier gold or vip.')
-    try {
-      const issued = await transaction(ctx.db, async (tx) => {
-        let appointmentId: string | null = null
-        let invoiceId: string | null = null
-        if (input.appointmentRef && (input.kind === 'calendar' || input.kind === 'pay')) {
-          const a = await ownAppointment(tx, ctx, input.appointmentRef)
-          if (!a) throw new LinkRefused(fail('not_found', 'No such appointment for this client.'))
-          appointmentId = a.id
-        }
-        if (input.kind === 'pay') invoiceId = await payableInvoice(tx, ctx, appointmentId)
-        if (input.kind === 'membership') {
-          const plan = await tx
-            .selectFrom('membership_plans')
-            .select('key')
-            .where('location_id', '=', id.locationId)
-            .where('key', '=', tierSpec(input.tier!).planKey)
-            .executeTakeFirst()
-          if (!plan) throw new LinkRefused(fail('unavailable', 'Memberships cannot be started by link right now; a team member can help.'))
-        }
-        const issued = await issueClientLink(
-          tx,
-          { newId: ctx.newId, now: ctx.now, ...(ctx.env.PUBLIC_SITE_URL ? { siteUrl: ctx.env.PUBLIC_SITE_URL } : {}) },
-          {
-            locationId: id.locationId,
-            kind: input.kind,
-            customerId: client,
-            phone: client ? null : id.phone,
-            appointmentId: input.kind === 'calendar' ? appointmentId : null,
-            invoiceId,
-            planKey: input.kind === 'membership' ? tierSpec(input.tier!).planKey : null,
-            issuedBy: 'assistant',
-          },
-        )
-        // the link goes only to the number that is texting (the client's number on file is the same number)
-        if (issued.phone !== id.phone) throw new LinkRefused(fail('not_allowed', 'This number is not the client’s number on file.'))
-        await ctx.audit(tx, 'assistant.link.sent', { entityType: client ? 'customer' : 'lead', entityId: client, after: { kind: input.kind, expiresAt: issued.expiresAt.toISOString() } })
-        return issued
+  run: (ctx, input) => issueLinkOutcome(ctx, input),
+}
+
+/**
+ * send_link's work: issues the personal link to the number that is texting, registers it with the turn ({linkN}) and says how to
+ * use it. check_availability calls it too (W4b X4: an unverified booking gets the calendar link in the same reply).
+ */
+export async function issueLinkOutcome(ctx: ToolContext, input: ToolInputs['send_link']) {
+  if (!ctx.env.PUBLIC_LINKS_ENABLED)
+    return fail(
+      'unavailable',
+      'Personal links are not available right now. Offer to have a team member text back.',
+    )
+  const id = ctx.identity
+  const client = id.customerId
+  // a stranger (no client) or a record the stale rule hides gets only what proves the number: verify, or a calendar for a stranger
+  if (input.kind === 'verify' && !client)
+    return fail('not_allowed', 'There is no client record for this number yet; ask their name first.')
+  if (input.kind === 'calendar' && client && !atLeast(id.trust, 'caller'))
+    return fail('needs_verification', 'This number has to be verified first: send a verify link.')
+  if (
+    (input.kind === 'pin' || input.kind === 'membership' || input.kind === 'pay') &&
+    (!client || !atLeast(id.trust, 'caller'))
+  )
+    return fail('not_allowed', 'That link is only for a client on file; send a verify link first.')
+  if (input.kind === 'membership' && !input.tier) return fail('invalid', 'Say which plan: tier gold or vip.')
+  try {
+    const issued = await transaction(ctx.db, async (tx) => {
+      let appointmentId: string | null = null
+      let invoiceId: string | null = null
+      if (input.appointmentRef && (input.kind === 'calendar' || input.kind === 'pay')) {
+        const a = await ownAppointment(tx, ctx, input.appointmentRef)
+        if (!a) throw new LinkRefused(fail('not_found', 'No such appointment for this client.'))
+        appointmentId = a.id
+      }
+      if (input.kind === 'pay') invoiceId = await payableInvoice(tx, ctx, appointmentId)
+      if (input.kind === 'membership') {
+        const plan = await tx
+          .selectFrom('membership_plans')
+          .select('key')
+          .where('location_id', '=', id.locationId)
+          .where('key', '=', tierSpec(input.tier!).planKey)
+          .executeTakeFirst()
+        if (!plan)
+          throw new LinkRefused(
+            fail('unavailable', 'Memberships cannot be started by link right now; a team member can help.'),
+          )
+      }
+      const issued = await issueClientLink(
+        tx,
+        {
+          newId: ctx.newId,
+          now: ctx.now,
+          ...(ctx.env.PUBLIC_SITE_URL ? { siteUrl: ctx.env.PUBLIC_SITE_URL } : {}),
+        },
+        {
+          locationId: id.locationId,
+          kind: input.kind,
+          customerId: client,
+          phone: client ? null : id.phone,
+          appointmentId: input.kind === 'calendar' ? appointmentId : null,
+          invoiceId,
+          planKey: input.kind === 'membership' ? tierSpec(input.tier!).planKey : null,
+          issuedBy: 'assistant',
+        },
+      )
+      // the link goes only to the number that is texting (the client's number on file is the same number)
+      if (issued.phone !== id.phone)
+        throw new LinkRefused(fail('not_allowed', 'This number is not the client’s number on file.'))
+      await ctx.audit(tx, 'assistant.link.sent', {
+        entityType: client ? 'customer' : 'lead',
+        entityId: client,
+        after: { kind: input.kind, expiresAt: issued.expiresAt.toISOString() },
       })
-      // registered once the link row is committed: the reply never carries a link that does not exist
-      const placeholder = ctx.addLink(issued.url, { kind: input.kind, expiresAt: issued.expiresAt })
-      const minutes = Math.round((issued.expiresAt.getTime() - ctx.now.getTime()) / 60_000)
-      return ok({
-        placeholder,
-        kind: input.kind,
-        expiresInMinutes: minutes,
-        instruction: `Put ${placeholder} in your reply exactly once; it is replaced by the secure link. Never write a URL yourself.`,
-      })
-    } catch (e) {
-      if (e instanceof LinkRefused) return e.outcome
-      if (e instanceof AppError && e.code === 'IDENTITY_LINK_LIMIT')
-        return fail('rate_limited', 'The link limit for this number is reached for now (3 a day, one of a kind an hour). Offer a team member instead.')
-      if (e instanceof NoPaymentLink)
-        return withHandoff(ctx, fail('unavailable', 'There is no online payment for that invoice yet; a team member will text a payment link.'), 'no_payment_link', 'The client asked to pay online; the invoice has no payment link yet.')
-      if (e instanceof AppError && (e.code === 'VALIDATION_FAILED' || e.code === 'NOT_FOUND' || e.code === 'IDENTITY_NO_PHONE'))
-        return fail('not_found', 'There is nothing that link could be for.')
-      throw e
-    }
-  },
+      return issued
+    })
+    // registered once the link row is committed: the reply never carries a link that does not exist
+    const placeholder = ctx.addLink(issued.url, { kind: input.kind, expiresAt: issued.expiresAt })
+    const minutes = Math.round((issued.expiresAt.getTime() - ctx.now.getTime()) / 60_000)
+    return ok({
+      placeholder,
+      kind: input.kind,
+      expiresInMinutes: minutes,
+      instruction: `Put ${placeholder} in your reply exactly once; it is replaced by the secure link. Never write a URL yourself.`,
+    })
+  } catch (e) {
+    if (e instanceof LinkRefused) return e.outcome
+    if (e instanceof AppError && e.code === 'IDENTITY_LINK_LIMIT')
+      return fail(
+        'rate_limited',
+        // W4 live eval: "I've hit the link limit for today" confused clients (a limit they never heard of)
+        // full Bedrock run: "It's good for 3 days so no rush!" and "scroll up" to a client who could not find the link
+        'No new link can go to this number right now. If a link of this kind was texted earlier in this conversation and still works (a calendar link works for 3 days, a verify link for 15 minutes), point them to it (it is in their texts; never tell them how long it works); otherwise say a team member will text them. If they say they cannot find it, say a team member will text it to them and call handoff_to_staff. Never mention a limit or a count.',
+      )
+    if (e instanceof NoPaymentLink)
+      return withHandoff(
+        ctx,
+        fail(
+          'unavailable',
+          'There is no online payment for that invoice yet; a team member will text a payment link.',
+        ),
+        'no_payment_link',
+        'The client asked to pay online; the invoice has no payment link yet.',
+      )
+    if (
+      e instanceof AppError &&
+      (e.code === 'VALIDATION_FAILED' || e.code === 'NOT_FOUND' || e.code === 'IDENTITY_NO_PHONE')
+    )
+      return fail('not_found', 'There is nothing that link could be for.')
+    throw e
+  }
 }
 
 /** The open invoice a pay link is for: the visit's, or the client's latest with a balance; it needs a staff-attached payment URL. */
@@ -150,12 +194,14 @@ export const optOut: AssistantTool<ToolInputs['opt_out']> = {
       if (!already) {
         const target = id.customerId ? await loadCustomerTarget(tx, id.locationId, id.customerId) : null
         const recipient = target?.recipient ?? (await strangerRecipient(tx, id.locationId, id.phone))
+        // a Spanish conversation gets the Spanish confirmation (guard polish after W4b-fix, P3)
+        const es = (await conversationVoice(tx, ctx.conversationId)).lang === 'es' ? serverTextEs('opt_out_confirm') : null
         await ctx.queue.enqueueFor(tx, {
           locationId: id.locationId,
           customerId: id.customerId,
           recipient,
           appointmentId: null,
-          templateKey: 'opt_out_confirm',
+          ...(es ? { text: es, klass: 'opt_out_confirm' as const, tag: 'opt_out_confirm' } : { templateKey: 'opt_out_confirm' }),
           purpose: 'inbound-reply',
           senderKind: 'system',
           dedupeKey: `assistant-opt-out:${ctx.turnId}`,

@@ -1,9 +1,11 @@
 // The turn's append-only transcript (ADR 0160: assistant_turns.transcript, "redacted": no phone numbers, ids, tokens or codes).
 // The model's own blocks are kept as they came (reasoning included: it is passed back unchanged within the turn), but what is
-// stored goes through redactJson, which masks phone numbers, e-mail addresses, uuids and long digit runs anywhere in the value.
+// stored goes through redactJson, which masks card numbers (to their last four digits), phone numbers, e-mail addresses, uuids and
+// long digit runs anywhere in the value.
 import type { AiMessage } from '../../integrations/ports/ai.js'
 import type { JsonValue } from '../../platform/schema.js'
 import { maskEmail, maskPhone } from '../../platform/phone.js'
+import { maskCardNumbers } from '../messaging/inbound/cards.js'
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
 const E164 = /\+\d{8,15}\b/g
@@ -36,7 +38,14 @@ export function maskPhones(s: string, by: (match: string) => string): string {
 }
 
 export function redactText(s: string): string {
-  return maskPhones(s.replace(UUID, '[id]').replace(EMAIL, (m) => maskEmail(m)).replace(E164, (m) => maskPhone(m)), (m) => maskPhone(m))
+  // a card number first (W4b X6: "[card ending 1111]"), before the phone patterns could take its digits apart
+  return maskPhones(
+    maskCardNumbers(s)
+      .replace(UUID, '[id]')
+      .replace(EMAIL, (m) => maskEmail(m))
+      .replace(E164, (m) => maskPhone(m)),
+    (m) => maskPhone(m),
+  )
 }
 
 /** A deep copy with every string redacted (keys kept). */
@@ -58,9 +67,12 @@ export type TranscriptEntry =
   | { kind: 'message'; message: AiMessage; stopReason?: string; usage?: Record<string, number> }
   | { kind: 'tools'; round: number; calls: { tool: string; outcome: string; error?: string }[] }
   | { kind: 'guard'; verdict: string; problems?: string[]; words?: string[] }
-  | { kind: 'judge'; verdict: 'pass' | 'fail' | 'error'; category?: string; reason?: string; error?: string; model: string | null; latencyMs: number }
+  | { kind: 'judge'; verdict: 'pass' | 'fail' | 'error'; category?: string; reason?: string; error?: string; model: string | null; latencyMs: number; attempts?: number; shortened?: boolean }
+  /** W4a fix F3: a throttled or timed-out model or judge call retried once (waitMs), or not retried for lack of time (skipped). */
+  | { kind: 'retry'; call: 'model' | 'judge'; error: string; waitMs?: number; skipped?: 'deadline' }
   | { kind: 'error'; error: string }
-  | { kind: 'reply'; text: string; klass: string }
+  /** `rendered`: the server's renderings of the placeholders the reply used ("Your open balance is $12.50"), for review (W4b X9). */
+  | { kind: 'reply'; text: string; klass: string; rendered?: string[] }
   | { kind: 'handoff'; reason: string }
 
 /** Append-only within the turn; stored once, redacted, when the turn ends. */

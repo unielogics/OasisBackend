@@ -18,8 +18,9 @@ import type { JsonValue } from '../../../platform/schema.js'
 import { loadCustomerTarget } from '../../messaging/db/recipients.js'
 import { loadBoardServices } from '../../public/availability-loader.js'
 import { TOOL_MIN_TRUST, type AssistantTool, type ToolContext, type ToolInputs, type ToolOutcome } from '../contract.js'
-import { actionSummary, cancelBlockOf, serviceWithAddons, type BookPayload, type CancelPayload, type ReschedulePayload } from '../actions/plan.js'
+import { cancelBlockOf, serviceWithAddons, type BookPayload, type CancelPayload, type ReschedulePayload } from '../actions/plan.js'
 import { bookablePackage, vipFor } from './availability.js'
+import { actionConfirmText, actionSummaryIn, conversationVoice, markDisclosed, whenIn, withDisclosure } from '../lang.js'
 import {
   aiBookingsAhead,
   BIZ_DATE,
@@ -98,20 +99,34 @@ async function propose(
         throw e
       }
       const target = await loadCustomerTarget(tx, ctx.identity.locationId, customerId)
-      if (!target || target.recipient.phone !== ctx.identity.phone) throw new Refused(fail('not_allowed', 'This number is not the client’s number on file.'))
+      if (!target || target.recipient.phone !== ctx.identity.phone)
+        throw new Refused(fail('not_allowed', 'This number is not the client’s number on file.'))
+      // W4b X1: when this is the first text of the conversation's AI flow (a trusted client's first text can be a proposal), it
+      // carries the automated-assistant disclosure and the STOP footer, and the reply that follows does not repeat them; X5: in the
+      // conversation's language
+      const voice = await conversationVoice(tx, ctx.conversationId)
+      const body = actionConfirmText(o.summary, voice.lang)
       const out = await ctx.queue.enqueueFor(tx, {
         locationId: ctx.identity.locationId,
         customerId,
         recipient: target.recipient,
         appointmentId: o.appointmentId,
-        templateKey: 'action_confirm',
-        vars: { summary: o.summary },
+        text: voice.disclosed ? body : withDisclosure(body, voice.lang),
+        klass: 'action_confirm',
+        tag: 'action_confirm',
         secretVars: { code: proposal.code },
         purpose: `assistant-${o.kind}-confirm`,
         senderKind: 'ai',
         dedupeKey: `action-confirm:${proposal.id}`,
       })
-      if (!out.queued) throw new Refused(fail('unavailable', 'The confirmation text could not be sent to this number. Offer a team member instead.'))
+      if (!out.queued)
+        throw new Refused(
+          fail(
+            'unavailable',
+            'The confirmation text could not be sent to this number. Offer a team member instead.',
+          ),
+        )
+      if (!voice.disclosed) await markDisclosed(tx, ctx.conversationId, ctx.now)
       await attachConfirmMessage(tx, proposal.id, out.messageId)
       await ctx.audit(tx, `assistant.${o.kind}.proposed`, {
         entityType: o.appointmentId ? 'appointment' : 'customer',
@@ -131,14 +146,14 @@ async function propose(
     // the server's own text already says how to confirm; the policy judge fails any reply of the model that asks for a number they
     // received (design 3c rubric (c)), so the model only points at that text
     instruction:
-      'The server just texted the client this summary with how to confirm it. In your reply say only that you sent the details in a separate text to confirm (for example "I just texted you the details: confirm with that text."). Never mention, ask for or repeat any number or code. Nothing is booked or changed until they confirm.',
+      'The server just texted the client this summary with how to confirm it. In your reply write the placeholder {confirm} as its own sentence ("{confirm}."): the server writes "I just texted you the details with how to confirm." Add nothing else about confirming, and never mention, ask for or repeat any number or code. Nothing is booked or changed until they confirm.',
   })
 }
 
 export const proposeBooking: AssistantTool<ToolInputs['propose_booking']> = {
   name: 'propose_booking',
   description:
-    'Proposes a booking for the verified client: serviceKey (a package from list_services), addonKeys (add-on keys, or []), date (YYYY-MM-DD), startMin (from check_availability), vehicle (the client’s own vehicle as they named it, or null). The server texts them a confirmation number; nothing is booked until they reply with it.',
+    'Proposes a booking for the verified client: serviceKey (a package from list_services), addonKeys (add-on keys, or []), date (YYYY-MM-DD), startMin (from check_availability), vehicle (the client’s own vehicle as they named it, or null: a vehicle is never needed, so never ask for one before proposing). The server texts them a confirmation number; nothing is booked until they reply with it.',
   input: z.strictObject({
     serviceKey: z.string().min(1).max(80),
     addonKeys: z.array(z.string().min(1).max(80)).max(6),
@@ -190,6 +205,7 @@ export const proposeBooking: AssistantTool<ToolInputs['propose_booking']> = {
     })
     if (!v.ok) return slotFailure(v)
     const today = toBizDate(ctx.now, ctx.scheduling.tz)
+    const { lang } = await conversationVoice(ctx.db, ctx.conversationId)
     const service = serviceWithAddons(found.item.name, addons.map((a) => a.name))
     const payload: BookPayload = {
       serviceKey: found.item.key,
@@ -199,7 +215,8 @@ export const proposeBooking: AssistantTool<ToolInputs['propose_booking']> = {
       startMin: input.startMin,
       vehicleId,
     }
-    return propose(ctx, { kind: 'book', summary: actionSummary({ kind: 'book', service, when: whenWords(input.date, input.startMin, today) }), payload, appointmentId: null })
+    // guard polish after W4b-fix (P3): the summary and its date in the conversation's language ("vie 16 oct, 11:00 a. m.")
+    return propose(ctx, { kind: 'book', summary: actionSummaryIn(lang, { kind: 'book', service, when: whenIn(lang, input.date, input.startMin, today) }), payload, appointmentId: null })
   },
 }
 
@@ -235,9 +252,10 @@ export const proposeReschedule: AssistantTool<ToolInputs['propose_reschedule']> 
     const today = toBizDate(ctx.now, tz)
     if (toBizDate(a.start, tz) === input.date && minutesOfDay(a.start, tz) === input.startMin) return fail('invalid', 'That is already the time of that visit.')
     const payload: ReschedulePayload = { appointmentId: a.id, serviceName: a.serviceName, date: input.date, startMin: input.startMin }
+    const { lang } = await conversationVoice(ctx.db, ctx.conversationId)
     return propose(ctx, {
       kind: 'reschedule',
-      summary: actionSummary({ kind: 'reschedule', service: a.serviceName, when: whenWords(input.date, input.startMin, today) }),
+      summary: actionSummaryIn(lang, { kind: 'reschedule', service: a.serviceName, when: whenIn(lang, input.date, input.startMin, today) }),
       payload,
       appointmentId: a.id,
     })
@@ -270,6 +288,8 @@ export const proposeCancel: AssistantTool<ToolInputs['propose_cancel']> = {
         `The client asked by text to cancel their ${a.serviceName} ${when} (${block === 'late' ? 'inside the free-cancellation window' : 'money is held on the visit'}). Reason: ${input.reason.slice(0, 120)}`,
       )
     const payload: CancelPayload = { appointmentId: a.id, serviceName: a.serviceName, reason: input.reason.replace(/\s+/g, ' ').trim().slice(0, 200) }
-    return propose(ctx, { kind: 'cancel', summary: actionSummary({ kind: 'cancel', service: a.serviceName, when }), payload, appointmentId: a.id })
+    const { lang } = await conversationVoice(ctx.db, ctx.conversationId)
+    const summary = actionSummaryIn(lang, { kind: 'cancel', service: a.serviceName, when: lang === 'en' ? when : whenIn(lang, toBizDate(a.start, tz), minutesOfDay(a.start, tz), today) })
+    return propose(ctx, { kind: 'cancel', summary, payload, appointmentId: a.id })
   },
 }
