@@ -39,6 +39,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261011050000_membership_matching.sql` | membership matching (ADR 0160 W2e): checkout row origin (link or sync), state rejected, nullable checkout_url, email_verified drops on an email change  |
 | `20261012020000_assistant_tools.sql` | `vehicles.vehicle_type` (the tint price class `set_my_vehicle` records) and `customers.archived_at` (the welcome flow's 30-day archive of nameless, never-booked provisional clients) (ADR 0160, W3b) |
 | `20261012030000_link_bookings.sql` | appointment `source` `link`: a visit booked on a personal link page (ADR 0160, W3c link API)                                                       |
+| `20261012100000_location_address.sql` | the shop’s street address for the existing location when none is set (the assistant’s shop facts read it; ADR 0160, W4b) |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
