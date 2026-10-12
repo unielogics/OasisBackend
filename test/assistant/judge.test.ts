@@ -10,6 +10,7 @@ import {
   JUDGE_HINTS,
   JUDGE_MAX_TOKENS,
   JUDGE_RUBRIC,
+  JUDGE_STOP,
   judgeMessage,
   judgeRequest,
   parseVerdict,
@@ -56,7 +57,8 @@ describe('the judge request', () => {
     expect(JUDGE_RUBRIC.length).toBeGreaterThan(4400)
     // Bedrock gets the temperature and the cache point after the rubric
     const input = toConverseInput(req, { modelId: 'us.anthropic.claude-sonnet-4-6' })
-    expect(input.inferenceConfig).toEqual({ maxTokens: 120, temperature: 0 })
+    expect(input.inferenceConfig).toEqual({ maxTokens: 120, temperature: 0, stopSequences: ['}\n'] })
+    expect(req.stopSequences).toEqual([JUDGE_STOP])
     expect(input.system).toEqual([{ text: JUDGE_RUBRIC }, { cachePoint: { type: 'default' } }])
     expect(input.toolConfig).toBeUndefined()
   })
@@ -104,6 +106,13 @@ describe('one judge call with the simulator', () => {
     expect((await run([{ error: 'throttled' }])).outcome).toEqual({ kind: 'error', error: 'ai:throttled' })
     expect((await run([simText('{"ok":true,"category":"none","reason":""}', { delayMs: 500 })], 50)).outcome).toEqual({ kind: 'error', error: 'timeout' })
     expect((await run([simText('{"ok":true', { stopReason: 'max_tokens' })])).outcome).toEqual({ kind: 'error', error: 'stop:max_tokens' })
+    // stopped after its line (W4a): the stop sequence's "}" is put back, and only that first object counts
+    expect((await run([simText('{"reason":"a greeting","category":"none","ok":true', { stopReason: 'stop_sequence' })])).outcome).toEqual({
+      kind: 'pass',
+      verdict: { ok: true, category: 'none', reason: 'a greeting' },
+    })
+    expect((await run([simText('{"reason":"an amount","category":"price","ok":false', { stopReason: 'stop_sequence' })])).outcome).toMatchObject({ kind: 'fail' })
+    expect((await run([simText('{"reason":"cut', { stopReason: 'stop_sequence' })])).outcome).toEqual({ kind: 'error', error: 'unparseable' })
     expect((await run([simText('I think it is fine.')])).outcome).toEqual({ kind: 'error', error: 'unparseable' })
     // the caller's abort (the turn deadline) is not reported as the judge's own timeout
     const ac = new AbortController()

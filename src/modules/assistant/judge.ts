@@ -6,7 +6,8 @@
 //
 // It answers strict JSON {reason, category, ok} (the reason first, W4a). The turn (turn.ts): fail -> one rewrite with the category's hint -> the guard and
 // the judge again -> fallback + handoff (`policy_judge`); an error, a timeout (8 s), an unknown stop or an answer that is not the
-// JSON -> FAIL CLOSED (fallback + handoff, `judge_error`). Temperature 0, at most 120 output tokens, the rubric cached.
+// JSON -> FAIL CLOSED (fallback + handoff, `judge_error`). Temperature 0, at most 120 output tokens, it stops after the object's
+// line (JUDGE_STOP), the rubric cached.
 import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import { POLICY_JUDGE_HEADER } from '../../integrations/ai/sim.js'
@@ -38,6 +39,12 @@ export const JUDGE_MAX_TOKENS = 120
 export const JUDGE_TEMPERATURE = 0
 export const JUDGE_TIMEOUT_MS = 8000
 export const JUDGE_REASON_MAX = 120
+/**
+ * The judge stops right after its one-line object ("}" then a line break; the stop sequence is not in the answer, so the "}" is put
+ * back). W4a: on unclear replies Sonnet 4.6 wrote its object, then "Wait, let me reconsider" and a second object, which ran into
+ * the token limit (an error, fail closed); the first object is its answer.
+ */
+export const JUDGE_STOP = '}\n'
 
 /** The fixed rubric: the judge's whole system prompt, byte-stable (cached). Language-agnostic. */
 export const JUDGE_RUBRIC = `${POLICY_JUDGE_HEADER} (car wash text messages)
@@ -58,7 +65,7 @@ Mentioning a subject is not breaking a rule: the assistant's own text may name p
 
 PASS everything else, for example: greetings and the client's name; opening hours, dates, times, durations and counts ("we open 8 to 6", "bay 2", "a 2-door", "October 12, 2026"); booking questions; what a service includes; "a team member will text you"; the trusted parts themselves.
 
-Answer with ONLY one JSON object and nothing before or after it. Write the reason first, then decide; never write a second object:
+Answer with ONLY one JSON object on one line, then a line break, and nothing before or after it. Write the reason first, then decide; never write a second object:
 {"reason":"<what the assistant's own text says or asks, at most ${JUDGE_REASON_MAX} characters>","category":"none","ok":true}
 or
 {"reason":"<what breaks which rule, at most ${JUDGE_REASON_MAX} characters>","category":"price|promise|secret|link_or_phone|other","ok":false}`
@@ -94,6 +101,7 @@ export function judgeRequest(segments: readonly ReplySegment[], maxTokens = JUDG
     toolChoice: 'none',
     maxTokens,
     temperature: JUDGE_TEMPERATURE,
+    stopSequences: [JUDGE_STOP],
     effort: 'low',
   }
 }
@@ -167,8 +175,8 @@ export async function runJudge(
   try {
     const res = await provider.converse(req, { signal })
     const base = { message, usage: res.usage, model: res.model, latencyMs: Math.max(0, Math.round(nowMs() - began)) }
-    if (res.stopReason !== 'end_turn') return { ...base, outcome: { kind: 'error', error: `stop:${res.stopReason}` } }
-    const verdict = parseVerdict(textOf(res.message))
+    if (res.stopReason !== 'end_turn' && res.stopReason !== 'stop_sequence') return { ...base, outcome: { kind: 'error', error: `stop:${res.stopReason}` } }
+    const verdict = parseVerdict(res.stopReason === 'stop_sequence' ? `${textOf(res.message)}}` : textOf(res.message))
     if (!verdict) return { ...base, outcome: { kind: 'error', error: 'unparseable' } }
     return { ...base, outcome: verdict.ok ? { kind: 'pass', verdict } : { kind: 'fail', verdict } }
   } catch (e) {
