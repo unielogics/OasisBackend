@@ -77,63 +77,80 @@ const ageLabel = (minutes: number): string =>
  * AWAITING_ALERT_MINUTES (review B8: 2 hours, not the design's 24), and orders waiting in the manual matching queue
  * (managers only). Both are computed on read, so they clear the moment the sync or a person resolves them.
  */
-export const sqspExternalAlerts: ExternalAlertSource = {
-  async list(db, ctx): Promise<ExternalAlert[]> {
-    const out: ExternalAlert[] = []
-    const cutoff = new Date(ctx.now.getTime() - AWAITING_ALERT_MINUTES * 60_000)
-    const aw = await sql<{
-      id: string
-      type: 'pay' | 'refund'
-      amount_cents: number
-      occurred_at: Date
-      invoice_no: number
-      client_name: string
-      appointment_id: string | null
-      processor: 'square' | 'squarespace' | null
-      sent: boolean
-    }>`
-      select e.id, e.type, e.amount_cents, e.occurred_at, i.invoice_no, i.client_name, i.appointment_id, e.processor,
-        exists (select 1 from square_refund_legs l where l.ledger_event_id = e.id and l.origin = 'api') as sent
-      from ledger_events e join invoices i on i.id = e.invoice_id
-      where e.location_id = ${ctx.locationId} and e.processor_state = 'awaiting_processor' and e.occurred_at <= ${cutoff}
-        and not exists (select 1 from ledger_events v where v.voids_event_id = e.id)
-      order by e.occurred_at, e.seq
-      limit 20`.execute(db)
-    for (const e of aw.rows) {
-      const minutes = Math.floor((ctx.now.getTime() - e.occurred_at.getTime()) / 60_000)
-      out.push({
-        key: `awaiting_processor:${e.id}`,
-        kind: 'awaiting_processor',
-        tone: 'amber',
-        title: `${e.type === 'refund' ? 'Card refund' : 'Card payment'} not confirmed · ${e.client_name}`,
-        // processor-neutral (ADR 0171, design 2.7): a Square entry waits on Square's webhook; anything else is finished in Squarespace
-        desc: `${formatUsd(e.amount_cents)} on INV-${e.invoice_no} recorded ${ageLabel(minutes)} ago · ${e.processor === 'square' ? 'Square has not confirmed it yet' : 'finish it in Squarespace'}`,
-        // a refund sent through the Square API settles by itself (confirming it by hand is refused): look, don't confirm
-        actionLabel: e.sent ? 'Review' : 'Confirm',
-        appointmentId: e.appointment_id,
-        priority: 0,
-      })
-    }
-    if (ctx.manager) {
-      const q = await sql<{ n: number }>`
-        select count(distinct m.sqsp_order_id)::int as n from sqsp_manual_queue m
-        where m.location_id = ${ctx.locationId} and m.state = 'open'`.execute(db)
-      const n = q.rows[0]?.n ?? 0
-      if (n > 0)
+export interface SqspAlertOptions {
+  /**
+   * The Square refund job sends the card refunds with processor 'square' (PAYMENT_PROCESSOR=square and Square writes on): their
+   * waiting alert offers Review, as confirming them by hand is refused (ADR 0171 D4). Read at each listing (production wiring:
+   * composition.ts).
+   */
+  squareSendsRefunds: () => boolean
+}
+
+/** Alert 12, money waiting on its processor (and, for managers, Squarespace orders to match). */
+export function sqspExternalAlertsWith(o: SqspAlertOptions): ExternalAlertSource {
+  return {
+    async list(db, ctx): Promise<ExternalAlert[]> {
+      const squareSends = o.squareSendsRefunds()
+      const out: ExternalAlert[] = []
+      const cutoff = new Date(ctx.now.getTime() - AWAITING_ALERT_MINUTES * 60_000)
+      const aw = await sql<{
+        id: string
+        type: 'pay' | 'refund'
+        amount_cents: number
+        occurred_at: Date
+        invoice_no: number
+        client_name: string
+        appointment_id: string | null
+        processor: 'square' | 'squarespace' | null
+        sent: boolean
+      }>`
+        select e.id, e.type, e.amount_cents, e.occurred_at, i.invoice_no, i.client_name, i.appointment_id, e.processor,
+          (exists (select 1 from square_refund_legs l where l.ledger_event_id = e.id and l.origin = 'api')
+            or (${squareSends}::boolean and e.type = 'refund' and e.processor = 'square')) as sent
+        from ledger_events e join invoices i on i.id = e.invoice_id
+        where e.location_id = ${ctx.locationId} and e.processor_state = 'awaiting_processor' and e.occurred_at <= ${cutoff}
+          and not exists (select 1 from ledger_events v where v.voids_event_id = e.id)
+        order by e.occurred_at, e.seq
+        limit 20`.execute(db)
+      for (const e of aw.rows) {
+        const minutes = Math.floor((ctx.now.getTime() - e.occurred_at.getTime()) / 60_000)
         out.push({
-          key: 'unmatched_orders',
-          kind: 'unmatched_order',
-          tone: 'violet',
-          title: `${n} Squarespace ${n === 1 ? 'order needs' : 'orders need'} matching`,
-          desc: 'Match each to an invoice or ignore it in Payments',
-          actionLabel: 'Review',
-          appointmentId: null,
+          key: `awaiting_processor:${e.id}`,
+          kind: 'awaiting_processor',
+          tone: 'amber',
+          title: `${e.type === 'refund' ? 'Card refund' : 'Card payment'} not confirmed · ${e.client_name}`,
+          // processor-neutral (ADR 0171, design 2.7): a Square entry waits on Square's webhook; anything else is finished in Squarespace
+          desc: `${formatUsd(e.amount_cents)} on INV-${e.invoice_no} recorded ${ageLabel(minutes)} ago · ${e.processor === 'square' ? 'Square has not confirmed it yet' : 'finish it in Squarespace'}`,
+          // a refund sent (or about to be sent) through the Square API settles by itself (confirming it by hand is refused): look, don't confirm
+          actionLabel: e.sent ? 'Review' : 'Confirm',
+          appointmentId: e.appointment_id,
           priority: 0,
         })
-    }
-    return out
-  },
+      }
+      if (ctx.manager) {
+        const q = await sql<{ n: number }>`
+          select count(distinct m.sqsp_order_id)::int as n from sqsp_manual_queue m
+          where m.location_id = ${ctx.locationId} and m.state = 'open'`.execute(db)
+        const n = q.rows[0]?.n ?? 0
+        if (n > 0)
+          out.push({
+            key: 'unmatched_orders',
+            kind: 'unmatched_order',
+            tone: 'violet',
+            title: `${n} Squarespace ${n === 1 ? 'order needs' : 'orders need'} matching`,
+            desc: 'Match each to an invoice or ignore it in Payments',
+            actionLabel: 'Review',
+            appointmentId: null,
+            priority: 0,
+          })
+      }
+      return out
+    },
+  }
 }
+
+/** Without Square refunds sent by the job (tests, before the cutover): every waiting entry offers Confirm unless it has legs. */
+export const sqspExternalAlerts: ExternalAlertSource = sqspExternalAlertsWith({ squareSendsRefunds: () => false })
 
 /** Merges several alert sources (messaging, payments sync) into the one the scheduling module takes. */
 export function combineExternalAlerts(...sources: ExternalAlertSource[]): ExternalAlertSource {

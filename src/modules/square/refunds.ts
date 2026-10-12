@@ -8,7 +8,7 @@
 //   3. refund.* webhooks (and the catch-up) move the legs; once every leg is settled: all completed -> the refund is confirmed; any leg
 //      FAILED or REJECTED -> processor_state 'failed': it no longer counts as refunded (invoice_calc_of and its twins), what the
 //      completed legs gave back is written as its own confirmed card refund (settleRefundEvent), and staff are alerted to give the
-//      rest back another way. A refund sent to Square is not confirmed by hand (PaymentsService.confirmProcessor refuses it).
+//      rest back another way. A refund sent to Square, or that the job will send, is not confirmed by hand (confirmProcessor refuses it).
 // A refund made in the Square POS app is attached to the staff's awaiting card refund of that amount (or to one they confirmed by hand
 // before Square's event arrived), or recorded as an external refund that needs review (ingestSquareRefund).
 import { sql } from 'kysely'
@@ -161,6 +161,8 @@ export async function settleRefundEvent(
           deposit: ev.deposit,
           reason: ev.reason,
           note: 'The part of the card refund Square gave back (the rest failed)',
+          // the items stay claimed (refundedItemIds): refunding them again by item would give their whole price back a second time,
+          // so the uncovered rest the alert names goes back as an amount refund (finding E2)
           item_ids: ev.item_ids,
           parent_event_id: ev.id,
           actor_user_id: ev.actor_user_id,
@@ -426,7 +428,10 @@ export async function ingestSquareRefund(
     }
   }
   // the staff confirmed their card refund by hand (today's step before the cutover) before Square's refund event arrived: that refund
-  // is this one, so it takes the Square ids instead of the money counting twice. Not one finished in Squarespace (its order id).
+  // is this one, so it takes the Square ids instead of the money counting twice. Not one finished in Squarespace (its order id), and
+  // only on an invoice whose card money is all Square's: with Squarespace (or unknown) card money there too, the hand-confirmed refund
+  // may be that money's, so Square's refund is recorded on its own for review (a possible double count shown to staff, never a refund
+  // silently hidden).
   const byHand = await tx
     .selectFrom('ledger_events as e')
     .select('e.id')
@@ -440,6 +445,13 @@ export async function ingestSquareRefund(
     .where('e.sqsp_order_id', 'is', null)
     .where((eb) => eb.or([eb('e.processor', 'is', null), eb('e.processor', '=', 'square')]))
     .where(({ not, exists, selectFrom }) => not(exists(selectFrom('square_refund_legs as l').select('l.id').whereRef('l.ledger_event_id', '=', 'e.id'))))
+    .where(
+      ({ not, exists }) =>
+        not(
+          exists(sql`(select 1 from ledger_events p where p.invoice_id = e.invoice_id and p.type = 'pay' and p.method_kind in ('card', 'apple_pay')
+            and p.processor is distinct from 'square' and not exists (select 1 from ledger_events v where v.voids_event_id = p.id))`),
+        ),
+    )
     .orderBy('e.seq')
     .executeTakeFirst()
   if (byHand) {

@@ -7,9 +7,10 @@ import { messagingAlertSource } from './modules/messaging/adapters/alerts.js'
 import { createDbPaymentOutbox } from './modules/messaging/adapters/payments.js'
 import { MessagingClosureNotifier, MessagingEmergencyNotifier } from './modules/messaging/adapters/settings.js'
 import { MessagingRuntime, runtimeFor, type LoggerLike } from './modules/messaging/runtime.js'
-import { combineExternalAlerts, sqspCardHints, sqspExternalAlerts, sqspUnmatched } from './modules/payments-sync/db/queries.js'
+import { combineExternalAlerts, sqspCardHints, sqspExternalAlertsWith, sqspUnmatched } from './modules/payments-sync/db/queries.js'
 import { processorCardHints, squareExternalAlerts, squareReconciliation } from './modules/square/db/alerts.js'
-import { configureSquareMessenger } from './modules/square/runtime.js'
+import { squareSendsRefunds } from './modules/square/links.js'
+import { configureSquareMessenger, squareEnv } from './modules/square/runtime.js'
 import { createGatewayFor } from './modules/payments/module.js'
 import { createPaymentMessenger, type PaymentMessenger } from './modules/payments/messenger.js'
 import { defaultPorts as defaultPaymentsPorts, linkHostsFromEnv, type PaymentsPorts } from './modules/payments/ports.js'
@@ -28,7 +29,12 @@ import type { Db } from './platform/db.js'
  * Needs Attention alerts 10-12: unread replies and a down SMS device (messaging), money waiting on its processor (payments-sync), and
  * Square (ADR 0171): payments to match, failed card refunds, invoices overpaid through Square, Square's health.
  */
-export const productionExternalAlerts: ExternalAlertSource = combineExternalAlerts(messagingAlertSource, sqspExternalAlerts, squareExternalAlerts)
+export const productionExternalAlerts: ExternalAlertSource = combineExternalAlerts(
+  messagingAlertSource,
+  // a card refund the Square job sends is not confirmed by hand: its waiting alert offers Review (read at each listing)
+  sqspExternalAlertsWith({ squareSendsRefunds: () => squareSendsRefunds(squareEnv()) }),
+  squareExternalAlerts,
+)
 
 type MessagingDeps = Pick<AppDeps, 'db' | 'clock' | 'env'> & { newId?: NewId }
 

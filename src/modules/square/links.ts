@@ -117,6 +117,14 @@ export function squareProcessor(env: Pick<Env, 'PAYMENT_PROCESSOR'>): boolean {
   return env.PAYMENT_PROCESSOR === 'square'
 }
 
+/**
+ * The job square.refunds.submit sends the card refunds with processor 'square' (the cutover and Square writes on): such a refund is
+ * Square's to settle, never confirmed by hand. Observe-only (or before the cutover) staff still confirm it by hand.
+ */
+export function squareSendsRefunds(env: Pick<Env, 'PAYMENT_PROCESSOR' | 'SQUARE_WRITES_ENABLED'>): boolean {
+  return squareProcessor(env) && squareWritesOn(env)
+}
+
 async function invoiceFor(db: Executor, locationId: string, invoiceId: string) {
   const inv = await db
     .selectFrom('invoices')
