@@ -815,7 +815,7 @@ describe.skipIf(!NGINX)('the website in a real nginx', () => {
     once(home, 'home')
     expect(home.header('content-type')).toEqual(['text/html; charset=utf-8'])
     expect(home.header('cache-control')).toEqual(['no-cache'])
-    expect(home.header('content-security-policy')[0]).toMatch(/^default-src 'none'; script-src 'self';/)
+    expect(home.header('content-security-policy')).toEqual([SQUARE_CSP.production])
     expect(home.header('x-frame-options')).toEqual(['DENY'])
     expect(home.header('referrer-policy')).toEqual(['strict-origin-when-cross-origin'])
     expect(home.header('cross-origin-resource-policy')).toEqual(['same-origin'])

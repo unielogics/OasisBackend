@@ -6,6 +6,7 @@
 // the staff card routes; everything off by default.
 import { sql } from 'kysely'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { Env } from '../../src/config/env.js'
 import type { SquareApi } from '../../src/integrations/ports/square.js'
 import { SquareNetworkError, squareErrorFrom } from '../../src/integrations/square/errors.js'
 import { sqKey } from '../../src/integrations/square/keys.js'
@@ -26,9 +27,15 @@ afterEach(() => configureSquareRuntime({}))
 
 type Json = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
 
-let sq: ReturnType<typeof square>
+type Sim = ReturnType<typeof simFor>
+interface Square {
+  sim: Sim
+  env: Env
+  api: SquareApi
+}
+let sq!: Square
 /** Points the runtime at the test's simulator (the same Square merchant all test long) with these switches and an optional wrapper. */
-function square(vars: Record<string, string> = {}, wrap?: (api: SquareApi) => SquareApi, sim = sq?.sim ?? simFor(m.h.clock)) {
+function square(vars: Record<string, string> = {}, wrap?: (api: SquareApi) => SquareApi, sim: Sim = (sq as Square | undefined)?.sim ?? simFor(m.h.clock)): Square {
   const env = squareEnvFor(vars)
   const api = wrap ? wrap(sim.api) : sim.api
   configureSquareRuntime({ env, api: () => api })

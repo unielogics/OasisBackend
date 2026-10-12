@@ -92,7 +92,10 @@ sudo deploy/scripts/install.sh --domain oasis.example.com --email you@example.co
   root-owned `/var/www/site` with a placeholder release, the site's nginx servers (a port-80 bootstrap until the certificate exists),
   and in certbot mode one certificate for the apex and `www` (a warning, not an error, while their DNS records do not point here yet:
   re-run with the same options once they do). `--site-root`, `--site-tls-cert/--site-tls-key` (with `--tls files`), `--site-csp`
-  and `--site-marker` refine it; they belong to "the same options" every later run repeats.
+  and `--site-marker` refine it; they belong to "the same options" every later run repeats. The default site policy lets in Square's
+  Web Payments SDK, which only the personal link pages load to take a card (ADR 0171 D12; [integrations/square.md](integrations/square.md)
+  section 12.1): production hosts by default, the sandbox's with `--square-env sandbox` (a staging site whose API runs against the
+  sandbox); `--site-csp` replaces the whole policy and cannot be combined with `--square-env`. `Permissions-Policy: payment=()` stays.
 * TLS: `--tls certbot` (default) installs a port-80-only site, obtains a Let's Encrypt certificate with the webroot challenge, then
   installs the full site and a renewal hook that reloads nginx. `--tls files --tls-cert F --tls-key F` uses certificates you supply.
 * **Copy `SECRETS_KEY` (from the seed, before you shred it) into a password manager now.** It decrypts the tablet and Squarespace

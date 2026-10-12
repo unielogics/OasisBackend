@@ -1893,7 +1893,8 @@ matrix's `PUBLIC_ROUTES`; tests in `test/public-links/*.test.ts`.
 | **No cache** | Every answer carries `Cache-Control: no-store` (nginx also replaces whatever the API sends with `no-store`, its own errors included, and caches nothing under the prefix). |
 | **JSON only** | A POST needs `Content-Type: application/json` (415 `UNSUPPORTED_MEDIA_TYPE` otherwise) and a JSON body (`{}` when there is nothing to send). Answers are `application/json` (problems `application/problem+json`) with `X-Content-Type-Options: nosniff` and the API's `Content-Security-Policy: default-src 'none'`; `<`, `>` and `&` inside strings are sent as `<`, `>`, `&` (still the same JSON once parsed), so no answer can be read as markup. |
 | **Origin** | When an `Origin` header is present it must be an allowed origin (`PUBLIC_SITE_URL`, the dashboard's, `ALLOWED_ORIGINS`), on GETs as well as POSTs: 403 `ORIGIN_NOT_ALLOWED` otherwise. No `Origin` (a server-side caller) is allowed. No cookie is read or set. |
-| **Limits** | An IPv6 client counts as one address per /64 (in memory and durable; `platform/ip.ts` `ipLimitKey`). In memory per address per minute: exchange 20, me / availability 60, code confirm and PIN 20, code request, PIN set/reset, bookings, reschedule, membership and pay 10 (429 `RATE_LIMITED`). Durable (`public_rate_limits`, shared by every API process; 429 `PUBLIC_RATE_LIMITED` "Too many requests from this number or device. Try again in N min." with `Retry-After`): exchange 30 / 10 min per address; code requests 10 per address, 3 per page and 5 per number every 10 minutes; code confirms 30 / 10 min per address; PIN entries 30 / 10 min per address and choosing a PIN 10 per page (plus the PIN rules of section 27.2); bookings 10 an hour per address, 5 per link, 5 per number; reschedules 10 an hour per address, 5 per number; membership starts 10 an hour per address, 5 a day per number; pay starts 20 an hour per address, 10 per number. nginx: zone `oasis_public_links`, 60 a minute per address with a burst of 20, bodies up to 4k. |
+| **Limits** | An IPv6 client counts as one address per /64 (in memory and durable; `platform/ip.ts` `ipLimitKey`). In memory per address per minute: exchange 20, me / availability 60, code confirm and PIN 20, code request, PIN set/reset, bookings, reschedule, membership and pay 10 (429 `RATE_LIMITED`). Durable (`public_rate_limits`, shared by every API process; 429 `PUBLIC_RATE_LIMITED` "Too many requests from this number or device. Try again in N min." with `Retry-After`): exchange 30 / 10 min per address; code requests 10 per address, 3 per page and 5 per number every 10 minutes; code confirms 30 / 10 min per address; PIN entries 30 / 10 min per address and choosing a PIN 10 per page (plus the PIN rules of section 27.2); bookings 10 an hour per address, 5 per link, 5 per number; reschedules 10 an hour per address, 5 per number; membership starts 10 an hour per address, 5 a day per number; pay starts 20 an hour per address, 10 per number; saving a card 10 an hour per address, 5 a day per number, 3 per page (and a
+number with 3 declined cards in a day is locked for the day: 429 `CARD_SAVE_LOCKED`). nginx: zone `oasis_public_links`, 60 a minute per address with a burst of 20, bodies up to 4k. |
 | **Dead links and pages** | 401 `IDENTITY_LINK_INVALID` (exchange; `meta.reason` `not_found` \| `expired` \| `used` \| `revoked`) "This link no longer works" and 401 `IDENTITY_SESSION_INVALID` (every other route) "Open the link from our text again." A link or page dies when it expires, is used up, superseded by a newer link of its kind, the number texts STOP (START does not bring it back), the client's PIN or number changes, staff clear the PIN or revoke the trust, the links epoch is bumped (`links.epoch`, the incident switch), or (a payment link) its invoice is paid or voided. Five wrong PINs or codes on a page end it (429 `IDENTITY_SESSION_LOCKED`). |
 | **Wrong purpose** | A page asking for another kind of link's action (a calendar page paying, a payment page booking) is 401 `LINK_WRONG_PURPOSE` "This link is for something else. Text us and we’ll send you the right one." |
 
@@ -1902,11 +1903,11 @@ availability, bookings (1). `verify` (`#/v`, 15 min, single use): verification o
 `pin` (`#/pin`, 15 min): verification and choosing / resetting the PIN (the PIN step uses it up). `membership` (`#/m`, 24 h, the plan
 it was sent for): `membership/start` (3). `pay` (`#/p`, until paid or void, at most 7 days, the invoice it was sent for):
 `pay/start` (3). `card` (`#/k`, 24 h, ADR 0171 D7, migration `20261014500000_square_cards.sql`): saving a card with Square
-(3; the routes are declared, built by wave Q3a). Opening a link uses nothing; the numbers in brackets are its completions.
+(`cards`, 3) and removing one. Opening a link uses nothing; the numbers in brackets are its completions.
 
 **Verified and fresh.** A page is **verified** when its session started inside the number's live 30-day trust, or once a PIN or a
-texted code was entered on it. Bookings and reschedules need verified. Memberships and payments need **fresh**: a PIN or code entered
-on this page in the last 5 minutes (the trust alone is not enough). Both refusals are 403 `IDENTITY_STEP_UP_REQUIRED` "Enter your PIN
+texted code was entered on it. Bookings and reschedules need verified. Memberships, payments and saving or removing a card need **fresh**: a PIN or
+code entered on this page in the last 5 minutes (the trust alone is not enough). Both refusals are 403 `IDENTITY_STEP_UP_REQUIRED` "Enter your PIN
 or a texted code to continue." with `meta.need` `verified` or `fresh`. A PIN outranks a code: once the client has a PIN, a code only
 resets it. **A code proves the number, not the client** (W4c fixes): on a record the stale-record rule holds, a page verified by code
 shows nothing of the client (no name, visits, invoice or PIN window), moves none of their visits (404 `LINK_APPOINTMENT_NOT_FOUND`),
@@ -1930,7 +1931,10 @@ The exchange (with `session` added), `GET me` and every verification step answer
   stepUp: { method: pin | code, freshUntil, canSetPinUntil },
   appointments: [ { ref, start, end, when, service, addons[], status, canReschedule } ] | null,
   invoice: { number, date, items[{name, priceCents}], subtotalCents, taxCents, tipCents, totalCents, paidCents, balanceCents } | null,
-  plan: { tier, planKey, name, monthlyPriceCents, perks[] } | null
+  plan: { tier, planKey, name, monthlyPriceCents, perks[] } | null,
+  cards: [ { id, brand, last4, expMonth, expYear, purposes[] } ] | null,          // ADR 0171 D7, wave Q3a
+  cardSetup: { consent: { version, text, purposes[{key, words}], checkedByDefault: false },
+               square: { applicationId, locationId, environment: sandbox | production, sdkUrl } | null } | null
 }
 ```
 
@@ -1948,6 +1952,12 @@ The exchange (with `session` added), `GET me` and every verification step answer
 * `invoice`: a payment link's invoice (ADR 0170: each item adds `listCents`, `discountBp`, `memberDiscountCents`, `classLabel`, and
   `coverage[{serviceName, coveredCents, lineCents, differenceCents, planClassLabel}]`; amounts in cents; hidden while the stale rule hides the client). `plan`: a membership link's plan
   from the Settings catalog (public label, monthly price, perks).
+* `cards` (wave Q3a): the client's active saved cards with what their live consents allow (`membership_billing`, `no_show_fee`,
+  `late_cancel_fee`, `balance`), newest first; only on a verified card or membership page whose client is proven, null otherwise.
+  `cardSetup`: on card and membership pages while saved cards are on (PAYMENT_PROCESSOR=square), null otherwise: the current consent
+  wording (`text` with `{purposes}` where the ticked purposes go, joined "a, b and c" in `purposes` order; send `version` back as
+  `consentVersion`; the box starts unchecked) and Square's Web Payments SDK settings (no secret; `square` null when Square is not
+  configured). The page loads the SDK from `sdkUrl` only when it shows the card form.
 * All instants are ISO-8601 UTC strings.
 
 ### 28.3 Routes
@@ -1968,14 +1978,17 @@ The exchange (with `session` added), `GET me` and every verification step answer
 | `POST /public/links/pay/start` | `{}` | 200 `{status: "redirect", redirectUrl}`: the payment URL staff attached to the invoice, only https on a `PAYMENT_LINK_HOSTS` host (default squarespace.com, square.link, square.site) with no user, password or port; one completion of the link. With `PAYMENT_PROCESSOR=square` (ADR 0171 D3): a Square link for exactly the current balance, reused while it is active for that amount, else made now in two transactions around the Square call (409 `CONCURRENT_UPDATE` if the balance changed during the call; 422 `PAY_NOTHING_TO_COLLECT`); `link_pending` only when Square does not answer or is watch-only. 200 `{status: "link_pending", redirectUrl: null}`: the invoice has no allowed URL; tell the client the shop will text a payment link (the managers get one `payments.link_requested` notice "Text Maria a payment link", not repeated while unread). Payment pages with a **fresh** step-up; 403 `LINK_PRIVILEGES_HELD`; 409 `IDENTITY_RECORD_UNCONFIRMED` on a stale record proven only by a code. A paid or voided invoice has already ended the page (401 `IDENTITY_SESSION_INVALID`). |
 | `POST /public/links/deposit/start` | `{bookingRef}` | (ADR 0171 D2, `PAYMENT_PROCESSOR=square`) A verified calendar or book-again page pays the deposit of one of its client's upcoming visits (booked or confirmed) whose booking asked for a deposit link (`booking.guest_fee.collect` `link`): 200 `{status: "redirect", redirectUrl, amountCents}` a Square quick-pay link for exactly the deposit (an active one reused); `paid`; `none` (no deposit link owed for that visit, or Squarespace is still the processor); `link_pending` (Square did not answer). 404 for a booking that is not the page client's. Uses no completion of the link. Limits as pay/start. |
 
-**Declared for waves Q3a and Q3b, not built yet** (ADR 0171 D7, D8; `src/modules/public/links/http/card-routes.ts` and
-`subscribe-routes.ts`, marked STUB): `POST /public/links/cards` (body `{sourceId, verificationToken?, consentVersion, purposes[]
-(membership_billing | no_show_fee | late_cancel_fee | balance, at least one), cardholderName?, postalCode?}`, strict), `DELETE
-/public/links/cards/:cardId`, `POST /public/links/membership/subscribe` (body `{email, planClass?, vehicles?, sourceId,
-verificationToken?, consentVersion, cardholderName?, postalCode?}`, strict) and `GET /public/links/membership/status`. They follow
-every rule of 28.1 (closed: the unknown-route 404) and validate their bodies (422); with personal links open they answer 501
-`LINK_ACTION_NOT_READY` "This page can’t do that yet. Text us and we’ll help." and write nothing. Their behaviour, limits and
-answers are specified by the waves that build them.
+**Cards on file (wave Q3a, ADR 0171 D7 and D12; `src/modules/public/links/http/card-routes.ts`).**
+
+| Route | Body | Answer and errors |
+|---|---|---|
+| `POST /public/links/cards` (Idempotency-Key required, the key belongs to the link) | `{sourceId, verificationToken?, consentVersion, purposes[] (membership_billing \| no_show_fee \| late_cancel_fee \| balance, at least one), cardholderName?, postalCode?}` (strict) | 201 `{card: {id, brand, last4, expMonth, expYear, state}, consent: {version, purposes}}`. Card pages with a **fresh** step-up, the client proven (409 `IDENTITY_RECORD_UNCONFIRMED`), no PIN-reset hold (403 `LINK_PRIVILEGES_HELD`); 401 `LINK_WRONG_PURPOSE` on another kind of link. `sourceId` is the Web Payments SDK's one-time token (never stored, never logged). The consent must be the current wording (409 `CARD_CONSENT_OUTDATED` "The card terms were updated. Reload the page, read them and try again.") with at least one purpose ticked (422). The card is saved with Square (CreateCard outside any transaction, key from the link and the token) under the client's Square customer, then the card and the consent (version, SHA-256 and text, time, address, browser, link, page) are stored (audit `card.saved`); one completion of the link per card saved (3); the same key and body replay the stored answer. 422 `CARD_DECLINED` with the reason the client may read in `detail` ("This card number is not valid. Please check it and try again."); after 3 declined cards in a day on the number: 429 `CARD_SAVE_LOCKED` "Too many cards were declined on this number today. Try again tomorrow, or pay at the shop." Limits: 10 an hour per address, 5 a day per number, 3 per page (429 `PUBLIC_RATE_LIMITED`). 501 `LINK_ACTION_NOT_READY` while saved cards are off (PAYMENT_PROCESSOR is not square); 409 `SQUARE_WRITES_OFF`; 503 `SQUARE_UNAVAILABLE`. |
+| `DELETE /public/links/cards/:cardId` | none | 200 `{cardId, state}`: one of the page client's own cards (404 `CARD_NOT_FOUND` otherwise) is disabled at Square (DisableCard first: 503 / 409 change nothing) and its consents revoked (audit `card.disabled`); removing a removed card answers its state. A fresh step-up on a card page. 20 an hour per address. Uses no completion. |
+
+**Declared for wave Q3b, not built yet** (ADR 0171 D8; `subscribe-routes.ts`, marked STUB): `POST /public/links/membership/subscribe`
+(body `{email, planClass?, vehicles?, sourceId, verificationToken?, consentVersion, cardholderName?, postalCode?}`, strict) and `GET
+/public/links/membership/status`. They follow every rule of 28.1 (closed: the unknown-route 404) and validate their bodies (422); with
+personal links open they answer 501 `LINK_ACTION_NOT_READY` "This page can’t do that yet. Text us and we’ll help." and write nothing.
 
 ### 28.4 Flows the website builds
 
@@ -2073,7 +2086,7 @@ Tests: `test/assistant-tools/*.test.ts`, `test/leads/*.test.ts`, the authz matri
 `test/assistant/runtime-e2e.test.ts` runs the tools, the welcome flow, the reply number, the leads and the status texts through the
 real turn, guard and judge (ADR 0160, W3 integration).
 
-## 30. Square (ADR 0171): foundation (wave Q1b) and core (wave Q2b)
+## 30. Square (ADR 0171): foundation (wave Q1b), core (wave Q2b) and cards on file (wave Q3a)
 
 Everything here is off by default (`SQUARE_PROVIDER=sim`: an in-process simulator answers, nothing reaches Square;
 `SQUARE_WRITES_ENABLED=false`: nothing is created or changed at Square; `PAYMENT_PROCESSOR=squarespace`: links, refunds and deposits
@@ -2218,3 +2231,35 @@ No route of its own yet (the link routes are declared in section 28); the servic
   consents revoked (audit `card.disabled`); 404 `CARD_NOT_FOUND` for another client's or location's card; idempotent.
 * Nothing calls them while `PUBLIC_LINKS_ENABLED=false` (the routes are closed) and `SQUARE_WRITES_ENABLED=false` (nothing is created
   at Square).
+
+### 30.11 Cards on file and fees (wave Q3a; `src/modules/square/http/card-routes.ts`)
+
+A saved card is charged only after a staff member confirms (ADR 0171 D7, plan decision 6). Every charge is sent to Square in the
+idempotency `prepare` hook (after the key is claimed, before the command's transaction) and never while the invoice is locked; a replay
+answers the stored result. `ChargeDto`: `{id, purpose: no_show_fee | late_cancel_fee | balance, state: proposed | charging | charged |
+declined | unknown | waived, amountCents, reason, card {id, label "Visa ••4242", brand, last4} | null, invoiceId, appointmentId,
+squarePaymentId, error, declineCode, attempts, proposedBy, decidedBy, decidedAt, chargedAt, waiveReason, createdAt}`.
+
+| Route | Permission | Body | Answer and errors |
+|---|---|---|---|
+| `GET /customers/:id/cards` | cli.view | | `{cards[{id, brand, last4, label, expMonth, expYear, state, createdVia, createdAt, disabledAt, disabledReason, purposes[], consents[{id, version, purposes[], acceptedAt, revokedAt, revokeReason, via: link \| staff}]}], charge}`: active cards first; `charge` true when the "Saved card" tender may be offered (PAYMENT_PROCESSOR=square). |
+| `DELETE /customers/:id/cards/:cardId` | cli.edit | | `{cardId, state, revokedConsents}`: DisableCard at Square first (503 `SQUARE_UNAVAILABLE` / 409 `SQUARE_WRITES_OFF` change nothing), then the card disabled and its consents revoked by staff (audit `card.disabled`). 404 `CARD_NOT_FOUND`. |
+| `POST /customers/:id/card-link` | cli.edit | `{}` | `{sent, reason, linkId, expiresAt}`: a card link (`#/k`, 24 h, 3 cards) texted with `personal_link_card` (the link stored masked); `sent: false` with the reason when the text could not go (opted out, no number). 409 `CARD_LINK_UNAVAILABLE` while PUBLIC_LINKS_ENABLED=false, 409 `CARD_PAYMENTS_OFF` before the cutover. Audited `card.link_sent`. |
+| `GET /invoices/:id/card-charges` | pay.collect or pay.reports | | `{items: ChargeDto[]}`, newest first. |
+| `POST /invoices/:id/card-charges` (Idempotency-Key) | pay.collect | `{cardId, amountCents}` | A balance on a saved card with the client's OK: the card's live consent must cover `balance` (422 `CARD_NOT_USABLE` otherwise, or a removed or expired card), at most the balance (422 `PAY_AMOUNT_INVALID`), one charge at a time per invoice (409 `CARD_CHARGE_IN_PROGRESS`). 201 `{charge, invoice}` charged (a Square `pay`, rule `charge`, ledger reason "Balance"); 202 `{charge (state unknown), invoice}` when Square did not answer (`square.charges.resolve` finishes it; nothing is charged twice); 422 `CARD_DECLINED` (title "Card declined", the plain reason in `detail`, `meta.chargeId`; the charge stays `declined`, the key is released). 409 `CARD_PAYMENTS_OFF`, 409 `SQUARE_WRITES_OFF`, 422 `PAY_NOTHING_TO_COLLECT`. |
+| `GET /appointments/:id/fee-charges` | pay.collect or sched.cancel | | `{items: ChargeDto[]}`: the visit's no-show and late-cancel fees. |
+| `POST /appointments/:id/fee-charges/:chargeId/charge` (Idempotency-Key) | pay.collect | `{cardId?}` | Charges a proposed (or declined: a new attempt, a new key) fee on its card or `cardId` (another of the client's cards whose consent covers that fee). 201 / 202 / 422 `CARD_DECLINED` as above; the payment lands on the visit's canceled invoice (ledger reason "No-show fee" / "Late-cancel fee"; the invoice reads canceled, kept) and the client is texted `card_fee_charged`. 409 `CARD_CHARGE_DECIDED` (charged or waived), 409 `CARD_CHARGE_IN_PROGRESS`, 404 `CARD_CHARGE_NOT_FOUND`, 422 `CARD_NOT_USABLE`. |
+| `POST /appointments/:id/fee-charges/:chargeId/waive` (Idempotency-Key) | pay.collect | `{reason}` | 200 `{charge}` waived (audit `card.fee_waived`, an activity line). 409 `CARD_CHARGE_DECIDED`, 409 `CARD_CHARGE_IN_PROGRESS`, 404. |
+| `GET /settings/card-fees` | set.billing or pay.reports | | `{fees: {enabled, noShowCents, lateCancelCents}, version, active}` (`fees.card_on_file`; off and $0 by default; `active`: enabled and Square the processor). |
+| `PUT /settings/card-fees` | set.billing | `{enabled, noShowCents, lateCancelCents, version}` | The same answer; 412 `VERSION_CONFLICT` on a stale version. Audited `settings.update`. |
+
+**The fee proposal.** With the fees on and Square the processor, a no-show (or a cancel inside the free-cancellation window) proposes,
+never charges, the fee beyond the deposit kept, on the client's newest card whose consent covers that fee (none: nothing proposed; a
+staff refund of the deposit: nothing proposed). The cancel and no-show answers carry it as `settlement.cardFee {chargeId, purpose,
+amountCents, cardLabel}`, the activity log says "No-show fee proposed · $15.00 on Visa ••4242 (charge or waive it)", and reopening the
+visit waives it.
+
+**Jobs.** `square.charges.resolve` (every minute, writes on): charges Square did not answer are asked again within 23 hours (GetPayment,
+or the same CreatePayment with the same key). `square.cards.nightly` (04:20): a card link for each membership card that expires within 30
+days (once per expiry), and the cards of deleted clients disabled at Square. The webhook's `card.*` and `customer.deleted` events keep
+the saved cards in step (ADR 0171, "Cards on file and fees").

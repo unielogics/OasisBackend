@@ -120,6 +120,8 @@ USD and takes cards; the Events API is enabled; our subscription exists, is enab
 | `square.links.sweep` | every minute | Cancels Square links that no longer match what is owed, gives up on pending rows, deletes canceled links at Square (writes on). |
 | `square.deposit-link` | every minute, processor square, writes on | A booking's deposit request becomes a texted quick-pay link. |
 | `square.refunds.submit` | every minute, processor square, writes on | Card refunds through the API: legs planned and sent (section 11.4). |
+| `square.charges.resolve` | every minute, writes on | Saved-card charges Square did not answer: GetPayment, or the same CreatePayment with the same key (section 12.3). |
+| `square.cards.nightly` | nightly 04:20 | Card links for membership cards about to expire; deleted clients' cards disabled at Square (section 12.5). |
 
 With `SQUARE_PROVIDER=sim` (the default) the catch-up and the reconcile do nothing and call nobody; the matcher finds nothing to match;
 the sweep, the deposit links and the refunds find nothing (no Square link or Square refund exists before `PAYMENT_PROCESSOR=square`)
@@ -220,7 +222,7 @@ failed), card auto-update and forget, fail a refund, faults (429, 500, a dropped
 
 ## 10. What comes next
 
-See ADR 0171, "What the later waves add": cards on file and fees (Q3a); memberships on Square (Q3b); the website and dashboard (Q3c,
+See ADR 0171, "What the later waves add": cards on file and fees (Q3a, built: section 12); memberships on Square (Q3b); the website and dashboard (Q3c,
 Q3e); `SQSP_SYNC_MODE` (Squarespace history mode) still to build. Their shared foundation is built (ADR 0171, "The cards
 foundation"): the client's Square customer (`cu_<client id>`, found again by `reference_id` after a crash), saving a card (`cd_<attempt>`)
 with the client's versioned consent, removing it (DisableCard), and the card link kind `card` (`#/k`).
@@ -274,3 +276,69 @@ Production only (`SQUARE_POS_API_ENABLED`, live production, an application id). 
 (`PUBLIC_DASHBOARD_URL/payments/square-callback`) in the Developer Dashboard first. "Open Square POS" writes the staff card entry and an
 intent whose code goes in the payment note (`INV-20640 · OAS-PI-xxxxxx`); the payment is recorded on that entry by the app's callback
 or by the webhook (rule R2).
+
+## 12. Cards on file and fees (wave Q3a)
+
+Everything here needs `PAYMENT_PROCESSOR=square` and `SQUARE_WRITES_ENABLED=true`; the card page also needs
+`PUBLIC_LINKS_ENABLED=true`. With the defaults no card is saved or charged and no fee is proposed.
+
+### 12.1 The card page (`#/k`)
+
+Staff text a card link from the client file (`POST /customers/:id/card-link`, template `personal_link_card`, 24 hours, 3 cards). The
+page needs a fresh PIN or code (5 minutes) and the client proven; it loads Square's Web Payments SDK (the settings come in
+`LinkState.cardSetup`: application id, location id, SDK URL, and the consent wording) and posts the one-time token with the consent
+(`POST /public/links/cards`, Idempotency-Key). Limits: 10 an hour per address, 5 a day per number, 3 per page; 3 declined cards a day
+lock the number for the day (`CARD_SAVE_LOCKED`; card testing). The page lists the client's active cards (`LinkState.cards`) and removes
+one (`DELETE /public/links/cards/:cardId`: DisableCard at Square, consents revoked).
+
+**CSP.** The website's default policy (`install.sh`) lets the SDK in: `script-src`, `style-src` and `frame-src`
+`https://web.squarecdn.com`, `connect-src` `https://web.squarecdn.com https://pci-connect.squareup.com https://o160250.ingest.sentry.io`,
+`font-src` `https://square-fonts-production-f.squarecdn.com https://d1g145x70srn7h.cloudfront.net`. `--square-env sandbox` uses
+`https://sandbox.web.squarecdn.com` and `https://pci-connect.squareupsandbox.com` instead (a staging site against the sandbox).
+`Permissions-Policy: payment=()` stays: cards only (no Apple Pay or Google Pay through the browser). 3-D Secure under
+`Cross-Origin-Opener-Policy: same-origin` is still to confirm with the SDK on a sandbox page (site package).
+
+### 12.2 Consent
+
+The box starts unchecked. The client ticks what the card may be charged for (membership billing, a no-show fee, a late-cancel fee, a
+balance); the wording is versioned (`v1`), and each consent stores the version, the SHA-256 and the text shown, the time, the address,
+the browser, the link and the page. A page that showed an older wording gets 409 `CARD_CONSENT_OUTDATED` (reload). Removing a card
+revokes its consents; nothing is ever deleted.
+
+### 12.3 Charging a saved card
+
+Only after a staff member confirms (plan decision 6):
+
+* **A balance**, with the client's OK: `POST /invoices/:id/card-charges {cardId, amountCents}` (pay.collect). The card's consent must
+  cover `balance`; one charge at a time per invoice; at most the balance.
+* **A fee** the cancel or no-show proposed: `POST /appointments/:id/fee-charges/:chargeId/charge` (pay.collect), or `…/waive` with a
+  reason.
+
+CreatePayment (`source_id` the card, `customer_id` its Square customer, `autocomplete`, `reference_id` the charge id, a note
+`INV-20640 · No-show fee`) is sent in the idempotency `prepare` hook, never while the invoice is locked, with the key `ch_<charge id>`
+(`ch_<charge id:attempt>` for a new attempt after a decline). The payment is recorded through `SquareLedgerOps` (rule `charge`, the
+ledger reason "Balance" / "No-show fee" / "Late-cancel fee", in the name of the staff member who confirmed it). A decline answers 422
+`CARD_DECLINED` with the plain reason and keeps the charge `declined`. No answer leaves it `unknown` (202): `square.charges.resolve`
+asks again within 23 hours (GetPayment when the payment id is known, otherwise the same request with the same key: Square answers the
+payment it made, or makes it once). The webhook of the payment finds the charge by its `reference_id` and records it the same way, so
+whichever comes first records it.
+
+### 12.4 Fees
+
+Setting `fees.card_on_file {enabled, noShowCents, lateCancelCents}` (`GET/PUT /settings/card-fees`, set.billing), off by default. A
+no-show, or a cancel inside the free-cancellation window, proposes the fee BEYOND the deposit kept (a $40 fee with a $25 deposit kept
+proposes $15) on the client's newest card whose consent covers that fee; the cancel and no-show answers carry it as
+`settlement.cardFee`, and an activity line says "No-show fee proposed · $15.00 on Visa ••4242 (charge or waive it)". A staff refund of
+the deposit proposes none. Charged, the fee is a payment on the canceled invoice (status canceled, kept) and the client is texted
+`card_fee_charged` ("Oasis Auto Spa charged $15.00 to your saved Visa ending in 4242 for the no-show fee. ..."). Reopening the visit
+waives an open fee.
+
+### 12.5 Card lifecycle
+
+`card.automatically_updated` / `card.updated`: the new expiry and last 4 are copied onto the card. `card.disabled` / `card.forgotten`
+(also a card Square no longer has): the card is closed and its consents revoked; when it paid a membership the managers get a notice
+and the client a card link ("Your saved Visa ending in 4242 can no longer be charged for your membership. ..."). `customer.deleted`:
+the Square customer's cards are closed and the link removed (the next save makes a new Square customer, with a new key). A card Oasis
+did not save is ignored (it has no consent, so it is never charged). Nightly, a card paying a membership that expires within 30 days
+gets a card link texted (once per expiry), and the cards of a deleted client are disabled at Square.
+

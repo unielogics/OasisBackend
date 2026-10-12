@@ -493,6 +493,8 @@ const dedicated: Record<string, string> = {
   'square.links.sweep': 'test/jobs/matrix-square.test.ts',
   'square.deposit-link': 'test/jobs/matrix-square.test.ts',
   'square.refunds.submit': 'test/jobs/matrix-square.test.ts',
+  'square.charges.resolve': 'test/jobs/matrix-square.test.ts',
+  'square.cards.nightly': 'test/jobs/matrix-square.test.ts',
   'leads.follow_up': 'test/leads/follow-up.test.ts',
   'leads.provisional_archive': 'test/leads/archive.test.ts',
   'ai.respond': 'test/assistant/jobs.test.ts',
