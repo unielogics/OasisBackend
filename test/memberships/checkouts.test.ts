@@ -179,18 +179,17 @@ describe('membership checkouts', () => {
     const o2 = r.store.createOrder({ email: 'bob@example.com', name: 'Bob Legacy', lineItems: [item('MEM-GOLD', 'Gold')] })
     await sync(r)
     const p = await pass(r)
-    expect(p.sync).toMatchObject({ intentsMatched: 0, created: 0 })
-    // Eve's intent is not consumed and her membership gets nothing; the order waits for staff about Bob, as without the intent
+    expect(p.sync).toMatchObject({ intentsMatched: 0, created: 0, awaitingMatch: 0, needsCustomer: 0 })
+    // Eve's intent is not consumed and her membership gets nothing; the order is Bob's renewal: his Squarespace customer already
+    // paid on his record, so it is Bob whatever made the contact link (W4c re-review 3, D1; before it, the order waited for staff)
     const eveMembership = async () => r.db.selectFrom('memberships').selectAll().where('customer_id', '=', eve).execute()
     expect(await eveMembership()).toEqual([
       expect.objectContaining({ id: started.membershipId, status: 'pending', paid_order_count: 0, sqsp_customer_id: null, last_sqsp_order_id: null }),
     ])
     const rows = await checkouts(r)
     expect(rows.find((c) => c.id === started.checkoutId)).toMatchObject({ state: 'open', matched_order_id: null })
-    expect(rows.filter((c) => c.id !== started.checkoutId).map((c) => [c.state, c.customer_id, c.membership_id, c.matched_order_id])).toEqual([
-      ['awaiting_match', bob, bobMembership, await orderRow(r, o2.orderId)],
-    ])
-    expect(await memberOf(r, bob)).toMatchObject({ id: bobMembership, status: 'active', paid_order_count: 1, last_sqsp_order_id: o1.orderId })
+    expect(rows.filter((c) => c.id !== started.checkoutId)).toEqual([])
+    expect(await memberOf(r, bob)).toMatchObject({ id: bobMembership, status: 'active', paid_order_count: 2, last_sqsp_order_id: o2.orderId })
     expect((await loadIntentRefs(r.db, r.locationId)).find((i) => i.id === started.checkoutId)).toMatchObject({ state: 'open', orderId: undefined })
 
     // the state the first fix left (re-verifier probe): Eve's intent matched to Bob's renewal. loadIntentRefs never binds it to
@@ -217,39 +216,48 @@ describe('membership checkouts', () => {
       expect((await pass(r)).sync).toMatchObject({ intentsMatched: 0 })
       expect(await eveMembership()).toEqual([expect.objectContaining({ paid_order_count: 0, status: 'pending', sqsp_customer_id: null, last_sqsp_order_id: null })])
     }
-    // every order waits for staff about Bob; none was ever bound to Eve beyond the forced row
+    // every order is Bob's renewal; none was ever bound to Eve beyond the forced row
     const after = await checkouts(r)
     expect(after.filter((c) => c.customer_id === eve).map((c) => c.state).sort()).toEqual(['matched', 'open'])
-    expect(after.filter((c) => c.customer_id !== eve).every((c) => c.customer_id === bob && c.state === 'awaiting_match')).toBe(true)
-    expect(await memberOf(r, bob)).toMatchObject({ id: bobMembership, paid_order_count: 1 })
+    expect(after.filter((c) => c.customer_id !== eve)).toEqual([])
+    expect(await memberOf(r, bob)).toMatchObject({ id: bobMembership, status: 'active', paid_order_count: 4 })
   })
 
-  it('a member known only by the Squarespace customer on their membership row: another client’s intent naming the order email takes nothing, and the alert says why (F1)', async () => {
-    const r = rig()
-    const { env } = await setup(r)
-    const meg = await makeCustomer(r.db, env, { name: 'Meg Member', email: null, phone: '+12015550144' })
-    const eve = await makeCustomer(r.db, env, { name: 'Eve Taker', email: 'eve@example.com', phone: '+12015550122' })
-    const o1 = r.store.createOrder({ email: 'meg@example.com', name: 'Meg', lineItems: [item('MEM-GOLD', 'Gold')] })
-    await sync(r)
-    const sqMeg = await sqspCustomerOf(r, o1.orderId)
-    await legacyMembership(r, meg, sqMeg, o1.orderId)
-    expect(await r.db.selectFrom('sqsp_customer_links').select('customer_id').execute()).toEqual([])
-    r.advance(30 * D)
-    const started = await transaction(r.db, (tx) =>
-      openCheckoutIntent(tx, dctx(r), { customerId: eve, planKey: 'premium', email: 'meg@example.com' }, SYSTEM),
-    )
-    r.advance(H)
-    const o2 = r.store.createOrder({ email: 'meg@example.com', name: 'Meg', lineItems: [item('MEM-GOLD', 'Gold')] })
-    await sync(r)
-    const p = await pass(r)
-    expect(p.sync).toMatchObject({ intentsMatched: 0, needsCustomer: 1 })
-    expect((await checkouts(r)).find((c) => c.id === started.checkoutId)).toMatchObject({ state: 'open', matched_order_id: null })
-    expect(await memberOf(r, eve)).toMatchObject({ status: 'pending', paid_order_count: 0, sqsp_customer_id: null })
-    const alerts = await openAlerts(r)
-    expect(alerts.map((a) => a.code)).toEqual(['membership_needs_customer'])
-    expect(alerts[0]!.message).toContain('carries the email of a checkout another client started')
-    expect(alerts[0]!.message).toContain(o2.orderId)
-  })
+  for (const paid of [true, false])
+    it(`a member known only by the Squarespace customer on their membership row (${paid ? 'a matched payment reached it' : 'no matched payment on it'}): another client’s intent naming the order email takes nothing (F1)${paid ? '; the order is the member’s (D1)' : ', and the alert says why'}`, async () => {
+      const r = rig()
+      const { env } = await setup(r)
+      const meg = await makeCustomer(r.db, env, { name: 'Meg Member', email: null, phone: '+12015550144' })
+      const eve = await makeCustomer(r.db, env, { name: 'Eve Taker', email: 'eve@example.com', phone: '+12015550122' })
+      const o1 = r.store.createOrder({ email: 'meg@example.com', name: 'Meg', lineItems: [item('MEM-GOLD', 'Gold')] })
+      await sync(r)
+      const sqMeg = await sqspCustomerOf(r, o1.orderId)
+      const megMembership = await legacyMembership(r, meg, sqMeg, o1.orderId)
+      // a row an import named the Squarespace customer on without any payment the sync matched: it links nothing by itself
+      if (!paid) await r.db.updateTable('memberships').set({ last_paid_at: null, paid_order_count: 0 }).where('id', '=', megMembership).execute()
+      expect(await r.db.selectFrom('sqsp_customer_links').select('customer_id').execute()).toEqual([])
+      r.advance(30 * D)
+      const started = await transaction(r.db, (tx) =>
+        openCheckoutIntent(tx, dctx(r), { customerId: eve, planKey: 'premium', email: 'meg@example.com' }, SYSTEM),
+      )
+      r.advance(H)
+      const o2 = r.store.createOrder({ email: 'meg@example.com', name: 'Meg', lineItems: [item('MEM-GOLD', 'Gold')] })
+      await sync(r)
+      const p = await pass(r)
+      expect(p.sync).toMatchObject({ intentsMatched: 0, needsCustomer: paid ? 0 : 1 })
+      expect((await checkouts(r)).find((c) => c.id === started.checkoutId)).toMatchObject({ state: 'open', matched_order_id: null })
+      expect(await memberOf(r, eve)).toMatchObject({ status: 'pending', paid_order_count: 0, sqsp_customer_id: null })
+      const alerts = await openAlerts(r)
+      if (paid) {
+        // the Squarespace customer already paid on Meg's record: her renewal (W4c re-review 3, D1)
+        expect(alerts).toEqual([])
+        expect(await memberOf(r, meg)).toMatchObject({ id: megMembership, status: 'active', paid_order_count: 2, last_sqsp_order_id: o2.orderId })
+        return
+      }
+      expect(alerts.map((a) => a.code)).toEqual(['membership_needs_customer'])
+      expect(alerts[0]!.message).toContain('carries the email of a checkout another client started')
+      expect(alerts[0]!.message).toContain(o2.orderId)
+    })
 
   it('the honest case: a brand-new client’s intent takes the order of a new Squarespace customer, its renewals follow, and a later intent of someone else naming that email takes none (F1)', async () => {
     const r = rig()

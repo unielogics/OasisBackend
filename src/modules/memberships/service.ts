@@ -12,7 +12,7 @@ import type { AuditContext } from '../../platform/audit.js'
 import { AppError } from '../../platform/errors.js'
 import type { NewId } from '../../platform/ids.js'
 import { sql } from 'kysely'
-import { staleRecord, type StaleVerdict } from '../identity/stale.js'
+import { staleRecord, staleWhy, type StaleVerdict } from '../identity/stale.js'
 import { raiseAlert, resolveAlertKeys } from '../payments-sync/db/alerts.js'
 import { orderFromJson } from '../payments-sync/db/codec.js'
 import { normalizeEmail, normalizePhone } from '../payments-sync/identity.js'
@@ -74,6 +74,9 @@ const empty = (): MembershipSyncReport => ({
   creditsGranted: 0,
 })
 
+/** Squarespace payment states of an order whose money was taken (a refund after it included). */
+const PAID_STATES = ['PAID', 'PARTIALLY_PAID', 'REFUND_PENDING', 'REFUNDED', 'REFUND_FAILED']
+
 const SYSTEM_AUDIT: AuditContext = { actor: { name: 'Squarespace sync' } }
 
 function labelFor(inf: MembershipInference, plan: Plan): string {
@@ -104,7 +107,10 @@ async function customerRefs(
         or c.id in (select l.customer_id from sqsp_customer_links l
                     where l.location_id = ${locationId} and l.sqsp_customer_id = any(${sqsp}::text[]))
         or c.id in (select m.customer_id from memberships m
-                    where m.location_id = ${locationId} and m.sqsp_customer_id = any(${sqsp}::text[])))`.execute(
+                    where m.location_id = ${locationId} and m.sqsp_customer_id = any(${sqsp}::text[]))
+        or c.id in (select o.customer_id from sqsp_orders o
+                    where o.location_id = ${locationId} and o.customer_id is not null and o.sqsp_customer_id = any(${sqsp}::text[])
+                      and o.payment_state = any(${PAID_STATES}::text[])))`.execute(
     db,
   )
   if (rows.rows.length === 0) return []
@@ -120,7 +126,7 @@ async function customerRefs(
     .execute()
   const held = await db
     .selectFrom('memberships')
-    .select(['customer_id', 'sqsp_customer_id'])
+    .select(['customer_id', 'sqsp_customer_id', 'last_paid_at'])
     .where('location_id', '=', locationId)
     .where('sqsp_customer_id', 'is not', null)
     .where(
@@ -129,11 +135,32 @@ async function customerRefs(
       rows.rows.map((r) => r.id),
     )
     .execute()
+  // A Squarespace customer that already PAID on the client's record (W4c re-review 3, D1): the one on a membership row of theirs that
+  // a matched payment reached, or on a paid order already linked to them. It is that client: its orders link to them whatever the
+  // record's staleness and whatever made the contact link (phone, an email verified or not). A NEW Squarespace customer never paid
+  // on the record, so the stale rule below still keeps it off a recycled number's old record.
+  const paidOrders = await db
+    .selectFrom('sqsp_orders')
+    .select(['customer_id', 'sqsp_customer_id'])
+    .where('location_id', '=', locationId)
+    .where('sqsp_customer_id', 'is not', null)
+    .where('payment_state', 'in', PAID_STATES)
+    .where(
+      'customer_id',
+      'in',
+      rows.rows.map((r) => r.id),
+    )
+    .execute()
+  const paidBy = (customerId: string): string[] => [
+    ...held.filter((m) => m.customer_id === customerId && m.last_paid_at !== null).map((m) => m.sqsp_customer_id!),
+    ...paidOrders.filter((o) => o.customer_id === customerId).map((o) => o.sqsp_customer_id!),
+  ]
   // The stale-record rule (identity/stale.ts, W4c re-review 2 N1): numbers are recycled, so the phone of a record the rule holds
   // links no order placed since it went stale (and neither does its unverified email): its new holder paying with it is not that
-  // client. Nor does a Squarespace contact the contacts job linked BY that phone after the record went stale; one linked while it
-  // was the client's (a real member's renewals), a staff link and a verified email still link, and so does every order placed
-  // before the record went stale (a lapsed member's own history).
+  // client. Nor does a Squarespace contact the contacts job linked BY that phone after the record went stale (unless that
+  // Squarespace customer already paid on the record, above); one linked while it was the client's (a real member's renewals), a
+  // staff link and a verified email still link, and so does every order placed before the record went stale (a lapsed member's own
+  // history).
   const verdicts = new Map<string, StaleVerdict>()
   for (const r of rows.rows)
     if (r.phone_e164) verdicts.set(r.id, await staleRecord(db, { locationId, customerId: r.id, phone: r.phone_e164, now }))
@@ -152,13 +179,19 @@ async function customerRefs(
     unverifiedEmails: r.email && !r.email_verified ? [r.email] : [],
     phones: r.phone_e164 ? [r.phone_e164] : [],
     staleSince: staleSinceOf(verdicts.get(r.id)),
-    sqspCustomerIds: links
-      .filter((l) => l.customer_id === r.id && (l.source !== 'email' || r.email_verified) && !linkedWhileStale(l))
-      .map((l) => l.sqsp_customer_id),
+    sqspCustomerIds: [
+      ...new Set([
+        ...links
+          .filter((l) => l.customer_id === r.id && (l.source !== 'email' || r.email_verified) && !linkedWhileStale(l))
+          .map((l) => l.sqsp_customer_id),
+        ...paidBy(r.id),
+      ]),
+    ],
     heldSqspCustomerIds: [
       ...new Set([
         ...links.filter((l) => l.customer_id === r.id).map((l) => l.sqsp_customer_id),
         ...held.filter((m) => m.customer_id === r.id).map((m) => m.sqsp_customer_id!),
+        ...paidBy(r.id),
       ]),
     ],
   }))
@@ -542,6 +575,8 @@ export async function patchMembership(
       errors: [{ path: 'planKey', message: 'That plan is not set up' }],
     })
   const status = p.status ?? cur.status
+  // setting a membership live (active, past due or paused) stamps a staff action, proof of the client: not on a stale record (D3)
+  if (status === 'active' || status === 'past_due' || status === 'paused') await requireConfirmedClient(tx, d, cur.customer_id)
   let start = cur.current_period_start
   let end = cur.current_period_end
   if (p.renewsAt) {
@@ -601,6 +636,23 @@ export interface NewManualMembership {
   startedAt?: Date
 }
 
+/**
+ * A staff membership is a staff action, and a staff action is proof of the client (identity/stale.ts): on a record the stale-record
+ * rule holds it would hand the old client's record to whoever holds the number now (a website join with that number asks staff to
+ * add the membership). So staff confirm the client first (POST /customers/:id/identity/confirm, audited), which ends the rule; until
+ * then 409 MEMBERSHIP_CLIENT_UNCONFIRMED (W4c re-review 3, D3).
+ */
+async function requireConfirmedClient(tx: Tx, d: { locationId: string; clock: Clock }, customerId: string): Promise<void> {
+  const c = await tx.selectFrom('customers').select('phone_e164').where('id', '=', customerId).executeTakeFirst()
+  if (!c?.phone_e164) return
+  const now = d.clock.now()
+  const v = await staleRecord(tx, { locationId: d.locationId, customerId, phone: c.phone_e164, now })
+  if (v.stale) {
+    const why = staleWhy(v, now)
+    throw new AppError('MEMBERSHIP_CLIENT_UNCONFIRMED', { params: { why: why.charAt(0).toUpperCase() + why.slice(1) } })
+  }
+}
+
 /** A member added by hand (no Squarespace subscription data): active, cycle credits granted, held against the inference. */
 export async function createManualMembership(
   tx: Tx,
@@ -630,6 +682,7 @@ export async function createManualMembership(
     .where('status', 'in', ['pending', 'active', 'past_due', 'paused'])
     .executeTakeFirst()
   if (live) throw new AppError('MEMBERSHIP_EXISTS')
+  await requireConfirmedClient(tx, d, input.customerId)
   const now = d.clock.now()
   const end = input.renewsAt ?? addMonths(now, plan.billingIntervalMonths)
   const start = addMonths(end, -plan.billingIntervalMonths)

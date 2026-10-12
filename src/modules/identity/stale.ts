@@ -6,13 +6,21 @@
 // setting a membership) or a membership payment matched to them, each from its own time. A party that verified only the number on a stale record books as a new client
 // (identity/rebind.ts). Texts FROM the number are never activity: whoever holds a recycled number texts from it too, and the
 // webhook stores that text before the assistant asks for the verdict, so counting it would clear the rule at the very moment it
-// exists for.
+// exists for. A paid-up member is never held for inactivity (W4c re-review 3, D2): a membership paid through Squarespace whose paid
+// period covers now (plus 14 days of grace) is current proof of the client, so a yearly member who never comes in stays known; a
+// lapsed one counts from their last payment. A bounce as an invalid number still holds a paid-up member's record: the number itself
+// is gone, and carriers hand it to someone else.
 import { sql } from 'kysely'
 import type { Executor } from '../../platform/db.js'
 import { isTransientReason } from '../messaging/dispatch/retry.js'
 import './schema.js'
 
 export const STALE_AFTER_DAYS = 180
+/**
+ * A membership paid through Squarespace whose paid period (its current_period_end, or the plan's period after its last payment)
+ * ended less than this long ago is paid up: current proof of the client (W4c re-review 3, D2).
+ */
+export const PAID_UP_GRACE_DAYS = 14
 const DAY_MS = 86_400_000
 
 /** A delivery failure that says the number itself is wrong (not a transient radio or network failure). */
@@ -26,7 +34,7 @@ export function isInvalidNumberError(error: string | null | undefined): boolean 
 export interface StaleVerdict {
   stale: boolean
   reason: 'inactive' | 'invalid_number' | null
-  /** The newest proof of the client: the record's creation, their PIN, a staff action, a membership payment (see staleRecord). */
+  /** The newest proof of the client: the record's creation, their PIN, a staff action, a membership payment, now for a paid-up member (see staleRecord). */
   lastActivityAt: Date
   /**
    * Since when the rule has held the record (stale only): 180 days after its newest proof, or the invalid-number bounce. Something
@@ -47,7 +55,10 @@ export const STAFF_APPOINTMENT_SOURCES = ['dashboard', 'walk_in', 'phone', 'stan
  * counting from the wash (owner decision, W4c re-review: the crew served the client in person); a membership payment matched to this
  * client (memberships.last_paid_at, whatever the membership's status now) or staff setting a membership live or paused
  * (manual_status_at of an active, past_due or paused row: a checkout the system canceled is no proof), each counting from its own
- * time: a membership that is merely still live proves nothing new (W4c re-review R3). Never a texted code, a link or website
+ * time: a membership that is merely still live proves nothing new (W4c re-review R3), except a PAID-UP one (W4c re-review 3, D2): a
+ * live (active, past_due or paused) membership with a matched payment whose paid period (current_period_end, else the plan's
+ * billing interval after last_paid_at) ended less than PAID_UP_GRACE_DAYS ago counts as proof now; a lapsed one counts from its
+ * last_paid_at as before, and a hand-made one (no matched payment) from its staff action. Never a texted code, a link or website
  * booking by itself, or a text from the number. The invalid-number rule: the number's newest final
  * outbound text failed as an invalid number after the record's newest proof (its creation included).
  */
@@ -67,8 +78,14 @@ export async function staleRecord(
       greatest(c.identity_confirmed_at,
         (select max(t.verified_at) from phone_trust t where t.location_id = ${o.locationId} and t.phone_e164 = ${o.phone}
           and t.customer_id = c.id and t.verified_by = 'pin')) as proof,
-      (select max(greatest(m.last_paid_at, case when m.status in ('active', 'past_due', 'paused') then m.manual_status_at end))
-        from memberships m where m.customer_id = c.id) as member
+      (select max(greatest(
+          case when m.status in ('active', 'past_due', 'paused') and m.last_paid_at is not null
+                and coalesce(m.current_period_end, m.last_paid_at + make_interval(months => p.billing_interval_months))
+                  + make_interval(days => ${PAID_UP_GRACE_DAYS}::int) >= ${o.now}::timestamptz
+            then ${o.now}::timestamptz end,
+          m.last_paid_at,
+          case when m.status in ('active', 'past_due', 'paused') then m.manual_status_at end))
+        from memberships m join membership_plans p on p.id = m.plan_id where m.customer_id = c.id) as member
     from customers c where c.id = ${o.customerId}`.execute(db)
   const row = r.rows[0]
   if (!row) return { stale: true, reason: 'inactive', lastActivityAt: new Date(0), staleSince: new Date(0) }
@@ -94,4 +111,13 @@ export async function staleRecord(
   if (o.now.getTime() - last.getTime() >= STALE_AFTER_DAYS * DAY_MS)
     return { stale: true, reason: 'inactive', lastActivityAt: last, staleSince: new Date(last.getTime() + STALE_AFTER_DAYS * DAY_MS) }
   return { stale: false, reason: null, lastActivityAt: last }
+}
+
+/**
+ * What staff are told about a stale record (W4c re-review 3, D3), for a notice or a refusal: "this number's record has been quiet
+ * for N days" or "this number's last text bounced as an invalid number".
+ */
+export function staleWhy(v: StaleVerdict, now: Date): string {
+  if (v.reason === 'invalid_number') return "this number's last text bounced as an invalid number"
+  return `this number's record has been quiet for ${Math.floor((now.getTime() - v.lastActivityAt.getTime()) / DAY_MS)} days`
 }

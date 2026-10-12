@@ -97,6 +97,21 @@ describe('joining with the number of an existing customer', () => {
     // a token for another number is refused
     expect(json(await join(joinBody({ memberToken, phone: PHONES.extra })))).toMatchObject({ status: 422, code: 'PUBLIC_TOKEN_PHONE_MISMATCH' })
   })
+
+  it('without a code, for the number of a STALE record: staff are told the joiner may be a new holder of the number (W4c re-review 3, D3)', async () => {
+    const id = await existingCustomer(PHONES.extra)
+    await sql`update customers set created_at = ${new Date(h.clock.now().getTime() - 200 * 86_400_000)} where id = ${id}`.execute(h.db)
+    const r = await join(joinBody({ phone: PHONES.extra, name: 'Nora Newholder', email: 'nora@example.test' }))
+    expect(r.statusCode, r.body).toBe(201)
+    expect(await h.db.selectFrom('memberships').select('id').execute()).toEqual([])
+    const [n] = await notifications()
+    expect(n!.kind).toBe('membership.web_join')
+    expect(n!.body).toContain(
+      "this number's record has been quiet for 200 days — the texter may be a new holder of the number: confirm who they are before adding a membership; if they are new, create a new client",
+    )
+    expect(n!.body).not.toContain('add the Gold membership on their record')
+    expect(n!.body).toContain('Nora Newholder')
+  })
 })
 
 describe('joining on the website', () => {

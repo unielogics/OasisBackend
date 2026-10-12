@@ -25,7 +25,8 @@ import type { ProductMap, ResolvedProduct, Tier } from './product-map.js'
  * client typed: an order matching it alone but carrying another phone or name than the client's waits for staff too
  * ('intent_mismatch', awaiting_match; W4c fixes). A STALE record (identity/stale.ts: numbers are recycled) is no match by its phone or by
  * an email nobody verified: the order names it for staff ('stale_record', "needs a customer") and links nobody (W4c re-review 2,
- * N1); its Squarespace links made while it was not stale (memberships/service.ts) and a verified email still link.
+ * N1); its Squarespace links made while it was not stale (memberships/service.ts), a Squarespace customer that already paid on it
+ * (W4c re-review 3, D1) and a verified email still link.
  */
 export interface MembershipConfig {
   /** Days after period end during which the member is still active (Squarespace retries failed renewals). Default 7. */
@@ -48,7 +49,12 @@ export interface CustomerRef {
   /** Emails on file that nobody verified: they never link, but an order matching only one of them waits for staff. */
   unverifiedEmails?: string[]
   phones: string[]
-  /** Squarespace customer ids that LINK an order to the client (a link the contacts job made by an unverified email excluded). */
+  /**
+   * Squarespace customer ids that LINK an order to the client, whatever the record's staleness: their links (one the contacts job
+   * made by an unverified email, or by phone after the record went stale, excluded) and every Squarespace customer that already PAID
+   * on the record (on a membership row a matched payment reached, or on a paid order linked to them: W4c re-review 3, D1), whatever
+   * made its contact link.
+   */
   sqspCustomerIds?: string[]
   /**
    * Every Squarespace customer id tied to the client, whatever made the tie: sqsp_customer_links of any source (one made by an

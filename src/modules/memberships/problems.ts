@@ -42,6 +42,13 @@ registerProblems({
     title: 'Appointment closed',
     detail: 'A canceled or no-show appointment cannot take a credit',
   },
+  // a staff membership on a record the stale-record rule holds (W4c re-review 3, D3): staff confirm the client first
+  MEMBERSHIP_CLIENT_UNCONFIRMED: {
+    status: 409,
+    title: 'Confirm who this client is first',
+    detail:
+      '{why}: whoever has the number now may be a new holder of it. Confirm who they are before adding a membership or setting one live (then confirm the number on their record); if they are new, create a new client.',
+  },
   MEMBERSHIP_EXISTS: {
     status: 409,
     title: 'Already a member',

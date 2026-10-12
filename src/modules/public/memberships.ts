@@ -10,7 +10,7 @@ import { formatPhoneDisplay } from '../../platform/phone.js'
 import { findCustomerByPhone, updateCustomer, upsertCustomerByPhone, upsertVehicleByPlate, type CustomerRecord } from '../customers/service.js'
 import { hasPin } from '../identity/common.js'
 import { reassignNumber } from '../identity/rebind.js'
-import { staleRecord } from '../identity/stale.js'
+import { staleRecord, staleWhy } from '../identity/stale.js'
 import { ensurePlans, loadPlans, planByKey } from '../memberships/plans.js'
 import { notifyManagers } from '../messaging/notify.js'
 import { raiseAlert } from '../payments-sync/db/alerts.js'
@@ -273,7 +273,13 @@ async function unverifiedJoin(
     `vehicles ${input.vehicles.map((v) => `"${v.car.trim()}${v.plate ? ` (${v.plate.trim()})` : ''}"`).join(', ')}`,
     `texts ${input.smsConsent ? 'yes' : 'no'}`,
   ].join(', ')
-  const next = live
+  // On a record the stale-record rule holds, the joiner may be a new holder of the number: a membership added on that record would
+  // hand it to them (and staff adding one is refused until they confirm the client: W4c re-review 3, D3).
+  const now = clock.now()
+  const verdict = existing.phoneE164 ? await staleRecord(tx, { locationId: loc.id, customerId: existing.id, phone: existing.phoneE164, now }) : undefined
+  const next = verdict?.stale
+    ? `Careful: ${staleWhy(verdict, now)} — the texter may be a new holder of the number: confirm who they are before adding a membership; if they are new, create a new client.`
+    : live
     ? `They already have a ${live.plan_label} membership (${live.status.replace('_', ' ')}): check with them before changing anything.`
     : `Call or text them to confirm; if they did join, add the ${spec.label} membership on their record and text them the Squarespace checkout link${product ? ` for "${product.name ?? product.sku ?? product.productId}"` : ''}.`
   await audit.record(tx, {
@@ -281,7 +287,7 @@ async function unverifiedJoin(
     action: 'membership.web_join_unverified',
     entityType: 'customer',
     entityId: existing.id,
-    after: { tier: spec.key, ref, liveMembership: live !== undefined },
+    after: { tier: spec.key, ref, liveMembership: live !== undefined, staleRecord: verdict?.stale === true },
     ctx: { actor: { name: 'Website' }, requestId: r.requestId, idempotencyKey: r.idempotencyKey ?? null, ip: r.ip },
   })
   await notifyManagers(

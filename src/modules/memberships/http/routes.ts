@@ -259,7 +259,7 @@ export function registerMembershipRoutes(app: AppInstance): void {
         tags: [TAG],
         summary: 'Add a member by hand (when there is no Squarespace subscription data)',
         description:
-          'Creates an active manual membership with this cycle’s credits. It holds against the Squarespace inference until a newer paid subscription order arrives.',
+          'Creates an active manual membership with this cycle’s credits. It holds against the Squarespace inference until a newer paid subscription order arrives. On a record the stale-record rule holds (180 days without proof of the client, or a bounce as an invalid number: whoever has the number now may be a new holder of it) 409 `MEMBERSHIP_CLIENT_UNCONFIRMED`: staff confirm the client first (`POST /customers/:id/identity/confirm`), or create a new client.',
         body: CreateBody,
         response: { 201: MembershipResult },
       },
@@ -296,7 +296,7 @@ export function registerMembershipRoutes(app: AppInstance): void {
         tags: [TAG],
         summary: 'Manual override of a membership’s status, tier, renewal date or auto-apply flag',
         description:
-          'For when the Squarespace subscription data is missing or wrong. The edit holds against the inference until a newer paid order arrives; a tier change starts the new plan’s credits for the current cycle. Audited.',
+          'For when the Squarespace subscription data is missing or wrong. The edit holds against the inference until a newer paid order arrives; a tier change starts the new plan’s credits for the current cycle. Audited. An edit that leaves the membership active, past due or paused on a record the stale-record rule holds: 409 `MEMBERSHIP_CLIENT_UNCONFIRMED` (confirm the client first, `POST /customers/:id/identity/confirm`); canceling is allowed.',
         params: IdParams,
         body: PatchBody,
         response: { 200: MembershipResult },
