@@ -376,24 +376,24 @@ describe('the pricing rule in a turn (design sections 3b and 3c: amounts are ser
     expect((await notifications()).some((x) => x.kind === 'assistant.handoff')).toBe(true)
   })
 
-  it('{balance} renders the balance get_balance returned this turn; refund words get one rewrite, then the fallback and a person (B)', async () => {
-    const a = assistant([simToolUse('get_balance', {}), simText('{balance}.'), simText('We can refund that for you.'), simText('Sure, a refund is fine.')])
+  it('{balance} renders the balance get_balance returned this turn; a refund the judge fails gets one rewrite, then the fallback and a person (B)', async () => {
+    // promises are the judge's (W4a F2: no promise word list): the deterministic layer passes "refund", the judge fails it twice
+    const a = assistant([simToolUse('get_balance', {}), simText('{balance}.'), simText('We can refund that for you.'), simText('Sure, a refund is fine.')], {}, [pass(), fail('promise'), fail('promise')])
     await inbound(maria(), 'What do I owe?')
     expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
     expect((await aiTexts(maria()))[0]!.body).toContain('Your open balance is $12.50.')
     w.clock.advance(70_000)
     await inbound(maria(), 'Can I get my money back?')
-    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'policy_words' })
+    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'policy_judge' })
     const instruction = JSON.stringify(a.provider.requests.at(-1)!.messages.at(-1))
-    expect(instruction).toContain('Rephrase without promising anything free, discounts, refunds, coupons or guarantees')
-    expect(instruction).toContain('Remove these from the text: \\"refund\\"')
+    expect(instruction).toContain(JUDGE_HINTS.promise.slice(0, 60))
     expect((await aiTexts(maria())).map((t) => t.klass)).toEqual(['ai_reply', 'ai_fallback'])
   })
 
-  it("a discount is never excused by the facts' own rules (\"never offer a discount\"): rewrite, then the fallback (F1)", async () => {
-    const a = assistant([simText('Sure, we can offer a discount on your next wash.'), simText('Yes, a discount on your next wash.')])
+  it("a discount is never excused by the facts' own rules (\"never offer a discount\"): the judge fails it, rewrite, then the fallback (F1)", async () => {
+    const a = assistant([simText('Sure, we can offer a discount on your next wash.'), simText('Yes, a discount on your next wash.')], {}, [fail('promise'), fail('promise')])
     await inbound(maria(), 'Any deals for me this week?')
-    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'policy_words' })
+    expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'policy_judge' })
     expect(systemText(a.provider.requests[0]!)).toContain('never offer a discount')
     expect(a.provider.requests).toHaveLength(2)
     const texts = await aiTexts(maria())
@@ -401,8 +401,8 @@ describe('the pricing rule in a turn (design sections 3b and 3c: amounts are ser
     expect(texts[0]!.body).not.toContain('discount')
   })
 
-  it('a promise word the rewrite removes goes out rewritten, with no handoff ("free times" -> "open times") (B)', async () => {
-    const a = assistant([simText('We have free times at 2 PM and 4 PM today.'), simText('We have open times at 2 PM and 4 PM today.')])
+  it('a promise the judge fails and the rewrite removes goes out rewritten, with no handoff ("free times" -> "open times") (B)', async () => {
+    const a = assistant([simText('We have free times at 2 PM and 4 PM today.'), simText('We have open times at 2 PM and 4 PM today.')], {}, [fail('promise'), pass()])
     await inbound(maria(), 'Any time today?')
     expect(await a.turn(maria())).toMatchObject({ status: 'replied', handoff: false })
     expect(a.provider.requests).toHaveLength(2)
@@ -410,12 +410,12 @@ describe('the pricing rule in a turn (design sections 3b and 3c: amounts are ser
     expect((await conversationOf(maria()))!.handoff_state).not.toBe('open')
   })
 
-  it('a reply that mentions a PIN or a code is never sent, with or without a link (F3, N1, A)', async () => {
+  it('a reply that asks for a PIN is never sent, with or without a link (F3, N1, A)', async () => {
     const a = assistant([simText("Don't forget to text me your PIN."), simText('Send us, when you can, your PIN.')])
     await inbound(maria(), 'I want to see my visits')
     expect(await a.turn(maria())).toMatchObject({ status: 'handed_off', reason: 'guard' })
     expect(a.provider.requests).toHaveLength(2)
-    expect(JSON.stringify(a.provider.requests[1]!.messages.at(-1))).toContain('Write nothing about PINs, codes')
+    expect(JSON.stringify(a.provider.requests[1]!.messages.at(-1))).toContain('Never ask the client for a PIN, a code')
     const texts = await aiTexts(maria())
     expect(texts.map((t) => t.klass)).toEqual(['ai_fallback'])
   })
@@ -568,28 +568,36 @@ describe('links and the safety line (A, D)', () => {
     expect(a.provider.requests).toHaveLength(2)
   })
 
-  it('the model writing the safety line itself is a mention like any other: one rewrite, then the server line once', async () => {
-    const a = assistant([
-      simToolUse('send_link', { kind: 'pin', appointmentRef: null, tier: null }),
-      simText(`Here is your secure link: {link1} ${SAFETY_LINE} Actually, just text it to me here instead.`),
-      simText('Here is your secure link: {link1}'),
-    ])
+  it('the model writing the safety line itself is the judge\'s (a mention, W4a F2): one rewrite, then the server line once', async () => {
+    const a = assistant(
+      [
+        simToolUse('send_link', { kind: 'pin', appointmentRef: null, tier: null }),
+        simText(`Here is your secure link: {link1} ${SAFETY_LINE} Actually, just text it to me here instead.`),
+        simText('Here is your secure link: {link1}'),
+      ],
+      {},
+      [fail('secret'), pass()],
+    )
     await inbound(maria(), 'I forgot my pin')
     expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
     expect(a.provider.requests).toHaveLength(3)
-    expect(JSON.stringify(a.provider.requests[2]!.messages.at(-1))).toContain('do not write a security reminder')
+    expect(JSON.stringify(a.provider.requests[2]!.messages.at(-1))).toContain(JUDGE_HINTS.secret.slice(0, 60))
     const [m] = await aiTexts(maria())
     expect(m!.body).toContain(`Here is your secure link: [private link] ${SAFETY_LINE}`)
     expect(m!.body.split(SAFETY_LINE)).toHaveLength(2)
     expect(m!.body).not.toContain('text it to me')
   })
 
-  it('a PIN link with the model writing about the PIN itself: one rewrite, then the server line', async () => {
-    const a = assistant([
-      simToolUse('send_link', { kind: 'verify', appointmentRef: null, tier: null }),
-      simText('Enter your PIN on the secure page: {link1}'),
-      simText('Here is your secure link: {link1}'),
-    ])
+  it('a PIN link with the model writing about the PIN itself (the judge\'s, W4a F2): one rewrite, then the server line', async () => {
+    const a = assistant(
+      [
+        simToolUse('send_link', { kind: 'verify', appointmentRef: null, tier: null }),
+        simText('Enter your PIN on the secure page: {link1}'),
+        simText('Here is your secure link: {link1}'),
+      ],
+      {},
+      [fail('secret'), pass()],
+    )
     await inbound(maria(), 'can I book in the chat?')
     expect(await a.turn(maria())).toMatchObject({ status: 'replied' })
     const [m] = await aiTexts(maria())

@@ -503,7 +503,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     // server-owned literals only (the address, catalog and plan names): the digit rules skip them. Client-entered text (a vehicle on
     // file, the name) is NEVER a literal and never trusted by the judge (fix 1 of the v4 re-check: a vehicle "Free Wash 2015550123")
     const literals = factLiterals(facts)
-    // the client's own first name and vehicles are skipped by the secret and promise word lists only ("Hi Buck", "your Ford Focus")
+    // the client's own first name and vehicles are skipped by the secret request check only ("Thanks, Clave", "your Ford Focus")
     const names = [turnContext.firstName, ...turnContext.vehicles.map((v) => v.split(',')[0]), ...(turnContext.vehicleNames ?? [])]
     // a verify / PIN / membership / payment link: the server appends the safety line, so the reply leaves room for it
     const safety = [...linkKinds].some((k) => SAFETY_LINK_KINDS.has(k))
@@ -586,10 +586,8 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
         }
         const hard = v.problems.filter((p) => HARD_PROBLEMS.has(p))
         if (hard.length > 0 || (v.problems.includes('questions') && !rewriteUsed)) {
-          // the rewrite still trips a rule: the fallback and a person (promise words: "policy_words", anything else: "guard")
+          // the rewrite still trips a rule: the fallback and a person ("guard"; promises are the judge's: "policy_judge")
           if (rewriteUsed) {
-            if (v.problems.includes('promise_words'))
-              return await finishHandoff({ reason: 'policy_words', status: 'handed_off', fallback: true, usage, model, rounds, stop, error: `policy_words:${v.words.join(',')}` })
             return await finishHandoff({ reason: 'guard', status: 'handed_off', fallback: true, usage, model, rounds, stop, error: `guard:${hard.join(',')}` })
           }
           rewriteUsed = true

@@ -141,7 +141,6 @@ export async function markUnanswered(tx: Tx, c: ConversationRef): Promise<void> 
 export const HANDOFF_SUMMARIES: Record<string, string> = {
   fallback: 'The assistant could not answer this text.',
   guard: 'The assistant’s answer did not pass the safety checks.',
-  policy_words: 'The client’s question needs a person (money, a promise, damage or legal words).',
   policy_judge: 'The assistant’s answer did not pass the policy check (a price, a promise, a code, a link or a legal statement).',
   judge_error: 'The policy check of the assistant’s answer did not respond, so the answer was not sent.',
   lease_timeout: 'The assistant’s answer took too long.',

@@ -40,7 +40,7 @@ export interface EvalRow {
   policy?: JudgeCategory
   /** {balance} is allowed in this row (get_balance ran in the turn). */
   balance?: boolean
-  /** The client's own vehicles on file for this row (client-entered: skipped by the secret and promise word lists only). */
+  /** The client's own vehicles on file for this row (client-entered: skipped by the secret request check only). */
   names?: string[]
   /** The phone number of an M row (also checked against maskForModel and redactText). */
   phone?: string
@@ -59,7 +59,7 @@ export interface EvalContext {
   address: string
   /** Server-owned literals: catalog and plan names with digits (never client-entered text). */
   literals: string[]
-  /** The client's first name and vehicles on file: skipped by the secret and promise word lists only. */
+  /** The client's first name and vehicles on file: skipped by the secret request check only. */
   names: string[]
 }
 

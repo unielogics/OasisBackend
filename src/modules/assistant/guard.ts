@@ -30,16 +30,17 @@
 //       - `url`: anything host-shaped (v3's host skeleton: "[.]", " dot ", spaced letters, "name,com"; now also "period com",
 //         "point com", "punto com", "-dot-", ";com", " : com", "<word> com slash"), an IP, http/hxxp/www/"://"; only {linkN} and the
 //         shop's own host as plain text (no path, not even after a space) pass;
-//       - `secret` and `promise_words`: short lists of UNAMBIGUOUS words in English and Spanish (pin, passcode, password, OTP, CVV,
-//         card number...; English "code" only in its secret senses: "the/your/a/that/this/what code", "the code we sent", "a
-//         verification/security/confirmation/one-time/reply code", "enter codes", codes next to "secure page" or "by text"; English
-//         "digit(s)" only as "6-digit code/number", "the digits we texted", "digits on your card"; so "promo code", "ZIP code",
-//         "dress code", "area code" and "the last digits of your plate" pass here and the judge reads them; free (not "feel free" or
-//         a non-money "-free" compound), discount, refund, coupon, guarantee, warranty, complimentary, on the house, % off; código,
-//         contraseña, clave, gratis, gratuito, descuento, reembolso, garantía; no phrase that ordinary replies use: no deal, on us,
-//         one-time, sue, legal or time words), matched on the plain text and a skeleton (accents stripped, look-alikes mapped,
-//         spaced-out letters joined). The client's own first name and vehicles are skipped by THESE TWO LISTS ONLY ("Hi Buck",
-//         "Thanks, Sue", "your Ford Focus"): never by the money, digit or host rules, and never trusted by the judge.
+//       - `secret`: only an unambiguous REQUEST for an account or card secret (W4a fix F2): a request verb (send, reply, text,
+//         tell, type, give, share, read, provide, confirm; envía, manda, dime, dame, escribe, responde...), "what is your", "cuál es
+//         tu" or "need your", then, in the same clause, a PIN, passcode, password, OTP, CVV, a card number or details, a
+//         verification/security/one-time code, "the/your code", "the 6 digits", "the digits on your card" (contraseña, clave,
+//         código but not código postal/promocional, número de tu tarjeta); on the plain text and a skeleton (accents stripped,
+//         look-alikes mapped, spaced-out letters joined). The shop's own sending ("we'll text you a code") is not a request. A
+//         MENTION is the judge's ("I lost the code", "ZIP code", a quoted "PIN", a security notice of the model's own). There is no
+//         promise word list any more (free, discount, refund, guarantee, gratis, descuento...): promises are the judge's, which
+//         reads them in any wording ("is the wax free?" quoted back is no promise). The client's own first name and vehicles are
+//         skipped by the secret check ONLY ("Thanks, Clave"): never by the money, digit or host rules, and never trusted by the
+//         judge.
 //       Numbers in general are allowed ("2 to 3 days", "8 to 6", "bay 2", "a 2-door", "October 12, 2026").
 //   (3) The policy judge (judge.ts) reads every reply that passed (1) and (2), rendered, with the server's segments marked trusted
 //       (guardReply returns them as `segments`): rendered placeholders, links, the shop's own phone numbers, address and host (the
@@ -62,13 +63,12 @@ export type GuardProblem =
   | 'money'
   | 'digits'
   | 'secret'
-  | 'promise_words'
   | 'url'
   | 'questions'
   | 'too_long'
 
 /** Problems only a rewrite can fix; a reply that still has one after the rewrite becomes the fallback. */
-export const HARD_PROBLEMS: ReadonlySet<GuardProblem> = new Set(['empty', 'unknown_placeholder', 'placement', 'money', 'digits', 'secret', 'promise_words', 'url'])
+export const HARD_PROBLEMS: ReadonlySet<GuardProblem> = new Set(['empty', 'unknown_placeholder', 'placement', 'money', 'digits', 'secret', 'url'])
 
 /**
  * A piece of the rendered reply as the judge reads it: `trusted` = inserted by the server (rendered placeholders, links, the shop's
@@ -113,7 +113,7 @@ export interface GuardInput {
   /** The shop's own address (facts.business.address): whole or any comma part, normalised as above, the judge reads it as trusted. */
   address?: string | null
   /**
-   * The client's own first name and vehicles on file (client-entered): skipped by the secret and promise word lists only ("Hi Buck",
+   * The client's own first name and vehicles on file (client-entered): skipped by the secret request check only ("Thanks, Clave",
    * "your Free Spirit"); the money, digit and host rules read them, and the judge reads them as untrusted.
    */
   names?: readonly (string | null | undefined)[]
@@ -308,111 +308,68 @@ export function moneyWords(text: string): string[] {
   return [...new Set([...[...t.matchAll(CURRENCY)].map((m) => m[0]), ...hits(MONEY_WORDS, [plainFold(t), skeleton(t)])])]
 }
 
-// ---- (2) secrets ----------------------------------------------------------------------------------------------------------------
+// ---- (2) secret requests --------------------------------------------------------------------------------------------------------
 
-const SECRET_WORDS = wordList([
-  'pin~s?',
-  'pincode~s?',
-  'pin code~s?',
-  'pin number~s?',
-  'passcode~s?',
-  'pass code~s?',
-  'password~s?',
-  'pass word~s?',
-  'passphrase~s?',
-  'pass phrase~s?',
-  'passkey~s?',
-  'pwd',
-  'otp~s?',
-  'one time number~s?',
-  'one time password~s?',
-  'personal identification',
-  'secret number~s?',
-  'verification number~s?',
-  'security number~s?',
-  'access number~s?',
-  'security key~s?',
-  'cvv~2?',
-  'cvc',
-  'card number~s?',
-  'card digits',
-  'card details',
-  // Spanish (accents are stripped before matching: código, contraseña)
-  'codigo~s?',
-  'contrasena~s?',
-  'clave~s?',
-  'numero de tarjeta',
-  'numero de tu tarjeta',
-  'numero de su tarjeta',
-])
-
-/** A spelled or written count before "digit" ("6-digit", "six digit"). */
-const DIGIT_COUNT = '(?:\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)'
 /**
- * English "code(s)" and "digit(s)" in their SECRET senses only (fix 3 of the v4 re-check: the bare words blocked "promo code", "ZIP
- * code", "dress code", "area code" and "the last digits of your plate"; the judge reads those): a determiner right before "code"
- * ("the/your/a/that/this/what/which code"), the code someone sent or got, a verification/security/confirmation/one-time/reply/
- * access/login code, "enter/type/send/text/share/give/read/tell (me) codes", codes in a sentence about the secure page or "by
- * text" (a security notice of the model's own), "a 6-digit code/number/PIN", "the digits we texted", "the digits on your card".
+ * The secret REQUEST check (W4a fix F2): only an unambiguous request for an account or card secret blocks here, so a mention of one
+ * ("I lost the code", "the ZIP code", a quoted "PIN") reaches the judge, which reads meaning. A request is a request verb, or "what
+ * is/are your", or "need your", followed in the same clause (at most 60 characters, no . ! ? ;) by a secret noun, or a secret noun
+ * followed by "please" ("Your verification code, please"); on the plain text
+ * and the skeleton (accents stripped, look-alikes mapped, spaced-out letters joined: "Send me your P*I*N", "S e n d your p1n").
+ * The shop's own sending ("we'll text you a code", "I will send the PIN page") is not a request: a send verb right after we/I/they
+ * (one word may stand between: "we can text you ...") does not count.
  */
-const SECRET_SENSE_PHRASES = [
-  '(?:the|your|ur|a|that|this|what|which|any|those|these)\\s+codes?',
-  'codes?\\s+(?:(?:we|you|i|they)\\s+(?:just\\s+)?(?:sent|texted|send|text|received|receive|got|get|gave)|(?:did|do)\\s+you\\s+(?:get|receive|see)|sent|texted)',
-  '(?:verification|verify|security|confirmation|confirm|one[\\s-]*time|reply|access|login|log[\\s-]*in|auth|authentication|2fa|sms|text|secret)\\s+codes?',
-  '(?:enter|type|send|text|share|give|read|tell)(?:s|ed|ing)?\\s+(?:(?:me|us)\\s+)?codes?',
-  'codes?\\b[^.!?]{0,60}?(?:secure|link)\\s+page',
-  'codes?\\b[^.!?]{0,60}?by\\s+text',
-  `${DIGIT_COUNT}[\\s-]*digits?\\s+(?:codes?|numbers?|pins?)`,
-  'digits?\\s+(?:(?:we|i|they)\\s+(?:just\\s+)?(?:sent|texted|send|text)|you\\s+(?:just\\s+)?(?:got|received|get|receive))',
-  'digits?\\s+(?:on|of|from)\\s+(?:the\\s+(?:back|front)\\s+of\\s+)?(?:your|the|ur)\\s+(?:card|credit\\s+card|debit\\s+card)',
-]
-const SECRET_SENSES = new RegExp(`(?<![\\p{L}\\p{N}])(?:${SECRET_SENSE_PHRASES.join('|')})(?![\\p{L}\\p{N}])`, 'gu')
-
-/** What the text says about PINs, codes, passwords or cards, as found, on the plain text and the skeleton. */
-export function secretWords(text: string): string[] {
-  const texts = [plainFold(text), skeleton(text)]
-  return [...new Set([...hits(SECRET_WORDS, texts), ...hits(SECRET_SENSES, texts)])]
-}
-
-// ---- (2) promise words ----------------------------------------------------------------------------------------------------------
-
-const PROMISE_WORDS = wordList([
-  'free',
-  'freebie~s?',
-  'gratis',
-  'complimentary',
-  'on the house',
-  'discount~\\w*',
-  'percent off',
-  'per cent off',
-  'half off',
-  'half price',
-  'rebate~s?',
-  'refund~\\w*',
-  'money back',
-  'coupon~s?',
-  'waive~[sd]?',
-  'guarantee~\\w*',
-  'guarant~(?:y|ies)',
-  'warrant~(?:y|ies)',
+const REQUEST_VERB_EN = '(?:(?:send|reply|respond|text|txt|tell|type|give|share|read|provide|forward|confirm|verify)(?:s|ing)?|let\\s+(?:me|us)\\s+know)'
+const REQUEST_VERB_ES = [
+  'envia', 'envie', 'enviame', 'envieme', 'envianos', 'envienos', 'enviar', 'enviarnos', 'enviarme',
+  'manda', 'mande', 'mandame', 'mandeme', 'mandanos', 'mandenos', 'mandar', 'mandarnos', 'mandarme',
+  'dime', 'digame', 'dinos', 'diganos', 'decir', 'decirnos', 'decirme',
+  'dame', 'deme', 'danos', 'denos', 'dar', 'darnos', 'darme',
+  'escribe', 'escriba', 'escribeme', 'escribame', 'escribenos', 'escribanos', 'escribir',
+  'responde', 'responda', 'respondeme', 'respondame', 'contesta', 'conteste', 'contestame', 'contesteme',
+  'comparte', 'comparta', 'compartenos', 'compartanos', 'compartir', 'pasa', 'pase', 'pasar', 'pasarme', 'pasarnos', 'pasame', 'paseme', 'pasanos', 'pasenos',
+  'indica', 'indique', 'indicame', 'indiqueme', 'proporciona', 'proporcione', 'proporcionanos', 'proporcionenos',
+  'teclea', 'teclee', 'confirma', 'confirme', 'confirmame', 'confirmeme',
+].join('|')
+/** "what is your ...", "cual es tu ...", "need your ...": a request without a request verb. */
+const REQUEST_ASK = "(?:what(?:'s|s|\\s+(?:is|are|was|were))|cual(?:es)?\\s+(?:es|son)|(?:need|necesito|necesitamos))"
+/** The shop as the subject of a send verb: "we'll text you", "I can send", "they just sent" (one word may stand between). */
+const SHOP_SUBJECT = "(?<!(?:^|[^\\p{L}])(?:we|i|they)(?:'ll|'d|'re|'ve|ll)?\\s+(?:[\\p{L}']+\\s+)?)"
+const DIGIT_COUNT = '(?:\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)'
+/** The secrets of an account or a card, English and Spanish (after plainFold: accents stripped, lower case). */
+const SECRET_NOUN = [
+  'p[il]n(?:s|es|code|codes)?',
+  'p[il]n\\s+(?:code|number)s?',
+  'nip',
+  'pass[\\s-]*(?:code|word|phrase|key)s?',
+  'pwd',
+  'otps?',
+  'one[\\s-]*time\\s+(?:password|passcode|code|pin|number)s?',
+  'cvv2?',
+  'cvc',
+  'personal\\s+identification',
+  '(?:security|verification|verify|confirmation|login|log[\\s-]*in|access|auth|authentication|2fa|sms|secret|reply)\\s+(?:codes?|numbers?|keys?)',
+  '(?:the|your|ur|that|this|those|these)\\s+codes?',
+  'card\\s+(?:number|digits|details|info|information)s?',
+  '(?:credit|debit|bank)\\s+card\\s+(?:number|digits|details|info|information)s?',
+  `${DIGIT_COUNT}[\\s-]*digits?(?:\\s+(?:code|number|pin)s?)?`,
+  'digits?\\s+(?:on|of|from)\\s+(?:the\\s+(?:back|front)\\s+of\\s+)?(?:your|the|ur)\\s+(?:credit\\s+|debit\\s+)?card',
+  `last\\s+${DIGIT_COUNT}\\s+(?:digits?\\s+)?(?:of|on|from)\\s+(?:your|the|ur)\\s+(?:credit\\s+|debit\\s+)?card`,
   // Spanish
-  'gratuit~\\w*',
-  'descuent~\\w*',
-  'reembols~\\w*',
-  'garantia~s?',
-  'garantiz~\\w*',
-])
-/** The only phrases with "free" that pass: "feel free", "<word>-free" ("spot-free", "cash-free"), except money ones ("cost-free"). */
-const FREE_OK =
-  /\bfee[il][\s-]*free\b|\b(?!(?:cost|charge|fee|fees|price|payment|pay|money|wallet|dollar|buck|cent|tax|interest|risk|commission|bill|tab)-)[\p{L}]{2,}-free\b/gu
+  'contrasena',
+  'claves?',
+  'codigos?(?!\\s+(?:postal|promocional|promo|de\\s+(?:descuento|promocion|area|vestimenta)))',
+  '(?:numero|datos|digitos)\\s+de\\s+(?:tu|su|la)\\s+tarjeta',
+  `${DIGIT_COUNT}\\s+digitos`,
+].join('|')
+const SECRET_REQUEST = new RegExp(
+  `(?<![\\p{L}\\p{N}])(?:(?:${SHOP_SUBJECT}${REQUEST_VERB_EN}|${REQUEST_VERB_ES}|${REQUEST_ASK})(?![\\p{L}\\p{N}])[^.!?;]{1,60}?(?<![\\p{L}\\p{N}])(?:${SECRET_NOUN})|(?:${SECRET_NOUN})[\\s,]+(?:please|pls|plz|por\\s+favor))(?![\\p{L}\\p{N}])`,
+  'gu',
+)
 
-/** "10% off", "20 % off". */
-const PERCENT_OFF = /%\s*off\b/g
-
-/** The promise words of a text, as found (lower case), on the plain text and the skeleton. */
-export function promiseWords(text: string): string[] {
-  const texts = [plainFold(text), skeleton(text)]
-  return [...new Set([...hits(PROMISE_WORDS, texts, FREE_OK), ...hits(PERCENT_OFF, texts)])]
+/** The secret requests of a text ("send me your PIN", "dime tu clave"), as found, on the plain text and the skeleton. */
+export function secretRequests(text: string): string[] {
+  return hits(SECRET_REQUEST, [plainFold(text), skeleton(text)])
 }
 
 // ---- (2) web addresses ----------------------------------------------------------------------------------------------------------
@@ -702,14 +659,13 @@ export function guardReply(i: GuardInput): GuardVerdict {
   if (LONE_BRACE.test(raw)) unknown.push(raw.match(LONE_BRACE)![0])
   flag('unknown_placeholder', unknown)
   flag('placement', misplacedPlaceholders(text, values))
-  // (2) the secret and promise word lists never read the client's own name or vehicles ("Hi Buck", "your Free Spirit"); every other
+  // (2) the secret request check never reads the client's own name or vehicles ("Thanks, Clave", "your Free Spirit"); every other
   // rule reads them (client-entered text is never trusted: a vehicle "Free Wash 2015550123" is still a phone number). A currency
   // sign GSM-7 would drop ("45¢") still counts.
   const worded = withoutPhrases(raw, i.names ?? [])
   const dropped = [...foldInput(i.text).replace(BRACED, '~').matchAll(CURRENCY)].map((m) => m[0])
   flag('money', [...new Set([...dropped, ...moneyWords(raw)])])
-  flag('secret', secretWords(worded))
-  flag('promise_words', promiseWords(worded))
+  flag('secret', secretRequests(worded))
   flag('url', urlWords(raw, i.website))
   const literals = [...addressLiterals(i.address), ...(i.literals ?? [])]
   flag('digits', digitWords(withoutOwnHost(withoutLiterals(raw, literals, i.shopNumbers ?? []), i.website), i.openWindow ?? DEFAULT_OPEN_WINDOW))
@@ -734,9 +690,7 @@ export const PROBLEM_HINTS: Record<GuardProblem, string> = {
     'Never write an amount, a currency sign or a money word (dollars, bucks, cents, USD, pesos). Write the placeholder as its own sentence and the server fills in the amount: "{price:<key>}.", "{plan:<key>}.", "{fee}.", "{balance}." (after get_balance). Never add prices up or give a total.',
   digits: 'Never write a digit code or a phone number, in any form (split by spaces, dashes or dots, as times, in words or with letters for digits): only the shop\'s own numbers in SHOP FACTS.',
   secret:
-    'Write nothing about PINs, codes, passwords or card numbers, never ask for them and do not write a security reminder: the server adds the security line itself.',
-  promise_words:
-    'Rephrase without promising anything free, discounts, refunds, coupons or guarantees (say "open times" or "openings" for availability). If the client asked for one of these, say a team member will text them back.',
+    'Never ask the client for a PIN, a code, a password or card details, and do not write a security reminder: send the right link with send_link and the server adds the security line itself.',
   url: 'Never write a web address or anything shaped like one (name.com, name dot com, an IP address, http, www): only the shop website exactly as in SHOP FACTS, or a {linkN} placeholder a tool gave you. If it was a missing space after a full stop or a comma, add the space.',
   questions: 'Ask at most one question per text.',
   too_long: `Keep it under ${MAX_REPLY_CHARS - 20} characters.`,
