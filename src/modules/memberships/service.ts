@@ -13,13 +13,14 @@ import { AppError } from '../../platform/errors.js'
 import type { NewId } from '../../platform/ids.js'
 import { sql } from 'kysely'
 import { staleRecord, staleWhy, type StaleVerdict } from '../identity/stale.js'
-import { raiseAlert, resolveAlertKeys } from '../payments-sync/db/alerts.js'
+import { alertKey, raiseAlert, resolveAlertKeys } from '../payments-sync/db/alerts.js'
 import { orderFromJson } from '../payments-sync/db/codec.js'
 import { normalizeEmail, normalizePhone } from '../payments-sync/identity.js'
 import {
   addMonths,
   inferMemberships,
   reconcileMembership,
+  type CheckoutIntentRef,
   type CustomerRef,
   type ExistingMembership,
   type MembershipConfig,
@@ -151,6 +152,21 @@ async function customerRefs(
       rows.rows.map((r) => r.id),
     )
     .execute()
+  // A staff (manual) link always wins (W4c re-review 4, E1): once staff link a Squarespace customer to a client, no other client's
+  // record takes its orders or holds it, whatever it paid on before (its membership row there, a paid order linked there).
+  const ids = [...new Set([...sqsp, ...held.map((m) => m.sqsp_customer_id!), ...paidOrders.map((o) => o.sqsp_customer_id!)])]
+  const staffLinks =
+    ids.length === 0
+      ? []
+      : await db
+          .selectFrom('sqsp_customer_links')
+          .select(['customer_id', 'sqsp_customer_id'])
+          .where('location_id', '=', locationId)
+          .where('source', '=', 'manual')
+          .where('sqsp_customer_id', 'in', ids)
+          .execute()
+  const staffElsewhere = (customerId: string, sqspCustomerId: string): boolean =>
+    staffLinks.some((l) => l.sqsp_customer_id === sqspCustomerId && l.customer_id !== customerId)
   const paidBy = (customerId: string): string[] => [
     ...held.filter((m) => m.customer_id === customerId && m.last_paid_at !== null).map((m) => m.sqsp_customer_id!),
     ...paidOrders.filter((o) => o.customer_id === customerId).map((o) => o.sqsp_customer_id!),
@@ -173,28 +189,62 @@ async function customerRefs(
   // that was linked automatically BY that email (sqsp.contacts) is not a way around it. Phone and staff links count as before.
   // What a client HOLDS is wider (F1): every link whatever its source and the Squarespace customer on their membership rows; and
   // their email even unverified: another client's checkout intent never takes such an order (payments-sync/membership.ts).
+  const mine = (customerId: string, list: string[]): string[] => [...new Set(list)].filter((x) => !staffElsewhere(customerId, x))
   return rows.rows.map((r) => ({
     id: r.id,
     emails: r.email && r.email_verified ? [r.email] : [],
     unverifiedEmails: r.email && !r.email_verified ? [r.email] : [],
     phones: r.phone_e164 ? [r.phone_e164] : [],
     staleSince: staleSinceOf(verdicts.get(r.id)),
-    sqspCustomerIds: [
-      ...new Set([
-        ...links
-          .filter((l) => l.customer_id === r.id && (l.source !== 'email' || r.email_verified) && !linkedWhileStale(l))
-          .map((l) => l.sqsp_customer_id),
-        ...paidBy(r.id),
-      ]),
-    ],
-    heldSqspCustomerIds: [
-      ...new Set([
-        ...links.filter((l) => l.customer_id === r.id).map((l) => l.sqsp_customer_id),
-        ...held.filter((m) => m.customer_id === r.id).map((m) => m.sqsp_customer_id!),
-        ...paidBy(r.id),
-      ]),
-    ],
+    sqspCustomerIds: mine(r.id, [
+      ...links
+        .filter((l) => l.customer_id === r.id && (l.source !== 'email' || r.email_verified) && !linkedWhileStale(l))
+        .map((l) => l.sqsp_customer_id),
+      ...paidBy(r.id),
+    ]),
+    heldSqspCustomerIds: mine(r.id, [
+      ...links.filter((l) => l.customer_id === r.id).map((l) => l.sqsp_customer_id),
+      ...held.filter((m) => m.customer_id === r.id).map((m) => m.sqsp_customer_id!),
+      ...paidBy(r.id),
+    ]),
+    staffSqspCustomerIds: links.filter((l) => l.customer_id === r.id && l.source === 'manual').map((l) => l.sqsp_customer_id),
   }))
+}
+
+/**
+ * An order a checkout intent of one client named but another client holds (the family account: the order is the holder's, F1) is
+ * not counted on the holder silently (W4c re-review 4, E3): one alert per order, naming both clients. Raised once: an alert staff
+ * resolved is not raised again by the next pass.
+ */
+async function raiseIntentConflicts(
+  db: Executor,
+  d: MembershipSyncDeps,
+  inf: MembershipInference,
+  intents: readonly CheckoutIntentRef[],
+): Promise<void> {
+  for (const c of inf.intentConflicts) {
+    const a = { code: 'membership_intent_conflict', orderId: c.orderId }
+    const known = await db
+      .selectFrom('sqsp_alerts')
+      .select('id')
+      .where('location_id', '=', d.locationId)
+      .where('dedupe_key', '=', alertKey(a))
+      .executeTakeFirst()
+    if (known) continue
+    const intentClient = intents.find((i) => i.id === c.intentId)?.customerId
+    const names = await db
+      .selectFrom('customers')
+      .select(['id', 'full_name'])
+      .where('id', 'in', [inf.customerId!, intentClient ?? inf.customerId!])
+      .execute()
+    const name = (id: string | undefined) => names.find((n) => n.id === id)?.full_name ?? 'another client'
+    const holder = name(inf.customerId)
+    const how = c.by === 'sqsp_customer_id' || c.by === 'checkout_intent' ? `paid from ${holder}'s Squarespace account` : `paid with ${holder}'s email or phone`
+    await raiseAlert(db, d, {
+      ...a,
+      message: `Order ${c.orderNumber} was ${how} for ${name(intentClient)}'s checkout: it was counted on ${holder}'s record (a checkout never takes an order another client holds) — check who it belongs to; if it is ${name(intentClient)}'s, link the Squarespace customer to them.`,
+    })
+  }
 }
 
 /** The inference pass: reads recent membership orders, links people, creates or updates members and grants cycle credits. */
@@ -228,6 +278,7 @@ export async function syncMemberships(db: Db, d: MembershipSyncDeps): Promise<Me
     if (!plan) continue
     if (inf.checkoutMatches.length > 0)
       report.intentsMatched += await transaction(db, (tx) => markIntentsMatched(tx, d, inf.checkoutMatches))
+    if (inf.customerId && inf.intentConflicts.length > 0) await raiseIntentConflicts(db, d, inf, intents)
     await resolveAlertKeys(
       db,
       d,
@@ -278,13 +329,16 @@ export async function syncMemberships(db: Db, d: MembershipSyncDeps): Promise<Me
       report.needsCustomer++
       // an order a checkout intent named while another client's identity points at it says why (payments-sync/membership.ts)
       const conflict = inf.flags.find((f) => f.code === 'ambiguous_customer' && f.orderId !== undefined)
-      // an order only a stale record's phone or unverified email points at: staff decide who paid (W4c re-review 2, N1)
-      const stale =
-        inf.linkedBy === 'stale_record' && inf.candidateCustomerId
+      // an order only a stale record's phone or unverified email points at (W4c re-review 2, N1), or a client's phone or unverified
+      // email that a Squarespace account other than theirs pays with (W4c re-review 4, E2): staff decide who paid
+      const candidate =
+        (inf.linkedBy === 'stale_record' || inf.linkedBy === 'second_account') && inf.candidateCustomerId
           ? await db.selectFrom('customers').select('full_name').where('id', '=', inf.candidateCustomerId).executeTakeFirst()
           : undefined
-      const why = stale
-        ? `the order's phone or email matches ${stale.full_name}, whose record is stale (no sign of that client for 180 days, or the number bounced): the number may belong to someone new. Confirm who paid, then create a client or link one`
+      const why = candidate
+        ? inf.linkedBy === 'second_account'
+          ? `a second Squarespace account is using ${candidate.full_name}'s number (or the email on file, which nobody verified), though their record already has its own Squarespace account: the number may have a new holder. Confirm who paid, then create a client or link one`
+          : `the order's phone or email matches ${candidate.full_name}, whose record is stale (no sign of that client for 180 days, or the number bounced): the number may belong to someone new. Confirm who paid, then create a client or link one`
         : conflict
           ? conflict.note
           : action.reason

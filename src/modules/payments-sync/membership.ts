@@ -26,7 +26,9 @@ import type { ProductMap, ResolvedProduct, Tier } from './product-map.js'
  * ('intent_mismatch', awaiting_match; W4c fixes). A STALE record (identity/stale.ts: numbers are recycled) is no match by its phone or by
  * an email nobody verified: the order names it for staff ('stale_record', "needs a customer") and links nobody (W4c re-review 2,
  * N1); its Squarespace links made while it was not stale (memberships/service.ts), a Squarespace customer that already paid on it
- * (W4c re-review 3, D1) and a verified email still link.
+ * (W4c re-review 3, D1) and a verified email still link. A staff (manual) link of a Squarespace customer always wins over a payment
+ * it made on another record (W4c re-review 4, E1). A Squarespace customer other than the one a client already has never links to
+ * them by their phone or an email nobody verified ('second_account', "needs a customer": the number may have a new holder; E2).
  */
 export interface MembershipConfig {
   /** Days after period end during which the member is still active (Squarespace retries failed renewals). Default 7. */
@@ -62,6 +64,12 @@ export interface CustomerRef {
    * another client's checkout intent never takes an order of one of them (F1).
    */
   heldSqspCustomerIds?: string[]
+  /**
+   * The Squarespace customers staff linked to the client by hand (sqsp_customer_links source manual). A staff link always wins (W4c
+   * re-review 4, E1): customerRefs drops such a customer from every other client's ids, and an order of one that another client's
+   * checkout intent named raises no conflict alert (staff already said whose it is).
+   */
+  staffSqspCustomerIds?: string[]
   /**
    * Set when the stale-record rule holds the client (identity/stale.ts): since when it has. Their phone and their unverified email
    * link no order placed since then and hold none (whoever holds the number now may be someone else): such an order names them as
@@ -109,6 +117,7 @@ export type LinkedBy =
   | 'unverified_email'
   | 'intent_mismatch'
   | 'stale_record'
+  | 'second_account'
   | 'ambiguous'
   | 'none'
 
@@ -137,8 +146,16 @@ export interface MembershipInference {
    * linkedBy 'unverified_email': the one client whose unverified email the order carries; 'intent_mismatch': the client of the open
    * intent whose email the order carries with another phone or name. Never linked by the inference: staff confirm (awaiting_match).
    * 'stale_record': the stale record whose phone or unverified email the order carries; staff decide ("needs a customer").
+   * 'second_account': the client whose phone or unverified email a Squarespace customer other than theirs pays with ("needs a
+   * customer": the number may have a new holder; W4c re-review 4, E2).
    */
   candidateCustomerId?: string
+  /**
+   * Orders of this person that a checkout intent of ANOTHER client named but could not take, because this client holds the order
+   * (its Squarespace customer, email or phone): the family-account case (W4c re-review 4, E3). The sync raises one alert per order
+   * naming both clients. An order whose Squarespace customer staff linked to this client by hand is left out.
+   */
+  intentConflicts: { intentId: string; orderId: string; orderNumber: string; by: LinkedBy }[]
   /** Open checkout intents an order of this person matched (intent id, Squarespace order id): the sync marks them matched. */
   checkoutMatches: { intentId: string; orderId: string }[]
   email?: string
@@ -233,9 +250,12 @@ export interface CustomerLink {
   by: LinkedBy
   /** by 'checkout_intent': the intent that linked; `fresh` when it was still open (this order consumes it). */
   intent?: { id: string; fresh: boolean }
-  /** by 'unverified_email', 'intent_mismatch' or 'stale_record': the client staff are asked about. */
+  /** by 'unverified_email', 'intent_mismatch', 'stale_record' or 'second_account': the client staff are asked about. */
   candidateCustomerId?: string
-  /** An intent that named this order but was ignored because another client holds the order (the other tiers linked it). */
+  /**
+   * An intent that named this order but was ignored because another client holds the order (the other tiers, or that client's own
+   * matched checkout, linked it, or nobody did).
+   */
   intentConflict?: string
 }
 
@@ -409,16 +429,29 @@ export function linkCustomer(
   intents: readonly CheckoutIntentRef[] = [],
 ): CustomerLink {
   const byIntent = intentFor(who, intents, (clientId) => holdsOrder(who, customers, intents, clientId))
-  if (byIntent.link) return byIntent.link
+  // an intent refused while another one linked the order (its holder's own matched checkout) is a conflict all the same (E3)
+  if (byIntent.link)
+    return byIntent.refused && byIntent.link.customerId !== undefined ? { ...byIntent.link, intentConflict: byIntent.refused } : byIntent.link
   const link = linkByIdentity(who, customers)
   return byIntent.refused ? { ...link, intentConflict: byIntent.refused } : link
 }
 
 /**
+ * The order comes from a Squarespace customer other than the one(s) the client already has (linked, on a membership row, or paid
+ * on their record): a member normally has one account, so a second one using their phone or an email nobody verified may be a new
+ * holder of the number (W4c re-review 4, E2). A client with no Squarespace customer yet, or an order naming none, is never one.
+ */
+const otherAccount = (c: CustomerRef, who: OrderIdentity): boolean =>
+  who.sqspCustomerId !== undefined &&
+  (c.heldSqspCustomerIds ?? []).length > 0 &&
+  !(c.heldSqspCustomerIds ?? []).includes(who.sqspCustomerId)
+
+/**
  * The tiers after the intents: the Squarespace customer id, a verified email, the phone, then an unverified email's candidate. A
  * stale record (CustomerRef.staleSince) takes no part in the phone and unverified-email tiers for an order placed since it went
  * stale: when only such a record carries the order's phone or email, the order names it as 'stale_record' for staff and links
- * nobody (W4c re-review 2, N1).
+ * nobody (W4c re-review 2, N1). Nor does a record that already has ANOTHER Squarespace customer (`otherAccount`): such an order
+ * names it as 'second_account' for staff and links nobody (W4c re-review 4, E2).
  */
 function linkByIdentity(who: OrderIdentity, customers: readonly CustomerRef[]): CustomerLink {
   const tiers: [LinkedBy, (c: CustomerRef) => boolean][] = []
@@ -429,20 +462,24 @@ function linkByIdentity(who: OrderIdentity, customers: readonly CustomerRef[]): 
   const p = normalizePhone(who.phone)
   const byPhone = (c: CustomerRef): boolean => p !== undefined && c.phones.some((x) => normalizePhone(x) === p)
   const byUnverified = (c: CustomerRef): boolean => e !== undefined && (c.unverifiedEmails ?? []).some((x) => normalizeEmail(x) === e)
-  if (p) tiers.push(['phone', (c) => speaksFor(c, who) && byPhone(c)])
+  const usable = (c: CustomerRef): boolean => speaksFor(c, who) && !otherAccount(c, who)
+  if (p) tiers.push(['phone', (c) => usable(c) && byPhone(c)])
   for (const [by, test] of tiers) {
     const hits = customers.filter(test)
     if (hits.length === 1) return { customerId: hits[0]!.id, by }
     if (hits.length > 1) return { by: 'ambiguous' }
   }
   if (e) {
-    const hits = customers.filter((c) => speaksFor(c, who) && byUnverified(c))
+    const hits = customers.filter((c) => usable(c) && byUnverified(c))
     if (hits.length === 1) return { by: 'unverified_email', candidateCustomerId: hits[0]!.id }
     if (hits.length > 1) return { by: 'ambiguous' }
   }
   const stale = customers.filter((c) => !speaksFor(c, who) && (byPhone(c) || byUnverified(c)))
   if (stale.length === 1) return { by: 'stale_record', candidateCustomerId: stale[0]!.id }
   if (stale.length > 1) return { by: 'ambiguous' }
+  const second = customers.filter((c) => speaksFor(c, who) && otherAccount(c, who) && (byPhone(c) || byUnverified(c)))
+  if (second.length === 1) return { by: 'second_account', candidateCustomerId: second[0]!.id }
+  if (second.length > 1) return { by: 'ambiguous' }
   return { by: 'none' }
 }
 
@@ -567,7 +604,17 @@ export function inferMemberships(
       customerId: link.customerId,
       linkedBy: link.by,
       candidateCustomerId:
-        link.by === 'unverified_email' || link.by === 'intent_mismatch' || link.by === 'stale_record' ? link.candidateCustomerId : undefined,
+        link.by === 'unverified_email' || link.by === 'intent_mismatch' || link.by === 'stale_record' || link.by === 'second_account'
+          ? link.candidateCustomerId
+          : undefined,
+      intentConflicts: list.flatMap((c) =>
+        c.link.intentConflict !== undefined &&
+        c.link.customerId !== undefined &&
+        !(c.order.customerId !== undefined &&
+          (customers.find((x) => x.id === c.link.customerId)?.staffSqspCustomerIds ?? []).includes(c.order.customerId))
+          ? [{ intentId: c.link.intentConflict, orderId: c.order.id, orderNumber: c.order.orderNumber, by: c.link.by }]
+          : [],
+      ),
       checkoutMatches: list.flatMap((c) =>
         c.link.intent?.fresh ? [{ intentId: c.link.intent.id, orderId: c.order.id }] : [],
       ),

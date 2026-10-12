@@ -249,8 +249,10 @@ describe('membership checkouts', () => {
       expect(await memberOf(r, eve)).toMatchObject({ status: 'pending', paid_order_count: 0, sqsp_customer_id: null })
       const alerts = await openAlerts(r)
       if (paid) {
-        // the Squarespace customer already paid on Meg's record: her renewal (W4c re-review 3, D1)
-        expect(alerts).toEqual([])
+        // the Squarespace customer already paid on Meg's record: her renewal (W4c re-review 3, D1), and staff are told Eve's
+        // checkout named it (W4c re-review 4, E3)
+        expect(alerts).toEqual([expect.objectContaining({ code: 'membership_intent_conflict', sqsp_order_id: o2.orderId })])
+        expect(alerts[0]!.message).toContain("paid from Meg Member's Squarespace account for Eve Taker's checkout")
         expect(await memberOf(r, meg)).toMatchObject({ id: megMembership, status: 'active', paid_order_count: 2, last_sqsp_order_id: o2.orderId })
         return
       }
@@ -293,7 +295,10 @@ describe('membership checkouts', () => {
     expect(await memberOf(r, nina)).toMatchObject({ status: 'active', paid_order_count: 3, last_sqsp_order_id: o3.orderId })
     expect(await memberOf(r, eve)).toMatchObject({ id: eves.membershipId, status: 'pending', paid_order_count: 0 })
     expect((await checkouts(r)).find((c) => c.id === eves.checkoutId)).toMatchObject({ state: 'open', matched_order_id: null })
-    expect(await openAlerts(r)).toEqual([])
+    // not silently: staff are told Eve's checkout named an order Nina's own account paid (W4c re-review 4, E3)
+    const alerts = await openAlerts(r)
+    expect(alerts).toEqual([expect.objectContaining({ code: 'membership_intent_conflict', sqsp_order_id: o3.orderId })])
+    expect(alerts[0]!.message).toContain("paid from Nina New's Squarespace account for Eve Taker's checkout")
   })
 
   it('a plan without a checkout URL cannot start a checkout', async () => {

@@ -219,7 +219,13 @@ describe('linkCustomer: the checkout-intent tier', () => {
     // another client's checkout row for the same Squarespace customer (matched, or waiting for staff), or for this very order
     const bobRow = intent({ id: 'i-bob', customerId: 'c-bob', membershipId: 'm-bob', state: 'matched', orderId: 'o-bob', orderSqspCustomerId: 'sq-2', expectedEmail: 'other@example.com' })
     // (Bob's matched row makes the order his renewal; one waiting for staff only holds it)
-    expect(linkCustomer(who(at, { sqspCustomerId: 'sq-2' }), [], [intent(), bobRow])).toEqual({ customerId: 'c-bob', by: 'checkout_intent', intent: { id: 'i-bob', fresh: false } })
+    // (the refused intent is named all the same: staff are told, W4c re-review 4, E3)
+    expect(linkCustomer(who(at, { sqspCustomerId: 'sq-2' }), [], [intent(), bobRow])).toEqual({
+      customerId: 'c-bob',
+      by: 'checkout_intent',
+      intent: { id: 'i-bob', fresh: false },
+      intentConflict: 'i1',
+    })
     const waiting = { ...bobRow, state: 'awaiting_match' as const }
     expect(linkCustomer(who(at, { sqspCustomerId: 'sq-2' }), [], [intent(), waiting])).toMatchObject({ by: 'none', intentConflict: 'i1' })
     const sameOrder = { ...waiting, orderId: 'o-x', orderSqspCustomerId: undefined }
@@ -275,7 +281,7 @@ describe('linkCustomer: the checkout-intent tier', () => {
     const eve = intent({ id: 'i-eve', customerId: 'c-eve', membershipId: 'm-eve', expectedEmail: 'nina@example.com', startedAt: new Date('2026-12-11T12:00:00Z'), expiresAt: new Date('2026-12-14T12:00:00Z') })
     expect(
       linkCustomer(who('2026-12-12T09:00:00Z', { email: 'nina@example.com', orderId: 'o-z', sqspCustomerId: 'sq-new' }), [ninaHeld], [matched, eve]),
-    ).toEqual({ customerId: 'c-nina', by: 'checkout_intent', intent: { id: 'i-nina', fresh: false } })
+    ).toEqual({ customerId: 'c-nina', by: 'checkout_intent', intent: { id: 'i-nina', fresh: false }, intentConflict: 'i-eve' })
   })
 
   it('a matched intent’s renewals follow the Squarespace customer of its bound order, never another payer with the same email (F1)', () => {
@@ -403,5 +409,100 @@ describe('inferMemberships with intents, unverified emails and duplicates', () =
     const [r] = inferMemberships([refunded, dup], map, [bob], new Date('2026-09-20T00:00:00Z'))
     expect(r!.flags.map((f) => f.code)).toEqual(['full_refund'])
     expect(r!.lastOrderId).toBe(dup.id)
+  })
+})
+
+describe('a second Squarespace account on a client’s phone or unverified email (W4c re-review 4, E2)', () => {
+  // Pam already pays from her own Squarespace account sq-pam (held: linked, on her membership row)
+  const pam: CustomerRef = {
+    id: 'c-pam',
+    emails: [],
+    unverifiedEmails: ['pam@example.com'],
+    phones: ['+13055550111'],
+    sqspCustomerIds: ['sq-pam'],
+    heldSqspCustomerIds: ['sq-pam'],
+  }
+  const at = new Date('2026-10-12T09:00:00Z')
+
+  it('another account using her phone or unverified email links nobody: second_account names her for staff', () => {
+    expect(linkCustomer({ sqspCustomerId: 'sq-nick', email: 'nick@example.com', phone: '(305) 555-0111', createdOn: at }, [pam])).toEqual({
+      by: 'second_account',
+      candidateCustomerId: 'c-pam',
+    })
+    expect(linkCustomer({ sqspCustomerId: 'sq-nick', email: 'pam@example.com', createdOn: at }, [pam])).toEqual({ by: 'second_account', candidateCustomerId: 'c-pam' })
+    const [inf] = inferMemberships(
+      [order({ at: '2026-10-12T09:00:00Z', customerId: 'sq-nick', customerEmail: 'nick@example.com', customerName: 'Nick New', customerPhone: '3055550111' })],
+      map,
+      [pam],
+      new Date('2026-10-12T10:00:00Z'),
+    )
+    expect(inf).toMatchObject({ customerId: undefined, linkedBy: 'second_account', candidateCustomerId: 'c-pam' })
+  })
+
+  it('her own account, a verified email, an order naming no account and a record with no account yet link as before', () => {
+    expect(linkCustomer({ sqspCustomerId: 'sq-pam', phone: '(305) 555-0111', createdOn: at }, [pam])).toEqual({ customerId: 'c-pam', by: 'sqsp_customer_id' })
+    expect(linkCustomer({ sqspCustomerId: 'sq-2', email: 'pam@example.com', createdOn: at }, [{ ...pam, emails: ['pam@example.com'], unverifiedEmails: [] }])).toEqual({
+      customerId: 'c-pam',
+      by: 'email',
+    })
+    expect(linkCustomer({ phone: '(305) 555-0111', createdOn: at }, [pam])).toEqual({ customerId: 'c-pam', by: 'phone' })
+    const first: CustomerRef = { id: 'c-fay', emails: [], phones: ['+13055550121'] }
+    expect(linkCustomer({ sqspCustomerId: 'sq-fay', phone: '(305) 555-0121', createdOn: at }, [first])).toEqual({ customerId: 'c-fay', by: 'phone' })
+  })
+})
+
+describe('an intent another client holds the order of is a conflict, whoever linked it (W4c re-review 4, E3)', () => {
+  it('a refused intent is named when the holder’s own matched checkout links the renewal, and inferMemberships lists it', () => {
+    const at = new Date('2026-10-12T09:00:00Z')
+    const mom: CustomerRef = { id: 'c-mom', emails: [], unverifiedEmails: ['family@example.com'], phones: [], heldSqspCustomerIds: ['sq-fam'] }
+    const momIntent: CheckoutIntentRef = {
+      id: 'i-mom',
+      customerId: 'c-mom',
+      membershipId: 'm-mom',
+      state: 'matched',
+      planKey: 'premium',
+      expectedEmail: 'family@example.com',
+      startedAt: new Date('2026-01-01T00:00:00Z'),
+      expiresAt: new Date('2026-01-04T00:00:00Z'),
+      orderId: 'o-first',
+      orderSqspCustomerId: 'sq-fam',
+    }
+    const kid: CheckoutIntentRef = {
+      id: 'i-kid',
+      customerId: 'c-kid',
+      membershipId: 'm-kid',
+      state: 'open',
+      planKey: 'premium',
+      expectedEmail: 'family@example.com',
+      startedAt: new Date('2026-10-12T08:00:00Z'),
+      expiresAt: new Date('2026-10-15T08:00:00Z'),
+      client: { phone: '+13055550132', name: 'Dina Daughter' },
+    }
+    const product = { key: 'prod-gold', productId: 'prod-gold', sku: 'MEM-PREMIUM', tier: 'premium' }
+    expect(linkCustomer({ sqspCustomerId: 'sq-fam', email: 'family@example.com', orderId: 'o-new', createdOn: at, product }, [mom], [momIntent, kid])).toEqual({
+      customerId: 'c-mom',
+      by: 'checkout_intent',
+      intent: { id: 'i-mom', fresh: false },
+      intentConflict: 'i-kid',
+    })
+    const [inf] = inferMemberships(
+      [order({ at: '2026-10-12T09:00:00Z', id: 'o-new', customerId: 'sq-fam', customerEmail: 'family@example.com', customerName: 'Dina Daughter' })],
+      map,
+      [mom],
+      new Date('2026-10-12T10:00:00Z'),
+      {},
+      [momIntent, kid],
+    )
+    expect(inf).toMatchObject({ customerId: 'c-mom', intentConflicts: [{ intentId: 'i-kid', orderId: 'o-new', by: 'checkout_intent' }] })
+    // staff linked the account to mom by hand: their decision, no alert
+    const [staff] = inferMemberships(
+      [order({ at: '2026-10-12T09:00:00Z', id: 'o-new', customerId: 'sq-fam', customerEmail: 'family@example.com', customerName: 'Dina Daughter' })],
+      map,
+      [{ ...mom, sqspCustomerIds: ['sq-fam'], staffSqspCustomerIds: ['sq-fam'] }],
+      new Date('2026-10-12T10:00:00Z'),
+      {},
+      [kid],
+    )
+    expect(staff).toMatchObject({ customerId: 'c-mom', linkedBy: 'sqsp_customer_id', intentConflicts: [] })
   })
 })
