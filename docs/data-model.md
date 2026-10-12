@@ -945,8 +945,9 @@ Primary key `(lot_event_id)`. `(customer_id)` references `customers(id)`. `(loca
 | `disabled_reason` | text | yes |  |
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `updated_at` | timestamp with time zone | no | `app_now()` |
+| `expiry_notice_for` | text | yes |  |
 
-Primary key `(id)`. Unique `(square_card_id)`. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. 8 check constraints. Index `customer_cards_customer_idx` `(customer_id, created_at)`.
+Primary key `(id)`. Unique `(square_card_id)`. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. 9 check constraints. Index `customer_cards_customer_idx` `(customer_id, created_at)`.
 
 #### `customer_pins`
 
@@ -2460,8 +2461,11 @@ Primary key `(id)`. Unique `(location_id, sqsp_subscription_id)`. `(location_id)
 | `waive_reason` | text | yes |  |
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `updated_at` | timestamp with time zone | no | `app_now()` |
+| `attempted_at` | timestamp with time zone | yes |  |
+| `decline_code` | text | yes |  |
+| `reason` | text | yes |  |
 
-Primary key `(id)`. Unique `(idempotency_key)`. Unique `(square_payment_id)`. `(appointment_id)` references `appointments(id)`. `(card_id)` references `customer_cards(id)`. `(consent_id)` references `card_consents(id)`. `(customer_id)` references `customers(id)`. `(decided_by_user_id)` references `users(id)` on delete set null. `(invoice_id)` references `invoices(id)`. `(ledger_event_id)` references `ledger_events(id)`. `(location_id)` references `locations(id)` on delete cascade. 8 check constraints. Index `square_charges_customer_idx` `(customer_id)`. Index `square_charges_invoice_idx` `(invoice_id)` where `invoice_id IS NOT NULL`. Index `square_charges_open_idx` `(location_id, created_at)` where `state = ANY (ARRAY['proposed'::text, 'charging'::text, 'unknown'::text])`.
+Primary key `(id)`. Unique `(idempotency_key)`. Unique `(square_payment_id)`. `(appointment_id)` references `appointments(id)`. `(card_id)` references `customer_cards(id)`. `(consent_id)` references `card_consents(id)`. `(customer_id)` references `customers(id)`. `(decided_by_user_id)` references `users(id)` on delete set null. `(invoice_id)` references `invoices(id)`. `(ledger_event_id)` references `ledger_events(id)`. `(location_id)` references `locations(id)` on delete cascade. 10 check constraints. Index `square_charges_customer_idx` `(customer_id)`. Index `square_charges_invoice_idx` `(invoice_id)` where `invoice_id IS NOT NULL`. Unique index `square_charges_open_fee_idx` `(appointment_id, purpose)` where `(appointment_id IS NOT NULL) AND (purpose = ANY (ARRAY['no_show_fee'::text, 'late_cancel_fee'::text])) AND (state = ANY (ARRAY['proposed'::text, 'charging'::text, 'unknown'::text, 'declined'::text]))`. Index `square_charges_open_idx` `(location_id, created_at)` where `state = ANY (ARRAY['proposed'::text, 'charging'::text, 'unknown'::text])`.
 
 #### `square_customer_links`
 

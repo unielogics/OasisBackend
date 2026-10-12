@@ -1027,11 +1027,13 @@ CREATE TABLE public.customer_cards (
     disabled_reason text,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    expiry_notice_for text,
     CONSTRAINT customer_cards_check CHECK (((state = 'active'::text) = (disabled_at IS NULL))),
     CONSTRAINT customer_cards_created_via_check CHECK ((created_via = ANY (ARRAY['card_link'::text, 'membership_link'::text, 'staff'::text, 'square'::text]))),
     CONSTRAINT customer_cards_disabled_reason_check CHECK (((disabled_reason IS NULL) OR (disabled_reason = ANY (ARRAY['client_removed'::text, 'staff_removed'::text, 'square_disabled'::text, 'square_forgotten'::text, 'expired'::text, 'customer_deleted'::text])))),
     CONSTRAINT customer_cards_exp_month_check CHECK (((exp_month IS NULL) OR ((exp_month >= 1) AND (exp_month <= 12)))),
     CONSTRAINT customer_cards_exp_year_check CHECK (((exp_year IS NULL) OR ((exp_year >= 2000) AND (exp_year <= 2200)))),
+    CONSTRAINT customer_cards_expiry_notice_for_check CHECK (((expiry_notice_for IS NULL) OR (expiry_notice_for ~ '^[0-9]{4}-[0-9]{2}$'::text))),
     CONSTRAINT customer_cards_last4_check CHECK (((last4 IS NULL) OR (last4 ~ '^[0-9]{4}$'::text))),
     CONSTRAINT customer_cards_postal_check CHECK (((postal IS NULL) OR (length(postal) <= 12))),
     CONSTRAINT customer_cards_state_check CHECK ((state = ANY (ARRAY['active'::text, 'disabled'::text, 'forgotten'::text, 'expired'::text])))
@@ -2877,13 +2879,18 @@ CREATE TABLE public.square_charges (
     waive_reason text,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    attempted_at timestamp with time zone,
+    decline_code text,
+    reason text,
     CONSTRAINT square_charges_amount_cents_check CHECK ((amount_cents > 0)),
     CONSTRAINT square_charges_attempts_check CHECK ((attempts >= 0)),
     CONSTRAINT square_charges_check CHECK (((state <> 'charged'::text) OR (square_payment_id IS NOT NULL))),
     CONSTRAINT square_charges_check1 CHECK (((state = 'proposed'::text) OR (decided_at IS NOT NULL))),
     CONSTRAINT square_charges_check2 CHECK (((invoice_id IS NOT NULL) OR (appointment_id IS NOT NULL))),
+    CONSTRAINT square_charges_decline_code_check CHECK (((decline_code IS NULL) OR (length(decline_code) <= 64))),
     CONSTRAINT square_charges_idempotency_key_check CHECK ((length(idempotency_key) <= 45)),
     CONSTRAINT square_charges_purpose_check CHECK ((purpose = ANY (ARRAY['no_show_fee'::text, 'late_cancel_fee'::text, 'balance'::text]))),
+    CONSTRAINT square_charges_reason_check CHECK (((reason IS NULL) OR (length(reason) <= 120))),
     CONSTRAINT square_charges_state_check CHECK ((state = ANY (ARRAY['proposed'::text, 'charging'::text, 'charged'::text, 'declined'::text, 'unknown'::text, 'waived'::text])))
 );
 
@@ -5409,6 +5416,12 @@ CREATE INDEX square_charges_customer_idx ON public.square_charges USING btree (c
 --
 
 CREATE INDEX square_charges_invoice_idx ON public.square_charges USING btree (invoice_id) WHERE (invoice_id IS NOT NULL);
+
+--
+-- Name: square_charges_open_fee_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX square_charges_open_fee_idx ON public.square_charges USING btree (appointment_id, purpose) WHERE ((appointment_id IS NOT NULL) AND (purpose = ANY (ARRAY['no_show_fee'::text, 'late_cancel_fee'::text])) AND (state = ANY (ARRAY['proposed'::text, 'charging'::text, 'unknown'::text, 'declined'::text])));
 
 --
 -- Name: square_charges_open_idx; Type: INDEX; Schema: public; Owner: -

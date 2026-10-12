@@ -274,6 +274,9 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | PUT | `/api/v1/appointments/:id/checklist/items/:itemId` | jobs.checklist |  |
 | POST | `/api/v1/appointments/:id/complete` | jobs.status |  |
 | POST | `/api/v1/appointments/:id/confirm` | sched.edit | jobs.status |  |
+| GET | `/api/v1/appointments/:id/fee-charges` | pay.collect | sched.cancel |  |
+| POST | `/api/v1/appointments/:id/fee-charges/:chargeId/charge` | pay.collect | required |
+| POST | `/api/v1/appointments/:id/fee-charges/:chargeId/waive` | pay.collect | required |
 | POST | `/api/v1/appointments/:id/membership-perks/apply` | cli.member | required |
 | GET | `/api/v1/appointments/:id/messages` | cli.view |  |
 | POST | `/api/v1/appointments/:id/messages` | msg.send | required |
@@ -338,6 +341,9 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/closures/preview` | set.hours |  |
 | GET | `/api/v1/customers` | cli.view |  |
 | POST | `/api/v1/customers` | sched.edit |  |
+| POST | `/api/v1/customers/:id/card-link` | cli.edit |  |
+| GET | `/api/v1/customers/:id/cards` | cli.view |  |
+| DELETE | `/api/v1/customers/:id/cards/:cardId` | cli.edit |  |
 | GET | `/api/v1/customers/:id/identity` | cli.view |  |
 | POST | `/api/v1/customers/:id/identity/confirm` | cli.edit |  |
 | POST | `/api/v1/customers/:id/identity/pin/clear` | cli.edit |  |
@@ -386,6 +392,8 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/integrations/squarespace/sync-now` | set.billing |  |
 | GET | `/api/v1/invoices/:id` | pay.reports |  |
 | POST | `/api/v1/invoices/:id/adjustments` | pay.adjust | required |
+| GET | `/api/v1/invoices/:id/card-charges` | pay.collect | pay.reports |  |
+| POST | `/api/v1/invoices/:id/card-charges` | pay.collect | required |
 | POST | `/api/v1/invoices/:id/credit-applications` | pay.collect | required |
 | POST | `/api/v1/invoices/:id/credits` | pay.credit | required |
 | POST | `/api/v1/invoices/:id/payment-links` | pay.collect | required |
@@ -440,7 +448,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/public/links/appointments/:ref/reschedule` | public |  |
 | GET | `/api/v1/public/links/availability` | public |  |
 | POST | `/api/v1/public/links/bookings` | public | required |
-| POST | `/api/v1/public/links/cards` | public |  |
+| POST | `/api/v1/public/links/cards` | public | required |
 | DELETE | `/api/v1/public/links/cards/:cardId` | public |  |
 | POST | `/api/v1/public/links/deposit/start` | public |  |
 | POST | `/api/v1/public/links/exchange` | public |  |
@@ -473,6 +481,8 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/api/v1/settings/bundle` | authenticated |  |
 | GET | `/api/v1/settings/cancellation-policy` | authenticated |  |
 | PUT | `/api/v1/settings/cancellation-policy` | set.hours |  |
+| GET | `/api/v1/settings/card-fees` | set.billing | pay.reports |  |
+| PUT | `/api/v1/settings/card-fees` | set.billing |  |
 | GET | `/api/v1/settings/features` | authenticated |  |
 | PUT | `/api/v1/settings/features` | set.billing |  |
 | GET | `/api/v1/settings/hours` | authenticated |  |
