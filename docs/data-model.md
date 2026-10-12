@@ -429,8 +429,7 @@ Operations design day re-anchored on **today** in the business time zone with th
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (112 tables, 1 view, 14 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
-Generated from `db/schema.sql` by `pnpm data-model` (107 tables, 1 view, 12 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (113 tables, 1 view, 14 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
