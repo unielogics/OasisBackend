@@ -38,7 +38,7 @@ describe('joining on the website with Square as the processor', () => {
     const n = await h.db.selectFrom('notifications').select(['kind', 'body']).execute()
     expect(n[0]).toMatchObject({ kind: 'membership.web_join' })
     expect(n[0]!.body).toContain('We texted them their secure membership page to enter a card')
-    expect(n.some((x) => /Squarespace/.test(x.body))).toBe(false)
+    expect(n.some((x) => /Squarespace/.test(x.body ?? ''))).toBe(false)
     expect(sim.sim.log).toEqual([])
   })
 })
