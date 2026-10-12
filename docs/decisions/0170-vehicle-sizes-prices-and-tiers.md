@@ -13,15 +13,17 @@ plan's credits covered services by tag. This ADR replaces all of that with one m
 
 1. **Vehicle sizes are an editable list per location** (`vehicle_classes`, built on the categories pattern): key (slug, never
    changes), label, sort (size order, smallest first), active. Defaults `compact_car`, `large_car`, `compact_suv`, `large_suv`,
-   `truck`; at most 12. A size anything uses (a price, a tier price, a membership, a vehicle, a visit) cannot be deleted
-   (`CLASS_IN_USE`), only turned off; the last active size stays on.
+   `truck`; at most 12. A size anything uses (a price, a tier price, a membership, a membership checkout, a credit event, a
+   vehicle, a visit) cannot be deleted (`CLASS_IN_USE`), only turned off; the last active size stays on. A size turned off still
+   prices the memberships already sold at it: coverage reads the plan size's own cell even when that size is off.
 2. **One regular price per service and size** (`service_class_prices`; an "up to" price makes a range, for tint). A missing cell is
    "not set". This replaces the member and guest prices, the guest markup and the tint matrix (kept, read only, for one release).
 3. **The member price is computed, never typed:** price × (1 − the tier's % off), rounded **half up to whole dollars**
    (`memberCents`; 0% leaves the price as it is; never above the price). The % off is per tier (`member_discount_bp`, 0 at
    migration, so nothing anyone pays changes).
 4. **Coverage is capped at the plan size:** an inclusion covers min(price at the visit size, price at the plan size); the line is
-   charged the regular price and the **size difference stays due with no % off**. Covered lines get no % off either.
+   charged the regular price and the **size difference stays due with no % off**. Covered lines get no % off either. The price at
+   the plan size is that size's own cell, even after the size is turned off (a member keeps the size they pay for).
 5. **Tiers stay in `membership_plans` with slug keys.** `premium` is renamed `gold` and `executive` `vip`; the old key is kept in
    `legacy_key`, through which old Squarespace product names, product rows, the bootstrap map and staff inputs still resolve
    (`planByKey`); the two foreign keys that use the key (personal links, checkouts) follow by their `on update cascade`. A tier gains
@@ -103,7 +105,12 @@ facts (`facts-v4`) are wave Q3d's.
 `pricing-defaults` (new, idempotent, fills only empty cells, audited "Seed (pricing-defaults)"): Signature Hand Wash (else the
 cheapest active wash) at Compact car $40 and Gold at Compact car $129/month; % off 0. `website-catalog` no longer writes any price,
 markup or tint matrix (the website's figures were wrong, plan decision 9); it sets the tint films and the Gold/VIP tiers' perks and
-warns about inclusions that cover no active service. `ensurePlans` creates the design's tiers (gold and vip carrying their old keys)
+warns about inclusions that cover no active service.
+
+Rollout check: the migration already copies an old member or guest price into the Compact car cell of every service that had one,
+and `pricing-defaults` never overwrites a set cell. After `pnpm seed -- --profile pricing-defaults`, read its log: the wash line must
+name the wash it priced (`wash Signature Hand Wash`). If it says `wash unchanged (… already has a compact_car price of $X, kept …)`,
+the $40 was not applied: set it in Settings → Prices. `ensurePlans` creates the design's tiers (gold and vip carrying their old keys)
 only for a location without any tier, so a tier or inclusion staff deleted never comes back.
 
 ## What the next waves add
@@ -113,7 +120,8 @@ only for a location without any tier, so a tier or inclusion staff deleted never
   when it would overpay), `POST /appointments/quote`, `settleMembershipVisit` (one redeem + adjust per covered line, the covered
   amount capped at the plan size; the per-inclusion unique index is already in place), household routes, `planClass` on joins and
   manual memberships, the invoice DTO coverage fields, the website's "Sedan / Coupe" label bug.
-* **Q3:** the website catalog v2 and join flow (size picker, tier prices), the assistant's facts-v4, memberships billed as Square
+* **Q3:** the website catalog v2 and join flow (size picker, tier prices; a tier with no current price is not sold online: v2,
+  the join route and the assistant's links leave it out, which v1 `plans` and `POST /public/memberships/join` do not do yet), the assistant's facts-v4, memberships billed as Square
   subscriptions (each `membership_tier_prices` row a plan variation; "Move members").
 * **Later:** a migration drops `vehicles.vehicle_type`, the member/guest/VIP columns, `plan_credit_rules`, `catalog.tint_matrix`
   and `catalog.guest_markup_pct`.

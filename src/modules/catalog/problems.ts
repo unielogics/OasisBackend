@@ -34,7 +34,7 @@ registerProblems({
   CLASS_IN_USE: {
     status: 409,
     title: 'Size in use',
-    detail: 'Prices, memberships, vehicles or visits still use this size. Turn it off instead',
+    detail: 'Prices, memberships, checkouts, vehicles or visits still use this size. Turn it off instead',
   },
   CLASS_LIMIT: {
     status: 422,

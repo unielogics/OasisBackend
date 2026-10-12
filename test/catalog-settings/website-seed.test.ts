@@ -288,7 +288,7 @@ describe('pricing-defaults seed', () => {
     expect(await snapshot()).toEqual(first)
     expect(await t.db.selectFrom('membership_tier_prices').selectAll().execute()).toEqual(tierRows)
     expect(lines.find((l) => l.startsWith('pricing-defaults:'))).toBe(
-      'pricing-defaults: size compact_car, wash unchanged, tier unchanged (Signature Hand Wash already has a compact_car price; Gold already has a compact_car price)',
+      'pricing-defaults: size compact_car, wash unchanged, tier unchanged (Signature Hand Wash already has a compact_car price of $45, kept: set $40 in Settings if that is the price; Gold already has a compact_car price)',
     )
   })
 

@@ -213,6 +213,21 @@ describe('priceLine: a guest, a member, a covered line', () => {
     expect(l.coverage).toMatchObject({ coveredCents: 4000, differenceCents: 2000 })
   })
 
+  it('a plan size turned off later still covers at that size’s own price (members keep the size they pay for)', () => {
+    const off = book({ wash: { compact_car: 4000, large_car: 5000, large_suv: 6000 } }, { off: ['large_suv'] })
+    // a Large car on a Large SUV plan: $50 is within the $60 plan-size price, fully covered
+    expect(priceLine(off, { serviceId: 'wash' }, 'large_car', member({ planClass: 'large_suv' }))).toMatchObject({
+      coverage: { coveredCents: 5000, differenceCents: 0, planClass: 'large_suv' },
+      dueCents: 0,
+    })
+    // a turned-off plan size without a price of its own: rule 1 as before
+    const bare = book({ wash: { compact_car: 4000, large_car: 5000 } }, { off: ['large_suv'] })
+    expect(priceLine(bare, { serviceId: 'wash' }, 'large_car', member({ planClass: 'large_suv' })).coverage).toMatchObject({
+      coveredCents: 4000,
+      differenceCents: 1000,
+    })
+  })
+
   it('no credit left: the line is not covered and gets the member price', () => {
     const m = member({ inclusions: [{ id: 'i-wash', label: 'Hand wash', mode: 'per_cycle', left: 0, autoApply: true, serviceIds: ['wash'] }] })
     expect(priceLine(B, { serviceId: 'wash' }, 'large_car', m)).toMatchObject({ chargeCents: 4500, coverage: null, dueCents: 4500 })

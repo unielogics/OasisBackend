@@ -686,7 +686,7 @@ export function registerCatalogSettingsRoutes(rt: SettingsRuntime): void {
         operationId: 'deleteVehicleClass',
         summary: 'Delete a vehicle size nothing uses',
         description:
-          '409 CLASS_IN_USE (meta names the counts) while any price, tier price (current or past), membership, vehicle or visit uses it: turn it off instead. The last size that is on cannot be deleted (422). If-Match is enforced when sent.',
+          '409 CLASS_IN_USE (meta names the counts) while any price, tier price (current or past), membership, membership checkout, credit event, vehicle or visit uses it: turn it off instead. The last size that is on cannot be deleted (422). If-Match is enforced when sent.',
         params: CategoryKeyParam,
         response: { 200: z.object({ key: z.string(), removed: z.literal(true) }) },
       },

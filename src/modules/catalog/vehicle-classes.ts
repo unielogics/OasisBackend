@@ -230,10 +230,13 @@ export async function updateVehicleClass(
   return { vehicleClass: after, changed: true }
 }
 
-/** What still uses a size: price cells, tier prices (current or past), memberships, vehicles and visits. */
+/**
+ * What still uses a size: price cells, tier prices (current or past), memberships, membership checkouts, credit events, vehicles and
+ * visits. Checkouts and credit events name a size without a foreign key, so they are counted here.
+ */
 export async function vehicleClassUses(db: Executor, locationId: string, key: string): Promise<Record<string, number>> {
   const n = async (q: Promise<{ n: string | number | bigint } | undefined>): Promise<number> => Number((await q)?.n ?? 0)
-  const [prices, tierPrices, memberships, appointments, vehicles] = await Promise.all([
+  const [prices, tierPrices, memberships, checkouts, creditEvents, appointments, vehicles] = await Promise.all([
     n(
       db
         .selectFrom('service_class_prices')
@@ -260,6 +263,23 @@ export async function vehicleClassUses(db: Executor, locationId: string, key: st
     ),
     n(
       db
+        .selectFrom('membership_checkouts')
+        .select((eb) => eb.fn.countAll<string>().as('n'))
+        .where('location_id', '=', locationId)
+        .where('plan_class', '=', key)
+        .executeTakeFirst(),
+    ),
+    n(
+      db
+        .selectFrom('membership_credit_events as e')
+        .innerJoin('memberships as m', 'm.id', 'e.membership_id')
+        .select((eb) => eb.fn.countAll<string>().as('n'))
+        .where('m.location_id', '=', locationId)
+        .where((eb) => eb.or([eb('e.plan_class', '=', key), eb('e.visit_class', '=', key)]))
+        .executeTakeFirst(),
+    ),
+    n(
+      db
         .selectFrom('appointments')
         .select((eb) => eb.fn.countAll<string>().as('n'))
         .where('location_id', '=', locationId)
@@ -276,7 +296,7 @@ export async function vehicleClassUses(db: Executor, locationId: string, key: st
         .executeTakeFirst(),
     ),
   ])
-  return { prices, tierPrices, memberships, appointments, vehicles }
+  return { prices, tierPrices, memberships, checkouts, creditEvents, appointments, vehicles }
 }
 
 /** Deletes a size nothing uses (409 CLASS_IN_USE otherwise: turn it off instead) and never the last one. */

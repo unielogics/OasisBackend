@@ -273,6 +273,8 @@ async function writeInclusions(tx: Tx, d: { newId: NewId }, plan: Plan, next: In
       throw invalid(`inclusions.${i}.id`, 'That inclusion belongs to another tier: leave the id out to add it.')
   }
   const keep = new Set(next.flatMap((x) => (x.id ? [x.id] : [])))
+  // one turned off goes after the saved list (in its old order), so the order never rests on a tie between ids
+  let after = next.length
   for (const old of plan.inclusions) {
     if (keep.has(old.id)) continue
     const used = await tx
@@ -284,7 +286,7 @@ async function writeInclusions(tx: Tx, d: { newId: NewId }, plan: Plan, next: In
     if (used)
       await tx
         .updateTable('membership_inclusions')
-        .set((eb) => ({ active: false, updated_at: eb.fn('app_now', []) }))
+        .set((eb) => ({ active: false, sort: after++, updated_at: eb.fn('app_now', []) }))
         .where('id', '=', old.id)
         .execute()
     else await tx.deleteFrom('membership_inclusions').where('id', '=', old.id).execute()

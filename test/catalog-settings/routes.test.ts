@@ -317,7 +317,32 @@ describe('vehicle sizes', () => {
     for (const key of ['compact_car', 'compact_suv', 'large_suv', 'truck']) await h.patch(`catalog/vehicle-classes/${key}`, s, { active: false })
     const last = await h.patch('catalog/vehicle-classes/large_car', s, { active: false })
     expect([last.statusCode, errorPath(last)]).toEqual([422, 'active'])
-    for (let i = 0; i < 7; i++) expect((await h.post('catalog/vehicle-classes', s, { key: `x${i}`, label: `X ${i}` })).statusCode).toBe(201)
+    // a membership checkout priced at a size (that column has no foreign key) keeps the size too
+    expect((await h.post('catalog/vehicle-classes', s, { key: 'van', label: 'Van' })).statusCode).toBe(201)
+    await ensurePlans(h.db, { locationId: h.fx.locationId, clock: h.clock, newId: h.fx.newId })
+    const plan = await h.db.selectFrom('membership_plans').select('id').where('key', '=', 'gold').executeTakeFirstOrThrow()
+    const mid = h.fx.newId()
+    await h.db
+      .insertInto('memberships')
+      .values({ id: mid, location_id: h.fx.locationId, customer_id: cust, plan_id: plan.id, plan_label: 'Gold', status: 'pending', source: 'manual', started_at: h.clock.now(), plan_class: 'large_car' })
+      .execute()
+    await h.db
+      .insertInto('membership_checkouts')
+      .values({
+        id: h.fx.newId(),
+        location_id: h.fx.locationId,
+        membership_id: mid,
+        customer_id: cust,
+        plan_key: 'gold',
+        plan_class: 'van',
+        checkout_url: 'https://oasis.squarespace.com/checkout/subscribe?productId=1',
+        started_at: h.clock.now(),
+        expires_at: new Date(h.clock.now().getTime() + 86_400_000),
+      })
+      .execute()
+    const van = await h.del('catalog/vehicle-classes/van', s)
+    expect([van.statusCode, json(van)]).toEqual([409, expect.objectContaining({ code: 'CLASS_IN_USE', meta: { key: 'van', checkouts: 1 } })])
+    for (let i = 0; i < 6; i++) expect((await h.post('catalog/vehicle-classes', s, { key: `x${i}`, label: `X ${i}` })).statusCode).toBe(201)
     expect(json(await h.post('catalog/vehicle-classes', s, { key: 'x99', label: 'One more' })).code).toBe('CLASS_LIMIT')
   })
 
@@ -525,7 +550,7 @@ describe('membership tiers', () => {
       version: saved.version,
     })
     expect(json(same)).toMatchObject({ changed: false, version: saved.version })
-    // a dropped inclusion is deleted, unless credits name it (then turned off)
+    // a dropped inclusion is deleted, unless credits name it (then turned off and listed after the tier's list)
     const m = await makeCustomer(h.db, h.fx, { name: 'Maria Delgado' })
     const plan = await h.db.selectFrom('membership_plans').select('id').where('key', '=', 'gold').executeTakeFirstOrThrow()
     const mid = h.fx.newId()
@@ -538,8 +563,8 @@ describe('membership tiers', () => {
     const drop = await h.put('catalog/tiers/gold', s, { ...body, inclusions: [body.inclusions[1]], version: saved.version })
     expect(drop.statusCode, drop.body).toBe(200)
     expect(json(drop).inclusions.map((i: { id: string; active: boolean }) => [i.id === old.id, i.active])).toEqual([
-      [true, false],
       [false, true],
+      [true, false],
     ])
     expect(json(drop).sold).toBe(true)
     expect(await auditActions(h.db)).toContain('catalog.tier.update')

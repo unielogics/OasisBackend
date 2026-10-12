@@ -9,7 +9,8 @@
 //    The starting price ("from $40") is the lowest cell over the active sizes (fromPrice).
 // 2. A member (MemberContext: the holder or a household member of an ACTIVE membership).
 //      covered   the first active inclusion that names the service and can still cover it (every_visit, or per_cycle with a credit
-//                left / unlimited) covers min(price at the visit size, price at the plan size); the line is charged the regular
+//                left / unlimited) covers min(price at the visit size, price at the plan size — that size's own cell even
+//                when the size is off now); the line is charged the regular
 //                price and the size difference (line - covered) stays due. No % off on a covered line, nor on its difference.
 //      other     the member price: price x (1 - tier %), rounded half up to whole dollars (never above the price; 0% = the price).
 // Money is integer cents; nothing here reads the clock or the database.
@@ -223,6 +224,14 @@ export function coveringInclusion(member: MemberContext, serviceId: string, used
 }
 
 /**
+ * The price at a member's plan size: that size's own cell even when the size was turned off later (a member keeps the size they pay
+ * for), else rule 1.
+ */
+function planSizeCents(book: PriceBook, serviceId: string, planClass: string): number {
+  return book.cells.get(serviceId)?.get(planClass)?.cents ?? classPrice(book, serviceId, planClass).cents
+}
+
+/**
  * One line for a guest (member null) or a member. `inclusion`: the inclusion that covers it (quoteVisit picks it), null for none,
  * undefined to let the line find its own (coveringInclusion with the member's credits as they stand).
  */
@@ -245,7 +254,7 @@ export function priceLine(
   if (!member) return { ...base, memberDiscountCents: 0, chargeCents: p.cents, discountBp: 0, coverage: null, dueCents: p.cents }
   const inc = o.inclusion === undefined ? coveringInclusion(member, line.serviceId) : o.inclusion
   if (inc) {
-    const atPlan = classPrice(book, line.serviceId, member.planClass).cents
+    const atPlan = planSizeCents(book, line.serviceId, member.planClass)
     const coveredCents = Math.min(p.cents, atPlan)
     const differenceCents = p.cents - coveredCents
     return {

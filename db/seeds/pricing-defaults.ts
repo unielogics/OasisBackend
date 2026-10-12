@@ -14,6 +14,7 @@ import { putTierPrices } from '../../src/modules/catalog/tiers.js'
 import { ensurePlans, loadPlans, planByKey } from '../../src/modules/memberships/plans.js'
 import { ensureDomainDefaults } from '../../src/modules/settings/defaults.js'
 import type * as audit from '../../src/platform/audit.js'
+import { formatUsdOps } from '../../src/platform/money.js'
 import type { SeedContext, SeedProfile } from './index.js'
 
 export const PRICING_DEFAULTS = {
@@ -78,7 +79,11 @@ export async function seedPricingDefaults(ctx: SeedContext): Promise<PricingDefa
       .where('service_id', '=', wash.id)
       .where('class_key', '=', cls.key)
       .executeTakeFirst()
-    if (set) out.skipped.push(`${wash.name} already has a ${cls.key} price`)
+    // a price the migration copied from the old member/guest price is kept too: the log says so, for the rollout check (ADR 0170)
+    if (set)
+      out.skipped.push(
+        `${wash.name} already has a ${cls.key} price of ${formatUsdOps(set.price_cents)}, kept: set ${formatUsdOps(PRICING_DEFAULTS.washCents)} in Settings if that is the price`,
+      )
     else {
       await putClassPrices(tx, {
         locationId: location.id,
