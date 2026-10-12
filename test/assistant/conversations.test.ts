@@ -14,7 +14,7 @@ import type { AssistantConfig } from '../../src/modules/assistant/config.js'
 import { aiCostMicros } from '../../src/integrations/ai/cost.js'
 import { assistantConfig } from '../../src/modules/assistant/config.js'
 import { SAFETY_LINE } from '../../src/modules/assistant/guard.js'
-import { JUDGE_HINTS, JUDGE_RUBRIC, TRUSTED_CLOSE, TRUSTED_OPEN } from '../../src/modules/assistant/judge.js'
+import { JUDGE_HINTS, JUDGE_RUBRIC, TRUSTED_CLOSE, TRUSTED_OPEN, unkeyed } from '../../src/modules/assistant/judge.js'
 import { INTAKE_LINES } from '../../src/modules/assistant/prompt.js'
 import { AssistantRuntime } from '../../src/modules/assistant/runtime.js'
 import { toBizDate } from '../../src/platform/time.js'
@@ -438,7 +438,7 @@ describe('the policy judge in a turn (design 3c, layer 3)', () => {
     // the judge read the rendered reply both times, the server's segments marked trusted
     expect(a.judge.requests).toHaveLength(2)
     expect(JSON.stringify(a.judge.requests[0]!.messages)).toContain('OK: 54 for the wash.')
-    expect(JSON.stringify(a.judge.requests[1]!.messages)).toContain(`${TRUSTED_OPEN}Signature Hand Wash starts at $45 for members, $54 otherwise${TRUSTED_CLOSE}`)
+    expect(unkeyed(JSON.stringify(a.judge.requests[1]!.messages))).toContain(`${TRUSTED_OPEN}Signature Hand Wash starts at $45 for members, $54 otherwise${TRUSTED_CLOSE}`)
     // both verdicts are stored for review, as tool calls that are no progress
     const rows = await w.t.db.selectFrom('assistant_tool_calls').select(['tool', 'outcome', 'error', 'output', 'input']).where('tool', '=', 'policy_judge').orderBy('seq').execute()
     expect(rows.map((r) => [r.outcome, r.error])).toEqual([
@@ -494,7 +494,7 @@ describe('the policy judge in a turn (design 3c, layer 3)', () => {
     const req = a.judge.requests[0]!
     expect(req.system).toEqual([{ text: JUDGE_RUBRIC, cache: true }])
     expect(req).toMatchObject({ maxTokens: 120, temperature: 0, toolChoice: 'none' })
-    const message = JSON.stringify(req.messages)
+    const message = unkeyed(JSON.stringify(req.messages))
     expect(message).toContain(`Hi Maria! ${TRUSTED_OPEN}Signature Hand Wash`)
     expect(message).toContain(`${TRUSTED_OPEN}[link]${TRUSTED_CLOSE} ${TRUSTED_OPEN}${SAFETY_LINE}${TRUSTED_CLOSE}`)
     const conv = (await conversationOf(maria()))!
@@ -539,7 +539,7 @@ describe('the policy judge in a turn (design 3c, layer 3)', () => {
       expect(JSON.stringify(a.provider.requests[1]!.messages.at(-1))).toContain('Never write a digit code or a phone number')
       // the rewritten reply passed the word lists ("Free" is the vehicle's own name), and the judge read it all as untrusted
       expect(a.judge.requests).toHaveLength(1)
-      const message = JSON.stringify(a.judge.requests[0]!.messages)
+      const message = unkeyed(JSON.stringify(a.judge.requests[0]!.messages))
       expect(message).toContain('Your Free Wash Club is booked.')
       expect(message).not.toContain(TRUSTED_OPEN)
       expect((await aiTexts(maria()))[0]!.body).toContain('Your Free Wash Club is booked.')
