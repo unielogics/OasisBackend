@@ -1331,12 +1331,21 @@ Who a Squarespace membership order belongs to (`payments-sync/membership.ts link
    (`orderHeldByAnother`), and that row binds neither its order nor renewals; a row staff matched is never second-guessed. An
    intent only names an email the client typed, so it can never take a member's renewals.
 2. The Squarespace customer id (`sqsp_customer_links`; a link the contacts job made **by email** counts only while that client's
-   email is verified).
+   email is verified). A staff link (`PUT /customer-links/:sqspCustomerId`, source `manual`) always wins: no other client's
+   record takes that Squarespace customer's orders or holds it, whatever it paid on before (ADR 0160, W4c re-review 4, E1).
 3. An email the client **verified** (`customers.email_verified`; trigger `customers_email_unverify` drops the flag whenever the
    email changes, letter case aside, even when the statement also sets it; the only way to store a new verified email is
    `setVerifiedEmail(tx, customerId, email)` in `src/modules/memberships/verified-email.ts`, which names the address in the
    transaction-local setting `oasis.verified_email` for that one statement).
 4. The phone.
+
+Tiers 4 and the unverified-email candidate skip a record that already has a **different** Squarespace customer (linked by any
+source, on a membership row, or on a paid order linked to it) when the order names its Squarespace customer: such an order is
+`second_account`, "needs a customer", and the `membership_needs_customer` alert says "a second Squarespace account is using
+<client>'s number … the number may have a new holder"; the contacts job likewise links no such contact by phone or an unverified
+email (W4c re-review 4, E2). An order an intent named but another client holds (tier 1's refusal above) raises one
+`membership_intent_conflict` alert per order naming both clients, raised once ("paid from <holder>'s Squarespace account for
+<client>'s checkout … check who it belongs to"; none when staff linked that Squarespace customer to the holder; E3).
 
 An email nobody verified never links. A **paid** order whose email matches exactly one client only that way waits for staff: the
 sync opens a `membership_checkouts` row `awaiting_match` (origin `sync`, the order in `matched_order_id`, no checkout URL) on that

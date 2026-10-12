@@ -582,6 +582,13 @@ confirm" proposals from the assistant, and a reply number sent then books nothin
    its /64, so an AAAA record is no longer a way around them.
 6. **`PUBLIC_WRITES_ENABLED` stays `false`** (the website's own POSTs). Before Squarespace goes live: an order that matches a checkout
    intent only by its typed email but carries another phone or name waits for staff (Memberships, awaiting match).
+7. **Before `SQSP_PROVIDER=live`** (ADR 0160, W4c re-review 4, E4): re-test the Squarespace paths (contacts job, linking tiers,
+   the staff-link, second-account and family-account rules, their alerts) with a read-only pass over the REAL Squarespace orders
+   and contacts into a copy of the database, and review with the owner which orders link, which wait for "needs a customer" and
+   which alerts open. Accepted residual risks, know them: Squarespace keys customer profiles by email (anyone checking out with a
+   client's email pays as that client's Squarespace customer; staff relink by hand, `membership_intent_conflict` and
+   `membership_duplicate_payment` alerts point at it); the 180-day stale-record window (a recycled number is the old client to the
+   assistant until then); an invalid-number bounce holds even a paid-up member's record until staff confirm the client.
 
 ### The host cannot resolve its own new name (health check: "answered HTTP 000")
 

@@ -804,3 +804,48 @@ test/memberships/stale-staff.test.ts, test/public-http/memberships.test.ts).
   once). **Proposed owner decision for W5:** the assistant discusses balance and membership details only with a VERIFIED (trusted)
   phone (a PIN or code verification within the 30-day trust); appointment dates and times stay available to the number on file, as
   the shop's own reminder texts already send them there.
+
+### W4c re-review 4 fixes (the fourth re-review of d0318f5: who a Squarespace account belongs to)
+
+Orchestrator decisions; each code item (E1–E3) has a test that fails on d0318f5 and passes after it
+(test/memberships/second-account.test.ts; the pure rules in test/payments-sync/membership-intents.test.ts).
+
+- **E1 A staff link always wins** [attack A: a staff manual link overridden by D1]: D1 put a Squarespace customer that had paid on
+  client A's record into A's ids, so after staff linked it to client B by hand (`PUT /integrations/squarespace/customer-links/:id`,
+  `setManualLink`) both records claimed it and its orders linked nobody (ambiguous). `memberships/service.ts` `customerRefs` now drops
+  a Squarespace customer staff linked to one client from every other client's ids (`sqspCustomerIds` and `heldSqspCustomerIds`:
+  their membership row of it, a paid order of it linked to them), so its orders are B's from then on; A's record keeps its history
+  and takes nothing new. The contacts job never overwrites a staff link (as before).
+- **E2 A second Squarespace account on a client's number** [attack C: a paid-up member's number recycled; the new holder's NEW
+  Squarespace account linked by phone]: a member normally has one Squarespace account, and a paid-up member (D2) is never stale, so
+  the new holder's account was linked by the contacts job by phone and paid as a duplicate on the member's record. Now a Squarespace
+  customer is never tied to a record by its PHONE or an UNVERIFIED email when the record already has a DIFFERENT Squarespace customer
+  (linked by any source, on a membership row, or on a paid order linked to it; one staff linked to someone else is not theirs, E1):
+  the contacts job (`payments-sync/db/links.ts` `linkContacts`, `hasOtherAccount`) links nothing (the contact is tried again on each
+  run) and the membership sync (`payments-sync/membership.ts` `linkByIdentity`, `otherAccount`) skips the record in the phone and
+  unverified-email tiers: the order is `second_account`, "needs a customer", and the `membership_needs_customer` alert says "a second
+  Squarespace account is using <client>'s number … the number may have a new holder". A first link (a record with no Squarespace
+  customer yet), the client's own account, a verified email and a staff link work as before. Cost, accepted: a real member who opens
+  a second Squarespace profile (a new email: Squarespace keys profiles by email) waits for staff to link it once.
+- **E3 A family account** [attack B: a shared Squarespace account; the intent refused, the order landing on the lapsed holder
+  silently]: a checkout intent refused because another client holds the paying order (F1: their Squarespace customer, email or
+  phone; whichever tier then links it, the holder's own matched checkout included) still leaves the order with its holder (F1 stands:
+  an intent never takes another client's renewals), but no longer silently: the sync raises one `membership_intent_conflict` alert
+  per order naming both clients ("Order N was paid from <holder>'s Squarespace account for <intent client>'s checkout: it was
+  counted on <holder>'s record … check who it belongs to; if it is <intent client>'s, link the Squarespace customer to them"),
+  raised once (an alert staff resolved is not raised again). `MembershipInference.intentConflicts`; none for an order whose
+  Squarespace customer staff linked to the holder by hand (staff already decided).
+- **E4 Accepted residual risks, before the live Squarespace sync**:
+  - **NH3b Squarespace keys customer profiles by email**: anyone checking out with a client's email gets that client's Squarespace
+    customer id, so their order links to the client in the Squarespace-customer tier (and D1 makes a paid one stick). Oasis cannot
+    tell two people behind one email apart; accepted. Mitigations: an intent of another client never takes it and now says so (E3);
+    a duplicate payment is flagged and alerted; staff can relink by hand (E1).
+  - **The 180-day window** (D4): until a record goes stale, whoever holds its number is that client to the assistant; the proposed
+    W5 owner decision (balance and membership details only with a verified phone) stands.
+  - **Bounce versus paid-up** (D2, the fixer's call): an invalid-number bounce after the record's newest PIN or creation holds even a
+    paid-up member's record (the number itself is gone and carriers reissue it); the member's own Squarespace account still renews
+    on their record (D1), and staff confirm the client to end the rule.
+  - **Re-test with real data**: every Squarespace path here (the contacts job, `customerRefs`, the linking tiers, D1/E1–E3, the
+    alerts) was built and tested against the simulator, whose contacts are keyed by email like the documented API. Before
+    `SQSP_PROVIDER=live` is switched on, re-run them against the real Squarespace data (a read-only pass over real orders and
+    contacts into a copy of the database: which links, which "needs a customer", which alerts) and review the result with the owner.

@@ -240,7 +240,12 @@ Actor: permissions sched.edit + jobs.status only, audit actor "Oasis AI (SMS)", 
   the contacts job never links a Squarespace contact to it by phone; its Squarespace links made while it was not stale, staff
   links and a verified email still link (W4c re-review 2). A Squarespace customer that already PAID on the record (on its
   membership row with a matched payment, or on a paid order linked to it) is that client: its orders link whatever the record's
-  staleness and whatever made the contact link (W4c re-review 3, D1: a yearly member's renewal stays hers).
+  staleness and whatever made the contact link (W4c re-review 3, D1: a yearly member's renewal stays hers). A staff link always
+  wins over that (W4c re-review 4, E1). A Squarespace customer other than the one a record already has never links to it by its
+  phone or an unverified email, in the contacts job or the sync: "needs a customer", alert "a second Squarespace account is using
+  <client>'s number" (E2). An intent refused because another client holds the order leaves it with the holder and raises one
+  `membership_intent_conflict` alert naming both (E3). Accepted, to re-test with the real data before the live sync: Squarespace
+  keys profiles by email, so one email is one Squarespace customer whoever types it (ADR 0160, E4).
 
 ## 6. Status texts (port from lifecycle.finish())
 Checked in (manual arrive: queue +3 min, drop if cleaning starts), wash started (existing in_progress), running late
