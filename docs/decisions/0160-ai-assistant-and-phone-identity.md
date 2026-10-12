@@ -676,7 +676,8 @@ Each item has a test that fails on 74bdf9d and passes after it.
   client ends the stale-record rule (`identity/stale.ts`): the record's creation, their PIN (`customers.identity_confirmed_at`, stamped
   by `verifySessionPin`, and a trust granted by PIN), staff (an appointment staff created, a visit staff served (wash started or finished) unless
   the website booked it, `POST /customers/:id/identity/confirm`), a booking made for a session verified with the client's PIN
-  (`appointments.booked_with_pin`, link pages and the assistant), a live membership. Never a texted code, a link or website booking by
+  (`appointments.booked_with_pin`, link pages and the assistant), a live membership (superseded by the re-review's L3: its last
+  matched payment or staff action). Never a texted code, a link or website booking by
   itself or a text. The invalid-number rule compares the bounce with the record's newest proof, its creation included. (b) A party
   who verified only the number on a stale record (a stranger's link, the client's own calendar link, a website member token) books as a
   NEW client (`identity/rebind.ts` `bindPartyToNumber` / `reassignNumber`): the number moves to it; the old record keeps its history,
@@ -707,3 +708,33 @@ Each item has a test that fails on 74bdf9d and passes after it.
 - **P8 IPv6**: every per-address limit (the public and link durable limits, the in-memory rings, PIN failures per address) keys an IPv6
   address by its /64 and an IPv4-mapped address as IPv4 (`platform/ip.ts` `ipLimitKey`); `identity_pin_failures.ip` stores that key.
 - **Runbook**: the pre-rollout checklist and the kill switches are in docs/runbook.md "Personal links".
+
+### W4c re-review fixes (the adversarial re-review of 6ba4491)
+
+Each item has a test that fails on 6ba4491 and passes after it (the re-reviewer's probe ids in brackets).
+
+- **M1 Stale provisional records** [R4, RL2]: `resolveIdentity` applies the stale-record rule to a provisional record ("New texter …",
+  `needs_details`) too: a stale one is unknown to the assistant (no name, vehicles, visits, membership or balance) until proof. A text
+  from a number whose ARCHIVED provisional record the rule holds never restores it (`welcome/provisional.ts`
+  `restoreArchivedClient`): a new provisional client is created; the archived record stays archived, loses the number (its links,
+  sessions, trust and pending action end) and gets `phone_reassigned_at` / `_to` and the audit `customer.phone_reassigned` (no
+  manager notice: nobody named or booked on it). A non-stale archived record is restored as before; the hourly new-texter ceiling
+  exempts only a restorable one.
+- **L1 The website** [R1, R2]: `/public/otp/verify` shows a stale record to nobody (`member` empty as for an unknown number).
+  `POST /public/bookings` and `POST /public/memberships` refuse a member token (a texted code) for a number whose client has a PIN,
+  stale or not: 409 `IDENTITY_PIN_REQUIRED`, the link pages' rule (a PIN outranks a code); nothing is booked, joined or moved.
+- **L2 Proposals after a handoff or a staff takeover** [RA1, RA2]: `createPendingAction` refuses (409 `IDENTITY_STAFF_HOLDS_CHAT`)
+  while the number's conversation has an open handoff or the client's thread is paused by staff (`ai_paused_until` ahead), locking
+  the thread then the conversation (the order a takeover locks them) so a proposal and a handoff never interleave; the `propose_*`
+  tools answer `unavailable` and nothing is texted. The reply-number handler re-checks both before executing and cancels the
+  action unanswered.
+- **L3 Membership proof** [R3]: a membership proves the client from its last matched payment (`last_paid_at`, whatever the status
+  now) or the last staff action on it (`manual_status_at` while active, past_due or paused; a checkout the system canceled is none),
+  never "live now". Decided (orchestrator): a visit the crew served (the wash started or finished, counted from then) is a staff
+  action whoever booked it, except a website booking; a link or website booking made by code is never proof by itself. Design
+  section 5 says so.
+- **L4 Lead follow-up stage** [RL1]: the follow-up uses the turn's `stageAndConsent`, so in stage `customers` a lead on a stale
+  record is `not_in_stage`.
+- **I1 One-word and placeholder names** [RU2, RU3]: an open intent's client whose name is a single word ("Maria") or a placeholder
+  ("New texter ••0142", "Walk-in guest") takes an order only when the order carries that client's phone; otherwise
+  `intent_mismatch` (`awaiting_match` for staff). `sameName` itself is unchanged ("Nina" / "Nina New" still match by name).

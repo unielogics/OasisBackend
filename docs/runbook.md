@@ -557,7 +557,10 @@ while clients have PINs: a new value voids every PIN (each client sets a new one
 texts bounced as invalid) and books, the shop gets a new client for them and the number moves to it; the old record keeps its
 history without a phone. The managers get "Number reassigned: <name>" and the client file shows it. If it was the same person after
 all, merge the two records. When staff know a quiet client still has the number, confirming it
-(`POST /api/v1/customers/:id/identity/confirm`, cli.edit) ends the stale-record rule for them.
+(`POST /api/v1/customers/:id/identity/confirm`, cli.edit) ends the stale-record rule for them. The same happens without a
+notice when a number whose archived "New texter" record is that old texts again: the text gets a new "New texter" record and the
+archived one shows "number reassigned" in its file. A conversation staff took over (AGENT or a staff reply) gets no "Reply NNNN to
+confirm" proposals from the assistant, and a reply number sent then books nothing.
 
 ### Before the AI and links roll out (W4c checklist)
 

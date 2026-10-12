@@ -213,8 +213,15 @@ Actor: permissions sched.edit + jobs.status only, audit actor "Oasis AI (SMS)", 
   session dies; per IP 20 fails/h; constant-time and same work when no PIN exists; wrong PIN and unknown state answer
   alike. A PIN outranks a code once set; reset by code holds member privileges 72 h + email notice (SES) + staff notice.
 - Stale-record rule: no activity 180+ days or last delivery failed as invalid number → unknown until verified. (W4c fixes:
-  only proof of the CLIENT is activity: their PIN, staff, a PIN-verified booking, a live membership; a texted code proves only the
-  NUMBER, so a code-verified party on a stale record books as a new client and the number moves to it; ADR 0160 "W4c fixes".)
+  only proof of the CLIENT is activity: their PIN, staff, a PIN-verified booking, a membership payment matched to them; a texted
+  code proves only the NUMBER, so a code-verified party on a stale record books as a new client and the number moves to it; ADR 0160
+  "W4c fixes".) W4c re-review: "staff" includes a visit the crew served (the wash started or finished, counted from then), whoever
+  booked it, except a website booking (orchestrator decision: serving the client in person is a staff action; a link or website
+  booking made by code is not proof by itself); a membership counts from its last matched payment (`last_paid_at`) or the last
+  staff action on it (`manual_status_at` while live or paused), never as "live now". The rule holds provisional records ("New
+  texter …") too, and an archived provisional record it holds is never restored by a text (a new provisional client is made; the
+  old one is flagged "number reassigned"). A PIN outranks a code on the website as on the links (a member token for a PIN holder's
+  number: 409 IDENTITY_PIN_REQUIRED), and the website's code check shows a stale record to nobody.
 - Revocation: phone change, PIN reset, merge, STOP, staff Clear PIN, LINK_EPOCH bump.
 - Squarespace: unverified emails never feed linkCustomer's email tier; checkout-intent tier first (expected email +
   product + window); no match → awaiting_match for staff; duplicate paid → flagged; abandoned after 7 d.
