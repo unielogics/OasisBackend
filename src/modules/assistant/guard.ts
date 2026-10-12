@@ -52,6 +52,27 @@ export const MAX_REPLY_CHARS = 320
 
 /** The safety line the server appends to a reply that carries a verify, PIN, membership or payment link (A). The model never writes it. */
 export const SAFETY_LINE = 'For your security, enter codes and your PIN only on the secure page, never by text.'
+/**
+ * The line the server appends when the texts a turn answers hold what looks like a card number (W4 live eval: the model may write
+ * nothing about cards, so a client who texted a card got no warning at all). The model never writes it.
+ */
+export const CARD_LINE = 'For your security, please never text card numbers.'
+
+/** 13 to 19 digits in a row (single spaces or dashes between them allowed) that pass the Luhn check: a card number. */
+export function looksLikeCardNumber(text: string): boolean {
+  for (const m of text.matchAll(/(?<![\d])\d(?:[ -]?\d){12,18}(?![\d])/g)) {
+    const digits = m[0].replace(/\D/g, '')
+    let sum = 0
+    for (let i = 0; i < digits.length; i++) {
+      let d = Number(digits[digits.length - 1 - i])
+      if (i % 2 === 1) d = d * 2 > 9 ? d * 2 - 9 : d * 2
+      sum += d
+    }
+    if (sum % 10 === 0) return true
+  }
+  return false
+}
+
 /** The link kinds whose reply gets SAFETY_LINE. */
 export const SAFETY_LINK_KINDS: ReadonlySet<string> = new Set(['verify', 'pin', 'membership', 'pay'])
 

@@ -11,7 +11,7 @@ import { SIM_DEVICE_KEY } from '../../db/seeds/messaging.js'
 import { DEFAULT_SIM_VERDICT, POLICY_JUDGE_HEADER, SimAiProvider, simText, simToolUse, type SimResponder, type SimStep } from '../../src/integrations/ai/sim.js'
 import type { AiContentBlock, AiConverseRequest, AiJson } from '../../src/integrations/ports/ai.js'
 import { placeholderValues } from '../../src/modules/assistant/facts.js'
-import { SAFETY_LINE } from '../../src/modules/assistant/guard.js'
+import { CARD_LINE, SAFETY_LINE } from '../../src/modules/assistant/guard.js'
 import { TRUSTED_CLOSE, TRUSTED_OPEN, unkeyed } from '../../src/modules/assistant/judge.js'
 import { INTAKE_LINES } from '../../src/modules/assistant/prompt.js'
 import { AssistantRuntime } from '../../src/modules/assistant/runtime.js'
@@ -510,6 +510,24 @@ describe('W4 live eval: what the eval on Bedrock found in these seams', () => {
     // the judge read the perks as the server's own part: its <own-text> has only the model's words
     const judged = JSON.stringify(a.judge.requests[0]!.messages)
     expect(judged).toContain('<own-text>\\n…. …. Want a link to join?\\n</own-text>')
+  })
+
+  it('a card number texted in: the reply carries the server’s card line (trusted for the judge); the model writes nothing about cards', async () => {
+    // on Bedrock the guard refused the model's own "please don't share card details", so the client got no warning at all
+    const a = assistant([simText('There is nothing open on your account right now.')])
+    await inbound(maria(), 'Can I pay by text? My card is 4111 1111 1111 1111 exp 04/28')
+    expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
+    const [reply] = await outTexts(maria())
+    expect(reply!.body).toContain(`There is nothing open on your account right now. ${CARD_LINE}`)
+    const judged = JSON.stringify(a.judge.requests[0]!.messages)
+    expect(judged).toContain(CARD_LINE)
+    expect(judged).toContain('<own-text>\\nThere is nothing open on your account right now. …\\n</own-text>')
+    // a text without a card number gets no card line
+    w.clock.advance(60_000)
+    const b = assistant([simText('We open at 8 AM.')])
+    await inbound(maria(), 'When do you open? My number is 201 555 0123')
+    expect(await b.respond(maria())).toMatchObject({ status: 'replied' })
+    expect((await outTexts(maria())).at(-1)!.body).not.toContain(CARD_LINE)
   })
 
   it('a client on file without a lead: open times open no lead (only the welcome flow and note_interest do)', async () => {

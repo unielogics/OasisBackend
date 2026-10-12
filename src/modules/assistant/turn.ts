@@ -42,7 +42,7 @@ import { AI_ACTOR_NAME, type AssistantLog, type AssistantQueue, type HandoffRequ
 import type { AssistantConfig } from './config.js'
 import { appointmentRefs, loadAppointmentRefs, loadConversation, loadTurnContext, resolveIdentity } from './context.js'
 import { factLiterals, openingWindow, placeholderValues, renderShopFacts } from './facts.js'
-import { cutAfterFirstQuestion, cutAtSentence, guardReply, HARD_PROBLEMS, MAX_REPLY_CHARS, SAFETY_LINE, SAFETY_LINK_KINDS, type GuardProblem, type ReplySegment } from './guard.js'
+import { CARD_LINE, cutAfterFirstQuestion, cutAtSentence, guardReply, HARD_PROBLEMS, looksLikeCardNumber, MAX_REPLY_CHARS, SAFETY_LINE, SAFETY_LINK_KINDS, type GuardProblem, type ReplySegment } from './guard.js'
 import { JUDGE_HINTS, runJudge } from './judge.js'
 import { HANDOFF_SUMMARIES, markUnanswered, openTurnHandoff, recipientOf, sendFallback, type ConversationRef, type HandoffDeps } from './handoff.js'
 import type { AssistantGate, AssistantInbox } from './ports.js'
@@ -149,7 +149,7 @@ export async function noProgress(db: Db | Tx, o: { conversationId: string; now: 
  * The reply as queued: the ai_reply template (the disclosure on the first AI text), links as secretVars (class personal_link), and
  * with `safety` (a verify, PIN, membership or payment link) the server's SAFETY_LINE after the reply: the model never writes it.
  */
-export function composeReply(o: { text: string; disclose: boolean; links: ReadonlyMap<string, string>; safety?: boolean }): {
+export function composeReply(o: { text: string; disclose: boolean; links: ReadonlyMap<string, string>; safety?: boolean; card?: boolean }): {
   text: string
   klass: 'ai_reply' | 'personal_link'
   secretVars?: Record<string, string>
@@ -158,6 +158,7 @@ export function composeReply(o: { text: string; disclose: boolean; links: Readon
   // a registered link the reply left out is appended (the contract: the model may forget the placeholder)
   for (const p of o.links.keys()) if (!reply.includes(p)) reply = `${reply} ${p}`
   if (o.safety) reply = `${reply} ${SAFETY_LINE}`
+  if (o.card) reply = `${reply} ${CARD_LINE}`
   const text = renderTemplate('ai_reply', { reply, ...(o.disclose ? { disclosure: 'yes' } : {}) }).text
   const used = [...o.links.entries()].filter(([p]) => text.includes(p))
   if (used.length === 0) return { text, klass: 'ai_reply' }
@@ -507,7 +508,10 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     const names = [turnContext.firstName, ...turnContext.vehicles.map((v) => v.split(',')[0]), ...(turnContext.vehicleNames ?? [])]
     // a verify / PIN / membership / payment link: the server appends the safety line, so the reply leaves room for it
     const safety = [...linkKinds].some((k) => SAFETY_LINK_KINDS.has(k))
-    const maxChars = safety ? MAX_REPLY_CHARS - SAFETY_LINE.length - 1 : MAX_REPLY_CHARS
+    // the client texted a card number: the server's CARD_LINE follows the reply (the model may write nothing about cards)
+    const card =
+      snap.inboxIds.length > 0 && (await d.db.selectFrom('sms_inbox').select('body').where('id', 'in', snap.inboxIds).execute()).some((r) => looksLikeCardNumber(r.body))
+    const maxChars = MAX_REPLY_CHARS - (safety ? SAFETY_LINE.length + 1 : 0) - (card ? CARD_LINE.length + 1 : 0)
     let rewriteUsed = false
     let shortenUsed = false
     let judgeRewriteUsed = false
@@ -521,7 +525,11 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     }
     // (3) the policy judge: the rendered reply, the server's segments trusted (the safety line too); never throws (an error fails closed)
     const judge = async (segments: readonly ReplySegment[]) => {
-      const all = safety ? [...segments, { text: ' ', trusted: false }, { text: SAFETY_LINE, trusted: true }] : segments
+      const all = [
+        ...segments,
+        ...(safety ? [{ text: ' ', trusted: false }, { text: SAFETY_LINE, trusted: true }] : []),
+        ...(card ? [{ text: ' ', trusted: false }, { text: CARD_LINE, trusted: true }] : []),
+      ]
       const r = await runJudge(d.judge, all, { timeoutMs: d.cfg.judge.timeoutMs, maxTokens: d.cfg.judge.maxTokens, signal: deadline.signal, nowMs })
       judgeUsage = addUsage(judgeUsage, r.usage)
       const o = r.outcome
@@ -631,7 +639,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
             .executeTakeFirst()
         : undefined
       const superseded = c.handoff_state === 'open' || paused !== undefined
-      const composed = composeReply({ text: reply, disclose: c.disclosed_at === null, links, safety })
+      const composed = composeReply({ text: reply, disclose: c.disclosed_at === null, links, safety, card })
       const queued = superseded
         ? null
         : await d.queue.enqueueFor(tx, {

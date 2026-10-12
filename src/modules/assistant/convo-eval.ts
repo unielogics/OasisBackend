@@ -9,7 +9,7 @@
 // offer; at most 320 characters of reply per text; at most one question per text. Flow expectations (per persona: a handoff, a
 // booking, a link of some kind, an opt-out) are reported next to them; they need a person's look before they count as a defect.
 import { z } from 'zod'
-import { MAX_REPLY_CHARS, SAFETY_LINE, SAFETY_LINK_KINDS } from './guard.js'
+import { CARD_LINE, MAX_REPLY_CHARS, SAFETY_LINE, SAFETY_LINK_KINDS } from './guard.js'
 
 // ---- the fixture ---------------------------------------------------------------------------------------------------------------
 
@@ -231,7 +231,7 @@ export function replyPart(text: string): string {
   let t = straight(text)
   if (t.startsWith(DISCLOSURE_PREFIX)) t = t.slice(DISCLOSURE_PREFIX.length)
   if (t.endsWith(DISCLOSURE_SUFFIX)) t = t.slice(0, -DISCLOSURE_SUFFIX.length)
-  return t.replace(SAFETY_LINE, '').trim()
+  return t.replace(SAFETY_LINE, '').replace(CARD_LINE, '').trim()
 }
 
 /** The model's own words: the reply part without the server's rendered placeholders and links. */
@@ -394,7 +394,7 @@ export function markServerParts(text: string, renderedPhrases: readonly string[]
     tail = ` ⟦${DISCLOSURE_SUFFIX.trim()}⟧`
     t = t.slice(0, -DISCLOSURE_SUFFIX.length)
   }
-  t = t.split(SAFETY_LINE).join(`⟦${SAFETY_LINE}⟧`)
+  t = t.split(SAFETY_LINE).join(`⟦${SAFETY_LINE}⟧`).split(CARD_LINE).join(`⟦${CARD_LINE}⟧`)
   // longest first; a phrase is swapped for an index token first so a shorter phrase inside it is not marked twice
   for (const p of [...renderedPhrases].sort((a, b) => b.length - a.length)) if (p) t = t.split(p).join(`⟪${renderedPhrases.indexOf(p)}⟫`)
   t = t.replace(/⟪(\d+)⟫/g, (_, i: string) => `⟦${renderedPhrases[Number(i)]}⟧`)

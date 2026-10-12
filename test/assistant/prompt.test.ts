@@ -8,7 +8,7 @@ import { INTAKE_LINES, PROMPT_VERSION, STATIC_RULES, nextIntakeStep, renderConve
 import { inputSchemaOf, offeredTools, trustAtLeast } from '../../src/modules/assistant/tool-runner.js'
 import { redactJson } from '../../src/modules/assistant/transcript.js'
 import { composeReply } from '../../src/modules/assistant/turn.js'
-import { SAFETY_LINE } from '../../src/modules/assistant/guard.js'
+import { CARD_LINE, looksLikeCardNumber, SAFETY_LINE } from '../../src/modules/assistant/guard.js'
 import { TEMPLATES } from '../../src/modules/messaging/templates/registry.js'
 
 const base: TurnContextData = {
@@ -153,6 +153,18 @@ describe('the reply as queued', () => {
     expect(composeReply({ text: 'Here is your secure link: {link1}', disclose: false, links, safety: true }).text).toBe(`Here is your secure link: {link1} ${SAFETY_LINE}`)
     expect(composeReply({ text: 'Here you go.', disclose: false, links, safety: true }).text).toBe(`Here you go. {link1} ${SAFETY_LINE}`)
     expect(composeReply({ text: 'Pick a time: {link1}', disclose: false, links }).text).not.toContain(SAFETY_LINE)
+    // a card number in the client's texts: the server's card line follows (W4 live eval), after the safety line when both apply
+    expect(composeReply({ text: 'No open balance right now.', disclose: false, links: new Map(), card: true }).text).toBe(`No open balance right now. ${CARD_LINE}`)
+    expect(composeReply({ text: 'Here: {link1}', disclose: false, links, safety: true, card: true }).text).toBe(`Here: {link1} ${SAFETY_LINE} ${CARD_LINE}`)
+  })
+
+  it('a card number is 13 to 19 digits (spaces or dashes) that pass the Luhn check; a phone number or a wrong digit is not', () => {
+    expect(looksLikeCardNumber('My card is 4111 1111 1111 1111 exp 04/28')).toBe(true)
+    expect(looksLikeCardNumber('5500-0000-0000-0004')).toBe(true)
+    expect(looksLikeCardNumber('378282246310005')).toBe(true)
+    expect(looksLikeCardNumber('4111 1111 1111 1112')).toBe(false)
+    expect(looksLikeCardNumber('call me at 201 555 0123')).toBe(false)
+    expect(looksLikeCardNumber('my code is 482913')).toBe(false)
   })
 })
 
