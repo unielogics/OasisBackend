@@ -152,6 +152,16 @@ describe('Square payments into the ledger', () => {
     expect(await alerts(true)).toEqual([])
   })
 
+  it('a payment naming an invoice for more than it owes is recorded, and the invoice shows as overpaid via Square', async () => {
+    const r = await coreRig(t)
+    const inv = await r.openInvoice()
+    const p = r.posPayment({ amountCents: 5000, note: `INV-${inv.no}` })
+    expect(await r.decide(p.id)).toBe('matched')
+    expect(await r.calc(inv.id)).toMatchObject({ overpaid: 720 })
+    const alerts = await squareExternalAlerts.list(t.db, { locationId: r.pe.locationId, now: r.clock.now(), manager: false })
+    expect(alerts).toEqual([expect.objectContaining({ kind: 'square_overpaid', key: `square_overpaid:${inv.id}`, desc: `$7.20 more than INV-${inv.no} · refund the difference` })])
+  })
+
   it('a payment of another location or a failed one never reaches the ledger', async () => {
     const r = await coreRig(t)
     const inv = await r.openInvoice()

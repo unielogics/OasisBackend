@@ -507,6 +507,7 @@ export interface ExternalAlert {
     // Square (ADR 0171): payments to match, a card refund Square refused, an invoice overpaid through Square, Square's health
     | 'square_unmatched'
     | 'square_refund_failed'
+    | 'square_external_refund'
     | 'square_overpaid'
     | 'square_problem'
   tone: AlertTone

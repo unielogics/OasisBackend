@@ -172,7 +172,10 @@ export function squareHealthProblems(
   return out
 }
 
-/** "Needs attention": payments waiting to be matched, failed card refunds, invoices overpaid through Square, Square's health. */
+/**
+ * "Needs attention": payments waiting to be matched, failed card refunds, refunds made directly in the Square app, invoices overpaid
+ * through Square, Square's health.
+ */
 export const squareExternalAlerts: ExternalAlertSource = {
   async list(db, ctx): Promise<ExternalAlert[]> {
     const out: ExternalAlert[] = []
@@ -191,12 +194,33 @@ export const squareExternalAlerts: ExternalAlertSource = {
         priority: 0,
       })
     }
+    // a refund made directly in the Square app, outside Oasis limits and approvals
+    const external = await sql<{ id: string; amount_cents: number; invoice_no: number; client_name: string; appointment_id: string | null }>`
+      select e.id, e.amount_cents, i.invoice_no, i.client_name, i.appointment_id
+      from ledger_events e join invoices i on i.id = e.invoice_id
+      where e.location_id = ${ctx.locationId} and e.type = 'refund' and e.source = 'square' and e.needs_review
+        and e.occurred_at >= ${since}
+      order by e.occurred_at desc, e.seq desc limit 20`.execute(db)
+    for (const x of external.rows)
+      out.push({
+        key: `square_external_refund:${x.id}`,
+        kind: 'square_external_refund',
+        tone: 'amber',
+        title: `Refunded in the Square app · ${x.client_name}`,
+        desc: `${formatUsd(x.amount_cents)} on ${invoiceLabel(x.invoice_no)}, outside Oasis limits and approvals · review it`,
+        actionLabel: 'Review',
+        appointmentId: x.appointment_id,
+        priority: 0,
+      })
+    // only the invoices Square paid lately are computed (the board reads this on every refresh)
     const over = await sql<{ id: string; invoice_no: number; client_name: string; overpaid: string | number; appointment_id: string | null }>`
+      with sq as (
+        select distinct e.invoice_id from ledger_events e
+        where e.location_id = ${ctx.locationId} and e.processor = 'square' and e.type = 'pay' and e.occurred_at >= ${since}
+      )
       select i.id, i.invoice_no, i.client_name, c.overpaid, i.appointment_id
-      from invoices i cross join lateral invoice_calc_of(i.id) c
-      where i.location_id = ${ctx.locationId} and c.overpaid > 0
-        and exists (select 1 from ledger_events e where e.invoice_id = i.id and e.processor = 'square' and e.type = 'pay'
-                    and e.occurred_at >= ${since})
+      from sq join invoices i on i.id = sq.invoice_id cross join lateral invoice_calc_of(i.id) c
+      where c.overpaid > 0
       order by i.invoice_no desc limit 20`.execute(db)
     for (const o of over.rows)
       out.push({

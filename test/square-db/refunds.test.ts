@@ -167,6 +167,8 @@ describe('Square refunds', () => {
     expect(ext).toMatchObject({ type: 'refund', amount_cents: 500, needs_review: true, source: 'square', reason: 'Refunded in Square' })
     await r.ingestRefund(other.id)
     expect(await r.calc(s.inv.id)).toMatchObject({ refunded: 1500 })
+    const alerts = await squareExternalAlerts.list(t.db, { locationId: r.pe.locationId, now: r.clock.now(), manager: false })
+    expect(alerts.filter((a) => a.kind === 'square_external_refund')).toEqual([expect.objectContaining({ tone: 'amber', title: expect.stringMatching(/^Refunded in the Square app · /) })])
     // the job never touches them (no processor square awaiting)
     expect(await runSquareRefunds({ ...s.job, env: squareEnvFor() })).toMatchObject({ planned: 0, submitted: 0 })
   })
