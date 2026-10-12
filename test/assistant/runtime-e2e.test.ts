@@ -464,3 +464,33 @@ describe('the lead follow-up job and the status texts next to the assistant', ()
     expect((await outTexts(maria())).at(-1)!.body).toBe('You are welcome, Maria! See you next time.')
   })
 })
+
+describe('W4 live eval: what the eval on Bedrock found in these seams', () => {
+  it('asking for open times notes the service on the new texter’s lead: the next intake step is the memberships, not "what would you like" again', async () => {
+    // on Bedrock the model almost never called note_interest, so the intake stayed on its "intent" step for whole conversations
+    // and the memberships were never presented before a first booking (owner 2026-10-11 intake order)
+    const a = assistant([
+      simToolUse('set_my_name', { fullName: 'Ana Lopez' }),
+      simToolUse('check_availability', { serviceKey: 'signature-hand-wash', date: MONDAY, partOfDay: 'morning' }),
+      simText('Monday morning has openings, 10:00 AM included. Do you want to hear about our memberships first?'),
+      simText('{plan:gold}. {plan:vip}. Would one of them interest you?'),
+    ])
+    await inbound(NEWCOMER, 'Hi, I’m Ana Lopez, can I get a wash Monday morning?')
+    expect(await a.respond(NEWCOMER)).toMatchObject({ status: 'replied' })
+    expect(contextOf(a.provider.requests[0]!)).toContain(`Intake: ${INTAKE_LINES.name}.`)
+    expect((await w.t.db.selectFrom('leads').select('interests').where('phone_e164', '=', NEWCOMER).executeTakeFirstOrThrow()).interests).toEqual(['wash'])
+    w.clock.advance(70_000)
+    await inbound(NEWCOMER, 'Sure')
+    expect(await a.respond(NEWCOMER)).toMatchObject({ status: 'replied' })
+    expect(contextOf(a.provider.requests.at(-1)!)).toContain(`Intake: ${INTAKE_LINES.memberships}.`)
+    // the intent line itself tells the model to save what the texter already said
+    expect(INTAKE_LINES.intent).toContain('note_interest')
+  })
+
+  it('a client on file without a lead: open times open no lead (only the welcome flow and note_interest do)', async () => {
+    const a = assistant([simToolUse('check_availability', { serviceKey: 'signature-hand-wash', date: MONDAY, partOfDay: null }), simText('Monday has openings at 10:00 AM.')])
+    await inbound(maria(), 'Any openings Monday?')
+    expect(await a.respond(maria())).toMatchObject({ status: 'replied' })
+    expect(await w.t.db.selectFrom('leads').select('id').execute()).toEqual([])
+  })
+})

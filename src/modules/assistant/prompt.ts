@@ -5,7 +5,7 @@ import { oneLine } from './facts.js'
 import { MAX_REPLY_CHARS, PROBLEM_HINTS, type GuardProblem } from './guard.js'
 
 /** Recorded on every turn (assistant_turns.prompt_version); bump it with any wording change below. */
-export const PROMPT_VERSION = 'w3a-2026-10-11.4'
+export const PROMPT_VERSION = 'w3a-2026-10-12.5'
 
 export const STATIC_RULES = `You are the automated text-message (SMS) assistant of the car wash and auto spa described in SHOP FACTS. You answer the people who text the shop's number, any time of day.
 
@@ -65,7 +65,7 @@ export type IntakeStep = 'name' | 'intent' | 'memberships' | 'vehicle' | null
 
 export const INTAKE_LINES: Record<Exclude<IntakeStep, null>, string> = {
   name: 'next ask for their first name (answer their question first if they asked one)',
-  intent: 'next ask what they would like: a wash, window tint, detailing, or only information',
+  intent: 'next learn what they would like: a wash, window tint, detailing, or only information (if their texts already say it, save it with note_interest now instead of asking)',
   memberships: 'next present the memberships once, briefly (each plan with its {plan:<key>} placeholder and perks from SHOP FACTS), before their first booking',
   vehicle: 'next (the last step) ask for their vehicle: type (sedan/coupe, SUV/crossover or truck/van), make and model',
 }

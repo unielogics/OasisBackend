@@ -15,7 +15,8 @@ import { atLeast, fail, json, ok, ownAppointment, withHandoff } from './common.j
 
 export const noteInterest: AssistantTool<ToolInputs['note_interest']> = {
   name: 'note_interest',
-  description: 'Records which service categories the texter is interested in (category keys from the catalog), for the team’s lead list.',
+  description:
+    'Records what the texter wants (category keys from the catalog, e.g. wash, tint, detail). Call it as soon as they say it, even in their first text and without asking again: it saves their lead for the team and moves the welcome intake on to its next step.',
   input: z.strictObject({ categories: z.array(z.string().max(32)).min(1).max(5) }),
   minTrust: TOOL_MIN_TRUST.note_interest,
   async run(ctx, { categories }) {
