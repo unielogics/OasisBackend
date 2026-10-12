@@ -227,7 +227,9 @@ describe('the welcome flow, verification and an in-chat booking, one conversatio
         // the tool tells the model to point at the server's text, never to ask for a number (the judge would fail that)
         expect(result).toContain('"confirmationTexted":true')
         expect(result).not.toMatch(/reply with (that|the) number/i)
-        return simText('I just texted you the details: confirm with that text.')
+        // the server's own words point to the reply number's text (W4 live eval: the judge failed the model's "confirm with that text")
+        expect(result).toContain('{confirm}')
+        return simText('{confirm}.')
       },
     ])
     const intakes: string[] = []
@@ -290,7 +292,9 @@ describe('the welcome flow, verification and an in-chat booking, one conversatio
     expect(confirm.body).toBe('Signature Hand Wash, Mon Jun 15 at 10:00 AM. Reply [code] to confirm.')
     const code = /Reply (\d{4}) to confirm/.exec((await outboxOf(confirm.id)).body)![1]!
     expect(JSON.stringify(a.provider.requests)).not.toContain(`Reply ${code}`)
-    expect((await outTexts(NEWCOMER)).at(-1)!.body).toBe('I just texted you the details: confirm with that text.')
+    expect((await outTexts(NEWCOMER)).at(-1)!.body).toBe('I just texted you the details with how to confirm.')
+    // ... trusted for the judge: its own-text has nothing of it
+    expect(JSON.stringify(a.judge.requests.at(-1)!.messages)).toContain('<own-text>\\n….\\n</own-text>')
 
     // ---- the client texts the number back: the handler books before any model, the lead closes
     w.clock.advance(30_000)

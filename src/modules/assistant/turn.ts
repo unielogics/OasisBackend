@@ -373,6 +373,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
   const linkKinds = new Set<string>()
   let toolHandoff: HandoffRequest | null = null
   let balanceCents: number | null = null
+  let confirmTexted = false
   const ctx: ToolContext = {
     db: d.db,
     clock: d.clock,
@@ -471,6 +472,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
           const r = await runToolRound({ db: d.db, newId: d.newId, nowMs }, { registry: d.registry, ctx, uses, round: rounds, seq, actionsEnabled })
           seq = r.seq
           if (r.balanceCents !== null) balanceCents = r.balanceCents
+          if (r.confirmTexted) confirmTexted = true
           toolHandoff ??= r.handoff
           transcript.add({ kind: 'tools', round: rounds, calls: r.calls })
           // the client opted out in words (opt_out sent the confirmation): nothing more is written to that number, not even a reply
@@ -499,7 +501,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
 
     // ---- the output guard
     // what the placeholders render to (the current facts; {balance} only after get_balance; the links stay for composeReply)
-    const values = placeholderValues(facts, { balanceCents })
+    const values = placeholderValues(facts, { balanceCents, confirmTexted })
     for (const p of links.keys()) values.set(p, p)
     // server-owned literals only (the address, catalog and plan names): the digit rules skip them. Client-entered text (a vehicle on
     // file, the name) is NEVER a literal and never trusted by the judge (fix 1 of the v4 re-check: a vehicle "Free Wash 2015550123")

@@ -105,6 +105,9 @@ describe('the shop facts document', () => {
     expect(values.get('{perks:vip}')).toBe('VIP includes: everything in Gold; wax every wash + engine bay; leather 2× and stain removal 1× a month')
     expect(values.get('{fee}')).toBe('Guests pay a $25 booking fee')
     expect(values.has('{balance}')).toBe(false)
+    // {confirm} exists only after a proposal texted its reply number in the turn
+    expect(values.has('{confirm}')).toBe(false)
+    expect(placeholderValues(f, { confirmTexted: true }).get('{confirm}')).toBe('I just texted you the details with how to confirm')
     expect(placeholderValues(f, { balanceCents: 1250 }).get('{balance}')).toBe('Your open balance is $12.50')
     expect(placeholderValues({ ...f, fee: { ...f.fee, guestBookingFeeCents: 0 } }).get('{fee}')).toBe('There is no booking fee')
     expect([vehiclePhrase('Sedan / Coupe'), vehiclePhrase('SUV / Crossover'), vehiclePhrase('Truck / Van'), vehiclePhrase('Exotic')]).toEqual([

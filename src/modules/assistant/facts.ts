@@ -430,6 +430,12 @@ export function perksWords(p: { label: string; perks: readonly string[] }): stri
 }
 export const FEE_PLACEHOLDER = '{fee}'
 export const BALANCE_PLACEHOLDER = '{balance}'
+/**
+ * After a propose_* call texted its reply number in this turn: the server's own pointer to that text (W4 live eval: the policy judge
+ * failed the model's "confirm with that text" as asking for a received code, so a booking proposal ended in the fallback).
+ */
+export const CONFIRM_PLACEHOLDER = '{confirm}'
+export const CONFIRM_WORDS = 'I just texted you the details with how to confirm'
 
 /**
  * The facts as the cached system block: plain text, deterministic (no generatedAt, no version, fixed order). It names KEYS and
@@ -527,9 +533,10 @@ export function vehiclePhrase(label: string): string {
  *   {perks:<key>}                  "Gold includes: 4 hand washes a month, interior included; no booking fees; ..." (Settings perks)
  *   {fee}                          "Guests pay a $25 booking fee" (no fee: "There is no booking fee")
  *   {balance}                      "Your open balance is $12.50", only when get_balance ran this turn
+ *   {confirm}                      "I just texted you the details with how to confirm", only after a propose_* texted its number
  * The {linkN} placeholders are the turn's own (turn.ts). The names are the shop's own public names (Settings, one line each).
  */
-export function placeholderValues(f: ShopFacts, o: { balanceCents?: number | null } = {}): Map<string, string> {
+export function placeholderValues(f: ShopFacts, o: { balanceCents?: number | null; confirmTexted?: boolean } = {}): Map<string, string> {
   const out = new Map<string, string>()
   for (const it of f.catalog.items)
     out.set(
@@ -546,6 +553,7 @@ export function placeholderValues(f: ShopFacts, o: { balanceCents?: number | nul
   out.set(FEE_PLACEHOLDER, f.fee.guestBookingFeeCents > 0 ? `Guests pay a ${usd(f.fee.guestBookingFeeCents)} booking fee` : 'There is no booking fee')
   if (o.balanceCents !== undefined && o.balanceCents !== null && Number.isInteger(o.balanceCents) && o.balanceCents >= 0)
     out.set(BALANCE_PLACEHOLDER, `Your open balance is ${usd(o.balanceCents)}`)
+  if (o.confirmTexted) out.set(CONFIRM_PLACEHOLDER, CONFIRM_WORDS)
   return out
 }
 

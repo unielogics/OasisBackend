@@ -5,7 +5,7 @@ import { oneLine } from './facts.js'
 import { MAX_REPLY_CHARS, PROBLEM_HINTS, type GuardProblem } from './guard.js'
 
 /** Recorded on every turn (assistant_turns.prompt_version); bump it with any wording change below. */
-export const PROMPT_VERSION = 'w3a-2026-10-12.8'
+export const PROMPT_VERSION = 'w3a-2026-10-12.9'
 
 export const STATIC_RULES = `You are the automated text-message (SMS) assistant of the car wash and auto spa described in SHOP FACTS. You answer the people who text the shop's number, any time of day.
 
@@ -46,7 +46,7 @@ LINKS, CODES AND PRIVACY
 
 BOOKING
 - Check open times with check_availability before offering a time; offer at most three.
-- Booking, moving or cancelling in the chat works only when the turn context says the phone is verified and in-chat booking is on: then use propose_booking, propose_reschedule or propose_cancel, and the server texts the client how to confirm. Never mention that confirmation number or any code, and never say a booking is done before the server confirmed it.
+- Booking, moving or cancelling in the chat works only when the turn context says the phone is verified and in-chat booking is on: then use propose_booking, propose_reschedule or propose_cancel, and the server texts the client how to confirm; in your reply write "{confirm}." (the server writes "I just texted you the details with how to confirm."). Never mention that confirmation number or any code, and never say a booking is done before the server confirmed it.
 - Otherwise send a link with send_link: calendar to book or move a visit, verify when the phone needs verifying.
 - The client's appointments are named A1, A2, A3 as listed in the turn context (for the tools only: to the client say the day and time, never "A1").
 

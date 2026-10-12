@@ -112,7 +112,7 @@ async function propose(
     // the server's own text already says how to confirm; the policy judge fails any reply of the model that asks for a number they
     // received (design 3c rubric (c)), so the model only points at that text
     instruction:
-      'The server just texted the client this summary with how to confirm it. In your reply say only that you sent the details in a separate text to confirm (for example "I just texted you the details: confirm with that text."). Never mention, ask for or repeat any number or code. Nothing is booked or changed until they confirm.',
+      'The server just texted the client this summary with how to confirm it. In your reply write the placeholder {confirm} as its own sentence ("{confirm}."): the server writes "I just texted you the details with how to confirm." Add nothing else about confirming, and never mention, ask for or repeat any number or code. Nothing is booked or changed until they confirm.',
   })
 }
 

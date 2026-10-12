@@ -27,7 +27,7 @@ const assistant = new SimAiProvider((req) => {
       return /Verified phone: yes/.test(req.system[2]!.text)
         ? simToolUse('propose_booking', { serviceKey: 'signature-hand-wash', addonKeys: [], date: '2026-10-15', startMin: 600, vehicle: null })
         : simToolUse('send_link', { kind: 'verify', appointmentRef: null, tier: null })
-    return /confirmationTexted/.test(JSON.stringify(req.messages)) ? simText('I just texted you the details: confirm with that text.') : simText('First confirm it is you here: {link1}')
+    return /confirmationTexted/.test(JSON.stringify(req.messages)) ? simText('{confirm}.') : simText('First confirm it is you here: {link1}')
   }
   if (/how much/i.test(said)) return rounds === 0 ? simToolUse('list_services', { category: 'wash' }) : simText('{price:signature-hand-wash}. What is your first name?')
   return simText('Thanks! A team member can help with anything else.')
