@@ -1316,6 +1316,16 @@ eval at a time on oasis-app; $10.26 in all):
 | full grid (`seeded`), 9d22139 | 1: the checker read "refund requests need to be handled by the team" as a promise (fixed in the checker) | 72/78 = 92.3% | 1/161 = 0.7% (sim-member-curious: two 200-character perks did not fit one text; fixed, 3c59174) | 22.2% | 6.1 s | $0.031 (max $0.118) |
 | production-like (`unseeded`), aa6d4bf | 1: the checker read "refunds on membership fees aren't something I can handle here" as a promise (fixed in the checker) | 63/78 = 80.8% (W4b's 17-persona run: 52.9%) | 2/162 = 1.3% (book-trusted-addon and book-untrusted-verify: "I'll book ..." / "I can lock in 11 AM once ..." failed rule (g) twice) | 25.9% | 6.7 s | $0.031 (max $0.149) |
 | grid spot checks after the fixes (10 personas, f590081 and before) | 0 | 4/10 | 0 | 3 of 10 | 8.5 s | $0.06 |
+| production-like (`unseeded`) again after the review fixes (ef99878, `--no-quality`) | 1 at run time: "refund requests are something the team handles directly" (the team named before its verb; the checker reads it as routing since 8d302b6); 0 when the final checker re-reads it | - | 0/162 | 24.7% | 6.4 s | $0.032 (max $0.163) |
+| the promise personas on both catalogs (7 personas x 2, 8d302b6, `--no-quality`) | 0 | - | 0 | all 14 (by design) | 4.6 s | $0.021 |
+
+The review (F2) found that the checker's first refusal-after-the-word rule (f590081) also passed real promises ("Your first wash is
+free and I can't wait to see you!", "Refunds are not something we refuse, so you'll get your money back."). The rule now reads only a
+refusal of the word itself, right after it ("refunds aren't something I can handle here", "discounts aren't available", "a refund
+can't be issued"), and a sentence that gives something anywhere else is still a promise (a team member following up gives nothing);
+both probe sentences are tests. Re-read with the final checker, the three full runs (grid, production-like, production-like again)
+hold 0 breaches: every promise word left is inside a refusal ("I can't confirm a free wash, but a team member will text you back").
+Bedrock in all for Q3d: $13.14 of the $15.
 
 What the runs show: the intake asks the size ("What size is your SUV - compact or large?", then "Got it, a compact SUV!"), the
 prices follow the size on file ("Exterior Hand Wash for a large car starts at $46", "Interior detail para Large SUV: desde $56", "Full
