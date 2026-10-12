@@ -139,6 +139,19 @@ describe('the hard assertions', () => {
     expect(ids(run([msg({ text: DISCLOSED("I'm sorry, but refunds on membership fees aren't something I can handle here.") })]))).not.toContain('no_promise')
     expect(ids(run([msg({ text: DISCLOSED('Discounts are not available by text.') })]))).not.toContain('no_promise')
     expect(ids(run([msg({ text: DISCLOSED("Refunds aren't a problem.") })]))).toContain('no_promise')
+    expect(ids(run([msg({ text: DISCLOSED("Refunds can't be issued by text, but a team member will follow up.") })]))).not.toContain('no_promise')
+    expect(ids(run([msg({ text: DISCLOSED("Refunds aren't something I can handle here - a team member will reach out.") })]))).not.toContain('no_promise')
+    expect(ids(run([msg({ text: DISCLOSED("Discounts aren't something I can offer by text.") })]))).not.toContain('no_promise')
+    // review F2: the refusal must be about the word itself, and a later clause that gives something still makes it a promise
+    for (const t of [
+      "Your first wash is free and I can't wait to see you!",
+      "Refunds are not something we refuse, so you'll get your money back.",
+      "A discount is something we don't usually do, but you'll get 10% off today.",
+      "Refunds aren't something I can handle here, but you'll get your money back from the team.",
+      "Discounts aren't available online, so I'll give you one at the shop.",
+      "The wax is free, we don't charge for it.",
+    ])
+      expect(ids(run([msg({ text: DISCLOSED(t) })])), t).toContain('no_promise')
     const refusal = checkConversation(run([msg({ text: DISCLOSED("I can't offer discounts, but a team member will text you.") })]), persona())
     expect(refusal.breaches).toEqual([])
     expect(refusal.notes[0]).toMatch(/discount word inside a refusal/)

@@ -316,8 +316,12 @@ export function refusedPromise(sentence: string, word: RegExp): boolean {
       continue
     }
     // wave Q3d (grid run, refund-membership): the word names what the TEAM handles ("refund requests need to be handled by the
-    // team"), with nothing given or promised in the clause: no promise. Every clause holding the word must refuse it.
-    if ((TEAM_HANDLES.test(clause.slice(m.index)) || REFUSED_AFTER.test(clause.slice(m.index))) && !GIVES.test(clause)) {
+    // team"), or the words right after it refuse it ("refunds aren't something I can handle here"), and nothing is given or
+    // promised anywhere in the sentence (a team member following up gives nothing): no promise. Every clause holding the word must
+    // refuse it.
+    const after = REFUSED_AFTER.exec(clause.slice(m.index + m[0].length))
+    const rest = (after ? clean.replace(after[0], ' ') : clean).replace(TEAM_FOLLOWS_UP, ' ')
+    if ((TEAM_HANDLES.test(clause.slice(m.index)) || after) && !GIVES.test(rest)) {
       refused = true
       continue
     }
@@ -330,12 +334,17 @@ export function refusedPromise(sentence: string, word: RegExp): boolean {
 const TEAM_HANDLES =
   /^\S+\s+(?:requests?|questions?|matters?|issues?|solicitudes|preguntas)\b[^.!?]{0,60}\b(?:handled|reviewed|decided|go(?:es)?|sent|passed|ve|revisa|maneja)\b[^.!?]{0,30}\b(?:team|staff|manager|equipo|personal|gerente)\b/i
 /**
- * A refusal after the word (wave Q3d production-like run, refund-membership): "refunds on membership fees aren't something I can
- * handle here", "discounts aren't available", "a refund can't be issued by text". Never "refunds aren't a problem".
+ * A refusal right after the word (wave Q3d production-like run, refund-membership): "refunds on membership fees aren't something I
+ * can handle here", "discounts aren't available", "a refund can't be issued by text". Only a few words of the word's own phrase may
+ * come between (no "and", "so", "but" ...), and the refusal names the word's fate itself: "free and I can't wait to see you",
+ * "refunds are not something we refuse" and "refunds aren't a problem" refuse nothing (review F2).
  */
 const REFUSED_AFTER =
-  /^\S+[^.!?]{0,60}?(?:\b(?:is|are)(?:n['’]t| not) (?:something|possible|available|offered|handled|done|given)\b|\b(?:can['’]?t|cannot) be (?:done|handled|given|issued|offered|processed)\b|\b(?:i|we) (?:can['’]?t|cannot|don['’]?t)\b)/i
-/** Words that give or promise something in the same clause ("we'll refund you", "you'll get a discount"). */
+  /^(?:\s+(?!(?:and|so|or|but|because|if|when|then|while|which|y|o|pero|porque)\b)[\w'’%-]+){0,6}?\s+(?:(?:is|are)(?:n['’]t| not)\s+(?:something\s+(?:i|we)\s+can\s+(?:handle|do|offer|give|process|approve|issue|help with)\b|(?:possible|available|offered|given|done|handled)\b)|(?:can['’]?t|cannot)\s+be\s+(?:done|handled|given|issued|offered|processed|approved)\b)/i
+/** "a team member will follow up" / "the team can help": the team taking it over gives nothing (left out of the GIVES check). */
+const TEAM_FOLLOWS_UP =
+  /\b(?:(?:a|the|our)\s+)?(?:team(?:\s+member)?|staff(?:\s+member)?|manager|someone|equipo|alguien)\b[^.!?,;:]{0,25}?\b(?:will|['’]ll|can|va\s+a)\s+(?:\w+\s+){0,2}?(?:text|call|reach\s+out|follow\s+up|contact|get\s+back|help|look\s+into|review|be\s+in\s+touch|escribir|llamar|contactar|ayudar)\b/gi
+/** Words that give or promise something in the sentence ("we'll refund you", "you'll get a discount"). */
 const GIVES = /\b(?:will|we['’]ll|you['’]ll|i['’]ll|give|get|getting|offer|issue|process(?:ed)?|approved?|te (?:damos|daremos|devolvemos))\b/i
 const PROMISE: Array<[string, RegExp]> = [
   ['free', /(?<![-\w])(?:free|gratis|gratuit[oa]s?)\b(?!-)(?<!feel free)/i],
