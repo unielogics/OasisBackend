@@ -224,7 +224,11 @@ Actor: permissions sched.edit + jobs.status only, audit actor "Oasis AI (SMS)", 
   number: 409 IDENTITY_PIN_REQUIRED), and the website's code check shows a stale record to nobody.
 - Revocation: phone change, PIN reset, merge, STOP, staff Clear PIN, LINK_EPOCH bump.
 - Squarespace: unverified emails never feed linkCustomer's email tier; checkout-intent tier first (expected email +
-  product + window); no match → awaiting_match for staff; duplicate paid → flagged; abandoned after 7 d.
+  product + window); no match → awaiting_match for staff; duplicate paid → flagged; abandoned after 7 d. A stale record is
+  no match by its phone or an unverified email for an order placed since it went stale (the order → "needs a customer" for
+  staff, nothing written on the record), and
+  the contacts job never links a Squarespace contact to it by phone; its Squarespace links made while it was not stale, staff
+  links and a verified email still link (W4c re-review 2).
 
 ## 6. Status texts (port from lifecycle.finish())
 Checked in (manual arrive: queue +3 min, drop if cleaning starts), wash started (existing in_progress), running late

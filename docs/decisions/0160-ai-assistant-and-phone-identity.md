@@ -738,3 +738,29 @@ Each item has a test that fails on 6ba4491 and passes after it (the re-reviewer'
 - **I1 One-word and placeholder names** [RU2, RU3]: an open intent's client whose name is a single word ("Maria") or a placeholder
   ("New texter ••0142", "Walk-in guest") takes an order only when the order carries that client's phone; otherwise
   `intent_mismatch` (`awaiting_match` for staff). `sameName` itself is unchanged ("Nina" / "Nina New" still match by name).
+  Superseded in part by N2 below: a one-word real name needs the phone AND a name that can be the client's.
+
+### W4c re-review 2 fixes (the second re-review of b125a7e)
+
+Each item has a test that fails on b125a7e and passes after it (the re-reviewer's probe ids in brackets).
+
+- **N1 Membership orders and stale records** [M1-N1]: a Squarespace order placed since a record went stale never links to it by
+  that record's phone or by an email nobody verified (`memberships/service.ts` `customerRefs` sets `CustomerRef.staleSince` from
+  `staleRecord`: 180 days after its newest proof, or the invalid-number bounce; `payments-sync/membership.ts` `linkByIdentity`
+  skips the record in the phone and unverified-email tiers for such an order and `holdsOrder` ignores its phone). An order placed
+  before the record went stale (a lapsed member's own history, re-read by every pass) is hers as before. Such an order is `stale_record`: it goes the existing unmatched-order way ("needs a customer": the alert
+  `membership_needs_customer` names the stale record and says the number may belong to someone new; staff create a client or
+  link one), and nothing is written on the stale record: no membership, no `last_paid_at`, no awaiting row or pending membership,
+  so it stays stale and unknown to the assistant, the website code check and the link pages. Decided: "needs a customer" rather
+  than `awaiting_match`, because an awaiting row opens a pending membership on its candidate. The contacts job
+  (`payments-sync/db/links.ts` `linkContacts`) links no Squarespace contact to a stale record by phone (the contact stays
+  unlinked and is tried again), and a phone-made link created after the record went stale (`StaleVerdict.staleSince`) links
+  nothing. What still links a stale record: a Squarespace link made
+  while it was not stale (a real member's renewals), a staff (manual) link, a verified email, a matched checkout intent.
+- **N2 One-word real names** [I1 partial]: a one-word REAL client name ("Maria") needs the order's phone to be hers AND the
+  order's name, when it carries one, to be one she could have ("John Smith" with her phone is `intent_mismatch`, as before I1).
+  Only a placeholder ("New texter …", "Walk-in guest") or no name at all skips the name check, and then the phone alone decides.
+- **N3 Proposals after a handoff in the same turn** [L2-N3]: once the turn has asked for a handoff (`handoff_to_staff`, or a tool's
+  own handoff such as a late cancel; `ToolContext.handoffRequested()`), `propose_booking`, `propose_reschedule` and
+  `propose_cancel` answer `unavailable` and create nothing: no pending action, no reply-number text. The handoff itself still
+  opens when the turn ends.
