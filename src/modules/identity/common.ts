@@ -19,6 +19,12 @@ export async function pinVersionOf(db: Executor, customerId: string): Promise<nu
   return r?.version ?? 0
 }
 
+/** The client has a PIN set (customer_pins.pin_hash): their PIN outranks a texted code for their number (design section 5). */
+export async function hasPin(db: Executor, customerId: string): Promise<boolean> {
+  const r = await db.selectFrom('customer_pins').select('pin_hash').where('customer_id', '=', customerId).executeTakeFirst()
+  return !!r?.pin_hash
+}
+
 export interface LiveCustomer {
   id: string
   fullName: string

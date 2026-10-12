@@ -3,7 +3,8 @@
 //   1. the kill switches: with AI_ENABLED or assistant.enabled off the action is canceled and nothing is said (the AI is off); with
 //      AI_ACTIONS_ENABLED or assistant.actions_enabled off it is canceled and the client is told a team member will text back; the
 //      turn's stage and opt-out rules (messaging/assistant/gate.ts stageAndConsent: the allowlist, a known non-stale client in the
-//      customers stage, no opt-out) cancel it unanswered;
+//      customers stage, no opt-out) cancel it unanswered; so does an open handoff of the number or a staff pause of the client's
+//      thread (the chat is the staff's: W4c re-review L2);
 //   2. the number is checked against the pending action of THIS phone only (identity/pending-actions.ts confirmPendingAction): a
 //      wrong number counts a try (3 tries lock it), an expired one is refused, and the phone's trust is checked again;
 //   3. the confirmed action runs as the assistant's actor (createAppointment channel online, source sms_ai | rescheduleAppointment |
@@ -16,7 +17,15 @@ import type { Tx } from '../../../platform/db.js'
 import * as audit from '../../../platform/audit.js'
 import { getSetting } from '../../../platform/settings.js'
 import { fmtT, toBizDate, wallToInstant } from '../../../platform/time.js'
-import { findPendingAction, cancelPendingActions, completePendingAction, confirmPendingAction, failPendingAction, type ConfirmedAction } from '../../identity/pending-actions.js'
+import {
+  findPendingAction,
+  cancelPendingActions,
+  completePendingAction,
+  confirmPendingAction,
+  failPendingAction,
+  staffHoldsChat,
+  type ConfirmedAction,
+} from '../../identity/pending-actions.js'
 import { evaluateTrust } from '../../identity/trust.js'
 import { markLeadBooked } from '../../leads/service.js'
 import { stageAndConsent } from '../../messaging/assistant/gate.js'
@@ -66,6 +75,13 @@ export const createActionCodeHandler: CreateActionCodeHandler = (deps): ActionCo
     })
     if (refused) {
       await cancelPendingActions(tx, { locationId: input.locationId, phone: input.phone, now: at, error: `the assistant does not serve this number now (${refused})` })
+      return
+    }
+    // the chat is the staff's (an open handoff of the number, or a staff pause of the client's thread): the action is canceled
+    // unanswered and never runs, whenever it was proposed (W4c re-review L2)
+    const pendingFor = await findPendingAction(tx, { locationId: input.locationId, phone: input.phone, now: at })
+    if (await staffHoldsChat(tx, { locationId: input.locationId, phone: input.phone, customerId: pendingFor?.customerId ?? input.customerId, now: at })) {
+      await cancelPendingActions(tx, { locationId: input.locationId, phone: input.phone, now: at, error: 'staff hold the chat (an open handoff or a staff pause)' })
       return
     }
     const outcome = await confirmPendingAction(tx, { locationId: input.locationId, phone: input.phone, code: input.code, now: at })

@@ -3,6 +3,7 @@
 // PROPOSAL: the server records it (identity/pending-actions.ts: the trust is checked again there) and texts the client the summary
 // with a 4-digit reply number (class action_confirm, the number a secretVar: masked in the thread). Nothing changes until the client
 // texts that number back (actions/handler.ts). The model never sees the number. Untrusted: needs_verification (send a verify link).
+// While staff hold the chat (an open handoff, a staff pause) nothing is proposed: unavailable (identity/pending-actions.ts).
 // A cancel inside the late window or with money held on the visit is the staff's (handoff).
 import { z } from 'zod/v4'
 import { transaction } from '../../../platform/db.js'
@@ -37,6 +38,7 @@ const StartMin = z.number().int().min(0).max(24 * 60 - 1)
 
 const NEEDS_VERIFY = 'This needs a quick verification first: send the client a verify link (send_link kind verify).'
 const OFF = 'Booking, moving or canceling by text is switched off right now. Offer the booking link or a team member.'
+const STAFF_HOLDS = 'A team member has this conversation now: nothing was proposed. Tell the client a team member will text them.'
 
 class Refused extends Error {
   constructor(readonly outcome: ToolOutcome) {
@@ -76,6 +78,8 @@ async function propose(
         )
       } catch (e) {
         if (e instanceof AppError && e.code === 'IDENTITY_NOT_TRUSTED') throw new Refused(fail('needs_verification', NEEDS_VERIFY))
+        // AGENT or a staff text arrived while this turn ran (W4c re-review L2): the chat is the staff's, nothing is proposed
+        if (e instanceof AppError && e.code === 'IDENTITY_STAFF_HOLDS_CHAT') throw new Refused(fail('unavailable', STAFF_HOLDS))
         // too many wrong reply numbers from this number today (W4c): no new number to guess, a person takes over
         if (e instanceof AppError && e.code === 'IDENTITY_TOO_MANY_TRIES')
           throw new Refused(

@@ -195,6 +195,29 @@ describe('leads.follow_up', () => {
     ])
   })
 
+  it('in the customers stage a lead on a stale record is no known customer: not_in_stage, never sent (W4c re-review L4, probe RL1)', async () => {
+    await w.assistantOn()
+    await w.setting('assistant.stage', 'customers')
+    const olga = w.newId()
+    const old = new Date(w.clock.now().getTime() - 200 * 86_400_000)
+    await w.t.db
+      .insertInto('customers')
+      .values({ id: olga, full_name: 'Olga Previous', phone_e164: STRANGER2, source: 'inbound_sms', sms_opted_in: true, sms_opt_in_source: 'inbound_text', sms_opt_in_at: old, created_at: old, updated_at: old })
+      .execute()
+    const at = w.clock.now()
+    await w.t.db
+      .insertInto('leads')
+      .values({ id: w.newId(), location_id: w.locationId, phone_e164: STRANGER2, customer_id: olga, source: 'text', first_contact_at: at, last_contact_at: at, follow_up_at: at })
+      .execute()
+    w.clock.advance(181 * MIN)
+    expect(await runLeadFollowUps(w.deps)).toMatchObject({ sent: 0, dropped: { not_in_stage: 1 } })
+    expect(await followUps()).toEqual([])
+    // the same record proven by staff is a known customer again: the stage lets it through
+    await w.t.db.updateTable('customers').set({ identity_confirmed_at: w.clock.now() }).where('id', '=', olga).execute()
+    await w.t.db.updateTable('leads').set({ follow_up_at: w.clock.now() }).execute()
+    expect((await runLeadFollowUps(w.deps)).dropped.not_in_stage ?? 0).toBe(0)
+  })
+
   it('names the interests in plain words', () => {
     const labels = new Map([['ppf', 'Paint protection']])
     expect(interestPhrase(['tint'], labels)).toBe('window tint')

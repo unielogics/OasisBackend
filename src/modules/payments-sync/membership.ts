@@ -270,14 +270,25 @@ export function sameName(a: string | undefined, b: string | undefined): boolean 
   return lx === ly || (lx.length === 1 && ly.startsWith(lx)) || (ly.length === 1 && lx.startsWith(ly))
 }
 
+/** A name the shop made up, not the client's: the walk-in default and the welcome flow's "New texter ••0142". */
+const PLACEHOLDER_NAME = /^\s*(walk[\s-]*in guest|new texter\b)/i
+
 /**
- * The order carries a phone or a name, and it is not the intent client's (a client with none on file matches nothing). An intent
- * whose client was not loaded (`client` absent: never from loadIntentRefs, which always sets it) is not checked.
+ * A client name that says too little to tell two people apart: a single word ("Maria" matches "Maria Gonzalez" by design) or a
+ * placeholder (W4c re-review I1). For such a client only the order's phone can show the order is theirs.
+ */
+const weakName = (name: string | undefined): boolean => PLACEHOLDER_NAME.test(name ?? '') || nameWords(name).length <= 1
+
+/**
+ * The order carries a phone or a name, and it is not the intent client's (a client with none on file matches nothing); when the
+ * client's name is a single word or a placeholder, an order without the client's own phone is not shown to be theirs either. An
+ * intent whose client was not loaded (`client` absent: never from loadIntentRefs, which always sets it) is not checked.
  */
 function notTheClient(who: OrderIdentity, intent: CheckoutIntentRef): boolean {
   if (!intent.client) return false
   const phone = normalizePhone(who.phone)
   if (phone !== undefined && normalizePhone(intent.client?.phone) !== phone) return true
+  if (weakName(intent.client.name)) return phone === undefined
   if (nameWords(who.name).length > 0 && !sameName(who.name, intent.client?.name)) return true
   return false
 }

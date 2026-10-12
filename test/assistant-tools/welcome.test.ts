@@ -3,6 +3,7 @@
 // marketing, needs_details) and its lead in the webhook's transaction, once per number; off by default; an archived one comes back.
 import { describe, expect, it } from 'vitest'
 import { SIM_DEVICE_KEY } from '../../db/seeds/messaging.js'
+import { loadTurnContext, resolveIdentity } from '../../src/modules/assistant/context.js'
 import { createNewTexters } from '../../src/modules/assistant/welcome/new-texters.js'
 import { archiveStaleProvisionalClients, isProvisionalClient, provisionalName } from '../../src/modules/assistant/welcome/provisional.js'
 import { canSendSms } from '../../src/modules/messaging/policy/canSend.js'
@@ -124,5 +125,38 @@ describe('NewTexters.adopt through the webhook', () => {
     w.clock.advance(61 * 60_000)
     await inbound(STRANGER2, 'still there?')
     expect(await clientsOf(STRANGER2)).toHaveLength(1)
+  })
+
+  it('a recycled number: the old holder’s ARCHIVED provisional record is stale, so the first text makes a new client; the old one stays archived, loses the number and is flagged (W4c re-review M1, probe RL2)', async () => {
+    const DAY = 86_400_000
+    await w.assistantOn()
+    w.rt.useAssistant({ newTexters: createNewTexters(w.deps) })
+    await inbound(STRANGER, 'hi')
+    const [old] = await clientsOf(STRANGER)
+    await w.t.db.insertInto('vehicles').values({ id: w.newId(), customer_id: old!.id, year: 2021, make: 'Tesla', model: 'Model 3', color: 'Red', plate: null, deleted_at: null }).execute()
+    w.clock.advance(31 * DAY)
+    expect(await archiveStaleProvisionalClients(w.t.db, { now: w.clock.now() })).toEqual({ archived: 1 })
+    w.clock.advance(170 * DAY) // 201 days after the old record was created: the stale-record rule holds it
+    await inbound(STRANGER, 'hello, is this the car wash?')
+    const live = await clientsOf(STRANGER)
+    expect(live).toHaveLength(1)
+    expect(live[0]!.id).not.toBe(old!.id)
+    expect(live[0]).toMatchObject({ full_name: 'New texter ••0199', deleted_at: null, archived_at: null, needs_details: true })
+    const was = await w.t.db
+      .selectFrom('customers')
+      .select(['phone_e164', 'deleted_at', 'archived_at', 'phone_reassigned_at', 'phone_reassigned_to'])
+      .where('id', '=', old!.id)
+      .executeTakeFirstOrThrow()
+    expect(was).toMatchObject({ phone_e164: null, phone_reassigned_at: w.clock.now(), phone_reassigned_to: live[0]!.id })
+    expect(was.deleted_at).not.toBeNull()
+    expect(was.archived_at).not.toBeNull()
+    expect(await w.t.db.selectFrom('audit_log').select('entity_id').where('action', '=', 'customer.phone_reassigned').execute()).toEqual([{ entity_id: old!.id }])
+    // the assistant knows the new texter only: never the old holder's vehicle
+    const now = w.clock.now()
+    const resolved = await resolveIdentity(w.t.db, { locationId: w.locationId, phone: STRANGER, customerId: null, now })
+    expect(resolved.identity.customerId).toBe(live[0]!.id)
+    const ctx = await loadTurnContext(w.t.db, { resolved, conversationId: w.newId(), refs: [], actionsEnabled: false, firstContact: false, now, tz: 'America/New_York' })
+    expect(ctx.vehicles).toEqual([])
+    expect(JSON.stringify(ctx)).not.toMatch(/Tesla|Model 3/)
   })
 })

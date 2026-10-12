@@ -3,13 +3,17 @@
 // number's last four digits), source inbound_sms, consent inbound_text (transactional only: never marketing), needs_details. The
 // assistant fills the name later (set_my_name). A provisional client that never gives a name and never books is archived 30 days
 // after its last text: soft-deleted with archived_at (never deleted; the thread is kept for retention; reversible), and restored when
-// the number texts again.
+// the number texts again, unless the stale-record rule holds it (identity/stale.ts; W4c re-review M1): a number quiet that long may
+// have changed hands, so the text makes a NEW provisional client and the archived record stays archived, loses the number and is
+// flagged "number reassigned" for staff (phone_reassigned_at / _to), exactly as identity/rebind.ts does for a live record.
 import { sql } from 'kysely'
 import type { Db, Executor, Tx } from '../../../platform/db.js'
 import type { NewId } from '../../../platform/ids.js'
 import * as audit from '../../../platform/audit.js'
-import { formatPhoneDisplay } from '../../../platform/phone.js'
+import { formatPhoneDisplay, maskPhone } from '../../../platform/phone.js'
 import { AI_ACTOR_NAME } from '../contract.js'
+import { revokeIdentity } from '../../identity/revoke.js'
+import { staleRecord } from '../../identity/stale.js'
 import { closeLead } from '../../leads/service.js'
 import './schema.js'
 
@@ -46,8 +50,8 @@ export async function createProvisionalClient(
   tx: Tx,
   o: { newId: NewId; locationId: string; phone: string; at: Date; optedOut: boolean },
 ): Promise<{ customerId: string; created: boolean; restored: boolean }> {
-  const restored = await restoreArchivedClient(tx, { locationId: o.locationId, phone: o.phone, at: o.at })
-  if (restored) return { customerId: restored, created: false, restored: true }
+  const archived = await restoreArchivedClient(tx, { locationId: o.locationId, phone: o.phone, at: o.at })
+  if (archived?.restored) return { customerId: archived.id, created: false, restored: true }
   const id = o.newId()
   const inserted = await tx
     .insertInto('customers')
@@ -88,11 +92,16 @@ export async function createProvisionalClient(
     after: { name: provisionalName(o.phone), source: 'inbound_sms', consent: o.optedOut ? null : 'inbound_text', provisional: true },
     ctx: { actor: { name: AI_ACTOR_NAME } },
   })
+  if (archived) await flagReassigned(tx, { locationId: o.locationId, phone: o.phone, from: archived.id, to: id, at: o.at })
   return { customerId: id, created: true, restored: false }
 }
 
-/** A returning texter's archived provisional record comes back (only while nobody else holds the number). Returns its id. */
-export async function restoreArchivedClient(tx: Tx, o: { locationId: string; phone: string; at: Date }): Promise<string | null> {
+/**
+ * A returning texter's archived provisional record comes back (only while nobody else holds the number): `{id, restored: true}`. The
+ * stale-record rule holding it (W4c re-review M1) leaves it archived: `{id, restored: false}`, and the caller creates a new client
+ * and flags the old one (flagReassigned). Null when the number has no archived record (or a live owner).
+ */
+export async function restoreArchivedClient(tx: Tx, o: { locationId: string; phone: string; at: Date }): Promise<{ id: string; restored: boolean } | null> {
   const owner = await tx
     .selectFrom('customers')
     .select('id')
@@ -112,6 +121,7 @@ export async function restoreArchivedClient(tx: Tx, o: { locationId: string; pho
     .forUpdate()
     .executeTakeFirst()
   if (!row) return null
+  if ((await staleRecord(tx, { locationId: o.locationId, customerId: row.id, phone: o.phone, now: o.at })).stale) return { id: row.id, restored: false }
   await tx
     .updateTable('customers')
     .set((eb) => ({ deleted_at: null, archived_at: null, version: eb('version', '+', 1), updated_at: o.at }))
@@ -126,7 +136,38 @@ export async function restoreArchivedClient(tx: Tx, o: { locationId: string; pho
     after: { archived: false },
     ctx: { actor: { name: AI_ACTOR_NAME } },
   })
-  return row.id
+  return { id: row.id, restored: true }
+}
+
+/**
+ * The archived record `from` the stale-record rule holds stays archived and loses the number to the new client `to` (a phone change:
+ * its links, sessions, trust and pending action end), flagged phone_reassigned_at / _to for staff (the staff view's numberReassigned)
+ * and audited customer.phone_reassigned. No manager notice: nobody gave that record a name or booked on it.
+ */
+async function flagReassigned(tx: Tx, o: { locationId: string; phone: string; from: string; to: string; at: Date }): Promise<void> {
+  await tx
+    .updateTable('customers')
+    .set((eb) => ({
+      phone_e164: null,
+      phone_display: null,
+      phone_version: eb('phone_version', '+', 1),
+      phone_reassigned_at: o.at,
+      phone_reassigned_to: o.to,
+      version: eb('version', '+', 1),
+      updated_at: o.at,
+    }))
+    .where('id', '=', o.from)
+    .execute()
+  const revoked = await revokeIdentity(tx, { locationId: o.locationId, customerId: o.from, reason: 'phone_change', now: o.at })
+  await audit.record(tx, {
+    locationId: o.locationId,
+    action: 'customer.phone_reassigned',
+    entityType: 'customer',
+    entityId: o.from,
+    before: { phone: maskPhone(o.phone), archived: true },
+    after: { phone: null, reassignedTo: o.to, revoked: { ...revoked } },
+    ctx: { actor: { name: AI_ACTOR_NAME } },
+  })
 }
 
 export interface ArchiveReport {

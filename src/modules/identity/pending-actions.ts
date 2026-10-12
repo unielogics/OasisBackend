@@ -3,8 +3,10 @@
 // ("Signature Wash, Sat 10:00 AM. Reply 4821 to confirm"; class action_confirm, the number as a secretVar). The model never sees the
 // number; only its salted SHA-256 is stored. One pending action per number (a new proposal supersedes the old one); 15 minutes;
 // 3 wrong replies lock it, and a number gets at most PENDING_ACTION_WRONG_PER_DAY wrong replies across all its actions in 24 hours
-// (a new or superseding proposal never brings fresh guesses: W4c review). The confirmation re-checks the trust, then hands the
-// stored payload back for the caller to execute.
+// (a new or superseding proposal never brings fresh guesses: W4c review). No proposal while the chat is the staff's (an open handoff
+// of the number or a staff pause of the client's thread: W4c re-review L2), so a turn still running when AGENT or a staff text arrived
+// cannot leave an action behind that nothing cancels. The confirmation re-checks the trust, then hands the stored payload back for
+// the caller to execute (the reply-number handler re-checks the staff hold first).
 import { randomInt } from 'node:crypto'
 import { sql } from 'kysely'
 import type { Executor, Tx } from '../../platform/db.js'
@@ -17,6 +19,8 @@ import type { PendingActionKind } from './schema.js'
 import { evaluateTrust } from './trust.js'
 import './problems.js'
 import './schema.js'
+import '../assistant/schema.js'
+import '../messaging/schema.js'
 
 export const REPLY_CODE_LENGTH = 4
 export const PENDING_ACTION_TTL_MS = 15 * 60_000
@@ -51,8 +55,34 @@ export interface ProposedAction {
 }
 
 /**
+ * True while staff hold the chat of `phone` / `customerId`: the number's assistant conversation has an open handoff, or the client's
+ * thread is paused by a staff reply (message_threads.ai_paused_until in the future). With `lock`, the rows are locked in the order a
+ * staff takeover locks them (the thread, then the conversation), so a proposal and a handoff or takeover never interleave: whichever
+ * commits second sees the other (the takeover's cancel finds the proposal, or the proposal finds the hold).
+ */
+export async function staffHoldsChat(
+  tx: Executor,
+  o: { locationId: string; phone: string; customerId: string | null; now: Date; lock?: boolean },
+): Promise<boolean> {
+  let paused = false
+  if (o.customerId) {
+    const q = tx
+      .selectFrom('message_threads')
+      .select('ai_paused_until')
+      .where('location_id', '=', o.locationId)
+      .where('customer_id', '=', o.customerId)
+    const threads = o.lock ? await q.forShare().execute() : await q.execute()
+    paused = threads.some((t) => t.ai_paused_until !== null && t.ai_paused_until.getTime() > o.now.getTime())
+  }
+  const c = tx.selectFrom('assistant_conversations').select('handoff_state').where('location_id', '=', o.locationId).where('phone_e164', '=', o.phone)
+  const conv = o.lock ? await c.forUpdate().executeTakeFirst() : await c.executeTakeFirst()
+  return paused || conv?.handoff_state === 'open'
+}
+
+/**
  * Records a proposal and returns its reply number. Refused (403 IDENTITY_NOT_TRUSTED) unless the number's trust is live for this
- * client right now: the assistant's own check is not the only one. A pending action of the number is superseded.
+ * client right now: the assistant's own check is not the only one; refused (409 IDENTITY_STAFF_HOLDS_CHAT) while staff hold the
+ * chat (staffHoldsChat). A pending action of the number is superseded.
  */
 export async function createPendingAction(
   tx: Tx,
@@ -67,6 +97,7 @@ export async function createPendingAction(
   },
 ): Promise<ProposedAction> {
   const { now } = deps
+  if (await staffHoldsChat(tx, { locationId: o.locationId, phone: o.phone, customerId: o.customerId, now, lock: true })) throw new AppError('IDENTITY_STAFF_HOLDS_CHAT')
   const trust = await evaluateTrust(tx, { locationId: o.locationId, phone: o.phone, customerId: o.customerId, now })
   if (!trust.trusted) throw new AppError('IDENTITY_NOT_TRUSTED', { meta: { reason: trust.reason } })
   // the number used up its wrong replies for the day: no new reply number to guess (the assistant hands over to staff)

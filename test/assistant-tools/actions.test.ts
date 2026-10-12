@@ -386,3 +386,66 @@ describe('what ends a pending action (W4c fixes B3)', () => {
     expect({ booked: (await appointmentsOf(maria().id)).length, state: (await pending()).at(-1)?.state }).toEqual({ booked: 0, state: 'canceled' })
   })
 })
+
+describe('no proposal while staff hold the chat (W4c re-review L2, probes RA1 and RA2)', () => {
+  it('RA1: a turn in flight proposes AFTER AGENT opened the handoff: refused, no reply number is texted, nothing is booked', async () => {
+    const probe = await trustedMaria()
+    w.rt.useAssistant({ actionCodes: handler() })
+    await inbound(maria().phone, 'AGENT')
+    const r = await run('propose_booking', probe, BOOK)
+    expect(r).toMatchObject({ ok: false, error: 'unavailable' })
+    expect((await aiTexts(maria().id)).filter((m) => m.klass === 'action_confirm')).toEqual([])
+    expect(await pending()).toEqual([])
+    expect(await appointmentsOf(maria().id)).toEqual([])
+  })
+
+  it('RA2: a turn in flight proposes AFTER a staff takeover (the thread paused): refused, nothing is booked', async () => {
+    const probe = await trustedMaria()
+    w.rt.useAssistant({ actionCodes: handler() })
+    const target = await w.rt.queue.target(w.t.db, w.locationId, maria().id)
+    await w.tx((tx) =>
+      w.rt.queue.enqueueFor(tx, { locationId: w.locationId, customerId: maria().id, recipient: target!.recipient, appointmentId: null, text: 'Hi Maria, Joe here.', klass: 'staff_message', purpose: 'staff', senderKind: 'staff' }),
+    )
+    expect(await run('propose_booking', probe, BOOK)).toMatchObject({ ok: false, error: 'unavailable' })
+    expect((await aiTexts(maria().id)).filter((m) => m.klass === 'action_confirm')).toEqual([])
+    expect(await pending()).toEqual([])
+    expect(await appointmentsOf(maria().id)).toEqual([])
+  })
+
+  it('createPendingAction itself refuses while a handoff is open or the thread is paused (409 IDENTITY_STAFF_HOLDS_CHAT)', async () => {
+    const probe = await trustedMaria()
+    const { createPendingAction } = await import('../../src/modules/identity/pending-actions.js')
+    const propose = () =>
+      w.tx((tx) =>
+        createPendingAction(tx, { newId: w.newId, now: w.clock.now() }, { locationId: w.locationId, conversationId: probe.ctx.conversationId, customerId: maria().id, phone: maria().phone, kind: 'book', payload: {} }),
+      )
+    await sql`update assistant_conversations set handoff_state = 'open', handoff_at = ${w.clock.now()}, handoff_reason = 'test' where phone_e164 = ${maria().phone}`.execute(w.t.db)
+    await expect(propose()).rejects.toMatchObject({ code: 'IDENTITY_STAFF_HOLDS_CHAT' })
+    await sql`update assistant_conversations set handoff_state = 'resolved' where phone_e164 = ${maria().phone}`.execute(w.t.db)
+    await sql`update message_threads set ai_paused_until = ${new Date(w.clock.now().getTime() + 60 * MIN)} where customer_id = ${maria().id}`.execute(w.t.db)
+    await expect(propose()).rejects.toMatchObject({ code: 'IDENTITY_STAFF_HOLDS_CHAT' })
+    // a pause that has passed holds nothing
+    await sql`update message_threads set ai_paused_until = ${new Date(w.clock.now().getTime() - MIN)} where customer_id = ${maria().id}`.execute(w.t.db)
+    await expect(propose()).resolves.toMatchObject({ code: expect.stringMatching(/^\d{4}$/) })
+  })
+
+  it('the reply-number handler re-checks both before executing: an action left pending under an open handoff is canceled, not run', async () => {
+    const probe = await trustedMaria()
+    w.rt.useAssistant({ actionCodes: handler() })
+    await run('propose_booking', probe, BOOK)
+    const code = await lastCode(maria().phone)
+    // as if the handoff opened without reaching the action (a race the inbox's own cancel would have closed)
+    await sql`update assistant_conversations set handoff_state = 'open', handoff_at = ${w.clock.now()}, handoff_reason = 'test' where phone_e164 = ${maria().phone}`.execute(w.t.db)
+    await inbound(maria().phone, code)
+    expect({ booked: (await appointmentsOf(maria().id)).length, state: (await pending()).at(-1)?.state }).toEqual({ booked: 0, state: 'canceled' })
+  })
+
+  it('… and one left pending under a staff pause is canceled too', async () => {
+    const probe = await trustedMaria()
+    await run('propose_booking', probe, BOOK)
+    const code = await lastCode(maria().phone)
+    await sql`update message_threads set ai_paused_until = ${new Date(w.clock.now().getTime() + 60 * MIN)} where customer_id = ${maria().id}`.execute(w.t.db)
+    await reply(maria().phone, code, maria().id)
+    expect({ booked: (await appointmentsOf(maria().id)).length, state: (await pending()).at(-1)?.state }).toEqual({ booked: 0, state: 'canceled' })
+  })
+})

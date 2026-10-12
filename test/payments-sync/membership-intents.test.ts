@@ -85,6 +85,34 @@ describe('an intent-only match whose order carries another phone or name waits f
   })
 })
 
+describe('a client with a one-word or placeholder name: the order’s phone must match too (W4c re-review I1)', () => {
+  const at = '2026-10-12T09:00:00Z'
+  const who = (over: Record<string, unknown> = {}) => ({ email: 'ana@example.com', orderId: 'o-x', createdOn: new Date(at), product, ...over })
+  const mine = { customerId: 'c-ana', by: 'checkout_intent', intent: { id: 'i1', fresh: true } }
+  const waits = { by: 'intent_mismatch', candidateCustomerId: 'c-ana' }
+
+  it('a one-word name ("Maria") never takes an order by its first name alone: no phone, or another phone, waits for staff', () => {
+    const maria = intent({ client: { phone: '+12015550188', name: 'Maria' } })
+    expect(linkCustomer(who({ name: 'Maria Gonzalez' }), [], [maria])).toEqual(waits)
+    expect(linkCustomer(who({ name: 'Maria' }), [], [maria])).toEqual(waits)
+    expect(linkCustomer(who(), [], [maria])).toEqual(waits)
+    expect(linkCustomer(who({ phone: '(973) 555-0101', name: 'Maria' }), [], [maria])).toEqual(waits)
+    // her own phone on the order: hers
+    expect(linkCustomer(who({ phone: '(201) 555-0188', name: 'Maria Gonzalez' }), [], [maria])).toEqual(mine)
+    expect(linkCustomer(who({ phone: '(201) 555-0188' }), [], [maria])).toEqual(mine)
+  })
+
+  it('a placeholder name ("New texter ••0188", "Walk-in guest") matches no name: only the phone links', () => {
+    for (const name of ['New texter ••0188', 'Walk-in guest']) {
+      const c = intent({ client: { phone: '+12015550188', name } })
+      expect(linkCustomer(who({ name: 'New Texter' }), [], [c]), name).toEqual(waits)
+      expect(linkCustomer(who({ name: 'Walk In' }), [], [c]), name).toEqual(waits)
+      expect(linkCustomer(who(), [], [c]), name).toEqual(waits)
+      expect(linkCustomer(who({ phone: '(201) 555-0188', name: 'Ana Ruiz' }), [], [c]), name).toEqual(mine)
+    }
+  })
+})
+
 describe('linkCustomer: the checkout-intent tier', () => {
   const who = (at: string, over: Record<string, unknown> = {}) => ({
     email: 'ANA@example.com',

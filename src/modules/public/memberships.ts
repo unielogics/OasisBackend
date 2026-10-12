@@ -8,6 +8,7 @@ import type { Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
 import { formatPhoneDisplay } from '../../platform/phone.js'
 import { findCustomerByPhone, updateCustomer, upsertCustomerByPhone, upsertVehicleByPlate, type CustomerRecord } from '../customers/service.js'
+import { hasPin } from '../identity/common.js'
 import { reassignNumber } from '../identity/rebind.js'
 import { staleRecord } from '../identity/stale.js'
 import { ensurePlans, loadPlans, planByKey } from '../memberships/plans.js'
@@ -19,6 +20,7 @@ import { parseVehicleLabel } from './bookings.js'
 import { websiteActor, type PublicDeps, type PublicLocation, type PublicRequest } from './deps.js'
 import { enforceLimits, publicLimitChecks } from './limits.js'
 import { phoneOrThrow, resolveMemberToken } from './otp.js'
+import '../identity/problems.js'
 import './problems.js'
 import { tierSpec, type PublicTier, type TierSpec } from './tiers.js'
 
@@ -98,6 +100,8 @@ export async function joinWeb(
   const verified = input.memberToken ? await resolveMemberToken(tx, loc, input.memberToken, now) : null
   if (verified && verified.phoneE164 !== phone) throw new AppError('PUBLIC_TOKEN_PHONE_MISMATCH')
   let existing = await findCustomerByPhone(tx, phone)
+  // a PIN outranks a texted code: a member token never joins for a number whose client has a PIN (W4c re-review L1, as bookings.ts)
+  if (verified && existing && (await hasPin(tx, existing.id))) throw new AppError('IDENTITY_PIN_REQUIRED')
   // A member token proves the number, not the client on file for it: on a record the stale-record rule holds, the caller joins as a
   // new client and the number moves to them (identity/rebind.ts, ADR 0160 W4c fixes); the old record is flagged for staff.
   if (

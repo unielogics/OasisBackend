@@ -52,10 +52,10 @@ export async function resolveIdentity(
   if (!candidate) return { identity: none, threadCustomerId: null, fullName: null }
   const c = await db.selectFrom('customers').select(['full_name', 'needs_details']).where('id', '=', candidate).executeTakeFirstOrThrow()
   const provisional = c.needs_details && PROVISIONAL_NAME.test(c.full_name)
-  if (!provisional) {
-    const stale = await staleRecord(db, { locationId: o.locationId, customerId: candidate, phone: o.phone, now: o.now })
-    if (stale.stale) return { identity: none, threadCustomerId: candidate, fullName: null }
-  }
+  // the stale-record rule holds a provisional record too (W4c re-review M1): a "New texter" record quiet for 180 days may carry a
+  // previous holder's vehicle and visits, so it is unknown (no name, vehicles, visits, membership or balance) until proof
+  const stale = await staleRecord(db, { locationId: o.locationId, customerId: candidate, phone: o.phone, now: o.now })
+  if (stale.stale) return { identity: none, threadCustomerId: candidate, fullName: null }
   const trust = await evaluateTrust(db, { locationId: o.locationId, phone: o.phone, now: o.now, customerId: candidate })
   return {
     identity: {

@@ -9,7 +9,8 @@
 //   - never once they booked (any booking since the first contact closes the lead first; that closing runs even while follow-ups
 //     are off, since it sends nothing);
 //   - never by name or with a client-bound link to a stale record (identity/stale.ts): such a number gets the stranger's text;
-//   - only to a number inside the assistant's rollout stage (assistant.stage / assistant.allowlist).
+//   - only to a number inside the assistant's rollout stage (assistant.stage / assistant.allowlist; the turn's stageAndConsent: in
+//     stage customers a stale record is no known customer).
 // A follow-up that cannot go any more is dropped (follow_up_at cleared); a new text from the number plans it again.
 import { sql } from 'kysely'
 import type { Env } from '../../config/env.js'
@@ -23,6 +24,7 @@ import { assistantOn } from '../assistant/tools/switches.js'
 import { listCategories } from '../catalog/categories.js'
 import { issueClientLink } from '../identity/links.js'
 import { staleRecord } from '../identity/stale.js'
+import { stageAndConsent } from '../messaging/assistant/gate.js'
 import { lastInboundAt, loadCustomerTarget, strangerRecipient } from '../messaging/db/recipients.js'
 import { listLiveClosures } from '../settings/closures.js'
 import { dayInfo, type DayInfo } from '../settings/day-info.js'
@@ -233,12 +235,9 @@ async function followUpOne(
     : undefined
   const live = customer && customer.deleted_at === null && customer.merged_into === null && customer.phone_e164 === lead.phone_e164 ? customer : undefined
   // the rollout stage the assistant answers in (W5: owner and staff numbers first, then clients, then everyone) holds for its
-  // follow-up too: a number the assistant would not answer now gets none
-  const stage = (await getSetting(tx, o.locationId, 'assistant.stage')).value
-  if (
-    (stage === 'allowlist' && !(await getSetting(tx, o.locationId, 'assistant.allowlist')).value.includes(lead.phone_e164)) ||
-    (stage === 'customers' && !live)
-  ) {
+  // follow-up too: a number the assistant would not answer now gets none. The turn's own stage rule (stageAndConsent): in stage
+  // customers a record the stale-record rule holds is no known customer (W4c re-review L4); opt-outs are checked below
+  if ((await stageAndConsent(tx, { locationId: o.locationId, phone: lead.phone_e164, customerId: live?.id ?? null, optedOut: false, now })) === 'not_in_stage') {
     await setPlan(null)
     return 'not_in_stage'
   }

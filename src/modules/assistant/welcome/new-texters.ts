@@ -5,13 +5,15 @@
 // start and the turn greets a client. Idempotent per (location, phone): a second text finds the client the first one created.
 // The hourly ceiling (settings assistant.new_texters_per_hour, W4c fixes): beyond it a first text creates nothing (no client, no lead,
 // no AI reply: spoofed first texts cannot flood the shop with records and texts); it is stored for staff as an unknown sender's, and
-// the managers are told once an hour. A returning texter's archived record is restored whatever the count.
+// the managers are told once an hour. A returning texter's archived record is restored whatever the count (unless the stale-record
+// rule holds it: then the text is a new texter's, provisional.ts).
 // Off by default: while AI_ENABLED or assistant.enabled is off it adopts nobody (and the gate would not call it anyway).
 import { advisoryXactLock, type Tx } from '../../../platform/db.js'
 import { getSetting } from '../../../platform/settings.js'
 import { normalizeTextableNanp } from '../../../platform/phone.js'
 import type { NewTexters } from '../ports.js'
 import type { AssistantDeps, CreateNewTexters } from '../contract.js'
+import { staleRecord } from '../../identity/stale.js'
 import { openLead } from '../../leads/service.js'
 import { notifyManagers } from '../../messaging/notify.js'
 import { assistantOn } from '../tools/switches.js'
@@ -49,9 +51,11 @@ async function overCeiling(tx: Tx, deps: AssistantDeps, o: { locationId: string;
     .where('phone_e164', '=', o.phone)
     .where('archived_at', 'is not', null)
     .where('merged_into', 'is', null)
+    .orderBy('archived_at', 'desc')
     .limit(1)
     .executeTakeFirst()
-  if (archived) return false
+  // a returning texter's record comes back whatever the count; one the stale-record rule holds does not (a new client is made)
+  if (archived && !(await staleRecord(tx, { locationId: o.locationId, customerId: archived.id, phone: o.phone, now: o.at })).stale) return false
   const ceiling = (await getSetting(tx, o.locationId, 'assistant.new_texters_per_hour')).value
   // one count at a time per location, so two first texts never both take the last place
   await advisoryXactLock(tx, `welcome-ceiling:${o.locationId}`)

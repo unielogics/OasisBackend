@@ -98,6 +98,12 @@ registerProblems({
     title: 'We need to confirm it’s you',
     detail: 'We could not confirm this number is still yours. Enter your PIN, or call or text us and we’ll sort it out.',
   },
+  // the chat is the staff's (an open handoff or a staff pause): the assistant proposes no in-chat action (W4c re-review L2)
+  IDENTITY_STAFF_HOLDS_CHAT: {
+    status: 409,
+    title: 'A team member has this chat',
+    detail: 'A team member is handling this conversation now. They will text you back.',
+  },
   IDENTITY_NOT_TRUSTED: {
     status: 403,
     title: 'Verification needed',

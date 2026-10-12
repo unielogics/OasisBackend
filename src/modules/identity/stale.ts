@@ -2,8 +2,8 @@
 // for 180 days or more, or whose last text bounced as an invalid number, says nothing about who holds that number today. Such a
 // record is treated as unknown (no name, no appointments, no trust). Proving control of the NUMBER is not proof of being the OLD
 // CLIENT (W4c fixes): a texted code, a link or website booking or any text from the number never ends the rule; only proof of being
-// that client does: their PIN, a staff action (a booking staff made, a visit staff served, staff confirming the number) or a
-// membership paid and matched to them. A party that verified only the number on a stale record books as a new client
+// that client does: their PIN, a staff action (a booking staff made, a visit staff served, staff confirming the number, staff
+// setting a membership) or a membership payment matched to them, each from its own time. A party that verified only the number on a stale record books as a new client
 // (identity/rebind.ts). Texts FROM the number are never activity: whoever holds a recycled number texts from it too, and the
 // webhook stores that text before the assistant asks for the verdict, so counting it would clear the rule at the very moment it
 // exists for.
@@ -26,7 +26,7 @@ export function isInvalidNumberError(error: string | null | undefined): boolean 
 export interface StaleVerdict {
   stale: boolean
   reason: 'inactive' | 'invalid_number' | null
-  /** The newest proof of the client: the record's creation, their PIN, a staff action, a live membership (see staleRecord). */
+  /** The newest proof of the client: the record's creation, their PIN, a staff action, a membership payment (see staleRecord). */
   lastActivityAt: Date
 }
 
@@ -38,8 +38,12 @@ export const STAFF_APPOINTMENT_SOURCES = ['dashboard', 'walk_in', 'phone', 'stan
  * link page (customers.identity_confirmed_at, or a 30-day trust granted by PIN); staff confirming the number (identity_confirmed_at);
  * an appointment staff created, or one a link page or the assistant created for a session verified with this client's PIN
  * (appointments.booked_with_pin), counting its time once passed; a visit staff served (the crew started or finished the wash: an
- * arrival alone can come from the client's own phone), except a website booking (anyone can type any number there); a live membership (counts as now: its payments were matched to this client, or staff set it). Never a
- * texted code, a link or website booking by itself, or a text from the number. The invalid-number rule: the number's newest final
+ * arrival alone can come from the client's own phone), except a website booking (anyone can type any number there),
+ * counting from the wash (owner decision, W4c re-review: the crew served the client in person); a membership payment matched to this
+ * client (memberships.last_paid_at, whatever the membership's status now) or staff setting a membership live or paused
+ * (manual_status_at of an active, past_due or paused row: a checkout the system canceled is no proof), each counting from its own
+ * time: a membership that is merely still live proves nothing new (W4c re-review R3). Never a texted code, a link or website
+ * booking by itself, or a text from the number. The invalid-number rule: the number's newest final
  * outbound text failed as an invalid number after the record's newest proof (its creation included).
  */
 export async function staleRecord(
@@ -47,7 +51,7 @@ export async function staleRecord(
   o: { locationId: string; customerId: string; phone: string; now: Date },
 ): Promise<StaleVerdict> {
   const staff = sql.join(STAFF_APPOINTMENT_SOURCES.map((x) => sql`${x}`))
-  const r = await sql<{ created: Date; appt: Date | null; proof: Date | null; member: boolean }>`
+  const r = await sql<{ created: Date; appt: Date | null; proof: Date | null; member: Date | null }>`
     select
       c.created_at as created,
       (select max(case
@@ -58,12 +62,15 @@ export async function staleRecord(
       greatest(c.identity_confirmed_at,
         (select max(t.verified_at) from phone_trust t where t.location_id = ${o.locationId} and t.phone_e164 = ${o.phone}
           and t.customer_id = c.id and t.verified_by = 'pin')) as proof,
-      exists (select 1 from memberships m where m.customer_id = c.id and m.status in ('active', 'past_due', 'paused')) as member
+      (select max(greatest(m.last_paid_at, case when m.status in ('active', 'past_due', 'paused') then m.manual_status_at end))
+        from memberships m where m.customer_id = c.id) as member
     from customers c where c.id = ${o.customerId}`.execute(db)
   const row = r.rows[0]
   if (!row) return { stale: true, reason: 'inactive', lastActivityAt: new Date(0) }
-  const times = [row.created, row.appt, row.proof].filter((x): x is Date => x !== null).map((x) => new Date(x))
-  const last = row.member ? o.now : new Date(Math.max(...times.map((x) => x.getTime())))
+  // the membership's proof time, capped at now (in JS: Postgres least() would turn a missing time into now)
+  const member = row.member === null ? null : new Date(Math.min(new Date(row.member).getTime(), o.now.getTime()))
+  const times = [row.created, row.appt, row.proof, member].filter((x): x is Date => x !== null).map((x) => new Date(x))
+  const last = new Date(Math.max(...times.map((x) => x.getTime())))
 
   const lastOut = await db
     .selectFrom('messages')

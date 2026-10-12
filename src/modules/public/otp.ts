@@ -11,11 +11,12 @@ import { ipLimitKey } from '../../platform/ip.js'
 import { maskPhone, normalizeTextableNanp } from '../../platform/phone.js'
 import { hashToken, newToken, safeEqual } from '../auth/tokens.js'
 import { findCustomerByPhone, type CustomerRecord } from '../customers/service.js'
+import { staleRecord } from '../identity/stale.js'
 import { loadCustomerTarget, strangerRecipient } from '../messaging/db/recipients.js'
 import type { SmsRecipient } from '../messaging/policy/canSend.js'
 import type { PublicDeps, PublicLocation, PublicRequest } from './deps.js'
 import { enforceLimits, PUBLIC_LIMITS, publicLimitChecks } from './limits.js'
-import { memberView, type MemberView } from './members.js'
+import { memberView, NOBODY, type MemberView } from './members.js'
 import { notifyManagers } from '../messaging/notify.js'
 import './problems.js'
 import './schema.js'
@@ -284,7 +285,10 @@ export async function verifyOtp(
       after: { phone: maskPhone(row.phone_e164), known: customer !== undefined },
       ctx: { actor: { name: 'Website' }, requestId: r.requestId, ip: r.ip },
     })
-    return { ok: true, token, member: await memberView(tx, loc.id, customer) }
+    // a texted code proves the NUMBER, not the client on file for it: a record the stale-record rule holds is shown to nobody (no
+    // first name, no membership; ADR 0160 W4c re-review L1), as on the link pages
+    const stale = customer ? (await staleRecord(tx, { locationId: loc.id, customerId: customer.id, phone: row.phone_e164, now })).stale : false
+    return { ok: true, token, member: stale ? NOBODY : await memberView(tx, loc.id, customer) }
   })
   if (!out.ok) throw out.error
   return { memberToken: out.token, expiresInSec: MEMBER_TOKEN_TTL_SEC, member: out.member }

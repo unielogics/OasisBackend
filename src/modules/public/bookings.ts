@@ -12,6 +12,7 @@ import { addDays, fmtT, toBizDate, wallToInstant } from '../../platform/time.js'
 import type { Tx } from '../../platform/db.js'
 import { DateTime } from 'luxon'
 import { findCustomerByPhone, isVipCustomer, updateCustomer } from '../customers/service.js'
+import { hasPin } from '../identity/common.js'
 import { reassignNumber } from '../identity/rebind.js'
 import { staleRecord } from '../identity/stale.js'
 import { loadPlans } from '../memberships/plans.js'
@@ -24,6 +25,7 @@ import { enforceLimits, publicLimitChecks } from './limits.js'
 import { activeMembership } from './members.js'
 import { tierOfPlan } from './tiers.js'
 import { phoneOrThrow, resolveMemberToken } from './otp.js'
+import '../identity/problems.js'
 import './problems.js'
 
 export interface WebVehicle {
@@ -154,6 +156,10 @@ export async function createWebBooking(
   const start = wallToInstant(input.date, input.startMin, loc.tz)
   let existing = await findCustomerByPhone(tx, phone)
   let reboundId: string | null = null
+  // A PIN outranks a texted code (design section 5): for a number whose client has a PIN, stale or not, a member token (a code only)
+  // books nothing, exactly as a link page verified by code refuses (ADR 0160 W4c re-review L1). Without a token the booking is a
+  // guest's linked to that client, which changes nothing on the record.
+  if (verified && existing && (await hasPin(tx, existing.id))) throw new AppError('IDENTITY_PIN_REQUIRED')
   // A member token proves the NUMBER (a texted code), not the client the shop has on file for it: on a record the stale-record rule
   // holds, the caller becomes a new client and the number moves to them; the old record keeps its history and is flagged for staff
   // (identity/rebind.ts, ADR 0160 W4c fixes). Without a token the booking is only linked to the stale record (below), which changes
