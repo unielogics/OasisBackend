@@ -127,13 +127,29 @@ export const wireOrder = z
             quantity: str,
             base_price_money: opt(wireMoney),
             total_money: opt(wireMoney),
+            // a line rung up from the item library (ADR 0172): the variation, its version and name; the tax Square put on it
+            catalog_object_id: opt(str),
+            catalog_version: opt(z.number().int()),
+            variation_name: opt(str),
+            item_type: opt(str),
+            total_tax_money: opt(wireMoney),
+            total_discount_money: opt(wireMoney),
+            applied_taxes: opt(z.array(z.object({ uid: opt(str), tax_uid: opt(str), applied_money: opt(wireMoney) }).passthrough())),
           })
+          .passthrough(),
+      ),
+    ),
+    taxes: opt(
+      z.array(
+        z
+          .object({ uid: opt(str), catalog_object_id: opt(str), name: opt(str), percentage: opt(str), type: opt(str), scope: opt(str), applied_money: opt(wireMoney) })
           .passthrough(),
       ),
     ),
     total_money: opt(wireMoney),
     total_tax_money: opt(wireMoney),
     total_tip_money: opt(wireMoney),
+    total_discount_money: opt(wireMoney),
     net_amount_due_money: opt(wireMoney),
     tenders: opt(z.array(z.object({ id: opt(str), type: opt(str), payment_id: opt(str), amount_money: opt(wireMoney) }).passthrough())),
     created_at: opt(str),
@@ -141,6 +157,10 @@ export const wireOrder = z
   })
   .passthrough()
 export type WireOrder = z.infer<typeof wireOrder>
+
+/** A CalculateOrder answer: the order as Square would price it; nothing is created, so it may come without an id. */
+export const wireCalculatedOrder = wireOrder.extend({ id: opt(str), location_id: opt(str) })
+export type WireCalculatedOrder = z.infer<typeof wireCalculatedOrder>
 
 export const wireCustomer = z
   .object({
@@ -181,13 +201,82 @@ export type WireCard = z.infer<typeof wireCard>
 const pricing = z.object({ type: opt(str), price_money: opt(wireMoney) }).passthrough()
 const phase = z.object({ uid: opt(str), cadence: str, ordinal: opt(z.number().int()), periods: opt(z.number().int()), pricing: opt(pricing) }).passthrough()
 
-export const wireCatalogObject = z
+/** CatalogItemVariation data (ADR 0172): what the item library sync reads and owns; everything else passes through. */
+export const wireItemVariationData = z
   .object({
-    type: str, // SUBSCRIPTION_PLAN | SUBSCRIPTION_PLAN_VARIATION | ITEM | ...
+    item_id: opt(str),
+    name: opt(str),
+    ordinal: opt(z.number().int()),
+    pricing_type: opt(str), // FIXED_PRICING | VARIABLE_PRICING
+    price_money: opt(wireMoney),
+    user_data: opt(str),
+    sellable: opt(z.boolean()),
+    location_overrides: opt(
+      z.array(z.object({ location_id: opt(str), pricing_type: opt(str), price_money: opt(wireMoney) }).passthrough()),
+    ),
+  })
+  .passthrough()
+
+/** Where a catalog object is present (Square: everywhere unless present_at_all_locations is false; a list of ids otherwise). */
+const presence = {
+  present_at_all_locations: opt(z.boolean()),
+  present_at_location_ids: opt(z.array(str)),
+  absent_at_location_ids: opt(z.array(str)),
+}
+
+/** A variation nested in an item (Square answers an item with its variations inside item_data.variations). */
+export const wireNestedVariation = z
+  .object({
+    type: str,
     id: str,
     version: opt(z.number().int()),
     is_deleted: opt(z.boolean()),
-    present_at_all_locations: opt(z.boolean()),
+    ...presence,
+    item_variation_data: opt(wireItemVariationData),
+  })
+  .passthrough()
+
+const categoryRef = z.object({ id: str, ordinal: opt(z.number()) }).passthrough()
+
+export const wireItemData = z
+  .object({
+    name: opt(str),
+    buyer_facing_name: opt(str),
+    product_type: opt(str), // REGULAR | APPOINTMENTS_SERVICE | ...
+    is_taxable: opt(z.boolean()),
+    is_archived: opt(z.boolean()),
+    tax_ids: opt(z.array(str)),
+    categories: opt(z.array(categoryRef)),
+    reporting_category: opt(categoryRef),
+    variations: opt(z.array(wireNestedVariation)),
+  })
+  .passthrough()
+
+export const wireCategoryData = z.object({ name: opt(str) }).passthrough()
+
+export const wireTaxData = z
+  .object({
+    name: opt(str),
+    calculation_phase: opt(str), // TAX_SUBTOTAL_PHASE | TAX_TOTAL_PHASE
+    inclusion_type: opt(str), // ADDITIVE | INCLUSIVE
+    percentage: opt(str), // a decimal string: "6.625"
+    applies_to_custom_amounts: opt(z.boolean()),
+    enabled: opt(z.boolean()),
+  })
+  .passthrough()
+
+export const wireCatalogObject = z
+  .object({
+    type: str, // SUBSCRIPTION_PLAN | SUBSCRIPTION_PLAN_VARIATION | ITEM | ITEM_VARIATION | CATEGORY | TAX | ...
+    id: str,
+    version: opt(z.number().int()),
+    is_deleted: opt(z.boolean()),
+    updated_at: opt(str),
+    ...presence,
+    item_data: opt(wireItemData),
+    item_variation_data: opt(wireItemVariationData),
+    category_data: opt(wireCategoryData),
+    tax_data: opt(wireTaxData),
     subscription_plan_data: opt(
       z.object({ name: opt(str), subscription_plan_variations: opt(z.array(z.object({}).passthrough())) }).passthrough(),
     ),
@@ -197,6 +286,10 @@ export const wireCatalogObject = z
   })
   .passthrough()
 export type WireCatalogObject = z.infer<typeof wireCatalogObject>
+export type WireItemData = z.infer<typeof wireItemData>
+export type WireNestedVariation = z.infer<typeof wireNestedVariation>
+export type WireItemVariationData = z.infer<typeof wireItemVariationData>
+export type WireTaxData = z.infer<typeof wireTaxData>
 
 export const wireSubscriptionAction = z
   .object({ id: str, type: str, effective_date: opt(str), new_plan_variation_id: opt(str) })
@@ -305,6 +398,7 @@ export const wire = {
   paymentLinks: z.object({ payment_links: z.array(wirePaymentLink).default([]), ...page }).passthrough(),
   deletedPaymentLink: z.object({ id: opt(str), cancelled_order_id: opt(str) }).passthrough(),
   order: z.object({ order: wireOrder }).passthrough(),
+  orderCalculated: z.object({ order: wireCalculatedOrder }).passthrough(),
   orders: z.object({ orders: z.array(wireOrder).default([]) }).passthrough(),
   customer: z.object({ customer: wireCustomer }).passthrough(),
   customers: z.object({ customers: z.array(wireCustomer).default([]), ...page }).passthrough(),
@@ -323,7 +417,12 @@ export const wire = {
     })
     .passthrough(),
   catalogRetrieve: z.object({ object: wireCatalogObject, related_objects: opt(z.array(wireCatalogObject)) }).passthrough(),
-  catalogSearch: z.object({ objects: z.array(wireCatalogObject).default([]), ...page }).passthrough(),
+  catalogBatchRetrieve: z
+    .object({ objects: z.array(wireCatalogObject).default([]), related_objects: opt(z.array(wireCatalogObject)) })
+    .passthrough(),
+  catalogSearch: z
+    .object({ objects: z.array(wireCatalogObject).default([]), related_objects: opt(z.array(wireCatalogObject)), ...page })
+    .passthrough(),
   catalogDelete: z.object({ deleted_object_ids: z.array(str).default([]) }).passthrough(),
   subscription: z
     .object({ subscription: wireSubscription, actions: opt(z.array(wireSubscriptionAction)) })

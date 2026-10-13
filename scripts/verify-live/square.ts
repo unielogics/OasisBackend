@@ -640,7 +640,7 @@ async function subscriptions(
         phases: [{ cadence: 'MONTHLY', ordinal: 0, pricing: { type: 'STATIC', price_money: usd(amount) } }],
       },
     })
-    const vars = await api.catalog.batchUpsert(sqKey('ct', `${run}:vars`), [variation(100, 1), variation(200, 2)])
+    const vars = await api.catalog.batchUpsert(sqKey('ct', `${run}:vars`), [[variation(100, 1), variation(200, 2)]])
     const var1 = vars.objects.find((x) => x.subscription_plan_variation_data?.name?.startsWith('Verify monthly 1'))?.id
     var2 = vars.objects.find((x) => x.subscription_plan_variation_data?.name?.startsWith('Verify monthly 2'))?.id
     if (!var1 || !var2) throw new Error('the batch upsert did not return both variations')

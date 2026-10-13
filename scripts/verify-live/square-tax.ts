@@ -175,7 +175,7 @@ async function makeCatalog(api: SquareApi, run: string, ref: string, locationId:
       },
     })
   }
-  const r = await api.catalog.batchUpsert(sqKey('ct', `${run}:tax-catalog`), objects)
+  const r = await api.catalog.batchUpsert(sqKey('ct', `${run}:tax-catalog`), [objects])
   const idOf = (tmp: string): string => {
     const m = r.idMappings.find((x) => x.client_object_id === tmp)?.object_id
     if (!m) throw new Error(`the batch upsert gave no id for ${tmp}`)

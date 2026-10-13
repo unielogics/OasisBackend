@@ -112,9 +112,9 @@ describe('Square simulator', () => {
     const c = await r.customer()
     const card = await r.api.cards.create(sqKey('cd', 'c'), { source_id: 'cnon:card-nonce-ok', card: { customer_id: c.id } })
     const plan = await r.api.catalog.upsert(sqKey('ct', 'p'), { type: 'SUBSCRIPTION_PLAN', id: '#p', subscription_plan_data: { name: 'Gold' } })
-    const vars = await r.api.catalog.batchUpsert(sqKey('ct', 'v'), [
+    const vars = await r.api.catalog.batchUpsert(sqKey('ct', 'v'), [[
       { type: 'SUBSCRIPTION_PLAN_VARIATION', id: '#v', subscription_plan_variation_data: { name: 'Gold Compact', subscription_plan_id: plan.object.id, phases: [{ cadence: 'MONTHLY', ordinal: 0, pricing: { type: 'STATIC', price_money: usd(12900) } }] } },
-    ])
+    ]])
     const sub = await r.api.subscriptions.create(sqKey('sb', 's'), { location_id: 'LTEST', plan_variation_id: vars.objects[0]!.id, customer_id: c.id, card_id: card.id })
     expect(sub).toMatchObject({ status: 'ACTIVE', start_date: '2026-10-12' })
     expect(sub.invoice_ids).toBeUndefined()
@@ -140,10 +140,10 @@ describe('Square simulator', () => {
     const c = await r.customer()
     const card = await r.api.cards.create(sqKey('cd', 'c'), { source_id: 'cnon:card-nonce-ok', card: { customer_id: c.id } })
     const plan = await r.api.catalog.upsert(sqKey('ct', 'p'), { type: 'SUBSCRIPTION_PLAN', id: '#p', subscription_plan_data: { name: 'Gold' } })
-    const v = (await r.api.catalog.batchUpsert(sqKey('ct', 'v'), [
+    const v = (await r.api.catalog.batchUpsert(sqKey('ct', 'v'), [[
       { type: 'SUBSCRIPTION_PLAN_VARIATION', id: '#a', subscription_plan_variation_data: { name: 'A', subscription_plan_id: plan.object.id, phases: [{ cadence: 'MONTHLY', ordinal: 0, pricing: { type: 'STATIC', price_money: usd(100) } }] } },
       { type: 'SUBSCRIPTION_PLAN_VARIATION', id: '#b', subscription_plan_variation_data: { name: 'B', subscription_plan_id: plan.object.id, phases: [{ cadence: 'MONTHLY', ordinal: 0, pricing: { type: 'STATIC', price_money: usd(200) } }] } },
-    ])).objects
+    ]])).objects
     const sub = await r.api.subscriptions.create(sqKey('sb', 's'), { location_id: 'LTEST', plan_variation_id: v[0]!.id, customer_id: c.id, card_id: card.id })
     await r.api.subscriptions.retrieve(sub.id)
     const swap = await r.api.subscriptions.swapPlan(sub.id, { new_plan_variation_id: v[1]!.id })

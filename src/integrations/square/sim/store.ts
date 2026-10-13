@@ -7,6 +7,8 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { DateTime } from 'luxon'
 import type { Clock } from '../../../platform/clock.js'
 import { SIM_LOCATION_ID, SIM_MERCHANT_ID } from '../config.js'
+import { calculateOrder, SimCalculateError } from './calculate.js'
+import { SimCatalog, SimCatalogError } from './catalog.js'
 
 type Obj = Record<string, unknown>
 type Money = { amount: number; currency: string }
@@ -18,6 +20,8 @@ export class SimError extends Error {
     readonly code: string,
     readonly detail: string,
     readonly extra: Obj = {},
+    /** The request field the error is about (Square's `field`). */
+    readonly field?: string,
   ) {
     super(detail)
   }
@@ -83,7 +87,8 @@ export class SquareSimStore {
   readonly refunds = new Map<string, Obj>()
   readonly orders = new Map<string, Obj>()
   readonly links = new Map<string, Obj>()
-  readonly catalog = new Map<string, Obj>()
+  /** The item library and the subscription plans (catalog.ts). */
+  readonly items: SimCatalog
   readonly subscriptions = new Map<string, Obj>()
   readonly invoices = new Map<string, Obj>()
   readonly webhookSubscriptions = new Map<string, Obj>()
@@ -111,6 +116,16 @@ export class SquareSimStore {
     this.linkHost = o.linkHost ?? 'sandbox.square.link'
     this.refundDelayMs = o.refundDelayMs ?? 3000
     this.firstInvoiceDelayMs = o.firstInvoiceDelayMs ?? 0
+    this.items = new SimCatalog({
+      locationId: this.locationId,
+      now: () => this.now(),
+      inUse: (ids) => [...this.subscriptions.values()].some((s) => ids.includes(String(s.plan_variation_id))),
+    })
+  }
+
+  /** The live catalog objects by id (an ITEM without its nested variations: use items.view or retrieveCatalog for those). */
+  get catalog(): Map<string, Obj> {
+    return this.items.objects
   }
 
   now(): Date {
@@ -644,72 +659,53 @@ export class SquareSimStore {
 
   // ---- catalog -----------------------------------------------------------------------------------------------------------------
 
-  upsertCatalog(objects: Obj[]): { objects: Obj[]; id_mappings: Obj[] } {
-    const mappings: Obj[] = []
-    const temp = new Map<string, string>()
-    for (const o of objects) if (typeof o.id === 'string' && o.id.startsWith('#')) temp.set(o.id, rid(24))
-    const resolve = (v: unknown) => (typeof v === 'string' && temp.has(v) ? temp.get(v)! : v)
-    const out: Obj[] = []
-    for (const raw of objects) {
-      const o = clone(raw)
-      const tempId = typeof o.id === 'string' && o.id.startsWith('#') ? o.id : undefined
-      const id = tempId ? temp.get(tempId)! : String(o.id ?? '')
-      const existing = tempId ? undefined : this.catalog.get(id)
-      if (!tempId && !existing) throw new SimError(404, 'INVALID_REQUEST_ERROR', 'NOT_FOUND', `Catalog object \`${id}\` not found.`)
-      if (existing && o.version !== undefined && o.version !== existing.version)
-        throw new SimError(400, 'INVALID_REQUEST_ERROR', 'VERSION_MISMATCH', 'Object version does not match.')
-      if (o.type === 'SUBSCRIPTION_PLAN_VARIATION') {
-        const data = (o.subscription_plan_variation_data ?? {}) as Obj
-        data.subscription_plan_id = resolve(data.subscription_plan_id)
-        const plan = this.catalog.get(String(data.subscription_plan_id)) ?? out.find((x) => x.id === data.subscription_plan_id)
-        if (!plan) throw new SimError(400, 'INVALID_REQUEST_ERROR', 'INVALID_VALUE', 'subscription_plan_id must name a SUBSCRIPTION_PLAN.')
-        const phases = (data.phases as Obj[] | undefined) ?? []
-        if (!phases.length) throw new SimError(400, 'INVALID_REQUEST_ERROR', 'MISSING_REQUIRED_PARAMETER', 'phases is required.')
-        for (const ph of phases) {
-          const pricing = (ph.pricing ?? {}) as Obj
-          if (pricing.type === 'STATIC') {
-            moneyIn(pricing.price_money, 'price_money')
-            pricing.price = pricing.price_money
-          }
-          ph.uid ??= rid(22)
-        }
-      } else if (o.type !== 'SUBSCRIPTION_PLAN' && o.type !== 'ITEM' && o.type !== 'ITEM_VARIATION')
-        throw new SimError(400, 'INVALID_REQUEST_ERROR', 'INVALID_VALUE', `The simulator does not keep catalog objects of type ${String(o.type)}.`)
-      const stored: Obj = {
-        ...o,
-        id,
-        updated_at: this.iso(),
-        created_at: existing?.created_at ?? this.iso(),
-        version: this.now().getTime() + out.length,
-        is_deleted: false,
-        present_at_all_locations: true,
-      }
-      this.catalog.set(id, stored)
-      out.push(stored)
-      if (tempId) mappings.push({ client_object_id: tempId, object_id: id })
+  /** UpsertCatalogObject ([[object]]) and BatchUpsertCatalogObjects (one array per batch): see catalog.ts. */
+  upsertCatalog(batches: Obj[][]): { objects: Obj[]; id_mappings: Obj[] } {
+    try {
+      return this.items.upsert(batches)
+    } catch (e) {
+      throw catalogError(e)
+    } finally {
+      this.emit('catalog.version.updated', 'catalog_version', undefined, { catalog_version: { updated_at: this.iso() } }, false)
     }
-    this.emit('catalog.version.updated', 'catalog_version', undefined, { catalog_version: { updated_at: this.iso() } }, false)
-    return { objects: out.map(clone), id_mappings: mappings }
   }
 
   retrieveCatalog(id: string): Obj {
-    return clone(this.get(this.catalog, id, 'Catalog object'))
+    try {
+      return this.items.retrieve(id)
+    } catch (e) {
+      throw catalogError(e)
+    }
   }
 
-  searchCatalog(types: string[]): Obj[] {
-    return [...this.catalog.values()].filter((o) => !types.length || types.includes(String(o.type))).map(clone)
+  batchRetrieveCatalog(ids: string[], o: { include_related_objects?: boolean; include_deleted_objects?: boolean } = {}): { objects: Obj[]; related_objects?: Obj[] } {
+    try {
+      return this.items.batchRetrieve(ids, o)
+    } catch (e) {
+      throw catalogError(e)
+    }
+  }
+
+  searchCatalog(types: string[], o: { include_deleted_objects?: boolean; begin_time?: string } = {}): Obj[] {
+    return this.items.search({ object_types: types, ...o })
   }
 
   deleteCatalog(id: string): string[] {
-    const o = this.get(this.catalog, id, 'Catalog object')
-    const variations = o.type === 'SUBSCRIPTION_PLAN'
-      ? [...this.catalog.values()].filter((v) => (v.subscription_plan_variation_data as Obj | undefined)?.subscription_plan_id === id).map((v) => String(v.id))
-      : [id]
-    const used = [...this.subscriptions.values()].some((s) => variations.includes(String(s.plan_variation_id)))
-    if (used) throw new SimError(400, 'INVALID_REQUEST_ERROR', 'BAD_REQUEST', `Catalog Object cannot be deleted for token(s) ${id}`)
-    const gone = o.type === 'SUBSCRIPTION_PLAN' ? [id, ...variations] : [id]
-    for (const g of gone) this.catalog.delete(g)
-    return gone
+    try {
+      return this.items.delete(id)
+    } catch (e) {
+      throw catalogError(e)
+    }
+  }
+
+  /** CalculateOrder: the order priced as Square would (calculate.ts); nothing is stored. */
+  calculateOrder(order: Obj): Obj {
+    try {
+      return calculateOrder(order, this.items, this.locationId)
+    } catch (e) {
+      if (e instanceof SimCalculateError) throw new SimError(e.code === 'NOT_FOUND' ? 404 : 400, 'INVALID_REQUEST_ERROR', e.code, e.detail)
+      throw e
+    }
   }
 
   // ---- subscriptions -----------------------------------------------------------------------------------------------------------
@@ -1102,4 +1098,9 @@ function moneyIn(m: unknown, field: string): number {
     throw new SimError(400, 'INVALID_REQUEST_ERROR', 'INVALID_VALUE', `${field}.amount must be a non-negative integer.`)
   if (v.currency !== 'USD') throw new SimError(400, 'INVALID_REQUEST_ERROR', 'UNSUPPORTED_CURRENCY', `${field}.currency must be USD.`)
   return v.amount
+}
+
+function catalogError(e: unknown): unknown {
+  if (e instanceof SimCatalogError) return new SimError(e.status, 'INVALID_REQUEST_ERROR', e.code, e.detail, {}, e.field)
+  return e
 }
