@@ -186,9 +186,9 @@ export function registerSquareMembershipRoutes(app: AppInstance): void {
         tags: ['catalog'],
         summary: 'Move the tier’s Square members to its current prices, after a notice',
         description:
-          'Plan decision 8: a price edit is grandfathered until this is pressed. Every member billed by Square at an older price of their size gets a scheduled move to the size’s current price and a notice by text and email; after `notice` days (default `memberships.price_change_notice_days`, 30) the job `square.plans.swap` sends SwapPlan, which Square applies at the next billing date. A member with a staff change scheduled is left alone (`skipped`). The current prices must be at Square (409 `TIER_PRICE_NOT_SYNCED`). Audited `catalog.tier.move_members`.',
+          'Plan decision 8: a price edit is grandfathered until this is pressed. Every member billed by Square at an older price of their size gets a scheduled move to the size’s current price and a notice by text and email; after `notice` days (30 to 90; default `memberships.price_change_notice_days`, 30, never under 30) the job `square.plans.swap` sends SwapPlan, which Square applies at the next billing date. A member with a staff change scheduled is left alone (`skipped`). The current prices must be at Square (409 `TIER_PRICE_NOT_SYNCED`). Audited `catalog.tier.move_members`.',
         params: KeyParams,
-        body: z.object({ notice: z.number().int().min(0).max(90).optional().describe('Days of notice (default 30)') }).strict(),
+        body: z.object({ notice: z.number().int().min(30).max(90).optional().describe('Days of notice: at least 30 (plan decision 8), default 30') }).strict(),
         response: { 200: z.object({ tierKey: z.string(), moving: z.number().int(), skipped: z.number().int(), swapAfter: z.string() }) },
       },
     },

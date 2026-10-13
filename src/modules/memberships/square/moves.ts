@@ -35,6 +35,9 @@ export interface MoveResult {
   swapAfter: string
 }
 
+/** The shortest notice a member gets of a new price (plan decision 8). */
+export const MIN_NOTICE_DAYS = 30
+
 /** POST /catalog/tiers/:key/move-members (see the header), in the caller's transaction. */
 export async function moveMembers(
   tx: Tx,
@@ -49,7 +52,8 @@ export async function moveMembers(
     .forUpdate()
     .executeTakeFirst()
   if (!plan) throw new AppError('NOT_FOUND', { detail: 'That membership tier does not exist' })
-  const noticeDays = input.noticeDays ?? (await getSetting(tx, d.locationId, 'memberships.price_change_notice_days')).value
+  // never under the 30-day notice of plan decision 8, whatever asked for less (review Q4 pricing:F3)
+  const noticeDays = Math.max(MIN_NOTICE_DAYS, input.noticeDays ?? (await getSetting(tx, d.locationId, 'memberships.price_change_notice_days')).value)
   const now = d.clock.now()
   const swapAfter = new Date(now.getTime() + noticeDays * DAY)
   const tz = await locationTz(tx, d.locationId)
@@ -153,15 +157,25 @@ export async function runPlanSwaps(x: SquareSteps): Promise<SwapReport> {
     const undone = await x.db.selectFrom('memberships').select('swap_undone_variations').where('id', '=', r.id).executeTakeFirstOrThrow()
     if (undone.swap_undone_variations.includes(price.square_variation_id)) continue
     let effective: string | null
+    let undoneNow: string[] = []
     try {
-      effective = (await replaceSwap(x.api, r.square_subscription_id!, price.square_variation_id)).action?.effective_date ?? null
+      const sent = await replaceSwap(x.api, r.square_subscription_id!, price.square_variation_id)
+      effective = sent.action?.effective_date ?? null
+      undoneNow = sent.undone
     } catch (e) {
       x.logger?.warn({ membership: r.id, err: e instanceof Error ? e.message : String(e) }, 'square: a price move could not be sent')
       report.failed++
       continue
     }
     await transaction(x.db, async (tx) => {
-      const cur = await tx.selectFrom('memberships').select(['scheduled_change']).where('id', '=', r.id).forUpdate().executeTakeFirstOrThrow()
+      const cur = await tx.selectFrom('memberships').select(['scheduled_change', 'swap_undone_variations']).where('id', '=', r.id).forUpdate().executeTakeFirstOrThrow()
+      // a swap the move replaced at Square is undone for the period, whatever happens to the move (review Q4 SQ-SEM-2)
+      if (undoneNow.length)
+        await tx
+          .updateTable('memberships')
+          .set({ swap_undone_variations: [...new Set([...cur.swap_undone_variations, ...undoneNow])] })
+          .where('id', '=', r.id)
+          .execute()
       const still = cur.scheduled_change as ScheduledChange | null
       if (!still || still.kind !== 'move' || still.toTierPriceId !== c.toTierPriceId) return
       // Square answers the action's date; without one (a swap Square applied at once) the swap is done today

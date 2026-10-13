@@ -86,7 +86,8 @@ export const settingDefs = {
     default: { graceDays: 7, cancelDays: 21 },
   },
   // "Move members" (plan decision 8): members on an older tier price are told this many days before their price moves.
-  'memberships.price_change_notice_days': { schema: z.number().int().min(0).max(90), default: 30 },
+  // plan decision 8: members hear about a new price at least 30 days before it is billed (review Q4 pricing:F3)
+  'memberships.price_change_notice_days': { schema: z.number().int().min(30).max(90), default: 30 },
   'approvals.allow_self': { schema: z.boolean(), default: false },
   'reminders.offsets_min': {
     schema: z.array(z.number().int().min(1).max(10_080)).max(5),

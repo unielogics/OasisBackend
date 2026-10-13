@@ -49,13 +49,23 @@ const swaps = (sub: { actions?: WireSubscriptionAction[] | null }) => (sub.actio
  * "locked and not billable" for SwapPlan at Square (sandbox 2026-10-12, still after 6 minutes), while a swap to another variation
  * after the delete is accepted.
  */
-export async function replaceSwap(api: SquareApi, subscriptionId: string, variationId: string): Promise<{ subscription: WireSubscription; action: WireSubscriptionAction | null }> {
+export async function replaceSwap(
+  api: SquareApi,
+  subscriptionId: string,
+  variationId: string,
+): Promise<{ subscription: WireSubscription; action: WireSubscriptionAction | null; undone: string[] }> {
   const cur = await api.subscriptions.retrieve(subscriptionId, { includeActions: true })
   const same = swaps(cur).find((a) => a.new_plan_variation_id === variationId)
-  if (same) return { subscription: cur, action: same }
-  for (const a of swaps(cur)) await whenFree(() => api.subscriptions.deleteAction(subscriptionId, a.id))
+  if (same) return { subscription: cur, action: same, undone: [] }
+  // the swaps deleted here are undone for this billing period like a staff undo (review Q4 SQ-SEM-2): Square locks the subscription
+  // when one of them is sent again before the next billing date, so the caller records them in swap_undone_variations
+  const undone: string[] = []
+  for (const a of swaps(cur)) {
+    await whenFree(() => api.subscriptions.deleteAction(subscriptionId, a.id))
+    if (a.new_plan_variation_id) undone.push(a.new_plan_variation_id)
+  }
   const r = await whenFree(() => api.subscriptions.swapPlan(subscriptionId, { new_plan_variation_id: variationId }))
-  return { subscription: r.subscription, action: r.actions.find((a) => a.type === 'SWAP_PLAN') ?? null }
+  return { subscription: r.subscription, action: r.actions.find((a) => a.type === 'SWAP_PLAN') ?? null, undone }
 }
 
 const detailOf = (e: SquareApiError): string => e.errors.map((x) => x.detail ?? '').join(' ')
@@ -90,7 +100,7 @@ export interface PreparedAction {
   pauseAt: string | null
   squareStatus: string | null
   change: ScheduledChange | null
-  /** change_undo: the variations whose swap was removed (never sent again this billing period). */
+  /** change_undo, or a change replacing an earlier one: the variations whose swap was removed (never sent again this billing period). */
   undoneVariations: string[]
 }
 
@@ -152,9 +162,13 @@ export async function prepareBillingAction(
           .where('id', '=', size.tierPriceId!)
           .executeTakeFirstOrThrow()
         if (price.square_state !== 'synced' || !price.square_variation_id) throw new AppError('TIER_PRICE_NOT_SYNCED')
-        if (price.id === m.tier_price_id) throw state('The membership is on that plan and size already.')
+        // the member's own tier and size: a grandfathered price moves only with Move members and its notice (plan decision 8; review
+        // Q4 pricing:F6), never by a change that would bill the new price at the next billing date unannounced
+        if (price.id === m.tier_price_id || (plan.id === m.plan_id && size.classKey === m.plan_class))
+          throw state('The membership is on that plan and size already. To move it to the plan’s new price, use Move members (it sends the notice).')
         if (m.swap_undone_variations.includes(price.square_variation_id)) throw state(UNDONE)
         const r = await replaceSwap(x.api, subId, price.square_variation_id)
+        undone.push(...r.undone)
         change = {
           kind: 'change',
           toTierPriceId: price.id,

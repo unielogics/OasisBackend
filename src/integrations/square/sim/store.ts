@@ -90,6 +90,12 @@ export class SquareSimStore {
   /** subscription id -> its scheduled actions, and the internal billing bookkeeping. */
   private readonly actions = new Map<string, Obj[]>()
   private readonly billing = new Map<string, { nextBillAt: number; deactivateAt?: number }>()
+  /**
+   * Square's swap lock (sandbox 2026-10-12, square.md section 8; review Q4 SQ-SEM-2): after a scheduled SWAP_PLAN to X is deleted, a
+   * SwapPlan to X in the same billing period answers 500 "locked and is not billable", and from then on every DeleteSubscriptionAction
+   * of that subscription answers 409 until the next billing. subscription id -> the period (its next billing date) and what it locks.
+   */
+  private readonly swapLocks = new Map<string, { period: string; undone: Set<string>; locked: boolean }>()
   /** order id -> what owns it ('invoice' orders refuse CreatePayment like the sandbox's "owned by another application"). */
   private readonly orderOwner = new Map<string, 'link' | 'invoice' | 'payment' | 'pos'>()
   readonly events: SimEventRecord[] = []
@@ -833,9 +839,25 @@ export class SquareSimStore {
       throw new SimError(400, 'INVALID_REQUEST_ERROR', 'BAD_REQUEST', `The provided subscription \`${id}\` must have a \`ACTIVE\` state to swap the plan.`)
     const v = this.catalog.get(String(input.new_plan_variation_id ?? ''))
     if (!v || v.type !== 'SUBSCRIPTION_PLAN_VARIATION') throw new SimError(400, 'INVALID_REQUEST_ERROR', 'INVALID_VALUE', 'new_plan_variation_id must name a plan variation.')
+    const lock = this.swapLockOf(s)
+    if (lock.undone.has(String(v.id))) {
+      lock.locked = true
+      throw new SimError(500, 'API_ERROR', 'INTERNAL_SERVER_ERROR', `Subscription ${id} is locked and is not billable`)
+    }
     const a = this.act(id, 'SWAP_PLAN', this.nextBillingDate(s), { new_plan_variation_id: v.id })
     this.emit('subscription.updated', 'subscription', id, { subscription: s })
     return { subscription: clone(s), actions: clone([a]) }
+  }
+
+  /** The swap lock of the subscription's current billing period (a new period starts a new one). */
+  private swapLockOf(s: Obj): { period: string; undone: Set<string>; locked: boolean } {
+    const period = this.nextBillingDate(s)
+    let l = this.swapLocks.get(String(s.id))
+    if (!l || l.period !== period) {
+      l = { period, undone: new Set(), locked: false }
+      this.swapLocks.set(String(s.id), l)
+    }
+    return l
   }
 
   bulkSwapPlan(input: Obj): number {
@@ -854,6 +876,9 @@ export class SquareSimStore {
     const list = this.actions.get(id) ?? []
     const a = list.find((x) => x.id === actionId)
     if (!a) throw new SimError(404, 'INVALID_REQUEST_ERROR', 'NOT_FOUND', `Action \`${actionId}\` not found.`)
+    const lock = this.swapLockOf(s)
+    if (lock.locked) throw new SimError(409, 'INVALID_REQUEST_ERROR', 'CONFLICT', `Unable to lock subscription ${id}`)
+    if (a.type === 'SWAP_PLAN' && a.new_plan_variation_id) lock.undone.add(String(a.new_plan_variation_id))
     this.actions.set(id, list.filter((x) => x.id !== actionId))
     if (a.type === 'CANCEL') delete s.canceled_date
     s.version = Number(s.version) + 1

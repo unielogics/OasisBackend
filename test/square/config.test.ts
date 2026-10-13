@@ -68,6 +68,16 @@ describe('Square environment', () => {
     expect(loadEnv({ ...base, ...live, PAYMENT_PROCESSOR: 'square' }).PAYMENT_PROCESSOR).toBe('square')
   })
 
+  it('production with PAYMENT_PROCESSOR=square refuses SQUARE_API_BASE pointing anywhere but Square production (review Q4 SQ-SEM-3)', () => {
+    const cut = { ...prod, ...live, PAYMENT_PROCESSOR: 'square', SQUARE_ENVIRONMENT: 'production', SQUARE_WRITES_ENABLED: 'true' }
+    for (const b of ['https://connect.squareupsandbox.com', 'http://127.0.0.1:4593'])
+      expect(() => loadEnv({ ...cut, SQUARE_API_BASE: b })).toThrow(/SQUARE_API_BASE: must be unset/)
+    expect(squareBaseUrl(loadEnv({ ...cut, SQUARE_API_BASE: 'https://connect.squareup.com/' }))).toBe('https://connect.squareup.com')
+    expect(squareBaseUrl(loadEnv(cut))).toBe('https://connect.squareup.com')
+    // before the cutover a staging override stays possible (observe-only against the sandbox or a simulator)
+    expect(loadEnv({ ...prod, ...live, SQUARE_API_BASE: 'http://127.0.0.1:4593' }).SQUARE_API_BASE).toBe('http://127.0.0.1:4593')
+  })
+
   it('the POS app switch only with live production Square; the webhook URL is https://<domain>/hooks/square in production', () => {
     expect(() => loadEnv({ ...base, SQUARE_POS_API_ENABLED: 'true' })).toThrow(/SQUARE_POS_API_ENABLED: only with SQUARE_PROVIDER=live and SQUARE_ENVIRONMENT=production/)
     expect(loadEnv({ ...base, ...live, SQUARE_ENVIRONMENT: 'production', SQUARE_POS_API_ENABLED: 'true' }).SQUARE_POS_API_ENABLED).toBe(true)

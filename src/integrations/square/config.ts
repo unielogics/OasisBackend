@@ -70,8 +70,8 @@ type IssueSink = (cond: boolean, path: string, message: string) => void
 /**
  * The cross-field rules, run by the environment contract's superRefine:
  * - live requires the token, location, application id, webhook signature key and webhook URL;
- * - production with PAYMENT_PROCESSOR=square requires SQUARE_PROVIDER=live and SQUARE_ENVIRONMENT=production (real clients never
- *   see a sandbox checkout);
+ * - production with PAYMENT_PROCESSOR=square requires SQUARE_PROVIDER=live, SQUARE_ENVIRONMENT=production and no SQUARE_API_BASE
+ *   other than Square's production host (real clients never see a sandbox or simulator checkout; review Q4 SQ-SEM-3);
  * - the POS app switch only with the production environment, live;
  * - in production the webhook URL is https and ends in /hooks/square.
  */
@@ -96,6 +96,11 @@ export function squareEnvIssues(e: SquareEnv & { NODE_ENV: string }, need: Issue
     prod && e.PAYMENT_PROCESSOR === 'square' && e.SQUARE_ENVIRONMENT !== 'production',
     'SQUARE_ENVIRONMENT',
     'must be production in production when PAYMENT_PROCESSOR=square (real clients never see a sandbox checkout)',
+  )
+  need(
+    prod && e.PAYMENT_PROCESSOR === 'square' && !!e.SQUARE_API_BASE && e.SQUARE_API_BASE.replace(/\/+$/, '') !== SQUARE_BASE_URLS.production,
+    'SQUARE_API_BASE',
+    `must be unset (or ${SQUARE_BASE_URLS.production}) in production when PAYMENT_PROCESSOR=square (never a sandbox or a simulator)`,
   )
   need(
     e.SQUARE_POS_API_ENABLED && (e.SQUARE_ENVIRONMENT !== 'production' || e.SQUARE_PROVIDER !== 'live'),
