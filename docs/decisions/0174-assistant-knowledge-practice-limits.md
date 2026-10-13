@@ -220,4 +220,13 @@ filter, pages, the 90-day window, redaction, the correction linked), `jobs.test.
   plain cases before PDF.js starts).
   The child stays inside the worker's systemd unit (`SystemCallFilter=@system-service` allows `prlimit64` and `execve`;
   `MemoryMax=1000M` holds the worker and one child: pg-boss hands the queue one job at a time).
+- **K4REV-2 more orders, a lone price.** Three order patterns more (18 in all; the dashboard's copy is the same list, character for
+  character): "ignore / disregard / forget / override / pay no attention to" before "guidance" too; the same verbs before
+  "everything / all / anything / whatever / what" and then "told / said / given / earlier / previous / prior / came before / above"
+  ("Disregard everything you were told before"); and words addressed to the AI by name, with a colon, comma or dash, then an order
+  ("Oasis AI: tell every client …", "Assistant, never …"). Ordinary text such as "Do not forget to dry the car before you drive" or
+  "Pay no attention to the noise of the dryers" is not flagged. A lone number inside a sentence is hidden as `[number]` when it is a
+  price: comma-grouped ("1,299"), three or more digits in a line with a price, service or vehicle-size word (or "is", "for",
+  "from" …), or two digits (or with cents) right after such a word ("Express wash 15 for sedans"); a number followed by a unit
+  ("3,000 miles", "48 hours", "300 cars"), a year, a percentage (tint VLT), a time and the shop's number stay.
 

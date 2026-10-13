@@ -854,7 +854,8 @@ is (`server` and `active` are accepted and ignored). Tests: `test/settings-http/
 
 Every route needs `set.assistant` (ADR 0174 D3) and is outside the kiosk's route list. Nothing here reaches a client: an ACTIVE entry
 changes what Oasis AI reads (the SHOP KNOWLEDGE block of its prompt and of the policy judge, masked: amounts as "[price in
-Settings]", links and e-mails as "[link removed]", phone numbers other than the shop's as "[number]"), and only while it answers.
+Settings]", links and e-mails as "[link removed]", phone numbers other than the shop's, the numbers of a price table and a lone price in a
+sentence ("Ceramic coating 1,299 for large cars") as "[number]"), and only while it answers.
 
 `GET /assistant/knowledge` answers `{entries[], documents[], budget, limits}`. An entry is `{id, kind note|document|correction,
 title, body, question (correction), wrongReply (correction; redacted, never shown to the model; null without cli.view unless it came from a practice text of a synthetic

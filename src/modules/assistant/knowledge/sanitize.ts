@@ -61,7 +61,10 @@ const PLAIN_WS = /[\t\n\r]/g
  * the prompt or the judge's frame) is flagged and a document holding one must be confirmed before it is turned on.
  */
 const INSTRUCTION: readonly RegExp[] = [
-  /\b(?:ignore|disregard|forget|override)\b[^.\n]{0,40}\b(?:rules?|instructions?|prompts?|guidelines?|above|previous)\b/i,
+  /\b(?:ignore|disregard|forget|override|pay\s+no\s+attention\s+to)\b[^.\n]{0,40}\b(?:rules?|instructions?|prompts?|guidelines?|guidance|above|previous)\b/i,
+  // K4 re-review K4REV-2: "Disregard everything you were told before", "Oasis AI: tell every client …"
+  /\b(?:ignore|disregard|forget|override|pay\s+no\s+attention\s+to)\s+(?:everything|all|anything|whatever|what)\b[^.\n]{0,40}\b(?:told|said|given|earlier|previous|prior|came\s+before|above)\b/i,
+  /\b(?:oasis\s+ai|assistant|ai|bot|chatbot|model)\s*[:,\-–—]\s*(?:please\s+)?(?:tell|say|always|never|confirm|promise|offer|give|answer|reply|respond|ignore|forget)\b/i,
   // K4 review asst:K4A-3: words addressed to the AI, standing orders, and the judge's verdict in any quotes
   /\b(?:note|message|instructions?|reminder)\s+(?:to|for)\s+(?:the\s+)?(?:ai|assistant|bot|chatbot|model|oasis\s+ai)\b/i,
   /\b(?:dear|hey|attention)\s+(?:ai|assistant|bot|chatbot|model)\b/i,
@@ -123,9 +126,9 @@ function asciiDigits(s: string): string {
 
 /**
  * A price table (K4 review asst:K4A-6): a line with a column mark (|, a tab, dot leaders) or holding two or more numbers, or one of two
- * or more digits closing the line ("Full detail 189"). Those numbers are hidden too, whatever stands next to them, except percentages
- * (tint shades), times, years and numbers inside a word ("F-150", "X5"): a PDF price sheet with the "$" only in its header, or none
- * at all, never reaches the model with its prices.
+ * or more digits closing the line ("Full detail 189"), or a lone price inside a sentence (lonePrice, K4REV-2). Those numbers are hidden
+ * too, whatever stands next to them, except percentages (tint shades), times, years and numbers inside a word ("F-150", "X5"): a
+ * PDF price sheet with the "$" only in its header, or none at all, never reaches the model with its prices.
  */
 const COLUMNS = /\||\t|\.{3,}|…/
 const BARE_NUMBER = /(?<![\p{L}\p{N}.,:]|\p{L}-)\d+(?:[.,]\d+)*(?![\p{L}\p{N}%]|[.,]\d|\s*%|\s*percent|:\d|\s*(?:a\.?m\.?|p\.?m\.?)\b)/giu
@@ -134,11 +137,33 @@ const isYear = (n: string): boolean => /^(?:19|20)\d{2}$/.test(n)
 /** A number of two or more digits closing a line after words ("Full detail 189"): a price list's last column. */
 const END_NUMBER = /(?<=\p{L}[^\p{L}\p{N}]{1,3})(\d{2,}(?:[.,]\d+)?)(?=\s*[.!]?\s*$)/u
 
+/**
+ * A lone price inside a sentence (K4 re-review K4REV-2: "Ceramic coating 1,299 for large cars"): a comma-grouped number, one of three
+ * or more digits in a line with a price, service or vehicle-size word, or one of two digits (or with cents) right after such a word
+ * ("Express wash 15 for sedans"). A number followed by a unit ("3,000 miles", "48 hours", "300 cars") is a quantity and stays.
+ */
+const UNIT_AFTER =
+  /^\s*-?\s*(?:°|(?:miles?|mi|km|kilomet(?:er|re)s?|hours?|hrs?|minutes?|mins?|seconds?|secs?|days?|weeks?|months?|years?|yrs?|ft|feet|foot|inch(?:es)?|lbs?|pounds?|kg|oz|ounces?|ml|lit(?:er|re)s?|gallons?|gal|psi|grit|degrees?|steps?|bays?|spots?|cars?|vehicles?|people|clients?|customers?|coats?|layers?|stages?|times?|reviews?|stars?|k)\b)/i
+const PRICE_WORDS = String.raw`prices?|priced|costs?|charges?|fees?|rates?|pay|just|only|from|wash(?:es)?|details?|detailing|coatings?|ceramic|wax|polish|tint|shampoo|packages?|plans?|memberships?|add-?ons?|upgrades?|sedans?|suvs?|trucks?|vans?|minivans?|coupes?|cars?|small|medium|large|xl|compact`
+const PRICE_CONTEXT = new RegExp(String.raw`\b(?:${PRICE_WORDS}|is|are|was|for|starting|starts|each|per|plus|extra|interior|exterior)\b`, 'i')
+const PRICE_BEFORE = new RegExp(String.raw`\b(?:${PRICE_WORDS}|is)\s*[:\-–]?\s*$`, 'i')
+
+function lonePrice(s: string, n: string, at: number): boolean {
+  if (UNIT_AFTER.test(s.slice(at + n.length))) return false
+  if (/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(n)) return true
+  const whole = n.replace(/[.,]\d+$/, '')
+  if (whole.length >= 3) return PRICE_CONTEXT.test(s)
+  if (whole.length === 2 || /[.,]\d{2}$/.test(n)) return PRICE_BEFORE.test(s.slice(0, at))
+  return false
+}
+
 function maskTableNumbers(s: string): string {
   const numbers = [...s.matchAll(BARE_NUMBER)].map((m) => m[0]).filter((n) => !isYear(n))
   if (numbers.length === 0) return s
   if (COLUMNS.test(s) || numbers.length >= 2) return s.replace(BARE_NUMBER, (n) => (isYear(n) ? n : NUMBER_MASK))
-  return s.replace(END_NUMBER, (n) => (isYear(n) ? n : NUMBER_MASK))
+  const end = s.replace(END_NUMBER, (n) => (isYear(n) ? n : NUMBER_MASK))
+  if (end !== s) return end
+  return s.replace(BARE_NUMBER, (n: string, at: number) => (isYear(n) || !lonePrice(s, n, at) ? n : NUMBER_MASK))
 }
 
 const clip = (s: string): string => (s.length > 40 ? `${s.slice(0, 39)}…` : s)
