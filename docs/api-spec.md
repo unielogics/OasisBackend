@@ -2574,8 +2574,9 @@ after `to`, 23 or 25 hours on a daylight-saving day), at most 31 days: a bad dat
 - `employees`: everyone active or invited at the shop, and anyone else with activity in the range, by first name; each
   `{id, name, initials, avatarColor, title, status, totals, days}`, `days` holding only the days with activity.
 - Counts (`totals` and each day): `checkIns` (arrive, and a drag onto a bay from booked or confirmed), `baysStarted` (assign-bay and
-  start), `completed`, `pickedUp`, `readyTexts` (notify-ready), `bookings`, `walkIns`, `addons`, `sizeChanges`, `checklistTasks` (by
-  task: "Check all" of 6 is 6), `photos` (photos and written notes) from `staff_events` (kiosk and signed in); `textsSent` from
+  start), `completed`, `pickedUp`, `readyTexts` (notify-ready), `bookings`, `walkIns`, `addons`, `sizeChanges`, `photos` (photos and written notes)
+  from `staff_events` (kiosk and signed in); `checklistTasks` from the checklist: the tasks done now, by task ("Check all" of 6 is 6),
+  for whoever ticked them, on the day they did (un-ticking takes one back, so ticking a task on and off never adds up); `textsSent` from
   `messages` (out, sent by the employee as staff); `payments {count, amountCents}` from the ledger (`pay` events done by the employee;
   one a void cancels is never counted; `amountCents` null without `pay.reports`); `bayMinutes {total, avg, cars}` (completed minus
   cleaning started, whole minutes, for the cars the employee was the worker of when completed).
@@ -2584,7 +2585,7 @@ after `to`, 23 or 25 hours on a daylight-saving day), at most 31 days: a bad dat
   paidCents}`, the steps by whoever did them, `paidCents` null without `pay.reports`.
 
 `GET /reports/employee-activity/:employeeId/events?from&to[&cursor]` answers `{items, nextCursor}`: their staff events, newest first, 50
-a page (`nextCursor` back as `cursor`; null on the last page; a bad cursor `422`), each `{id, at, kind, via, deviceName, appointmentId,
+a page (`nextCursor` back as `cursor`, opaque, keeping the instant to the microsecond; null on the last page; a bad cursor `422`), each `{id, at, kind, via, deviceName, appointmentId,
 customerId, customer, amountCents, messageId, meta}`, `amountCents` null without `pay.reports`. A kiosk gets `403 KIOSK_FORBIDDEN` for
 both.
 

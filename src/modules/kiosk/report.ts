@@ -1,5 +1,5 @@
 // The per-employee activity report (ADR 0180, design section 5; Settings -> Team activity). Read from staff_events (car steps,
-// bookings, add-ons, sizes, checklist, photos: kiosk and signed-in alike), the ledger (payments: `pay` events done, a voided one never
+// bookings, add-ons, sizes, photos: kiosk and signed-in alike), the checklist tasks done (by whoever ticked them), the ledger (payments: `pay` events done, a voided one never
 // counted), the messages (texts out sent by the employee as staff) and the appointments (bay time of the cars the employee was the
 // worker of at completion). One business time zone: a range is whole business days, [from 00:00, to + 1 day 00:00) in the shop's time
 // zone, at most 31 days. Access: team.edit; amounts (payments.amountCents, cars[].paidCents, events' amountCents) are null without
@@ -224,11 +224,10 @@ export async function employeeActivity(
   const { tz, start, end } = range
   if (employeeId) await requireEmployee(db, locationId, employeeId)
 
-  const [events, texts, payments, bays] = await Promise.all([
-    sql<{ employee_id: string; day: string; kind: StaffEventKind; n: number; implicit: number; tasks: number }>`
+  const [events, texts, payments, bays, tasks] = await Promise.all([
+    sql<{ employee_id: string; day: string; kind: StaffEventKind; n: number; implicit: number }>`
       select employee_id, (at at time zone ${tz})::date as day, kind, count(*)::int as n,
-        (count(*) filter (where kind = 'assign_bay' and meta->>'implicitArrival' = 'true'))::int as implicit,
-        coalesce(sum(case when kind = 'checklist' then coalesce((meta->>'count')::int, 1) end), 0)::int as tasks
+        (count(*) filter (where kind = 'assign_bay' and meta->>'implicitArrival' = 'true'))::int as implicit
       from staff_events
       where location_id = ${locationId}::uuid and at >= ${start} and at < ${end} and employee_id is not null
         ${andEmployee('employee_id', employeeId)}
@@ -253,6 +252,15 @@ export async function employeeActivity(
       where location_id = ${locationId}::uuid and status = 'completed' and assigned_employee_id is not null
         and cleaning_started_at is not null and completed_at >= ${start} and completed_at < ${end}
         ${andEmployee('assigned_employee_id', employeeId)}
+      group by 1, 2`.execute(db),
+    // checklist tasks: the tasks done now, by whoever ticked them, on the day they were ticked. Un-ticking takes a task back, so
+    // ticking and un-ticking one task again and again never adds up (the checklist events stay on the timeline and the cars).
+    sql<{ employee_id: string; day: string; n: number }>`
+      select i.done_by_employee_id as employee_id, (i.done_at at time zone ${tz})::date as day, count(*)::int as n
+      from job_checklist_items i
+      join appointments a on a.id = i.appointment_id
+      where a.location_id = ${locationId}::uuid and i.done and i.removed_at is null and i.done_by_employee_id is not null
+        and i.done_at >= ${start} and i.done_at < ${end} ${andEmployee('i.done_by_employee_id', employeeId)}
       group by 1, 2`.execute(db),
   ])
 
@@ -298,9 +306,6 @@ export async function employeeActivity(
       case 'size_change':
         d.sizeChanges += r.n
         break
-      case 'checklist':
-        d.checklistTasks += r.tasks
-        break
       case 'photo':
         d.photos += r.n
         break
@@ -310,6 +315,7 @@ export async function employeeActivity(
     }
   }
   for (const r of texts.rows) slot(r.employee_id, r.day).textsSent += r.n
+  for (const r of tasks.rows) slot(r.employee_id, r.day).checklistTasks += r.n
   for (const r of payments.rows) {
     const p = slot(r.employee_id, r.day).payments
     p.count += r.n
@@ -449,7 +455,9 @@ async function carsOf(
   }))
 }
 
-const CURSOR = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\|(\d{1,18})$/
+// The cursor carries the row's instant to the microsecond (as Postgres stores it): a JS Date keeps only milliseconds, and events of
+// one request are microseconds apart, so a millisecond cursor would skip the rest of that millisecond.
+const CURSOR = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z)\|(\d{1,18})$/
 
 /** One employee's staff events in the range, newest first, EVENTS_PAGE at a time (`nextCursor` until the last page). */
 export async function employeeEvents(
@@ -458,11 +466,11 @@ export async function employeeEvents(
 ): Promise<z.infer<typeof EmployeeEventsResponse>> {
   const { locationId, range, employeeId, amounts } = o
   await requireEmployee(db, locationId, employeeId)
-  let after: { at: Date; id: number } | null = null
+  let after: { at: string; id: string } | null = null
   if (o.cursor !== undefined) {
     const m = CURSOR.exec(o.cursor)
-    if (!m) throw invalid('cursor', 'That page link is not valid. Load the timeline again.')
-    after = { at: new Date(m[1]!), id: Number(m[2]) }
+    if (!m || Number.isNaN(Date.parse(`${m[1]!.slice(0, 23)}Z`))) throw invalid('cursor', 'That page link is not valid. Load the timeline again.')
+    after = { at: m[1]!, id: m[2]! }
   }
   let q = db
     .selectFrom('staff_events as s')
@@ -480,6 +488,7 @@ export async function employeeEvents(
       's.amount_cents',
       's.message_id',
       's.meta',
+      sql<string>`to_char(s.at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`.as('at_key'),
     ])
     .where('s.location_id', '=', locationId)
     .where('s.employee_id', '=', employeeId)
@@ -487,7 +496,7 @@ export async function employeeEvents(
     .where('s.at', '<', range.end)
   if (after) {
     const a = after
-    q = q.where((eb) => eb.or([eb('s.at', '<', a.at), eb.and([eb('s.at', '=', a.at), eb('s.id', '<', a.id)])]))
+    q = q.where(sql<boolean>`(s.at, s.id) < (${a.at}::timestamptz, ${a.id}::bigint)`)
   }
   const rows = await q.orderBy('s.at', 'desc').orderBy('s.id', 'desc').limit(EVENTS_PAGE + 1).execute()
   const page = rows.slice(0, EVENTS_PAGE)
@@ -506,7 +515,7 @@ export async function employeeEvents(
       messageId: r.message_id,
       meta: (r.meta ?? {}) as Record<string, unknown>,
     })),
-    nextCursor: rows.length > EVENTS_PAGE && last ? `${last.at.toISOString()}|${last.id}` : null,
+    nextCursor: rows.length > EVENTS_PAGE && last ? `${last.at_key}|${last.id}` : null,
   }
 }
 
@@ -523,7 +532,8 @@ export function registerActivityReportRoutes(app: AppInstance): void {
         description:
           'Counts per employee and per business day from the staff events (kiosk and signed-in), the ledger and the messages: check-ins ' +
           '(arrive, and a drag from booked or confirmed onto a bay), bays started (assign-bay and start), completed, picked up, ready texts, ' +
-          'bookings, walk-ins, add-ons, size changes, checklist tasks, photos and notes, texts sent, payments (`pay` events done; a voided one ' +
+          'bookings, walk-ins, add-ons, size changes, checklist tasks (the tasks done now, counted for whoever ticked them on the day they did; ' +
+          'un-ticking takes one back), photos and notes, texts sent, payments (`pay` events done; a voided one ' +
           'is never counted; amounts null without pay.reports) and bay minutes (completed minus cleaning started, for the cars the employee ' +
           'was the worker of). Every active or invited employee of the shop is listed, and anyone else with activity in the range; `days` ' +
           'holds only the days with activity. With employeeId: that employee alone (404 when not of the shop) and `cars`, every car they ' +

@@ -1,6 +1,7 @@
 // The Team activity report (ADR 0180, wave K2b backend): GET /reports/employee-activity and the per-employee timeline. Counts across
 // days, bay time, a voided payment never counted, amounts only with pay.reports, business-day edges in the shop's time zone, the 31-day
 // limit, the cars drill-down and the paged timeline. Real kiosk flows where it matters, rows written directly for the day edges.
+import { sql } from 'kysely'
 import { describe, expect, it } from 'vitest'
 import type { StaffEventKind } from '../../src/modules/kiosk/schema.js'
 import { reportRange } from '../../src/modules/kiosk/report.js'
@@ -125,26 +126,75 @@ describe('GET /reports/employee-activity', () => {
     expect(after.totals.payments).toEqual({ count: 0, amountCents: 0 })
   })
 
-  it('counts each event on its business day in the shop’s time zone, and checklist ticks by task', async () => {
+  it('counts each event on its business day in the shop’s time zone', async () => {
     const w = await kioskWorld()
     const e = w.marco.employeeId
     await event({ employeeId: e, kind: 'arrive', at: '2026-06-13T03:59:59Z' }) // June 12, 11:59:59 PM in New Jersey
     await event({ employeeId: e, kind: 'arrive', at: '2026-06-13T04:00:00Z' }) // June 13, midnight
     await event({ employeeId: e, kind: 'assign_bay', at: '2026-06-14T03:59:59Z', meta: { implicitArrival: true } }) // June 13, 11:59 PM
     await event({ employeeId: e, kind: 'assign_bay', at: '2026-06-14T04:00:00Z', meta: { implicitArrival: false } }) // June 14
-    await event({ employeeId: e, kind: 'checklist', at: '2026-06-13T15:00:00Z', meta: { count: 6 } })
-    await event({ employeeId: e, kind: 'checklist', at: '2026-06-14T15:00:00Z', meta: { count: 1 } })
     await event({ employeeId: e, kind: 'photo', at: '2026-06-14T15:00:00Z' })
     const day = of((await report(sup(), 'from=2026-06-13&to=2026-06-13')).json() as Json, e)
-    expect(day.totals).toMatchObject({ checkIns: 2, baysStarted: 1, checklistTasks: 6, photos: 0 })
+    expect(day.totals).toMatchObject({ checkIns: 2, baysStarted: 1, photos: 0 })
     const two = of((await report(sup(), 'from=2026-06-13&to=2026-06-14')).json() as Json, e)
-    expect(two.totals).toMatchObject({ checkIns: 2, baysStarted: 2, checklistTasks: 7, photos: 1 })
-    expect(two.days.map((d: Json) => [d.date, d.checkIns, d.baysStarted, d.checklistTasks])).toEqual([
-      ['2026-06-13', 2, 1, 6],
+    expect(two.totals).toMatchObject({ checkIns: 2, baysStarted: 2, photos: 1 })
+    expect(two.days.map((d: Json) => [d.date, d.checkIns, d.baysStarted, d.photos])).toEqual([
+      ['2026-06-13', 2, 1, 0],
       ['2026-06-14', 0, 1, 1],
     ])
     const before = of((await report(sup(), 'from=2026-06-12&to=2026-06-12')).json() as Json, e)
     expect(before.totals.checkIns).toBe(1)
+  })
+
+  it('counts the checklist tasks an employee finished, by task and day: un-ticking takes it back, ticking again never adds more', async () => {
+    const w = await kioskWorld()
+    const e = w.marco.employeeId
+    const v = await m.book('Maria Delgado', 'Express Hand Wash', '2026-06-13T14:00:00-04:00')
+    const items = (
+      await db()
+        .selectFrom('job_checklist_items')
+        .select('id')
+        .where('appointment_id', '=', v.appointmentId)
+        .where('removed_at', 'is', null)
+        .orderBy('position')
+        .execute()
+    ).map((r) => r.id)
+    expect(items.length).toBeGreaterThanOrEqual(2)
+    const tick = async (item: string, done: boolean) =>
+      expect((await kiosk(w, 'PUT', `appointments/${v.appointmentId}/checklist/items/${item}`, { done })).statusCode).toBe(200)
+    const tasks = async (who: string, range = 'from=2026-06-13&to=2026-06-13') =>
+      of((await report(sup(), range)).json() as Json, who).totals.checklistTasks as number
+
+    // one task ticked and un-ticked twice: nothing finished
+    for (const done of [true, false, true, false]) await tick(items[0]!, done)
+    expect(await tasks(e)).toBe(0)
+    await tick(items[0]!, true)
+    await tick(items[0]!, true) // already done: no change
+    expect(await tasks(e)).toBe(1)
+    // "Check all" counts each task once, the one already done included only once
+    const all = await kiosk(w, 'POST', `appointments/${v.appointmentId}/checklist/bulk`, { itemIds: items, done: true })
+    expect(all.statusCode, all.body).toBe(200)
+    expect(await tasks(e)).toBe(items.length)
+    // someone else (signed in) un-ticks one and ticks it again: it is theirs now
+    const amara = (await db().selectFrom('users').select('employee_id').where('email', '=', 'amara@example.test').executeTakeFirstOrThrow()).employee_id!
+    const last = items[items.length - 1]!
+    for (const done of [false, true]) {
+      const r = await m.send(sup(), 'PUT', `/appointments/${v.appointmentId}/checklist/items/${last}`, { done }, false)
+      expect(r.statusCode, r.body).toBe(200)
+    }
+    expect(await tasks(e)).toBe(items.length - 1)
+    expect(await tasks(amara)).toBe(1)
+    // by business day in the shop's time zone (done_at moved directly: 11:59:59 PM, then midnight in New Jersey)
+    await db().updateTable('job_checklist_items').set({ done_by_employee_id: e, done_at: new Date('2026-06-14T03:59:59Z') }).where('id', '=', last).execute()
+    expect(await tasks(e)).toBe(items.length)
+    await db().updateTable('job_checklist_items').set({ done_at: new Date('2026-06-14T04:00:00Z') }).where('id', '=', last).execute()
+    const two = of((await report(sup(), 'from=2026-06-13&to=2026-06-14')).json() as Json, e)
+    expect(two.days.map((d: Json) => [d.date, d.checklistTasks])).toEqual([
+      ['2026-06-13', items.length - 1],
+      ['2026-06-14', 1],
+    ])
+    expect(two.totals.checklistTasks).toBe(items.length)
+    expect(await tasks(amara, 'from=2026-06-13&to=2026-06-14')).toBe(0)
   })
 
   it('answers at most 31 days, and refuses a bad range, an unknown employee and anyone without team.edit', async () => {
@@ -177,6 +227,30 @@ describe('GET /reports/employee-activity', () => {
 })
 
 describe('GET /reports/employee-activity/:employeeId/events', () => {
+  it('pages through events written microseconds apart within one millisecond, and losing none', async () => {
+    const w = await kioskWorld()
+    const e = w.marco.employeeId
+    // production writes `at` with microseconds (clock_timestamp()); 52 events in one millisecond, two of them at the very same instant
+    const ats = Array.from({ length: 50 }, (_, i) => `2026-06-13T13:00:00.${String(123900 - i * 10).padStart(6, '0')}Z`)
+    ats.push('2026-06-13T13:00:00.123390Z', '2026-06-13T13:00:00.123390Z')
+    for (const at of ats)
+      await db()
+        .insertInto('staff_events')
+        .values({ location_id: m.locationId(), at: sql`${at}::timestamptz` as never, employee_id: e, employee_name: 'Marco R.', kind: 'update', via: 'signed_in' })
+        .execute()
+    const all = (
+      await db().selectFrom('staff_events').select('id').where('employee_id', '=', e).orderBy('at', 'desc').orderBy('id', 'desc').execute()
+    ).map((r) => String(r.id))
+    expect(all).toHaveLength(52)
+    const url = `/reports/employee-activity/${e}/events?from=2026-06-13&to=2026-06-13`
+    const first = (await m.get(sup(), url)).json() as Json
+    expect(first.items).toHaveLength(50)
+    expect(first.nextCursor).toEqual(expect.any(String))
+    const second = (await m.get(sup(), `${url}&cursor=${encodeURIComponent(first.nextCursor)}`)).json() as Json
+    expect(second.nextCursor).toBeNull()
+    expect([...first.items, ...second.items].map((x: Json) => x.id)).toEqual(all)
+  })
+
   it('pages the timeline newest first, with the device, and amounts only with pay.reports', async () => {
     const w = await kioskWorld()
     const e = w.marco.employeeId
