@@ -11,7 +11,7 @@ import { squareLiveConfigured } from '../../integrations/square/config.js'
 import { SQUARE_EVENT_TYPES } from '../../integrations/square/webhook.js'
 import { getDefaultLocation } from '../../platform/locations.js'
 import { maskText } from '../../platform/logging.js'
-import { currentSquareState, saveSquareState } from './db/state.js'
+import { currentSquareState, saveSquareState, stampConnectionPoint } from './db/state.js'
 import { processLoggedEvent, squareWebhookLog, type SquareEventDeps } from './events.js'
 
 const MIN = 60_000
@@ -133,6 +133,9 @@ export async function runSquareCatchup(d: SquareEventDeps, o: { force?: boolean 
     do {
       const page = await d.api.events.search({ start_at: from.toISOString(), event_types: [...SQUARE_EVENT_TYPES], cursor, limit: 100 })
       pages++
+      // the first read of this Square (sandbox run F2): the connection point is now, before any event of the page is decided, so
+      // the shop's earlier sales the first run reads (a day back) are history
+      if (pages === 1 && !state?.connected_at && !wm) await stampConnectionPoint(d.db, location.id, d.env, now)
       for (const e of page.items) {
         r.read++
         seen.add(e.event_id)

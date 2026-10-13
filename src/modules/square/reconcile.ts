@@ -14,7 +14,7 @@ import { refundKey } from './ledger.js'
 import { getDefaultLocation } from '../../platform/locations.js'
 import { maskText } from '../../platform/logging.js'
 import type { SquareReconcileSummary } from './db/schema.js'
-import { saveSquareState } from './db/state.js'
+import { saveSquareState, stampConnectionPoint } from './db/state.js'
 import type { SquareEventDeps } from './events.js'
 
 export const RECONCILE_WINDOW_MS = 72 * 3600_000
@@ -81,6 +81,9 @@ export async function runSquareReconcile(
     await saveSquareState(d.db, location.id, d.env, now, { last_error: `reconcile: ${msg}`, last_error_at: now })
     throw e
   }
+  // the first read of this Square (sandbox run F2): when nothing read it before, the connection point is now, so the 72 hours of
+  // earlier sales listed here are history (kept as it is otherwise)
+  await stampConnectionPoint(d.db, location.id, d.env, now)
   // what the webhook and the catch-up both missed: decided now, through the same locks and keys
   const newId = createIdGenerator(d.clock)
   const deps = { locationId: location.id, clock: d.clock, newId, env: d.env }

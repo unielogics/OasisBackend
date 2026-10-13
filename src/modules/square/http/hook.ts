@@ -11,10 +11,13 @@ import { SQUARE_SIGNATURE_HEADER, parseSquareEvent, verifySquareSignature } from
 import { AppError } from '../../../platform/errors.js'
 import { createIdGenerator } from '../../../platform/ids.js'
 import { getDefaultLocation } from '../../../platform/locations.js'
-import { currentSquareState, saveSquareState } from '../db/state.js'
+import { currentSquareState, saveSquareState, squareEnvironment } from '../db/state.js'
 import { processLoggedEvent, squareWebhookLog } from '../events.js'
 import { squareApi, squareIngest } from '../runtime.js'
 import '../problems.js'
+
+/** How far before its event the first webhook sets the connection point (a sale is made shortly before its event). */
+const CONNECTION_POINT_MARGIN_MS = 10 * 60_000
 
 const KEPT_HEADERS = ['content-type', 'user-agent', 'square-environment', 'square-initial-delivery-timestamp', 'square-retry-number', 'square-retry-reason']
 
@@ -52,7 +55,13 @@ export const squareHookModule: ApiModule = (app, deps) => {
         if (v !== undefined) headers[h] = String(Array.isArray(v) ? v[0] : v)
       }
       if (!(await log.claim(event.event_id, now, { headers, body: raw }))) return reply.status(200).send({ status: 'duplicate' })
-      await saveSquareState(deps.db, location.id, env, now, { last_webhook_at: now })
+      // the first webhook of this Square, before anything read it (sandbox run F2): a webhook is live, so the connection point is
+      // set a little before the event (a sale made just before its event is not history); the catch-up and reconcile keep it
+      const point =
+        squareEnvironment(env) !== 'sim' && !state?.connected_at && !state?.watermark
+          ? new Date(Math.min(now.getTime(), Date.parse(event.created_at) || now.getTime()) - CONNECTION_POINT_MARGIN_MS)
+          : undefined
+      await saveSquareState(deps.db, location.id, env, now, { last_webhook_at: now, ...(point ? { connection_point: point } : {}) })
       if (deps.jobs) {
         try {
           await deps.jobs.enqueue('square.event.process', { eventId: event.event_id }, { singletonKey: event.event_id })

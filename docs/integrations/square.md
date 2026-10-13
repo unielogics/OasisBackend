@@ -138,11 +138,14 @@ and the last two skip unless the processor is Square and writes are on.
 
 ## 6. Runbook
 
-**History before the connection.** The first successful Test connection of a stack that has not read Square's events yet stamps
-`square_state.connected_at`. The first catch-up reads the last day of events and the nightly reconcile the last 72 hours, so the shop's
-earlier POS sales are mirrored too: a counter payment made before the stamp is kept as history (ignored, "before connection"), never in
-"Square payments to match" and never alerted (sandbox run F2). Later tests keep the stamp; a stack already reading events before the
-stamp existed gets none. Run Test connection first, before `SQUARE_PROVIDER=live` lets the catch-up run, so day one starts clean.
+**History before the connection.** The first time Oasis reads a real Square environment it stamps `square_state.connected_at`, the
+connection point: whichever comes first of the first catch-up page, the first reconcile listing, the first successful Test connection
+and the first webhook (a webhook is live, so its stamp is set 10 minutes before its event). The first catch-up reads the last day of
+events and the nightly reconcile the last 72 hours, so the shop's earlier POS sales are mirrored too: a counter payment made before the
+stamp is kept as history (ignored, "before connection"), never in "Square payments to match" and never alerted (sandbox run F2). Later
+reads keep the stamp; switching environment (sim to sandbox to production) starts it afresh; a stack already reading events before the
+stamp existed gets none. Nothing to do in the setup order: set `SQUARE_PROVIDER=live`, restart, then run Test connection whenever
+convenient, the history is cut either way. The simulator is never stamped by a read (only by Test connection).
 
 **Observe-only first.** With `SQUARE_WRITES_ENABLED=false` the client refuses, before sending, every call that would create or change
 something at Square (payments, refunds, links, customers, cards, catalog, subscription actions). Reads, searches and the setup calls

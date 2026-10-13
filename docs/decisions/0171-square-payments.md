@@ -433,6 +433,11 @@ Migration `20261015100100_review_q4_fix.sql`:
   that has not read events yet stamps `square_state.connected_at` (reset with the environment, like every learned column); a counter
   payment Square made before it is mirrored as history (`ignored`, reason `other`, note "before connection: a sale from before Square
   was connected to Oasis"), never queued nor alerted. A later test keeps the stamp; a stack that already read events before the stamp
-  existed gets none (nothing is cut). Rollout: Test connection before `SQUARE_PROVIDER=live` lets the catch-up run.
+  existed gets none (nothing is cut). Re-verified: in the documented setup (live, restart, then Test connection) the catch-up ran
+  first and the stamp was never made. Now the first read of a real Square stamps it, whichever comes first: the first catch-up page
+  and the first reconcile listing (before anything they list is decided), a successful Test connection, the first webhook (10 minutes
+  before its event: a webhook is live). `saveSquareState(..., { connection_point })` decides it in one statement (a new row, a row of
+  another environment, or one with neither stamp nor watermark). The simulator is stamped only by Test connection. No setup order
+  to follow.
 - **SANDBOX-F1** (inclusions apply by themselves by default; a booking shows as covered only what will be covered) and the staff side
   of pricing **F2** ("Confirm price" on a `base` line) are in ADR 0170's Q4 fix notes.

@@ -29,6 +29,12 @@ export interface SquareStatePatch {
   last_test?: SquareConnectionTest | null
   last_error?: string | null
   last_error_at?: Date | null
+  /**
+   * The connection point (sandbox run F2) to stamp if this environment's row has none yet: `connected_at` is set to it only when the
+   * stored row is new, of another environment, or has neither `connected_at` nor a catch-up `watermark` (a stack that read events
+   * before the stamp existed never gets one made up). Decided in the same statement, so two first reads never race.
+   */
+  connection_point?: Date
 }
 
 export function squareEnvironment(env: Pick<Env, 'SQUARE_PROVIDER' | 'SQUARE_ENVIRONMENT'>): 'sandbox' | 'production' | 'sim' {
@@ -65,7 +71,7 @@ const LEARNED = {
   last_test: null,
   last_error: null,
   last_error_at: null,
-} as const satisfies Record<keyof SquareStatePatch, null | number>
+} as const satisfies Record<Exclude<keyof SquareStatePatch, 'connection_point'>, null | number>
 
 /**
  * Inserts or updates the location's row with the fields given (JSON fields serialised); the environment is always refreshed. When
@@ -78,7 +84,7 @@ export async function saveSquareState(
   now: Date,
   patch: SquareStatePatch,
 ): Promise<void> {
-  const { last_reconcile, last_test, ...plain } = patch
+  const { last_reconcile, last_test, connection_point, ...plain } = patch
   const values = {
     ...plain,
     ...(last_reconcile !== undefined ? { last_reconcile: last_reconcile === null ? null : JSON.stringify(last_reconcile) } : {}),
@@ -94,9 +100,34 @@ export async function saveSquareState(
         sql`case when square_state.environment = excluded.environment then ${sql.ref(`square_state.${k}`)} else ${sql.lit(LEARNED[k])} end`,
       ]),
   )
+  const point =
+    connection_point && patch.connected_at === undefined
+      ? {
+          connected_at: sql`case when square_state.environment <> excluded.environment
+            or (square_state.connected_at is null and square_state.watermark is null) then excluded.connected_at
+            else square_state.connected_at end`,
+        }
+      : {}
   await db
     .insertInto('square_state')
-    .values({ location_id: locationId, created_at: now, ...values })
-    .onConflict((oc) => oc.column('location_id').doUpdateSet({ ...resets, ...values } as never))
+    .values({ location_id: locationId, created_at: now, ...values, ...(connection_point && patch.connected_at === undefined ? { connected_at: connection_point } : {}) })
+    .onConflict((oc) => oc.column('location_id').doUpdateSet({ ...resets, ...values, ...point } as never))
     .execute()
+}
+
+/**
+ * The connection point of a real Square (sandbox run F2): the first time Oasis reads this environment (the first catch-up page, the
+ * first reconcile listing, the first webhook, or the first successful Test connection, whichever comes first), `connected_at` is
+ * stamped; a counter payment Square made before it is the shop's history. The simulator has no sales from before Oasis: nothing is
+ * stamped there except by Test connection. Kept by every later read; reset only with the environment.
+ */
+export async function stampConnectionPoint(
+  db: Executor,
+  locationId: string,
+  env: Pick<Env, 'SQUARE_PROVIDER' | 'SQUARE_ENVIRONMENT'>,
+  now: Date,
+  at: Date = now,
+): Promise<void> {
+  if (squareEnvironment(env) === 'sim') return
+  await saveSquareState(db, locationId, env, now, { connection_point: at })
 }

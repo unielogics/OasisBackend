@@ -2158,10 +2158,12 @@ Body `{}`. Calls ListLocations, EnableEvents and ListWebhookSubscriptions (again
 A failing check is still `200` with `ok: false` and a plain reason. The merchant id, the location, `events_enabled_at` and the verified
 subscription are kept in `square_state` for the configured Square environment (sim, sandbox or production); the hook drops events of
 any other merchant from then on. A row learned in another environment counts as none (switching environment starts it afresh).
-The first successful test of a stack that has not read Square's events yet stamps `connected_at`, the connection point (sandbox run
-F2): a counter payment Square made before it (the first catch-up reads a day back, the reconcile 72 hours) is the shop's history,
-mirrored as `ignored` (reason `other`, note "before connection: ..."), never queued in "Square payments to match" nor alerted. A later
-test keeps the stamp; a stack that already read events before the stamp existed gets none (nothing is cut).
+The connection point `connected_at` (sandbox run F2) is stamped by the first read of a real Square environment, whichever comes
+first: a successful test, the first catch-up page, the first reconcile listing, or the first webhook (10 minutes before its event: a
+webhook is live). A counter payment Square made before it (the first catch-up reads a day back, the reconcile 72 hours) is the shop's
+history, mirrored as `ignored` (reason `other`, note "before connection: ..."), never queued in "Square payments to match" nor
+alerted. Later reads and tests keep the stamp, a change of environment starts it afresh, a stack that already read events before the
+stamp existed gets none (nothing is cut), and the simulator is stamped only by a successful test.
 
 ### 30.4 `GET /api/v1/system/integrations`: the `square` row
 

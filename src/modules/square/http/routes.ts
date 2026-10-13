@@ -73,15 +73,14 @@ export function registerSquareRoutes(app: AppInstance): void {
       const now = app.clock.now()
       const failed = r.checks.find((c) => !c.ok)
       await app.db.transaction().execute(async (tx) => {
-        // the connection point (sandbox run F2): the first successful test of a stack that has not read Square's events yet; counter
-        // payments made before it are history. A later test keeps it; a stack already running never gets one made up later.
-        const before = await currentSquareState(tx, locationId, env)
-        const firstConnection = r.ok && !before?.connected_at && !before?.watermark
+        // the connection point (sandbox run F2): a successful test stamps it unless this environment was read before (the catch-up,
+        // the reconcile or a webhook stamp it too, whichever comes first); counter payments made before it are history. A later test
+        // keeps it; a stack already reading events before the stamp existed never gets one made up later.
         await saveSquareState(tx, locationId, env, now, {
           square_location_id: r.locationId,
           ...(r.merchantId ? { merchant_id: r.merchantId } : {}),
           ...(r.eventsEnabled ? { events_enabled_at: now } : {}),
-          ...(firstConnection ? { connected_at: now } : {}),
+          ...(r.ok ? { connection_point: now } : {}),
           webhook_subscription_id: r.webhookSubscriptionId,
           webhook_checked_at: now,
           last_test_at: now,
