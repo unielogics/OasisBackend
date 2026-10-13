@@ -6,7 +6,7 @@
 #   --tls certbot|files    certbot (default): obtain a Let's Encrypt certificate with the webroot challenge; files: use --tls-cert/--tls-key
 #   --tls-cert FILE --tls-key FILE
 #   --csp app|report-only|enforce|off   Content-Security-Policy from nginx (default app: the dashboard sends its own; docs/deployment.md)
-#   --install-packages     dnf install nginx, certbot, logrotate, the Node 22 runtime and pnpm (otherwise they must already be there)
+#   --install-packages     dnf install nginx, certbot, logrotate, util-linux (prlimit), the Node 22 runtime and pnpm (otherwise they must already be there)
 #   --install-postgres     dnf install postgresql15-server, initialise it and allow password logins on 127.0.0.1
 #   --local-db             the database is the local Postgres: create the oasis role and database (needs sudo -u postgres) and order
 #                          the units after postgresql.service (a drop-in; production on Aurora has none)
@@ -198,6 +198,8 @@ step_preflight() {
   fi
   have pnpm && ok "pnpm $(pnpm -v 2>/dev/null)" || { ((INSTALL_PACKAGES)) || warn "pnpm is not installed: use --install-packages"; }
   have pg_dump && ok "pg_dump $(pg_dump --version | awk '{print $3}')" || warn "pg_dump is missing (dnf install postgresql15): backups need it"
+  # the worker reads knowledge PDFs in a child process under prlimit's memory and CPU limits; without it no PDF is read (ADR 0174)
+  [[ -x /usr/bin/prlimit ]] && ok "prlimit" || warn "prlimit is missing (dnf install util-linux): Oasis AI's knowledge PDFs are never read without it"
   local mem
   mem=$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0)
   ((mem >= 3500)) || warn "only ${mem} MB of memory: the dashboard build needs about 2 GB; add swap (docs/deployment.md)"
@@ -207,7 +209,7 @@ step_preflight() {
 step_packages() {
   ((INSTALL_PACKAGES)) || return 0
   # AL2023 ships curl-minimal, which conflicts with the full curl package: ask for curl only when no curl is installed
-  local pkgs=(nginx logrotate git openssl tar gzip nodejs22 nodejs22-npm postgresql15)
+  local pkgs=(nginx logrotate git openssl tar gzip nodejs22 nodejs22-npm postgresql15 util-linux)
   have curl || pkgs+=(curl)
   run_system dnf install -y "${pkgs[@]}"
   # the services run as the oasis user, so pnpm must be on the system PATH, not only on the caller's (e.g. ~/.local/bin)

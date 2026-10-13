@@ -1,18 +1,50 @@
-// Reading PDFs for the assistant's knowledge (ADR 0174 §2 and §11 "PDF"): unpdf in a worker thread under a heap and a time limit.
+// Reading PDFs for the assistant's knowledge (ADR 0174 §2 and §11 "PDF"): unpdf in a child process under an OS memory limit
+// (prlimit), a CPU limit and a deadline (K4 re-review K4REV-1).
 // A text PDF gives its cleaned text; a scan is no_text; a password, a broken file and too many pages are plain failures; a
 // /JavaScript open action runs nothing; white text is extracted (and the review flags it); a decompression bomb is stopped by the
 // limits without harming the process; the cleaning counts hidden characters and joins split words.
 import { describe, expect, it } from 'vitest'
 import { cleanPdfText, looksScanned } from '../../src/modules/assistant/knowledge/extract/clean.js'
-import { extractPdf, PDF_LIMITS } from '../../src/modules/assistant/knowledge/extract/extract.js'
-import { PDF_DECODED_MAX, prescanPdf } from '../../src/modules/assistant/knowledge/extract/pdf-worker.js'
+import { extractPdf, findPrlimit, PDF_CHILD_FLAG, PDF_LIMITS, PRLIMIT_PATHS, pdfSandboxAvailable } from '../../src/modules/assistant/knowledge/extract/extract.js'
+import { CHILD_FLAG, PDF_DECODED_MAX, prescanPdf } from '../../src/modules/assistant/knowledge/extract/pdf-worker.js'
+import { readFileSync } from 'node:fs'
+import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { deflateSync } from 'node:zlib'
 import { entryWarnings } from '../../src/modules/assistant/knowledge/service.js'
-import { CANARY, bombPdf, buildPdf, corruptPdf, deflatedSpaces, encryptedPdf, jsActionPdf, manyPagesPdf, scanPdf, SHOP_TEXT, textPdf, whiteTextPdf } from './pdf-fixtures.js'
+import { CANARY, bombPdf, buildPdf, corruptPdf, deflatedSpaces, encryptedPdf, hiddenBombs, jsActionPdf, longTextPdf, manyPagesPdf, scanPdf, SHOP_TEXT, textPdf, whiteTextPdf } from './pdf-fixtures.js'
 
-describe('extractPdf (worker thread, ADR 0174 §2)', () => {
-  it('has the design limits: 60 pages, 30 s, 256 MB heap', () => {
-    expect(PDF_LIMITS).toEqual({ maxPages: 60, timeoutMs: 30_000, maxOldGenerationSizeMb: 256, maxYoungGenerationSizeMb: 32 })
+/** Runs `f` while sampling this process's RSS every 10 ms: the result and the largest growth seen. */
+async function withRss<T>(f: () => Promise<T>): Promise<{ r: T; grew: number }> {
+  const base = process.memoryUsage().rss
+  let peak = base
+  const sample = setInterval(() => (peak = Math.max(peak, process.memoryUsage().rss)), 10)
+  try {
+    const r = await f()
+    peak = Math.max(peak, process.memoryUsage().rss)
+    return { r, grew: peak - base }
+  } finally {
+    clearInterval(sample)
+  }
+}
+
+const MB = 1024 * 1024
+
+const gone = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return false
+  } catch (e) {
+    return (e as { code?: string }).code === 'ESRCH'
+  }
+}
+
+describe('extractPdf (child process under prlimit, ADR 0174 §2)', () => {
+  it('has the limits: 60 pages, 30 s, 384 MB of memory in all (192 MB heap); prlimit is found on this host', () => {
+    expect(PDF_LIMITS).toEqual({ maxPages: 60, timeoutMs: 30_000, memoryMb: 384, heapMb: 192 })
+    expect(PRLIMIT_PATHS).toContain('/usr/bin/prlimit')
+    expect(findPrlimit()).not.toBeNull()
+    expect(pdfSandboxAvailable()).toBe(true)
+    expect(PDF_CHILD_FLAG).toBe(CHILD_FLAG)
   })
 
   it('reads a text PDF: every page, cleaned, a blank line between pages', async () => {
@@ -55,11 +87,11 @@ describe('extractPdf (worker thread, ADR 0174 §2)', () => {
 
   it('a decompression bomb is stopped by the time or memory limit; the process goes on', async () => {
     const started = performance.now()
-    const r = await extractPdf(bombPdf(), { timeoutMs: 4000, maxOldGenerationSizeMb: 64, maxYoungGenerationSizeMb: 16 })
+    const r = await extractPdf(bombPdf(), { timeoutMs: 4000, heapMb: 64 })
     expect(r.ok).toBe(false)
     if (!r.ok) expect(['timeout', 'too_large']).toContain(r.error)
     expect(performance.now() - started).toBeLessThan(15_000)
-    // the worker died alone: the next read works
+    // the child died alone: the next read works
     expect((await extractPdf(textPdf())).ok).toBe(true)
   }, 30_000)
 
@@ -67,15 +99,11 @@ describe('extractPdf (worker thread, ADR 0174 §2)', () => {
     // 512 MB of spaces in one FlateDecode content stream (about half a megabyte on disk), with the production limits
     const bomb = buildPdf({ pages: [{ raw: await deflatedSpaces(512 * 1024 * 1024), filter: ' /Filter /FlateDecode' }] })
     expect(bomb.length).toBeLessThan(2 * 1024 * 1024)
-    const base = process.memoryUsage().rss
-    let peak = base
-    const sample = setInterval(() => (peak = Math.max(peak, process.memoryUsage().rss)), 10)
     const started = performance.now()
-    const r = await extractPdf(bomb)
-    clearInterval(sample)
+    const { r, grew } = await withRss(() => extractPdf(bomb))
     expect(r).toEqual({ ok: false, error: 'too_large' })
     expect(performance.now() - started).toBeLessThan(10_000)
-    expect(peak - base, `rss grew ${Math.round((peak - base) / 1e6)} MB`).toBeLessThan(600 * 1024 * 1024)
+    expect(grew, `rss grew ${Math.round(grew / MB)} MB`).toBeLessThan(50 * MB)
     expect((await extractPdf(textPdf())).ok).toBe(true)
   }, 60_000)
 
@@ -105,9 +133,87 @@ describe('extractPdf (worker thread, ADR 0174 §2)', () => {
     expect(PDF_DECODED_MAX).toBe(128 * 1024 * 1024)
   })
 
-  it('the time limit terminates the thread: timeout', async () => {
+  it('the time limit kills the child: timeout', async () => {
     expect(await extractPdf(manyPagesPdf(40), { timeoutMs: 1 })).toEqual({ ok: false, error: 'timeout' })
   })
+})
+
+describe('K4 re-review K4REV-1: an inflate bomb the prescan cannot see is stopped by the OS limit of the child', () => {
+  let bombs: ReturnType<typeof hiddenBombs>
+  it('builds the bombs: 512 MB of spaces in half a megabyte; the prescan stops only the control', async () => {
+    bombs = hiddenBombs(await deflatedSpaces(512 * MB))
+    expect(prescanPdf(bombs.control)).toBe('too_large')
+    for (const k of ['decoy', 'nameEscape', 'comment', 'spaceBeforeEol', 'indirectChain'] as const) {
+      expect(bombs[k].length).toBeLessThan(1.1 * MB)
+      expect(prescanPdf(bombs[k]), k).toBeNull()
+    }
+  }, 60_000)
+
+  for (const k of ['control', 'decoy', 'nameEscape', 'comment', 'spaceBeforeEol', 'indirectChain'] as const)
+    it(`${k}: too_large with the production limits, and this process's memory stays flat`, async () => {
+      const started = performance.now()
+      const { r, grew } = await withRss(() => extractPdf(bombs[k]))
+      expect(r).toEqual({ ok: false, error: 'too_large' })
+      expect(grew, `rss grew ${Math.round(grew / MB)} MB`).toBeLessThan(50 * MB)
+      expect(performance.now() - started).toBeLessThan(PDF_LIMITS.timeoutMs + 3000)
+    }, 60_000)
+
+  it('a normal long text PDF (60 pages of 45 lines) still reads with the production limits', async () => {
+    const { r, grew } = await withRss(() => extractPdf(longTextPdf()))
+    expect(r.ok, JSON.stringify(r).slice(0, 200)).toBe(true)
+    if (!r.ok) return
+    expect(r.pageCount).toBe(60)
+    expect(r.text).toContain('Page 60, line 45: hand wash, clay bar, wax, interior shampoo.')
+    expect(r.cut).toBe(false)
+    expect(grew).toBeLessThan(50 * MB)
+  }, 60_000)
+
+  it('the read never blocks this process: a text PDF read meanwhile finishes first, the event loop stays free', async () => {
+    const h = monitorEventLoopDelay({ resolution: 10 })
+    h.enable()
+    const order: string[] = []
+    const bomb = extractPdf(bombs.nameEscape).then((r) => (order.push('bomb'), r))
+    const text = extractPdf(textPdf()).then((r) => (order.push('text'), r))
+    const [b, t] = await Promise.all([bomb, text])
+    h.disable()
+    expect(b).toEqual({ ok: false, error: 'too_large' })
+    expect(t.ok).toBe(true)
+    expect(order).toEqual(['text', 'bomb'])
+    // (a generous bound: the test fork's own garbage collector may pause it; the bomb itself never runs here)
+    expect(h.max / 1e6, `event loop delay ${Math.round(h.max / 1e6)} ms`).toBeLessThan(1000)
+  }, 60_000)
+
+  it('the child never outlives the deadline: killed at it, gone when the read answers', async () => {
+    let pid = 0
+    const started = performance.now()
+    const r = await extractPdf(bombPdf(), { timeoutMs: 800 }, { onSpawn: (p) => (pid = p) })
+    expect(r).toEqual({ ok: false, error: 'timeout' })
+    expect(pid).toBeGreaterThan(0)
+    expect(gone(pid)).toBe(true)
+    expect(performance.now() - started).toBeLessThan(800 + 2500)
+  }, 30_000)
+
+  it('fails closed without prlimit: nothing is read (corrupt), no child is started', async () => {
+    let spawned = false
+    expect(await extractPdf(textPdf(), {}, { prlimit: null, onSpawn: () => (spawned = true) })).toEqual({ ok: false, error: 'corrupt' })
+    expect(spawned).toBe(false)
+    expect(findPrlimit(['/nonexistent/prlimit'])).toBeNull()
+    // a prlimit that cannot be started is the same plain failure
+    expect(await extractPdf(textPdf(), {}, { prlimit: '/nonexistent/prlimit' })).toEqual({ ok: false, error: 'corrupt' })
+  })
+
+  it('the child gets no environment (the worker\'s secrets stay out of it)', async () => {
+    process.env.OASIS_TEST_SECRET_K4REV1 = 'never-in-the-child'
+    let environ: string | null = null
+    try {
+      const r = await extractPdf(textPdf(), {}, { onSpawn: (pid) => (environ = readFileSync(`/proc/${pid}/environ`, 'latin1')) })
+      expect(r.ok).toBe(true)
+    } finally {
+      delete process.env.OASIS_TEST_SECRET_K4REV1
+    }
+    expect(environ).toBe('')
+  })
+
 })
 
 describe('cleanPdfText (ADR 0174 §2 "Cleaning")', () => {

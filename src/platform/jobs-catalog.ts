@@ -505,10 +505,10 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
   'assistant.knowledge.extract': {
     owner: 'assistant (knowledge)',
     purpose:
-      'Reads one uploaded knowledge PDF (ADR 0174 §2) in a worker thread (unpdf; 256 MB heap, 30 s, 60 pages, eval and fonts off): stores the cleaned text and creates its knowledge entry as an inactive, unreviewed draft with its warnings, or fails the document with a plain reason (no_text for a scan, encrypted, corrupt, too_many_pages, timeout, too_large). Nothing reaches a client; works whatever AI_ENABLED says.',
+      'Reads one uploaded knowledge PDF (ADR 0174 §2) in a child process under prlimit (unpdf; 384 MB of memory in all, 30 s, 60 pages, eval and fonts off; no prlimit on the host: nothing is read, an error is logged): stores the cleaned text and creates its knowledge entry as an inactive, unreviewed draft with its warnings, or fails the document with a plain reason (no_text for a scan, encrypted, corrupt, too_many_pages, timeout, too_large). Nothing reaches a client; works whatever AI_ENABLED says.',
     idempotency:
       'Only a document still extracting is read, under a row lock; the entry is unique per document (assistant_knowledge.document_id), so a second run finds it ready or failed and does nothing.',
-    clock: 'Injected clock for updated_at; the 30-second limit is a timer on the worker thread.',
+    clock: 'Injected clock for updated_at; the 30-second limit is a timer that kills the child process.',
     enqueuedBy: 'POST /assistant/knowledge/documents/:id/complete and POST .../:id/extract (retry), after their commit (singleton key = the document)',
     tests: 'test/assistant-knowledge/pdf.test.ts, test/assistant-knowledge/documents.test.ts, test/jobs/registry.test.ts',
     status: 'built',

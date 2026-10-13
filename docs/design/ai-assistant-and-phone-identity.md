@@ -313,7 +313,7 @@ line by line after the rules, and never shows the model an amount, a link or ano
   rules and SHOP FACTS (its own cache point), masked and line-prefixed; the judge's rule (f) covers it (four cache points at most).
   facts-v5. Without an active entry nothing changes in the prompt.
 - PDFs (built): presign (browser SHA-256) → upload → complete (HEAD, `%PDF-`, server SHA-256) → `assistant.knowledge.extract`
-  (unpdf in a worker thread: 256 MB, 30 s, 60 pages; scans are `no_text`) → a draft entry with warnings → the owner reviews it
+  (unpdf in a child process under prlimit: 384 MB, 30 s, 60 pages; scans are `no_text`) → a draft entry with warnings → the owner reviews it
   (and confirms instruction-like lines) before it goes live. Delete clears the text and the object; `assistant.knowledge.cleanup`
   every 15 minutes. Downloads are 10-minute attachments.
 - Limits and tone (built, wave K2c; `policy.ts`): what is switched off is left out of the model's tools (send_link narrowed to the

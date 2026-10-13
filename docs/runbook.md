@@ -594,8 +594,11 @@ confirm" proposals from the assistant, and a reply number sent then books nothin
 
 - **Knowledge** (Settings → Oasis AI → Knowledge, `set.assistant`): notes and PDFs the owner adds are drafts until turned on; only
   active entries reach the assistant, masked (no amount, link or other number), and they share `AI_KNOWLEDGE_MAX_CHARS` (20,000
-  characters) with the Settings Q&A. A PDF is read by the worker (`assistant.knowledge.extract`, unpdf in a worker thread: 256 MB,
-  30 s, 60 pages); a scan cannot be read (no OCR). Every new key lives under `kb/` in the photos bucket, outside the photo lifecycle
+  characters) with the Settings Q&A. A PDF is read by the worker (`assistant.knowledge.extract`, unpdf in a child process under
+  `prlimit`: 384 MB of memory in all, a CPU limit, killed at 30 s; 60 pages); a scan cannot be read (no OCR). **`/usr/bin/prlimit`
+  (util-linux, on Amazon Linux 2023 by default; `install.sh` checks it) is required**: without it no PDF is read (each fails as
+  "could not be read" and the worker logs `knowledge PDF not read: prlimit (util-linux) is missing on this host`; `dnf install
+  util-linux`, then "Try again"). A hostile PDF can only kill that child: the worker's own memory stays flat. Every new key lives under `kb/` in the photos bucket, outside the photo lifecycle
   rule: no AWS change is needed. A document stuck "reading" for 10 minutes is failed as a timeout by `assistant.knowledge.cleanup`
   (every 15 minutes); the owner presses "Try again".
 - **Who may edit Oasis AI** is the `set.assistant` permission (every role that had `set.hours` got it on 2026-10-13); take it away

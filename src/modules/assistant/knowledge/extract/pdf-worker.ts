@@ -1,16 +1,17 @@
-// The PDF reader's worker thread (ADR 0174 §2): unpdf (PDF.js serverless build, no native code) parses the file here, off the
-// worker process's event loop, under the parent's resourceLimits (heap) and time limit (terminate). It returns the raw text of each
-// page, or why it could not: too many pages, a password, a broken file. Nothing else: the parent cleans the text and decides.
+// The PDF reader's child process (ADR 0174 §2, K4 review K4REV-1): unpdf (PDF.js serverless build, no native code) parses the file
+// here, in a process of its own started by extract.ts under prlimit (an OS memory limit on everything the process allocates, the V8
+// heap and the buffers PDF.js decodes outside it alike, and a CPU limit) and killed at the deadline, so a hostile file can only kill
+// this process, never grow the worker process that sends the live SMS turns. The bytes come on stdin; the one JSON answer goes to
+// stdout: the raw text of each page, or why there is none (too many pages, a password, a broken file, too much to hold). Nothing
+// else: the parent cleans the text and decides.
 //
 // PDF.js runs no document JavaScript without the viewer's scripting sandbox, which is never loaded; fonts are never turned into
 // font faces and XFA forms are not rendered, so a /JavaScript action or a font program is data. (`isEvalSupported` of the design is
-// gone from PDF.js 5: the eval code path of CVE-2024-4367 was removed, so there is nothing left to switch off.) The parent
-// terminates the thread as soon as the answer is posted, which frees the document.
+// gone from PDF.js 5: the eval code path of CVE-2024-4367 was removed, so there is nothing left to switch off.)
 //
-// This file is started on its own (worker_threads, plain Node: tsx and vitest load the .ts through Node's type stripping, production
-// the compiled .js), so it imports nothing of this project: only Node and unpdf. Before PDF.js sees a file, the prescan below decodes
-// its streams with a hard cap (memory PDF.js would take outside the V8 heap).
-import { parentPort, workerData } from 'node:worker_threads'
+// This file is started on its own (plain Node: under tsx and vitest Node strips the .ts types, production runs the compiled .js), so
+// it imports nothing of this project: only Node and unpdf. Before PDF.js sees a file, the prescan below decodes its streams with a
+// hard cap: defence in depth only (it reads the file with regular expressions, not as PDF.js does; the OS limit is the bound).
 import { constants as zc, inflateSync } from 'node:zlib'
 import { getDocumentProxy } from 'unpdf'
 
@@ -22,12 +23,14 @@ export interface PdfWorkerInput {
 }
 
 export type PdfWorkerOutput =
-  | { ok: true; pageCount: number; pages: string[]; tinyChars: number }
+  | { ok: true; pageCount: number; pages: string[]; tinyChars: number; truncated?: boolean }
   | { ok: false; error: 'encrypted' | 'corrupt' | 'too_many_pages' | 'too_large'; pageCount?: number }
 
-// --- the prescan (K4 review asst:K4A-1) ----------------------------------------------------------------------------------------------
-// resourceLimits bound only the V8 heap: PDF.js decodes a stream into Uint8Arrays OUTSIDE the heap, doubling them with no cap, so a
-// small inflate bomb grows the whole worker process by gigabytes before the time limit. So before PDF.js sees the file, every stream
+// --- the prescan (K4 review asst:K4A-1; defence in depth since K4REV-1) ------------------------------------------------------------
+// A heap limit bounds only the V8 heap: PDF.js decodes a stream into Uint8Arrays OUTSIDE the heap, doubling them with no cap, so a
+// small inflate bomb grows its process by gigabytes before the time limit (the OS limit of this process stops it; this prescan
+// refuses the plain cases early and cheaply, but a decoy dictionary, a name escape or a comment hides a stream from it). So before
+// PDF.js sees the file, every stream
 // is decoded here the way PDF.js would (FlateDecode, LZWDecode, RunLengthDecode, after ASCIIHexDecode / ASCII85Decode; a stream with
 // a zlib header whose filter is not written out plainly is inflated too) with a hard output cap, and a file whose streams hold more
 // than PDF_DECODED_MAX bytes together is `too_large`. Memory stays bounded by the cap. An encrypted file (an /Encrypt dictionary, with
@@ -206,7 +209,17 @@ export function prescanPdf(bytes: Uint8Array, max = PDF_DECODED_MAX): 'too_large
   return null
 }
 
-async function read(input: PdfWorkerInput): Promise<PdfWorkerOutput> {
+/** At most this many characters of page text go back to the parent (the cleaned text keeps 200,000; the rest is cut). */
+export const PDF_TEXT_MAX = 2_000_000
+
+/** Words of a JavaScript or V8 allocation failure (PDF.js with stopAtErrors off only warns about it and reads on). */
+const MEMORY_WORDS = /allocation failed|out of memory|invalid typed array length|invalid array length|array buffer/i
+
+/** Whether an error (or a PDF.js warning) is the process running out of the memory its limit allows. */
+export const isMemoryFailure = (e: unknown): boolean =>
+  e instanceof RangeError || MEMORY_WORDS.test(typeof e === 'string' ? e : String((e as { message?: unknown })?.message ?? ''))
+
+export async function read(input: PdfWorkerInput): Promise<PdfWorkerOutput> {
   const pre = prescanPdf(input.bytes, input.maxDecoded ?? PDF_DECODED_MAX)
   if (pre) return { ok: false, error: pre }
   let pdf: Awaited<ReturnType<typeof getDocumentProxy>>
@@ -218,6 +231,7 @@ async function read(input: PdfWorkerInput): Promise<PdfWorkerOutput> {
       useSystemFonts: false,
     })
   } catch (e) {
+    if (isMemoryFailure(e)) return { ok: false, error: 'too_large' }
     const name = (e as { name?: string })?.name ?? ''
     return { ok: false, error: /password/i.test(name) ? 'encrypted' : 'corrupt' }
   }
@@ -227,7 +241,9 @@ async function read(input: PdfWorkerInput): Promise<PdfWorkerOutput> {
     // is no part of what the owner reviews; it is counted with the hidden characters: K4 review asst:K4A-3)
     const pages: string[] = []
     let tinyChars = 0
-    for (let n = 1; n <= pdf.numPages; n++) {
+    let total = 0
+    let truncated = false
+    for (let n = 1; n <= pdf.numPages && !truncated; n++) {
       const content = await (await pdf.getPage(n)).getTextContent()
       let text = ''
       for (const item of content.items) {
@@ -237,19 +253,52 @@ async function read(input: PdfWorkerInput): Promise<PdfWorkerOutput> {
         if (tiny) tinyChars += item.str.replace(/\s+/g, '').length
         text += (tiny ? '' : item.str) + (item.hasEOL ? '\n' : '')
       }
+      if (total + text.length > PDF_TEXT_MAX) {
+        text = text.slice(0, PDF_TEXT_MAX - total)
+        truncated = true
+      }
+      total += text.length
       pages.push(text)
     }
-    return { ok: true, pageCount: pdf.numPages, pages, tinyChars }
+    return { ok: true, pageCount: pdf.numPages, pages, tinyChars, ...(truncated ? { truncated } : {}) }
   } catch (e) {
+    if (isMemoryFailure(e)) return { ok: false, error: 'too_large' }
     const name = (e as { name?: string })?.name ?? ''
     return { ok: false, error: /password/i.test(name) ? 'encrypted' : 'corrupt' }
   }
 }
 
-if (parentPort) {
-  const port = parentPort
-  read(workerData as PdfWorkerInput).then(
-    (out) => port.postMessage(out),
-    () => port.postMessage({ ok: false, error: 'corrupt' }),
-  )
+/** The argument that starts this file as the reader's child process (followed by the page limit). */
+export const CHILD_FLAG = '--oasis-pdf-child'
+
+/**
+ * The child process: everything PDF.js prints goes to stderr (stdout carries only the answer); a warning about a failed allocation
+ * (PDF.js with stopAtErrors off reads on after one) turns the answer into too_large, so a page read only in part is never kept.
+ */
+async function child(maxPages: number): Promise<void> {
+  let memoryHit = false
+  const toStderr = (...a: unknown[]): void => {
+    const line = a.map((x) => (x instanceof Error ? `${x.name}: ${x.message}` : String(x))).join(' ')
+    if (MEMORY_WORDS.test(line)) memoryHit = true
+    process.stderr.write(`${line.slice(0, 500)}\n`)
+  }
+  console.log = console.info = console.warn = console.error = console.debug = console.trace = toStderr
+  const chunks: Buffer[] = []
+  for await (const c of process.stdin) chunks.push(c as Buffer)
+  const buf = Buffer.concat(chunks)
+  chunks.length = 0
+  let out: PdfWorkerOutput
+  try {
+    out = await read({ bytes: new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength), maxPages })
+  } catch (e) {
+    out = { ok: false, error: isMemoryFailure(e) ? 'too_large' : 'corrupt' }
+  }
+  if (memoryHit) out = { ok: false, error: 'too_large' }
+  process.stdout.write(JSON.stringify(out), () => process.exit(0))
+}
+
+if (process.argv[2] === CHILD_FLAG) {
+  child(Number(process.argv[3]) || 60).catch(() => {
+    process.stdout.write(JSON.stringify({ ok: false, error: 'corrupt' }), () => process.exit(0))
+  })
 }

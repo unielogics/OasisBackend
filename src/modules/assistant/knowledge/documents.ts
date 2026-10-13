@@ -280,6 +280,8 @@ export interface ExtractDeps {
   /** The shop's own numbers (kept in the warnings). */
   shopNumbers: readonly (string | null | undefined)[]
   limits?: Partial<PdfLimits>
+  /** prlimit's path (default: found on the host); null = none, nothing is read (fail closed: corrupt). K4REV-1. */
+  prlimit?: string | null
 }
 
 /**
@@ -296,7 +298,7 @@ export async function extractDocument(d: ExtractDeps, id: string): Promise<'read
   } catch {
     return finishFailed(d, doc, 'corrupt')
   }
-  const r = await extractPdf(bytes, d.limits)
+  const r = await extractPdf(bytes, d.limits, d.prlimit === undefined ? {} : { prlimit: d.prlimit })
   if (!r.ok) return finishFailed(d, doc, r.error, r.pageCount)
   return d.db.transaction().execute(async (tx) => {
     const cur = await tx.selectFrom('assistant_knowledge_documents').select('status').where('id', '=', id).forUpdate().executeTakeFirst()

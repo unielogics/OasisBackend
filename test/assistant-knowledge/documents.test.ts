@@ -99,6 +99,17 @@ describe('the upload flow (presign, complete, extract)', () => {
     }
     expect((await h.post(`assistant/knowledge/documents/${documentId}/extract`, s)).statusCode).toBe(409)
   })
+
+  it('K4REV-1: without prlimit on the host nothing is read: the document fails in plain words (try again), no entry', async () => {
+    const s = await h.admin()
+    const { documentId } = await upload(s, textPdf(), 'guide.pdf')
+    await h.post(`assistant/knowledge/documents/${documentId}/complete`, s)
+    const deps = { db: h.db, storage: h.storage, newId: createIdGenerator(h.clock), now: () => h.clock.now(), shopNumbers: [], prlimit: null }
+    expect(await extractDocument(deps, documentId)).toBe('corrupt')
+    const k = json(await h.get('assistant/knowledge', s))
+    expect(k.documents[0]).toMatchObject({ status: 'failed', errorCode: 'corrupt', error: DOCUMENT_ERROR_TEXT.corrupt, entryId: null })
+    expect(k.entries).toEqual([])
+  })
 })
 
 describe('the review gate (ADR 0174 §2)', () => {

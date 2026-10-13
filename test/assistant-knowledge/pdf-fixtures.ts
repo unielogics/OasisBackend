@@ -15,6 +15,8 @@ export interface PdfPage {
   deflate?: boolean
   /** The stream dictionary's filter entry as written (" /Filter [/FlateDecode /FlateDecode]"); `raw` is then already encoded. */
   filter?: string
+  /** What closes the stream dictionary and opens the data, as written (default " >>\nstream\n"; K4REV-1 variants). */
+  streamOpen?: string
 }
 
 export interface PdfOptions {
@@ -23,6 +25,8 @@ export interface PdfOptions {
   catalogExtra?: string
   /** A Standard security handler with an unknown password. */
   encrypted?: boolean
+  /** Objects added after the pages (numbered 4 + 2 × pages, then on). */
+  extraObjects?: string[]
 }
 
 const esc = (s: string): string => s.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)')
@@ -59,9 +63,10 @@ export function buildPdf(o: PdfOptions): Buffer {
     let data = contentOf(p)
     const filter = p.filter ?? (p.deflate ? ' /Filter /FlateDecode' : '')
     if (p.deflate) data = deflateSync(data)
-    const content = add(Buffer.concat([Buffer.from(`<< /Length ${data.length}${filter} >>\nstream\n`, 'latin1'), data, Buffer.from('\nendstream', 'latin1')]))
+    const content = add(Buffer.concat([Buffer.from(`<< /Length ${data.length}${filter}${p.streamOpen ?? ' >>\nstream\n'}`, 'latin1'), data, Buffer.from('\nendstream', 'latin1')]))
     kids.push(add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${content} 0 R >>`))
   }
+  for (const x of o.extraObjects ?? []) add(x)
   objects[0] = Buffer.from(`<< /Type /Catalog /Pages 2 0 R${o.catalogExtra ? ` ${o.catalogExtra}` : ''} >>`, 'latin1')
   objects[1] = Buffer.from(`<< /Type /Pages /Kids [${kids.map((k) => `${k} 0 R`).join(' ')}] /Count ${kids.length} >>`, 'latin1')
   let encrypt = ''
@@ -128,3 +133,35 @@ export async function deflatedSpaces(bytes: number): Promise<Buffer> {
   await done
   return Buffer.concat(out)
 }
+
+/**
+ * The inflate bombs of the K4 re-review (K4REV-1): `raw` (deflated spaces) in one content stream written so the regular-expression
+ * prescan cannot see it while PDF.js still decodes it fully, and the plain control the prescan stops. Each one reaches PDF.js only
+ * through the child process's OS memory limit.
+ */
+export function hiddenBombs(raw: Buffer): Record<'control' | 'decoy' | 'nameEscape' | 'comment' | 'spaceBeforeEol' | 'indirectChain', Buffer> {
+  const hex = Buffer.from(`${raw.toString('hex')}>`, 'latin1')
+  const one = (page: PdfPage, extra?: string[]): Buffer => buildPdf({ pages: [page], ...(extra ? { extraObjects: extra } : {}) })
+  return {
+    control: one({ raw, filter: ' /Filter /FlateDecode' }),
+    // a nested dictionary holding " obj" in a string: the prescan's dictionary starts after the filter, so it sees none
+    decoy: one({ raw: hex, filter: ' /Filter [/AHx /Fl] /Decoy << /Note ( 9 0 obj) >>' }),
+    // a name escape: /Fl#61teDecode is /FlateDecode
+    nameEscape: one({ raw, filter: ' /Filter /Fl#61teDecode' }),
+    // a comment between the dictionary and the stream keyword
+    comment: one({ raw, filter: ' /Filter /FlateDecode', streamOpen: ' >>%\nstream\n' }),
+    // a space before the end of line after the stream keyword
+    spaceBeforeEol: one({ raw, filter: ' /Filter /FlateDecode', streamOpen: ' >>\nstream \n' }),
+    // the filter chain as an indirect object (object 6), the data hex so no zlib header shows
+    indirectChain: one({ raw: hex, filter: ' /Filter 6 0 R' }, ['[/AHx /Fl]']),
+  }
+}
+
+/** A normal long text PDF: 60 pages of 45 lines, compressed (a real price sheet or policy is smaller); under 200,000 characters. */
+export const longTextPdf = (): Buffer =>
+  buildPdf({
+    pages: Array.from({ length: 60 }, (_, i) => ({
+      deflate: true,
+      lines: Array.from({ length: 45 }, (_, k) => `Page ${i + 1}, line ${k + 1}: hand wash, clay bar, wax, interior shampoo.`),
+    })),
+  })
