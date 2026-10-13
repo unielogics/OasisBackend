@@ -64,7 +64,8 @@ describe('the shop facts document', () => {
     expect(f.fee.lines.join(' ')).toContain('pay a booking fee, paid at the shop; write it as its own sentence, "{fee}."')
     expect(f.cancellation.lines[0]).toContain('24 hours')
     expect(f.bookingRules.lines.length).toBeGreaterThan(3)
-    expect(FACTS_FORMAT).toBe('facts-v4')
+    // facts-v5 (ADR 0174): the active knowledge entries joined the fingerprint and the document
+    expect(FACTS_FORMAT).toBe('facts-v5')
     expect(f.vip.lines.join(' ')).toContain('The VIP booking rules come with: VIP.')
     expect(f.catalog.sizes).toEqual([
       { key: 'sedan', label: 'Sedan / Coupe' },

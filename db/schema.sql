@@ -620,6 +620,86 @@ CREATE TABLE public.assistant_conversations (
 );
 
 --
+-- Name: assistant_knowledge; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.assistant_knowledge (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    kind text NOT NULL,
+    title text NOT NULL,
+    body text NOT NULL,
+    question text,
+    wrong_reply text,
+    source text DEFAULT 'manual'::text NOT NULL,
+    assistant_turn_id uuid,
+    practice_turn_id uuid,
+    document_id uuid,
+    active boolean DEFAULT false NOT NULL,
+    reviewed_at timestamp with time zone,
+    warnings jsonb DEFAULT '[]'::jsonb NOT NULL,
+    chars integer NOT NULL,
+    sort integer DEFAULT 0 NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    created_by uuid,
+    updated_by uuid,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT assistant_knowledge_body_check CHECK ((char_length(body) <= 60000)),
+    CONSTRAINT assistant_knowledge_chars_check CHECK ((chars >= 0)),
+    CONSTRAINT assistant_knowledge_check CHECK (((kind = 'document'::text) = (document_id IS NOT NULL))),
+    CONSTRAINT assistant_knowledge_check1 CHECK (((kind <> 'correction'::text) OR (question IS NOT NULL))),
+    CONSTRAINT assistant_knowledge_check2 CHECK (((kind = 'correction'::text) OR ((question IS NULL) AND (wrong_reply IS NULL)))),
+    CONSTRAINT assistant_knowledge_check3 CHECK (((kind <> 'document'::text) OR (NOT active) OR (reviewed_at IS NOT NULL))),
+    CONSTRAINT assistant_knowledge_kind_check CHECK ((kind = ANY (ARRAY['note'::text, 'document'::text, 'correction'::text]))),
+    CONSTRAINT assistant_knowledge_question_check CHECK (((question IS NULL) OR (char_length(question) <= 300))),
+    CONSTRAINT assistant_knowledge_source_check CHECK ((source = ANY (ARRAY['manual'::text, 'practice'::text, 'live'::text]))),
+    CONSTRAINT assistant_knowledge_title_check CHECK (((char_length(title) >= 1) AND (char_length(title) <= 120))),
+    CONSTRAINT assistant_knowledge_version_check CHECK ((version >= 1)),
+    CONSTRAINT assistant_knowledge_warnings_check CHECK ((jsonb_typeof(warnings) = 'array'::text)),
+    CONSTRAINT assistant_knowledge_wrong_reply_check CHECK (((wrong_reply IS NULL) OR (char_length(wrong_reply) <= 2000)))
+);
+
+--
+-- Name: assistant_knowledge_documents; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.assistant_knowledge_documents (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    filename text NOT NULL,
+    content_type text NOT NULL,
+    bytes integer NOT NULL,
+    sha256 text,
+    s3_key text NOT NULL,
+    status text DEFAULT 'pending_upload'::text NOT NULL,
+    error_code text,
+    page_count integer,
+    extracted_text text,
+    removed_chars integer DEFAULT 0 NOT NULL,
+    attempts smallint DEFAULT 0 NOT NULL,
+    uploaded_by uuid,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    deleted_at timestamp with time zone,
+    object_deleted_at timestamp with time zone,
+    CONSTRAINT assistant_knowledge_documents_attempts_check CHECK ((attempts >= 0)),
+    CONSTRAINT assistant_knowledge_documents_bytes_check CHECK (((bytes >= 1) AND (bytes <= 10485760))),
+    CONSTRAINT assistant_knowledge_documents_check CHECK (((status = 'failed'::text) = (error_code IS NOT NULL))),
+    CONSTRAINT assistant_knowledge_documents_check1 CHECK (((status = 'deleted'::text) = (deleted_at IS NOT NULL))),
+    CONSTRAINT assistant_knowledge_documents_check2 CHECK (((status <> 'deleted'::text) OR (extracted_text IS NULL))),
+    CONSTRAINT assistant_knowledge_documents_content_type_check CHECK ((content_type = 'application/pdf'::text)),
+    CONSTRAINT assistant_knowledge_documents_error_code_check CHECK ((error_code = ANY (ARRAY['no_text'::text, 'encrypted'::text, 'corrupt'::text, 'too_many_pages'::text, 'timeout'::text, 'not_pdf'::text, 'too_large'::text]))),
+    CONSTRAINT assistant_knowledge_documents_extracted_text_check CHECK (((extracted_text IS NULL) OR (char_length(extracted_text) <= 200000))),
+    CONSTRAINT assistant_knowledge_documents_filename_check CHECK (((char_length(filename) >= 1) AND (char_length(filename) <= 120))),
+    CONSTRAINT assistant_knowledge_documents_page_count_check CHECK ((page_count >= 0)),
+    CONSTRAINT assistant_knowledge_documents_removed_chars_check CHECK ((removed_chars >= 0)),
+    CONSTRAINT assistant_knowledge_documents_s3_key_check CHECK ((s3_key ~ '^kb/'::text)),
+    CONSTRAINT assistant_knowledge_documents_sha256_check CHECK ((sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT assistant_knowledge_documents_status_check CHECK ((status = ANY (ARRAY['pending_upload'::text, 'extracting'::text, 'ready'::text, 'failed'::text, 'deleted'::text])))
+);
+
+--
 -- Name: assistant_pending_actions; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -651,6 +731,80 @@ CREATE TABLE public.assistant_pending_actions (
     CONSTRAINT assistant_pending_actions_payload_check CHECK ((jsonb_typeof(payload) = 'object'::text)),
     CONSTRAINT assistant_pending_actions_phone_e164_check CHECK ((phone_e164 ~ '^\+[1-9][0-9]{6,14}$'::text)),
     CONSTRAINT assistant_pending_actions_state_check CHECK ((state = ANY (ARRAY['pending'::text, 'executed'::text, 'failed'::text, 'expired'::text, 'superseded'::text, 'locked'::text, 'canceled'::text])))
+);
+
+--
+-- Name: assistant_practice_sessions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.assistant_practice_sessions (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    persona text NOT NULL,
+    customer_id uuid,
+    verified boolean DEFAULT false NOT NULL,
+    include_entry_ids uuid[] DEFAULT '{}'::uuid[] NOT NULL,
+    language text DEFAULT 'en'::text NOT NULL,
+    state jsonb DEFAULT '{}'::jsonb NOT NULL,
+    turns integer DEFAULT 0 NOT NULL,
+    cost_micros bigint DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT assistant_practice_sessions_check CHECK (((persona = 'client'::text) = (customer_id IS NOT NULL))),
+    CONSTRAINT assistant_practice_sessions_cost_micros_check CHECK ((cost_micros >= 0)),
+    CONSTRAINT assistant_practice_sessions_include_entry_ids_check CHECK ((cardinality(include_entry_ids) <= 20)),
+    CONSTRAINT assistant_practice_sessions_language_check CHECK ((language = ANY (ARRAY['en'::text, 'es'::text]))),
+    CONSTRAINT assistant_practice_sessions_persona_check CHECK ((persona = ANY (ARRAY['new_texter'::text, 'client'::text]))),
+    CONSTRAINT assistant_practice_sessions_state_check CHECK ((jsonb_typeof(state) = 'object'::text)),
+    CONSTRAINT assistant_practice_sessions_turns_check CHECK ((turns >= 0))
+);
+
+--
+-- Name: assistant_practice_turns; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.assistant_practice_turns (
+    id uuid NOT NULL,
+    session_id uuid NOT NULL,
+    seq integer NOT NULL,
+    rerun_of uuid,
+    client_text text NOT NULL,
+    status text DEFAULT 'running'::text NOT NULL,
+    reply_text text,
+    extra_texts jsonb DEFAULT '[]'::jsonb NOT NULL,
+    badges jsonb DEFAULT '[]'::jsonb NOT NULL,
+    error text,
+    model text,
+    prompt_version text,
+    facts_version text,
+    tokens_in integer DEFAULT 0 NOT NULL,
+    tokens_out integer DEFAULT 0 NOT NULL,
+    tokens_cache_read integer DEFAULT 0 NOT NULL,
+    tokens_cache_write integer DEFAULT 0 NOT NULL,
+    cost_micros bigint DEFAULT 0 NOT NULL,
+    latency_ms integer,
+    state_before jsonb DEFAULT '{}'::jsonb NOT NULL,
+    transcript jsonb,
+    tool_calls jsonb DEFAULT '[]'::jsonb NOT NULL,
+    started_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    finished_at timestamp with time zone,
+    CONSTRAINT assistant_practice_turns_badges_check CHECK ((jsonb_typeof(badges) = 'array'::text)),
+    CONSTRAINT assistant_practice_turns_check CHECK (((status = 'running'::text) = (finished_at IS NULL))),
+    CONSTRAINT assistant_practice_turns_client_text_check CHECK (((char_length(client_text) >= 1) AND (char_length(client_text) <= 640))),
+    CONSTRAINT assistant_practice_turns_cost_micros_check CHECK ((cost_micros >= 0)),
+    CONSTRAINT assistant_practice_turns_error_check CHECK (((error IS NULL) OR (char_length(error) <= 2000))),
+    CONSTRAINT assistant_practice_turns_extra_texts_check CHECK ((jsonb_typeof(extra_texts) = 'array'::text)),
+    CONSTRAINT assistant_practice_turns_latency_ms_check CHECK (((latency_ms IS NULL) OR (latency_ms >= 0))),
+    CONSTRAINT assistant_practice_turns_reply_text_check CHECK (((reply_text IS NULL) OR (char_length(reply_text) <= 2000))),
+    CONSTRAINT assistant_practice_turns_seq_check CHECK ((seq >= 1)),
+    CONSTRAINT assistant_practice_turns_state_before_check CHECK ((jsonb_typeof(state_before) = 'object'::text)),
+    CONSTRAINT assistant_practice_turns_status_check CHECK ((status = ANY (ARRAY['running'::text, 'replied'::text, 'handed_off'::text, 'failed'::text, 'opted_out'::text]))),
+    CONSTRAINT assistant_practice_turns_tokens_cache_read_check CHECK ((tokens_cache_read >= 0)),
+    CONSTRAINT assistant_practice_turns_tokens_cache_write_check CHECK ((tokens_cache_write >= 0)),
+    CONSTRAINT assistant_practice_turns_tokens_in_check CHECK ((tokens_in >= 0)),
+    CONSTRAINT assistant_practice_turns_tokens_out_check CHECK ((tokens_out >= 0)),
+    CONSTRAINT assistant_practice_turns_tool_calls_check CHECK ((jsonb_typeof(tool_calls) = 'array'::text))
 );
 
 --
@@ -3635,11 +3789,53 @@ ALTER TABLE ONLY public.assistant_conversations
     ADD CONSTRAINT assistant_conversations_pkey PRIMARY KEY (id);
 
 --
+-- Name: assistant_knowledge assistant_knowledge_document_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_knowledge
+    ADD CONSTRAINT assistant_knowledge_document_id_key UNIQUE (document_id);
+
+--
+-- Name: assistant_knowledge_documents assistant_knowledge_documents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_knowledge_documents
+    ADD CONSTRAINT assistant_knowledge_documents_pkey PRIMARY KEY (id);
+
+--
+-- Name: assistant_knowledge_documents assistant_knowledge_documents_s3_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_knowledge_documents
+    ADD CONSTRAINT assistant_knowledge_documents_s3_key_key UNIQUE (s3_key);
+
+--
+-- Name: assistant_knowledge assistant_knowledge_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_knowledge
+    ADD CONSTRAINT assistant_knowledge_pkey PRIMARY KEY (id);
+
+--
 -- Name: assistant_pending_actions assistant_pending_actions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.assistant_pending_actions
     ADD CONSTRAINT assistant_pending_actions_pkey PRIMARY KEY (id);
+
+--
+-- Name: assistant_practice_sessions assistant_practice_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_practice_sessions
+    ADD CONSTRAINT assistant_practice_sessions_pkey PRIMARY KEY (id);
+
+--
+-- Name: assistant_practice_turns assistant_practice_turns_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_practice_turns
+    ADD CONSTRAINT assistant_practice_turns_pkey PRIMARY KEY (id);
 
 --
 -- Name: assistant_tool_calls assistant_tool_calls_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -4962,6 +5158,36 @@ CREATE INDEX assistant_conversations_pending_idx ON public.assistant_conversatio
 CREATE INDEX assistant_conversations_running_idx ON public.assistant_conversations USING btree (running_since) WHERE (running_since IS NOT NULL);
 
 --
+-- Name: assistant_knowledge_active_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_knowledge_active_idx ON public.assistant_knowledge USING btree (location_id) WHERE active;
+
+--
+-- Name: assistant_knowledge_documents_cleanup_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_knowledge_documents_cleanup_idx ON public.assistant_knowledge_documents USING btree (status, updated_at) WHERE ((status = ANY (ARRAY['pending_upload'::text, 'extracting'::text])) OR ((status = 'deleted'::text) AND (object_deleted_at IS NULL)));
+
+--
+-- Name: assistant_knowledge_documents_location_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_knowledge_documents_location_idx ON public.assistant_knowledge_documents USING btree (location_id, created_at);
+
+--
+-- Name: assistant_knowledge_documents_sha_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX assistant_knowledge_documents_sha_idx ON public.assistant_knowledge_documents USING btree (location_id, sha256) WHERE ((status <> 'deleted'::text) AND (sha256 IS NOT NULL));
+
+--
+-- Name: assistant_knowledge_location_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_knowledge_location_idx ON public.assistant_knowledge USING btree (location_id, kind, sort, created_at);
+
+--
 -- Name: assistant_pending_actions_conversation_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4972,6 +5198,42 @@ CREATE INDEX assistant_pending_actions_conversation_idx ON public.assistant_pend
 --
 
 CREATE INDEX assistant_pending_actions_expiry_idx ON public.assistant_pending_actions USING btree (expires_at) WHERE (state = 'pending'::text);
+
+--
+-- Name: assistant_practice_sessions_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_practice_sessions_created_idx ON public.assistant_practice_sessions USING btree (created_at);
+
+--
+-- Name: assistant_practice_sessions_user_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_practice_sessions_user_idx ON public.assistant_practice_sessions USING btree (user_id, created_at DESC);
+
+--
+-- Name: assistant_practice_turns_running_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX assistant_practice_turns_running_idx ON public.assistant_practice_turns USING btree (session_id) WHERE (status = 'running'::text);
+
+--
+-- Name: assistant_practice_turns_seq_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX assistant_practice_turns_seq_idx ON public.assistant_practice_turns USING btree (session_id, seq) WHERE (rerun_of IS NULL);
+
+--
+-- Name: assistant_practice_turns_session_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_practice_turns_session_idx ON public.assistant_practice_turns USING btree (session_id, started_at);
+
+--
+-- Name: assistant_practice_turns_started_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_practice_turns_started_idx ON public.assistant_practice_turns USING btree (started_at);
 
 --
 -- Name: assistant_tool_calls_tool_idx; Type: INDEX; Schema: public; Owner: -
@@ -6372,6 +6634,55 @@ ALTER TABLE ONLY public.assistant_conversations
     ADD CONSTRAINT assistant_conversations_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
+-- Name: assistant_knowledge assistant_knowledge_assistant_turn_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_knowledge
+    ADD CONSTRAINT assistant_knowledge_assistant_turn_id_fkey FOREIGN KEY (assistant_turn_id) REFERENCES public.assistant_turns(id) ON DELETE SET NULL;
+
+--
+-- Name: assistant_knowledge assistant_knowledge_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_knowledge
+    ADD CONSTRAINT assistant_knowledge_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: assistant_knowledge assistant_knowledge_document_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_knowledge
+    ADD CONSTRAINT assistant_knowledge_document_id_fkey FOREIGN KEY (document_id) REFERENCES public.assistant_knowledge_documents(id) ON DELETE CASCADE;
+
+--
+-- Name: assistant_knowledge_documents assistant_knowledge_documents_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_knowledge_documents
+    ADD CONSTRAINT assistant_knowledge_documents_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: assistant_knowledge_documents assistant_knowledge_documents_uploaded_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_knowledge_documents
+    ADD CONSTRAINT assistant_knowledge_documents_uploaded_by_fkey FOREIGN KEY (uploaded_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: assistant_knowledge assistant_knowledge_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_knowledge
+    ADD CONSTRAINT assistant_knowledge_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: assistant_knowledge assistant_knowledge_updated_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_knowledge
+    ADD CONSTRAINT assistant_knowledge_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
 -- Name: assistant_pending_actions assistant_pending_actions_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6405,6 +6716,41 @@ ALTER TABLE ONLY public.assistant_pending_actions
 
 ALTER TABLE ONLY public.assistant_pending_actions
     ADD CONSTRAINT assistant_pending_actions_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: assistant_practice_sessions assistant_practice_sessions_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_practice_sessions
+    ADD CONSTRAINT assistant_practice_sessions_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id) ON DELETE CASCADE;
+
+--
+-- Name: assistant_practice_sessions assistant_practice_sessions_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_practice_sessions
+    ADD CONSTRAINT assistant_practice_sessions_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: assistant_practice_sessions assistant_practice_sessions_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_practice_sessions
+    ADD CONSTRAINT assistant_practice_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+--
+-- Name: assistant_practice_turns assistant_practice_turns_rerun_of_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_practice_turns
+    ADD CONSTRAINT assistant_practice_turns_rerun_of_fkey FOREIGN KEY (rerun_of) REFERENCES public.assistant_practice_turns(id) ON DELETE CASCADE;
+
+--
+-- Name: assistant_practice_turns assistant_practice_turns_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_practice_turns
+    ADD CONSTRAINT assistant_practice_turns_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.assistant_practice_sessions(id) ON DELETE CASCADE;
 
 --
 -- Name: assistant_tool_calls assistant_tool_calls_turn_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

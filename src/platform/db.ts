@@ -32,6 +32,11 @@ export interface DbOptions {
    * quickly instead of queueing every request behind it without limit (default 10 s; DB_CONNECT_TIMEOUT_MS in the services).
    */
   connectTimeoutMs?: number
+  /**
+   * Every transaction of the pool is READ ONLY (`default_transaction_read_only=on`): any write fails in the database (SQLSTATE
+   * 25006). The practice chat's tools read through such a pool, so a write the practice effects missed changes nothing (ADR 0174 §4c).
+   */
+  readOnly?: boolean
 }
 
 export const DEFAULT_CONNECT_TIMEOUT_MS = 10_000
@@ -51,6 +56,7 @@ function startupOptions(o: DbOptions): string {
     opts.push(`-c search_path=${path.join(',')}`)
   }
   if (o.clock?.synthetic) opts.push(`-c oasis.now=${o.clock.now().toISOString()}`)
+  if (o.readOnly) opts.push('-c default_transaction_read_only=on')
   return opts.join(' ')
 }
 

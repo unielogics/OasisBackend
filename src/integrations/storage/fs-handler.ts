@@ -1,8 +1,8 @@
 import type { Readable } from 'node:stream'
 import { DEV_STORAGE_PREFIX, type FsStorage } from './fs-provider.js'
 import { parseMultipart } from './multipart.js'
-import { sniffImageType } from './sniff.js'
-import { HEIC_MESSAGE, MAX_UPLOAD_BYTES, StorageError, type StorageErrorCode } from './types.js'
+import { sniffImageType, sniffPdf } from './sniff.js'
+import { dispositionFilename, HEIC_MESSAGE, MAX_UPLOAD_BYTES, StorageError, type StorageErrorCode } from './types.js'
 
 export interface DevStorageRequest {
   method: string
@@ -101,7 +101,8 @@ export function createFsStorageHandler(
             'TOO_LARGE',
             `file is larger than the ${maxBytes} byte limit for this upload`,
           )
-        const sniffed = sniffImageType(data)
+        // the slot's announced type decides what the bytes must be (ADR 0174: a knowledge slot takes a PDF, a photo slot an image)
+        const sniffed = contentType === 'application/pdf' ? (sniffPdf(data) ? 'application/pdf' : null) : sniffImageType(data)
         if (sniffed === 'image/heic') throw new StorageError('HEIC_NOT_SUPPORTED', HEIC_MESSAGE)
         if (sniffed !== contentType) {
           throw new StorageError(
@@ -125,7 +126,9 @@ export function createFsStorageHandler(
         const headers = {
           'Content-Type': meta.contentType,
           'Content-Length': String(meta.bytes),
-          'Content-Disposition': 'inline',
+          'Content-Disposition': url.searchParams.get('download')
+            ? `attachment; filename="${dispositionFilename(url.searchParams.get('download')!)}"`
+            : 'inline',
           'Cache-Control': 'private, max-age=0, no-store',
           'X-Content-Type-Options': 'nosniff',
           'Content-Security-Policy': "default-src 'none'; sandbox",

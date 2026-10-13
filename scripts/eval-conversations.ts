@@ -58,6 +58,7 @@ import {
 } from '../src/modules/assistant/convo-eval.js'
 import { placeholderValues, renderShopFacts } from '../src/modules/assistant/facts.js'
 import { parseVerdict } from '../src/modules/assistant/judge.js'
+import { DEFAULT_BEHAVIOR, DEFAULT_CAPABILITIES } from '../src/modules/assistant/policy.js'
 import { INTAKE_LINES } from '../src/modules/assistant/prompt.js'
 import { AssistantRuntime } from '../src/modules/assistant/runtime.js'
 import { TYPE_OF_SIZE } from '../src/modules/assistant/tools/account.js'
@@ -238,7 +239,14 @@ class EvalWorld {
   }
 
   /** A fresh shop for one persona: every table emptied, the seeds of the catalog run, the assistant's settings on. */
-  async reset(o: { profiles: string; startAt: string; faq: Array<{ q: string; a: string }>; grid?: boolean }): Promise<void> {
+  async reset(o: {
+    profiles: string
+    startAt: string
+    faq: Array<{ q: string; a: string }>
+    grid?: boolean
+    /** ADR 0174: the persona's shop: active knowledge, the owner's limits and tone, the in-chat actions setting. */
+    persona?: Pick<Persona, 'knowledge' | 'capabilities' | 'behavior' | 'actions'>
+  }): Promise<void> {
     await this.rt?.idle()
     for (let attempt = 1; ; attempt++) {
       try {
@@ -258,7 +266,26 @@ class EvalWorld {
       where not exists (select 1 from users u where u.employee_id = e.id)`.execute(this.db)
     await this.setting('assistant.enabled', true)
     await this.setting('assistant.stage', 'everyone')
-    await this.setting('assistant.actions_enabled', true)
+    await this.setting('assistant.actions_enabled', o.persona?.actions ?? true)
+    if (o.persona?.capabilities) await this.setting('assistant.capabilities', { ...DEFAULT_CAPABILITIES, ...o.persona.capabilities })
+    if (o.persona?.behavior) await this.setting('assistant.behavior', { ...DEFAULT_BEHAVIOR, ...o.persona.behavior })
+    for (const k of o.persona?.knowledge ?? []) {
+      const title = k.kind === 'correction' ? (k.question ?? k.title).slice(0, 120) : k.title
+      await this.db
+        .insertInto('assistant_knowledge')
+        .values({
+          id: this.newId(),
+          location_id: this.locationId,
+          kind: k.kind,
+          title,
+          body: k.body,
+          question: k.kind === 'correction' ? (k.question ?? k.title) : null,
+          source: 'manual',
+          active: true,
+          chars: title.length + (k.question?.length ?? 0) + k.body.length,
+        })
+        .execute()
+    }
     if (o.grid) await this.fillGrid()
     if (o.faq.length > 0) {
       const current = (await this.db.selectFrom('settings').select('value').where('location_id', '=', this.locationId).where('key', '=', 'assistant.faq').executeTakeFirst())?.value
@@ -486,7 +513,7 @@ async function runPersona(
   o: { index: number; catalog: 'seeded' | 'unseeded'; startAt: string; envBase: Record<string, string>; providers: EvalProviders; tally: Tally; simPrices: AiPrices; gate: RpmGate },
 ): Promise<{ run: ConversationRun; factsText: string; evalCostMicros: number }> {
   const phones = phonesOf(o.index, persona)
-  await w.reset({ profiles: o.catalog === 'seeded' ? SEEDED_PROFILES : UNSEEDED_PROFILES, grid: o.catalog === 'seeded', startAt: persona.startAt ?? o.startAt, faq: persona.faq })
+  await w.reset({ profiles: o.catalog === 'seeded' ? SEEDED_PROFILES : UNSEEDED_PROFILES, grid: o.catalog === 'seeded', startAt: persona.startAt ?? o.startAt, faq: persona.faq, persona })
   const env = loadEnv({ ...o.envBase, SMS_ALLOWLIST: [phones.primary, phones.alt].join(',') })
   const rt = w.runtime(env)
   const art = new AssistantRuntime({ db: w.db, clock: w.clock, newId: w.newId, env, messaging: rt, provider: o.providers.assistant, judgeProvider: o.providers.judge })
@@ -673,6 +700,14 @@ async function runPersona(
         .orderBy('id')
         .execute()
     : []
+  // ADR 0174: every tool call (the policy judge's aside), with send_link's kind, for no_disabled_capability
+  const callRows = turnRows.length
+    ? await w.db.selectFrom('assistant_tool_calls').select(['tool', 'outcome', 'error', 'input']).where('turn_id', 'in', turnRows.map((t) => t.id)).where('tool', '!=', 'policy_judge').orderBy('created_at').orderBy('seq').execute()
+    : []
+  const toolCalls = callRows.map((c) => {
+    const input = (typeof c.input === 'string' ? JSON.parse(c.input) : c.input) as { kind?: unknown } | null
+    return { tool: c.tool, outcome: c.outcome, error: c.error, kind: c.tool === 'send_link' && typeof input?.kind === 'string' ? input.kind : null }
+  })
   const judgeRows = turnRows.length
     ? await w.db.selectFrom('assistant_tool_calls').select(['turn_id', 'outcome', 'error', 'input', 'output']).where('turn_id', 'in', turnRows.map((t) => t.id)).where('tool', '=', 'policy_judge').orderBy('seq').execute()
     : []
@@ -716,7 +751,7 @@ async function runPersona(
     }
   }
   return {
-    run: { personaId: persona.id, category: persona.category, catalog: o.catalog, messages, turns, handoffs, optedOutAfterSeq, appointmentChanges, renderedPhrases, intake, firstContext, error },
+    run: { personaId: persona.id, category: persona.category, catalog: o.catalog, messages, turns, handoffs, optedOutAfterSeq, appointmentChanges, renderedPhrases, intake, firstContext, toolCalls, error },
     factsText,
     evalCostMicros,
   }
@@ -737,7 +772,7 @@ function traceOf(transcript: unknown, judges: Array<{ outcome: string; error: st
         if (b.type === 'toolUse') out.push(`tool: ${String(b.name)} ${short(b.input, 200)}`)
       }
     } else if (e.kind === 'tools') out.push(`tools: ${short((e.calls as unknown[]) ?? [], 300)}`)
-    else if (e.kind === 'guard' && e.verdict !== 'ok') out.push(`guard: ${short(e.problems)} ${e.words ? short(e.words) : ''}`.trim())
+    else if (e.kind === 'guard' && e.verdict !== 'ok') out.push(`guard: ${short(e.problems ?? e.verdict)} ${e.words ? short(e.words) : ''}`.trim())
     else if (e.kind === 'judge') {
       const row = judges[j++]
       const read = row ? short((typeof row.input === 'string' ? JSON.parse(row.input) : row.input)?.message ?? '', 400) : ''

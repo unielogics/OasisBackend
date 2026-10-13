@@ -42,6 +42,24 @@ export const FALLBACK_TEXTS: Record<ConvoLang, string> = {
   es: 'Gracias, un miembro del equipo te escribira pronto.',
 }
 
+/**
+ * ADR 0174 §3b, Spanish "handoff": the server's own answer to a Spanish text while the owner hands Spanish chats to the team (no
+ * model call), and the line the handoff-topic backstop sends instead of the model's reply (in the client's language).
+ */
+export const SPANISH_HANDOFF_TEXT = 'Gracias por escribirnos. Un miembro del equipo te respondera pronto por mensaje.'
+export const TOPIC_HANDOFF_TEXTS: Record<ConvoLang, string> = {
+  en: 'Thanks for asking. A team member will text you back about that shortly.',
+  es: 'Gracias por preguntar. Un miembro del equipo te escribira pronto sobre eso.',
+}
+/**
+ * The handoff-topic line when a proposal's reply-number text already went out in the same turn (verifier F2): the handoff ends that
+ * proposal (the chat is the staff's), so the line names the visit too and never points at the reply number.
+ */
+export const TOPIC_HANDOFF_AFTER_PROPOSAL_TEXTS: Record<ConvoLang, string> = {
+  en: 'Thanks for asking. A team member will text you back shortly about that and your visit.',
+  es: 'Gracias por preguntar. Un miembro del equipo te escribira pronto sobre eso y tu cita.',
+}
+
 /** The {confirm} rendering: the server's pointer to the reply-number text it just sent. */
 export const CONFIRM_WORDS_BY_LANG: Record<ConvoLang, string> = {
   en: 'I just texted you the details with how to confirm',

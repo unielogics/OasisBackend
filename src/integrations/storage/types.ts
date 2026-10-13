@@ -16,6 +16,21 @@ export const PHOTO_TYPES: Readonly<Record<string, string>> = {
   'image/webp': 'webp',
 }
 
+/**
+ * Content types of the assistant's knowledge documents (ADR 0174 §2): PDF only, under the kb/ key prefix. A per-purpose allow-list:
+ * the photo keys (loc/...) keep PHOTO_TYPES, so the photo routes still refuse a PDF and the knowledge routes refuse an image.
+ */
+export const KNOWLEDGE_TYPES: Readonly<Record<string, string>> = { 'application/pdf': 'pdf' }
+/** A knowledge PDF is at most 10 MB. */
+export const MAX_KNOWLEDGE_BYTES = 10 * 1024 * 1024
+/** The key prefix of the knowledge documents (outside the photos' loc/ lifecycle rule). */
+export const KNOWLEDGE_PREFIX = 'kb/'
+
+/** The allow-list of a key's purpose: KNOWLEDGE_TYPES for kb/ keys, else the provider's (photo) list. */
+export function typesForKey(key: string, photos: Readonly<Record<string, string>>): Readonly<Record<string, string>> {
+  return key.startsWith(KNOWLEDGE_PREFIX) ? KNOWLEDGE_TYPES : photos
+}
+
 const HEIC_TYPES = new Set(['image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence'])
 
 export type StorageErrorCode =
@@ -71,6 +86,19 @@ export interface UploadRequest {
   contentType: string
   maxBytes: number
   ttlSec: number
+  /** The purpose's allow-list (default: typesForKey of the key: KNOWLEDGE_TYPES under kb/, else the provider's photo list). */
+  allowedTypes?: Readonly<Record<string, string>>
+}
+
+/** A signed download: inline (photos), or as an attachment with this file name (ADR 0174: knowledge PDFs). */
+export interface DownloadOptions {
+  attachment?: string
+}
+
+/** A file name safe for Content-Disposition: printable ASCII without quotes, backslashes or separators, at most 100 characters. */
+export function dispositionFilename(name: string): string {
+  const flat = name.normalize('NFKD').replace(/[^\x20-\x7e]/g, '').replace(/["\\/;]/g, '_').trim().slice(-100)
+  return flat === '' ? 'document.pdf' : flat
 }
 
 export function assertTtl(ttlSec: number, what = 'ttlSec'): void {

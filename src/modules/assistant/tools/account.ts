@@ -2,36 +2,14 @@
 // welcome flow's placeholder stands) and their vehicles (added to their own record). The client is ctx.identity's, never an input.
 import { sql } from 'kysely'
 import { z } from 'zod/v4'
-import { transaction, type Tx } from '../../../platform/db.js'
-import { AppError } from '../../../platform/errors.js'
 import { fmtT, minutesOfDay, toBizDate } from '../../../platform/time.js'
-import { listVehicles, updateCustomer, upsertVehicleByPlate } from '../../customers/service.js'
 import { STATUS_PHRASE } from '../../scheduling/appointments.js'
 import { TOOL_MIN_TRUST, type AssistantTool, type ToolInputs } from '../contract.js'
-import { isProvisionalClient } from '../welcome/provisional.js'
-import type { VehicleType } from '../welcome/schema.js'
-import { planPlaceholder, pricePlaceholder } from '../facts.js'
-import '../welcome/schema.js'
-import { fail, json, ok, shortDate } from './common.js'
+import { cleanPersonName, fail, json, ok, shortDate } from './common.js'
+import { effectsOf } from './effects-live.js'
 
-/**
- * The old vehicle type (vehicles.vehicle_type, kept for one release by ADR 0170) a default size stands for: the reverse of the
- * migration's backfill (sedan_coupe -> compact_car, suv_crossover -> compact_suv, truck_van -> truck), so a car saved by text still
- * reads the same to anything that has not moved to sizes yet. A size the shop added has none.
- */
-export const TYPE_OF_SIZE: Readonly<Record<string, VehicleType>> = {
-  compact_car: 'sedan_coupe',
-  large_car: 'sedan_coupe',
-  compact_suv: 'suv_crossover',
-  large_suv: 'suv_crossover',
-  truck: 'truck_van',
-}
-
-/** The most package price keys set_my_vehicle hands back (the plans' follow them). */
-const MAX_SIZE_KEYS = 10
-
-/** Vehicles a client may have added by text in all (the record is theirs; a flood of vehicles is not). */
-export const MAX_VEHICLES = 6
+// the vehicle constants moved with set_my_vehicle's write (effects-live.ts, ADR 0174 §4b)
+export { MAX_VEHICLES, TYPE_OF_SIZE } from './effects-live.js'
 
 export const listMyAppointments: AssistantTool<ToolInputs['list_my_appointments']> = {
   name: 'list_my_appointments',
@@ -110,15 +88,7 @@ export const getBalance: AssistantTool<ToolInputs['get_balance']> = {
   },
 }
 
-/** A person's name as typed: letters (any alphabet), spaces, apostrophes, hyphens and periods; one to four words. */
-export function cleanPersonName(raw: string): string | null {
-  const name = raw.normalize('NFC').replace(/\s+/g, ' ').trim()
-  if (name.length < 2 || name.length > 60) return null
-  if (!/^\p{L}[\p{L}\p{M}'’ .-]*$/u.test(name)) return null
-  const words = name.split(' ')
-  if (words.length > 4 || words.some((w) => !/\p{L}/u.test(w))) return null
-  return name
-}
+export { cleanPersonName } from './common.js'
 
 export const setMyName: AssistantTool<ToolInputs['set_my_name']> = {
   name: 'set_my_name',
@@ -131,66 +101,8 @@ export const setMyName: AssistantTool<ToolInputs['set_my_name']> = {
     if (!customerId) return fail('not_allowed', 'There is no client record for this number yet.')
     const name = cleanPersonName(fullName)
     if (!name) return fail('invalid', 'That does not look like a person’s name. Ask for their first name.')
-    return transaction(ctx.db, async (tx) => {
-      // the record decides, not the turn's view: a name on file (or a client staff completed) is never replaced; the one exception
-      // (W4b X7) is the client correcting the name the assistant itself saved in this conversation, while it still stands as saved
-      const locked = await tx
-        .selectFrom('customers')
-        .select(['full_name', 'phone_e164'])
-        .where('id', '=', customerId)
-        .forUpdate()
-        .executeTakeFirst()
-      if (!locked || locked.phone_e164 !== ctx.identity.phone)
-        return fail('not_allowed', 'There is no client record for this number.')
-      const provisional = await isProvisionalClient(tx, customerId)
-      if (
-        !provisional &&
-        !(await namedInThisConversation(tx, {
-          conversationId: ctx.conversationId,
-          customerId,
-          current: locked.full_name,
-        }))
-      )
-        return fail('not_allowed', 'This client already has a name on file; it is not changed by text.')
-      if (!provisional && locked.full_name === name)
-        return ok({ saved: true, firstName: name.split(' ')[0]!, unchanged: true })
-      await updateCustomer(tx, { id: customerId, patch: { fullName: name, needsDetails: false } })
-      await ctx.audit(tx, provisional ? 'assistant.client.named' : 'assistant.client.renamed', {
-        entityType: 'customer',
-        entityId: customerId,
-        before: { name: locked.full_name },
-        after: { name },
-      })
-      return ok({ saved: true, firstName: name.split(' ')[0]! })
-    })
+    return effectsOf(ctx).saveName(ctx, name)
   },
-}
-
-/**
- * Whether the client's current name is the one set_my_name saved in this conversation (its last successful call, cleaned the same
- * way): then the client may still correct it by text (W4b X7: a model padded "Rosa Rosa" and the client's "Rosa Garcia" was
- * refused). A name staff changed since, or one from before the conversation, is never changed by text.
- */
-async function namedInThisConversation(
-  tx: Tx,
-  o: { conversationId: string; customerId: string; current: string },
-): Promise<boolean> {
-  const last = await tx
-    .selectFrom('assistant_tool_calls as c')
-    .innerJoin('assistant_turns as t', 't.id', 'c.turn_id')
-    .select(['c.input'])
-    .where('t.conversation_id', '=', o.conversationId)
-    .where('c.tool', '=', 'set_my_name')
-    .where('c.outcome', '=', 'ok')
-    .orderBy('c.created_at', 'desc')
-    .orderBy('c.seq', 'desc')
-    .limit(1)
-    .executeTakeFirst()
-  if (!last) return false
-  const input = (typeof last.input === 'string' ? JSON.parse(last.input) : last.input) as {
-    fullName?: unknown
-  }
-  return typeof input.fullName === 'string' && cleanPersonName(input.fullName) === o.current
 }
 
 const word = z.string().min(1).max(40)
@@ -225,62 +137,6 @@ export const setMyVehicle: AssistantTool<ToolInputs['set_my_vehicle']> = {
       return fail('invalid', 'Use the plain make, model and color words.')
     const maxYear = new Date(ctx.now.getTime()).getUTCFullYear() + 1
     if (input.year !== null && input.year > maxYear) return fail('invalid', 'That model year is in the future.')
-    return transaction(ctx.db, async (tx) => {
-      const owner = await tx.selectFrom('customers').select('phone_e164').where('id', '=', customerId).forUpdate().executeTakeFirst()
-      if (!owner || owner.phone_e164 !== ctx.identity.phone) return fail('not_allowed', 'There is no client record for this number.')
-      const vehicles = await listVehicles(tx, customerId)
-      const same = vehicles.find(
-        (v) => (v.make ?? '').toLowerCase() === make.toLowerCase() && (v.model ?? '').toLowerCase() === model.toLowerCase() && (input.year === null || v.year === input.year),
-      )
-      if (!same && vehicles.length >= MAX_VEHICLES) return fail('rate_limited', 'This client has many vehicles on file already; the team can add more.')
-      let vehicleId: string
-      try {
-        vehicleId = same
-          ? same.id
-          : (await upsertVehicleByPlate(tx, { newId: ctx.newId, customerId, year: input.year, make, model, color, plate: null })).vehicle.id
-      } catch (e) {
-        if (e instanceof AppError && e.code === 'VALIDATION_FAILED') return fail('invalid', 'That vehicle could not be saved.')
-        throw e
-      }
-      const legacyType = TYPE_OF_SIZE[size.key]
-      const saved = await tx
-        .updateTable('vehicles')
-        .set({
-          ...(legacyType ? { vehicle_type: legacyType } : {}),
-          // the size the client said (ADR 0170: source ai), never over a size staff set
-          vehicle_class: sql<string>`case when vehicle_class_source = 'staff' then vehicle_class else ${size.key} end`,
-          vehicle_class_source: sql<'staff' | 'ai'>`case when vehicle_class_source = 'staff' then 'staff' else 'ai' end`,
-          ...(same && input.year !== null && same.year === null ? { year: input.year } : {}),
-          ...(same && color && !same.color ? { color } : {}),
-        })
-        .where('id', '=', vehicleId)
-        .where('customer_id', '=', customerId)
-        .returning(['vehicle_class', 'vehicle_class_source'])
-        .executeTakeFirst()
-      await ctx.audit(tx, same ? 'assistant.vehicle.updated' : 'assistant.vehicle.added', {
-        entityType: 'vehicle',
-        entityId: vehicleId,
-        after: { customerId, size: size.key, year: input.year, make, model, color },
-      })
-      // the size the car is priced at: staff's when they set one (the client's word does not replace it)
-      const kept = saved?.vehicle_class_source === 'staff' && saved.vehicle_class !== size.key ? sizes.find((x) => x.key === saved.vehicle_class) : undefined
-      const at = kept ?? size
-      const priceKeys = [
-        ...ctx.facts.catalog.items
-          .filter((i) => i.kind === 'package' && !i.quoteOnly)
-          .slice(0, MAX_SIZE_KEYS)
-          .map((i) => ({ name: i.name, priceKey: pricePlaceholder(i.key, at.key) })),
-        ...ctx.facts.plans.map((p) => ({ name: `${p.label} membership`, priceKey: planPlaceholder(p.key, at.key) })),
-      ]
-      return ok({
-        saved: true,
-        vehicle: [input.year, make, model].filter((x) => x !== null).join(' '),
-        size: at.label,
-        sizeKey: at.key,
-        ...(kept ? { note: `The team already set this car as ${kept.label}; prices follow that size.` } : {}),
-        // the prices for their car's size, as placeholders (the model never writes an amount); a size without a price reads "priced at the shop"
-        priceKeys,
-      })
-    })
+    return effectsOf(ctx).saveVehicle(ctx, { size, make, model, year: input.year, color })
   },
 }

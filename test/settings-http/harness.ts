@@ -5,6 +5,7 @@ import type { LightMyRequestResponse } from 'fastify'
 import { afterAll, beforeAll, beforeEach } from 'vitest'
 import { allowedOrigins } from '../../src/http/hooks.js'
 import type { AppDeps } from '../../src/app.js'
+import type { ApiModule } from '../../src/http/modules.js'
 import {
   InMemoryNotifier,
   authModule,
@@ -96,7 +97,7 @@ export interface SettingsHarness {
 
 let counter = 0
 
-export function useSettingsHarness(o: { hub?: boolean; env?: Record<string, string> } = {}): SettingsHarness {
+export function useSettingsHarness(o: { hub?: boolean; env?: Record<string, string>; extraModules?: ApiModule[] } = {}): SettingsHarness {
   let testDb: TestDb
   let t: TestApp
   let identity: Identity
@@ -124,7 +125,7 @@ export function useSettingsHarness(o: { hub?: boolean; env?: Record<string, stri
     t = await createTestApp({
       testDb,
       env: o.env,
-      modules: [authModule, peopleModule, createSettingsModule(ports)],
+      modules: [authModule, peopleModule, createSettingsModule(ports), ...(o.extraModules ?? [])],
       deps,
       authorizer: (location) => {
         locationId = location.id

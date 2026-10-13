@@ -12,6 +12,8 @@ import {
   assertAllowedContentType,
   assertTtl,
   assertUploadRequest,
+  typesForKey,
+  type DownloadOptions,
   type ObjectStorage,
   type UploadRequest,
 } from './types.js'
@@ -61,7 +63,7 @@ export class FsStorage implements ObjectStorage {
   }
 
   async createUpload(p: UploadRequest): Promise<UploadSlot> {
-    const contentType = assertUploadRequest(p, this.allowed)
+    const contentType = assertUploadRequest(p, p.allowedTypes ?? typesForKey(p.key, this.allowed))
     assertSafeKey(p.key)
     const expiresAt = new Date(this.clock.now().getTime() + p.ttlSec * 1000)
     const exp = Math.floor(expiresAt.getTime() / 1000)
@@ -97,12 +99,14 @@ export class FsStorage implements ObjectStorage {
     return { key, contentType, maxBytes }
   }
 
-  async getDownloadUrl(key: string, ttlSec: number): Promise<string> {
+  async getDownloadUrl(key: string, ttlSec: number, o: DownloadOptions = {}): Promise<string> {
     assertSafeKey(key)
     assertTtl(ttlSec)
     const exp = Math.floor(this.clock.now().getTime() / 1000) + ttlSec
     const sig = signDownload(this.secret, { key, exp })
-    return `${this.baseUrl}/files/${key.split('/').map(encodeURIComponent).join('/')}?exp=${exp}&sig=${sig}`
+    // the disposition is not part of the signature (it changes how the browser saves the file, not what it may read)
+    const dl = o.attachment ? `&download=${encodeURIComponent(o.attachment)}` : ''
+    return `${this.baseUrl}/files/${key.split('/').map(encodeURIComponent).join('/')}?exp=${exp}&sig=${sig}${dl}`
   }
 
   verifyDownload(key: string, exp: string | null, sig: string | null): void {
@@ -140,7 +144,7 @@ export class FsStorage implements ObjectStorage {
   }
 
   async put(key: string, body: Buffer, contentType: string): Promise<void> {
-    const ct = assertAllowedContentType(contentType, this.allowed)
+    const ct = assertAllowedContentType(contentType, typesForKey(key, this.allowed))
     if (body.length > MAX_UPLOAD_BYTES) throw new StorageError('TOO_LARGE', 'object exceeds the 15 MB limit')
     const file = this.objectPath(key)
     const meta = this.metaPath(key)

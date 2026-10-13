@@ -14,21 +14,12 @@
 // Every failure (the model's error, refusal, cut answer or unknown stop, the guard, a cap, the loop breaker) sends the fixed
 // fallback (at most one per 2 hours) and hands the conversation to staff. Nothing runs while AI_ENABLED=false or the settings
 // switch is off: the gate refuses before anything is loaded or called.
-import { randomInt } from 'node:crypto'
+// ADR 0174 §4a: the Converse loop, the output guard and the policy judge are the ENGINE (engine.ts, shared with practice); this file
+// keeps what only a live turn does: the gate, the caps, the claim, the context, the live tool context and every write.
 import { sql } from 'kysely'
 import type { Env } from '../../config/env.js'
 import { addUsage, aiCostMicros } from '../../integrations/ai/cost.js'
-import {
-  AiProviderError,
-  textOf,
-  type AiContentBlock,
-  type AiConverseRequest,
-  type AiConverseResponse,
-  type AiMessage,
-  type AiProvider,
-  type AiSystemBlock,
-  type AiUsage,
-} from '../../integrations/ports/ai.js'
+import type { AiMessage, AiProvider, AiUsage } from '../../integrations/ports/ai.js'
 import * as audit from '../../platform/audit.js'
 import type { Clock } from '../../platform/clock.js'
 import { transaction, type Db, type Tx } from '../../platform/db.js'
@@ -40,43 +31,27 @@ import { renderTemplate } from '../messaging/templates/render.js'
 import { hasActiveOptOut } from '../messaging/db/recipients.js'
 import { notifyManagers } from '../messaging/notify.js'
 import type { Actor, SchedulingCtx } from '../scheduling/context.js'
-import { AI_ACTOR_NAME, type AssistantLog, type AssistantQueue, type HandoffRequest, type ShopFactsSource, type ToolContext, type ToolOutcome, type ToolRegistry, type TurnIdentity } from './contract.js'
+import { AI_ACTOR_NAME, type AssistantLog, type AssistantQueue, type ShopFactsSource, type ToolContext, type ToolOutcome, type ToolRegistry, type TurnIdentity } from './contract.js'
 import type { AssistantConfig } from './config.js'
 import { appointmentRefs, loadAppointmentRefs, loadConversation, loadTurnContext, resolveIdentity } from './context.js'
-import { CONFIRM_PLACEHOLDER, factLiterals, openingWindow, placeholderValues, renderShopFacts } from './facts.js'
-import {
-  cutAfterFirstQuestion,
-  cutAtSentence,
-  sentencesOf,
-  guardReply,
-  HARD_PROBLEMS,
-  isolatePlaceholders,
-  looksLikeCardNumber,
-  MAX_REPLY_CHARS,
-  SAFETY_LINK_KINDS,
-  withoutQuestions,
-  type GuardProblem,
-  type ReplySegment,
-} from './guard.js'
-import {
-  CARD_LINES,
-  detectLanguage,
-  FALLBACK_TEXTS,
-  isConvoLang,
-  SAFETY_LINES,
-  storeLanguage,
-  withDisclosure,
-  type ConvoLang,
-} from './lang.js'
+import { runEngine, TurnAbort, ZERO_USAGE, type ConversationRecord, type EngineResult } from './engine.js'
+import { looksLikeCardNumber, toGsm7 } from './guard.js'
+import { CARD_LINES, detectLanguage, isConvoLang, SAFETY_LINES, SPANISH_HANDOFF_TEXT, storeLanguage, withDisclosure, type ConvoLang } from './lang.js'
 import { whenWords } from './tools/common.js'
-import { JUDGE_HINTS, runJudge } from './judge.js'
+import { liveToolEffects } from './tools/effects-live.js'
 import { HANDOFF_SUMMARIES, markUnanswered, openTurnHandoff, recipientOf, sendFallback, type ConversationRef, type HandoffDeps } from './handoff.js'
 import type { AssistantGate, AssistantInbox } from './ports.js'
-import { asksForFree, declinesPlans, judgeRewriteInstruction, PROMPT_VERSION, REPLY_NOW_TEXT, STATIC_RULES, renderConversation, renderTurnContext, rewriteInstruction } from './prompt.js'
-import { NON_PROGRESS_TOOLS, offeredTools, recordLine, runToolRound, toolSpecs } from './tool-runner.js'
-import { redactText, Transcript } from './transcript.js'
+import { loadPolicy } from './policy.js'
+import { PROMPT_VERSION, renderConversation } from './prompt.js'
+import { liveRecorder, NON_PROGRESS_TOOLS, recordLine } from './tool-runner.js'
+import { buildTurnPrompt } from './turn-prompt.js'
+import { Transcript } from './transcript.js'
+import { TurnLinks } from './turn-links.js'
 import './schema.js'
 import '../messaging/schema.js'
+
+// moved to engine.ts (ADR 0174 §4a); re-exported for the callers and tests that import them from here
+export { LINK_NUDGE_TEXT, offersLink, RETRY_BACKOFF_MAX_MS, RETRY_BACKOFF_MIN_MS, RETRY_MIN_ROOM_MS, retryBackoffMs, withHandoffText } from './engine.js'
 
 export interface TurnDeps {
   db: Db
@@ -126,23 +101,6 @@ const COLUMNS = [
   'disclosed_at',
   'language',
 ] as const
-
-const ZERO_USAGE: AiUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
-
-/**
- * W4a fix F3: a model call or a judge call that the account's quota throttled (ThrottlingException, 429), that timed out, or that
- * met an outage (5xx: the SDK retry this replaces covered those) is retried ONCE, after RETRY_BACKOFF_MIN_MS-RETRY_BACKOFF_MAX_MS
- * (jitter), and only while the turn deadline leaves the wait plus RETRY_MIN_ROOM_MS; each retry is a transcript entry (kind
- * "retry") and a log line, and a retried judge call's row and transcript entry carry attempts: 2. A second failure fails closed as
- * before (the fallback and a handoff). The Bedrock client itself no longer retries (createBedrockClient: one attempt), so this is
- * the only retry.
- */
-export const RETRY_BACKOFF_MIN_MS = 800
-export const RETRY_BACKOFF_MAX_MS = 1500
-export const RETRY_MIN_ROOM_MS = 3000
-export const retryBackoffMs = (): number => randomInt(RETRY_BACKOFF_MIN_MS, RETRY_BACKOFF_MAX_MS + 1)
-/** The judge's errors a retry can help (runJudge: its own 8-second timeout, the provider's timeout, the quota, an outage). */
-const RETRYABLE_JUDGE_ERRORS: ReadonlySet<string> = new Set(['timeout', 'ai:timeout', 'ai:throttled', 'ai:unavailable'])
 
 /** The caps of design section 3 that a new turn of this conversation would cross, or null. */
 export async function capReached(
@@ -210,6 +168,8 @@ export function composeReply(o: {
   safety?: boolean
   card?: boolean
   lang?: ConvoLang
+  /** ADR 0174 §3b: the owner's sign-off, appended by the server after everything else of the reply (the judge never read it). */
+  signOff?: string
 }): {
   text: string
   klass: 'ai_reply' | 'personal_link'
@@ -221,6 +181,8 @@ export function composeReply(o: {
   for (const p of o.links.keys()) if (!reply.includes(p)) reply = `${reply} ${p}`
   if (o.safety) reply = `${reply} ${SAFETY_LINES[lang]}`
   if (o.card) reply = `${reply} ${CARD_LINES[lang]}`
+  const signOff = o.signOff ? toGsm7(o.signOff.replace(/\s+/g, ' ').trim()) : ''
+  if (signOff) reply = `${reply} ${signOff}`
   // the first AI text of the conversation: the disclosure and the STOP footer, in the conversation's language (W4b X5)
   const text =
     lang === 'en'
@@ -231,12 +193,6 @@ export function composeReply(o: {
   const used = [...o.links.entries()].filter(([p]) => text.includes(p))
   if (used.length === 0) return { text, klass: 'ai_reply' }
   return { text, klass: 'personal_link', secretVars: Object.fromEntries(used.map(([p, url]) => [p.slice(1, -1), url])) }
-}
-
-class TurnAbort extends Error {
-  constructor(readonly reason: string) {
-    super(reason)
-  }
 }
 
 /** One turn of the conversation. Never throws for the model's failures (they become the fallback); database errors propagate. */
@@ -414,6 +370,8 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
   const loc = conv.location_id
   const facts = await d.facts.get(loc)
   const actionsEnabled = d.cfg.actionsEnabled && (await getSetting(d.db, loc, 'assistant.actions_enabled')).value
+  // ADR 0174 §3b: the owner's limits and tone (the defaults are today's behaviour)
+  const policy = await loadPolicy(d.db, loc, actionsEnabled)
   const refRows = await loadAppointmentRefs(d.db, { locationId: loc, customerId: identity0.customerId, now })
   const snap = await loadConversation(d.db, {
     locationId: loc,
@@ -428,7 +386,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
   // the client's language (W4b X5): what their new texts are written in, else what the conversation was in (English by default)
   const freshClient = snap.lines.filter((l) => l.fresh && l.who === 'client').map((l) => l.text)
   const detected = detectLanguage(freshClient)
-  const lang: ConvoLang = detected ?? (isConvoLang(claim.conv.language) ? claim.conv.language : 'en')
+  const clientLang: ConvoLang = detected ?? (isConvoLang(claim.conv.language) ? claim.conv.language : 'en')
   if (detected) await storeLanguage(d.db, conv.id, detected)
   const loaded = await loadTurnContext(d.db, {
     resolved,
@@ -439,22 +397,18 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     now,
     tz,
   })
-  // W4 final check L7: "no just book it" (any client text in the window) skips the memberships step and says not to pitch them
-  const declinedPlans = loaded.membership === null && declinesPlans(snap.lines.filter((l) => l.who === 'client').map((l) => l.text))
-  const turnContext = {
-    ...loaded,
-    // ... and so does a shop that sells no plan online (facts-v4: a tier without a price is not sold)
-    ...((declinedPlans || facts.plans.length === 0) && loaded.intake === 'memberships' ? { intake: loaded.vehicles.length > 0 ? null : ('vehicle' as const) } : {}),
-    language: lang,
-    ...(asksForFree(freshClient) ? { asksFree: true } : {}),
-    ...(declinedPlans ? { declinedPlans: true } : {}),
-  }
-  const contextText = renderTurnContext(turnContext)
-  const tools = offeredTools(d.registry, actionsEnabled)
-  const specs = toolSpecs(tools)
-  const factsText = renderShopFacts(facts)
-  const system: AiSystemBlock[] = [{ text: STATIC_RULES }, { text: factsText, cache: true }, { text: contextText }]
-  transcript.add({ kind: 'system', promptVersion: PROMPT_VERSION, factsVersion: facts.version, tools: tools.map((t) => t.name) })
+  // ADR 0174 §4c: the request is assembled by the code practice uses too (turn-prompt.ts), so both send the same bytes
+  const prompt = buildTurnPrompt({
+    facts,
+    loaded,
+    policy,
+    registry: d.registry,
+    freshClientTexts: freshClient,
+    allClientTexts: snap.lines.filter((l) => l.who === 'client').map((l) => l.text),
+    clientLang,
+  })
+  const { lang, spanishHandoff, turnContext, contextText, knowledgeText, factsText, tools, specs, system } = prompt
+  transcript.add(prompt.systemEntry)
   transcript.add({ kind: 'context', text: contextText })
   const messages: AiMessage[] = [{ role: 'user', content: [{ type: 'text', text: renderConversation(snap.lines) }] }]
   transcript.add({ kind: 'message', message: messages[0]! })
@@ -464,38 +418,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
   const deadlineAt = performance.now() + d.cfg.turnDeadlineMs
   const timer = setTimeout(() => deadline.abort(new TurnAbort('deadline')), d.cfg.turnDeadlineMs)
   timer.unref?.()
-  // F3: one retry per call of a throttled or timed-out model or judge call, when the deadline leaves room (false: fail closed)
-  let retries = 0
-  const retryOnce = async (call: 'model' | 'judge', error: string): Promise<boolean> => {
-    if (deadline.signal.aborted) return false
-    const waitMs = Math.max(0, Math.round((d.retryBackoffMs ?? retryBackoffMs)()))
-    if (deadlineAt - performance.now() < waitMs + RETRY_MIN_ROOM_MS) {
-      transcript.add({ kind: 'retry', call, error, skipped: 'deadline' })
-      d.log.warn({ conversation: conv.id, turn: turnId, call, error }, 'assistant call failed; no room left before the turn deadline to retry it')
-      return false
-    }
-    retries += 1
-    transcript.add({ kind: 'retry', call, error, waitMs })
-    d.log.warn({ conversation: conv.id, turn: turnId, call, error, waitMs, retries }, 'assistant retries a throttled or timed-out call once')
-    await new Promise<void>((resolve) => {
-      const t = setTimeout(done, waitMs)
-      function done(): void {
-        clearTimeout(t)
-        deadline.signal.removeEventListener('abort', done)
-        resolve()
-      }
-      deadline.signal.addEventListener('abort', done, { once: true })
-    })
-    if (deadline.signal.aborted) throw new TurnAbort('deadline')
-    return true
-  }
-  const links = new Map<string, string>()
-  const linkKinds = new Set<string>()
-  let toolHandoff: HandoffRequest | null = null
-  let balanceCents: number | null = null
-  let confirmTexted = false
-  /** What the server did and returned in this turn's tool rounds, for the judge's server record (tool-runner.ts recordLine). */
-  const toolRecord: string[] = []
+  const links = new TurnLinks()
   const ctx: ToolContext = {
     db: d.db,
     clock: d.clock,
@@ -516,16 +439,13 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     log: d.log,
     signal: deadline.signal,
     addLink(url, link) {
-      const p = `{link${links.size + 1}}`
-      links.set(p, url)
-      linkKinds.add(link.kind)
-      return p
+      return links.add(url, link)
     },
     handoff(reason, summary) {
-      toolHandoff ??= { reason, summary }
+      links.handoff(reason, summary)
     },
     handoffRequested() {
-      return toolHandoff !== null
+      return links.requested()
     },
     async audit(tx, action, detail) {
       await audit.record(tx, {
@@ -553,376 +473,71 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
       state.threadCustomerId = again.threadCustomerId
       await d.db.updateTable('assistant_conversations').set({ customer_id: customerId, updated_at: d.clock.now() }).where('id', '=', conv.id).execute()
     },
+    // ADR 0174 §4b: the tools write through the live effects, and their own words follow the language this turn answers in
+    effects: liveToolEffects,
+    lang,
+    // ADR 0174 §3b: the owner's limits, checked again by the tools
+    policy: policy.tools,
   }
-
-  // ---- the Converse loop
-  let usage = ZERO_USAGE
-  let model: string | null = null
-  let rounds = 0
-  let seq = 0
-  let stop: string | null = null
-  const call = async (req: AiConverseRequest): Promise<AiConverseResponse> => {
-    let res: AiConverseResponse
-    for (let attempt = 0; ; attempt++) {
-      if (deadline.signal.aborted) throw new TurnAbort('deadline')
-      const callTimeout = AbortSignal.timeout(d.cfg.callTimeoutMs)
-      const signal = AbortSignal.any([deadline.signal, callTimeout])
-      try {
-        res = await d.provider.converse(req, { signal })
-        break
-      } catch (e) {
-        // the quota (throttled), a timeout (the provider's or this call's own; never the turn deadline) or an outage: retried once (F3)
-        const kind = deadline.signal.aborted
-          ? null
-          : callTimeout.aborted
-            ? 'timeout'
-            : e instanceof AiProviderError && (e.kind === 'throttled' || e.kind === 'timeout' || e.kind === 'unavailable')
-              ? e.kind
-              : null
-        if (kind === null || attempt > 0 || !(await retryOnce('model', `ai:${kind}`))) throw e
-      }
-    }
-    usage = addUsage(usage, res.usage)
-    model = res.model
-    stop = res.rawStopReason
-    transcript.add({ kind: 'message', message: res.message, stopReason: res.rawStopReason, usage: { ...res.usage } })
-    return res
-  }
-  const request = (final: boolean): AiConverseRequest => ({
-    system,
-    messages,
-    ...(specs.length > 0 ? { tools: specs, cacheTools: true } : {}),
-    toolChoice: final || specs.length === 0 ? 'none' : 'auto',
-    maxTokens: d.cfg.maxTokens,
-    effort: d.cfg.effort,
-  })
-  const failureOf = (e: unknown): string =>
-    e instanceof TurnAbort ? 'timeout:turn' : e instanceof AiProviderError ? `ai:${e.kind}` : `error:${(e as Error)?.name ?? 'Error'}`
-
-  let text: string | null = null
-  let optedOut = false
-  // a link offered as a question ("Want me to text you a link to join?") is asked once; offered again in the next text it is sent
-  const lastAiOffered = offersLink(snap.lines.filter((l) => l.who === 'ai').at(-1)?.text ?? '')
-  /** W4 final check L7: text the model wrote in the same round as handoff_to_staff ("I can't confirm a free wash, but ..."). */
-  let handoffText: string | null = null
-  let linkNudged = false
-  try {
-    try {
-      for (;;) {
-        const final = rounds >= d.cfg.maxToolRounds
-        const res = await call(request(final))
-        messages.push(res.message)
-        if (res.stopReason === 'tool_use') {
-          const uses = res.message.content.filter((b): b is Extract<AiContentBlock, { type: 'toolUse' }> => b.type === 'toolUse')
-          if (final || uses.length === 0) throw new TurnAbort('tool_use_after_reply_now')
-          if (uses.some((u) => u.name === 'handoff_to_staff')) {
-            const said = textOf(res.message).trim()
-            if (said) handoffText = said
-          }
-          rounds += 1
-          const r = await runToolRound({ db: d.db, newId: d.newId, nowMs }, { registry: d.registry, ctx, uses, round: rounds, seq, actionsEnabled })
-          seq = r.seq
-          if (r.balanceCents !== null) balanceCents = r.balanceCents
-          if (r.confirmTexted) confirmTexted = true
-          toolRecord.push(...r.record)
-          toolHandoff ??= r.handoff
-          transcript.add({ kind: 'tools', round: rounds, calls: r.calls })
-          // the client opted out in words (opt_out sent the confirmation): nothing more is written to that number, not even a reply
-          // the queue would refuse, and no rewrite, judge or fallback runs over an empty "nothing else to say"
-          if (r.calls.some((c) => c.tool === 'opt_out' && c.outcome === 'ok')) {
-            optedOut = true
-            break
-          }
-          const content: AiContentBlock[] = [...r.results]
-          if (rounds >= d.cfg.maxToolRounds) content.push({ type: 'text', text: REPLY_NOW_TEXT })
-          messages.push({ role: 'user', content })
-          transcript.add({ kind: 'message', message: messages[messages.length - 1]! })
-          continue
-        }
-        if (res.stopReason !== 'end_turn') throw new TurnAbort(`stop:${res.stopReason}`)
-        text = textOf(res.message)
-        // W4 final check L7 (pin-fishing offered a reset link twice and never sent it): a reply that offers a link no tool sent in
-        // this turn goes back to the model ONCE, tools on: send it now or reply without offering it
-        if (!final && !linkNudged && links.size === 0 && tools.some((t) => t.name === 'send_link') && (offersLink(text, { statement: true }) || (offersLink(text) && lastAiOffered))) {
-          linkNudged = true
-          messages.push({ role: 'user', content: [{ type: 'text', text: LINK_NUDGE_TEXT }] })
-          transcript.add({ kind: 'message', message: messages[messages.length - 1]! })
-          text = null
-          continue
-        }
-        break
-      }
-    } catch (e) {
-      const reason = e instanceof TurnAbort ? e.reason : failureOf(e)
-      transcript.add({ kind: 'error', error: reason })
-      return await finishHandoff({ reason: 'fallback', status: 'failed', fallback: true, error: reason, usage, model, rounds, stop })
-    }
-    // the loop ends without a text only after an opt-out
-    if (optedOut || text === null) return await finishOptedOut({ usage, model, rounds, stop })
-    if (handoffText) text = withHandoffText(handoffText, text)
-
-    // ---- the output guard
-    // what the placeholders render to (the current facts; {balance} only after get_balance; the links stay for composeReply)
-    const values = placeholderValues(facts, { balanceCents, confirmTexted, lang })
-    for (const p of links.keys()) values.set(p, p)
-    // server-owned literals only (the address, catalog and plan names): the digit rules skip them. Client-entered text (a vehicle on
-    // file, the name) is NEVER a literal and never trusted by the judge (fix 1 of the v4 re-check: a vehicle "Free Wash 2015550123")
-    const literals = factLiterals(facts)
-    // the client's own first name and vehicles are skipped by the secret request check only ("Thanks, Clave", "your Ford Focus")
-    const names = [turnContext.firstName, ...turnContext.vehicles.map((v) => v.split(',')[0]), ...(turnContext.vehicleNames ?? [])]
-    // a verify / PIN / membership / payment link: the server appends the safety line, so the reply leaves room for it
-    const safety = [...linkKinds].some((k) => SAFETY_LINK_KINDS.has(k))
-    // the client texted a card number: the server's CARD_LINE follows the reply (the model may write nothing about cards)
+  // read once the tool rounds are done (a tool of this turn may change them): a card number in the new texts, the reply numbers
+  // executed since the last reply (W4b X3), the conversation's record (W4 final check L1)
+  const afterTools = async () => {
     const card =
       snap.inboxIds.length > 0 &&
-      (await d.db.selectFrom('sms_inbox').select('body').where('id', 'in', snap.inboxIds).execute()).some(
-        (r) => looksLikeCardNumber(r.body),
-      )
-    const safetyLine = SAFETY_LINES[lang]
-    const cardLine = CARD_LINES[lang]
-    const maxChars = MAX_REPLY_CHARS - (safety ? safetyLine.length + 1 : 0) - (card ? cardLine.length + 1 : 0)
-    // W4b X3: what the server did since the assistant's last text (a reply number executed a booking, a move, a cancel): only then
-    // may the reply say it is booked, moved, cancelled or "all set"; the judge reads the same record and the client's visits
+      (await d.db.selectFrom('sms_inbox').select('body').where('id', 'in', snap.inboxIds).execute()).some((x) => looksLikeCardNumber(x.body))
     const executed = await executedSinceLastReply(d.db, { conversationId: conv.id, turnId, now, tz })
-    const actionDone = executed.length > 0
-    // W4 final check L1: the record covers the conversation, not only this turn (links texted earlier, a proposal still waiting,
-    // what earlier turns saved and returned, the verification): "use the link I sent earlier" is true when one was sent
     const earlier = await conversationRecord(d.db, { locationId: loc, conversationId: conv.id, turnId, phone: conv.phone_e164, now, tz })
-    const verified = state.identity.trust === 'trusted'
-    // a phone the server gives no times in the chat (check_availability returns the booking link instead)
-    const noTimes = !(verified && actionsEnabled)
-    const timesReturned = [...toolRecord, ...earlier.lines].some((l) => /open times for [^:]*: (?!none)/.test(l))
-    const dayChecked = toolRecord.some((l) => l.startsWith('open times for ')) || earlier.availabilityChecked
-    const judgeRecord = [
-      `Done by the server since the assistant's last text: ${actionDone ? executed.join('; ') : 'nothing (nothing was booked, moved or cancelled)'}.`,
-      ...(confirmTexted
-        ? [
-            'In this turn the server texted the client a proposal to confirm with its reply number: nothing is done until they confirm it.',
-          ]
-        : []),
-      // guard polish after W4b-fix: the tool results of this turn (a saved vehicle is no false claim; open times only as returned)
-      `What the server did and returned in this turn: ${toolRecord.length > 0 ? toolRecord.join('; ') : 'nothing'}.`,
-      `Earlier in this conversation (last 24 hours): ${earlier.lines.length > 0 ? earlier.lines.join('; ') : 'nothing'}.`,
-      `Links the server texted to this number in the last 24 hours: ${earlier.links.length > 0 ? earlier.links.join('; ') : 'none'}.`,
-      `A proposal waiting for the client's reply number: ${earlier.pending ?? 'none'}.`,
-      ...(timesReturned
-        ? []
-        : [
-            noTimes
-              ? 'Open times the server returned: none (this phone is given no times in the chat: no time may be named as open or available; a day or a part of a day only as this record says).'
-              : 'Open times the server returned: none (no time may be named as open or available; a day only as this record says).',
-          ]),
-      verified
-        ? `Verified phone: yes${state.identity.trustUntil ? `, until ${toBizDate(state.identity.trustUntil, tz)}` : ''}.`
-        : 'Verified phone: no (the client has not verified this phone: never say they are verified).',
-      `The client's name on file: ${turnContext.firstName ?? 'none'}.`,
-      `Vehicles on file: ${turnContext.vehicles.length > 0 ? turnContext.vehicles.join('; ') : 'none'}.`,
-      `The client's visits on file: ${turnContext.appointments.length > 0 ? turnContext.appointments.map((a) => a.label).join('; ') : 'none'}.`,
-      // the membership the model reads in its turn context ("Gold, active, 2 washes left this cycle"): a count from it is no invented fact
-      `The client's membership: ${turnContext.membership ?? 'none'}.`,
-    ].join('\n')
-    let rewriteUsed = false
-    let shortenUsed = false
-    let judgeRewriteUsed = false
-    let isolateUsed = false
-    const fix = async (draft: string, problems: readonly GuardProblem[], words: readonly string[] = [], instruction?: string): Promise<string> => {
-      messages.push({ role: 'user', content: [{ type: 'text', text: instruction ?? rewriteInstruction(draft, problems, words) }] })
-      transcript.add({ kind: 'message', message: messages[messages.length - 1]! })
-      const res = await call(request(true))
-      messages.push(res.message)
-      if (res.stopReason !== 'end_turn') throw new TurnAbort(`stop:${res.stopReason}`)
-      return textOf(res.message)
-    }
-    // (3) the policy judge: the rendered reply, the server's segments trusted (the safety line too); never throws (an error fails closed)
-    const judge = async (segments: readonly ReplySegment[]) => {
-      const all = [
-        ...segments,
-        ...(safety
-          ? [
-              { text: ' ', trusted: false },
-              { text: safetyLine, trusted: true },
-            ]
-          : []),
-        ...(card
-          ? [
-              { text: ' ', trusted: false },
-              { text: cardLine, trusted: true },
-            ]
-          : []),
-      ]
-      const run = () =>
-        runJudge(d.judge, all, {
-          timeoutMs: d.cfg.judge.timeoutMs,
-          maxTokens: d.cfg.judge.maxTokens,
-          signal: deadline.signal,
-          nowMs,
-          facts: factsText,
-          record: judgeRecord,
-        })
-      let r = await run()
-      judgeUsage = addUsage(judgeUsage, r.usage)
-      let attempts = 1
-      // throttled or timed out: one retry when the deadline leaves room (F3); a second error fails closed below
-      if (r.outcome.kind === 'error' && RETRYABLE_JUDGE_ERRORS.has(r.outcome.error) && (await retryOnce('judge', r.outcome.error))) {
-        attempts = 2
-        r = await run()
-        judgeUsage = addUsage(judgeUsage, r.usage)
-      }
-      const o = r.outcome
-      const entry = {
-        verdict: o.kind,
-        model: r.model,
-        latencyMs: r.latencyMs,
-        ...(attempts > 1 ? { attempts } : {}),
-        ...(r.shortened ? { shortened: true } : {}),
-        ...(o.kind === 'error' ? { error: o.error } : { category: o.verdict.category, reason: o.verdict.reason }),
-      }
-      transcript.add({ kind: 'judge', ...entry })
-      // stored for review like a tool call (redacted; the judge's message holds no phone number, id or token in the first place)
-      seq += 1
-      await d.db
-        .insertInto('assistant_tool_calls')
-        .values({
-          id: d.newId(),
-          turn_id: turnId,
-          seq,
-          round: rounds,
-          tool: 'policy_judge',
-          tool_use_id: null,
-          input: JSON.stringify({ model: r.model ?? d.cfg.judge.modelId, message: redactText(r.message), ...(attempts > 1 ? { attempts } : {}) }) as never,
-          output: o.kind === 'error' ? null : (JSON.stringify(o.verdict) as never),
-          outcome: o.kind === 'pass' ? 'ok' : o.kind === 'fail' ? 'denied' : 'error',
-          error: o.kind === 'error' ? o.error.slice(0, 2000) : o.kind === 'fail' ? o.verdict.category : null,
-          latency_ms: r.latencyMs,
-        })
-        .execute()
-      return o
-    }
-    let draft = text
-    let reply: string | null = null
-    // the proposal's reply number went out in this turn but the model's words still fail: the client gets the server's own confirm
-    // line alone (no model words left to check), never "a team member will text you back" after a good proposal (Bedrock: "{confirm}.
-    // You're all set" and "{confirm}. See you Saturday at 9" both failed the judge, so the fallback followed the reply number)
-    let confirmOnly = false
-    const toConfirmOnly = (why: string): boolean => {
-      if (!confirmTexted || confirmOnly) return false
-      confirmOnly = true
-      draft = `${CONFIRM_PLACEHOLDER}.`
-      transcript.add({ kind: 'guard', verdict: 'confirm_only', problems: [why] })
-      return true
-    }
-    // the reply as the model wrote it (placeholders in): the server's renderings it used are recorded with the reply (W4b X9)
-    let replyRaw = ''
-    try {
-      for (let i = 0; i < 10 && reply === null; i++) {
-        const v = guardReply({
-          text: draft,
-          values,
-          literals,
-          names,
-          address: facts.business.address,
-          openWindow: openingWindow(facts),
-          website: facts.business.website,
-          shopNumbers: [facts.contact.textingNumber, facts.contact.callingNumber],
-          maxChars,
-          // one rewrite for a claim that something was done when nothing was (a claim left after it is the judge's)
-          checkActionClaims: !actionDone && !rewriteUsed,
-          // W4 final check L6: an unverified phone's open times and "you're verified" (one rewrite; then the judge's)
-          checkAvailabilityClaims: noTimes && !rewriteUsed ? { dayChecked } : null,
-          ...(!verified && !rewriteUsed ? { phoneVerified: false } : {}),
-        })
-        transcript.add({ kind: 'guard', verdict: v.kind, ...(v.kind === 'fix' ? { problems: v.problems, ...(v.words.length > 0 ? { words: v.words } : {}) } : {}) })
-        if (v.kind === 'ok') {
-          if (!d.cfg.judge.enabled || confirmOnly) {
-            reply = v.rendered
-            replyRaw = v.text
-            break
-          }
-          const j = await judge(v.segments)
-          if (j.kind === 'pass') {
-            reply = v.rendered
-            replyRaw = v.text
-            break
-          }
-          // fail closed: no verdict, no reply (the turn deadline is the turn's own timeout)
-          if (j.kind === 'error') {
-            if (deadline.signal.aborted) throw new TurnAbort('deadline')
-            if (toConfirmOnly(`judge_error:${j.error}`)) continue
-            return await finishHandoff({ reason: 'judge_error', status: 'handed_off', fallback: true, usage, model, rounds, stop, error: `judge:${j.error}` })
-          }
-          if (judgeRewriteUsed && toConfirmOnly(`judge:${j.verdict.category}`)) continue
-          if (judgeRewriteUsed)
-            return await finishHandoff({ reason: 'policy_judge', status: 'handed_off', fallback: true, usage, model, rounds, stop, error: `judge:${j.verdict.category}` })
-          judgeRewriteUsed = true
-          draft = await fix(v.text, [], [], judgeRewriteInstruction(v.text, JUDGE_HINTS[j.verdict.category]))
-          continue
-        }
-        const hard = v.problems.filter((p) => HARD_PROBLEMS.has(p))
-        if (
-          hard.length > 0 ||
-          ((v.problems.includes('questions') || v.problems.includes('action_claim') || v.problems.includes('unverified_claim')) && !rewriteUsed)
-        ) {
-          // the rewrite still trips only the placement rule: the server isolates the placeholders itself, once (each its own sentence)
-          if (rewriteUsed && !isolateUsed && hard.length === 1 && hard[0] === 'placement') {
-            isolateUsed = true
-            draft = isolatePlaceholders(v.text, values)
-            continue
-          }
-          // the rewrite still trips a rule: the fallback and a person ("guard"; promises are the judge's: "policy_judge")
-          if (rewriteUsed && toConfirmOnly(`guard:${hard.join(',')}`)) continue
-          if (rewriteUsed) {
-            return await finishHandoff({ reason: 'guard', status: 'handed_off', fallback: true, usage, model, rounds, stop, error: `guard:${hard.join(',')}` })
-          }
-          rewriteUsed = true
-          draft = await fix(v.text, v.problems, v.words)
-          continue
-        }
-        if (v.problems.includes('questions')) {
-          draft = cutAfterFirstQuestion(v.text)
-          continue
-        }
-        // too long only
-        if (!shortenUsed) {
-          shortenUsed = true
-          draft = await fix(v.text, ['too_long'])
-          continue
-        }
-        // the cut is on the raw text: leave room for what the placeholders add when rendered
-        draft = cutAtSentence(v.text, maxChars - Math.max(0, v.rendered.length - v.text.length))
-      }
-    } catch (e) {
-      const reason = e instanceof TurnAbort ? e.reason : failureOf(e)
-      transcript.add({ kind: 'error', error: reason })
-      return await finishHandoff({ reason: 'fallback', status: 'failed', fallback: true, error: reason, usage, model, rounds, stop })
-    }
-    if (reply === null)
-      return await finishHandoff({
-        reason: 'guard',
-        status: 'handed_off',
-        fallback: true,
-        usage,
-        model,
-        rounds,
-        stop,
-        error: 'guard:unresolved',
-      })
-    // W4b X8: the client texted a photo and the reply says the team will review it: a person is asked to (the AI cannot see it)
-    if (snap.photo && TEAM_REVIEW.test(reply))
-      toolHandoff ??= {
-        reason: 'photo_quote',
-        summary:
-          'The client texted a photo; the assistant told them the team will review it. Look at the photo in Messages and reply.',
-      }
-    // guard polish after W4b-fix (P5): a text that hands the chat to the team never ends with a question; the assistant goes silent
-    // after it, so a question would never be answered ("Someone will text you back shortly! What's your first name?")
-    if (toolHandoff && reply.includes('?')) {
-      const kept = withoutQuestions(reply)
-      transcript.add({ kind: 'guard', verdict: 'handoff_no_question', problems: ['questions'] })
-      reply = kept ?? FALLBACK_TEXTS[lang]
-    }
-    const rendered = [...values.entries()]
-      .filter(([k]) => !k.startsWith('{link') && replyRaw.includes(k))
-      .map(([, v]) => v)
+    return { card, executed, earlier }
+  }
+
+  try {
+    // ---- the engine (engine.ts): the Converse loop, the output guard and the policy judge; it writes nothing but the call rows
+    // (ADR 0174 §3b: a Spanish text while the owner hands Spanish chats to the team gets the server's fixed line, no model call)
+    const r: EngineResult = spanishHandoff
+      ? await spanishHandoffReply(transcript, afterTools)
+      : await runEngine(
+      {
+        cfg: d.cfg,
+        provider: d.provider,
+        judge: d.judge,
+        registry: d.registry,
+        log: d.log,
+        recordCall: liveRecorder(d.db, d.newId, turnId),
+        nowMs,
+        retryBackoffMs: d.retryBackoffMs,
+      },
+      {
+        conversationId: conv.id,
+        turnId,
+        tz,
+        system,
+        tools,
+        specs,
+        factsText,
+        knowledgeText,
+        messages,
+        ctx,
+        links,
+        facts,
+        lang,
+        actionsEnabled,
+        turnContext,
+        lastAiText: snap.lines.filter((l) => l.who === 'ai').at(-1)?.text ?? '',
+        photo: snap.photo,
+        signal: deadline.signal,
+        deadlineAt,
+        transcript,
+        afterTools,
+        policy,
+        freshClientTexts: freshClient,
+      },
+    )
+    judgeUsage = r.judgeUsage
+    const { usage, model, rounds, stop } = r
+    if (r.kind === 'handoff') return await finishHandoff({ reason: r.reason, status: r.status, fallback: true, error: r.error, usage, model, rounds, stop })
+    if (r.kind === 'opted_out') return await finishOptedOut({ usage, model, rounds, stop })
+    const { reply, rendered, safety, card } = r
+    const toolHandoff = r.handoff
 
     // ---- the reply
     const out = await transaction(d.db, async (tx) => {
@@ -942,10 +557,11 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
       const composed = composeReply({
         text: reply,
         disclose: c.disclosed_at === null,
-        links,
+        links: links.map,
         safety,
         card,
         lang,
+        signOff: r.kind === 'reply' && r.handoff?.reason !== 'language' ? policy.behavior.signOff : '',
       })
       const queued = superseded
         ? null
@@ -1043,6 +659,29 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
   }
 }
 
+/**
+ * ADR 0174 §3b, Spanish "handoff": the server's fixed Spanish line (the disclosure on a first text, the card line when the texts
+ * held a card number) and a handoff (reason `language`), as a reply of the engine's shape. No model or judge call: no cost.
+ */
+async function spanishHandoffReply(transcript: Transcript, afterTools: () => Promise<{ card: boolean }>): Promise<EngineResult> {
+  const { card } = await afterTools()
+  transcript.add({ kind: 'guard', verdict: 'spanish_handoff' })
+  return {
+    kind: 'reply',
+    reply: SPANISH_HANDOFF_TEXT,
+    replyRaw: SPANISH_HANDOFF_TEXT,
+    rendered: [],
+    safety: false,
+    card,
+    handoff: { reason: 'language', summary: HANDOFF_SUMMARIES.language! },
+    usage: ZERO_USAGE,
+    judgeUsage: ZERO_USAGE,
+    model: null,
+    rounds: 0,
+    stop: null,
+  }
+}
+
 /** A shop-wide cap (or the budget) tells the managers once per cap window: the hourly cap once an hour, the others once a business day. */
 async function notifyCapOnce(d: TurnDeps, o: { locationId: string; cap: CapKind; now: Date; tz: string }): Promise<void> {
   const window = o.cap === 'global_hour' ? new Date(Math.floor(o.now.getTime() / 3600_000) * 3600_000).toISOString() : toBizDate(o.now, o.tz)
@@ -1065,10 +704,6 @@ async function notifyCapOnce(d: TurnDeps, o: { locationId: string; cap: CapKind;
     )
   })
 }
-
-/** A reply that tells the client the team will look at what they sent (W4b X8: a photo then opens a handoff). */
-const TEAM_REVIEW =
-  /\b(?:team|staff|someone|a person|technician|we(?:'ll| will))\b[^.!?]{0,60}\b(?:review|look|check|see|get back|text you|quote|estimate)|\b(?:equipo|alguien)\b[^.!?]{0,60}\b(?:revis|mira|cotiz|te escrib|te contact)/i
 
 /**
  * W4b X3: the in-chat actions the server executed for this conversation since the assistant's last reply (a reply number booked,
@@ -1107,42 +742,6 @@ export async function executedSinceLastReply(
   })
 }
 
-/** W4 final check L7: what the model is told when its reply offers a link that no tool sent in this turn. */
-export const LINK_NUDGE_TEXT =
-  'Your reply offers a link but none was sent in this turn. If the link helps, call send_link now (kind pin for a PIN reset, calendar to book, verify to book by text) and write your reply with its placeholder; otherwise write the reply again without offering a link.'
-
-/** A reply that offers to send a link ("I can send you a link to set a new one", "Want me to text you the booking link?"). */
-const OFFERS_LINK =
-  /\b(?:i\s+can|i\s+could|i'?ll|i\s+will|i\s+would|want\s+me\s+to|shall\s+i|should\s+i|would\s+you\s+like(?:\s+me\s+to)?|let\s+me|happy\s+to|glad\s+to)\s+(?:send|text|get)\b[^.!?]{0,40}\blinks?\b|\b(?:would\s+you\s+like|do\s+you\s+want|want)\s+(?:a|the|another|your)\s+(?:\w+\s+){0,2}links?\b|\b(?:te\s+)?(?:puedo|quieres\s+que\s+te)\s+(?:enviar|mandar|envie|mande)\b[^.!?]{0,30}\benlace\b/i
-
-/**
- * Whether the text offers to send a link; `statement`: only an offer that is not a question ("I can send you a link to set a new
- * one", not "Want me to text you a link to join?", which may wait for the client's yes once).
- */
-export function offersLink(text: string, o: { statement?: boolean } = {}): boolean {
-  const t = text.normalize('NFD').replace(/\p{M}/gu, '').replace(/[’‘]/g, "'")
-  if (!o.statement) return OFFERS_LINK.test(t)
-  return sentencesOf(t).some((s) => !s.trim().endsWith('?') && OFFERS_LINK.test(s))
-}
-
-/**
- * W4 final check L7 (inject-you-are-now): the text written in the same round as handoff_to_staff ("I can't confirm a free wash, but
- * a team member will text you back shortly.") goes out ahead of the final round's text; a sentence of the final text it already holds,
- * or a second "a team member will text you back", is dropped.
- */
-export function withHandoffText(before: string, after: string): string {
-  const norm = (x: string): string => x.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, '').replace(/\s+/g, ' ').trim()
-  const b = norm(before)
-  // "a team member will text you back / reach out / give you a call", "someone will be in touch", "el equipo te escribirá"
-  const TEAM =
-    /\b(?:team\s+member|someone|somebody|staff|a\s+person|the\s+team|our\s+team|equipo|alguien)\b[^.!?]{0,40}\b(?:will|'ll|is\s+going\s+to|te\s+(?:escribir|contactar|llamar|respond))|\b(?:text\s+you\s+back|will\s+text\s+you|reach\s+out|get\s+back\s+to\s+you|give\s+you\s+a\s+call|call\s+you\s+(?:back|shortly|soon)|be\s+in\s+touch|te\s+escribir|te\s+contactar|te\s+llamar)/i
-  const kept = sentencesOf(after.trim()).filter((x) => {
-    const n = norm(x)
-    return n !== '' && !b.includes(n) && !(TEAM.test(x) && TEAM.test(before))
-  })
-  return [before.trim(), ...kept].join(' ').trim()
-}
-
 /**
  * W4 final check L1: the conversation part of the judge's server record. `links`: what the server texted to this number in the last
  * 24 hours (client_links: kind and when, whoever sent it); `pending`: a proposal still waiting for its reply number; `lines`: what
@@ -1152,7 +751,7 @@ export function withHandoffText(before: string, after: string): string {
 export async function conversationRecord(
   db: Db,
   o: { locationId: string; conversationId: string; turnId: string; phone: string; now: Date; tz: string },
-): Promise<{ links: string[]; pending: string | null; lines: string[]; availabilityChecked: boolean }> {
+): Promise<ConversationRecord> {
   const since = new Date(o.now.getTime() - 86_400_000)
   const when = (at: Date): string => `${DAY_ABBR[bizWeekday(toBizDate(at, o.tz))]} ${clockLabel(at, o.tz)}`
   const linkRows = await db

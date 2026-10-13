@@ -169,6 +169,17 @@ function hasPicture(kind: string, attachments: unknown): boolean {
   )
 }
 
+/** A text's time as the conversation shows it to the model: "[Sat 10:36 AM]" (shared with practice, ADR 0174 §4c). */
+export const historyWhen = (at: Date, tz: string): string => `[${DAY_ABBR[bizWeekday(toBizDate(at, tz))]} ${clockLabel(at, tz)}]`
+
+/** The turn context's "Now:" label: "Saturday, June 13, 2026, 10:36 AM" (shared with practice, ADR 0174 §4c). */
+export const nowLabelOf = (now: Date, tz: string): string =>
+  `${dateLabel(now, tz)}, ${now.toLocaleString('en-US', { timeZone: tz, year: 'numeric' })}, ${clockLabel(now, tz)}`
+
+/** A vehicle as the turn context lists it: "2021 Honda Civic, blue (size compact_car)" (shared with practice). */
+export const vehicleLine = (v: { year: number | null; make: string | null; model: string | null; color: string | null; vehicle_class: string | null }): string =>
+  [v.year, v.make, v.model].filter((x) => x !== null && String(x).trim() !== '').join(' ') + (v.color ? `, ${v.color}` : '') + (v.vehicle_class ? ` (size ${v.vehicle_class})` : '')
+
 /** The last historyLimit texts of the number within historyWindowMs, inbound (sms_inbox) and outbound (messages), oldest first. */
 export async function loadConversation(
   db: Executor,
@@ -207,7 +218,7 @@ export async function loadConversation(
     .orderBy('queued_at', 'desc')
     .limit(o.limit)
     .execute()
-  const when = (at: Date): string => `[${DAY_ABBR[bizWeekday(toBizDate(at, o.tz))]} ${clockLabel(at, o.tz)}]`
+  const when = (at: Date): string => historyWhen(at, o.tz)
   const pending = o.pendingSince?.getTime() ?? Infinity
   const fresh = (r: (typeof inbound)[number]): boolean =>
     r.assistant_conversation_id === o.conversationId && r.decision === 'assistant' && r.received_at.getTime() >= pending
@@ -298,12 +309,7 @@ export async function loadTurnContext(
       .limit(3)
       .execute()
     // the car's size key (facts-v4): what propose_booking's vehicleClass takes and what {price:<key>:<size>} prices
-    vehicles = rows.map(
-      (v) =>
-        [v.year, v.make, v.model].filter((x) => x !== null && String(x).trim() !== '').join(' ') +
-        (v.color ? `, ${v.color}` : '') +
-        (v.vehicle_class ? ` (size ${v.vehicle_class})` : ''),
-    )
+    vehicles = rows.map(vehicleLine)
     vehicleNames = rows.flatMap((v) => vehicleLiterals(v))
     hasAppointments =
       (await db.selectFrom('appointments').select('id').where('customer_id', '=', customerId).limit(1).executeTakeFirst()) !== undefined
@@ -326,7 +332,7 @@ export async function loadTurnContext(
   const unknownNumber = customerId === null
   const newClient = unknownNumber || identity.provisional || (welcomed && !hasAppointments)
   return {
-    nowLabel: `${dateLabel(o.now, o.tz)}, ${o.now.toLocaleString('en-US', { timeZone: o.tz, year: 'numeric' })}, ${clockLabel(o.now, o.tz)}`,
+    nowLabel: nowLabelOf(o.now, o.tz),
     firstName,
     unknownNumber,
     firstContact: o.firstContact,

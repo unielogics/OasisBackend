@@ -296,6 +296,24 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/api/v1/arrival-settings` | authenticated |  |
 | PUT | `/api/v1/arrival-settings` | cli.member |  |
 | POST | `/api/v1/arrivals/ping` | public |  |
+| GET | `/api/v1/assistant/conversations` | set.assistant + cli.view |  |
+| GET | `/api/v1/assistant/conversations/:id` | set.assistant + cli.view |  |
+| POST | `/api/v1/assistant/corrections` | set.assistant |  |
+| GET | `/api/v1/assistant/knowledge` | set.assistant |  |
+| POST | `/api/v1/assistant/knowledge` | set.assistant |  |
+| DELETE | `/api/v1/assistant/knowledge/:id` | set.assistant |  |
+| PUT | `/api/v1/assistant/knowledge/:id` | set.assistant |  |
+| DELETE | `/api/v1/assistant/knowledge/documents/:id` | set.assistant |  |
+| POST | `/api/v1/assistant/knowledge/documents/:id/complete` | set.assistant |  |
+| POST | `/api/v1/assistant/knowledge/documents/:id/extract` | set.assistant |  |
+| GET | `/api/v1/assistant/knowledge/documents/:id/file` | set.assistant |  |
+| POST | `/api/v1/assistant/knowledge/documents/presign` | set.assistant |  |
+| GET | `/api/v1/assistant/practice/sessions` | set.assistant |  |
+| POST | `/api/v1/assistant/practice/sessions` | set.assistant |  |
+| DELETE | `/api/v1/assistant/practice/sessions/:id` | set.assistant |  |
+| GET | `/api/v1/assistant/practice/sessions/:id` | set.assistant |  |
+| POST | `/api/v1/assistant/practice/sessions/:id/turns` | set.assistant | required |
+| POST | `/api/v1/assistant/practice/turns/:id/rerun` | set.assistant |  |
 | GET | `/api/v1/auth/csrf` | authenticated |  |
 | POST | `/api/v1/auth/invite/accept` | public |  |
 | POST | `/api/v1/auth/login` | public |  |
@@ -505,7 +523,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | PATCH | `/api/v1/services/:id` | set.services |  |
 | PUT | `/api/v1/services/:id/checklist` | set.services |  |
 | GET | `/api/v1/settings/assistant` | authenticated |  |
-| PUT | `/api/v1/settings/assistant` | set.hours |  |
+| PUT | `/api/v1/settings/assistant` | set.assistant |  |
 | PUT | `/api/v1/settings/auto-federal-holidays` | set.hours |  |
 | GET | `/api/v1/settings/billing` | set.billing |  |
 | PUT | `/api/v1/settings/billing/link-tipping` | set.billing |  |
@@ -783,17 +801,21 @@ as `{prep}` to both templates ("... at 2:00 PM. Plan for 2–3 hours. Reply C to
 ### 15.6b The AI text assistant: `/settings/assistant` (ADR 0160, design section 8, plan G)
 
 `GET /settings/assistant` (any session) answers `{enabled, actionsEnabled, stage allowlist|customers|everyone, allowlist[E.164],
-staffPauseHours, faq[{q, a}], server{aiEnabled, actionsEnabled} (read-only), active (read-only), version}` with `ETag: "<version>"`.
+staffPauseHours, faq[{q, a}], capabilities{availability, bookingLinks, membershipLinks, paymentLinks, accountInfo}, behavior{tone
+friendly|professional|warm|concise, length short|standard, styleNotes, spanish on|english|handoff, avoidWords[], avoidTopics[],
+handoffTopics[], signOff}, server{aiEnabled, actionsEnabled} (read-only), active (read-only), version}` with `ETag: "<version>"`.
 The values are the registry settings `assistant.enabled`, `assistant.actions_enabled`, `assistant.stage`, `assistant.allowlist`,
-`assistant.staff_pause_hours` and `assistant.faq` (all off / empty by default: `enabled` and `actionsEnabled` false, stage
-`allowlist`, 12 hours); `version` is the sum of their versions, which any write to any of them raises. `server` are the environment
+`assistant.staff_pause_hours`, `assistant.faq` and (ADR 0174) `assistant.capabilities` and `assistant.behavior` (all off / empty by
+default: `enabled` and `actionsEnabled` false, stage `allowlist`, 12 hours; every capability on, tone friendly, length standard,
+Spanish on, no lists, no sign-off: today's behaviour); `version` is the sum of their versions, which any write to any of them raises. `server` are the environment
 switches `AI_ENABLED` and `AI_ACTIONS_ENABLED`, which this section cannot change: with `AI_ENABLED=false` the assistant answers nobody
 whatever the section says. `active` = `AI_ENABLED` and `enabled`. The allowlist holds the owner's and staff's own mobile numbers,
-so a reader without `set.hours` gets them masked to the last four digits (`+1******0142`); `set.hours` sees them in full. The
+so a reader without `set.assistant` gets them masked to the last four digits (`+1******0142`); `set.assistant` sees them in full. The
 welcome flow's hourly ceiling of new provisional clients, `assistant.new_texters_per_hour` (1..1000, default 30; W4c fixes), is a
 registry setting outside this section (section 23.4a, "Welcome flow").
 
-`PUT /settings/assistant` (`set.hours`, the permission of the shop's other business settings): any field (strict; `allowlist` and
+`PUT /settings/assistant` (`set.assistant`, ADR 0174: the section's own permission, given by migration 20261016200000 to every
+role that held `set.hours`, the permission it used before): any field (strict; `allowlist` and
 `faq` replace the whole list), `version` or `If-Match` required (428 without, 412 `VERSION_CONFLICT {currentVersion}` when stale;
 saves take a per-location advisory lock). Each value is validated by its registry schema, then the section's rules: allowlist numbers
 are read as E.164 (`(201) 555-0142` becomes `+12015550142`), must be textable US/Canadian numbers, the check the assistant's gate
@@ -802,11 +824,130 @@ mobile numbers only.`), each listed once, at most 50; the FAQ holds at most 40 p
 (no HTML tag and no character a reader cannot see: control characters but a tab or line break, format characters such as zero-width,
 direction marks, the soft hyphen and the Unicode tag block, line/paragraph separators, private-use, unassigned and default-ignorable
 code points such as variation selectors and Hangul fillers; only the emoji presentation selector after an emoji and the zero-width
-joiner between two emoji pass), each question once (case and spaces ignored). 422
+joiner between two emoji pass), each question once (case and spaces ignored). `capabilities` and `behavior` are whole objects
+(strict; ADR 0174 §3a): style notes at most 400 characters, words 2..40 characters (at most 30), topics 3..80 (at most 15 per
+list), every text plain (the FAQ's rules), each list without repeats (case and spaces ignored), a topic either avoided or handed to
+the team, and a sign-off of at most 24 characters with no amount, number, link or promise word (`The sign-off cannot hold an amount, a
+number, a link or a promise.`). The turn applies them (ADR 0174 §3b, wave K2c), and they only take abilities away: a capability
+switched off leaves its tools out of the model's request (send_link offers only the allowed kinds: calendar with `bookingLinks`,
+verify with `bookingLinks` or in-chat actions, membership with `membershipLinks`, pay with `paymentLinks`, pin with any of
+`accountInfo`, `membershipLinks`, `paymentLinks`) and the runner refuses them if called; `behavior` adds the owner block after the
+unchanged rules (tone and length presets, words and topics to avoid, topics always handed to the team, quoted style notes), the
+guard rewrites a word to avoid (then drops its sentences, then the fallback), a handoff topic in the client's text the model did
+not hand off gets the server's fixed line and a handoff (reason `policy`; a proposal texted in that turn is canceled and the line
+names the visit too; the lists match sentence by sentence), Spanish `english` answers a Spanish texter in English
+and `handoff` answers with a fixed Spanish line and a handoff (reason `language`) without a model call, and `signOff` is appended
+by the server after the reply. With the defaults the assistant's requests are byte-identical to before. A FAQ that grows the shared knowledge budget past `AI_KNOWLEDGE_MAX_CHARS` is refused with 422
+`KNOWLEDGE_BUDGET {usedChars, maxChars, needed}` (section 15.6c); a save that shrinks it always passes. 422
 names every field (`allowlist.1`, `faq.0.a`, `staffPauseHours`; a stage outside the enum is the request schema's `body.stage`), and
 nothing is written. Only changed keys are written, each audited (`settings.update`, before/after) and published as
 `settings.changed {section: assistant, key, version}`. The answer is the view plus `changed`. A loaded view may be sent back as it
 is (`server` and `active` are accepted and ignored). Tests: `test/settings-http/assistant.test.ts`.
+
+### 15.6c Oasis AI knowledge: `/assistant/knowledge` (ADR 0174 §1)
+
+Every route needs `set.assistant` (ADR 0174 D3) and is outside the kiosk's route list. Nothing here reaches a client: an ACTIVE entry
+changes what Oasis AI reads (the SHOP KNOWLEDGE block of its prompt and of the policy judge, masked: amounts as "[price in
+Settings]", links and e-mails as "[link removed]", phone numbers other than the shop's as "[number]"), and only while it answers.
+
+`GET /assistant/knowledge` answers `{entries[], documents[], budget, limits}`. An entry is `{id, kind note|document|correction,
+title, body, question (correction), wrongReply (correction; redacted, never shown to the model; null without cli.view unless it came from a practice text of a synthetic
+new texter whose session still exists), source manual|practice|live,
+active, documentId, reviewedAt, warnings[{kind amount|link|phone|email|instruction|promise|hidden|markup|long, sample, line}],
+chars (title + question + body), sort, version, createdAt, updatedAt}`; `budget` is `{usedChars, maxChars, parts{faq, notes,
+documents, corrections}}` (active entries plus the Settings Q&A against `AI_KNOWLEDGE_MAX_CHARS`, default 20,000); `limits` names
+the caps (title 120, note 4,000, document stored 60,000 and 20,000 to be on, correction answer 500 and question 300, a PDF 10 MB and
+60 pages).
+
+`POST /assistant/knowledge` `{title, body, active?}` creates a note (201 `{entry, budget}`): plain text (no hidden character, no HTML
+tag; 422 naming `title` or `body`), a draft unless `active`. `PUT /assistant/knowledge/:id` `{title?, body?, question?
+(correction), active?, reviewed?, confirmInstructions?, version}` edits, turns on or off, or records the review of a document;
+`version` or `If-Match` is required (428 without, 412 `VERSION_CONFLICT {currentVersion}` when stale). `DELETE
+/assistant/knowledge/:id` (If-Match optional) answers 204; a document entry deletes its document (text cleared, object removed).
+
+The budget: turning an entry on, growing an active one, or a Settings Q&A that grows (section 15.6b) is refused with 422
+`KNOWLEDGE_BUDGET {usedChars, maxChars, needed}` when it would pass the cap; nothing is cut and the entry stays a draft. A save that
+removes characters always passes. All of these run under one per-location advisory lock, so two concurrent saves cannot both pass.
+
+The review gate: a document goes on only once reviewed (`reviewed: true` in that save, or an earlier review of the same text) and,
+when its warnings hold an instruction-like line, with `confirmInstructions: true`; else 422 `KNOWLEDGE_NEEDS_REVIEW {needs:
+[reviewed|confirmInstructions]}`. Editing a document's text clears its review: a live document passes the same gate again when its
+text changes, or when a new title brings an instruction-like line. A document needs 20,000 characters or fewer to be on.
+
+Audit `assistant.knowledge.{create,update,activate,deactivate,delete}` with `{kind, title, active, chars, bodySha256}` (never the
+body); every change publishes `settings.changed {section: assistant_knowledge}`. Tests: `test/assistant-knowledge/knowledge.test.ts`,
+`render.test.ts`, `turn.test.ts`.
+
+### 15.6d Oasis AI knowledge PDFs: `/assistant/knowledge/documents` (ADR 0174 §2)
+
+`POST /assistant/knowledge/documents/presign` `{filename, bytes (1..10 MB), sha256 (the browser's, hex)}` answers 201 `{documentId,
+upload{key, url, fields, expiresAt}}`: a presigned POST for exactly `kb/{location}/{id}.pdf`, `application/pdf`, 1 byte to 10 MB, 5
+minutes (upload like a photo: every field, then `file`). A file already in the knowledge is 409 `DUPLICATE_DOCUMENT {documentId,
+entryId}`. `POST …/:id/complete` checks the object (size, type, `%PDF-`) and its SHA-256 (the server's own: a copy is deleted and 409
+answered) and answers 202 `{status: extracting}` (job `assistant.knowledge.extract`), or 200 `{status: failed, errorCode: not_pdf,
+error}`; 422 when the file was not uploaded. The extraction makes the document `ready` with one inactive, unreviewed entry (its
+text cleaned, its warnings computed), or `failed` with `errorCode no_text|encrypted|corrupt|too_many_pages|timeout|too_large` and a
+plain `error` for the owner (a scan: "This PDF is a scan (pictures of pages), so Oasis AI can't read it. ..."). Poll GET
+`/assistant/knowledge` or listen for `settings.changed {section: assistant_knowledge}`.
+
+`POST …/:id/extract` reads a failed document again (202; at most 5 reads, never a not-PDF: 409 `DOCUMENT_NOT_READY`). `DELETE
+…/documents/:id` deletes a document and its entry (204). `GET …/:id/file` answers `{url, expiresInSeconds: 600}`, a presigned GET
+that saves the PDF as a file (`Content-Disposition: attachment`; 409 while not uploaded). Audit `assistant.document.{upload,
+extract,delete}`. Jobs: `assistant.knowledge.extract`, `assistant.knowledge.cleanup` (docs/jobs.md). Storage: docs/integrations/s3.md
+"Knowledge PDFs". Tests: `test/assistant-knowledge/documents.test.ts`, `pdf.test.ts`, `jobs.test.ts`.
+
+### 15.6e The practice chat: `/assistant/practice` (ADR 0174 §4c)
+
+`set.assistant`; a session that plays a real client also needs `cli.view` (403). Practice runs the real engine (the same prompt,
+tools, guard and policy judge as a live turn, the judge always on) with practice effects: nothing is sent or booked and nothing is
+written to a client record, a lead, a link, a pending action, the outbox or the audit log (its tools read through a read-only
+database pool). It works whatever `AI_ENABLED` says, is off until `AI_PRACTICE_ENABLED` (409 `PRACTICE_OFF`), mirrors the saved
+settings, `AI_ACTIONS_ENABLED` and `PUBLIC_LINKS_ENABLED`, and has its own daily budget `AI_PRACTICE_DAILY_BUDGET_USD` (the
+location's practice spend of the business day; 429 `PRACTICE_BUDGET`), never counted in `AI_DAILY_BUDGET_USD`.
+- `POST /assistant/practice/sessions` `{persona new_texter|client, customerId? (client: a client of the shop, 404 otherwise),
+  verified?, language? en|es, includeEntryIds? (draft knowledge entries read as if on, at most 20; 422 when one does not exist)}` →
+  201 `{session}`; 429 `PRACTICE_LIMIT` after 20 sessions a user a day. A new texter is synthetic (its id and a fictional 555-01xx
+  number exist only in the session); a client on file is read-only.
+- `GET /assistant/practice/sessions` → `{sessions[], practice{enabled, budgetUsd, spentTodayUsd, actionsEnabled, linksEnabled}}`
+  (mine, newest first, kept 30 days); `GET …/:id` → `{session, turns[]}` (another user's, or older than 30 days: 404); `DELETE
+  …/:id` → 204.
+- `POST …/sessions/:id/turns` `{text (1..640)}`, Idempotency-Key required (a replay answers the stored turn and queues nothing), 10
+  a minute → 202 `{turn}` with status `running`. Job `ai.practice` answers it (queued after the commit) and publishes
+  `assistant.practice.turn {sessionId, turnId}` on the notifications channel to the session's creator; the dashboard polls the
+  session every 2 s while a turn runs. 409 `PRACTICE_BUSY` while one runs (a turn running over 5 minutes is failed as `timeout`),
+  `PRACTICE_ENDED` after the client opted out in the chat; 429 `PRACTICE_LIMIT` after 40 turns a session.
+- `POST /assistant/practice/turns/:id/rerun` → 202 `{turn}` ("Try again" after a correction): the same text over the session's
+  earlier turns, from the session as it was before that text, reading the knowledge as it is now (`rerunOf` set, the original's
+  `seq`); it never changes the session's own state. Same switches and limits; another user's turn is 404.
+- A session is `{id, persona, client{id, firstName}|null, verified, language, includeEntryIds, turns, costMicros, createdAt,
+  updatedAt}`; a turn `{id, sessionId, seq, rerunOf, clientText, status running|replied|handed_off|failed|opted_out, replyText (what
+  the client would get, links as "[booking link]", "[verify link]", "[PIN link]", "[membership link]", "[payment link]"),
+  extraTexts (the confirmation a proposal would text, "Reply #### to confirm.", or the opt-out confirmation), badges[{kind
+  rewritten|shortened|policy_rewrite|handed_off|fallback|link|proposal|opted_out|looked_up, label}], error, latencyMs, startedAt,
+  finishedAt}`.
+Tests: `test/assistant-practice/practice.test.ts` (every production table's row count unchanged, the read-only pool, AI_ENABLED
+off, the judge forced on), `parity.test.ts` (live and practice send identical requests), `routes.test.ts`, `jobs.test.ts`.
+
+### 15.6f Corrections and the review of real conversations (ADR 0174 §5)
+
+- `POST /assistant/corrections` (`set.assistant`) `{clientText (1..300), rightAnswer (1..500), source practice|live,
+  practiceTurnId? (one of my practice texts, 404 otherwise), assistantTurnId? (a real turn of the location; needs cli.view, 403),
+  active? (default true), replaceEntryId?}` → 201 `{entry, budget}`: a knowledge entry of kind `correction` (its title is the
+  question). The wrong reply is loaded by the server from the named turn and stored redacted (`wrongReply`, links as "[link]"); the
+  browser's copy is never used and the model reads only `Q: "…" A: "…"` in SHOP KNOWLEDGE. Plain text (422 otherwise), the warnings
+  of notes, the shared budget (422 `KNOWLEDGE_BUDGET`; `active: false` saves a draft); 409 `CORRECTION_EXISTS {entryId}` for the same
+  question (case, spaces and punctuation ignored) unless `replaceEntryId` names it (then it is replaced in place, `version` + 1).
+  Audited `assistant.knowledge.create` / `.update` (never the body); `settings.changed {section: assistant_knowledge}`.
+- `GET /assistant/conversations?days=1..90 (30)&filter=all|handed_off|fallback|judge|corrected&cursor&limit=1..100 (50)`
+  (`set.assistant` + `cli.view`) → `{conversations[{id, client{firstName, phoneLast4 "•••0142"}, lastTurnAt, turns, handoff{open,
+  reason}|null, flags[]}], nextCursor}`: the location's conversations with an Oasis AI turn in the window, newest first. Flags:
+  `handed_off` (a handoff), `fallback` (a turn failed or the fallback text went), `judge` (the policy check failed a draft or did not
+  answer), `corrected` (a correction was made from a turn).
+- `GET /assistant/conversations/:id` → `{conversation, turns[{id, startedAt, status, clientTexts (the texts the turn answered,
+  redacted), reply (what was sent, redacted, links as "[link]"), handoffReason, guard[] (what the output guard changed, in plain
+  words), judge{verdict pass|fail|error, category, words}|null, tools[], model, promptVersion, correctionEntryId}]}` (the turns of
+  the last 90 days; another location's conversation or one with none in 90 days: 404).
+Tests: `test/assistant-practice/routes.test.ts` (corrections), `review.test.ts`; access: `test/assistant-knowledge/contracts.test.ts`.
 
 ### 15.7 The public website's hours: `GET /api/v1/public/hours`
 

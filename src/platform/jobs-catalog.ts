@@ -483,6 +483,44 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
     tests: 'test/assistant/jobs.test.ts, test/jobs/registry.test.ts',
     status: 'built',
   },
+  'assistant.knowledge.extract': {
+    owner: 'assistant (knowledge)',
+    purpose:
+      'Reads one uploaded knowledge PDF (ADR 0174 §2) in a worker thread (unpdf; 256 MB heap, 30 s, 60 pages, eval and fonts off): stores the cleaned text and creates its knowledge entry as an inactive, unreviewed draft with its warnings, or fails the document with a plain reason (no_text for a scan, encrypted, corrupt, too_many_pages, timeout, too_large). Nothing reaches a client; works whatever AI_ENABLED says.',
+    idempotency:
+      'Only a document still extracting is read, under a row lock; the entry is unique per document (assistant_knowledge.document_id), so a second run finds it ready or failed and does nothing.',
+    clock: 'Injected clock for updated_at; the 30-second limit is a timer on the worker thread.',
+    enqueuedBy: 'POST /assistant/knowledge/documents/:id/complete and POST .../:id/extract (retry), after their commit (singleton key = the document)',
+    tests: 'test/assistant-knowledge/pdf.test.ts, test/assistant-knowledge/documents.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'assistant.knowledge.cleanup': {
+    owner: 'assistant (knowledge)',
+    purpose:
+      'Every 15 minutes (ADR 0174 §2): deletes uploads still pending after 15 minutes with their objects, fails extractions stuck over 10 minutes as timeout (the owner can retry), and removes again the stored objects of deleted documents a request could not delete.',
+    idempotency: 'Each step moves only rows still in its starting state; deleting a missing object succeeds.',
+    clock: 'Injected clock against updated_at.',
+    tests: 'test/assistant-knowledge/documents.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'ai.practice': {
+    owner: 'assistant (practice)',
+    purpose:
+      'Answers one text of the practice chat (ADR 0174 §4c): the real engine (the same prompt, tools, guard and policy judge as a live turn, the judge forced on) with practice effects (a link shows as "[booking link]", a proposal shows the confirmation it would text; nothing is sent, booked or written to a client record) and a read-only database pool for the tools. Stores the answer, its badges and cost on the turn and tells its creator (assistant.practice.turn). Works whatever AI_ENABLED says; while AI_PRACTICE_ENABLED is off a queued turn fails (practice_off). Its spend counts against AI_PRACTICE_DAILY_BUDGET_USD only.',
+    idempotency: 'Only a turn still running is answered, and its result is stored only while it is still running; retryLimit 0 (a failed turn shows as failed).',
+    clock: 'Injected clock for the turn\'s instant and finished_at; the turn deadline is AI_TURN_DEADLINE_MS.',
+    enqueuedBy: 'POST /assistant/practice/sessions/:id/turns and POST /assistant/practice/turns/:id/rerun, after their commit',
+    tests: 'test/assistant-practice/practice.test.ts, test/assistant-practice/jobs.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'assistant.practice.retention': {
+    owner: 'assistant (practice)',
+    purpose: 'Daily (ADR 0174 §4c): deletes practice sessions older than 30 days with their turns, and fails turns still running after 5 minutes (a job that died) as timeout.',
+    idempotency: 'Deletes and updates by age only; a second run finds nothing left to do.',
+    clock: 'Injected clock against created_at and started_at.',
+    tests: 'test/assistant-practice/jobs.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
 }
 
 const policyOf = (d: JobDefinition<never>): string => d.policy ?? 'standard'

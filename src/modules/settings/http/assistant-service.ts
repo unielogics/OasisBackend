@@ -1,7 +1,8 @@
 // The Assistant section of Settings (ADR 0160, design section 8, plan G): the AI text assistant's switch, the in-chat actions switch,
 // the stage (who it answers), the allowlist of the first stage, how long a staff reply pauses it on a thread, and the FAQ it answers
-// from. Every value is an ordinary registry setting (assistant.*, platform/settings.ts); the section reads and writes them together
-// under one version token, the sum of the six setting versions, exactly like the Reminders section: a save names the version it was
+// from, and (ADR 0174) its limits and tone: what it may do (capabilities) and how it writes (behavior). Every value is an ordinary
+// registry setting (assistant.*, platform/settings.ts); the section reads and writes them together under one version token, the sum
+// of the eight setting versions, exactly like the Reminders section: a save names the version it was
 // edited from (412 VERSION_CONFLICT otherwise) under a per-location advisory lock, and writes only the keys whose value changed (each
 // audited and published as settings.changed, section "assistant", by updateSetting).
 //
@@ -14,6 +15,9 @@ import type { Executor, Tx } from '../../../platform/db.js'
 import { AppError } from '../../../platform/errors.js'
 import { normalizeTextableNanp } from '../../../platform/phone.js'
 import { getSetting, parseSetting, updateSetting, type SettingKey, type SettingValue } from '../../../platform/settings.js'
+import { PERK_PROMISE } from '../../assistant/facts.js'
+import { digitWords, moneyWords, secretRequests, urlWords } from '../../assistant/guard.js'
+import { assertBudget, faqChars, lockKnowledge } from '../../assistant/knowledge/service.js'
 
 /** The section's fields and the setting each one is stored in. */
 export const ASSISTANT_FIELDS = {
@@ -23,6 +27,9 @@ export const ASSISTANT_FIELDS = {
   allowlist: 'assistant.allowlist',
   staffPauseHours: 'assistant.staff_pause_hours',
   faq: 'assistant.faq',
+  // ADR 0174: limits and tone (the turn applies them: policy.ts; only ever taking abilities away)
+  capabilities: 'assistant.capabilities',
+  behavior: 'assistant.behavior',
 } as const satisfies Record<string, SettingKey>
 
 export type AssistantField = keyof typeof ASSISTANT_FIELDS
@@ -34,6 +41,8 @@ export interface AssistantValues {
   allowlist: string[]
   staffPauseHours: number
   faq: { q: string; a: string }[]
+  capabilities: SettingValue<'assistant.capabilities'>
+  behavior: SettingValue<'assistant.behavior'>
 }
 export type AssistantPatch = Partial<AssistantValues>
 
@@ -83,6 +92,42 @@ export const hasHiddenCharacters = (text: string): boolean => HIDDEN.test(text.r
 const MARKUP = /<\s*[a-z!/?][^>]*>/i
 
 const sameQuestion = (s: string): string => s.toLowerCase().replace(/\s+/g, ' ').trim()
+
+/** A plain-text owner line (style notes, a word or topic, the sign-off): the FAQ's rules (no hidden character, no HTML). */
+function plainText(text: string, path: string, issues: Issue[]): void {
+  if (hasHiddenCharacters(text)) issues.push({ path, message: 'Use plain text: this line holds hidden or control characters.' })
+  else if (MARKUP.test(text)) issues.push({ path, message: 'Use plain text: no HTML tags.' })
+}
+
+/**
+ * ADR 0174 §3a: the behavior's own rules (settings only take abilities away): plain text everywhere, each list without repeats, a
+ * topic either avoided or handed to the team (not both), and a sign-off the guard would let through as it is (no amount, no number,
+ * no link, no promise word, no request for a code).
+ */
+function behaviorIssues(b: AssistantValues['behavior'], issues: Issue[]): void {
+  plainText(b.styleNotes, 'behavior.styleNotes', issues)
+  plainText(b.signOff, 'behavior.signOff', issues)
+  for (const list of ['avoidWords', 'avoidTopics', 'handoffTopics'] as const) {
+    const seen = new Set<string>()
+    b[list].forEach((x, i) => {
+      plainText(x, `behavior.${list}.${i}`, issues)
+      const k = sameQuestion(x)
+      if (seen.has(k)) issues.push({ path: `behavior.${list}.${i}`, message: 'This is already in the list.' })
+      seen.add(k)
+    })
+  }
+  const avoided = new Set(b.avoidTopics.map(sameQuestion))
+  b.handoffTopics.forEach((x, i) => {
+    if (avoided.has(sameQuestion(x)))
+      issues.push({ path: `behavior.handoffTopics.${i}`, message: 'A topic is either avoided or handed to the team, not both.' })
+  })
+  const s = b.signOff
+  if (
+    s !== '' &&
+    (moneyWords(s).length > 0 || digitWords(s).length > 0 || urlWords(s, '').length > 0 || secretRequests(s).length > 0 || PERK_PROMISE.test(s))
+  )
+    issues.push({ path: 'behavior.signOff', message: 'The sign-off cannot hold an amount, a number, a link or a promise.' })
+}
 
 /**
  * Merges a patch over the stored values and validates the result: each value by its registry schema, then the section's own rules
@@ -138,6 +183,7 @@ export function mergeAssistantValues(current: AssistantValues, patch: AssistantP
       questions.add(q)
     })
   }
+  if (patch.behavior !== undefined && !issues.some((i) => i.path.startsWith('behavior'))) behaviorIssues(out.behavior, issues)
   if (issues.length) throw new AppError('VALIDATION_FAILED', { detail: issues[0]!.message, errors: issues })
   return out
 }
@@ -148,6 +194,8 @@ export interface SaveAssistantInput {
   expectedVersion: number
   updatedBy: string | null
   audit: AuditContext
+  /** AI_KNOWLEDGE_MAX_CHARS (ADR 0174): a Q&A that grows is checked against the knowledge budget it shares; absent: not checked. */
+  knowledgeMaxChars?: number
 }
 
 /** Saves the section: version check under the section lock, then one updateSetting per changed key. */
@@ -160,6 +208,13 @@ export async function saveAssistantSettings(
   if (current.version !== input.expectedVersion)
     throw new AppError('VERSION_CONFLICT', { meta: { currentVersion: current.version } })
   const merged = mergeAssistantValues(current.values, input.patch)
+  // ADR 0174: the Q&A shares the knowledge budget; one that grows waits for the knowledge lock and is refused past the cap (422)
+  const before = faqChars(current.values.faq)
+  const after = faqChars(merged.faq)
+  if (input.knowledgeMaxChars !== undefined && after > before) {
+    await lockKnowledge(tx, input.locationId)
+    await assertBudget(tx, { locationId: input.locationId, maxChars: input.knowledgeMaxChars, before, after })
+  }
   const changed: SettingKey[] = []
   for (const [field, key] of Object.entries(ASSISTANT_FIELDS) as [AssistantField, SettingKey][]) {
     if (JSON.stringify(current.values[field]) === JSON.stringify(merged[field])) continue

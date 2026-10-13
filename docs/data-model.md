@@ -59,6 +59,9 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261016100100_staff_attribution.sql` | Kiosk mode (ADR 0180): the tapped employee next to the user columns, `activity_log.actor_employee_id` and `kiosk_device_id`, `appointments.created_by_employee_id`, `appointment_addons.added_by_employee_id`, `appointment_photos.uploaded_by_employee_id`, `payment_links.created_by_employee_id` (columns only in K1a; written from wave K1b) |
 | `20261016100200_staff_events.sql` | Kiosk mode (ADR 0180): `staff_events`, one row per car step, booking, payment, text and so on by whoever did it (kiosk or signed in), the source of the Team activity report; the report's indexes on `ledger_events` (pay by actor) and `messages` (staff sender) |
 | `20261016100300_staff_attribution_links.sql` | Kiosk mode, attribution (ADR 0180, wave K1b): `staff_events.audit_id` (the audit row the event was recorded with, unique when set, so the history backfill never doubles an event); `square_charges.decided_by_employee_id` and `decided_kiosk_device_id` (who confirmed a saved-card charge: its payment is recorded later in their name, and a kiosk has no user) |
+| `20261016200000_assistant_set_permission.sql` | the permission `set.assistant` ("Oasis AI assistant", sort 28, appended last): granted to every role that holds `set.hours`, and a person's own `set.hours` exception copied to it (ADR 0174) |
+| `20261016200100_assistant_knowledge.sql` | the assistant's knowledge (ADR 0174): `assistant_knowledge` (the owner's notes, the reviewed text of PDFs and corrections; only active entries reach the prompt, sharing one character budget with the Settings Q&A) and `assistant_knowledge_documents` (uploaded PDFs under the `kb/` key prefix, their status, extracted text and sha256) |
+| `20261016200200_assistant_practice.sql` | the assistant's practice chat (ADR 0174 §4c): `assistant_practice_sessions` (the owner's practice chats, their creator's own, kept 30 days) and `assistant_practice_turns` (each practice text and what Oasis AI would answer); the only tables practice writes |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -90,7 +93,7 @@ module augmentation (`declare module '../../platform/schema.js'`) in each module
 | `employee_locations`            | pk `(employee_id, location_id)`: who works where.                                                                                                                                                        |
 | `employee_schedules`            | pk `(employee_id, weekday)`, Sunday = 0; `is_on`, `from_min`, `to_min`. Drives "on shift" (crew alerts) and the hours-conflict warnings.                                                                 |
 | `roles`                         | The five seeded roles (`key` super, mgmt, acct, support, crew) plus custom ones; `is_locked` marks the single Super Admin role.                                                                          |
-| `permissions`                   | The 27 permission keys with `module`, `label`, `sort` and `has_limit` for the three money ones (refund, adjust, credit).                                                                                 |
+| `permissions`                   | The 28 permission keys (27 from `people_auth`; `set.assistant` appended by ADR 0174) with `module`, `label`, `sort` and `has_limit` for the three money ones (refund, adjust, credit).                                                                                 |
 | `role_permissions`              | pk `(role_id, permission_key)`.                                                                                                                                                                          |
 | `role_limits`                   | pk `(role_id, kind)`; `unlimited` or `limit_cents` (cents). **No row means the default of 2500 cents.** The API takes the chip in dollars and stores cents (ADR 0081).                                   |
 | `employee_roles`                | pk `(employee_id, role_id)`: a person's roles; permissions are the union.                                                                                                                                |
@@ -306,6 +309,10 @@ HMAC. Location-scoped tables lead their unique keys with `location_id`; a phone 
 | `assistant_conversations`   | One per `(location_id, phone_e164)`: `customer_id` (null for a stranger), the durable marker `pending_since`, `last_inbound_at`, the turn lease `running_since`, `handoff_state open\|resolved` with reason and time, `last_fallback_at`, `disclosed_at`, the client's `language` (`en`\|`es`, the server's own words follow it). |
 | `assistant_turns`           | One per answer: `status running\|replied\|handed_off\|skipped\|failed` (one running per conversation), `trust unknown\|known\|trusted`, `provider sim\|bedrock`, `model`, `prompt_version`, `rounds`, token counts, `cost_micros`, `stop_reason`, `latency_ms`, `reply_message_id`, redacted `transcript`, `error`. |
 | `assistant_tool_calls`      | `(turn_id, seq)` unique: `round`, `tool`, provider `tool_use_id`, redacted `input`/`output`, `outcome ok\|error\|denied`, `latency_ms`.                                                                                                            |
+| `assistant_knowledge`       | ADR 0174: one owner-taught entry, `kind note\|document\|correction`, `title`, `body` (note 4,000, document 60,000 stored and 20,000 to turn on, correction answer 500), a correction's `question` and redacted `wrong_reply` (never shown to the model), `source manual\|practice\|live`, `document_id` (unique; a document's entry), `active` (only active entries reach the prompt, masked; they and the Q&A share `AI_KNOWLEDGE_MAX_CHARS`), `reviewed_at` (a document is on only once reviewed), `warnings` jsonb, `chars` (title + question + body), `sort`, `version`. |
+| `assistant_knowledge_documents` | ADR 0174: an uploaded PDF: `filename`, `content_type application/pdf`, `bytes` (at most 10 MB), `sha256` (one live copy per location), `s3_key` (`kb/{location}/{id}.pdf`, outside the photos' lifecycle rule), `status pending_upload\|extracting\|ready\|failed\|deleted` with `error_code` (no_text, encrypted, corrupt, too_many_pages, timeout, not_pdf, too_large), `page_count`, `extracted_text` (cleaned, at most 200,000 characters; null once deleted), `removed_chars`, `attempts`, `deleted_at`, `object_deleted_at`. |
+| `assistant_practice_sessions` | ADR 0174 §4c: one practice chat of one user (`user_id`; another user never sees it): `persona new_texter\|client` (a synthetic new texter whose id and fictional 555-01xx number are kept in `state`, never in a prompt; or a real client on file, `customer_id`, read-only, needs `cli.view`), `verified`, `include_entry_ids` (draft knowledge read as if on, at most 20), `language`, `state` jsonb (what the practice effects did: the name and vehicles saved, interests, links, the proposal, an opt-out), `turns`, `cost_micros` (practice's own spend, never in `AI_DAILY_BUDGET_USD`). Deleted after 30 days (job `assistant.practice.retention`). |
+| `assistant_practice_turns`    | ADR 0174 §4c: one practice text and its answer (job `ai.practice`): `seq` (a re-run, `rerun_of`, has its original's), `client_text`, `status running\|replied\|handed_off\|failed\|opted_out` (one running per session), `reply_text` (what the client would get, links as "[booking link]"), `extra_texts` (a proposal's confirmation it would text), `badges`, `error`, the model, prompt and facts versions, tokens, `cost_micros`, `latency_ms`, `state_before` (the session's state when the text came; a re-run starts from it), the redacted `transcript` and `tool_calls`. |
 | `client_links`              | A personal link: `token_hash` unique (sha256 of a 32-byte base64url token), `kind calendar\|verify\|pin\|membership\|pay\|book_again\|card` (card since `20261014500000_square_cards.sql`), `customer_id` (null only for a stranger's calendar or book-again link), `phone_e164`, appointment/invoice/plan bindings (the plan: fk `(location_id, plan_key)` to the location's plans), `pin_version`, `phone_version`, `epoch`, `issued_by`, `expires_at` (after `created_at`), `uses` of `max_uses`, `consumed_at`, `revoked_at` + `revoke_reason`. |
 | `client_links`              | A personal link: `token_hash` unique (sha256 of a 32-byte base64url token), `kind calendar\|verify\|pin\|membership\|pay\|book_again`, `customer_id` (null only for a stranger's calendar or book-again link), `phone_e164`, appointment/invoice/plan bindings (the plan: fk `(location_id, plan_key)` to the location's plans), `pin_version`, `phone_version`, `epoch`, `issued_by`, `expires_at` (after `created_at`), `uses` of `max_uses`, `consumed_at`, `revoked_at` + `revoke_reason`, `retexted_at` (the assistant texted this same link again, once; wave Q3d). |
 | `client_link_sessions`      | The bearer session a link is exchanged for, by `token_hash`: `trust link\|verified`, `verified_by pin\|code`, `step_up_at`, `failed_attempts`, `idle_expires_at` (15 minutes) within `expires_at` (1 hour), `revoked_at`, `ip`.                    |
@@ -684,6 +691,59 @@ Primary key `(location_id)`. `(location_id)` references `locations(id)` on delet
 
 Primary key `(id)`. Unique `(location_id, phone_e164)`. `(customer_id)` references `customers(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. 5 check constraints. Index `assistant_conversations_customer_idx` `(customer_id)` where `customer_id IS NOT NULL`. Index `assistant_conversations_handoff_idx` `(location_id, handoff_at)` where `handoff_state = 'open'::text`. Index `assistant_conversations_pending_idx` `(pending_since)` where `pending_since IS NOT NULL`. Index `assistant_conversations_running_idx` `(running_since)` where `running_since IS NOT NULL`.
 
+#### `assistant_knowledge`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `kind` | text | no |  |
+| `title` | text | no |  |
+| `body` | text | no |  |
+| `question` | text | yes |  |
+| `wrong_reply` | text | yes |  |
+| `source` | text | no | `'manual'::text` |
+| `assistant_turn_id` | uuid | yes |  |
+| `practice_turn_id` | uuid | yes |  |
+| `document_id` | uuid | yes |  |
+| `active` | boolean | no | `false` |
+| `reviewed_at` | timestamp with time zone | yes |  |
+| `warnings` | jsonb | no | `'[]'::jsonb` |
+| `chars` | integer | no |  |
+| `sort` | integer | no | `0` |
+| `version` | integer | no | `1` |
+| `created_by` | uuid | yes |  |
+| `updated_by` | uuid | yes |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. Unique `(document_id)`. `(assistant_turn_id)` references `assistant_turns(id)` on delete set null. `(created_by)` references `users(id)` on delete set null. `(document_id)` references `assistant_knowledge_documents(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. `(updated_by)` references `users(id)` on delete set null. 13 check constraints. Index `assistant_knowledge_active_idx` `(location_id)` where `active`. Index `assistant_knowledge_location_idx` `(location_id, kind, sort, created_at)`.
+
+#### `assistant_knowledge_documents`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `filename` | text | no |  |
+| `content_type` | text | no |  |
+| `bytes` | integer | no |  |
+| `sha256` | text | yes |  |
+| `s3_key` | text | no |  |
+| `status` | text | no | `'pending_upload'::text` |
+| `error_code` | text | yes |  |
+| `page_count` | integer | yes |  |
+| `extracted_text` | text | yes |  |
+| `removed_chars` | integer | no | `0` |
+| `attempts` | smallint | no | `0` |
+| `uploaded_by` | uuid | yes |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+| `deleted_at` | timestamp with time zone | yes |  |
+| `object_deleted_at` | timestamp with time zone | yes |  |
+
+Primary key `(id)`. Unique `(s3_key)`. `(location_id)` references `locations(id)` on delete cascade. `(uploaded_by)` references `users(id)` on delete set null. 14 check constraints. Index `assistant_knowledge_documents_cleanup_idx` `(status, updated_at)` where `(status = ANY (ARRAY['pending_upload'::text, 'extracting'::text])) OR ((status = 'deleted'::text) AND (object_deleted_at IS NULL))`. Index `assistant_knowledge_documents_location_idx` `(location_id, created_at)`. Unique index `assistant_knowledge_documents_sha_idx` `(location_id, sha256)` where `(status <> 'deleted'::text) AND (sha256 IS NOT NULL)`.
+
 #### `assistant_pending_actions`
 
 | Column | Type | Null | Default |
@@ -707,6 +767,57 @@ Primary key `(id)`. Unique `(location_id, phone_e164)`. `(customer_id)` referenc
 | `resolved_at` | timestamp with time zone | yes |  |
 
 Primary key `(id)`. `(appointment_id)` references `appointments(id)` on delete set null. `(confirm_message_id)` references `messages(id)` on delete set null. `(conversation_id)` references `assistant_conversations(id)` on delete cascade. `(customer_id)` references `customers(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. 10 check constraints. Index `assistant_pending_actions_conversation_idx` `(conversation_id)`. Index `assistant_pending_actions_expiry_idx` `(expires_at)` where `state = 'pending'::text`. Unique index `uq_assistant_pending_actions_phone` `(location_id, phone_e164)` where `state = 'pending'::text`.
+
+#### `assistant_practice_sessions`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `user_id` | uuid | no |  |
+| `persona` | text | no |  |
+| `customer_id` | uuid | yes |  |
+| `verified` | boolean | no | `false` |
+| `include_entry_ids` | uuid[] | no | `'{}'::uuid[]` |
+| `language` | text | no | `'en'::text` |
+| `state` | jsonb | no | `'{}'::jsonb` |
+| `turns` | integer | no | `0` |
+| `cost_micros` | bigint | no | `0` |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. `(customer_id)` references `customers(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. `(user_id)` references `users(id)` on delete cascade. 7 check constraints. Index `assistant_practice_sessions_created_idx` `(created_at)`. Index `assistant_practice_sessions_user_idx` `(user_id, created_at DESC)`.
+
+#### `assistant_practice_turns`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `session_id` | uuid | no |  |
+| `seq` | integer | no |  |
+| `rerun_of` | uuid | yes |  |
+| `client_text` | text | no |  |
+| `status` | text | no | `'running'::text` |
+| `reply_text` | text | yes |  |
+| `extra_texts` | jsonb | no | `'[]'::jsonb` |
+| `badges` | jsonb | no | `'[]'::jsonb` |
+| `error` | text | yes |  |
+| `model` | text | yes |  |
+| `prompt_version` | text | yes |  |
+| `facts_version` | text | yes |  |
+| `tokens_in` | integer | no | `0` |
+| `tokens_out` | integer | no | `0` |
+| `tokens_cache_read` | integer | no | `0` |
+| `tokens_cache_write` | integer | no | `0` |
+| `cost_micros` | bigint | no | `0` |
+| `latency_ms` | integer | yes |  |
+| `state_before` | jsonb | no | `'{}'::jsonb` |
+| `transcript` | jsonb | yes |  |
+| `tool_calls` | jsonb | no | `'[]'::jsonb` |
+| `started_at` | timestamp with time zone | no | `app_now()` |
+| `finished_at` | timestamp with time zone | yes |  |
+
+Primary key `(id)`. `(rerun_of)` references `assistant_practice_turns(id)` on delete cascade. `(session_id)` references `assistant_practice_sessions(id)` on delete cascade. 16 check constraints. Unique index `assistant_practice_turns_running_idx` `(session_id)` where `status = 'running'::text`. Unique index `assistant_practice_turns_seq_idx` `(session_id, seq)` where `rerun_of IS NULL`. Index `assistant_practice_turns_session_idx` `(session_id, started_at)`. Index `assistant_practice_turns_started_idx` `(started_at)`.
 
 #### `assistant_tool_calls`
 

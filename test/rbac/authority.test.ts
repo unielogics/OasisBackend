@@ -27,7 +27,7 @@ describe('database-backed RBAC', () => {
 
   const seed = () => runSeed({ db: t.db, clock: t.clock, profile: 'people' })
 
-  it('the migration seeds exactly the 27 catalog permissions, with limit flags and order', async () => {
+  it('the migrations seed exactly the 28 catalog permissions (set.assistant last, ADR 0174), with limit flags and order', async () => {
     // a scratch schema straight from the migrations (the worker schema is truncated between tests)
     const fresh = await createTestDb({ schema: workerSchema('permcheck') })
     try {
@@ -208,7 +208,7 @@ describe('database-backed RBAC', () => {
     await seed()
     const a = await loadAuthority(t.db, await employeeId('Rafael'))
     expect(a.limits).toEqual({ refund: 100_000, adjust: 50_000, credit: 50_000 })
-    expect(a.permissions.size).toBe(27)
+    expect(a.permissions.size).toBe(28)
     expect(a.isSuper).toBe(false)
     expect(a.effective['pay.refund']!.src).toBe('via Management + Accounting · ≤ $1,000')
   })
@@ -228,7 +228,7 @@ describe('database-backed RBAC', () => {
     await seed()
     const amara = await loadAuthority(t.db, await employeeId('Amara'))
     expect(amara.isSuper).toBe(true)
-    expect(amara.permissions.size).toBe(27)
+    expect(amara.permissions.size).toBe(28)
     expect(amara.limits).toEqual({ refund: null, adjust: null, credit: null })
     const marco = await loadAuthority(t.db, await employeeId('Marco'))
     expect([...marco.permissions].sort()).toEqual(['cli.view', 'jobs.checklist', 'jobs.status', 'sched.view'])

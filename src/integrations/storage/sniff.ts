@@ -1,6 +1,12 @@
 // Magic-byte detection shared by the dev upload handler and the media validator.
 export type SniffedType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/heic' | null
 
+/** A PDF announces itself with "%PDF-" within its first 1,024 bytes (ADR 0174 §2; readers tolerate a short preamble). */
+export function sniffPdf(b: Uint8Array): boolean {
+  const head = Buffer.from(b.subarray(0, Math.min(b.length, 1024))).toString('latin1')
+  return head.includes('%PDF-')
+}
+
 export function sniffImageType(b: Uint8Array): SniffedType {
   if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg'
   if (b.length >= 8 && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((v, i) => b[i] === v))

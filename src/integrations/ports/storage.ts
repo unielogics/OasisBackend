@@ -7,8 +7,10 @@ export interface UploadSlot {
 }
 
 export interface StorageProvider {
-  createUpload(p: { key: string; contentType: string; maxBytes: number; ttlSec: number }): Promise<UploadSlot>
+  /** `allowedTypes`: the purpose's content types (default: by the key, ADR 0174: kb/ keys take PDFs, every other key photos). */
+  createUpload(p: { key: string; contentType: string; maxBytes: number; ttlSec: number; allowedTypes?: Readonly<Record<string, string>> }): Promise<UploadSlot>
   head(key: string): Promise<{ bytes: number; contentType: string } | null>
-  getDownloadUrl(key: string, ttlSec: number): Promise<string>
+  /** Inline by default; `attachment` names the file the browser saves (ADR 0174: knowledge PDFs). */
+  getDownloadUrl(key: string, ttlSec: number, o?: { attachment?: string }): Promise<string>
   delete(key: string): Promise<void>
 }

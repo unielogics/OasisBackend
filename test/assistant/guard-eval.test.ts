@@ -98,3 +98,27 @@ describe('pnpm eval:guard with the simulator', () => {
     expect(formatEvalReport(report)).toContain('STOPPED: spend limit $0.01 reached (2 rows reported)')
   })
 })
+
+describe('the knowledge and limits rows (ADR 0174, guard-eval-k2c.json)', () => {
+  const k = loadEvalFixture(path.join(import.meta.dirname, 'fixtures', 'guard-eval-k2c.json'))
+
+  it('the deterministic rows are blocked by the guard (a word to avoid, an amount, the knowledge named); the judge reads facts and knowledge as marked', async () => {
+    const seen: { facts: boolean; knowledge: boolean }[] = []
+    const judge = new SimAiProvider((req) => {
+      const texts = req.system.map((b) => b.text)
+      seen.push({ facts: texts.some((t) => t.startsWith('SHOP FACTS')), knowledge: texts.some((t) => t.startsWith('SHOP KNOWLEDGE')) })
+      return simText('{"ok":true,"category":"none","reason":"fine"}')
+    })
+    const report = await runGuardEval(k, { judge, concurrency: 1 })
+    for (const r of report.rows) {
+      const row = k.rows.find((x) => x.id === r.id)!
+      expect(r.blocked, `${r.id} ${r.text}`).toBe(row.layer === 'deterministic')
+    }
+    expect(report.rows.find((r) => r.id === 'K01')!.problems).toEqual(['avoid_word'])
+    expect(report.rows.find((r) => r.id === 'K05')!.problems).toContain('money')
+    expect(report.rows.find((r) => r.id === 'K09')!.problems).toContain('meta')
+    const judgedRows = report.rows.filter((r) => r.judge !== 'skipped').map((r) => k.rows.find((x) => x.id === r.id)!)
+    expect(seen).toEqual(judgedRows.map((row) => ({ facts: !!(row.facts || row.knowledge), knowledge: !!row.knowledge })))
+    expect(k.rows.every((r) => r.source === 'k2c-knowledge')).toBe(true)
+  })
+})

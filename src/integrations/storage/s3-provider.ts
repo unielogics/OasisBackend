@@ -16,6 +16,9 @@ import {
   assertAllowedContentType,
   assertTtl,
   assertUploadRequest,
+  dispositionFilename,
+  typesForKey,
+  type DownloadOptions,
   type ObjectStorage,
   type UploadRequest,
 } from './types.js'
@@ -67,7 +70,7 @@ export class S3Storage implements ObjectStorage {
   }
 
   async createUpload(p: UploadRequest): Promise<UploadSlot> {
-    const contentType = assertUploadRequest(p, this.allowed)
+    const contentType = assertUploadRequest(p, p.allowedTypes ?? typesForKey(p.key, this.allowed))
     const fullKey = this.k(p.key)
     const fields: Record<string, string> = { 'Content-Type': contentType }
     const conditions: Array<['content-length-range', number, number] | ['eq', string, string]> = [
@@ -113,7 +116,7 @@ export class S3Storage implements ObjectStorage {
     }
   }
 
-  async getDownloadUrl(key: string, ttlSec: number): Promise<string> {
+  async getDownloadUrl(key: string, ttlSec: number, o: DownloadOptions = {}): Promise<string> {
     assertTtl(ttlSec)
     const Key = this.k(key)
     try {
@@ -122,7 +125,7 @@ export class S3Storage implements ObjectStorage {
         new GetObjectCommand({
           Bucket: this.bucket,
           Key,
-          ResponseContentDisposition: 'inline',
+          ResponseContentDisposition: o.attachment ? `attachment; filename="${dispositionFilename(o.attachment)}"` : 'inline',
           ResponseCacheControl: `private, max-age=${ttlSec}`,
         }),
         { expiresIn: ttlSec },
@@ -159,7 +162,7 @@ export class S3Storage implements ObjectStorage {
   }
 
   async put(key: string, body: Buffer, contentType: string): Promise<void> {
-    const ct = assertAllowedContentType(contentType, this.allowed)
+    const ct = assertAllowedContentType(contentType, typesForKey(key, this.allowed))
     if (body.length > MAX_UPLOAD_BYTES) throw new StorageError('TOO_LARGE', 'object exceeds the 15 MB limit')
     const Key = this.k(key)
     try {

@@ -2,9 +2,7 @@
 // website's board reads (online channel: lead time, booking window, paused days). VIP-held times and the VIP window count only for a
 // trusted VIP client; anyone else sees what the public board shows. No names, no other bookings, no ids.
 import { z } from 'zod/v4'
-import { transaction } from '../../../platform/db.js'
 import { addDays, diffDays, fmtT, isValidBizDate, toBizDate } from '../../../platform/time.js'
-import { noteLeadInterest } from '../../leads/service.js'
 import { loadBoardServices } from '../../public/availability-loader.js'
 import {
   TOOL_MIN_TRUST,
@@ -14,6 +12,7 @@ import {
   type ToolOutcome,
 } from '../contract.js'
 import { issueLinkOutcome } from './conversation.js'
+import { effectsOf } from './effects-live.js'
 import {
   BIZ_DATE,
   fail,
@@ -63,7 +62,7 @@ export const checkAvailability: AssistantTool<ToolInputs['check_availability']> 
     // asking for open times of a service says what the texter wants: their lead (a new texter's, opened by the welcome flow) notes
     // the service's category, so the welcome intake moves on to the memberships even when the model never called note_interest
     // (W4 live eval: it almost never did, and the intake stayed on "what would you like" for the whole conversation)
-    await transaction(ctx.db, (tx) => noteLeadInterest(tx, { locationId: ctx.identity.locationId, phone: ctx.identity.phone, categories: [found.item.category], at: ctx.now }))
+    await effectsOf(ctx).noteInterest(ctx, [found.item.category], { openLead: false })
     const vip = await vipFor(ctx)
     const windowDays = await windowDaysFor(ctx.db, ctx.identity.locationId, vip)
     if (diffDays(today, input.date) > windowDays)
@@ -121,6 +120,10 @@ const LINK_TEXTED_RULE =
 const LINK_RULE =
   'This phone cannot book by text yet, so the client picks the time on the booking page: put the link placeholder in your reply, e.g. "Here\u2019s your link to pick a time: {link1}" (or send_link kind verify if they want to book here by text). Do not list or offer specific times and do not ask them to pick a time in the chat.'
 
+/** check_availability's answer to a phone that cannot book in the chat while the owner switched booking links off (ADR 0174 §3b). */
+export const BOOKING_LINKS_OFF_RULE =
+  'Booking links are switched off by the shop, so this phone cannot pick a time here: say a team member will text them to set up the visit and call handoff_to_staff (reason cannot_help). Do not list or offer specific times and do not ask them to pick a time in the chat.'
+
 async function linkInsteadOfTimes(
   ctx: ToolContext,
   d: {
@@ -147,6 +150,9 @@ async function linkInsteadOfTimes(
     hasOpenTimes: d.open,
     openParts: [...d.openParts],
   }
+  // ADR 0174 §3b: booking links off: no link and no times; the team sets the visit up
+  if (ctx.policy && !ctx.policy.linkKinds.has('calendar'))
+    return ok(json({ ...day, bookingLink: null, instruction: BOOKING_LINKS_OFF_RULE }))
   let placeholder = issuedLinks.get(ctx) ?? null
   if (!placeholder) {
     const link = await issueLinkOutcome(ctx, { kind: 'calendar', appointmentRef: null, tier: null }, { retext: false })

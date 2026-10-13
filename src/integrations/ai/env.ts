@@ -54,6 +54,17 @@ export const aiEnvShape = {
   AI_GUARD_JUDGE: flag.optional(),
   /** The judge's model (a cross-region profile of models.ts); unset = AI_BEDROCK_MODEL_ID. */
   AI_GUARD_MODEL_ID: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(1).optional()),
+  /**
+   * ADR 0174: the characters the owner's knowledge (active notes, documents and corrections) and the Settings Q&A may hold together
+   * in the prompt (about 5k tokens at 20,000). A save that would go over it is refused (422 KNOWLEDGE_BUDGET); nothing is cut.
+   */
+  AI_KNOWLEDGE_MAX_CHARS: int(2000, 40_000, 20_000),
+  /**
+   * ADR 0174: the practice chat (Settings → Oasis AI → Practice: the owner texts as a client, nothing is sent or booked). Off until
+   * rollout; it works whatever AI_ENABLED says, with its own daily budget in US dollars (not counted in AI_DAILY_BUDGET_USD).
+   */
+  AI_PRACTICE_ENABLED: flag.default('false'),
+  AI_PRACTICE_DAILY_BUDGET_USD: z.coerce.number().min(0).max(1000).default(3),
   AI_PRICE_INPUT_PER_MTOK: price(),
   AI_PRICE_OUTPUT_PER_MTOK: price(),
   AI_PRICE_CACHE_READ_PER_MTOK: price(),

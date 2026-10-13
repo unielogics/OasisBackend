@@ -297,3 +297,34 @@ message rows; expired / wrong-purpose / post-PIN-change tokens 401; epoch bump k
 → 404; code endpoint ignores a phone field; PIN lockout/blocklist/constant time; unverified email never links an order;
 digits-only texts redacted; staff reply pauses AI; AI-created client fails canSendSms for broadcast; STOP gets no AI reply
 and later texts get none; lead follow-up exactly once inside business hours and never after STOP.
+
+## 11. Knowledge, PDFs, practice, corrections, limits and tone (owner 2026-10-13; ADR 0174)
+The owner teaches Oasis AI beyond Settings and trains it; full design `wt/_reports/k-design-assistant.md`, decisions and every
+deviation in ADR 0174. Settings only ever take abilities away; the binding rules stay first and fixed; owner text is data, quoted
+line by line after the rules, and never shows the model an amount, a link or another number.
+- Engine (built, wave K1c): `engine.ts` is the turn's core (Converse loop, link nudge, guard, judge, rewrites) shared by the live
+  turn and practice; `turn.ts` keeps the gate, caps, claim, context and every write. Requests byte-identical before/after
+  (`test/assistant/engine-parity.test.ts`). Tool writes go through `ToolContext.effects` (`tools/effects-live.ts` live).
+- Permission `set.assistant` (sort 28; every role with `set.hours` got it): the section's save, the allowlist unmasking, every
+  knowledge, document, practice and review route; review also `cli.view`.
+- Knowledge (built): `assistant_knowledge` (note, document, correction; only active entries reach the prompt) and
+  `assistant_knowledge_documents` (PDFs under `kb/`). The active entries and the Settings Q&A share `AI_KNOWLEDGE_MAX_CHARS`
+  (20,000) under a per-location advisory lock: 422 `KNOWLEDGE_BUDGET`, nothing cut. The SHOP KNOWLEDGE block sits between the
+  rules and SHOP FACTS (its own cache point), masked and line-prefixed; the judge's rule (f) covers it (four cache points at most).
+  facts-v5. Without an active entry nothing changes in the prompt.
+- PDFs (built): presign (browser SHA-256) → upload → complete (HEAD, `%PDF-`, server SHA-256) → `assistant.knowledge.extract`
+  (unpdf in a worker thread: 256 MB, 30 s, 60 pages; scans are `no_text`) → a draft entry with warnings → the owner reviews it
+  (and confirms instruction-like lines) before it goes live. Delete clears the text and the object; `assistant.knowledge.cleanup`
+  every 15 minutes. Downloads are 10-minute attachments.
+- Limits and tone (built, wave K2c; `policy.ts`): what is switched off is left out of the model's tools (send_link narrowed to the
+  allowed kinds) and refused by the runner; `CORE_RULES` are the rules as they were (byte-identical for every setting) and the
+  owner block follows them only when a setting differs from the defaults (tone and length presets, fixed "off" sentences, words and
+  topics to avoid, topics handed to the team, quoted style notes); the guard rewrites a word to avoid, then cuts its sentences;
+  server backstops for the handoff topics and, while an ability is off, for a promised team text; Spanish `english` or `handoff`
+  (a fixed line, no model call); the server's sign-off. Defaults: requests byte-identical to before.
+- Practice chat (built, wave K2c): the same request assembly as a live turn (`turn-prompt.ts`; live and practice requests are
+  identical), practice effects, a read-only pool and refusing ports, the judge always on, as job `ai.practice`; a synthetic new
+  texter or a real client read-only (`cli.view`); its own tables, budget (`AI_PRACTICE_DAILY_BUDGET_USD`) and switch
+  (`AI_PRACTICE_ENABLED`, off by default), kept 30 days. Corrections (built): a correction entry from the owner's question and
+  answer, the wrong reply loaded and redacted by the server and never shown to the model; "Try again" re-runs the text. Review of
+  real conversations (built): 90 days at most, redacted, `set.assistant` + `cli.view`.

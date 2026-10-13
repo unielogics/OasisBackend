@@ -590,6 +590,41 @@ confirm" proposals from the assistant, and a reply number sent then books nothin
    `membership_duplicate_payment` alerts point at it); the 180-day stale-record window (a recycled number is the old client to the
    assistant until then); an invalid-number bounce holds even a paid-up member's record until staff confirm the client.
 
+### Oasis AI knowledge, PDFs, limits, practice and review (ADR 0174)
+
+- **Knowledge** (Settings → Oasis AI → Knowledge, `set.assistant`): notes and PDFs the owner adds are drafts until turned on; only
+  active entries reach the assistant, masked (no amount, link or other number), and they share `AI_KNOWLEDGE_MAX_CHARS` (20,000
+  characters) with the Settings Q&A. A PDF is read by the worker (`assistant.knowledge.extract`, unpdf in a worker thread: 256 MB,
+  30 s, 60 pages); a scan cannot be read (no OCR). Every new key lives under `kb/` in the photos bucket, outside the photo lifecycle
+  rule: no AWS change is needed. A document stuck "reading" for 10 minutes is failed as a timeout by `assistant.knowledge.cleanup`
+  (every 15 minutes); the owner presses "Try again".
+- **Who may edit Oasis AI** is the `set.assistant` permission (every role that had `set.hours` got it on 2026-10-13); take it away
+  from a role in Team → Roles.
+- **Limits and tone** (Settings → Oasis AI → Limits & tone; `assistant.capabilities`, `assistant.behavior`): they only take
+  abilities away. With every setting at its default the assistant's prompt, tools and replies are exactly what they were before
+  (byte-identical requests; `test/assistant/engine-parity.test.ts`). A switched-off ability is left out of the tools and refused by
+  the runner (`assistant_tool_calls.error = policy_off`); words to avoid are rewritten once, then their sentences are dropped, then
+  the fallback; a handoff topic the model did not hand off gets the server's fixed line and a handoff (reason `policy`; a booking
+  change texted to confirm in that turn is canceled, and the team's alert says so); Spanish
+  "hand to the team" answers a Spanish text with a fixed Spanish line and a handoff (reason `language`) without calling the model.
+  The rules themselves (`CORE_RULES`) never change with these settings.
+- **Practice** (Settings → Oasis AI → Practice) stays off until `AI_PRACTICE_ENABLED=true`, after `pnpm aws:provision --bedrock` and
+  `AI_PROVIDER=bedrock` (with `AI_PROVIDER=sim` it answers with the simulator). It works whatever `AI_ENABLED` says, runs the
+  policy judge always (`AI_GUARD_JUDGE` can still turn it off), sends nothing, books nothing and writes no client record: its tools
+  read through a second, read-only pool of two connections (`application_name oasis-practice`, every transaction READ ONLY).
+  Its turns are answered by the worker (`ai.practice`); a turn running over 5 minutes is failed as `timeout` (the next text or
+  `assistant.practice.retention` does it), and sessions are deleted after 30 days. Its spend has its own daily budget,
+  `AI_PRACTICE_DAILY_BUDGET_USD` (default 3; 429 `PRACTICE_BUDGET` once the location's practice spend of the business day reaches
+  it) and never counts in `AI_DAILY_BUDGET_USD`, so practice cannot stop live replies. Limits: 10 texts a minute, 40 texts a chat,
+  20 chats a user a day. With full knowledge and a cold cache a turn costs about $0.07–0.12: review `AI_DAILY_BUDGET_USD` (10)
+  before go-live. To see what practice spent today: `select sum(t.cost_micros)/1e6 from assistant_practice_turns t where
+  t.started_at > now() - interval '1 day';`.
+- **Corrections and review** (Knowledge → corrections; Conversations, `set.assistant` + `cli.view`): a correction is a knowledge
+  entry (on by default, inside the budget); the wrong reply it was made from is kept for the owner and never shown to the model.
+  Someone with `set.assistant` but without `cli.view` sees that wrong reply only for practice texts of a synthetic new texter
+  (a real conversation or a client on file may hold a client's words).
+  The review lists the real Oasis AI conversations of the last 90 days at most, redacted.
+
 ### The host cannot resolve its own new name (health check: "answered HTTP 000")
 
 A name created in Route 53 after a resolver already answered "no such record" stays negative in that resolver for the zone's

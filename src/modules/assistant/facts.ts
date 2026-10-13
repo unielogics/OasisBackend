@@ -32,6 +32,8 @@ import { emergencySnapshot, getActiveEmergency } from '../settings/emergency.js'
 import { getBookingRules, getHours } from '../settings/hours.js'
 import { DAY_NAMES, weekdayMonthDay } from '../settings/labels.js'
 import { getVipSettings } from '../settings/vip.js'
+import { knowledgeOrder, type ShopKnowledge } from './knowledge/render.js'
+import './knowledge/schema.js'
 import type {
   BuildShopFacts,
   FactLine,
@@ -46,7 +48,7 @@ import type {
 } from './contract.js'
 
 /** Bumped whenever the document's shape or wording changes, so a cached version never outlives a deploy. */
-export const FACTS_FORMAT = 'facts-v4'
+export const FACTS_FORMAT = 'facts-v5'
 
 /** How far ahead the facts list closures (design section 3b). */
 export const FACTS_CLOSURE_DAYS = 30
@@ -111,7 +113,10 @@ async function sourceFingerprint(db: Executor, locationId: string, from: string,
       (select md5(coalesce(string_agg(row_to_json(x)::text, ','), '')) from booking_rules x where x.location_id = ${locationId}),
       (select md5(coalesce(string_agg(row_to_json(x)::text, ','), '')) from vip_settings x where x.location_id = ${locationId}),
       (select md5(coalesce(string_agg(row_to_json(x)::text, ','), '')) from arrival_settings x where x.location_id = ${locationId}),
-      (select md5(coalesce(string_agg(row_to_json(x)::text, ','), '')) from locations x where x.id = ${locationId})
+      (select md5(coalesce(string_agg(row_to_json(x)::text, ','), '')) from locations x where x.id = ${locationId}),
+      -- ADR 0174 (facts-v5): the active knowledge entries only (a draft's edit changes nothing the model reads)
+      (select md5(coalesce(string_agg(x.id::text || ':' || x.version, ',' order by x.id), '')) from assistant_knowledge x
+         where x.location_id = ${locationId} and x.active)
     ) as v`.execute(db)
   return r.rows[0]?.v ?? ''
 }
@@ -141,7 +146,7 @@ export async function loadShopFacts(db: Executor, deps: Pick<ShopFactsDeps, 'env
   const tz = env.BUSINESS_TZ
   const today = toBizDate(o.now, tz)
   const last = addDays(today, FACTS_CLOSURE_DAYS - 1)
-  const [location, hours, closureRows, emergency, rules, vip, arrival, fee, cancellation, offsets, confirmRequest, categoryPrep, faq, catalog, statusTexts] =
+  const [location, hours, closureRows, emergency, rules, vip, arrival, fee, cancellation, offsets, confirmRequest, categoryPrep, faq, catalog, knowledge, statusTexts] =
     await Promise.all([
       db.selectFrom('locations').select(['name', 'address']).where('id', '=', o.locationId).executeTakeFirst(),
       getHours(db, o.locationId),
@@ -157,6 +162,7 @@ export async function loadShopFacts(db: Executor, deps: Pick<ShopFactsDeps, 'env
       getSetting(db, o.locationId, 'reminders.category_prep'),
       getSetting(db, o.locationId, 'assistant.faq'),
       loadPublicCatalogV2(db, o.locationId, o.now),
+      loadActiveKnowledge(db, o.locationId),
       Promise.all([
         getSetting(db, o.locationId, 'status_texts.checked_in'),
         getSetting(db, o.locationId, 'status_texts.running_late'),
@@ -401,7 +407,21 @@ export async function loadShopFacts(db: Executor, deps: Pick<ShopFactsDeps, 'env
     catalog: { categories: catalog.categories.map((x) => ({ key: x.key, label: oneLine(x.label, 40) })), sizes, items, tintFilms, lines: catalogLines },
     plans,
     faq: faq.value.map((f) => ({ q: oneLine(f.q, 500), a: oneLine(f.a, 500) })),
+    // only with active entries: without, the document is exactly what it was before ADR 0174
+    ...(knowledge.entries.length > 0 ? { knowledge } : {}),
   }
+}
+
+/** The active knowledge entries of a location in prompt order (ADR 0174; knowledge/render.ts renders them). */
+export async function loadActiveKnowledge(db: Executor, locationId: string): Promise<ShopKnowledge> {
+  const rows = await db
+    .selectFrom('assistant_knowledge')
+    .select(['id', 'kind', 'title', 'body', 'question', 'sort', 'created_at'])
+    .where('location_id', '=', locationId)
+    .where('active', '=', true)
+    .execute()
+  const entries = rows.map((r) => ({ id: r.id, kind: r.kind, title: r.title, body: r.body, question: r.question, sort: r.sort, createdAt: r.created_at.toISOString() }))
+  return { entries: entries.sort(knowledgeOrder) }
 }
 
 /**

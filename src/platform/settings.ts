@@ -156,6 +156,44 @@ export const settingDefs = {
     default: [] as { q: string; a: string }[],
   },
   'assistant.actions_enabled': { schema: z.boolean(), default: false },
+  // ADR 0174 (limits and tone): settings only take abilities away; the defaults are today's behaviour. Edited in Settings → Oasis AI
+  // → Limits & tone and applied by the turn (src/modules/assistant/policy.ts).
+  'assistant.capabilities': {
+    schema: z
+      .object({
+        availability: z.boolean(),
+        bookingLinks: z.boolean(),
+        membershipLinks: z.boolean(),
+        paymentLinks: z.boolean(),
+        accountInfo: z.boolean(),
+      })
+      .strict(),
+    default: { availability: true, bookingLinks: true, membershipLinks: true, paymentLinks: true, accountInfo: true },
+  },
+  'assistant.behavior': {
+    schema: z
+      .object({
+        tone: z.enum(['friendly', 'professional', 'warm', 'concise']),
+        length: z.enum(['short', 'standard']),
+        styleNotes: z.string().trim().max(400),
+        spanish: z.enum(['on', 'english', 'handoff']),
+        avoidWords: z.array(z.string().trim().min(2).max(40)).max(30),
+        avoidTopics: z.array(z.string().trim().min(3).max(80)).max(15),
+        handoffTopics: z.array(z.string().trim().min(3).max(80)).max(15),
+        signOff: z.string().trim().max(24),
+      })
+      .strict(),
+    default: {
+      tone: 'friendly' as const,
+      length: 'standard' as const,
+      styleNotes: '',
+      spanish: 'on' as const,
+      avoidWords: [] as string[],
+      avoidTopics: [] as string[],
+      handoffTopics: [] as string[],
+      signOff: '',
+    },
+  },
   // The welcome flow's ceiling (W4c fixes, before stage everyone): at most this many NEW provisional clients from first texts an hour;
   // beyond it a first text is stored for staff without a client, a lead or an AI reply (one notice to the managers an hour).
   'assistant.new_texters_per_hour': { schema: z.number().int().min(1).max(1000), default: 30 },
