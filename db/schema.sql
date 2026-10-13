@@ -2906,6 +2906,7 @@ CREATE TABLE public.square_charges (
     decline_code text,
     reason text,
     request_key text,
+    charged_after_close_at timestamp with time zone,
     CONSTRAINT square_charges_amount_cents_check CHECK ((amount_cents > 0)),
     CONSTRAINT square_charges_attempts_check CHECK ((attempts >= 0)),
     CONSTRAINT square_charges_check CHECK (((state <> 'charged'::text) OR (square_payment_id IS NOT NULL))),

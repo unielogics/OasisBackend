@@ -354,8 +354,11 @@ lever) or past the 23 hours, nothing is sent: a charge Square has no payment for
 (NOT_SENT, "Nothing was charged: Square has no payment for it."), so it never blocks its invoice for good (review Q4 H1-R1). After 10
 minutes without an answer staff see the alert "Saved-card charge not confirmed"; when the Square dashboard has no such payment they
 press **Not charged** (`POST /invoices/:id/card-charges/:chargeId/not-charged`, pay.collect, audited `card.charge_not_charged`): the
-same read-only look-up at once, which records the payment instead if Square has it. The webhook of the payment finds the charge by its
-`reference_id` (a declined one too) and records it the same way, so whichever comes first records it.
+same read-only look-up at once, which records the payment instead if Square has it. Square having none, it closes the charge only once
+the last request is 15 minutes old and no re-send of the job is out (the job marks the charge before it re-sends): before that it
+answers "Square may still be answering this charge" (409, review Q4FIX-N1). The webhook of the payment finds the charge by its
+`reference_id` (a declined one too) and records it the same way, so whichever comes first records it; one that completes after the
+charge was closed is marked (`charged_after_close_at`) and the invoice's "Overpaid via Square" alert says so.
 
 ### 12.4 Fees
 

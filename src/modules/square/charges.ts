@@ -315,6 +315,9 @@ async function applyAnswer(tx: Tx, d: CardChargeDeps, chargeId: string, a: Answe
   if (r.state !== 'charging' && r.state !== 'unknown') return out(r)
   if (a.kind === 'wait') return out(r)
   const now = d.clock.now()
+  // staff "Not charged" (review Q4FIX-N1): only once the last request had its time to land at Square, checked under the row lock, so
+  // a re-send of the job that started after the staff look-up (it marks the row first) is never closed under it
+  if (a.kind === 'declined' && a.by && now.getTime() - lastRequestAt(r).getTime() < CHARGE_SETTLE_MS) throw new AppError('CARD_CHARGE_IN_PROGRESS', { detail: SETTLING })
   if (a.kind === 'declined') {
     const row = await tx
       .updateTable('square_charges')
@@ -361,6 +364,10 @@ export async function recordChargePayment(
   if (r.state === 'charged' && r.ledger_event_id)
     return { chargeId, state: 'charged', invoiceId: r.invoice_id, error: null }
   if (!r.invoice_id) throw new AppError('CARD_CHARGE_NOT_FOUND')
+  // Square completed it after Oasis closed it (declined, "Not charged"): the money is real and recorded, but the desk may have
+  // collected it again meanwhile; the invoice's "Overpaid via Square" alert says why (review Q4FIX-N1)
+  const late = r.state === 'declined'
+  if (late) d.logger?.warn({ chargeId, squarePaymentId: f.paymentId }, 'square: a card charge completed after it was closed')
   await tx.updateTable('square_payments').set({ classification: 'charge', updated_at: d.clock.now() }).where('square_payment_id', '=', f.paymentId).execute()
   const ops = new SquareLedgerOps(pd)
   const variance = f.amountCents !== r.amount_cents ? { expectedCents: r.amount_cents, paidCents: f.amountCents } : null
@@ -377,7 +384,16 @@ export async function recordChargePayment(
   const now = d.clock.now()
   await tx
     .updateTable('square_charges')
-    .set({ state: 'charged', square_payment_id: f.paymentId, ledger_event_id: rec.eventId, charged_at: now, error: null, decline_code: null, updated_at: now })
+    .set({
+      state: 'charged',
+      square_payment_id: f.paymentId,
+      ledger_event_id: rec.eventId,
+      charged_at: now,
+      error: null,
+      decline_code: null,
+      ...(late ? { charged_after_close_at: now } : {}),
+      updated_at: now,
+    })
     .where('id', '=', chargeId)
     .execute()
   const card = r.card_id ? await tx.selectFrom('customer_cards').select(['brand', 'last4']).where('id', '=', r.card_id).executeTakeFirst() : undefined
@@ -652,6 +668,23 @@ const lastRequestAt = (r: ChargeRow): Date => {
 }
 
 const NONE_AT_SQUARE = 'Nothing was charged: Square has no payment for it.'
+const SETTLING = 'Square may still be answering this charge. Check again in a few minutes.'
+
+/**
+ * The job's re-send marks the charge first (review Q4FIX-N1): `charging` again with its last request now (updated_at; attempted_at,
+ * the start of the look-up window and of the 23 hours, stays), in one statement that only takes a charge still waiting. Staff "Not
+ * charged" then answers IN_PROGRESS until the re-send is answered and settled; a charge staff closed meanwhile is not sent (null).
+ */
+async function markResend(d: CardChargeDeps, r: ChargeRow): Promise<ChargeRow | null> {
+  const row = await d.db
+    .updateTable('square_charges')
+    .set({ state: 'charging', updated_at: d.clock.now() })
+    .where('id', '=', r.id)
+    .where('state', 'in', ['charging', 'unknown'])
+    .returningAll()
+    .executeTakeFirst()
+  return row ?? null
+}
 
 /**
  * square.charges.resolve: every charge Square did not answer (state `unknown`, or `charging` for more than 5 minutes: its process
@@ -690,7 +723,10 @@ export async function resolveCharges(d: CardChargeDeps): Promise<ResolveReport> 
     // Square never got it, and the invoice no longer owes it (paid another way, or canceled): nothing is sent (plan decision 6:
     // staff confirmed a charge of a balance that is gone)
     else if (await noLongerOwed(d.db, r)) answer = { kind: 'declined', code: 'NOT_SENT', text: 'Nothing was charged: the invoice no longer owes it.' }
-    else if (resend) answer = await send(d, r)
+    else if (resend) {
+      const marked = await markResend(d, r)
+      answer = marked ? await send(d, marked) : { kind: 'wait' }
+    }
     else if (now.getTime() - lastRequestAt(r).getTime() >= CHARGE_SETTLE_MS) answer = { kind: 'declined', code: 'NOT_SENT', text: NONE_AT_SQUARE }
     else answer = { kind: 'wait' }
     try {
@@ -721,8 +757,9 @@ async function lookUp(d: CardChargeDeps, r: ChargeRow): Promise<WirePayment | nu
  * look-up as the job, at once and with Square watch-only too. Square has the payment: it is recorded (or declined as Square has it),
  * never closed as not charged; Square has none: the charge is closed `declined` (NOT_SENT) in the staff member's name (audit
  * `card.charge_not_charged`, an activity line) and the invoice can be collected again. 404 CARD_CHARGE_NOT_FOUND (another invoice's),
- * 409 CARD_CHARGE_NOT_WAITING (already charged, declined or waived), 409 CARD_CHARGE_IN_PROGRESS (its request is still out, or
- * Square shows the payment pending), 503 SQUARE_UNAVAILABLE (Square did not answer: nothing changes).
+ * 409 CARD_CHARGE_NOT_WAITING (already charged, declined or waived), 409 CARD_CHARGE_IN_PROGRESS (its request is still out, Square
+ * shows the payment pending, or Square has none but the last request, a re-send of the job included, is under CHARGE_SETTLE_MS old:
+ * review Q4FIX-N1), 503 SQUARE_UNAVAILABLE (Square did not answer: nothing changes).
  */
 export async function closeUnanswered(d: CardChargeDeps, i: { invoiceId: string; chargeId: string; actor: SquareActor }): Promise<ChargeOutcome> {
   const r = await d.db

@@ -418,7 +418,8 @@ Migration `20261015100100_review_q4_fix.sql`:
   nothing leaves the row as it is. Staff have **Not charged (checked Square)**: `POST /invoices/:id/card-charges/:chargeId/not-charged`
   (pay.collect, Idempotency-Key; a balance or a fee) does the same read-only look-up at once (writes off too): Square has it, it is
   recorded; none, the charge is closed NOT_SENT in the staff member's name (audit `card.charge_not_charged`, an activity line); 409
-  `CARD_CHARGE_NOT_WAITING`, 409 `CARD_CHARGE_IN_PROGRESS` (its request is under 5 minutes old, or Square shows it pending), 503
+  `CARD_CHARGE_NOT_WAITING`, 409 `CARD_CHARGE_IN_PROGRESS` (its request is under 5 minutes old, or Square shows it pending; since
+  Q4FIX-N1 also when Square has none and the last request is under 15 minutes old, or the job is re-sending it), 503
   `SQUARE_UNAVAILABLE`. The "Saved-card charge not confirmed" alert says to press Not charged when Square has no such payment. A late
   webhook of a payment Square did make still finds a declined charge by its reference and records it (the overpaid alert then asks
   for a refund if the invoice was collected another way meanwhile).
@@ -439,5 +440,15 @@ Migration `20261015100100_review_q4_fix.sql`:
   before its event: a webhook is live). `saveSquareState(..., { connection_point })` decides it in one statement (a new row, a row of
   another environment, or one with neither stamp nor watermark). The simulator is stamped only by Test connection. No setup order
   to follow.
+- **Q4FIX-N1, Not charged waits for the request to settle.** Staff **Not charged** closed an `unknown` charge at once, without the
+  job's 15-minute settle window and without regard to the job's re-send in flight: the request could still complete at Square after
+  the close, the desk collected again, and the late webhook recorded the money on the declined charge (overpaid). Now: Square has no
+  payment and the charge's last request (updated_at, or attempted_at) is under 15 minutes old: 409 `CARD_CHARGE_IN_PROGRESS` ("Square
+  may still be answering this charge. Check again in a few minutes."), checked under the row lock in the closing transaction. The job
+  marks a charge before it re-sends it (`charging`, last request now, one statement that takes only a charge still waiting; a charge
+  staff closed meanwhile is not sent), so Not charged answers IN_PROGRESS during a re-send and for 15 minutes after an unanswered one;
+  attempted_at (the look-up window, the 23 hours) never moves. A payment Square completes for a charge already closed is still
+  recorded, the charge gets `charged_after_close_at` (migration `20261015100200_charge_after_close.sql`), and the invoice's "Overpaid
+  via Square" alert says "a card charge went through after it was closed: refund the difference".
 - **SANDBOX-F1** (inclusions apply by themselves by default; a booking shows as covered only what will be covered) and the staff side
   of pricing **F2** ("Confirm price" on a `base` line) are in ADR 0170's Q4 fix notes.

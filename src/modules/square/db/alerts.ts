@@ -251,7 +251,7 @@ export const squareExternalAlerts: ExternalAlertSource = {
       })
     // only the invoices Square paid lately are computed (the board reads this on every refresh); a no-show or late-cancel fee charged
     // on a saved card (wave Q3a) sits on the canceled invoice on top of what the visit cost: it is not an overpayment
-    const over = await sql<{ id: string; invoice_no: number; client_name: string; overpaid: string | number; appointment_id: string | null; waiting: boolean }>`
+    const over = await sql<{ id: string; invoice_no: number; client_name: string; overpaid: string | number; appointment_id: string | null; waiting: boolean; late: boolean }>`
       with sq as (
         select distinct e.invoice_id from ledger_events e
         where e.location_id = ${ctx.locationId} and e.processor = 'square' and e.type = 'pay' and e.occurred_at >= ${since}
@@ -264,7 +264,8 @@ export const squareExternalAlerts: ExternalAlertSource = {
       )
       select id, invoice_no, client_name, overpaid, appointment_id,
         exists (select 1 from ledger_events w where w.invoice_id = o.id and w.type = 'pay' and w.processor_state = 'awaiting_processor'
-          and not exists (select 1 from ledger_events v where v.voids_event_id = w.id)) as waiting
+          and not exists (select 1 from ledger_events v where v.voids_event_id = w.id)) as waiting,
+        exists (select 1 from square_charges q where q.invoice_id = o.id and q.charged_after_close_at is not null) as late
       from o
       where overpaid > 0
       order by invoice_no desc limit 20`.execute(db)
@@ -275,9 +276,12 @@ export const squareExternalAlerts: ExternalAlertSource = {
         tone: 'amber',
         title: `Overpaid via Square · ${o.client_name}`,
         // a staff card entry still waiting may be this very money entered twice (review Q4 M1): check it before giving money back
+        // a saved-card charge Square completed after it was closed as not charged (review Q4FIX-N1): the desk collected it again
         desc: o.waiting
           ? `${formatUsd(Number(o.overpaid))} more than ${invoiceLabel(o.invoice_no)} · a staff card entry is still waiting: check it before refunding`
-          : `${formatUsd(Number(o.overpaid))} more than ${invoiceLabel(o.invoice_no)} · refund the difference`,
+          : o.late
+            ? `${formatUsd(Number(o.overpaid))} more than ${invoiceLabel(o.invoice_no)} · a card charge went through after it was closed: refund the difference`
+            : `${formatUsd(Number(o.overpaid))} more than ${invoiceLabel(o.invoice_no)} · refund the difference`,
         actionLabel: 'Refund',
         appointmentId: o.appointment_id,
         priority: 0,

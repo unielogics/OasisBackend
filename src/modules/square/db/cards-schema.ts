@@ -114,6 +114,8 @@ export interface SquareChargesTable {
   reason: string | null
   /** The staff request (user and Idempotency-Key) that started the current attempt. */
   request_key: string | null
+  /** Square completed the charge after Oasis closed it (declined, "Not charged"): recorded, the overpaid alert says why (Q4FIX-N1). */
+  charged_after_close_at: Date | null
   created_at: Generated<Date>
   updated_at: Generated<Date>
 }

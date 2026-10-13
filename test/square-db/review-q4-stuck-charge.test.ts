@@ -10,9 +10,12 @@ import { createSquareApi } from '../../src/integrations/square/api/index.js'
 import { simFetch } from '../../src/integrations/square/sim/index.js'
 import { saveCardOnFile } from '../../src/modules/square/cards.js'
 import { chargeWaiting } from '../../src/modules/square/charge-guard.js'
-import { resolveCharges } from '../../src/modules/square/charges.js'
+import { CHARGE_SETTLE_MS, paymentRequestOf, resolveCharges } from '../../src/modules/square/charges.js'
 import { squareExternalAlerts } from '../../src/modules/square/db/alerts.js'
+import { paymentFacts } from '../../src/modules/square/facts.js'
+import { decideSquarePayment, lockPayment } from '../../src/modules/square/payments.js'
 import { configureSquareRuntime } from '../../src/modules/square/runtime.js'
+import { transaction } from '../../src/platform/db.js'
 import { idemKey, invoiceState, recordPayment, useRig } from '../scheduling-gaps/support.js'
 import { silent, squareEnvFor } from './core.js'
 import { simFor } from './helpers.js'
@@ -132,6 +135,7 @@ describe('an unanswered saved-card charge always has a way out (review Q4 H1-R1)
   it('staff "Not charged (checked Square)": looks Square up; none: closed, audited, the desk collects again', async () => {
     const { a, chargeId } = await unanswered('hang')
     writesOff() // the rollback lever: the job sends nothing, staff still have a way out
+    later(CHARGE_SETTLE_MS) // the request had its time to land at Square (review Q4FIX-N1)
     const r = await notCharged(a.invoiceId, chargeId)
     expect(r.statusCode, r.body).toBe(200)
     expect((r.json() as Json).charge).toMatchObject({ id: chargeId, state: 'declined', declineCode: 'NOT_SENT' })
@@ -182,5 +186,111 @@ describe('an unanswered saved-card charge always has a way out (review Q4 H1-R1)
     const alerts = await squareExternalAlerts.list(m.h.t.db, { locationId: m.locationId(), now: m.h.clock.now(), manager: true })
     const a = alerts.find((x) => x.kind === 'square_charge_unknown')
     expect(a?.desc).toMatch(/Not charged/)
+  })
+})
+
+describe('staff "Not charged" never races a request still out (review Q4FIX-N1)', () => {
+  const clearFaults = () => {
+    ;(sim.sim as unknown as { faults: unknown[] }).faults.length = 0
+  }
+  const row = async (id: string) => m.h.t.db.selectFrom('square_charges').selectAll().where('id', '=', id).executeTakeFirstOrThrow()
+  /** The unanswered request lands at Square after all (its answer was only late): Square charged the card. */
+  async function landsLate(chargeId: string) {
+    const req = await paymentRequestOf(m.h.t.db, env, await row(chargeId))
+    const p = await sim.api.payments.create(req.key, req.body)
+    await transaction(m.h.t.db, async (tx) => {
+      await lockPayment(tx, p.id)
+      await decideSquarePayment(tx, { locationId: m.locationId(), clock: m.h.clock, newId: m.h.t.app.newId, env }, paymentFacts(p), { force: true })
+    })
+  }
+
+  it('within 15 minutes of the last request it is 409 CARD_CHARGE_IN_PROGRESS (an unknown charge too); after, it closes', async () => {
+    const { a, chargeId } = await unanswered('hang')
+    expect((await row(chargeId)).state).toBe('unknown')
+    later(10 * MIN)
+    const early = await notCharged(a.invoiceId, chargeId)
+    expect(early.statusCode, early.body).toBe(409)
+    expect((early.json() as Json).code).toBe('CARD_CHARGE_IN_PROGRESS')
+    expect((await row(chargeId)).state).toBe('unknown')
+    later(5 * MIN)
+    const r = await notCharged(a.invoiceId, chargeId)
+    expect(r.statusCode, r.body).toBe(200)
+    expect((r.json() as Json).charge).toMatchObject({ state: 'declined', declineCode: 'NOT_SENT' })
+  })
+
+  it('while the job re-sends, the charge is marked (charging, its last request now): staff get IN_PROGRESS', async () => {
+    const { a, chargeId } = await unanswered('hang')
+    later(CHARGE_SETTLE_MS)
+    clearFaults()
+    let during: { statusCode: number; body: string } | undefined
+    const base = sim.api
+    api = {
+      ...base,
+      payments: {
+        ...base.payments,
+        create: async (key, body) => {
+          // staff press "Not charged" while the job's re-send is out
+          const now = await row(chargeId)
+          expect(now.state).toBe('charging')
+          during = await notCharged(a.invoiceId, chargeId)
+          return base.payments.create(key, body)
+        },
+      },
+    }
+    configureSquareRuntime({ env, api: () => api })
+    expect(await resolve()).toMatchObject({ considered: 1, charged: 1 })
+    expect(during?.statusCode, during?.body).toBe(409)
+    expect(JSON.parse(during!.body).code).toBe('CARD_CHARGE_IN_PROGRESS')
+    expect(await row(chargeId)).toMatchObject({ state: 'charged' })
+    expect(await balanceOf(a.invoiceId)).toBe(0)
+  })
+
+  it('a re-send that starts after staff looked Square up wins: the close is refused, nothing is closed under it', async () => {
+    const { a, chargeId } = await unanswered('hang')
+    later(CHARGE_SETTLE_MS)
+    clearFaults()
+    // the job's re-send goes out (and gets no answer) between the staff look-up and the close
+    sim.sim.injectFault({ hang: true, times: 4, path: '/v2/payments', method: 'POST' })
+    const base = sim.api
+    let raced = false
+    api = {
+      ...base,
+      payments: {
+        ...base.payments,
+        list: async (q) => {
+          const res = await base.payments.list(q)
+          if (!raced) {
+            raced = true
+            api = base
+            configureSquareRuntime({ env, api: () => api })
+            expect(await resolve()).toMatchObject({ considered: 1, unknown: 1 })
+          }
+          return res
+        },
+      },
+    }
+    configureSquareRuntime({ env, api: () => api })
+    const r = await notCharged(a.invoiceId, chargeId)
+    expect(r.statusCode, r.body).toBe(409)
+    expect((r.json() as Json).code).toBe('CARD_CHARGE_IN_PROGRESS')
+    expect(await row(chargeId)).toMatchObject({ state: 'unknown' })
+  })
+
+  it('a card charge completed after it was closed: recorded, and the overpaid alert says why', async () => {
+    const { a, chargeId, balance } = await unanswered('hang')
+    writesOff()
+    later(CHARGE_SETTLE_MS)
+    expect((await notCharged(a.invoiceId, chargeId)).statusCode).toBe(200)
+    expect((await cash(a.invoiceId)).statusCode).toBe(201)
+    await landsLate(chargeId)
+    const after = await row(chargeId)
+    expect(after).toMatchObject({ state: 'charged' })
+    expect(after.charged_after_close_at).not.toBeNull()
+    expect((await invoiceState(m, a.invoiceId)).paid).toBe(2 * balance)
+    const alerts = await squareExternalAlerts.list(m.h.t.db, { locationId: m.locationId(), now: m.h.clock.now(), manager: true })
+    const over = alerts.filter((x) => x.kind === 'square_overpaid')
+    expect(over).toHaveLength(1)
+    expect(over[0]!.title).toMatch(/^Overpaid via Square · Maria Delgado/)
+    expect(over[0]!.desc).toMatch(/card charge went through after it was closed/)
   })
 })
