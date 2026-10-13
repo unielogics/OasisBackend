@@ -6,7 +6,7 @@
 //   complete  HEAD (size and type), GET, the %PDF- magic bytes (else failed: not_pdf), the server's own SHA-256 (the authoritative
 //             duplicate check: the copy is deleted and 409 answered), then `extracting`; the caller enqueues
 //             assistant.knowledge.extract after the commit.
-//   extract   (the job) reads the PDF in a worker thread (extract/extract.ts) and either fails it with a plain reason or stores the
+//   extract   (the job) reads the PDF in a child process under prlimit (extract/extract.ts) and either fails it with a plain reason or stores the
 //             cleaned text and creates the document's knowledge entry as an inactive draft, its warnings computed, waiting for review.
 //   retry     a failed document goes back to extracting (at most MAX_ATTEMPTS reads).
 //   delete    the document and its entry: text cleared, the object removed after the commit (the cleanup job retries).
