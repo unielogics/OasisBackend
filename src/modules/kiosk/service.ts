@@ -283,8 +283,7 @@ export class KioskService {
     if (!found || found.revoked_at) throw new AppError('KIOSK_DEVICE_UNKNOWN')
     const locationId = found.location_id
     if (!(await getSetting(db, locationId, 'kiosk.enabled')).value) throw new AppError('KIOSK_OFF')
-    const code = await this.currentCode(db, locationId)
-    if (!code) throw new AppError('KIOSK_CODE_NOT_SET')
+    if (!(await this.currentCode(db, locationId))) throw new AppError('KIOSK_CODE_NOT_SET')
 
     type Outcome =
       | { ok: true; token: string; sessionId: string; csrfSecret: string; lock: KioskLock; createdAt: Date; userSignedOut: boolean }
@@ -299,6 +298,19 @@ export class KioskService {
         .executeTakeFirstOrThrow()
       if (dev.revoked_at) throw new AppError('KIOSK_DEVICE_UNKNOWN')
       if (dev.locked_out_at) throw new AppError('KIOSK_LOCKED_OUT')
+      // read again and share-lock the current code: a code change waits for this unlock and then ends its session (its own
+      // update of the row), and an unlock behind a code change never opens a session with the retired code
+      const code = await this.currentCode(tx, locationId, true)
+      if (!code) throw new AppError('KIOSK_CODE_NOT_SET')
+      // likewise kiosk mode: turning it off waits for this unlock, then ends its session
+      const mode = await tx
+        .selectFrom('settings')
+        .select('value')
+        .where('location_id', '=', locationId)
+        .where('key', '=', 'kiosk.enabled')
+        .forShare()
+        .executeTakeFirst()
+      if ((mode?.value as unknown) !== true) throw new AppError('KIOSK_OFF')
       const now = clock.now()
       const wait = Math.max(
         deviceRetryAfterSec({ failedAttempts: dev.failed_attempts, lastFailedAt: dev.last_failed_at }, now),
@@ -785,13 +797,13 @@ export class KioskService {
   // --- helpers -------------------------------------------------------------------------------------------------------------------
 
   /** The current code row of the location, or undefined. */
-  private currentCode(db: Executor, locationId: string) {
-    return db
+  private currentCode(db: Executor, locationId: string, share = false) {
+    const q = db
       .selectFrom('kiosk_codes')
       .select(['id', 'code_hash', 'created_at', 'created_by_name'])
       .where('location_id', '=', locationId)
       .where('retired_at', 'is', null)
-      .executeTakeFirst()
+    return (share ? q.forShare() : q).executeTakeFirst()
   }
 
   /** The lock time of an unlock now: today's and yesterday's hours, closures and the emergency, in the business time zone. */
