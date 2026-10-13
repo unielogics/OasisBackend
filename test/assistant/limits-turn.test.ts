@@ -124,6 +124,19 @@ describe('a turn under the owner’s limits (ADR 0174 §3b)', () => {
     expect(p.model[0]!.system.at(-1)!.text).toContain('In-chat booking: off (a team member sets up bookings: booking links are off).')
   })
 
+  it('an ability switched off: a reply that says a team member will text them opens the handoff (and asks nothing more)', async () => {
+    await limits({ bookingLinks: false })
+    const p = await play('I want to book a wash tomorrow', [simText('A team member will text you to set that up. Which wash would you like?')])
+    expect(p.r.status).toBe('replied')
+    expect(await conversation(p.conversationId)).toEqual({ handoff_state: 'open', handoff_reason: 'cannot_help' })
+    expect(p.sent.at(-1)).toContain('A team member will text you to set that up.')
+    expect(p.sent.at(-1)).not.toContain('Which wash')
+    // with every ability on, the same words open nothing (today's behaviour)
+    await limits()
+    const q = await play('I want to book a wash tomorrow', [simText('A team member will text you to set that up.')], { who: 'Liam Chen' })
+    expect((await conversation(q.conversationId)).handoff_state).toBeNull()
+  })
+
   it('account questions off: the client’s own membership status is not looked up', async () => {
     await limits({ accountInfo: false })
     const p = await play('Am I a member?', [simToolUse('get_membership_info', {}), simText('A team member will text you about your membership.')])

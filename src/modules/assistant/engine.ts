@@ -29,7 +29,7 @@ import { toBizDate } from '../../platform/time.js'
 import type { AnyAssistantTool, AssistantLog, HandoffRequest, ShopFacts, ToolContext, ToolRegistry } from './contract.js'
 import type { AssistantConfig } from './config.js'
 import { CONFIRM_PLACEHOLDER, factLiterals, oneLine, openingWindow, placeholderValues } from './facts.js'
-import { allLinkKinds, handoffTopicIn, phrasesIn, type AssistantPolicy, type ToolPolicy } from './policy.js'
+import { allCapabilities, allLinkKinds, handoffTopicIn, phrasesIn, type AssistantPolicy, type ToolPolicy } from './policy.js'
 import {
   cutAfterFirstQuestion,
   cutAtSentence,
@@ -579,6 +579,10 @@ export async function runEngine(d: EngineDeps, i: EngineInput): Promise<EngineRe
     const line = TOPIC_HANDOFF_TEXTS[lang]
     return { kind: 'reply', reply: line, replyRaw: line, rendered: [], safety: false, card, handoff: links.handoffRequest, ...meter() }
   }
+  // ADR 0174 §3b: with an ability switched off, a reply that tells the client a team member will text them must reach the team
+  // (the owner block asks for handoff_to_staff; the model sometimes only says it): the handoff opens, so the promised text comes
+  if (!links.requested() && i.policy && !allCapabilities(i.policy.capabilities) && promisesTeamText(reply))
+    links.handoff('cannot_help', 'Oasis AI told the client a team member will text them (an ability is switched off in Settings → Oasis AI).')
   // W4b X8: the client texted a photo and the reply says the team will review it: a person is asked to (the AI cannot see it)
   if (i.photo && TEAM_REVIEW.test(reply))
     links.requestHandoff({
@@ -596,6 +600,16 @@ export async function runEngine(d: EngineDeps, i: EngineInput): Promise<EngineRe
     .filter(([k]) => !k.startsWith('{link') && replyRaw.includes(k))
     .map(([, v]) => v)
   return { kind: 'reply', reply, replyRaw, rendered, safety, card, handoff: links.handoffRequest, ...meter() }
+}
+
+/** "A team member will text you to set it up", "el equipo te escribira": a statement that a person will follow up (ADR 0174 §3b). */
+const TEAM_WILL_TEXT =
+  /\b(?:team\s+member|someone(?:\s+from\s+(?:the|our)\s+team)?|(?:the|our)\s+team|a\s+person|(?:our\s+)?staff)\b[^.!?]{0,40}?\b(?:will|'ll|is\s+going\s+to)\s+(?:\w+\s+){0,2}?(?:text|call|reach\s+out|contact|get\s+back|follow\s+up)|\b(?:equipo|alguien)\b[^.!?]{0,40}?\bte\s+(?:escribir|contactar|llamar|respond)/i
+
+/** Whether a reply states (not asks) that a person will text the client. */
+export function promisesTeamText(text: string): boolean {
+  const t = text.normalize('NFD').replace(/\p{M}/gu, '').replace(/[’‘]/g, "'")
+  return sentencesOf(t).some((s) => !s.trim().endsWith('?') && TEAM_WILL_TEXT.test(s))
 }
 
 /** A reply that tells the client the team will look at what they sent (W4b X8: a photo then opens a handoff). */
