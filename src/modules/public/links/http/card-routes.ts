@@ -6,7 +6,8 @@
 //                                       src/modules/square/cards.ts saveCardOnFile (CreateCard outside any transaction, key
 //                                       cd_<link and token>). Idempotency-Key required (the key is the LINK's). Limits: 10 an hour per
 //                                       address, 5 a day per number, 3 per page; 3 declined cards a day lock the number for the day
-//                                       (429 CARD_SAVE_LOCKED). One completion of the link per card saved.
+//                                       (429 CARD_SAVE_LOCKED), counted with the membership page's subscribe (cardDeclineLock). One
+//                                       completion of the link per card saved.
 //   DELETE /public/links/cards/:cardId  removes one of the page client's own cards: DisableCard at Square, consents revoked.
 // Closed like every link route (PUBLIC_LINKS_ENABLED=false: the unknown-route 404). Saved cards off (PAYMENT_PROCESSOR is not
 // square): 501 LINK_ACTION_NOT_READY, nothing written. Square watch-only: 409 SQUARE_WRITES_OFF.
@@ -73,7 +74,7 @@ export const CardRemoveResult = z.object({ cardId: z.string().uuid(), state: Car
 const declineKey = (phone: string): string => `card_decline:phone:${phone}`
 
 /** The number's declined cards today (read without counting): 3 lock it for the rest of the day. */
-async function declinesToday(k: LinkRouteKit, phone: string): Promise<number> {
+async function declinesToday(k: Pick<LinkRouteKit, 'app'>, phone: string): Promise<number> {
   const rule = CARD_LIMITS.declines
   const r = await k.app.db
     .selectFrom('public_rate_limits')
@@ -82,6 +83,26 @@ async function declinesToday(k: LinkRouteKit, phone: string): Promise<number> {
     .where('window_start', '=', windowStart(k.app.clock.now(), rule.windowSec))
     .executeTakeFirst()
   return Number(r?.count ?? 0)
+}
+
+/**
+ * The card-testing lock every page that sends a card to Square shares (the card page and the membership page's subscribe; review Q4
+ * SEC-1): 3 declined cards a day on a number lock it until the next day, whichever page they were declined on.
+ */
+export const cardDeclineLock = {
+  /** 429 CARD_SAVE_LOCKED before anything is sent to Square when the number is locked today. */
+  async check(k: Pick<LinkRouteKit, 'app'>, phone: string): Promise<void> {
+    if ((await declinesToday(k, phone)) >= CARD_LIMITS.declines.max) throw new AppError('CARD_SAVE_LOCKED')
+  },
+  /** Runs a card step; a CARD_DECLINED it throws counts toward the number's lock. */
+  async counting<T>(k: Pick<LinkRouteKit, 'app'>, phone: string, step: () => Promise<T>): Promise<T> {
+    try {
+      return await step()
+    } catch (e) {
+      if (e instanceof AppError && e.code === 'CARD_DECLINED') await consume(k.app.db, k.app.clock, declineKey(phone), CARD_LIMITS.declines)
+      throw e
+    }
+  },
 }
 
 const cardDeps = (k: LinkRouteKit, locationId: string, req: FastifyRequest): SquareCardDeps => {
@@ -154,7 +175,7 @@ export function registerCardLinkRoutes(k: LinkRouteKit): void {
         prepare: async (req) => {
           const s = await k.session(k.app.db, req, { touch: false })
           const { customerId, locationId } = await cardPage(k, s, { hold: true })
-          if ((await declinesToday(k, s.phone)) >= CARD_LIMITS.declines.max) throw new AppError('CARD_SAVE_LOCKED')
+          await cardDeclineLock.check(k, s.phone)
           await k.limit([
             { key: `link_card:ip:${ipLimitKey(req.ip)}`, rule: CARD_LIMITS.save.ip },
             { key: `link_card:phone:${s.phone}`, rule: CARD_LIMITS.save.phone },
@@ -162,8 +183,8 @@ export function registerCardLinkRoutes(k: LinkRouteKit): void {
           ])
           const body = req.body as z.infer<typeof CardSaveBody>
           const ua = req.headers['user-agent']
-          try {
-            return await saveCardOnFile(cardDeps(k, locationId, req), {
+          return cardDeclineLock.counting(k, s.phone, () =>
+            saveCardOnFile(cardDeps(k, locationId, req), {
               customerId,
               sourceId: body.sourceId,
               verificationToken: body.verificationToken ?? null,
@@ -179,11 +200,8 @@ export function registerCardLinkRoutes(k: LinkRouteKit): void {
               keyBase: `link-card:${s.link.id}:${body.sourceId}`,
               createdVia: 'card_link',
               audit: linkAudit(k.reqOf(req)),
-            })
-          } catch (e) {
-            if (e instanceof AppError && e.code === 'CARD_DECLINED') await consume(k.app.db, k.app.clock, declineKey(s.phone), CARD_LIMITS.declines)
-            throw e
-          }
+            }),
+          )
         },
       },
     ) as never,

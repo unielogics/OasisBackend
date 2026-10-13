@@ -16,7 +16,7 @@ import { ipLimitKey } from '../../../../platform/ip.js'
 import { enrollmentStatus, subscribeOnLink, type EnrollmentStatusView } from '../../../memberships/square/enroll.js'
 import { VehicleClassKey } from '../../http/schemas.js'
 import type { LinkRouteKit } from './routes.js'
-import './card-routes.js'
+import { cardDeclineLock } from './card-routes.js'
 
 /** The membership limits of the link routes (routes.ts LINK_LIMITS.membership): the subscribe shares their counters. */
 const LIMITS = { ip: { max: 10, windowSec: 3600 }, phone: { max: 5, windowSec: 86_400 } } as const
@@ -55,7 +55,7 @@ export function registerSubscribeLinkRoutes(k: LinkRouteKit): void {
         description:
           `${k.bearerNote} With PAYMENT_PROCESSOR=square (else 501 \`LINK_ACTION_NOT_READY\`: the page uses membership/start). Needs a PIN or code entered on this page in the last 5 minutes (403 \`IDENTITY_STEP_UP_REQUIRED\`, \`meta.need\` \`fresh\`); 403 \`LINK_PRIVILEGES_HELD\` within 72 hours of a PIN reset; 401 \`LINK_WRONG_PURPOSE\` on another kind of link. ` +
           'The size must be priced for the link’s tier (422 `TIER_CLASS_UNPRICED`) and that price set up at Square (409 `LINK_CHECKOUT_UNAVAILABLE`, also while Square is watch-only or SQUARE_MEMBERSHIPS_ENABLED is false); the email must look deliverable (422 on `body.email`: Square ends a subscription whose email it cannot deliver to); the consent version must be the current one (409 `CARD_CONSENT_OUTDATED`). 409 `LINK_ALREADY_MEMBER` for a client who holds or shares a live membership. ' +
-          'A pending membership (source square) and an enrollment, one completion of the link (3); then the client’s Square customer (with the email), the card saved with the consent `membership_billing` (422 `CARD_DECLINED` with the reason the client may read), and the Square subscription from today. `202 {status: pending}`: the page polls `GET membership/status` until `active` (Square’s first invoice paid) or `failed`. A second submit while an attempt is past its card answers its status and sends nothing. 503 `SQUARE_UNAVAILABLE` when Square does not answer before the card is saved. Limits: 10 an hour per address, 5 a day per number (shared with membership/start).',
+          'A pending membership (source square) and an enrollment, one completion of the link (3); then the client’s Square customer (with the email), the card saved with the consent `membership_billing` (422 `CARD_DECLINED` with the reason the client may read; it counts toward the number’s 3 declined cards a day, shared with the card page: then 429 `CARD_SAVE_LOCKED` until the next day, before anything is sent), and the Square subscription from today. `202 {status: pending}`: the page polls `GET membership/status` until `active` (Square’s first invoice paid) or `failed`. A second submit while an attempt is past its card answers its status and sends nothing. 503 `SQUARE_UNAVAILABLE` when Square does not answer before the card is saved. Limits: 10 an hour per address, 5 a day per number (shared with membership/start).',
         body: MembershipSubscribeBody,
         response: { 202: MembershipEnrollmentStatus },
       },
@@ -67,17 +67,21 @@ export function registerSubscribeLinkRoutes(k: LinkRouteKit): void {
         // the work runs here: its own short transactions around the Square calls (never inside the idempotency transaction)
         prepare: async (req) => {
           const s0 = await k.session(k.app.db, req, { touch: false })
+          // the card-testing lock of the card page holds here too, and a card declined here counts toward it (review Q4 SEC-1)
+          await cardDeclineLock.check(k, s0.phone)
           await k.limit([
             { key: `link_membership:ip:${ipLimitKey(req.ip)}`, rule: LIMITS.ip },
             { key: `link_membership:phone:${s0.phone}`, rule: LIMITS.phone },
           ])
           const ua = req.headers['user-agent']
-          return subscribeOnLink(
-            k.deps,
-            (db, o) => k.session(db, req, o),
-            { ...k.reqOf(req), userAgent: typeof ua === 'string' ? ua : null },
-            req.body as z.infer<typeof MembershipSubscribeBody>,
-            req.log,
+          return cardDeclineLock.counting(k, s0.phone, () =>
+            subscribeOnLink(
+              k.deps,
+              (db, o) => k.session(db, req, o),
+              { ...k.reqOf(req), userAgent: typeof ua === 'string' ? ua : null },
+              req.body as z.infer<typeof MembershipSubscribeBody>,
+              req.log,
+            ),
           )
         },
       },
