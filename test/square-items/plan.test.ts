@@ -458,3 +458,20 @@ describe('the tax gate', () => {
     ])
   })
 })
+
+describe('K4 review ITEMS-HARDEN: an item found again by its marker', () => {
+  it('two marked items for one service: the oldest (created_at) is adopted, the other reported, whatever the search order', () => {
+    const l: Lib = { active: [true, true, true, true, true], services: [{ id: sid(7), kind: 'package', name: 'Wash', publicName: null, sort: 1, category: 'wash', active: true, quoteOnly: false, priceCents: 4000, cells: {} }] }
+    const lib = desiredLibrary(input(l))
+    const marked = (id: string, created: string): WireCatalogObject => ({
+      type: 'ITEM',
+      id,
+      created_at: created,
+      item_data: { name: 'Wash', variations: [{ type: 'ITEM_VARIATION', id: `${id}-v`, item_variation_data: { item_id: id, name: 'Regular', user_data: markerOf(sid(7), null) } }] },
+    } as WireCatalogObject)
+    const remote: RemoteView = { items: new Map(), categories: new Map(), gone: new Set(), marked: [marked('NEWER', '2026-10-13T10:00:00Z'), marked('OLDER', '2026-10-01T10:00:00Z')] }
+    const plan = planItems(lib, { locationId: LOC, links: [], remote })
+    expect(plan.find((a) => a.kind === 'adopt_orphan')).toMatchObject({ itemId: 'OLDER' })
+    expect(plan.filter((a) => a.kind === 'drift')).toHaveLength(1)
+  })
+})

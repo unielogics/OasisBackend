@@ -125,8 +125,8 @@ variation, and a guest basket's Square CalculateOrder total ($133.28, tax $8.28 
 2. In production, look for a CATEGORY named any casing of "Oasis" (now left alone, but confirm what it holds) and confirm the shop's
    tax is the one that stays on (an adopted tax turned off later blocks the sync).
 3. Confirm in the sandbox how long Square keeps catalog idempotency keys, and whether the Square Dashboard's "Duplicate item" copies
-   variation `user_data` (a copied marker makes a second marked item; after a link loss the planner adopts whichever marked item the
-   search returns first).
+   variation `user_data` (a copied marker makes a second marked item, reported; after a link loss the planner adopts the oldest by
+   Square's `created_at`, fixed in the K4 review: it took whichever the search returned first).
 4. `square.items.sync` expires after 240 s: a first sync of about 41 items with 15 s timeouts and 4 tries can outlive it (the lock
    prevents a double run, but pg-boss records the expiry as a failure): watch the first run, or raise the expiry / cap the creates
    per run if it happens.

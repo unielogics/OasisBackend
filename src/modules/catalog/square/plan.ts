@@ -133,7 +133,12 @@ export function planItems(lib: DesiredLibrary, ctx: ItemPlanContext): ItemAction
   const linkedItemIds = new Set([...itemLinks.values()].map((l) => l.objectId).filter((x): x is string => !!x))
   // items with Oasis's marker that no link names (read only by the nightly run): adopted, the oldest first; a second one is reported
   const orphans = new Map<string, WireCatalogObject>()
-  for (const o of ctx.remote?.marked ?? []) {
+  // the oldest first by Square's created_at (search order is not creation order: K4 review ITEMS-HARDEN); without it, as listed
+  const createdOf = (o: WireCatalogObject): string => {
+    const c = (o as { created_at?: unknown }).created_at
+    return typeof c === 'string' ? c : '\uffff'
+  }
+  for (const o of [...(ctx.remote?.marked ?? [])].sort((a, b) => createdOf(a).localeCompare(createdOf(b)))) {
     if (o.is_deleted || linkedItemIds.has(o.id)) continue
     const svc = (o.item_data?.variations ?? []).map((v) => parseMarker(v.item_variation_data?.user_data)?.serviceId).find(Boolean)
     if (!svc) continue
