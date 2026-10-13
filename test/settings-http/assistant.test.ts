@@ -16,6 +16,9 @@ const DEFAULTS = {
   allowlist: [],
   staffPauseHours: 12,
   faq: [],
+  // ADR 0174: limits and tone, today's behaviour by default
+  capabilities: { availability: true, bookingLinks: true, membershipLinks: true, paymentLinks: true, accountInfo: true },
+  behavior: { tone: 'friendly', length: 'standard', styleNotes: '', spanish: 'on', avoidWords: [], avoidTopics: [], handoffTopics: [], signOff: '' },
   server: { aiEnabled: false, actionsEnabled: false },
   active: false,
 }
@@ -199,6 +202,45 @@ describe('PUT /settings/assistant', () => {
     expect((await h.put('settings/assistant', await h.withPermissions(['set.hours']), { version: v0, enabled: true })).statusCode).toBe(403)
     const manager = await h.withPermissions(['set.assistant'])
     expect((await h.put('settings/assistant', manager, { version: v0, enabled: true })).statusCode).toBe(200)
+  })
+})
+
+describe('limits and tone (ADR 0174 §3a): stored with the section, validated, today’s behaviour by default', () => {
+  const BEHAVIOR = DEFAULTS.behavior
+
+  it('saves the capabilities and the behavior as whole objects, each audited and published like the other keys', async () => {
+    const s = await h.admin()
+    const v0 = await sectionVersion(s)
+    const capabilities = { availability: false, bookingLinks: true, membershipLinks: false, paymentLinks: false, accountInfo: false }
+    const behavior = { ...BEHAVIOR, tone: 'warm', length: 'short', avoidWords: ['cheap', 'dude'], handoffTopics: ['insurance claims'], signOff: '- Oasis team' }
+    const r = await h.put('settings/assistant', s, { version: v0, capabilities, behavior })
+    expect(r.statusCode, r.body).toBe(200)
+    expect(json(r)).toMatchObject({ capabilities, behavior, changed: ['assistant.capabilities', 'assistant.behavior'], version: v0 + 2 })
+    expect(json(await h.get('settings/assistant', s))).toMatchObject({ capabilities, behavior })
+    const published = (await events(h.db, 'settings')).map((e) => [e.payload.section, e.payload.key])
+    expect(published).toContainEqual(['assistant', 'assistant.behavior'])
+  })
+
+  it('refuses a partial object, hidden characters, repeats, a topic both avoided and handed off, and a sign-off with an amount or a link', async () => {
+    const s = await h.admin()
+    const v0 = await sectionVersion(s)
+    const bad = async (body: Record<string, unknown>) => {
+      const r = await h.put('settings/assistant', s, { version: v0, ...body })
+      expect(r.statusCode, r.body).toBe(422)
+      return json(r).errors as { path: string; message: string }[]
+    }
+    await bad({ capabilities: { availability: false } })
+    await bad({ behavior: { ...BEHAVIOR, tone: 'sarcastic' } })
+    expect(await bad({ behavior: { ...BEHAVIOR, styleNotes: 'Be nice\u200b' } })).toContainEqual({ path: 'behavior.styleNotes', message: 'Use plain text: this line holds hidden or control characters.' })
+    expect(await bad({ behavior: { ...BEHAVIOR, styleNotes: 'Be <b>nice</b>' } })).toContainEqual({ path: 'behavior.styleNotes', message: 'Use plain text: no HTML tags.' })
+    expect(await bad({ behavior: { ...BEHAVIOR, avoidWords: ['cheap', 'Cheap '] } })).toContainEqual({ path: 'behavior.avoidWords.1', message: 'This is already in the list.' })
+    expect(await bad({ behavior: { ...BEHAVIOR, avoidTopics: ['competitors'], handoffTopics: ['Competitors'] } })).toContainEqual({
+      path: 'behavior.handoffTopics.0',
+      message: 'A topic is either avoided or handed to the team, not both.',
+    })
+    for (const signOff of ['$5 off', 'Call 2015550142', 'oasis.com', 'Free wash!'])
+      expect(await bad({ behavior: { ...BEHAVIOR, signOff } }), signOff).toContainEqual({ path: 'behavior.signOff', message: 'The sign-off cannot hold an amount, a number, a link or a promise.' })
+    expect(await sectionVersion(s)).toBe(v0)
   })
 })
 

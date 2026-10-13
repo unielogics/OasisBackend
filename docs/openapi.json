@@ -110273,6 +110273,113 @@
                       },
                       "type": "array"
                     },
+                    "behavior": {
+                      "additionalProperties": false,
+                      "description": "ADR 0174 tone: how the assistant writes (defaults = today). Stored now, applied by the turn from the policy wave on",
+                      "properties": {
+                        "avoidTopics": {
+                          "description": "Topics it does not discuss: 3 to 80 characters each, at most 15, each once",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "avoidWords": {
+                          "description": "Words and phrases it never uses: 2 to 40 characters each, at most 30, each once",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "handoffTopics": {
+                          "description": "Topics it always hands to the team: 3 to 80 characters each, at most 15, each once, none also in avoidTopics",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "length": {
+                          "description": "The reply length it aims for (320 characters stays the hard cap)",
+                          "enum": [
+                            "short",
+                            "standard"
+                          ],
+                          "type": "string"
+                        },
+                        "signOff": {
+                          "description": "An optional sign-off the server adds, at most 24 characters, no amount, number, link or promise (\"\" = none)",
+                          "type": "string"
+                        },
+                        "spanish": {
+                          "description": "Spanish texts: answer in Spanish, answer in English, or hand them to the team",
+                          "enum": [
+                            "on",
+                            "english",
+                            "handoff"
+                          ],
+                          "type": "string"
+                        },
+                        "styleNotes": {
+                          "description": "The owner’s style preferences, plain text, at most 400 characters (quoted to the model as data)",
+                          "type": "string"
+                        },
+                        "tone": {
+                          "description": "A fixed, vetted tone sentence",
+                          "enum": [
+                            "friendly",
+                            "professional",
+                            "warm",
+                            "concise"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "tone",
+                        "length",
+                        "styleNotes",
+                        "spanish",
+                        "avoidWords",
+                        "avoidTopics",
+                        "handoffTopics",
+                        "signOff"
+                      ],
+                      "type": "object"
+                    },
+                    "capabilities": {
+                      "additionalProperties": false,
+                      "description": "ADR 0174 limits: what the assistant may do (all on by default = today). Settings only take abilities away; booking, moving and cancelling by text stays `actionsEnabled`. \"Answer questions only\" is all five off. Stored now, applied by the turn from the policy wave on",
+                      "properties": {
+                        "accountInfo": {
+                          "description": "It may tell a client their balance, visits and membership",
+                          "type": "boolean"
+                        },
+                        "availability": {
+                          "description": "It may look up open times (check_availability)",
+                          "type": "boolean"
+                        },
+                        "bookingLinks": {
+                          "description": "It may text booking and verify links",
+                          "type": "boolean"
+                        },
+                        "membershipLinks": {
+                          "description": "It may text a link to join a membership",
+                          "type": "boolean"
+                        },
+                        "paymentLinks": {
+                          "description": "It may text a link to pay an open invoice",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "availability",
+                        "bookingLinks",
+                        "membershipLinks",
+                        "paymentLinks",
+                        "accountInfo"
+                      ],
+                      "type": "object"
+                    },
                     "enabled": {
                       "description": "The assistant answers texts (with AI_ENABLED on the server); off: texts reach staff as today",
                       "type": "boolean"
@@ -110347,6 +110454,8 @@
                     "allowlist",
                     "staffPauseHours",
                     "faq",
+                    "capabilities",
+                    "behavior",
                     "server",
                     "active",
                     "version"
@@ -110358,14 +110467,14 @@
             "description": "Default Response"
           }
         },
-        "summary": "The AI text assistant: on/off, in-chat actions, stage, allowlist, staff pause and FAQ (ETag = version)",
+        "summary": "The AI text assistant: on/off, in-chat actions, stage, allowlist, staff pause, FAQ, limits and tone (ETag = version)",
         "tags": [
           "settings"
         ],
         "x-oasis-access": "authenticated"
       },
       "put": {
-        "description": "Partial: any field; the rest stays (`allowlist` and `faq` are replaced as a whole). `version` (or If-Match) is required and must be the section’s current version: 412 VERSION_CONFLICT otherwise, 428 without one. Validated against the settings registry plus the section’s rules (allowlist: E.164 textable US/Canadian numbers, each once, at most 50; FAQ: at most 40 pairs of plain text, 500 characters each, no hidden, invisible or control characters (a tab or line break is fine) or HTML, each question once). Each changed setting is audited (settings.update) and published as `settings.changed` (section assistant). The server switches (`server`) are read-only.",
+        "description": "Partial: any field; the rest stays (`allowlist`, `faq`, `capabilities` and `behavior` are replaced as a whole). `version` (or If-Match) is required and must be the section’s current version: 412 VERSION_CONFLICT otherwise, 428 without one. Validated against the settings registry plus the section’s rules (allowlist: E.164 textable US/Canadian numbers, each once, at most 50; FAQ: at most 40 pairs of plain text, 500 characters each, no hidden, invisible or control characters (a tab or line break is fine) or HTML, each question once; behavior (ADR 0174): plain text, each list without repeats, a topic not both avoided and handed to the team, a sign-off without an amount, number, link or promise). A FAQ that grows past the knowledge budget (AI_KNOWLEDGE_MAX_CHARS, shared with the active knowledge entries) is refused with 422 `KNOWLEDGE_BUDGET {usedChars, maxChars, needed}`; a save that shrinks it always passes. Each changed setting is audited (settings.update) and published as `settings.changed` (section assistant). The server switches (`server`) are read-only.",
         "operationId": "putSettingsAssistant",
         "requestBody": {
           "content": {
@@ -110384,6 +110493,113 @@
                       "type": "string"
                     },
                     "type": "array"
+                  },
+                  "behavior": {
+                    "additionalProperties": false,
+                    "description": "ADR 0174 tone: how the assistant writes (defaults = today). Stored now, applied by the turn from the policy wave on",
+                    "properties": {
+                      "avoidTopics": {
+                        "description": "Topics it does not discuss: 3 to 80 characters each, at most 15, each once",
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "avoidWords": {
+                        "description": "Words and phrases it never uses: 2 to 40 characters each, at most 30, each once",
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "handoffTopics": {
+                        "description": "Topics it always hands to the team: 3 to 80 characters each, at most 15, each once, none also in avoidTopics",
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "length": {
+                        "description": "The reply length it aims for (320 characters stays the hard cap)",
+                        "enum": [
+                          "short",
+                          "standard"
+                        ],
+                        "type": "string"
+                      },
+                      "signOff": {
+                        "description": "An optional sign-off the server adds, at most 24 characters, no amount, number, link or promise (\"\" = none)",
+                        "type": "string"
+                      },
+                      "spanish": {
+                        "description": "Spanish texts: answer in Spanish, answer in English, or hand them to the team",
+                        "enum": [
+                          "on",
+                          "english",
+                          "handoff"
+                        ],
+                        "type": "string"
+                      },
+                      "styleNotes": {
+                        "description": "The owner’s style preferences, plain text, at most 400 characters (quoted to the model as data)",
+                        "type": "string"
+                      },
+                      "tone": {
+                        "description": "A fixed, vetted tone sentence",
+                        "enum": [
+                          "friendly",
+                          "professional",
+                          "warm",
+                          "concise"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "tone",
+                      "length",
+                      "styleNotes",
+                      "spanish",
+                      "avoidWords",
+                      "avoidTopics",
+                      "handoffTopics",
+                      "signOff"
+                    ],
+                    "type": "object"
+                  },
+                  "capabilities": {
+                    "additionalProperties": false,
+                    "description": "ADR 0174 limits: what the assistant may do (all on by default = today). Settings only take abilities away; booking, moving and cancelling by text stays `actionsEnabled`. \"Answer questions only\" is all five off. Stored now, applied by the turn from the policy wave on",
+                    "properties": {
+                      "accountInfo": {
+                        "description": "It may tell a client their balance, visits and membership",
+                        "type": "boolean"
+                      },
+                      "availability": {
+                        "description": "It may look up open times (check_availability)",
+                        "type": "boolean"
+                      },
+                      "bookingLinks": {
+                        "description": "It may text booking and verify links",
+                        "type": "boolean"
+                      },
+                      "membershipLinks": {
+                        "description": "It may text a link to join a membership",
+                        "type": "boolean"
+                      },
+                      "paymentLinks": {
+                        "description": "It may text a link to pay an open invoice",
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "availability",
+                      "bookingLinks",
+                      "membershipLinks",
+                      "paymentLinks",
+                      "accountInfo"
+                    ],
+                    "type": "object"
                   },
                   "enabled": {
                     "description": "The assistant answers texts (with AI_ENABLED on the server); off: texts reach staff as today",
@@ -110459,6 +110675,113 @@
                         "type": "string"
                       },
                       "type": "array"
+                    },
+                    "behavior": {
+                      "additionalProperties": false,
+                      "description": "ADR 0174 tone: how the assistant writes (defaults = today). Stored now, applied by the turn from the policy wave on",
+                      "properties": {
+                        "avoidTopics": {
+                          "description": "Topics it does not discuss: 3 to 80 characters each, at most 15, each once",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "avoidWords": {
+                          "description": "Words and phrases it never uses: 2 to 40 characters each, at most 30, each once",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "handoffTopics": {
+                          "description": "Topics it always hands to the team: 3 to 80 characters each, at most 15, each once, none also in avoidTopics",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "length": {
+                          "description": "The reply length it aims for (320 characters stays the hard cap)",
+                          "enum": [
+                            "short",
+                            "standard"
+                          ],
+                          "type": "string"
+                        },
+                        "signOff": {
+                          "description": "An optional sign-off the server adds, at most 24 characters, no amount, number, link or promise (\"\" = none)",
+                          "type": "string"
+                        },
+                        "spanish": {
+                          "description": "Spanish texts: answer in Spanish, answer in English, or hand them to the team",
+                          "enum": [
+                            "on",
+                            "english",
+                            "handoff"
+                          ],
+                          "type": "string"
+                        },
+                        "styleNotes": {
+                          "description": "The owner’s style preferences, plain text, at most 400 characters (quoted to the model as data)",
+                          "type": "string"
+                        },
+                        "tone": {
+                          "description": "A fixed, vetted tone sentence",
+                          "enum": [
+                            "friendly",
+                            "professional",
+                            "warm",
+                            "concise"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "tone",
+                        "length",
+                        "styleNotes",
+                        "spanish",
+                        "avoidWords",
+                        "avoidTopics",
+                        "handoffTopics",
+                        "signOff"
+                      ],
+                      "type": "object"
+                    },
+                    "capabilities": {
+                      "additionalProperties": false,
+                      "description": "ADR 0174 limits: what the assistant may do (all on by default = today). Settings only take abilities away; booking, moving and cancelling by text stays `actionsEnabled`. \"Answer questions only\" is all five off. Stored now, applied by the turn from the policy wave on",
+                      "properties": {
+                        "accountInfo": {
+                          "description": "It may tell a client their balance, visits and membership",
+                          "type": "boolean"
+                        },
+                        "availability": {
+                          "description": "It may look up open times (check_availability)",
+                          "type": "boolean"
+                        },
+                        "bookingLinks": {
+                          "description": "It may text booking and verify links",
+                          "type": "boolean"
+                        },
+                        "membershipLinks": {
+                          "description": "It may text a link to join a membership",
+                          "type": "boolean"
+                        },
+                        "paymentLinks": {
+                          "description": "It may text a link to pay an open invoice",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "availability",
+                        "bookingLinks",
+                        "membershipLinks",
+                        "paymentLinks",
+                        "accountInfo"
+                      ],
+                      "type": "object"
                     },
                     "changed": {
                       "description": "The setting keys this save changed",
@@ -110541,6 +110864,8 @@
                     "allowlist",
                     "staffPauseHours",
                     "faq",
+                    "capabilities",
+                    "behavior",
                     "server",
                     "active",
                     "version",

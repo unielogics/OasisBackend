@@ -766,10 +766,13 @@ as `{prep}` to both templates ("... at 2:00 PM. Plan for 2–3 hours. Reply C to
 ### 15.6b The AI text assistant: `/settings/assistant` (ADR 0160, design section 8, plan G)
 
 `GET /settings/assistant` (any session) answers `{enabled, actionsEnabled, stage allowlist|customers|everyone, allowlist[E.164],
-staffPauseHours, faq[{q, a}], server{aiEnabled, actionsEnabled} (read-only), active (read-only), version}` with `ETag: "<version>"`.
+staffPauseHours, faq[{q, a}], capabilities{availability, bookingLinks, membershipLinks, paymentLinks, accountInfo}, behavior{tone
+friendly|professional|warm|concise, length short|standard, styleNotes, spanish on|english|handoff, avoidWords[], avoidTopics[],
+handoffTopics[], signOff}, server{aiEnabled, actionsEnabled} (read-only), active (read-only), version}` with `ETag: "<version>"`.
 The values are the registry settings `assistant.enabled`, `assistant.actions_enabled`, `assistant.stage`, `assistant.allowlist`,
-`assistant.staff_pause_hours` and `assistant.faq` (all off / empty by default: `enabled` and `actionsEnabled` false, stage
-`allowlist`, 12 hours); `version` is the sum of their versions, which any write to any of them raises. `server` are the environment
+`assistant.staff_pause_hours`, `assistant.faq` and (ADR 0174) `assistant.capabilities` and `assistant.behavior` (all off / empty by
+default: `enabled` and `actionsEnabled` false, stage `allowlist`, 12 hours; every capability on, tone friendly, length standard,
+Spanish on, no lists, no sign-off: today's behaviour); `version` is the sum of their versions, which any write to any of them raises. `server` are the environment
 switches `AI_ENABLED` and `AI_ACTIONS_ENABLED`, which this section cannot change: with `AI_ENABLED=false` the assistant answers nobody
 whatever the section says. `active` = `AI_ENABLED` and `enabled`. The allowlist holds the owner's and staff's own mobile numbers,
 so a reader without `set.assistant` gets them masked to the last four digits (`+1******0142`); `set.assistant` sees them in full. The
@@ -786,7 +789,13 @@ mobile numbers only.`), each listed once, at most 50; the FAQ holds at most 40 p
 (no HTML tag and no character a reader cannot see: control characters but a tab or line break, format characters such as zero-width,
 direction marks, the soft hyphen and the Unicode tag block, line/paragraph separators, private-use, unassigned and default-ignorable
 code points such as variation selectors and Hangul fillers; only the emoji presentation selector after an emoji and the zero-width
-joiner between two emoji pass), each question once (case and spaces ignored). 422
+joiner between two emoji pass), each question once (case and spaces ignored). `capabilities` and `behavior` are whole objects
+(strict; ADR 0174 §3a): style notes at most 400 characters, words 2..40 characters (at most 30), topics 3..80 (at most 15 per
+list), every text plain (the FAQ's rules), each list without repeats (case and spaces ignored), a topic either avoided or handed to
+the team, and a sign-off of at most 24 characters with no amount, number, link or promise word (`The sign-off cannot hold an amount, a
+number, a link or a promise.`). They are stored and validated from this wave on; the turn applies them from the policy wave (K2c)
+on, so until then they change nothing. A FAQ that grows the shared knowledge budget past `AI_KNOWLEDGE_MAX_CHARS` is refused with 422
+`KNOWLEDGE_BUDGET {usedChars, maxChars, needed}` (section 15.6c); a save that shrinks it always passes. 422
 names every field (`allowlist.1`, `faq.0.a`, `staffPauseHours`; a stage outside the enum is the request schema's `body.stage`), and
 nothing is written. Only changed keys are written, each audited (`settings.update`, before/after) and published as
 `settings.changed {section: assistant, key, version}`. The answer is the view plus `changed`. A loaded view may be sent back as it
