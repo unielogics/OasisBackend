@@ -36,6 +36,7 @@ import type { AssistantConfig } from './config.js'
 import { appointmentRefs, loadAppointmentRefs, loadConversation, loadTurnContext, resolveIdentity } from './context.js'
 import { runEngine, TurnAbort, ZERO_USAGE, type ConversationRecord } from './engine.js'
 import { renderShopFacts } from './facts.js'
+import { renderShopKnowledge } from './knowledge/render.js'
 import { looksLikeCardNumber } from './guard.js'
 import { CARD_LINES, detectLanguage, isConvoLang, SAFETY_LINES, storeLanguage, withDisclosure, type ConvoLang } from './lang.js'
 import { whenWords } from './tools/common.js'
@@ -400,11 +401,13 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     ...(asksForFree(freshClient) ? { asksFree: true } : {}),
     ...(declinedPlans ? { declinedPlans: true } : {}),
   }
-  const contextText = renderTurnContext(turnContext)
+  // ADR 0174: the owner's active knowledge ('' without any: the prompt is then exactly what it was before)
+  const knowledgeText = renderShopKnowledge(facts)
+  const contextText = renderTurnContext(knowledgeText ? { ...turnContext, knowledge: true } : turnContext)
   const tools = offeredTools(d.registry, actionsEnabled)
   const specs = toolSpecs(tools)
   const factsText = renderShopFacts(facts)
-  const system = buildSystem({ factsText, contextText })
+  const system = buildSystem({ factsText, contextText, knowledgeText })
   transcript.add({ kind: 'system', promptVersion: PROMPT_VERSION, factsVersion: facts.version, tools: tools.map((t) => t.name) })
   transcript.add({ kind: 'context', text: contextText })
   const messages: AiMessage[] = [{ role: 'user', content: [{ type: 'text', text: renderConversation(snap.lines) }] }]
@@ -496,6 +499,7 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
         tools,
         specs,
         factsText,
+        knowledgeText,
         messages,
         ctx,
         links,

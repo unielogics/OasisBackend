@@ -17,6 +17,7 @@ import { normalizeTextableNanp } from '../../../platform/phone.js'
 import { getSetting, parseSetting, updateSetting, type SettingKey, type SettingValue } from '../../../platform/settings.js'
 import { PERK_PROMISE } from '../../assistant/facts.js'
 import { digitWords, moneyWords, secretRequests, urlWords } from '../../assistant/guard.js'
+import { assertBudget, faqChars, lockKnowledge } from '../../assistant/knowledge/service.js'
 
 /** The section's fields and the setting each one is stored in. */
 export const ASSISTANT_FIELDS = {
@@ -193,6 +194,8 @@ export interface SaveAssistantInput {
   expectedVersion: number
   updatedBy: string | null
   audit: AuditContext
+  /** AI_KNOWLEDGE_MAX_CHARS (ADR 0174): a Q&A that grows is checked against the knowledge budget it shares; absent: not checked. */
+  knowledgeMaxChars?: number
 }
 
 /** Saves the section: version check under the section lock, then one updateSetting per changed key. */
@@ -205,6 +208,13 @@ export async function saveAssistantSettings(
   if (current.version !== input.expectedVersion)
     throw new AppError('VERSION_CONFLICT', { meta: { currentVersion: current.version } })
   const merged = mergeAssistantValues(current.values, input.patch)
+  // ADR 0174: the Q&A shares the knowledge budget; one that grows waits for the knowledge lock and is refused past the cap (422)
+  const before = faqChars(current.values.faq)
+  const after = faqChars(merged.faq)
+  if (input.knowledgeMaxChars !== undefined && after > before) {
+    await lockKnowledge(tx, input.locationId)
+    await assertBudget(tx, { locationId: input.locationId, maxChars: input.knowledgeMaxChars, before, after })
+  }
   const changed: SettingKey[] = []
   for (const [field, key] of Object.entries(ASSISTANT_FIELDS) as [AssistantField, SettingKey][]) {
     if (JSON.stringify(current.values[field]) === JSON.stringify(merged[field])) continue

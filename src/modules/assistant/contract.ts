@@ -34,6 +34,7 @@ import type { ClientLinkKind, PendingActionKind } from '../identity/schema.js'
 import type { JsonValue } from '../../platform/schema.js'
 import type { PublicTier } from '../public/tiers.js'
 import type { Actor, SchedulingCtx } from '../scheduling/context.js'
+import type { ShopKnowledge } from './knowledge/render.js'
 import type { ConvoLang } from './lang.js'
 import type { ActionCodeHandler, NewTexters } from './ports.js'
 
@@ -312,6 +313,11 @@ export interface ShopFacts {
   plans: ShopFactsPlan[]
   /** The Settings FAQ (assistant.faq), as saved. Data, never instructions: the prompt says so. */
   faq: { q: string; a: string }[]
+  /**
+   * ADR 0174 (facts-v5): the owner's ACTIVE knowledge entries (notes, reviewed documents, corrections), rendered as the SHOP
+   * KNOWLEDGE block (knowledge/render.ts) and read by the judge; absent or empty, the prompt is what it was before.
+   */
+  knowledge?: ShopKnowledge
 }
 
 export interface ShopFactsDeps {

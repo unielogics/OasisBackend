@@ -1,4 +1,5 @@
 import {
+  KNOWLEDGE_PREFIX,
   PHOTO_CATEGORIES,
   PHOTO_TYPES,
   StorageError,
@@ -49,6 +50,18 @@ export function parsePhotoKey(
   return m
     ? { locationId: m[1]!, apptId: m[2]!, category: m[3] as PhotoCategory, photoId: m[4]!, ext: m[5]! }
     : null
+}
+
+/** kb/{locationId}/{documentId}.pdf (ADR 0174 §2): a knowledge PDF, outside the photos' loc/ prefix and its lifecycle rule. */
+export function buildKnowledgeKey(p: { locationId: string; documentId: string }): string {
+  return `${KNOWLEDGE_PREFIX}${segment('locationId', p.locationId)}/${segment('documentId', p.documentId)}.pdf`
+}
+
+const KNOWLEDGE_KEY = /^kb\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\.pdf$/
+
+export function parseKnowledgeKey(key: string): { locationId: string; documentId: string } | null {
+  const m = KNOWLEDGE_KEY.exec(key)
+  return m ? { locationId: m[1]!, documentId: m[2]! } : null
 }
 
 const SAFE_KEY = /^[A-Za-z0-9][A-Za-z0-9/_.-]{0,511}$/

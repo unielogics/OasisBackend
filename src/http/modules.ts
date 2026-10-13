@@ -4,6 +4,7 @@ import type { AppDeps } from '../app.js'
 import { sesHookModule } from '../modules/messaging/email/hook.js'
 import { createMessagingModule } from '../modules/messaging/http/module.js'
 import { messagingRuntimeFor, productionExternalAlerts, productionPaymentsPorts } from '../composition.js'
+import { assistantModule } from '../modules/assistant/http/module.js'
 import { authModule, peopleModule } from '../modules/auth/module.js'
 import { customersModule } from '../modules/customers/http/module.js'
 import { identityModule } from '../modules/identity/http/module.js'
@@ -84,6 +85,8 @@ export const apiModules: ApiModule[] = [
   authModule,
   peopleModule,
   settingsModule,
+  // Settings → Oasis AI: knowledge and PDFs; the practice, corrections and review contracts (ADR 0174)
+  assistantModule,
   customersModule,
   identityModule,
   leadsModule,

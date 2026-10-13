@@ -25958,6 +25958,3081 @@
         "x-oasis-access": "public"
       }
     },
+    "/api/v1/assistant/conversations": {
+      "get": {
+        "description": "Contract only (ADR 0174): answers 501 NOT_BUILT until the practice and review wave builds it.",
+        "operationId": "listAssistantConversations",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 90,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "handed_off",
+                "fallback",
+                "judge",
+                "corrected"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "conversations": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "client": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "firstName": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "phoneLast4": {
+                                "description": "\"•••0142\"",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "firstName",
+                              "phoneLast4"
+                            ],
+                            "type": "object"
+                          },
+                          "flags": {
+                            "items": {
+                              "enum": [
+                                "handed_off",
+                                "fallback",
+                                "judge",
+                                "corrected"
+                              ],
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "handoff": {
+                            "anyOf": [
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "open": {
+                                    "type": "boolean"
+                                  },
+                                  "reason": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "open",
+                                  "reason"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "lastTurnAt": {
+                            "type": "string"
+                          },
+                          "turns": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "client",
+                          "lastTurnAt",
+                          "turns",
+                          "handoff",
+                          "flags"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "nextCursor": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "conversations",
+                    "nextCursor"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Real Oasis AI conversations for training review (90 days at most)",
+        "tags": [
+          "assistant"
+        ],
+        "x-oasis-access": "set.assistant + cli.view"
+      }
+    },
+    "/api/v1/assistant/conversations/{id}": {
+      "get": {
+        "description": "Contract only (ADR 0174): answers 501 NOT_BUILT until the practice and review wave builds it.",
+        "operationId": "getAssistantConversation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "conversation": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "client": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "firstName": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "phoneLast4": {
+                              "description": "\"•••0142\"",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "firstName",
+                            "phoneLast4"
+                          ],
+                          "type": "object"
+                        },
+                        "flags": {
+                          "items": {
+                            "enum": [
+                              "handed_off",
+                              "fallback",
+                              "judge",
+                              "corrected"
+                            ],
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "handoff": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "open": {
+                                  "type": "boolean"
+                                },
+                                "reason": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "open",
+                                "reason"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "lastTurnAt": {
+                          "type": "string"
+                        },
+                        "turns": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "client",
+                        "lastTurnAt",
+                        "turns",
+                        "handoff",
+                        "flags"
+                      ],
+                      "type": "object"
+                    },
+                    "turns": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "clientTexts": {
+                            "description": "The client’s texts this turn answered (redacted)",
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "correctionEntryId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "guard": {
+                            "description": "What the output guard changed, in plain words",
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "handoffReason": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "judge": {
+                            "anyOf": [
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "category": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "verdict": {
+                                    "enum": [
+                                      "pass",
+                                      "fail",
+                                      "error"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "words": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "verdict",
+                                  "category",
+                                  "words"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "model": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "promptVersion": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "reply": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "What was sent (redacted; links as \"[link]\")"
+                          },
+                          "startedAt": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "tools": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "startedAt",
+                          "status",
+                          "clientTexts",
+                          "reply",
+                          "handoffReason",
+                          "guard",
+                          "judge",
+                          "tools",
+                          "model",
+                          "promptVersion",
+                          "correctionEntryId"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "conversation",
+                    "turns"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "One conversation, turn by turn, with what the guard and the policy check did (\"This answer was wrong\" opens a correction)",
+        "tags": [
+          "assistant"
+        ],
+        "x-oasis-access": "set.assistant + cli.view"
+      }
+    },
+    "/api/v1/assistant/corrections": {
+      "post": {
+        "description": "Contract only (ADR 0174): answers 501 NOT_BUILT until the practice and review wave builds it. With a turn named, the server loads the client’s text and the wrong reply itself (redacted; the wrong reply is never shown to the model). Same validation and warnings as notes; the budget applies (`active: false` saves a draft). 409 `CORRECTION_EXISTS {entryId}` for the same question (send `replaceEntryId` to replace it).",
+        "operationId": "createAssistantCorrection",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "active": {
+                    "type": "boolean"
+                  },
+                  "assistantTurnId": {
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+                    "type": "string"
+                  },
+                  "clientText": {
+                    "maxLength": 300,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "practiceTurnId": {
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+                    "type": "string"
+                  },
+                  "replaceEntryId": {
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+                    "type": "string"
+                  },
+                  "rightAnswer": {
+                    "maxLength": 500,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "source": {
+                    "enum": [
+                      "practice",
+                      "live"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "clientText",
+                  "rightAnswer",
+                  "source"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "budget": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "maxChars": {
+                          "description": "AI_KNOWLEDGE_MAX_CHARS",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "parts": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "corrections": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "documents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "faq": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "notes": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "faq",
+                            "notes",
+                            "documents",
+                            "corrections"
+                          ],
+                          "type": "object"
+                        },
+                        "usedChars": {
+                          "description": "Active entries + the Settings Q&A",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "usedChars",
+                        "maxChars",
+                        "parts"
+                      ],
+                      "type": "object"
+                    },
+                    "entry": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "active": {
+                          "description": "Oasis AI reads it (counts against the budget)",
+                          "type": "boolean"
+                        },
+                        "body": {
+                          "description": "note: the text; document: the reviewed text of the PDF; correction: the right answer",
+                          "type": "string"
+                        },
+                        "chars": {
+                          "description": "Title + question + body: what it counts against the budget",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "documentId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "enum": [
+                            "note",
+                            "document",
+                            "correction"
+                          ],
+                          "type": "string"
+                        },
+                        "question": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "correction: the client’s words"
+                        },
+                        "reviewedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "document: when the owner confirmed the text (needed before it can be on)"
+                        },
+                        "sort": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "source": {
+                          "enum": [
+                            "manual",
+                            "practice",
+                            "live"
+                          ],
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "description": "Send it back with PUT (412 when stale)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "warnings": {
+                          "description": "What the editor shows: amounts, links, phone numbers and e-mails are hidden from Oasis AI; instruction-like lines need confirmInstructions",
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "kind": {
+                                "enum": [
+                                  "amount",
+                                  "link",
+                                  "phone",
+                                  "email",
+                                  "instruction",
+                                  "promise",
+                                  "hidden",
+                                  "markup",
+                                  "long"
+                                ],
+                                "type": "string"
+                              },
+                              "line": {
+                                "description": "The body line (1-based); 0: the title, the question or the entry as a whole",
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "sample": {
+                                "description": "The words found (at most 40 characters)",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "sample",
+                              "line"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "wrongReply": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "correction: what Oasis AI said (redacted); never shown to the model"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "kind",
+                        "title",
+                        "body",
+                        "question",
+                        "wrongReply",
+                        "source",
+                        "active",
+                        "documentId",
+                        "reviewedAt",
+                        "warnings",
+                        "chars",
+                        "sort",
+                        "version",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "entry",
+                    "budget"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Save a correction: the client’s question and the right answer, as a knowledge entry",
+        "tags": [
+          "assistant"
+        ],
+        "x-oasis-access": "set.assistant"
+      }
+    },
+    "/api/v1/assistant/knowledge": {
+      "get": {
+        "operationId": "getAssistantKnowledge",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "budget": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "maxChars": {
+                          "description": "AI_KNOWLEDGE_MAX_CHARS",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "parts": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "corrections": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "documents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "faq": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "notes": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "faq",
+                            "notes",
+                            "documents",
+                            "corrections"
+                          ],
+                          "type": "object"
+                        },
+                        "usedChars": {
+                          "description": "Active entries + the Settings Q&A",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "usedChars",
+                        "maxChars",
+                        "parts"
+                      ],
+                      "type": "object"
+                    },
+                    "documents": {
+                      "description": "Uploaded PDFs that are not deleted, oldest first",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "bytes": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "entryId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The knowledge entry made from it (status ready)"
+                          },
+                          "error": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Why it could not be read, in plain words"
+                          },
+                          "errorCode": {
+                            "anyOf": [
+                              {
+                                "enum": [
+                                  "no_text",
+                                  "encrypted",
+                                  "corrupt",
+                                  "too_many_pages",
+                                  "timeout",
+                                  "not_pdf",
+                                  "too_large"
+                                ],
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "filename": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "pageCount": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "removedChars": {
+                            "description": "Hidden or control characters removed from the text",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "status": {
+                            "enum": [
+                              "pending_upload",
+                              "extracting",
+                              "ready",
+                              "failed"
+                            ],
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "filename",
+                          "bytes",
+                          "status",
+                          "errorCode",
+                          "error",
+                          "pageCount",
+                          "removedChars",
+                          "entryId",
+                          "createdAt",
+                          "updatedAt"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "entries": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "active": {
+                            "description": "Oasis AI reads it (counts against the budget)",
+                            "type": "boolean"
+                          },
+                          "body": {
+                            "description": "note: the text; document: the reviewed text of the PDF; correction: the right answer",
+                            "type": "string"
+                          },
+                          "chars": {
+                            "description": "Title + question + body: what it counts against the budget",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "documentId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "enum": [
+                              "note",
+                              "document",
+                              "correction"
+                            ],
+                            "type": "string"
+                          },
+                          "question": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "correction: the client’s words"
+                          },
+                          "reviewedAt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "document: when the owner confirmed the text (needed before it can be on)"
+                          },
+                          "sort": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "source": {
+                            "enum": [
+                              "manual",
+                              "practice",
+                              "live"
+                            ],
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "description": "Send it back with PUT (412 when stale)",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "warnings": {
+                            "description": "What the editor shows: amounts, links, phone numbers and e-mails are hidden from Oasis AI; instruction-like lines need confirmInstructions",
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "enum": [
+                                    "amount",
+                                    "link",
+                                    "phone",
+                                    "email",
+                                    "instruction",
+                                    "promise",
+                                    "hidden",
+                                    "markup",
+                                    "long"
+                                  ],
+                                  "type": "string"
+                                },
+                                "line": {
+                                  "description": "The body line (1-based); 0: the title, the question or the entry as a whole",
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "sample": {
+                                  "description": "The words found (at most 40 characters)",
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "sample",
+                                "line"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "wrongReply": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "correction: what Oasis AI said (redacted); never shown to the model"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "kind",
+                          "title",
+                          "body",
+                          "question",
+                          "wrongReply",
+                          "source",
+                          "active",
+                          "documentId",
+                          "reviewedAt",
+                          "warnings",
+                          "chars",
+                          "sort",
+                          "version",
+                          "createdAt",
+                          "updatedAt"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "limits": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "correctionAnswerMax": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "documentActiveMax": {
+                          "description": "A document needs this many characters or fewer to be turned on",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "documentMaxBytes": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "documentMaxPages": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "documentStoreMax": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "noteMax": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "questionMax": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "titleMax": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "titleMax",
+                        "noteMax",
+                        "documentStoreMax",
+                        "documentActiveMax",
+                        "correctionAnswerMax",
+                        "questionMax",
+                        "documentMaxBytes",
+                        "documentMaxPages"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "entries",
+                    "documents",
+                    "budget",
+                    "limits"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Oasis AI knowledge: the entries, the uploaded PDFs, the budget meter and the limits",
+        "tags": [
+          "assistant"
+        ],
+        "x-oasis-access": "set.assistant"
+      },
+      "post": {
+        "description": "Plain text (no hidden character, no HTML tag): a title of 1 to 120 characters, a body of up to 4,000. A draft unless `active` is true; turning it on counts its characters against the budget (AI_KNOWLEDGE_MAX_CHARS, shared with the Settings Q&A): 422 `KNOWLEDGE_BUDGET {usedChars, maxChars, needed}` and nothing is saved. Amounts, links, e-mails and phone numbers other than the shop’s are kept for the owner but hidden from Oasis AI (see `warnings`). Audited (`assistant.knowledge.create`, a SHA-256 of the body, never the body) and published as `settings.changed {section: assistant_knowledge}`.",
+        "operationId": "createAssistantKnowledgeNote",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "active": {
+                    "type": "boolean"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "title",
+                  "body"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "budget": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "maxChars": {
+                          "description": "AI_KNOWLEDGE_MAX_CHARS",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "parts": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "corrections": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "documents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "faq": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "notes": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "faq",
+                            "notes",
+                            "documents",
+                            "corrections"
+                          ],
+                          "type": "object"
+                        },
+                        "usedChars": {
+                          "description": "Active entries + the Settings Q&A",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "usedChars",
+                        "maxChars",
+                        "parts"
+                      ],
+                      "type": "object"
+                    },
+                    "entry": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "active": {
+                          "description": "Oasis AI reads it (counts against the budget)",
+                          "type": "boolean"
+                        },
+                        "body": {
+                          "description": "note: the text; document: the reviewed text of the PDF; correction: the right answer",
+                          "type": "string"
+                        },
+                        "chars": {
+                          "description": "Title + question + body: what it counts against the budget",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "documentId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "enum": [
+                            "note",
+                            "document",
+                            "correction"
+                          ],
+                          "type": "string"
+                        },
+                        "question": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "correction: the client’s words"
+                        },
+                        "reviewedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "document: when the owner confirmed the text (needed before it can be on)"
+                        },
+                        "sort": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "source": {
+                          "enum": [
+                            "manual",
+                            "practice",
+                            "live"
+                          ],
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "description": "Send it back with PUT (412 when stale)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "warnings": {
+                          "description": "What the editor shows: amounts, links, phone numbers and e-mails are hidden from Oasis AI; instruction-like lines need confirmInstructions",
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "kind": {
+                                "enum": [
+                                  "amount",
+                                  "link",
+                                  "phone",
+                                  "email",
+                                  "instruction",
+                                  "promise",
+                                  "hidden",
+                                  "markup",
+                                  "long"
+                                ],
+                                "type": "string"
+                              },
+                              "line": {
+                                "description": "The body line (1-based); 0: the title, the question or the entry as a whole",
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "sample": {
+                                "description": "The words found (at most 40 characters)",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "sample",
+                              "line"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "wrongReply": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "correction: what Oasis AI said (redacted); never shown to the model"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "kind",
+                        "title",
+                        "body",
+                        "question",
+                        "wrongReply",
+                        "source",
+                        "active",
+                        "documentId",
+                        "reviewedAt",
+                        "warnings",
+                        "chars",
+                        "sort",
+                        "version",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "entry",
+                    "budget"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "A new note for Oasis AI",
+        "tags": [
+          "assistant"
+        ],
+        "x-oasis-access": "set.assistant"
+      }
+    },
+    "/api/v1/assistant/knowledge/{id}": {
+      "delete": {
+        "description": "If-Match is optional (412 when stale). Audited (`assistant.knowledge.delete`; a document also `assistant.document.delete`).",
+        "operationId": "deleteAssistantKnowledge",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Default Response"
+          }
+        },
+        "summary": "Delete a knowledge entry (a document entry deletes its PDF and text too)",
+        "tags": [
+          "assistant"
+        ],
+        "x-oasis-access": "set.assistant"
+      },
+      "put": {
+        "description": "`version` (or If-Match) is required: 412 VERSION_CONFLICT when stale, 428 without. Turning an entry on, or growing an active one, checks the budget (422 `KNOWLEDGE_BUDGET {usedChars, maxChars, needed}`); a save that shrinks it always passes. A document goes on only once reviewed: `reviewed: true` in this save (or an earlier review of the same text) and, when its text has instruction-like lines, `confirmInstructions: true`; else 422 `KNOWLEDGE_NEEDS_REVIEW {needs: [reviewed|confirmInstructions]}`. Editing a document’s text clears its review. A document needs 20,000 characters or fewer to be on. `question` is a correction’s only. Audited (`assistant.knowledge.update` / `.activate` / `.deactivate`).",
+        "operationId": "putAssistantKnowledge",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "active": {
+                    "type": "boolean"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "confirmInstructions": {
+                    "type": "boolean"
+                  },
+                  "question": {
+                    "type": "string"
+                  },
+                  "reviewed": {
+                    "type": "boolean"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "maximum": 9007199254740991,
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "budget": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "maxChars": {
+                          "description": "AI_KNOWLEDGE_MAX_CHARS",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "parts": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "corrections": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "documents": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "faq": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "notes": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "faq",
+                            "notes",
+                            "documents",
+                            "corrections"
+                          ],
+                          "type": "object"
+                        },
+                        "usedChars": {
+                          "description": "Active entries + the Settings Q&A",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "usedChars",
+                        "maxChars",
+                        "parts"
+                      ],
+                      "type": "object"
+                    },
+                    "entry": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "active": {
+                          "description": "Oasis AI reads it (counts against the budget)",
+                          "type": "boolean"
+                        },
+                        "body": {
+                          "description": "note: the text; document: the reviewed text of the PDF; correction: the right answer",
+                          "type": "string"
+                        },
+                        "chars": {
+                          "description": "Title + question + body: what it counts against the budget",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "documentId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "enum": [
+                            "note",
+                            "document",
+                            "correction"
+                          ],
+                          "type": "string"
+                        },
+                        "question": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "correction: the client’s words"
+                        },
+                        "reviewedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "document: when the owner confirmed the text (needed before it can be on)"
+                        },
+                        "sort": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "source": {
+                          "enum": [
+                            "manual",
+                            "practice",
+                            "live"
+                          ],
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "description": "Send it back with PUT (412 when stale)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "warnings": {
+                          "description": "What the editor shows: amounts, links, phone numbers and e-mails are hidden from Oasis AI; instruction-like lines need confirmInstructions",
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "kind": {
+                                "enum": [
+                                  "amount",
+                                  "link",
+                                  "phone",
+                                  "email",
+                                  "instruction",
+                                  "promise",
+                                  "hidden",
+                                  "markup",
+                                  "long"
+                                ],
+                                "type": "string"
+                              },
+                              "line": {
+                                "description": "The body line (1-based); 0: the title, the question or the entry as a whole",
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "sample": {
+                                "description": "The words found (at most 40 characters)",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "sample",
+                              "line"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "wrongReply": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "correction: what Oasis AI said (redacted); never shown to the model"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "kind",
+                        "title",
+                        "body",
+                        "question",
+                        "wrongReply",
+                        "source",
+                        "active",
+                        "documentId",
+                        "reviewedAt",
+                        "warnings",
+                        "chars",
+                        "sort",
+                        "version",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "entry",
+                    "budget"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Edit a knowledge entry, turn it on or off, or confirm the text of a PDF",
+        "tags": [
+          "assistant"
+        ],
+        "x-oasis-access": "set.assistant"
+      }
+    },
+    "/api/v1/assistant/knowledge/documents/{id}": {
+      "delete": {
+        "operationId": "deleteAssistantKnowledgeDocument",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Default Response"
+          }
+        },
+        "summary": "Delete an uploaded PDF (and its entry, its text and the stored file)",
+        "tags": [
+          "assistant"
+        ],
+        "x-oasis-access": "set.assistant"
+      }
+    },
+    "/api/v1/assistant/knowledge/documents/{id}/complete": {
+      "post": {
+        "description": "Checks the object (size, type, the %PDF- start) and its SHA-256 (the server’s own: a copy of a PDF already in the knowledge is deleted and 409 `DUPLICATE_DOCUMENT` answered), then reads it in the background (job assistant.knowledge.extract): 202 `{status: extracting}`, or 200 `{status: failed, errorCode: not_pdf}`. Poll GET /assistant/knowledge or listen for `settings.changed {section: assistant_knowledge}`. Audited (`assistant.document.upload`).",
+        "operationId": "completeAssistantKnowledgeDocument",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "errorCode": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "failed"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "errorCode",
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "enum": [
+                        "extracting"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Verify the uploaded PDF and start reading it",
+        "tags": [
+          "assistant"
+        ],
+        "x-oasis-access": "set.assistant"
+      }
+    },
+    "/api/v1/assistant/knowledge/documents/{id}/extract": {
+      "post": {
+        "description": "Only a failed document (not one that is not a PDF), at most 5 reads in all: 409 `DOCUMENT_NOT_READY` otherwise.",
+        "operationId": "retryAssistantKnowledgeDocument",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "enum": [
+                        "extracting"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Read a PDF that failed again",
+        "tags": [
+          "assistant"
+        ],
+        "x-oasis-access": "set.assistant"
+      }
+    },
+    "/api/v1/assistant/knowledge/documents/{id}/file": {
+      "get": {
+        "operationId": "getAssistantKnowledgeDocumentFile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "expiresInSeconds": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "url",
+                    "expiresInSeconds"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "A 10-minute download link of the PDF (saved as a file, never shown inline)",
+        "tags": [
+          "assistant"
+        ],
+        "x-oasis-access": "set.assistant"
+      }
+    },
+    "/api/v1/assistant/knowledge/documents/presign": {
+      "post": {
+        "description": "`sha256` is the browser’s SHA-256 of the file (WebCrypto): a file already in the knowledge is refused before uploading (409 `DUPLICATE_DOCUMENT {documentId, entryId}`). Upload the file to `upload.url` with `upload.fields` (content type application/pdf, 1 byte to 10 MB, 5 minutes), then call complete.",
+        "operationId": "presignAssistantKnowledgeDocument",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "bytes": {
+                    "maximum": 9007199254740991,
+                    "minimum": -9007199254740991,
+                    "type": "integer"
+                  },
+                  "filename": {
+                    "maxLength": 500,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "sha256": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "filename",
+                  "bytes",
+                  "sha256"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "documentId": {
+                      "type": "string"
+                    },
+                    "upload": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "expiresAt": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "additionalProperties": {
+                            "type": "string"
+                          },
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "key": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "url",
+                        "fields",
+                        "expiresAt"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "documentId",
+                    "upload"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Start a PDF upload: a presigned POST for exactly one PDF of up to 10 MB",
+        "tags": [
+          "assistant"
+        ],
+        "x-oasis-access": "set.assistant"
+      }
+    },
+    "/api/v1/assistant/practice/sessions": {
+      "get": {
+        "description": "Contract only (ADR 0174): answers 501 NOT_BUILT until the practice and review wave builds it.",
+        "operationId": "listAssistantPracticeSessions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "practice": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "actionsEnabled": {
+                          "description": "Practice mirrors AI_ACTIONS_ENABLED and the setting: off, it never proposes",
+                          "type": "boolean"
+                        },
+                        "budgetUsd": {
+                          "description": "AI_PRACTICE_DAILY_BUDGET_USD",
+                          "type": "number"
+                        },
+                        "enabled": {
+                          "description": "AI_PRACTICE_ENABLED",
+                          "type": "boolean"
+                        },
+                        "linksEnabled": {
+                          "description": "Practice mirrors PUBLIC_LINKS_ENABLED: off, it sends no link",
+                          "type": "boolean"
+                        },
+                        "spentTodayUsd": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "budgetUsd",
+                        "spentTodayUsd",
+                        "actionsEnabled",
+                        "linksEnabled"
+                      ],
+                      "type": "object"
+                    },
+                    "sessions": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "client": {
+                            "anyOf": [
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "firstName": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "firstName"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The client a `client` session plays (null for a new texter)"
+                          },
+                          "costMicros": {
+                            "description": "USD millionths spent by this session (practice has its own daily budget)",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "includeEntryIds": {
+                            "description": "Draft knowledge entries this session reads as if they were on (\"Try this draft\")",
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "language": {
+                            "enum": [
+                              "en",
+                              "es"
+                            ],
+                            "type": "string"
+                          },
+                          "persona": {
+                            "description": "A synthetic new texter, or a real client on file (read-only; needs cli.view)",
+                            "enum": [
+                              "new_texter",
+                              "client"
+                            ],
+                            "type": "string"
+                          },
+                          "turns": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          },
+                          "verified": {
+                            "description": "The phone counts as verified in this session (in-chat booking, with AI_ACTIONS_ENABLED)",
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "persona",
+                          "client",
+                          "verified",
+                          "language",
+                          "includeEntryIds",
+                          "turns",
+                          "costMicros",
+                          "createdAt",
+                          "updatedAt"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "sessions",
+                    "practice"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "My practice chats (newest first; kept 30 days) and the practice switches and budget",
+        "tags": [
+          "assistant"
+        ],
+        "x-oasis-access": "set.assistant"
+      },
+      "post": {
+        "description": "Contract only (ADR 0174): answers 501 NOT_BUILT until the practice and review wave builds it. A client persona needs cli.view (403). 409 `PRACTICE_OFF` while AI_PRACTICE_ENABLED is false; 20 sessions per user a day.",
+        "operationId": "createAssistantPracticeSession",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "customerId": {
+                    "anyOf": [
+                      {
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The client a `client` session plays"
+                  },
+                  "includeEntryIds": {
+                    "items": {
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "type": "array"
+                  },
+                  "language": {
+                    "enum": [
+                      "en",
+                      "es"
+                    ],
+                    "type": "string"
+                  },
+                  "persona": {
+                    "enum": [
+                      "new_texter",
+                      "client"
+                    ],
+                    "type": "string"
+                  },
+                  "verified": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "persona"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "session": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "client": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "firstName": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "firstName"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The client a `client` session plays (null for a new texter)"
+                        },
+                        "costMicros": {
+                          "description": "USD millionths spent by this session (practice has its own daily budget)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "includeEntryIds": {
+                          "description": "Draft knowledge entries this session reads as if they were on (\"Try this draft\")",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "language": {
+                          "enum": [
+                            "en",
+                            "es"
+                          ],
+                          "type": "string"
+                        },
+                        "persona": {
+                          "description": "A synthetic new texter, or a real client on file (read-only; needs cli.view)",
+                          "enum": [
+                            "new_texter",
+                            "client"
+                          ],
+                          "type": "string"
+                        },
+                        "turns": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        },
+                        "verified": {
+                          "description": "The phone counts as verified in this session (in-chat booking, with AI_ACTIONS_ENABLED)",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "persona",
+                        "client",
+                        "verified",
+                        "language",
+                        "includeEntryIds",
+                        "turns",
+                        "costMicros",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "session"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Start a practice chat (the owner texts as a client; nothing is sent or booked)",
+        "tags": [
+          "assistant"
+        ],
+        "x-oasis-access": "set.assistant"
+      }
+    },
+    "/api/v1/assistant/practice/sessions/{id}": {
+      "delete": {
+        "description": "Contract only (ADR 0174): answers 501 NOT_BUILT until the practice and review wave builds it.",
+        "operationId": "deleteAssistantPracticeSession",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Default Response"
+          }
+        },
+        "summary": "Delete one of my practice chats",
+        "tags": [
+          "assistant"
+        ],
+        "x-oasis-access": "set.assistant"
+      },
+      "get": {
+        "description": "Contract only (ADR 0174): answers 501 NOT_BUILT until the practice and review wave builds it.",
+        "operationId": "getAssistantPracticeSession",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "session": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "client": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "firstName": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "firstName"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The client a `client` session plays (null for a new texter)"
+                        },
+                        "costMicros": {
+                          "description": "USD millionths spent by this session (practice has its own daily budget)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "includeEntryIds": {
+                          "description": "Draft knowledge entries this session reads as if they were on (\"Try this draft\")",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "language": {
+                          "enum": [
+                            "en",
+                            "es"
+                          ],
+                          "type": "string"
+                        },
+                        "persona": {
+                          "description": "A synthetic new texter, or a real client on file (read-only; needs cli.view)",
+                          "enum": [
+                            "new_texter",
+                            "client"
+                          ],
+                          "type": "string"
+                        },
+                        "turns": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        },
+                        "verified": {
+                          "description": "The phone counts as verified in this session (in-chat booking, with AI_ACTIONS_ENABLED)",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "persona",
+                        "client",
+                        "verified",
+                        "language",
+                        "includeEntryIds",
+                        "turns",
+                        "costMicros",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "type": "object"
+                    },
+                    "turns": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "badges": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "enum": [
+                                    "rewritten",
+                                    "shortened",
+                                    "policy_rewrite",
+                                    "handed_off",
+                                    "fallback",
+                                    "link",
+                                    "proposal",
+                                    "opted_out",
+                                    "looked_up"
+                                  ],
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "description": "Plain words (\"Booking link\", \"Handed to staff: asked for a person\", \"Looked up: open times\")",
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "label"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "clientText": {
+                            "type": "string"
+                          },
+                          "error": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "extraTexts": {
+                            "description": "Other texts the server would send (a proposal’s confirmation with its reply number)",
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "finishedAt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "latencyMs": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "replyText": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "What the client would get; links as \"[booking link]\""
+                          },
+                          "rerunOf": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The turn this one re-runs (\"After your correction\")"
+                          },
+                          "seq": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "sessionId": {
+                            "type": "string"
+                          },
+                          "startedAt": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "enum": [
+                              "running",
+                              "replied",
+                              "handed_off",
+                              "failed",
+                              "opted_out"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "sessionId",
+                          "seq",
+                          "rerunOf",
+                          "clientText",
+                          "status",
+                          "replyText",
+                          "extraTexts",
+                          "badges",
+                          "error",
+                          "latencyMs",
+                          "startedAt",
+                          "finishedAt"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "session",
+                    "turns"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "One of my practice chats with its turns (another user’s is 404)",
+        "tags": [
+          "assistant"
+        ],
+        "x-oasis-access": "set.assistant"
+      }
+    },
+    "/api/v1/assistant/practice/sessions/{id}/turns": {
+      "post": {
+        "description": "Contract only (ADR 0174): answers 501 NOT_BUILT until the practice and review wave builds it. Idempotency-Key required. 202 with the turn `running`; 409 `PRACTICE_BUSY` while one runs, `PRACTICE_OFF`; 429 `PRACTICE_BUDGET` when today’s practice budget is spent; 40 turns per session.",
+        "operationId": "createAssistantPracticeTurn",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "text": {
+                    "maxLength": 640,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "turn": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "badges": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "kind": {
+                                "enum": [
+                                  "rewritten",
+                                  "shortened",
+                                  "policy_rewrite",
+                                  "handed_off",
+                                  "fallback",
+                                  "link",
+                                  "proposal",
+                                  "opted_out",
+                                  "looked_up"
+                                ],
+                                "type": "string"
+                              },
+                              "label": {
+                                "description": "Plain words (\"Booking link\", \"Handed to staff: asked for a person\", \"Looked up: open times\")",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "label"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "clientText": {
+                          "type": "string"
+                        },
+                        "error": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "extraTexts": {
+                          "description": "Other texts the server would send (a proposal’s confirmation with its reply number)",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "finishedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "latencyMs": {
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "replyText": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "What the client would get; links as \"[booking link]\""
+                        },
+                        "rerunOf": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The turn this one re-runs (\"After your correction\")"
+                        },
+                        "seq": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "sessionId": {
+                          "type": "string"
+                        },
+                        "startedAt": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "running",
+                            "replied",
+                            "handed_off",
+                            "failed",
+                            "opted_out"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "sessionId",
+                        "seq",
+                        "rerunOf",
+                        "clientText",
+                        "status",
+                        "replyText",
+                        "extraTexts",
+                        "badges",
+                        "error",
+                        "latencyMs",
+                        "startedAt",
+                        "finishedAt"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "turn"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Text Oasis AI in a practice chat; the answer comes from a job (poll the session or listen for assistant.practice.turn)",
+        "tags": [
+          "assistant"
+        ],
+        "x-oasis-access": "set.assistant",
+        "x-oasis-idempotency": "required"
+      }
+    },
+    "/api/v1/assistant/practice/turns/{id}/rerun": {
+      "post": {
+        "description": "Contract only (ADR 0174): answers 501 NOT_BUILT until the practice and review wave builds it.",
+        "operationId": "rerunAssistantPracticeTurn",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "turn": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "badges": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "kind": {
+                                "enum": [
+                                  "rewritten",
+                                  "shortened",
+                                  "policy_rewrite",
+                                  "handed_off",
+                                  "fallback",
+                                  "link",
+                                  "proposal",
+                                  "opted_out",
+                                  "looked_up"
+                                ],
+                                "type": "string"
+                              },
+                              "label": {
+                                "description": "Plain words (\"Booking link\", \"Handed to staff: asked for a person\", \"Looked up: open times\")",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "label"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "clientText": {
+                          "type": "string"
+                        },
+                        "error": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "extraTexts": {
+                          "description": "Other texts the server would send (a proposal’s confirmation with its reply number)",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "finishedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "latencyMs": {
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "replyText": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "What the client would get; links as \"[booking link]\""
+                        },
+                        "rerunOf": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The turn this one re-runs (\"After your correction\")"
+                        },
+                        "seq": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "sessionId": {
+                          "type": "string"
+                        },
+                        "startedAt": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "running",
+                            "replied",
+                            "handed_off",
+                            "failed",
+                            "opted_out"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "sessionId",
+                        "seq",
+                        "rerunOf",
+                        "clientText",
+                        "status",
+                        "replyText",
+                        "extraTexts",
+                        "badges",
+                        "error",
+                        "latencyMs",
+                        "startedAt",
+                        "finishedAt"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "turn"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "\"Try again\": the same client text over the session’s earlier turns, as an alternate turn (after a correction)",
+        "tags": [
+          "assistant"
+        ],
+        "x-oasis-access": "set.assistant"
+      }
+    },
     "/api/v1/auth/csrf": {
       "get": {
         "responses": {

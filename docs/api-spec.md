@@ -296,6 +296,24 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/api/v1/arrival-settings` | authenticated |  |
 | PUT | `/api/v1/arrival-settings` | cli.member |  |
 | POST | `/api/v1/arrivals/ping` | public |  |
+| GET | `/api/v1/assistant/conversations` | set.assistant + cli.view |  |
+| GET | `/api/v1/assistant/conversations/:id` | set.assistant + cli.view |  |
+| POST | `/api/v1/assistant/corrections` | set.assistant |  |
+| GET | `/api/v1/assistant/knowledge` | set.assistant |  |
+| POST | `/api/v1/assistant/knowledge` | set.assistant |  |
+| DELETE | `/api/v1/assistant/knowledge/:id` | set.assistant |  |
+| PUT | `/api/v1/assistant/knowledge/:id` | set.assistant |  |
+| DELETE | `/api/v1/assistant/knowledge/documents/:id` | set.assistant |  |
+| POST | `/api/v1/assistant/knowledge/documents/:id/complete` | set.assistant |  |
+| POST | `/api/v1/assistant/knowledge/documents/:id/extract` | set.assistant |  |
+| GET | `/api/v1/assistant/knowledge/documents/:id/file` | set.assistant |  |
+| POST | `/api/v1/assistant/knowledge/documents/presign` | set.assistant |  |
+| GET | `/api/v1/assistant/practice/sessions` | set.assistant |  |
+| POST | `/api/v1/assistant/practice/sessions` | set.assistant |  |
+| DELETE | `/api/v1/assistant/practice/sessions/:id` | set.assistant |  |
+| GET | `/api/v1/assistant/practice/sessions/:id` | set.assistant |  |
+| POST | `/api/v1/assistant/practice/sessions/:id/turns` | set.assistant | required |
+| POST | `/api/v1/assistant/practice/turns/:id/rerun` | set.assistant |  |
 | GET | `/api/v1/auth/csrf` | authenticated |  |
 | POST | `/api/v1/auth/invite/accept` | public |  |
 | POST | `/api/v1/auth/login` | public |  |

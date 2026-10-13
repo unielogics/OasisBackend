@@ -9,6 +9,7 @@ export interface UploadSlot {
 export interface StorageProvider {
   createUpload(p: { key: string; contentType: string; maxBytes: number; ttlSec: number }): Promise<UploadSlot>
   head(key: string): Promise<{ bytes: number; contentType: string } | null>
-  getDownloadUrl(key: string, ttlSec: number): Promise<string>
+  /** Inline by default; `attachment` names the file the browser saves (ADR 0174: knowledge PDFs). */
+  getDownloadUrl(key: string, ttlSec: number, o?: { attachment?: string }): Promise<string>
   delete(key: string): Promise<void>
 }

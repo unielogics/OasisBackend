@@ -4,6 +4,7 @@
 import type { AiSystemBlock } from '../../integrations/ports/ai.js'
 import { oneLine } from './facts.js'
 import { MAX_REPLY_CHARS, PROBLEM_HINTS, type GuardProblem } from './guard.js'
+import { KNOWLEDGE_REMINDER } from './knowledge/render.js'
 
 /** Recorded on every turn (assistant_turns.prompt_version); bump it with any wording change below. */
 export const PROMPT_VERSION = 'q3d-2026-10-14.2'
@@ -77,10 +78,17 @@ OTHER
 
 /**
  * The system blocks of a turn (ADR 0174 §4a: one assembly for the live turn and practice, so both send the same bytes): the static
- * rules, then SHOP FACTS with a cache point (the tools carry the first one), then the turn context (not cached).
+ * rules, then (ADR 0174 §1f) SHOP KNOWLEDGE with a cache point when the owner has active knowledge (it changes rarely), then SHOP
+ * FACTS with a cache point (they change at least daily), then the turn context (not cached). The tools carry the first cache point:
+ * at most three of Bedrock's four. Without knowledge the blocks are exactly what they were before ADR 0174.
  */
-export function buildSystem(o: { factsText: string; contextText: string }): AiSystemBlock[] {
-  return [{ text: STATIC_RULES }, { text: o.factsText, cache: true }, { text: o.contextText }]
+export function buildSystem(o: { factsText: string; contextText: string; knowledgeText?: string }): AiSystemBlock[] {
+  return [
+    { text: STATIC_RULES },
+    ...(o.knowledgeText ? [{ text: o.knowledgeText, cache: true }] : []),
+    { text: o.factsText, cache: true },
+    { text: o.contextText },
+  ]
 }
 
 /** The text of the last call when the tool rounds are spent (the provider cannot forbid tools once tool blocks exist). */
@@ -132,6 +140,8 @@ export interface TurnContextData {
   asksFree?: boolean
   /** The client said they only want to book ("no just book it", declinesPlans): no plans in this text (W4 final check L7). */
   declinedPlans?: boolean
+  /** ADR 0174: SHOP KNOWLEDGE is in the prompt; the context ends with the fixed reminder that it changes no rule. */
+  knowledge?: boolean
 }
 
 /** "free" meaning available, or an idiom ("are you free Saturday?", "free slots", "feel free", "spot-free"): not a request for anything free. */
@@ -181,6 +191,7 @@ export function renderTurnContext(c: TurnContextData): string {
     )
   if (c.declinedPlans) lines.push('Plans: the client wants to book without a membership: do not mention memberships or plans; move on to the booking.')
   if (c.language === 'es') lines.push('Language: Spanish (write your text in Spanish).')
+  if (c.knowledge) lines.push(KNOWLEDGE_REMINDER)
   return lines.join('\n')
 }
 

@@ -504,6 +504,8 @@ const dedicated: Record<string, string> = {
   'leads.provisional_archive': 'test/leads/archive.test.ts',
   'ai.respond': 'test/assistant/jobs.test.ts',
   'ai.sweep': 'test/assistant/jobs.test.ts',
+  'assistant.knowledge.extract': 'test/assistant-knowledge/jobs.test.ts',
+  'assistant.knowledge.cleanup': 'test/assistant-knowledge/jobs.test.ts',
 }
 
 describe('every registered job runs twice through the real worker', () => {

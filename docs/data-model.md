@@ -56,6 +56,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261015100100_review_q4_fix.sql` | review Q4 re-verification and the Square sandbox run (ADR 0170 and ADR 0171 wave Q4 fix notes): `membership_inclusions.auto_apply` turned on for the default tiers' inclusions nobody edited (inclusions apply by themselves, plan decision 2); `webhook_log.attempts` (failures so far: the Square catch-up backs failed rows off by it; failed rows start at 1); `square_state.connected_at` (the connection point: counter payments Square made before it are history, never queued) |
 | `20261015100200_charge_after_close.sql` | review Q4FIX-N1 (ADR 0171 wave Q4 fix notes): `square_charges.charged_after_close_at` (Square completed the charge after Oasis closed it as not charged: recorded, and the invoice's "Overpaid via Square" alert says why) |
 | `20261016200000_assistant_set_permission.sql` | the permission `set.assistant` ("Oasis AI assistant", sort 28, appended last): granted to every role that holds `set.hours`, and a person's own `set.hours` exception copied to it (ADR 0174) |
+| `20261016200100_assistant_knowledge.sql` | the assistant's knowledge (ADR 0174): `assistant_knowledge` (the owner's notes, the reviewed text of PDFs and corrections; only active entries reach the prompt, sharing one character budget with the Settings Q&A) and `assistant_knowledge_documents` (uploaded PDFs under the `kb/` key prefix, their status, extracted text and sha256) |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -303,6 +304,8 @@ HMAC. Location-scoped tables lead their unique keys with `location_id`; a phone 
 | `assistant_conversations`   | One per `(location_id, phone_e164)`: `customer_id` (null for a stranger), the durable marker `pending_since`, `last_inbound_at`, the turn lease `running_since`, `handoff_state open\|resolved` with reason and time, `last_fallback_at`, `disclosed_at`, the client's `language` (`en`\|`es`, the server's own words follow it). |
 | `assistant_turns`           | One per answer: `status running\|replied\|handed_off\|skipped\|failed` (one running per conversation), `trust unknown\|known\|trusted`, `provider sim\|bedrock`, `model`, `prompt_version`, `rounds`, token counts, `cost_micros`, `stop_reason`, `latency_ms`, `reply_message_id`, redacted `transcript`, `error`. |
 | `assistant_tool_calls`      | `(turn_id, seq)` unique: `round`, `tool`, provider `tool_use_id`, redacted `input`/`output`, `outcome ok\|error\|denied`, `latency_ms`.                                                                                                            |
+| `assistant_knowledge`       | ADR 0174: one owner-taught entry, `kind note\|document\|correction`, `title`, `body` (note 4,000, document 60,000 stored and 20,000 to turn on, correction answer 500), a correction's `question` and redacted `wrong_reply` (never shown to the model), `source manual\|practice\|live`, `document_id` (unique; a document's entry), `active` (only active entries reach the prompt, masked; they and the Q&A share `AI_KNOWLEDGE_MAX_CHARS`), `reviewed_at` (a document is on only once reviewed), `warnings` jsonb, `chars` (title + question + body), `sort`, `version`. |
+| `assistant_knowledge_documents` | ADR 0174: an uploaded PDF: `filename`, `content_type application/pdf`, `bytes` (at most 10 MB), `sha256` (one live copy per location), `s3_key` (`kb/{location}/{id}.pdf`, outside the photos' lifecycle rule), `status pending_upload\|extracting\|ready\|failed\|deleted` with `error_code` (no_text, encrypted, corrupt, too_many_pages, timeout, not_pdf, too_large), `page_count`, `extracted_text` (cleaned, at most 200,000 characters; null once deleted), `removed_chars`, `attempts`, `deleted_at`, `object_deleted_at`. |
 | `client_links`              | A personal link: `token_hash` unique (sha256 of a 32-byte base64url token), `kind calendar\|verify\|pin\|membership\|pay\|book_again\|card` (card since `20261014500000_square_cards.sql`), `customer_id` (null only for a stranger's calendar or book-again link), `phone_e164`, appointment/invoice/plan bindings (the plan: fk `(location_id, plan_key)` to the location's plans), `pin_version`, `phone_version`, `epoch`, `issued_by`, `expires_at` (after `created_at`), `uses` of `max_uses`, `consumed_at`, `revoked_at` + `revoke_reason`. |
 | `client_links`              | A personal link: `token_hash` unique (sha256 of a 32-byte base64url token), `kind calendar\|verify\|pin\|membership\|pay\|book_again`, `customer_id` (null only for a stranger's calendar or book-again link), `phone_e164`, appointment/invoice/plan bindings (the plan: fk `(location_id, plan_key)` to the location's plans), `pin_version`, `phone_version`, `epoch`, `issued_by`, `expires_at` (after `created_at`), `uses` of `max_uses`, `consumed_at`, `revoked_at` + `revoke_reason`, `retexted_at` (the assistant texted this same link again, once; wave Q3d). |
 | `client_link_sessions`      | The bearer session a link is exchanged for, by `token_hash`: `trust link\|verified`, `verified_by pin\|code`, `step_up_at`, `failed_attempts`, `idle_expires_at` (15 minutes) within `expires_at` (1 hour), `revoked_at`, `ip`.                    |
@@ -455,7 +458,7 @@ Operations design day re-anchored on **today** in the business time zone with th
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (123 tables, 1 view, 15 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (125 tables, 1 view, 15 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -648,6 +651,59 @@ Primary key `(location_id)`. `(location_id)` references `locations(id)` on delet
 | `language` | text | no | `'en'::text` |
 
 Primary key `(id)`. Unique `(location_id, phone_e164)`. `(customer_id)` references `customers(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. 5 check constraints. Index `assistant_conversations_customer_idx` `(customer_id)` where `customer_id IS NOT NULL`. Index `assistant_conversations_handoff_idx` `(location_id, handoff_at)` where `handoff_state = 'open'::text`. Index `assistant_conversations_pending_idx` `(pending_since)` where `pending_since IS NOT NULL`. Index `assistant_conversations_running_idx` `(running_since)` where `running_since IS NOT NULL`.
+
+#### `assistant_knowledge`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `kind` | text | no |  |
+| `title` | text | no |  |
+| `body` | text | no |  |
+| `question` | text | yes |  |
+| `wrong_reply` | text | yes |  |
+| `source` | text | no | `'manual'::text` |
+| `assistant_turn_id` | uuid | yes |  |
+| `practice_turn_id` | uuid | yes |  |
+| `document_id` | uuid | yes |  |
+| `active` | boolean | no | `false` |
+| `reviewed_at` | timestamp with time zone | yes |  |
+| `warnings` | jsonb | no | `'[]'::jsonb` |
+| `chars` | integer | no |  |
+| `sort` | integer | no | `0` |
+| `version` | integer | no | `1` |
+| `created_by` | uuid | yes |  |
+| `updated_by` | uuid | yes |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. Unique `(document_id)`. `(assistant_turn_id)` references `assistant_turns(id)` on delete set null. `(created_by)` references `users(id)` on delete set null. `(document_id)` references `assistant_knowledge_documents(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. `(updated_by)` references `users(id)` on delete set null. 13 check constraints. Index `assistant_knowledge_active_idx` `(location_id)` where `active`. Index `assistant_knowledge_location_idx` `(location_id, kind, sort, created_at)`.
+
+#### `assistant_knowledge_documents`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `filename` | text | no |  |
+| `content_type` | text | no |  |
+| `bytes` | integer | no |  |
+| `sha256` | text | yes |  |
+| `s3_key` | text | no |  |
+| `status` | text | no | `'pending_upload'::text` |
+| `error_code` | text | yes |  |
+| `page_count` | integer | yes |  |
+| `extracted_text` | text | yes |  |
+| `removed_chars` | integer | no | `0` |
+| `attempts` | smallint | no | `0` |
+| `uploaded_by` | uuid | yes |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+| `deleted_at` | timestamp with time zone | yes |  |
+| `object_deleted_at` | timestamp with time zone | yes |  |
+
+Primary key `(id)`. Unique `(s3_key)`. `(location_id)` references `locations(id)` on delete cascade. `(uploaded_by)` references `users(id)` on delete set null. 14 check constraints. Index `assistant_knowledge_documents_cleanup_idx` `(status, updated_at)` where `(status = ANY (ARRAY['pending_upload'::text, 'extracting'::text])) OR ((status = 'deleted'::text) AND (object_deleted_at IS NULL))`. Index `assistant_knowledge_documents_location_idx` `(location_id, created_at)`. Unique index `assistant_knowledge_documents_sha_idx` `(location_id, sha256)` where `(status <> 'deleted'::text) AND (sha256 IS NOT NULL)`.
 
 #### `assistant_pending_actions`
 

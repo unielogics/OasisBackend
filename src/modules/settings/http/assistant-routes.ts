@@ -144,6 +144,7 @@ export function registerAssistantRoutes(rt: SettingsRuntime): void {
           expectedVersion: version,
           updatedBy: await storedUserId(tx, c.userId),
           audit: c.audit,
+          knowledgeMaxChars: app.env.AI_KNOWLEDGE_MAX_CHARS,
         }),
       )
       etag(reply, out.version)

@@ -483,6 +483,26 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
     tests: 'test/assistant/jobs.test.ts, test/jobs/registry.test.ts',
     status: 'built',
   },
+  'assistant.knowledge.extract': {
+    owner: 'assistant (knowledge)',
+    purpose:
+      'Reads one uploaded knowledge PDF (ADR 0174 §2) in a worker thread (unpdf; 256 MB heap, 30 s, 60 pages, eval and fonts off): stores the cleaned text and creates its knowledge entry as an inactive, unreviewed draft with its warnings, or fails the document with a plain reason (no_text for a scan, encrypted, corrupt, too_many_pages, timeout, too_large). Nothing reaches a client; works whatever AI_ENABLED says.',
+    idempotency:
+      'Only a document still extracting is read, under a row lock; the entry is unique per document (assistant_knowledge.document_id), so a second run finds it ready or failed and does nothing.',
+    clock: 'Injected clock for updated_at; the 30-second limit is a timer on the worker thread.',
+    enqueuedBy: 'POST /assistant/knowledge/documents/:id/complete and POST .../:id/extract (retry), after their commit (singleton key = the document)',
+    tests: 'test/assistant-knowledge/pdf.test.ts, test/assistant-knowledge/documents.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'assistant.knowledge.cleanup': {
+    owner: 'assistant (knowledge)',
+    purpose:
+      'Every 15 minutes (ADR 0174 §2): deletes uploads still pending after 15 minutes with their objects, fails extractions stuck over 10 minutes as timeout (the owner can retry), and removes again the stored objects of deleted documents a request could not delete.',
+    idempotency: 'Each step moves only rows still in its starting state; deleting a missing object succeeds.',
+    clock: 'Injected clock against updated_at.',
+    tests: 'test/assistant-knowledge/documents.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
 }
 
 const policyOf = (d: JobDefinition<never>): string => d.policy ?? 'standard'

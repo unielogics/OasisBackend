@@ -115,6 +115,8 @@ export interface EngineInput {
   specs: AiToolSpec[]
   /** The rendered SHOP FACTS the judge's rule (f) reads. */
   factsText: string
+  /** ADR 0174: the SHOP KNOWLEDGE block of the prompt ('' without active knowledge), read by the judge's rule (f) too. */
+  knowledgeText: string
   /** The conversation so far (the first user message); the engine appends to it. */
   messages: AiMessage[]
   ctx: ToolContext
@@ -406,6 +408,7 @@ export async function runEngine(d: EngineDeps, i: EngineInput): Promise<EngineRe
         nowMs,
         facts: factsText,
         record: judgeRecord,
+        ...(i.knowledgeText ? { knowledge: i.knowledgeText } : {}),
       })
     let r = await run()
     judgeUsage = addUsage(judgeUsage, r.usage)
