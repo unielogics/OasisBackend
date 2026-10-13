@@ -22,7 +22,7 @@ type World = KioskWorld
 
 const kioskWorld = (): Promise<World> => makeWorld(m.h)
 
-const kiosk = (w: World, method: 'POST' | 'PUT', url: string, body: unknown = {}) =>
+const kiosk = (w: World, method: 'POST' | 'PUT' | 'PATCH', url: string, body: unknown = {}) =>
   m.h.kioskCall(method, `${A}/${url}`, w.kiosk, { actor: w.marco.employeeId, body, headers: { 'idempotency-key': idemKey() } })
 
 const report = (s: Session, query: string) => m.get(s, `/reports/employee-activity?${query}`)
@@ -110,6 +110,43 @@ describe('GET /reports/employee-activity', () => {
     expect(one.cars[0].steps[2]).toMatchObject({ by: 'Marco R.', via: 'kiosk' })
     const hidden = (await report(lead, `from=2026-06-13&to=2026-06-13&employeeId=${w.marco.employeeId}`)).json() as Json
     expect(hidden.cars[0].paidCents).toBeNull()
+  })
+
+  it('K4 review: bay time stays with the worker at completion; a pickup undone and redone is one car; store credit is a payment', async () => {
+    const w = await kioskWorld()
+    const lena = await m.h.createUser({ email: `lena-${m.h.t.app.newId()}@example.test`, first: 'Lena', last: 'Park', roles: ['crew'] })
+    const v = await m.book('Maria Delgado', 'Express Hand Wash', '2026-06-13T14:00:00-04:00')
+    expect((await kiosk(w, 'POST', `appointments/${v.appointmentId}/assign-bay`, { bayId: await bay(1) })).statusCode).toBe(200)
+    m.h.clock.set('2026-06-13T11:18:30-04:00')
+    expect((await kiosk(w, 'POST', `appointments/${v.appointmentId}/complete`)).statusCode).toBe(200)
+    // the worker changed after completion (allowed, also on the kiosk): the bay time and the car stay Marco's
+    const moved = await kiosk(w, 'PATCH', `appointments/${v.appointmentId}`, { assignedEmployeeId: lena.employeeId })
+    expect(moved.statusCode, moved.body).toBe(200)
+    // pickup, undo, pickup again: one car
+    for (const state of ['collected', 'pending', 'collected'])
+      expect((await kiosk(w, 'POST', `appointments/${v.appointmentId}/pickup`, { state })).statusCode).toBe(200)
+    // store credit applied on the kiosk counts in Payments, as the timeline shows it
+    const credit = await m.send(sup(), 'POST', `/invoices/${v.invoiceId}/credits`, { amountCents: 1000, expiry: 'd90' })
+    expect(credit.statusCode, credit.body).toBe(201)
+    const applied = await kiosk(w, 'POST', `invoices/${v.invoiceId}/credit-applications`)
+    expect(applied.statusCode, applied.body).toBe(201)
+
+    const body = (await report(sup(), 'from=2026-06-13&to=2026-06-13')).json() as Json
+    const marco = of(body, w.marco.employeeId)
+    expect(marco.totals).toMatchObject({
+      completed: 1,
+      pickedUp: 1,
+      bayMinutes: { total: 42, avg: 42, cars: 1 },
+      payments: { count: 1, amountCents: 1000 },
+    })
+    expect(of(body, lena.employeeId).totals).toMatchObject({ bayMinutes: { total: 0, avg: null, cars: 0 }, pickedUp: 0 })
+    const one = (await report(sup(), `from=2026-06-13&to=2026-06-13&employeeId=${w.marco.employeeId}`)).json() as Json
+    expect(one.cars).toHaveLength(1)
+    expect(one.cars[0]).toMatchObject({ worker: { id: w.marco.employeeId, name: 'Marco R.' }, bayMinutes: 42, paidCents: 1000 })
+    const theirs = (await report(sup(), `from=2026-06-13&to=2026-06-13&employeeId=${lena.employeeId}`)).json() as Json
+    expect(theirs.cars).toEqual([])
+    const timeline = (await m.get(sup(), `/reports/employee-activity/${w.marco.employeeId}/events?from=2026-06-13&to=2026-06-13`)).json() as Json
+    expect(timeline.items.filter((x: Json) => x.kind === 'payment').map((x: Json) => x.amountCents)).toEqual([1000])
   })
 
   it('a voided payment is never counted', async () => {
@@ -268,6 +305,9 @@ describe('GET /reports/employee-activity/:employeeId/events', () => {
     const redacted = (await m.get(lead, url)).json() as Json
     expect(redacted.items.every((x: Json) => x.amountCents === null)).toBe(true)
     expect((await m.get(sup(), `${url}&cursor=nonsense`)).statusCode).toBe(422)
+    // an impossible date (V8's Date.parse rolls it forward; Postgres refuses it) and an impossible hour are 422, never 500
+    for (const bad of ['2026-02-30T12:00:00.000000Z|5', '2026-06-13T25:00:00.000000Z|5', '2026-04-31T00:00:00.000000Z|1'])
+      expect((await m.get(sup(), `${url}&cursor=${encodeURIComponent(bad)}`)).statusCode, bad).toBe(422)
     expect((await m.get(sup(), `/reports/employee-activity/${m.h.t.app.newId()}/events?from=2026-06-13&to=2026-06-13`)).statusCode).toBe(404)
     expect((await m.get(sup(), `/reports/employee-activity/${e}/events?from=2026-05-01&to=2026-06-13`)).statusCode).toBe(422)
   })

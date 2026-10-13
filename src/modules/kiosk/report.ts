@@ -225,8 +225,10 @@ export async function employeeActivity(
   if (employeeId) await requireEmployee(db, locationId, employeeId)
 
   const [events, texts, payments, bays, tasks] = await Promise.all([
-    sql<{ employee_id: string; day: string; kind: StaffEventKind; n: number; implicit: number }>`
+    // a pickup counts cars: pickup, undo and pickup again of one car by one person on one day is one car picked up
+    sql<{ employee_id: string; day: string; kind: StaffEventKind; n: number; cars: number; implicit: number }>`
       select employee_id, (at at time zone ${tz})::date as day, kind, count(*)::int as n,
+        count(distinct appointment_id)::int as cars,
         (count(*) filter (where kind = 'assign_bay' and meta->>'implicitArrival' = 'true'))::int as implicit
       from staff_events
       where location_id = ${locationId}::uuid and at >= ${start} and at < ${end} and employee_id is not null
@@ -242,16 +244,17 @@ export async function employeeActivity(
       select l.actor_employee_id as employee_id, (l.occurred_at at time zone ${tz})::date as day, count(*)::int as n,
         coalesce(sum(l.amount_cents), 0)::bigint as cents
       from ledger_events l
-      where l.location_id = ${locationId}::uuid and l.type = 'pay' and l.status = 'done' and l.actor_employee_id is not null
+      where l.location_id = ${locationId}::uuid and l.type in ('pay', 'credit_apply') and l.status = 'done'
+        and l.actor_employee_id is not null
         and l.occurred_at >= ${start} and l.occurred_at < ${end} and ${notVoided} ${andEmployee('l.actor_employee_id', employeeId)}
       group by 1, 2`.execute(db),
     sql<{ employee_id: string; day: string; cars: number; minutes: number }>`
-      select assigned_employee_id as employee_id, (completed_at at time zone ${tz})::date as day, count(*)::int as cars,
+      select completed_worker_id as employee_id, (completed_at at time zone ${tz})::date as day, count(*)::int as cars,
         coalesce(sum(floor(extract(epoch from (completed_at - cleaning_started_at)) / 60)), 0)::int as minutes
       from appointments
-      where location_id = ${locationId}::uuid and status = 'completed' and assigned_employee_id is not null
+      where location_id = ${locationId}::uuid and status = 'completed' and completed_worker_id is not null
         and cleaning_started_at is not null and completed_at >= ${start} and completed_at < ${end}
-        ${andEmployee('assigned_employee_id', employeeId)}
+        ${andEmployee('completed_worker_id', employeeId)}
       group by 1, 2`.execute(db),
     // checklist tasks: the tasks done now, by whoever ticked them, on the day they were ticked. Un-ticking takes a task back, so
     // ticking and un-ticking one task again and again never adds up (the checklist events stay on the timeline and the cars).
@@ -289,7 +292,7 @@ export async function employeeActivity(
         d.completed += r.n
         break
       case 'pickup':
-        d.pickedUp += r.n
+        d.pickedUp += r.cars
         break
       case 'notify_ready':
         d.readyTexts += r.n
@@ -376,7 +379,10 @@ const COUNTS = [
   'textsSent',
 ] as const satisfies ReadonlyArray<keyof Totals>
 
-/** Every car the employee touched in the range (a staff event, or the worker of a car finished in it), each step by whoever did it. */
+/**
+ * Every car the employee touched in the range (a staff event, or the worker of a car finished in it, as it was at completion), each step
+ * by whoever did it.
+ */
 async function carsOf(
   db: Executor,
   o: { locationId: string; range: ReportRange; employeeId: string; amounts: boolean },
@@ -389,8 +395,8 @@ async function carsOf(
         and at >= ${range.start} and at < ${range.end}
       union
       select id from appointments
-      where location_id = ${locationId}::uuid and assigned_employee_id = ${employeeId}::uuid
-        and completed_at >= ${range.start} and completed_at < ${range.end}`.execute(db)
+      where location_id = ${locationId}::uuid and completed_at >= ${range.start} and completed_at < ${range.end}
+        and coalesce(completed_worker_id, assigned_employee_id) = ${employeeId}::uuid`.execute(db)
   ).rows.map((r) => r.id)
   if (ids.length === 0) return []
   const [cars, steps, paid] = await Promise.all([
@@ -398,7 +404,10 @@ async function carsOf(
       .selectFrom('appointments as a')
       .innerJoin('customers as c', 'c.id', 'a.customer_id')
       .leftJoin('vehicles as v', 'v.id', 'a.vehicle_id')
-      .leftJoin('employees as w', 'w.id', 'a.assigned_employee_id')
+      // a completed car names its worker at completion (a later worker change does not move the car), others the current worker
+      .leftJoin('employees as w', (j) =>
+        j.on((eb) => eb('w.id', '=', eb.fn.coalesce('a.completed_worker_id', 'a.assigned_employee_id'))),
+      )
       .select([
         'a.id',
         'a.seq',
@@ -429,7 +438,8 @@ async function carsOf(
       ? sql<{ appointment_id: string; cents: number }>`
           select i.appointment_id, coalesce(sum(l.amount_cents), 0)::bigint as cents
           from ledger_events l join invoices i on i.id = l.invoice_id
-          where i.appointment_id in (${sql.join(ids.map((id) => sql`${id}::uuid`))}) and l.type = 'pay' and l.status = 'done'
+          where i.appointment_id in (${sql.join(ids.map((id) => sql`${id}::uuid`))}) and l.type in ('pay', 'credit_apply')
+            and l.status = 'done'
             and ${notVoided}
           group by 1`
           .execute(db)
@@ -459,6 +469,12 @@ async function carsOf(
 // one request are microseconds apart, so a millisecond cursor would skip the rest of that millisecond.
 const CURSOR = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z)\|(\d{1,18})$/
 
+/** Date.parse rolls an impossible date (2026-02-30) forward, so the instant must read back as written (Postgres would refuse it). */
+function realInstant(at: string): boolean {
+  const ms = Date.parse(`${at.slice(0, 23)}Z`)
+  return !Number.isNaN(ms) && new Date(ms).toISOString().slice(0, 23) === at.slice(0, 23)
+}
+
 /** One employee's staff events in the range, newest first, EVENTS_PAGE at a time (`nextCursor` until the last page). */
 export async function employeeEvents(
   db: Executor,
@@ -469,7 +485,7 @@ export async function employeeEvents(
   let after: { at: string; id: string } | null = null
   if (o.cursor !== undefined) {
     const m = CURSOR.exec(o.cursor)
-    if (!m || Number.isNaN(Date.parse(`${m[1]!.slice(0, 23)}Z`))) throw invalid('cursor', 'That page link is not valid. Load the timeline again.')
+    if (!m || !realInstant(m[1]!)) throw invalid('cursor', 'That page link is not valid. Load the timeline again.')
     after = { at: m[1]!, id: m[2]! }
   }
   let q = db

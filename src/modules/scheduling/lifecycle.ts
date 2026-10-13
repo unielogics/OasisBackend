@@ -482,6 +482,7 @@ export async function completeAppointment(
   await applyPatch(tx, a, {
     status: 'completed',
     completed_at: now,
+    completed_worker_id: a.assignedEmployeeId, // the activity report's bay time stays with this worker (ADR 0180)
     pickup_state: 'pending',
     ready_notified_at: readyText ? now : null,
   })

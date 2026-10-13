@@ -145,6 +145,8 @@ declare module '../customers/schema.js' {
   }
   interface AppointmentsTable {
     created_by_employee_id: string | null
+    /** The worker when the car was completed (migration 20261016100400): the activity report's bay time counts for them. */
+    completed_worker_id: string | null
   }
   interface AppointmentAddonsTable {
     added_by_employee_id: string | null
