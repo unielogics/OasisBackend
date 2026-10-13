@@ -706,6 +706,10 @@ export class Model {
     this.log(`tip ${who} ${tipCents} -> ${res.statusCode}`)
     if (!this.can(who, 'canCollect')) return this.expectStatus(res, 403, 'tip without pay.collect')
     if (row.inv.canceled_at) return this.expectStatus(res, 409, 'tip on a canceled invoice')
+    // a tip is never lowered below what the client already paid (K4 review tax:M2): that would leave the invoice overpaid
+    const oc = this.oc(row)
+    if (tipCents < row.inv.tip_cents && oc.paid - oc.refunded > oc.total - row.inv.tip_cents + tipCents)
+      return this.expectStatus(res, 409, 'a paid tip lowered into an overpaid invoice')
     this.expectStatus(res, 200, 'tip')
   }
 
