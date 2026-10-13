@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { hashToken } from '../../src/modules/auth/tokens.js'
 import { createKioskSession } from '../../src/modules/kiosk/sessions.js'
 import { ensureLocation } from '../../src/platform/locations.js'
-import { useHarness, KIOSK_CODE, type Harness, type KioskDevice, type KioskSession } from '../auth/harness.js'
+import { useHarness, KIOSK_CODE, TEST_PASSWORD, type Harness, type KioskDevice, type KioskSession } from '../auth/harness.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = Record<string, any>
@@ -564,6 +564,127 @@ describe('users and kiosks on one tablet', () => {
     expect(res.json().signedOut).toBe(true)
     expect(res.cookies.find((c) => c.name === 'oasis_sid')?.value).toBe('')
     expect((await h.call('GET', 'me', { session: admin })).statusCode).toBe(401)
+  })
+})
+
+describe('K4 review: a manager on the tablet never keeps a long session (kiosk:F1, kiosk:F2)', () => {
+  const h = useHarness()
+  const NOW_PLUS_4H = '2026-06-13T18:36:00.000Z'
+  const deviceCookieOf = (res: { cookies: { name: string; value: string }[] }) => res.cookies.find((c) => c.name === 'oasis_kdev')!.value
+  const loginOn = async (device: KioskDevice, u: { email: string; password: string }) => {
+    const res = await h.t.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: { origin: h.origin, cookie: device.cookie },
+      payload: { email: u.email, password: u.password },
+    })
+    expect(res.statusCode).toBe(200)
+    const c = res.cookies.find((x) => x.name === 'oasis_sid')!
+    return { cookie: `oasis_sid=${c.value}; ${device.cookie}`, csrf: res.json().csrfToken as string }
+  }
+  const alive = async (s: { cookie: string; csrf: string }) => (await h.call('GET', 'me', { session: s })).statusCode === 200
+
+  it('the documented order (sign in on the tablet, Make this a kiosk, then kiosk mode on) ends on the keypad', async () => {
+    const u = await h.createUser({ email: 'boss@example.test', roles: ['super'], first: 'Rafael', last: 'Mendes' })
+    const s = await h.login(u) // a normal 14-day session, opened before the tablet is a kiosk
+    await h.setCode(s)
+    const reg = await h.call('POST', 'kiosk/devices', { session: s, body: { name: 'Front desk tablet' } })
+    expect(reg.statusCode).toBe(201)
+    expect(reg.json().signedOut).toBe(false) // kiosk mode is still off
+    const tablet = { cookie: `${s.cookie}; oasis_kdev=${deviceCookieOf(reg)}`, csrf: s.csrf }
+    // the next request comes with the device cookie: the session is tied to the device, with the short timings and the banner
+    const me = (await h.call('GET', 'me', { session: tablet })).json() as Json
+    expect(me.kioskDevice).toEqual({ id: reg.json().device.id, name: 'Front desk tablet' })
+    expect(me.session.expiresAt).toBe(NOW_PLUS_4H)
+    const row = await h.t.db.selectFrom('sessions').selectAll().where('id', '=', hashToken(s.token)).executeTakeFirstOrThrow()
+    expect(row.kiosk_device_id).toBe(reg.json().device.id)
+    expect(row.absolute_expires_at.toISOString()).toBe(NOW_PLUS_4H)
+    expect(row.idle_expires_at.toISOString()).toBe('2026-06-13T14:51:00.000Z')
+    // kiosk mode on, from the tablet: the manager is signed out there and the tablet shows the keypad
+    const version = ((await h.call('GET', 'kiosk', { session: tablet })).json() as Json).version
+    const on = await h.call('PUT', 'kiosk/settings', { session: tablet, body: { enabled: true, version } })
+    expect(on.statusCode).toBe(200)
+    expect(on.json()).toEqual({ enabled: true, version: expect.any(Number) })
+    expect(on.cookies.find((c) => c.name === 'oasis_sid')?.value).toBe('')
+    expect(await alive(tablet)).toBe(false)
+    const status = await h.t.app.inject({ method: 'GET', url: '/api/v1/kiosk/status', headers: { cookie: `oasis_kdev=${deviceCookieOf(reg)}` } })
+    expect(status.json()).toMatchObject({ enabled: true, device: { name: 'Front desk tablet' }, unlocked: null })
+  })
+
+  it('a session that never sent the device cookie is not touched; one opened elsewhere is tied as soon as it comes with it', async () => {
+    const { admin, adminUser, device } = await h.kioskSetup()
+    expect(((await h.call('GET', 'me', { session: admin })).json() as Json).kioskDevice).toBeNull()
+    const other = await h.login(adminUser)
+    const onTablet = { cookie: `${other.cookie}; ${device.cookie}`, csrf: other.csrf }
+    expect(((await h.call('GET', 'me', { session: onTablet })).json() as Json).kioskDevice).toEqual({ id: device.id, name: device.name })
+    h.clock.advance(16 * 60_000) // 15 minutes idle
+    expect(await alive(onTablet)).toBe(false)
+    expect(await alive(other)).toBe(false) // the same session without the device cookie: tied for good
+    expect(await alive(admin)).toBe(true)
+  })
+
+  it('accepting an invite on the tablet opens the short kiosk-admin session', async () => {
+    const { device } = await h.kioskSetup()
+    const id = randomUUID()
+    await h.t.db.insertInto('employees').values({ id, first: 'Kevin', last: 'Tran', status: 'invited' }).execute()
+    await h.t.db.insertInto('employee_locations').values({ employee_id: id, location_id: h.t.location.id }).execute()
+    const { token } = await h.t.db.transaction().execute((tx) => h.identity.auth.issueInvite(tx, id, null))
+    const res = await h.t.app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/invite/accept',
+      headers: { origin: h.origin, cookie: device.cookie },
+      payload: { token, email: 'kevin@example.test', password: TEST_PASSWORD },
+    })
+    expect(res.statusCode, res.body).toBe(200)
+    const c = res.cookies.find((x) => x.name === 'oasis_sid')!
+    expect(c.maxAge).toBe(4 * 60 * 60)
+    const row = await h.t.db.selectFrom('sessions').selectAll().where('id', '=', hashToken(c.value)).executeTakeFirstOrThrow()
+    expect(row.kiosk_device_id).toBe(device.id)
+  })
+
+  it('Lock all, locking the device, kiosk mode off and Remove device each sign out a manager on the tablet', async () => {
+    const { admin, adminUser, device } = await h.kioskSetup()
+    let t = await loginOn(device, adminUser)
+    expect(await alive(t)).toBe(true)
+    expect((await h.call('POST', 'kiosk/lock-all', { session: admin })).statusCode).toBe(200)
+    expect(await alive(t)).toBe(false)
+
+    t = await loginOn(device, adminUser)
+    expect((await h.call('POST', `kiosk/devices/${device.id}/lock`, { session: admin })).statusCode).toBe(204)
+    expect(await alive(t)).toBe(false)
+
+    t = await loginOn(device, adminUser)
+    await h.setKioskMode(admin, false)
+    expect(await alive(t)).toBe(false)
+    await h.setKioskMode(admin, true)
+
+    t = await loginOn(device, adminUser)
+    // the manager on the tablet locks every kiosk from the tablet: signed out there, the cookie cleared
+    const self = await h.call('POST', 'kiosk/lock-all', { session: t })
+    expect(self.statusCode).toBe(200)
+    expect(self.cookies.find((c) => c.name === 'oasis_sid')?.value).toBe('')
+    expect(await alive(t)).toBe(false)
+
+    t = await loginOn(device, adminUser)
+    expect((await h.call('DELETE', `kiosk/devices/${device.id}`, { session: admin })).statusCode).toBe(204)
+    expect(await alive(t)).toBe(false)
+    expect(await alive(admin)).toBe(true) // the manager's own session elsewhere is not touched
+    const audit = await h.t.db.selectFrom('audit_log').select('after').where('action', '=', 'kiosk.lock_all').orderBy('id').execute()
+    expect(audit[0]!.after).toMatchObject({ managersSignedOut: 1 })
+  })
+})
+
+describe('K4 review: the last-3-codes rule holds for changes at the same moment (kiosk:KK-R1)', () => {
+  const h = useHarness()
+
+  it('two managers setting the same new code at once: one is accepted, the other refused as used recently', async () => {
+    const u = await h.createUser({ email: 'boss@example.test', roles: ['super'] })
+    const admin = await h.login(u)
+    for (const code of ['59308847', '61827394', '73946281', '82039475', '90384712']) {
+      const res = await Promise.all([1, 2].map(() => h.call('PUT', 'kiosk/code', { session: admin, body: { code } })))
+      expect(res.map((r) => r.statusCode).sort(), code).toEqual([200, 422])
+      expect(res.find((r) => r.statusCode === 422)!.json().errors[0].message).toMatch(/used recently/)
+    }
   })
 })
 

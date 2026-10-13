@@ -2,6 +2,7 @@
 // absolute expiry does not (14 d). Login always issues a fresh session (rotation); a password change or deactivation
 // revokes sessions.
 import { isIP } from 'node:net'
+import { sql } from 'kysely'
 import type { Clock } from '../../platform/clock.js'
 import type { Executor } from '../../platform/db.js'
 import { csrfTokenFor, hashToken, newCsrfSecret, newToken, TOKEN_SHAPE } from './tokens.js'
@@ -182,6 +183,30 @@ export class SessionService {
       kioskDevice:
         row.kiosk_device_id && row.kiosk_device_name ? { id: row.kiosk_device_id, name: row.kiosk_device_name } : null,
     }
+  }
+
+  /**
+   * A session that turns out to be on a registered kiosk device (it came with the device's cookie, ADR 0180): it is tied to the device
+   * and gets the short kiosk-admin timings from now on, so the banner shows and Lock all, locking or removing the device and a kiosk
+   * mode change end it. Returns whether the session was changed (false when it was revoked or already tied to a device).
+   */
+  async attachKioskDevice(id: string, kioskDeviceId: string, db: Executor = this.db): Promise<boolean> {
+    const now = this.clock.now().getTime()
+    const t = this.timingsFor(kioskDeviceId)
+    const absolute = new Date(now + t.absoluteMs)
+    const idle = new Date(now + t.idleMs)
+    const r = await db
+      .updateTable('sessions')
+      .set({
+        kiosk_device_id: kioskDeviceId,
+        absolute_expires_at: sql<Date>`least(absolute_expires_at, ${absolute})`,
+        idle_expires_at: sql<Date>`least(idle_expires_at, ${idle}, absolute_expires_at, ${absolute})`,
+      })
+      .where('id', '=', id)
+      .where('revoked_at', 'is', null)
+      .where('kiosk_device_id', 'is', null)
+      .executeTakeFirst()
+    return Number(r.numUpdatedRows) > 0
   }
 
   async revoke(id: string, db: Executor = this.db): Promise<void> {

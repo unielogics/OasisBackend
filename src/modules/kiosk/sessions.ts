@@ -144,6 +144,28 @@ export async function revokeKioskSessions(
   return Number(r.numUpdatedRows)
 }
 
+/**
+ * Ends the signed-in (user) sessions opened on, or tied to, kiosk devices (sessions.kiosk_device_id): a manager on the shared tablet
+ * is signed out by the same controls that lock it. Returns the ids of the sessions it ended.
+ */
+export async function revokeUserSessionsOnKiosks(
+  db: Executor,
+  clock: Clock,
+  where: { deviceId: string } | { locationId: string },
+): Promise<string[]> {
+  const rows = await db
+    .updateTable('sessions')
+    .set({ revoked_at: clock.now() })
+    .where('revoked_at', 'is', null)
+    .where('kiosk_device_id', 'in', (eb) => {
+      const q = eb.selectFrom('kiosk_devices').select('id')
+      return 'deviceId' in where ? q.where('id', '=', where.deviceId) : q.where('location_id', '=', where.locationId)
+    })
+    .returning('id')
+    .execute()
+  return rows.map((r) => r.id)
+}
+
 /** Housekeeping: drops sessions that ended (lock time or revoked) more than 30 days ago. */
 export async function purgeKioskSessions(db: Executor, clock: Clock): Promise<number> {
   const cutoff = new Date(clock.now().getTime() - 30 * 24 * 60 * 60 * 1000)

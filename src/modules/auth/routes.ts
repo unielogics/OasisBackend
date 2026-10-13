@@ -255,7 +255,14 @@ export function registerAuthRoutes(app: AppInstance, identityOf: IdentityProvide
     },
     async (req, reply) => {
       const id = await identityOf()
-      return signedIn(reply, await id.auth.acceptInvite({ ...req.body, ...clientMeta(req) }))
+      return signedIn(
+        reply,
+        await id.auth.acceptInvite({
+          ...req.body,
+          kioskDeviceToken: req.cookies?.[kioskDeviceCookieName(app.env)],
+          ...clientMeta(req),
+        }),
+      )
     },
   )
 

@@ -266,13 +266,19 @@ export function registerKioskRoutes(app: AppInstance, identityOf: KioskIdentityP
         tags: ['kiosk'],
         summary: 'Turn kiosk mode on or off',
         description:
-          'Turning it on needs a shop code (409 KIOSK_CODE_NOT_SET); turning it off ends every kiosk session. `version` is the ' +
+          'Turning it on needs a shop code (409 KIOSK_CODE_NOT_SET); turning it off ends every kiosk session. Turning it on or off ' +
+          'also signs out every manager signed in on a kiosk device (the caller too, when on one: the session cookie is cleared). ' +
+          '`version` is the ' +
           'version GET /kiosk returned (412 VERSION_CONFLICT when it changed).',
         body: z.object({ enabled: z.boolean(), version: z.number().int().min(0) }).strict(),
         response: { 200: z.object({ enabled: z.boolean(), version: z.number().int() }) },
       },
     },
-    async (req) => (await kioskService()).setEnabled(adminOf(req), req.body.enabled, req.body.version),
+    async (req, reply) => {
+      const r = await (await kioskService()).setEnabled(adminOf(req), req.body.enabled, req.body.version)
+      if (r.signedOut) clearSessionCookie(reply, app.env)
+      return { enabled: r.enabled, version: r.version }
+    },
   )
 
   app.put(
@@ -347,11 +353,13 @@ export function registerKioskRoutes(app: AppInstance, identityOf: KioskIdentityP
       schema: {
         tags: ['kiosk'],
         summary: 'Remove a kiosk device: its cookie stops working for good and its kiosk session ends',
+        description: 'A manager signed in on the device is signed out too (the caller’s own session cookie is cleared when it was one).',
         params: IdParams,
       },
     },
     async (req, reply) => {
-      await (await kioskService()).revokeDevice(adminOf(req), req.params.id)
+      const r = await (await kioskService()).revokeDevice(adminOf(req), req.params.id)
+      if (r.signedOut) clearSessionCookie(reply, app.env)
       return reply.status(204).send()
     },
   )
@@ -360,10 +368,16 @@ export function registerKioskRoutes(app: AppInstance, identityOf: KioskIdentityP
     '/kiosk/devices/:id/lock',
     {
       config: { access: access.perm('team.roles') },
-      schema: { tags: ['kiosk'], summary: 'Lock one kiosk now', params: IdParams },
+      schema: {
+        tags: ['kiosk'],
+        summary: 'Lock one kiosk now',
+        description: 'A manager signed in on the device is signed out too.',
+        params: IdParams,
+      },
     },
     async (req, reply) => {
-      await (await kioskService()).lockDevice(adminOf(req), req.params.id)
+      const r = await (await kioskService()).lockDevice(adminOf(req), req.params.id)
+      if (r.signedOut) clearSessionCookie(reply, app.env)
       return reply.status(204).send()
     },
   )
@@ -389,10 +403,15 @@ export function registerKioskRoutes(app: AppInstance, identityOf: KioskIdentityP
       schema: {
         tags: ['kiosk'],
         summary: 'Lock every kiosk now',
+        description: '`locked` counts kiosk sessions. Every manager signed in on a kiosk device is signed out too.',
         response: { 200: z.object({ locked: z.number().int() }) },
       },
     },
-    async (req) => ({ locked: await (await kioskService()).lockAll(adminOf(req)) }),
+    async (req, reply) => {
+      const r = await (await kioskService()).lockAll(adminOf(req))
+      if (r.signedOut) clearSessionCookie(reply, app.env)
+      return { locked: r.locked }
+    },
   )
 
   app.put(

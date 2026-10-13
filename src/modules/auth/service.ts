@@ -218,7 +218,13 @@ export class AuthService {
   }
 
   async acceptInvite(
-    input: { token: string; email: string; password: string } & ClientMeta,
+    input: {
+      token: string
+      email: string
+      password: string
+      /** The kiosk device cookie: accepted on the shared tablet, the session gets the short kiosk-admin timings (ADR 0180). */
+      kioskDeviceToken?: string | null
+    } & ClientMeta,
   ): Promise<LoginResult> {
     const email = normalizeEmail(input.email)
     const problem = passwordProblem(input.password, { email })
@@ -227,6 +233,8 @@ export class AuthService {
     const passwordHash = await this.d.hasher.hash(input.password)
     const tokenHash = hashToken(input.token)
     const now = this.d.clock.now()
+    const kioskDeviceId =
+      input.kioskDeviceToken && this.d.kioskDeviceOf ? await this.d.kioskDeviceOf(input.kioskDeviceToken) : null
 
     return transaction(this.d.db, async (tx) => {
       const found = await tx
@@ -297,9 +305,9 @@ export class AuthService {
         action: 'auth.invite.accepted',
         entityType: 'employee',
         entityId: emp.id,
-        ctx: this.actorCtx(user, input),
+        ctx: { ...this.actorCtx(user, input), kioskDeviceId },
       })
-      const session = await this.d.sessions.create(userId, input, tx)
+      const session = await this.d.sessions.create(userId, { ip: input.ip, ua: input.ua, kioskDeviceId }, tx)
       return { session, user }
     })
   }

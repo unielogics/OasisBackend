@@ -35,6 +35,7 @@ import {
   lookupKioskSession,
   purgeKioskSessions,
   revokeKioskSessions,
+  revokeUserSessionsOnKiosks,
 } from './sessions.js'
 import { findKioskActor, listKioskStaff, type KioskPerson } from './staff.js'
 import {
@@ -185,6 +186,11 @@ export class KioskService {
   async liveDeviceId(token: string | null | undefined, db: Executor = this.d.db): Promise<string | null> {
     const d = await this.deviceByToken(db, token ?? undefined)
     return d && !d.revoked_at ? d.id : null
+  }
+
+  /** The live device behind the request's device cookie (the authorizer ties a user session that comes with it to the device). */
+  liveDeviceOf(req: FastifyRequest): Promise<string | null> {
+    return this.liveDeviceId(this.deviceToken(req))
   }
 
   // --- the request context -------------------------------------------------------------------------------------------------------
@@ -526,8 +532,16 @@ export class KioskService {
     }
   }
 
-  /** PUT /kiosk/settings: turning kiosk mode on needs a code; turning it off ends every kiosk session. */
-  async setEnabled(admin: KioskAdmin, enabled: boolean, version: number): Promise<{ enabled: boolean; version: number }> {
+  /**
+   * PUT /kiosk/settings: turning kiosk mode on needs a code; turning it off ends every kiosk session. Either change also signs out
+   * every manager on a kiosk device (the tablets go to the keypad, or to the sign-in page when mode is off); `signedOut` says whether
+   * that included the caller.
+   */
+  async setEnabled(
+    admin: KioskAdmin,
+    enabled: boolean,
+    version: number,
+  ): Promise<{ enabled: boolean; version: number; signedOut: boolean }> {
     return transaction(this.d.db, async (tx) => {
       if (enabled && !(await this.currentCode(tx, admin.locationId))) throw new AppError('KIOSK_CODE_NOT_SET')
       const before = (await getSetting(tx, admin.locationId, 'kiosk.enabled')).value
@@ -548,7 +562,11 @@ export class KioskService {
           ctx: admin.audit,
         })
       if (!enabled) await revokeKioskSessions(tx, this.d.clock, { locationId: admin.locationId }, 'kiosk_off')
-      return { enabled: rec.value, version: rec.version }
+      const ended =
+        before !== enabled || !enabled
+          ? await revokeUserSessionsOnKiosks(tx, this.d.clock, { locationId: admin.locationId })
+          : []
+      return { enabled: rec.value, version: rec.version, signedOut: ended.includes(admin.sessionId) }
     })
   }
 
@@ -563,54 +581,62 @@ export class KioskService {
       new AppError('KIOSK_CODE_REJECTED', { detail: message, errors: [{ path: 'body.code', message }] })
     const problem = codeProblem(code)
     if (problem) throw reject(problem)
-    const recent = await this.d.db
-      .selectFrom('kiosk_codes')
-      .select('code_hash')
-      .where('location_id', '=', admin.locationId)
-      .orderBy('created_at', 'desc')
-      .orderBy('id', 'desc') // time-ordered ids: two codes set in the same instant still have an order
-      .limit(KIOSK_CODE_HISTORY)
-      .execute()
-    for (const r of recent)
-      if (await this.d.hasher.verify(admin.locationId, code, r.code_hash)) {
-        if (generated) return this.setCode(admin, input) // astronomically unlikely: draw again
-        throw reject(REUSED_CODE_PROBLEM)
-      }
     const hash = await this.d.hasher.hash(admin.locationId, code)
-    const setAt = await transaction(this.d.db, async (tx) => {
-      // two code changes for one shop take turns: without this the second one, behind the first's row lock, would retire nothing
-      // and then collide with the first's new current code (kiosk_codes_current_uq). NO KEY UPDATE leaves FK inserts unblocked.
-      await tx.selectFrom('locations').select('id').where('id', '=', admin.locationId).forNoKeyUpdate().executeTakeFirstOrThrow()
-      const now = this.d.clock.now()
-      await tx
-        .updateTable('kiosk_codes')
-        .set({ retired_at: now })
-        .where('location_id', '=', admin.locationId)
-        .where('retired_at', 'is', null)
-        .execute()
-      await tx
-        .insertInto('kiosk_codes')
-        .values({
-          id: this.d.newId(),
-          location_id: admin.locationId,
-          code_hash: hash,
-          created_at: now,
-          created_by: admin.userId,
-          created_by_name: admin.name,
+    const REDRAW = new Error('kiosk code: draw again')
+    let setAt: Date
+    try {
+      setAt = await transaction(this.d.db, async (tx) => {
+        // two code changes for one shop take turns: without this the second one, behind the first's row lock, would retire nothing
+        // and then collide with the first's new current code (kiosk_codes_current_uq). NO KEY UPDATE leaves FK inserts unblocked.
+        // The last-3 check runs under the same lock, so two changes to the same new code cannot both pass it.
+        await tx.selectFrom('locations').select('id').where('id', '=', admin.locationId).forNoKeyUpdate().executeTakeFirstOrThrow()
+        const recent = await tx
+          .selectFrom('kiosk_codes')
+          .select('code_hash')
+          .where('location_id', '=', admin.locationId)
+          .orderBy('created_at', 'desc')
+          .orderBy('id', 'desc') // time-ordered ids: two codes set in the same instant still have an order
+          .limit(KIOSK_CODE_HISTORY)
+          .execute()
+        for (const r of recent)
+          if (await this.d.hasher.verify(admin.locationId, code, r.code_hash)) {
+            if (generated) throw REDRAW // astronomically unlikely: draw again
+            throw reject(REUSED_CODE_PROBLEM)
+          }
+        const now = this.d.clock.now()
+        await tx
+          .updateTable('kiosk_codes')
+          .set({ retired_at: now })
+          .where('location_id', '=', admin.locationId)
+          .where('retired_at', 'is', null)
+          .execute()
+        await tx
+          .insertInto('kiosk_codes')
+          .values({
+            id: this.d.newId(),
+            location_id: admin.locationId,
+            code_hash: hash,
+            created_at: now,
+            created_by: admin.userId,
+            created_by_name: admin.name,
+          })
+          .execute()
+        const locked = await revokeKioskSessions(tx, this.d.clock, { locationId: admin.locationId }, 'code_changed')
+        await audit.record(tx, {
+          locationId: admin.locationId,
+          action: 'kiosk.code.set',
+          entityType: 'location',
+          entityId: admin.locationId,
+          after: { generated, locked }, // never the code
+          ctx: admin.audit,
         })
-        .execute()
-      const locked = await revokeKioskSessions(tx, this.d.clock, { locationId: admin.locationId }, 'code_changed')
-      await audit.record(tx, {
-        locationId: admin.locationId,
-        action: 'kiosk.code.set',
-        entityType: 'location',
-        entityId: admin.locationId,
-        after: { generated, locked }, // never the code
-        ctx: admin.audit,
+        await this.changed(tx, admin.locationId)
+        return now
       })
-      await this.changed(tx, admin.locationId)
-      return now
-    })
+    } catch (e) {
+      if (e === REDRAW) return this.setCode(admin, input)
+      throw e
+    }
     return generated ? { setAt: setAt.toISOString(), code } : { setAt: setAt.toISOString() }
   }
 
@@ -684,42 +710,50 @@ export class KioskService {
     return this.deviceView(this.d.db, admin.locationId, id)
   }
 
-  /** DELETE /kiosk/devices/:id: the device's cookie stops working for good and its session ends. */
-  async revokeDevice(admin: KioskAdmin, id: string): Promise<void> {
-    await transaction(this.d.db, async (tx) => {
+  /**
+   * DELETE /kiosk/devices/:id: the device's cookie stops working for good, its kiosk session ends and so does any manager signed in
+   * on it. Returns whether that included the caller.
+   */
+  async revokeDevice(admin: KioskAdmin, id: string): Promise<{ signedOut: boolean }> {
+    return transaction(this.d.db, async (tx) => {
       const dev = await this.lockDeviceRow(tx, admin.locationId, id)
-      if (dev.revoked_at) return
+      if (dev.revoked_at) return { signedOut: false }
       await tx
         .updateTable('kiosk_devices')
         .set({ revoked_at: this.d.clock.now(), revoked_by: admin.userId, version: dev.version + 1 })
         .where('id', '=', id)
         .execute()
       await revokeKioskSessions(tx, this.d.clock, { deviceId: id }, 'device_revoked')
+      const ended = await revokeUserSessionsOnKiosks(tx, this.d.clock, { deviceId: id })
       await audit.record(tx, {
         locationId: admin.locationId,
         action: 'kiosk.device.revoke',
         entityType: 'kiosk_device',
         entityId: id,
+        ...(ended.length ? { after: { managersSignedOut: ended.length } } : {}),
         ctx: admin.audit,
       })
       await this.changed(tx, admin.locationId)
+      return { signedOut: ended.includes(admin.sessionId) }
     })
   }
 
-  /** POST /kiosk/devices/:id/lock. */
-  async lockDevice(admin: KioskAdmin, id: string): Promise<void> {
-    await transaction(this.d.db, async (tx) => {
+  /** POST /kiosk/devices/:id/lock: its kiosk session ends, and so does any manager signed in on it. */
+  async lockDevice(admin: KioskAdmin, id: string): Promise<{ signedOut: boolean }> {
+    return transaction(this.d.db, async (tx) => {
       await this.lockDeviceRow(tx, admin.locationId, id)
       const n = await revokeKioskSessions(tx, this.d.clock, { deviceId: id }, 'lock_device')
+      const ended = await revokeUserSessionsOnKiosks(tx, this.d.clock, { deviceId: id })
       await audit.record(tx, {
         locationId: admin.locationId,
         action: 'kiosk.device.lock',
         entityType: 'kiosk_device',
         entityId: id,
-        after: { locked: n },
+        after: { locked: n, ...(ended.length ? { managersSignedOut: ended.length } : {}) },
         ctx: admin.audit,
       })
       await this.changed(tx, admin.locationId)
+      return { signedOut: ended.includes(admin.sessionId) }
     })
   }
 
@@ -745,8 +779,8 @@ export class KioskService {
     return this.deviceView(this.d.db, admin.locationId, id)
   }
 
-  /** POST /kiosk/lock-all. */
-  async lockAll(admin: KioskAdmin): Promise<number> {
+  /** POST /kiosk/lock-all: every kiosk session ends, and so does every manager signed in on a kiosk device. */
+  async lockAll(admin: KioskAdmin): Promise<{ locked: number; signedOut: boolean }> {
     return transaction(this.d.db, async (tx) => {
       // take every device row of the shop, as an unlock does for its own: an unlock in progress finishes first and its new
       // session is then ended here; an unlock that comes after waits and opens its session after Lock all
@@ -758,16 +792,17 @@ export class KioskService {
         .forUpdate()
         .execute()
       const n = await revokeKioskSessions(tx, this.d.clock, { locationId: admin.locationId }, 'lock_all')
+      const ended = await revokeUserSessionsOnKiosks(tx, this.d.clock, { locationId: admin.locationId })
       await audit.record(tx, {
         locationId: admin.locationId,
         action: 'kiosk.lock_all',
         entityType: 'location',
         entityId: admin.locationId,
-        after: { locked: n },
+        after: { locked: n, ...(ended.length ? { managersSignedOut: ended.length } : {}) },
         ctx: admin.audit,
       })
       await this.changed(tx, admin.locationId)
-      return n
+      return { locked: n, signedOut: ended.includes(admin.sessionId) }
     })
   }
 

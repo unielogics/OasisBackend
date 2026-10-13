@@ -36,6 +36,8 @@ export interface SessionAuthorizerDeps {
 export interface KioskResolver {
   resolveContext(req: FastifyRequest, opts?: { touch?: boolean }): Promise<KioskAuthContext | null>
   bindActor(req: FastifyRequest, ctx: KioskAuthContext, required: boolean): Promise<void>
+  /** The live registered device named by the request's device cookie, or null. */
+  liveDeviceOf(req: FastifyRequest): Promise<string | null>
 }
 
 export function createSessionAuthorizer(deps: SessionAuthorizerDeps): Authorizer {
@@ -46,8 +48,17 @@ export function createSessionAuthorizer(deps: SessionAuthorizerDeps): Authorizer
 
     async resolve(req: FastifyRequest, opts?: { touch?: boolean }): Promise<AuthContext | null> {
       const token = req.cookies?.[cookieName]
-      const rec = token ? await deps.sessions.lookup(token, opts) : null
+      let rec = token ? await deps.sessions.lookup(token, opts) : null
       if (!rec) return deps.kiosk ? deps.kiosk.resolveContext(req, opts) : null
+      // a session that comes with the cookie of a live kiosk device is a manager on the shared tablet, however it was opened (before
+      // the tablet was registered, an invite accepted there, ...): it is tied to the device for good and gets the short timings
+      if (token && !rec.kioskDevice && deps.kiosk) {
+        const deviceId = await deps.kiosk.liveDeviceOf(req)
+        if (deviceId && (await deps.sessions.attachKioskDevice(rec.id, deviceId))) {
+          rec = await deps.sessions.lookup(token, { touch: false })
+          if (!rec) return null
+        }
+      }
 
       const real = await deps.rbac.authorityFor(rec.employee.id, rec.rbacVersion)
       const canViewAs = real.isSuper

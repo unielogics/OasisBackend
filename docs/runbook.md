@@ -646,15 +646,18 @@ signed in as someone with "Assign roles & permissions" (Management or Super Admi
    with 0218, repeat a digit, run in a row (12345678), repeat a pattern, be a date, or be one of the last 3 codes.
 2. On the tablet itself: sign in with your email and password, Settings → Kiosk → "This device": give it a name ("Front desk tablet")
    and tap **Make this a kiosk**. Only this browser on this tablet becomes the kiosk (a cookie it keeps for 400 days; clearing the
-   browser's data or using another browser undoes it: then do this step again and remove the old device).
-3. Turn **Kiosk mode** on. The tablet goes to the keypad. Type the code: the board opens and stays open until closing + 2 hours
-   (2 hours on a closed day or late at night).
+   browser's data or using another browser undoes it: then do this step again and remove the old device). From here on, your own
+   sign-in on the tablet is a short one (15 minutes without use, 4 hours at most) with a "Signed in on a kiosk" bar.
+3. Turn **Kiosk mode** on (on the tablet or anywhere else). Every manager signed in on a kiosk tablet is signed out, so the tablet
+   goes to the keypad. Type the code: the board opens and stays open until closing + 2 hours (2 hours on a closed day or late at
+   night).
 4. Check: Settings → Kiosk lists the device as "Unlocked" with its lock time; "Recent kiosk events" shows the unlock.
 5. On the tablet, turn on the system's own guided access / screen pinning and a screen lock, so the browser can't be left.
 
 **Every day.** Staff tap their name when they move a car, take a payment, text or book. "Lock kiosk" in the menu locks it; it also
 locks by itself at its lock time. A manager can still sign in on the tablet: type 0218 on the keypad to show the email and password
-form. That sign-in signs out after 15 minutes without use (4 hours at most); the next unlock with the code signs it out too.
+form. That sign-in signs out after 15 minutes without use (4 hours at most); the next unlock with the code, Lock all, locking or
+removing the device and turning kiosk mode on or off sign it out too.
 
 **Change the code** (someone left, or every few months; Settings shows how old it is): Settings → Kiosk → Change code. Every kiosk
 locks at once; give the new code to the staff. If `SESSION_SECRET` was rotated (section 8), the old code stops working: set a new one.
@@ -664,8 +667,9 @@ then 4, 8 ... up to 5 minutes); after 20 in a row the device is locked out. Sett
 the code works again. Many wrong codes in an hour on every kiosk slow every keypad down and add "Many wrong codes on every kiosk" to
 Recent kiosk events: check who is at the tablets, and change the code.
 
-**Lost, stolen or replaced tablet**: Settings → Kiosk → the device → **Remove** (its cookie never works again), and change the code.
-"Lock all kiosks" locks every tablet now without removing anything.
+**Lost, stolen or replaced tablet**: Settings → Kiosk → the device → **Remove** (its cookie never works again, and anyone signed in on
+it is signed out), and change the code. "Lock all kiosks" locks every tablet now without removing anything (it also signs out anyone
+signed in on a tablet).
 
 **Turn it off** (rollback): Settings → Kiosk → Kiosk mode off. Every kiosk session ends and the sign-in page shows the email form
 again. Nothing else changes; the devices and the code are kept for next time.
