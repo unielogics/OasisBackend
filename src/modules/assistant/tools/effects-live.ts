@@ -403,7 +403,8 @@ async function saveVehicle(ctx: ToolContext, v: VehicleEffect): Promise<ToolOutc
     if (!owner || owner.phone_e164 !== ctx.identity.phone) return fail('not_allowed', 'There is no client record for this number.')
     const vehicles = await listVehicles(tx, customerId)
     const same = vehicles.find(
-      (v) => (v.make ?? '').toLowerCase() === make.toLowerCase() && (v.model ?? '').toLowerCase() === model.toLowerCase() && (v.year === null || v.year === v.year),
+      // the same car: the same make and model, and the same year unless the client gave none (a 2022 Civic is not the 2019 one)
+      (x) => (x.make ?? '').toLowerCase() === make.toLowerCase() && (x.model ?? '').toLowerCase() === model.toLowerCase() && (v.year === null || x.year === v.year),
     )
     if (!same && vehicles.length >= MAX_VEHICLES) return fail('rate_limited', 'This client has many vehicles on file already; the team can add more.')
     let vehicleId: string

@@ -7,7 +7,8 @@
 //            422 KNOWLEDGE_BUDGET {usedChars, maxChars, needed} when it would go over; the entry stays a draft and nothing is cut.
 //            A save that removes characters always passes, so a shop over budget (the cap lowered) is never stuck.
 //   Review   a document entry goes live only after the owner read it: `reviewed: true` (or an earlier review of the same text), and
-//            `confirmInstructions: true` when its text holds instruction-like lines; otherwise 422 KNOWLEDGE_NEEDS_REVIEW.
+//            `confirmInstructions: true` when its text holds instruction-like lines; otherwise 422 KNOWLEDGE_NEEDS_REVIEW. A live
+//            document passes the same gate again when its text changes, or when a new title brings an instruction-like line.
 //   Limits   title 1..120; note 4,000 characters; a document stores up to 60,000 and needs 20,000 or fewer to go live; plain text
 //            (no hidden character, no HTML tag), like the Q&A.
 //   Audit    assistant.knowledge.{create,update,activate,deactivate,delete}: kind, title, active, chars and the SHA-256 of the body,
@@ -164,6 +165,10 @@ export function entryWarnings(
 }
 
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex')
+
+/** The instruction-like lines of a set of warnings, as one comparable key (a live document's edit that changes them is confirmed). */
+const instructionLines = (warnings: readonly KnowledgeWarning[]): string =>
+  JSON.stringify(warnings.filter((w) => w.kind === 'instruction').map((w) => [w.line, w.sample]))
 
 type EntryRow = {
   id: string
@@ -347,7 +352,10 @@ export async function updateEntry(tx: Tx, c: KnowledgeContext, id: string, patch
   if (cur.kind === 'document') {
     if (patch.reviewed === true) reviewedAt = c.now
     else if (body !== cur.body) reviewedAt = null
-    if (active && !cur.active) {
+    // the gate runs when a document goes on, when the text of a live one changes (read again; its instruction-like lines confirmed
+    // again), and when an edit of a live one's title brings an instruction-like line the owner has not confirmed yet
+    const gate = active && (!cur.active || body !== cur.body || (textChanged && instructionLines(warnings) !== instructionLines(parseWarnings(cur.warnings))))
+    if (gate) {
       const needs: string[] = []
       if (!reviewedAt) needs.push('reviewed')
       if (hasInstructionWarning(warnings) && patch.confirmInstructions !== true) needs.push('confirmInstructions')
@@ -355,8 +363,6 @@ export async function updateEntry(tx: Tx, c: KnowledgeContext, id: string, patch
     }
     if (active && body.length > DOCUMENT_ACTIVE_MAX)
       throw invalid('body', `Shorten this document to ${DOCUMENT_ACTIVE_MAX.toLocaleString('en-US')} characters or fewer before turning it on.`)
-    // an active document whose text changed is read again before it stays live
-    if (active && cur.active && body !== cur.body && !reviewedAt) throw new AppError('KNOWLEDGE_NEEDS_REVIEW', { meta: { needs: ['reviewed'] } })
   }
   await assertBudget(tx, { locationId: c.locationId, maxChars: c.maxChars, before: cur.active ? cur.chars : 0, after: active ? chars : 0 })
   const changed = textChanged || active !== cur.active || reviewedAt?.getTime() !== cur.reviewed_at?.getTime()

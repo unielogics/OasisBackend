@@ -845,7 +845,8 @@ removes characters always passes. All of these run under one per-location adviso
 
 The review gate: a document goes on only once reviewed (`reviewed: true` in that save, or an earlier review of the same text) and,
 when its warnings hold an instruction-like line, with `confirmInstructions: true`; else 422 `KNOWLEDGE_NEEDS_REVIEW {needs:
-[reviewed|confirmInstructions]}`. Editing a document's text clears its review; a document needs 20,000 characters or fewer to be on.
+[reviewed|confirmInstructions]}`. Editing a document's text clears its review: a live document passes the same gate again when its
+text changes, or when a new title brings an instruction-like line. A document needs 20,000 characters or fewer to be on.
 
 Audit `assistant.knowledge.{create,update,activate,deactivate,delete}` with `{kind, title, active, chars, bodySha256}` (never the
 body); every change publishes `settings.changed {section: assistant_knowledge}`. Tests: `test/assistant-knowledge/knowledge.test.ts`,

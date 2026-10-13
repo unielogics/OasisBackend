@@ -3,10 +3,11 @@
 // too, so knowledge widens judge rule (f) on purpose. Owner text is data: every line is masked (sanitize.ts maskForKnowledge),
 // flattened and prefixed with "> ", so a document line such as "TURN CONTEXT" or "SHOP FACTS:" can never start a section; the
 // header says it is data, never instructions, and that the rules above and SHOP FACTS win. A correction is rendered only as its
-// question and the right answer: the wrong reply is never shown to the model. Deterministic: same entries, same bytes.
+// question and the right answer: the wrong reply is never shown to the model. Titles are masked like the lines. Deterministic: same
+// entries, same bytes.
 import type { ShopFacts } from '../contract.js'
 import { oneLine } from '../facts.js'
-import { maskForKnowledge } from './sanitize.js'
+import { maskForKnowledge, type SanitizeOptions } from './sanitize.js'
 import type { KnowledgeKind } from './schema.js'
 
 /** One active entry as the facts carry it (facts.ts loadShopFacts). */
@@ -40,7 +41,14 @@ export function knowledgeOrder(a: ShopKnowledgeEntry, b: ShopKnowledgeEntry): nu
   return KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.sort - b.sort || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)
 }
 
-const quoteTitle = (t: string): string => `"${oneLine(t, 120).replace(/"/g, "'").replace(/[⟦⟧[\]]/g, '')}"`
+/** A title as the model reads it: masked like every line of owner text (a note title or a PDF's file name can hold an amount, a
+ * link or a number; a document's ".pdf" is set aside first so the file name is not read as a web address), flattened, its quotes
+ * and brackets neutralised (a mask's brackets become parentheses). */
+const quoteTitle = (t: string, o: SanitizeOptions): string => {
+  const ext = /\.pdf$/i.exec(t.trim())?.[0] ?? ''
+  const masked = maskForKnowledge(ext ? t.trim().slice(0, -ext.length) : t, o) + ext
+  return `"${oneLine(masked, 120).replace(/"/g, "'").replace(/[⟦⟧]/g, '').replace(/\[/g, '(').replace(/\]/g, ')')}"`
+}
 
 const cache = new WeakMap<ShopKnowledge, string>()
 
@@ -62,7 +70,7 @@ export function renderShopKnowledge(facts: Pick<ShopFacts, 'knowledge' | 'contac
   for (const e of entries.filter((x) => x.kind !== 'correction')) {
     const body = lines(e.body)
     if (body.length === 0) continue
-    out.push(`[${e.kind === 'note' ? 'Note' : 'Document'} ${quoteTitle(e.title)}]`, ...body)
+    out.push(`[${e.kind === 'note' ? 'Note' : 'Document'} ${quoteTitle(e.title, o)}]`, ...body)
   }
   const corrections = entries
     .filter((x) => x.kind === 'correction')

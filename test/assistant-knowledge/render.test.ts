@@ -104,6 +104,28 @@ describe('renderShopKnowledge (ADR 0174 §1f)', () => {
     for (const line of text.split('\n').slice(1)) expect(line.startsWith('> ') || line.startsWith('[')).toBe(true)
   })
 
+  it('masks titles like the lines: an amount, a link, an e-mail or another number in a note title or a file name never reaches the model', () => {
+    const titled = {
+      entries: [
+        entry({ id: 'n1', kind: 'note', title: 'Spring deal $45 at www.cheapwash.com call 201-555-0199', body: 'Ask about the spring deal.' }),
+        entry({ id: 'd1', kind: 'document', title: 'Price list $45 owner@shop.com [v2].pdf', body: 'Tint shades 5% and 20%.' }),
+        entry({ id: 'n2', kind: 'note', title: 'Call us at (862) 388-5827', body: 'We answer texts.' }),
+      ],
+    }
+    const text = renderShopKnowledge({ knowledge: titled, contact })
+    const heads = text.split('\n').filter((l) => l.startsWith('[Note') || l.startsWith('[Document'))
+    expect(heads).toEqual([
+      '[Note "Spring deal (price in Settings) at (link removed) call (number)"]',
+      '[Note "Call us at (862) 388-5827"]',
+      '[Document "Price list (price in Settings) (link removed) (v2).pdf"]',
+    ])
+    for (const bad of ['$45', 'cheapwash', '555-0199', 'owner@shop.com']) expect(text).not.toContain(bad)
+    for (const l of heads) {
+      expect(moneyWords(l), l).toEqual([])
+      expect(urlWords(l, ''), l).toEqual([])
+    }
+  })
+
   it('is deterministic (the order does not depend on the input order) and empty without entries', () => {
     const shuffled = { entries: [...k.entries].reverse() }
     expect(renderShopKnowledge({ knowledge: shuffled, contact })).toBe(renderShopKnowledge({ knowledge: k, contact }))

@@ -27422,7 +27422,7 @@
         "x-oasis-access": "set.assistant"
       },
       "put": {
-        "description": "`version` (or If-Match) is required: 412 VERSION_CONFLICT when stale, 428 without. Turning an entry on, or growing an active one, checks the budget (422 `KNOWLEDGE_BUDGET {usedChars, maxChars, needed}`); a save that shrinks it always passes. A document goes on only once reviewed: `reviewed: true` in this save (or an earlier review of the same text) and, when its text has instruction-like lines, `confirmInstructions: true`; else 422 `KNOWLEDGE_NEEDS_REVIEW {needs: [reviewed|confirmInstructions]}`. Editing a document’s text clears its review. A document needs 20,000 characters or fewer to be on. `question` is a correction’s only. Audited (`assistant.knowledge.update` / `.activate` / `.deactivate`).",
+        "description": "`version` (or If-Match) is required: 412 VERSION_CONFLICT when stale, 428 without. Turning an entry on, or growing an active one, checks the budget (422 `KNOWLEDGE_BUDGET {usedChars, maxChars, needed}`); a save that shrinks it always passes. A document goes on only once reviewed: `reviewed: true` in this save (or an earlier review of the same text) and, when its text has instruction-like lines, `confirmInstructions: true`; else 422 `KNOWLEDGE_NEEDS_REVIEW {needs: [reviewed|confirmInstructions]}`. Editing a document’s text clears its review: a live document passes the same gate again when its text changes, or when a new title brings an instruction-like line. A document needs 20,000 characters or fewer to be on. `question` is a correction’s only. Audited (`assistant.knowledge.update` / `.activate` / `.deactivate`).",
         "operationId": "putAssistantKnowledge",
         "parameters": [
           {

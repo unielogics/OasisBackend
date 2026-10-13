@@ -381,6 +381,26 @@ describe('the client’s own record', () => {
       vehicle_class_source: 'staff',
     })
   })
+
+  it('set_my_vehicle: the same make and model of another year is another car (a new row; the old car keeps its size)', async () => {
+    const { ctx } = await w.ctx({ customerId: david().id, phone: david().phone, trust: 'caller' })
+    const old = w.newId()
+    await w.t.db
+      .insertInto('vehicles')
+      .values({ id: old, customer_id: david().id, year: 2019, make: 'Honda', model: 'Civic', color: null, plate: null, deleted_at: null, vehicle_class: 'compact_car', vehicle_class_source: 'ai' })
+      .execute()
+    const before = await w.t.db.selectFrom('vehicles').select('id').where('customer_id', '=', david().id).execute()
+    const r = await run('set_my_vehicle', ctx, { size: 'large_car', make: 'Honda', model: 'Civic', year: 2022, color: null })
+    expect(r).toMatchObject({ ok: true, data: { vehicle: '2022 Honda Civic', sizeKey: 'large_car' } })
+    const rows = await w.t.db.selectFrom('vehicles').select(['id', 'year', 'vehicle_class']).where('customer_id', '=', david().id).where('model', '=', 'Civic').execute()
+    expect(await w.t.db.selectFrom('vehicles').select('id').where('customer_id', '=', david().id).execute()).toHaveLength(before.length + 1)
+    expect(rows.find((x) => x.id === old)).toEqual({ id: old, year: 2019, vehicle_class: 'compact_car' })
+    expect(rows.find((x) => x.id !== old)).toMatchObject({ year: 2022, vehicle_class: 'large_car' })
+    // the same year again: that car (no new row)
+    await run('set_my_vehicle', ctx, { size: 'compact_suv', make: 'honda', model: 'civic', year: 2019, color: null })
+    expect(await w.t.db.selectFrom('vehicles').select('id').where('customer_id', '=', david().id).execute()).toHaveLength(before.length + 1)
+    expect((await w.t.db.selectFrom('vehicles').select('vehicle_class').where('id', '=', old).executeTakeFirstOrThrow()).vehicle_class).toBe('compact_suv')
+  })
 })
 
 describe('note_interest', () => {
