@@ -832,8 +832,9 @@ code points such as variation selectors and Hangul fillers; only the emoji prese
 joiner between two emoji pass), each question once (case and spaces ignored). `capabilities` and `behavior` are whole objects
 (strict; ADR 0174 §3a): style notes at most 400 characters, words 2..40 characters (at most 30), topics 3..80 (at most 15 per
 list), every text plain (the FAQ's rules), each list without repeats (case and spaces ignored), a topic either avoided or handed to
-the team, and a sign-off of at most 24 characters with no amount, number, link or promise word (`The sign-off cannot hold an amount, a
-number, a link or a promise.`). The turn applies them (ADR 0174 §3b, wave K2c), and they only take abilities away: a capability
+the team, and a sign-off of at most 24 characters with no amount, digit, link, promise word or offer word such as off, on us, BOGO,
+deal, sale or half (`The sign-off cannot hold an amount, a number, a link or a promise.`) and no word from `avoidWords` (`The
+sign-off uses a word from “Words to avoid”.`; K4 review asst:K4A-7). The turn applies them (ADR 0174 §3b, wave K2c), and they only take abilities away: a capability
 switched off leaves its tools out of the model's request (send_link offers only the allowed kinds: calendar with `bookingLinks`,
 verify with `bookingLinks` or in-chat actions, membership with `membershipLinks`, pay with `paymentLinks`, pin with any of
 `accountInfo`, `membershipLinks`, `paymentLinks`) and the runner refuses them if called; `behavior` adds the owner block after the
@@ -859,7 +860,8 @@ Settings]", links and e-mails as "[link removed]", phone numbers other than the 
 title, body, question (correction), wrongReply (correction; redacted, never shown to the model; null without cli.view unless it came from a practice text of a synthetic
 new texter whose session still exists), source manual|practice|live,
 active, documentId, reviewedAt, warnings[{kind amount|link|phone|email|instruction|promise|hidden|markup|long, sample, line}],
-chars (title + question + body), sort, version, createdAt, updatedAt}`; `budget` is `{usedChars, maxChars, parts{faq, notes,
+chars (title + question + body, or what the model reads of them when its masks make that longer: K4 review asst:K4A-5), sort,
+version, createdAt, updatedAt}`; `budget` is `{usedChars, maxChars, parts{faq, notes,
 documents, corrections}}` (active entries plus the Settings Q&A against `AI_KNOWLEDGE_MAX_CHARS`, default 20,000); `limits` names
 the caps (title 120, note 4,000, document stored 60,000 and 20,000 to be on, correction answer 500 and question 300, a PDF 10 MB and
 60 pages).
@@ -892,7 +894,9 @@ entryId}`. `POST …/:id/complete` checks the object (size, type, `%PDF-`) and i
 answered) and answers 202 `{status: extracting}` (job `assistant.knowledge.extract`), or 200 `{status: failed, errorCode: not_pdf,
 error}`; 422 when the file was not uploaded. The extraction makes the document `ready` with one inactive, unreviewed entry (its
 text cleaned, its warnings computed), or `failed` with `errorCode no_text|encrypted|corrupt|too_many_pages|timeout|too_large` and a
-plain `error` for the owner (a scan: "This PDF is a scan (pictures of pages), so Oasis AI can't read it. ..."). Poll GET
+plain `error` for the owner (a scan: "This PDF is a scan (pictures of pages), so Oasis AI can't read it. ..."). Before the PDF reader
+sees a file its streams are decoded with a hard cap (K4 review asst:K4A-1): more than 128 MB of content in all is `too_large`; an
+encrypted file (a password, or locked editing) is `encrypted`. Text drawn under 2 pt is left out and counted as hidden. Poll GET
 `/assistant/knowledge` or listen for `settings.changed {section: assistant_knowledge}`.
 
 `POST …/:id/extract` reads a failed document again (202; at most 5 reads, never a not-PDF: 409 `DOCUMENT_NOT_READY`). `DELETE
@@ -903,7 +907,10 @@ extract,delete}`. Jobs: `assistant.knowledge.extract`, `assistant.knowledge.clea
 
 ### 15.6e The practice chat: `/assistant/practice` (ADR 0174 §4c)
 
-`set.assistant`; a session that plays a real client also needs `cli.view` (403). Practice runs the real engine (the same prompt,
+`set.assistant`; a session that plays a real client also needs `cli.view` (403), to start it and, since the K4 review (asst:K4A-4),
+to read it, text in it or re-run a turn: a user who lost `cli.view` gets 403 there, and the list shows such a session with `client:
+null` (it can still be deleted). "Try this draft" adds only drafts that could go live (a document of 20,000 characters or fewer,
+within the budget). Practice runs the real engine (the same prompt,
 tools, guard and policy judge as a live turn, the judge always on) with practice effects: nothing is sent or booked and nothing is
 written to a client record, a lead, a link, a pending action, the outbox or the audit log (its tools read through a read-only
 database pool). It works whatever `AI_ENABLED` says, is off until `AI_PRACTICE_ENABLED` (409 `PRACTICE_OFF`), mirrors the saved
@@ -2594,7 +2601,7 @@ user, password or port; null for anything else and for every other row.
 | `PUT /settings/billing/link-tipping` | `{enabled, version?}` | `{enabled, version}` (`payments.link_tipping`, off by default). |
 | `PUT /settings/billing/renewal-policy` | `{graceDays 0..60, cancelDays 1..90, version?}` | `{graceDays, cancelDays, version}` (`memberships.billing_policy`, default 7 / 21); 422 `VALIDATION_FAILED` unless cancelDays > graceDays. |
 | `PUT /settings/billing/price-change-notice` | `{days 0..90, version?}` | `{days, version}` (`memberships.price_change_notice_days`, default 30). |
-| `PUT /settings/billing/sales-tax` | `{percent, rounding?, version?}` | `{percent, rateDbp, label, rounding, version}` (`tax.rate_dbp`, default 7%, and `tax.rounding`, default `half_up`; section 30.15). |
+| `PUT /settings/billing/sales-tax` | `{percent, rounding?, confirmHighRate?, version?}` | `{percent, rateDbp, label, rounding, version}` (`tax.rate_dbp`, default 7%, and `tax.rounding`, default `half_up`; section 30.15). |
 
 Reused, not copied: `POST /integrations/square/test` (Test connection), `PUT /catalog/guest-fee` (the fee and its collect mode),
 `PUT /settings/card-fees`, `POST /integrations/square/catalog/sync` ("Sync to Square").
@@ -2659,8 +2666,13 @@ rounding?, version?}` (`set.billing`): `percent` is a string, the rate as staff 
 with up to three decimals, such as 6.625"). `rounding` (`half_up` | `half_even`, anything else 422) is optional: left out, it stays as
 it is; sent and different, it is saved in the same transaction. The rate is always written, so `version` (or If-Match) guards both:
 428 without, 412 when stale (nothing saved). Audited `settings.update`, publishes `settings.changed {key: "tax.rate_dbp"}` (and
-`{key: "tax.rounding"}` when it changed). Both apply to invoices made from then on. Rollout: `{percent: "6.625", rounding:
-"half_even"}` in one save, only after the dashboard twin (`taxDbp`/`taxRounding`) is deployed.
+`{key: "tax.rounding"}` when it changed). Both apply to invoices made from then on and, in the same transaction, to the open invoices
+of visits not done yet (not canceled, date not frozen at completion): each moved one is audited `payments.tax_rerated` (before/after
+rate and rounding) and publishes `invoice.updated`; one that would end up overpaid (paid in full up front at the old rate) keeps its
+rate (K4 review tax:M1). A rate above 15% is 422 on `percent` ("66.25% is very high for a sales tax. Check the rate: New Jersey’s is
+6.625%.") unless `confirmHighRate: true` is sent (tax:H3). The dashboard's Save sends `rounding: "half_even"` with the rate (tax:H2).
+A new invoice reads the rate and the rounding in one statement (tax:H1). Rollout: `{percent: "6.625", rounding: "half_even"}` in one
+save, only after the dashboard twin (`taxDbp`/`taxRounding`) is deployed.
 
 The Square payment link's tax line reads `Sales tax (6.625%)` (the invoice's own rate); its amount is the invoice's tax (a link sets no
 Square tax). Tests: `test/unit/tax-precision.test.ts` (golden vectors, including the 200 recorded sandbox answers),
