@@ -82,7 +82,9 @@ export function registerSquareRoutes(app: AppInstance): void {
         taxBlocking: squareItemsOn(itemsEnv),
       })
       const now = app.clock.now()
-      const failed = r.checks.find((c) => !c.ok)
+      // only a check that fails Test connection is the integration's error: the item library's tax check while the item sync is off
+      // is advice in the check list (it reads "rounds half up" until the rollout switches the rounding: K4 review tax:H2)
+      const failed = r.ok ? undefined : r.checks.find((c) => !c.ok)
       await app.db.transaction().execute(async (tx) => {
         // the connection point (sandbox run F2): a successful test stamps it unless this environment was read before (the catch-up,
         // the reconcile or a webhook stamp it too, whichever comes first); counter payments made before it are history. A later test

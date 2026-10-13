@@ -102,10 +102,29 @@ describe('decideTax', () => {
     expect(decideTax([tax('T1'), tax('OWN')], input({ mode: 'create', ownTaxId: 'OWN' }))).toMatchObject({ status: 'ok', taxId: 'OWN', own: true })
   })
 
-  it('warns about a tax Square also adds to custom amounts, and about half-up rounding before the rollout', () => {
+  it('warns about a tax Square also adds to custom amounts; half-up rounding blocks in every mode (K4 review tax:H2)', () => {
     expect(decideTax([tax('T1', { custom: true })], input()).warnings.join(' ')).toMatch(/custom amounts: an Oasis total rung up as a custom amount would be taxed twice/)
     expect(decideTax([tax('T1')], input()).warnings).toEqual([])
-    expect(decideTax([tax('T1', { percentage: '7' })], input({ rateDbp: 7000, rounding: 'half_up' })).warnings.join(' ')).toMatch(/half up and Square rounds half to even/)
+    for (const o of [{}, { mode: 'create' as const }, { mode: 'adopt' as const, chosenTaxId: 'T1' }, { ownTaxId: 'T1' }]) {
+      const t = decideTax([tax('T1', { percentage: '7' })], input({ rateDbp: 7000, rounding: 'half_up', ...o }))
+      expect(t, JSON.stringify(o)).toMatchObject({ status: 'blocked', taxId: null, detail: expect.stringMatching(/Oasis rounds tax half up and Square rounds half to even/) })
+    }
+    // the case of the review: no tax in Square, 6.625% saved from the dashboard with the rounding left half up: never "create"
+    expect(decideTax([], input({ rounding: 'half_up' })).status).toBe('blocked')
+  })
+
+  it('auto: a shop tax adopted earlier that is turned off, taken off the shop, deleted or no longer at the rate blocks; never a tax of Oasis’s own (items:ITEMS-P2)', () => {
+    const adopted = (taxes: WireCatalogObject[]) => decideTax(taxes, input({ adoptedTaxId: 'NJ' }))
+    expect(adopted([tax('NJ', { name: 'NJ sales tax' })])).toMatchObject({ status: 'ok', taxId: 'NJ', own: false })
+    expect(adopted([tax('NJ', { name: 'NJ sales tax', enabled: false })])).toMatchObject({
+      status: 'blocked',
+      detail: 'The Square tax Oasis items use, “NJ sales tax”, is turned off in Square: the item sync is paused until it matches again, or pick another tax',
+    })
+    expect(adopted([tax('NJ', { name: 'NJ sales tax', at: ['LOTHER'] })]).detail).toMatch(/is not used at the shop in Square/)
+    expect(adopted([tax('NJ', { name: 'NJ sales tax', percentage: '7' })]).detail).toMatch(/is 7%, not 6.625% in Square/)
+    expect(adopted([])).toMatchObject({ status: 'blocked', detail: expect.stringMatching(/was deleted in Square/) })
+    // another matching tax does not take its place either
+    expect(adopted([tax('NJ', { enabled: false }), tax('T2')])).toMatchObject({ status: 'blocked' })
   })
 })
 

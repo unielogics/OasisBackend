@@ -6,18 +6,22 @@
 // tax gate (a mismatch blocks and tells the managers once a day; Oasis's own tax follows the rate, and a staff edit of it is put back);
 // overlapping runs (one runs, the other is skipped; the nightly run waits its turn).
 import { sql } from 'kysely'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { SquareApi } from '../../src/integrations/ports/square.js'
 import type { WireCatalogObject } from '../../src/integrations/square/wire.js'
 import { itemsLockKey, runItemSync, type ItemSyncDeps } from '../../src/modules/catalog/square/sync.js'
 import { configureSquareRuntime } from '../../src/modules/square/runtime.js'
 import type { FixedClock } from '../../src/platform/clock.js'
+import { transaction } from '../../src/platform/db.js'
+import { updateSetting } from '../../src/platform/settings.js'
 import { useRig } from '../scheduling-gaps/support.js'
 import { squareEnvFor } from '../square-db/core.js'
 import { liveEnvVars, SIM_LOCATION, simFor } from '../square-db/helpers.js'
 
 const m = useRig()
 afterEach(() => configureSquareRuntime({}))
+// Oasis rounds tax like Square (the rollout's setting): the item sync waits for it (K4 review tax:H2; test/square-items/review-k4.test.ts)
+beforeEach(() => transaction(m.h.t.db, (tx) => updateSetting(tx, { locationId: m.locationId(), key: 'tax.rounding', value: 'half_even' })).then(() => undefined))
 
 type Json = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
 const db = () => m.h.t.db

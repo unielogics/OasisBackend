@@ -9,7 +9,8 @@
 //   adopt   the tax staff picked (PUT /integrations/square/items/tax): it must be enabled here, ADDITIVE, subtotal phase and match.
 //   create  Oasis's own tax, whatever the shop has.
 // Warnings (never blocking): an adopted tax that Square also adds to custom amounts (an Oasis total rung up as a custom amount would
-// be taxed twice), and Oasis rounding new invoices half-up while Square rounds half to even (a few totals a cent apart).
+// be taxed twice). Blocking: Oasis rounding tax half up while Square rounds half to even (a few totals a cent apart; the sync waits
+// for tax.rounding = half_even, K4 review tax:H2), and in auto a shop tax adopted earlier that stopped matching (items:ITEMS-P2).
 // roundingCheck asks Square (CalculateOrder, read-only) to price a sample of Oasis's prices and counts the totals a cent apart.
 import type { SquareApi } from '../../../integrations/ports/square.js'
 import { SquareApiError, SquareAuthError } from '../../../integrations/square/errors.js'
@@ -123,6 +124,8 @@ export interface TaxCheckInput {
   chosenTaxId: string | null
   /** The tax Oasis made earlier (its link, not adopted), if any. */
   ownTaxId: string | null
+  /** auto: the shop's tax Oasis adopted earlier (its link, adopted), if any: when it stops matching the sync stops, never replaces it. */
+  adoptedTaxId?: string | null
 }
 
 /** Decides the tax from Square's TAX objects (pure; checkItemsTax reads them). */
@@ -136,8 +139,6 @@ export function decideTax(taxes: readonly WireCatalogObject[], i: TaxCheckInput)
     return { id: t.id, name: t.tax_data?.name ?? 'Tax', percentage: t.tax_data?.percentage ?? null, matches: problem === null, problem }
   })
   const warnings: string[] = []
-  if (i.rounding !== SQUARE_TAX_ROUNDING)
-    warnings.push('Oasis rounds new invoices’ tax half up and Square rounds half to even, so a few totals can be a cent apart until the rollout switches Oasis to Square’s rounding')
   const base = { mode: i.mode, wantPercentage: want, candidates, warnings }
   const ok = (t: WireCatalogObject, isOwn: boolean, detail: string): TaxCheck => {
     if (!isOwn && t.tax_data?.applies_to_custom_amounts === true)
@@ -165,6 +166,13 @@ export function decideTax(taxes: readonly WireCatalogObject[], i: TaxCheckInput)
     )
   }
   const list = (xs: readonly TaxCandidate[]): string => xs.map((c) => `${c.name} ${c.percentage ?? '?'}%`).join(', ')
+  // Square rounds half to even: an invoice rounded half up is a cent off about one whole-dollar basket in eight at 6.625%, and the
+  // counter matcher then misses it. The sync waits until Oasis rounds like Square (K4 review tax:H2).
+  if (i.rounding !== SQUARE_TAX_ROUNDING)
+    return none(
+      'blocked',
+      'Oasis rounds tax half up and Square rounds half to even, so totals can be a cent apart: save the sales tax again in Settings → Billing & integrations (it switches to Square’s rounding) and the item sync starts',
+    )
   if (i.mode === 'create') return own ? ownOk(own) : none('create', `Oasis will add its own Square tax “${OASIS_TAX_NAME}” at ${label}`)
   if (i.mode === 'adopt') {
     const t = taxes.find((x) => x.id === i.chosenTaxId)
@@ -174,6 +182,16 @@ export function decideTax(taxes: readonly WireCatalogObject[], i: TaxCheckInput)
     return ok(t, false, `Square tax “${t.tax_data?.name ?? 'Tax'}” is ${label}, the same as Oasis`)
   }
   if (own) return ownOk(own)
+  // the shop's tax adopted earlier stays the one: turned off, taken off the shop, deleted or no longer at Oasis's rate, the sync stops
+  // and says so (it never makes its own tax and moves every Oasis item to it without asking; K4 review items:ITEMS-P2)
+  if (i.adoptedTaxId) {
+    const t = taxes.find((x) => x.id === i.adoptedTaxId)
+    if (!t) return none('blocked', 'The Square tax Oasis items use was deleted in Square: pick the tax Oasis items should use')
+    const problem = problemOf(t, i.locationId, i.rateDbp)
+    if (problem)
+      return none('blocked', `The Square tax Oasis items use, “${t.tax_data?.name ?? 'Tax'}”, is ${problem} in Square: the item sync is paused until it matches again, or pick another tax`)
+    return ok(t, false, `Square tax “${t.tax_data?.name ?? 'Tax'}” is ${label}, the same as Oasis`)
+  }
   const matching = candidates.filter((c) => c.matches)
   if (matching.length === 1) {
     const t = shop.find((x) => x.id === matching[0]!.id)!

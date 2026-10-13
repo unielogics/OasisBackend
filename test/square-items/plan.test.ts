@@ -444,7 +444,7 @@ describe('the tax gate', () => {
       present_at_location_ids: [LOC],
       tax_data: { name: 'Sales tax', percentage: pct, inclusion_type: 'ADDITIVE', calculation_phase: 'TAX_SUBTOTAL_PHASE', enabled: true, applies_to_custom_amounts: false, ...o },
     })
-    const check = (t: WireCatalogObject) => decideTax([t], { locationId: LOC, rateDbp: 7000, rounding: 'half_up', mode: 'auto', chosenTaxId: null, ownTaxId: 'OWNTAX' })
+    const check = (t: WireCatalogObject) => decideTax([t], { locationId: LOC, rateDbp: 7000, rounding: 'half_even', mode: 'auto', chosenTaxId: null, ownTaxId: 'OWNTAX' })
     const link: LinkRow = { id: 'L-TAX', kind: 'tax', serviceId: null, classKey: null, categoryKey: null, objectId: 'OWNTAX', itemId: null, version: 1, desiredHash: null, contentHash: null, state: 'synced', adopted: false, error: null, pendingKey: null, pendingBody: null, pendingAt: null }
     const lib = desiredLibrary(input({ active: [true, true, true, true, true], services: [] }))
     const taxActions = (t: WireCatalogObject) => planSetup(lib, [link], check(t)).filter((a) => a.kind.endsWith('_tax'))

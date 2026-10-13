@@ -39,12 +39,19 @@ Oasis invoice (ADR 0173: 6.625%, rounded once, half to even).
   and told once as "Changed in Square"; an equal percentage written another way, "7.0" for 7, is the same and never re-sent);
   else the shop's one tax that is enabled at the location, ADDITIVE, in the subtotal phase and at exactly Oasis's rate (adopted, never
   changed); else, when the location has no enabled tax at all, Oasis creates "Sales tax" (ADDITIVE, subtotal phase, our location only,
-  never on custom amounts); anything else (taxes that do not match, or several that do) is **blocked**.
+  never on custom amounts); anything else (taxes that do not match, or several that do) is **blocked**. A shop tax adopted earlier
+  stays the one (K4 review ITEMS-P2): turned off, taken off the location, deleted or no longer at Oasis's rate, the check is
+  **blocked** ("The Square tax Oasis items use, “NJ sales tax”, is turned off in Square …"), never "create" and never a quiet move of
+  every Oasis item to a tax of Oasis's own.
+- **Rounding** (K4 review tax:H2): while `tax.rounding` is `half_up` the check is **blocked** in every mode ("Oasis rounds tax half up
+  and Square rounds half to even …"): nothing is created or written until Oasis rounds like Square (the dashboard's sales tax Save
+  sends `half_even`; ADR 0173).
 - `adopt`: the tax staff picked (`PUT /integrations/square/items/tax`); `create`: Oasis's own whatever the shop has.
 - A blocked check stops the run before anything is written; the managers are told once a day (`square.items_tax_mismatch`); the status
-  row warns; Settings shows the candidates and why each does not fit.
-- Warnings: an adopted tax Square also adds to custom amounts (an Oasis total rung up as a custom amount would be taxed twice); Oasis
-  rounding new invoices half-up while Square rounds half to even (ADR 0173: until the rollout switches `tax.rounding`).
+  row warns; Settings shows the candidates and why each does not fit. Square not answering the tax check (status `error`: 5xx, a
+  timeout, 429 after the retries) is a read failure instead (K4 review ITEMS-P4): nothing written, `last_error` "tax check: …", no
+  manager notice; the next run (5 minutes) tries again.
+- Warning: an adopted tax Square also adds to custom amounts (an Oasis total rung up as a custom amount would be taxed twice).
 - **Test connection** gains the check `tax` (read-only), with a CalculateOrder sample of Oasis's own prices ("all 9 sample totals match
   Square to the cent" or "N of M differ by a cent"). It fails Test connection only while the item sync is on.
 
@@ -102,10 +109,35 @@ variation, and a guest basket's Square CalculateOrder total ($133.28, tax $8.28 
    minutes; check the counts; add the Oasis categories to the POS home grid on each device.
 5. Then links and refunds, cards and fees, memberships, the processor (ADR 0171).
 
+## K4 review (2026-10-13)
+
+- **ITEMS-P1** a shop category matched by name is always referenced, never written (`adopted`), the "Oasis" marker category included,
+  and the marker matches only the exact name "Oasis": a shop's "OASIS" is the shop's (Oasis makes its own "Oasis").
+- **ITEMS-P2** above (an adopted tax that stops matching blocks). **ITEMS-P4** above (an unanswered tax check is a read failure).
+- **ITEMS-P3** every fresh item create carries a key of its own (`items:create:<env>:<service>:<hash>:<new id>`); a create that may
+  have reached Square is re-sent only from the outbox with the key kept there. A content-only key brought back, after an item was
+  deleted at Square, forgotten and sold again, Square's first answer: the deleted item, recorded as synced.
+- **tax:H2** the sync waits for `tax.rounding = half_even` (above).
+
+**Before `SQUARE_ITEMS_SYNC_ENABLED` (rollout checks; not bugs):**
+1. The shop's own POS items with the names of Oasis services stay beside the new Oasis items (Oasis never adopts an item by name):
+   staff archive their old wash items, and the Settings preview is read for name collisions.
+2. In production, look for a CATEGORY named any casing of "Oasis" (now left alone, but confirm what it holds) and confirm the shop's
+   tax is the one that stays on (an adopted tax turned off later blocks the sync).
+3. Confirm in the sandbox how long Square keeps catalog idempotency keys, and whether the Square Dashboard's "Duplicate item" copies
+   variation `user_data` (a copied marker makes a second marked item; after a link loss the planner adopts whichever marked item the
+   search returns first).
+4. `square.items.sync` expires after 240 s: a first sync of about 41 items with 15 s timeouts and 4 tries can outlive it (the lock
+   prevents a double run, but pg-boss records the expiry as a failure): watch the first run, or raise the expiry / cap the creates
+   per run if it happens.
+5. A VERSION_MISMATCH twice in one run notifies the managers at once ("Some services are not in Square yet") for a race the next run
+   fixes: expect at most one such notice in the first days.
+
 ## Tests
 
 `test/square-items/plan.test.ts` (desired library; property tests: converges, never deletes, never writes a foreign id, keeps staff
 variations, presence, prices by the rule, variation ids kept through size changes, keys ≤ 45, a failing tax plans only `blocked`),
 `test/square-items/tax.test.ts`, `test/square-items/sync.test.ts` (database: every scenario of design section 9),
-`test/square/sim-items.test.ts` (simulator fidelity and the 200 SQR-18 totals), `test/jobs/matrix-square-items.test.ts`, the routes'
+`test/square/sim-items.test.ts` (simulator fidelity and the 200 SQR-18 totals), `test/square-items/review-k4.test.ts` (the K4 review),
+`test/jobs/matrix-square-items.test.ts`, the routes'
 authz (generated matrix) and `test/square-db/routes.test.ts` (Test connection `tax`).

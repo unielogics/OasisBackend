@@ -525,7 +525,10 @@ tax check. Test connection shows the `tax` check (it fails Test connection only 
 **The tax** (ADR 0172 "Tax"): the shop's Square tax must be Oasis's rate exactly (`percentage` "6.625" against `tax.rate_dbp`),
 ADDITIVE, subtotal phase, at the location. With none at all, Oasis makes "Sales tax" at its rate (and keeps it at Oasis's rate); with
 taxes that do not match, or several that do, the sync is **paused** (nothing written; the managers told once a day,
-`square.items_tax_mismatch`). Staff can pick the tax (`PUT /api/v1/integrations/square/items/tax {mode: adopt, squareTaxId}`) or let
+`square.items_tax_mismatch`). It is paused too while Oasis rounds tax half up (`tax.rounding`, section 15; saving the rate in
+Settings switches it to Square's rounding), and when the shop tax Oasis adopted is turned off, taken off the location, deleted or no
+longer at Oasis's rate (Oasis never makes its own tax and moves the items without asking). Square not answering the tax check is a
+read failure (no notice; the next run tries again). Staff can pick the tax (`PUT /api/v1/integrations/square/items/tax {mode: adopt, squareTaxId}`) or let
 Oasis use its own (`mode: create`).
 
 **Square-side edits.** A field Oasis owns changed in the Square Dashboard (a price, a name, a size shown again, a price override at the
@@ -534,7 +537,8 @@ Wash · Large SUV was $45 in Square; Oasis charges $40. Oasis set it back."), ag
 in Square is made again. Failures are told once per set (`square.items_sync_failed`), again a day later while they last.
 
 **Crash safety.** A create keeps its key and exact request in the link row (the outbox) before it is sent; the next run sends the same
-request and Square answers the same item. Before any create Oasis searches every item for its marker (variation `user_data`
+request and Square answers the same item. Every fresh create has a key of its own, so an item deleted at Square and sold again is
+made anew (never Square's replay of the deleted one). Before any create Oasis searches every item for its marker (variation `user_data`
 `oasis:v1:<service>:<size>`): an item it made earlier (a crash, a database restore) is adopted, never made twice. Creates are one
 UpsertCatalogObject per service: a BatchUpsert with one failing batch answers 400 but keeps the other batches (sandbox, SQR-17).
 
@@ -567,6 +571,8 @@ locations, but the referenced object … of type ITEM is not"): the simulator re
   back. Change the rate in Settings → Billing & integrations → Sales tax.
 - Add the Oasis categories to the POS home grid once per device (new items appear in the item library, not on custom pages).
 - After the rollout, archive the shop's own hand-made duplicates in the Square Dashboard; Oasis never touches them.
+- A category of the shop is never written by Oasis, even one named "Oasis" in another casing ("OASIS"): Oasis's own category is
+  exactly "Oasis".
 
 **Production checklist** (with ADR 0171's):
 
@@ -577,6 +583,9 @@ locations, but the referenced object … of type ITEM is not"): the simulator re
    is the Settings preview (Sync now while watch-only): SQR-20 has no database.
 4. The shop has no published Square Online site (new REGULAR items could appear there); otherwise hide them from it.
 5. `SQUARE_WRITES_ENABLED=true`, `SQUARE_ITEMS_SYNC_ENABLED=true`; check Settings and the POS; staff instructions above.
+6. The K4 review checks (ADR 0172 "Before SQUARE_ITEMS_SYNC_ENABLED"): name collisions with the shop's own POS items, a category
+   named any casing of "Oasis", the shop tax that stays on, the idempotency-key lifetime and "Duplicate item", the first run's length
+   against the job's 240 s expiry.
 
 ## 15. Sales tax: rate and rounding (ADR 0173, wave K1e)
 
@@ -585,8 +594,9 @@ subtotal (after an order discount) and rounded **half to even**; Square then spr
 cents, shown as 26 + 27). The same holds for an order-level tax, a tax applied per line item and catalog items with a catalog TAX
 auto-applied (the POS path). All 200 answers fit exactly one of the six rules tried (half-up or half-even, per order, per line or per
 unit): per order, half to even. Oasis rounds a new invoice by the location's setting `tax.rounding`: `half_up` by default (today's
-numbers), `half_even` (Square's rule) once the rollout switches it together with 6.625%; each invoice keeps its own
-`tax_rounding`. At 7% a whole-dollar subtotal never ends in half a cent, so both rules agree; at 6.625% every subtotal of $4 + a
+numbers), `half_even` (Square's rule) once the rollout switches it together with 6.625% (the dashboard's Save always sends it); each
+invoice keeps its own `tax_rounding`, except that a change of the rate or the rounding also moves the open invoices of visits not done
+yet (K4 review tax:M1). At 7% a whole-dollar subtotal never ends in half a cent, so both rules agree; at 6.625% every subtotal of $4 + a
 multiple of $8 ends in exactly half a cent, and half of those ($4, $20, $36, ... $100, ... $500) are one cent lower at Square than
 half-up.
 

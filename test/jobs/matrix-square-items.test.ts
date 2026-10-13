@@ -11,6 +11,7 @@ import { configureSquareRuntime } from '../../src/modules/square/runtime.js'
 import { transaction } from '../../src/platform/db.js'
 import { createIdGenerator } from '../../src/platform/ids.js'
 import { ensureLocation } from '../../src/platform/locations.js'
+import { updateSetting } from '../../src/platform/settings.js'
 import { testDatabaseUrl } from '../helpers/env.js'
 import { coreVars } from '../square-db/core.js'
 import { simFor } from '../square-db/helpers.js'
@@ -26,6 +27,8 @@ async function arrange(vars: Record<string, string>) {
   const newId = createIdGenerator(h.clock)
   const loc = await ensureLocation(db, newId)
   await transaction(db, (tx) => ensureDomainDefaults(tx, loc.id))
+  // Oasis rounds tax like Square: the item sync waits for it (K4 review tax:H2)
+  await transaction(db, (tx) => updateSetting(tx, { locationId: loc.id, key: 'tax.rounding', value: 'half_even' }))
   const wash = newId()
   await db
     .insertInto('services')

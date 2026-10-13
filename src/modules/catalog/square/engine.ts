@@ -258,16 +258,21 @@ async function runSetup(i: EngineInput, a: SetupAction, r: EngineResult, shop: (
       }
       case 'create_category': {
         const prior = linkOf(i, (l) => l.kind === 'category' && l.categoryKey === a.key)
-        // the shop's own category of the same name (exactly one, not already Oasis's): referenced, never written
+        // the shop's own category of the same name (exactly one, not already Oasis's): referenced, never written. The "Oasis" marker
+        // category matches only by its exact name (a shop's "OASIS" is the shop's), and one found by name is referenced too, never
+        // written: it may be the shop's own, and its name never changes anyway (K4 review items:ITEMS-P1)
         const mine = new Set(i.store.all().filter((l) => l.kind === 'category' && l.objectId).map((l) => l.objectId!))
-        const same = (await shop()).filter((c) => !mine.has(c.id) && (c.category_data?.name ?? '').trim().toLowerCase() === a.name.toLowerCase())
-        // (the "Oasis" marker category of that name is Oasis's own, found again after its link was lost)
+        const named = (c: WireCatalogObject): boolean => {
+          const n = (c.category_data?.name ?? '').trim()
+          return a.key === OASIS_CATEGORY_KEY ? n === a.name : n.toLowerCase() === a.name.toLowerCase()
+        }
+        const same = (await shop()).filter((c) => !mine.has(c.id) && named(c))
         if (same.length === 1) {
           await i.store.put({
             ...(prior ?? newLink(i.newId(), { kind: 'category', categoryKey: a.key })),
             objectId: same[0]!.id,
             version: same[0]!.version ?? null,
-            adopted: a.key !== OASIS_CATEGORY_KEY,
+            adopted: true,
             state: 'synced',
             contentHash: categoryHash({ key: a.key, name: a.name }),
             error: null,
@@ -383,12 +388,14 @@ async function failItem(i: EngineInput, item: DesiredItem, e: unknown, r: Engine
 }
 
 /**
- * Makes a new item through the outbox. `replacing`: the id of an item Square deleted (its key must differ from the first create's,
- * which Square would answer with the deleted item).
+ * Makes a new item through the outbox. Every fresh create has a key of its own (a new id in it): a create that may have reached
+ * Square is sent again only from the outbox, with the key kept there. A key made from the content alone would bring back, after an
+ * item was deleted at Square and forgotten, Square's first answer for it: the deleted item (K4 review items:ITEMS-P3).
+ * `replacing`: the id of the item Square deleted, named in the key for the logs.
  */
 async function createItem(i: EngineInput, item: DesiredItem, hash: string, r: EngineResult, replacing?: string): Promise<boolean> {
   const body = newItemBody(item, mergeContextFor(item, { locationId: i.locationId, links: i.store.all() }))
-  const key = sqKey('ct', `items:create:${i.environment}:${item.serviceId}:${hash}${replacing ? `:after:${replacing}` : ''}`)
+  const key = sqKey('ct', `items:create:${i.environment}:${item.serviceId}:${hash}:${i.newId()}${replacing ? `:after:${replacing}` : ''}`)
   const prior = linkOf(i, (l) => l.kind === 'item' && l.serviceId === item.serviceId)
   // the outbox: the exact request is kept before it is sent
   await i.store.put({

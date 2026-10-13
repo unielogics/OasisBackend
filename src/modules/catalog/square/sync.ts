@@ -347,6 +347,7 @@ export async function itemsTaxCheck(db: Executor, api: SquareApi, locationId: st
     links ? Promise.resolve(links) : loadLinks(db, locationId, environment),
   ])
   const own = rows.find((l) => l.kind === 'tax' && !l.adopted)
+  const adopted = rows.find((l) => l.kind === 'tax' && l.adopted)
   return checkItemsTax(api, {
     locationId: squareLocationId(env as Env) ?? '',
     rateDbp: rate.value,
@@ -354,6 +355,7 @@ export async function itemsTaxCheck(db: Executor, api: SquareApi, locationId: st
     mode: state?.tax_mode ?? 'auto',
     chosenTaxId: state?.tax_mode === 'adopt' ? (state.tax_object_id ?? null) : null,
     ownTaxId: own?.objectId ?? null,
+    adoptedTaxId: adopted?.objectId ?? null,
   })
 }
 
@@ -447,6 +449,12 @@ async function syncOnce(deps: ItemSyncDeps, locationId: string, o: { drift?: boo
     const preview = previewOf(lib, links, tax, squareLocation, started)
     await saveItemsState(deps.db, locationId, environment, started, { last_preview: preview, last_preview_at: started })
     return report('preview', mode, { tax, preview, ...(tax.status === 'blocked' || tax.status === 'error' ? { reason: tax.detail } : {}) })
+  }
+  // Square did not answer the tax check (5xx, timeout, 429 after the retries): a read failure like the read-back's, never a tax
+  // mismatch. Nothing is written, no manager is told (a short outage is not their problem); the next run tries again (items:ITEMS-P4)
+  if (tax.status === 'error') {
+    await saveItemsState(deps.db, locationId, environment, started, { last_error: `tax check: ${tax.detail}`, last_error_at: started })
+    return report('done', mode, { tax, failed: 1, failures: [`Reading Square’s taxes: ${tax.detail}`] })
   }
   const fingerprintOf = (rows: readonly LinkRow[], t: TaxCheck = tax) =>
     libraryFingerprint(lib, (item) => refsFor(item, rows), { taxId: t.taxId, percentage: t.percentage, want: t.wantPercentage, location: squareLocation })
