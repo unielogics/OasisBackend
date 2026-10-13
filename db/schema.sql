@@ -2896,6 +2896,52 @@ CREATE TABLE public.sqsp_webhook_subscriptions (
 );
 
 --
+-- Name: square_catalog_links; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.square_catalog_links (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    environment text NOT NULL,
+    kind text NOT NULL,
+    service_id uuid,
+    class_key text,
+    category_key text,
+    square_object_id text,
+    square_item_id text,
+    square_version bigint,
+    desired_hash text,
+    content_hash text,
+    state text DEFAULT 'pending'::text NOT NULL,
+    adopted boolean DEFAULT false NOT NULL,
+    error text,
+    pending_key text,
+    pending_body text,
+    pending_at timestamp with time zone,
+    synced_at timestamp with time zone,
+    checked_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT square_catalog_links_category_key_check CHECK (((category_key IS NULL) OR (category_key ~ '^(_oasis|[a-z][a-z0-9_]{0,31})$'::text))),
+    CONSTRAINT square_catalog_links_check CHECK (((kind = ANY (ARRAY['item'::text, 'variation'::text])) = (service_id IS NOT NULL))),
+    CONSTRAINT square_catalog_links_check1 CHECK (((kind = 'variation'::text) OR (class_key IS NULL))),
+    CONSTRAINT square_catalog_links_check2 CHECK (((kind = 'category'::text) = (category_key IS NOT NULL))),
+    CONSTRAINT square_catalog_links_check3 CHECK (((kind <> 'variation'::text) OR (square_object_id IS NULL) OR (square_item_id IS NOT NULL))),
+    CONSTRAINT square_catalog_links_check4 CHECK (((pending_key IS NULL) = (pending_body IS NULL))),
+    CONSTRAINT square_catalog_links_class_key_check CHECK (((class_key IS NULL) OR (class_key ~ '^[a-z][a-z0-9_]{0,31}$'::text))),
+    CONSTRAINT square_catalog_links_content_hash_check CHECK (((content_hash IS NULL) OR (length(content_hash) <= 64))),
+    CONSTRAINT square_catalog_links_desired_hash_check CHECK (((desired_hash IS NULL) OR (length(desired_hash) <= 64))),
+    CONSTRAINT square_catalog_links_environment_check CHECK ((environment = ANY (ARRAY['sim'::text, 'sandbox'::text, 'production'::text]))),
+    CONSTRAINT square_catalog_links_error_check CHECK (((error IS NULL) OR (length(error) <= 300))),
+    CONSTRAINT square_catalog_links_kind_check CHECK ((kind = ANY (ARRAY['item'::text, 'variation'::text, 'category'::text, 'tax'::text]))),
+    CONSTRAINT square_catalog_links_pending_body_check CHECK (((pending_body IS NULL) OR (length(pending_body) <= 200000))),
+    CONSTRAINT square_catalog_links_pending_key_check CHECK (((pending_key IS NULL) OR (length(pending_key) <= 45))),
+    CONSTRAINT square_catalog_links_square_item_id_check CHECK (((square_item_id IS NULL) OR (length(square_item_id) <= 64))),
+    CONSTRAINT square_catalog_links_square_object_id_check CHECK (((square_object_id IS NULL) OR (length(square_object_id) <= 64))),
+    CONSTRAINT square_catalog_links_state_check CHECK ((state = ANY (ARRAY['pending'::text, 'synced'::text, 'failed'::text, 'archived'::text, 'hidden'::text, 'gone'::text])))
+);
+
+--
 -- Name: square_charges; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3001,6 +3047,38 @@ CREATE TABLE public.square_enrollments (
     CONSTRAINT square_enrollments_square_subscription_id_check CHECK (((square_subscription_id IS NULL) OR (length(square_subscription_id) <= 64))),
     CONSTRAINT square_enrollments_square_variation_id_check CHECK ((length(square_variation_id) <= 64)),
     CONSTRAINT square_enrollments_state_check CHECK ((state = ANY (ARRAY['started'::text, 'customer_ready'::text, 'card_saved'::text, 'subscribed'::text, 'active'::text, 'failed'::text, 'abandoned'::text])))
+);
+
+--
+-- Name: square_items_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.square_items_state (
+    location_id uuid NOT NULL,
+    environment text NOT NULL,
+    tax_mode text DEFAULT 'auto'::text NOT NULL,
+    tax_object_id text,
+    tax_check jsonb,
+    tax_checked_at timestamp with time zone,
+    fingerprint text,
+    watermark timestamp with time zone,
+    last_write_at timestamp with time zone,
+    last_sync_at timestamp with time zone,
+    last_sync jsonb,
+    last_drift_at timestamp with time zone,
+    last_drift jsonb,
+    last_preview jsonb,
+    last_preview_at timestamp with time zone,
+    last_error text,
+    last_error_at timestamp with time zone,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT square_items_state_environment_check CHECK ((environment = ANY (ARRAY['sim'::text, 'sandbox'::text, 'production'::text]))),
+    CONSTRAINT square_items_state_fingerprint_check CHECK (((fingerprint IS NULL) OR (length(fingerprint) <= 64))),
+    CONSTRAINT square_items_state_last_error_check CHECK (((last_error IS NULL) OR (length(last_error) <= 300))),
+    CONSTRAINT square_items_state_tax_mode_check CHECK ((tax_mode = ANY (ARRAY['auto'::text, 'adopt'::text, 'create'::text]))),
+    CONSTRAINT square_items_state_tax_object_id_check CHECK (((tax_object_id IS NULL) OR (length(tax_object_id) <= 64)))
 );
 
 --
@@ -4449,6 +4527,13 @@ ALTER TABLE ONLY public.sqsp_webhook_subscriptions
     ADD CONSTRAINT sqsp_webhook_subscriptions_pkey PRIMARY KEY (id);
 
 --
+-- Name: square_catalog_links square_catalog_links_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_catalog_links
+    ADD CONSTRAINT square_catalog_links_pkey PRIMARY KEY (id);
+
+--
 -- Name: square_charges square_charges_idempotency_key_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4496,6 +4581,13 @@ ALTER TABLE ONLY public.square_customer_links
 
 ALTER TABLE ONLY public.square_enrollments
     ADD CONSTRAINT square_enrollments_pkey PRIMARY KEY (id);
+
+--
+-- Name: square_items_state square_items_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_items_state
+    ADD CONSTRAINT square_items_state_pkey PRIMARY KEY (location_id, environment);
 
 --
 -- Name: square_payments square_payments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -5087,6 +5179,12 @@ CREATE INDEX invoices_biz_date_idx ON public.invoices USING btree (location_id, 
 --
 
 CREATE INDEX invoices_customer_idx ON public.invoices USING btree (customer_id, biz_date DESC);
+
+--
+-- Name: ix_square_catalog_links_open; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_square_catalog_links_open ON public.square_catalog_links USING btree (location_id, environment, state) WHERE (state = ANY (ARRAY['pending'::text, 'failed'::text]));
 
 --
 -- Name: job_checklist_items_appointment_idx; Type: INDEX; Schema: public; Owner: -
@@ -5837,6 +5935,36 @@ CREATE UNIQUE INDEX uq_sqsp_products_product ON public.sqsp_products USING btree
 --
 
 CREATE UNIQUE INDEX uq_sqsp_products_sku ON public.sqsp_products USING btree (location_id, lower(sku)) WHERE (sku IS NOT NULL);
+
+--
+-- Name: uq_square_catalog_links_category; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_square_catalog_links_category ON public.square_catalog_links USING btree (location_id, environment, category_key) WHERE (kind = 'category'::text);
+
+--
+-- Name: uq_square_catalog_links_item; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_square_catalog_links_item ON public.square_catalog_links USING btree (location_id, environment, service_id) WHERE (kind = 'item'::text);
+
+--
+-- Name: uq_square_catalog_links_object; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_square_catalog_links_object ON public.square_catalog_links USING btree (environment, square_object_id) WHERE (square_object_id IS NOT NULL);
+
+--
+-- Name: uq_square_catalog_links_tax; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_square_catalog_links_tax ON public.square_catalog_links USING btree (location_id, environment) WHERE (kind = 'tax'::text);
+
+--
+-- Name: uq_square_catalog_links_variation; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_square_catalog_links_variation ON public.square_catalog_links USING btree (location_id, environment, service_id, COALESCE(class_key, ''::text)) WHERE (kind = 'variation'::text);
 
 --
 -- Name: uq_square_enrollments_live; Type: INDEX; Schema: public; Owner: -
@@ -7568,6 +7696,20 @@ ALTER TABLE ONLY public.sqsp_webhook_subscriptions
     ADD CONSTRAINT sqsp_webhook_subscriptions_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
+-- Name: square_catalog_links square_catalog_links_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_catalog_links
+    ADD CONSTRAINT square_catalog_links_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: square_catalog_links square_catalog_links_service_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_catalog_links
+    ADD CONSTRAINT square_catalog_links_service_id_fkey FOREIGN KEY (service_id) REFERENCES public.services(id);
+
+--
 -- Name: square_charges square_charges_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -7685,6 +7827,13 @@ ALTER TABLE ONLY public.square_enrollments
 
 ALTER TABLE ONLY public.square_enrollments
     ADD CONSTRAINT square_enrollments_tier_price_id_fkey FOREIGN KEY (tier_price_id) REFERENCES public.membership_tier_prices(id);
+
+--
+-- Name: square_items_state square_items_state_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_items_state
+    ADD CONSTRAINT square_items_state_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 --
 -- Name: square_payments square_payments_decided_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

@@ -1,13 +1,14 @@
 // The 'square' row of GET /system/integrations (and GET /integrations/square): provider, what is missing before Square works live,
 // warnings, the last success and error, and non-secret details. The token and the webhook keys appear only as "set" / "not set".
 import type { Env } from '../../config/env.js'
-import { SQUARE_API_VERSION, squareLocationId } from '../../integrations/square/config.js'
+import { SQUARE_API_VERSION, squareItemsOn, squareLocationId } from '../../integrations/square/config.js'
 import type { Executor } from '../../platform/db.js'
 import { getDefaultLocation } from '../../platform/locations.js'
 import { maskText } from '../../platform/logging.js'
 import type { IntegrationStatus } from '../system/integrations.js'
 import { squareCounts } from './db/alerts.js'
-import { currentSquareState } from './db/state.js'
+import { currentSquareState, squareEnvironment } from './db/state.js'
+import '../catalog/square/schema.js'
 
 const H = 3600_000
 
@@ -20,6 +21,22 @@ async function pendingEnrollments(db: Executor, locationId: string): Promise<num
     .where('state', 'in', ['started', 'customer_ready', 'card_saved', 'subscribed'])
     .executeTakeFirst()
   return Number(r?.n ?? 0)
+}
+/** The item library sync's health (ADR 0172): the tax check's block, and the links that failed. */
+async function itemsHealth(db: Executor, locationId: string, environment: 'sim' | 'sandbox' | 'production'): Promise<{ blocked: string | null; failed: number }> {
+  const [state, failed] = await Promise.all([
+    db.selectFrom('square_items_state').select('tax_check').where('location_id', '=', locationId).where('environment', '=', environment).executeTakeFirst(),
+    db
+      .selectFrom('square_catalog_links')
+      .select((eb) => eb.fn.countAll<number>().as('n'))
+      .where('location_id', '=', locationId)
+      .where('environment', '=', environment)
+      .where('kind', '=', 'item')
+      .where('state', '=', 'failed')
+      .executeTakeFirst(),
+  ])
+  const check = state?.tax_check as { status?: string; detail?: string } | null | undefined
+  return { blocked: check && (check.status === 'blocked' || check.status === 'error') ? (check.detail ?? 'the tax check failed') : null, failed: Number(failed?.n ?? 0) }
 }
 const at = (d: Date | null | undefined): string | null => (d ? d.toISOString() : null)
 const latest = (...ds: Array<Date | null | undefined>): Date | null => ds.reduce<Date | null>((m, d) => (d && (!m || d > m) ? d : m), null)
@@ -56,6 +73,10 @@ export async function squareStatus(db: Executor, env: Env, now: Date): Promise<I
   const counts = location ? await squareCounts(db, location.id, now) : { unmatched: 0, failedRefunds: 0 }
   if (counts.unmatched > 0) warnings.push(`${counts.unmatched} Square payment(s) to match (Payments, Square payments to match)`)
   if (counts.failedRefunds > 0) warnings.push(`${counts.failedRefunds} card refund(s) Square refused in the last 14 days: give the money back another way`)
+  // the Square item library (ADR 0172): a sync the tax check pauses, and services Square did not take
+  const items = location && squareItemsOn(env) ? await itemsHealth(db, location.id, squareEnvironment(env)) : null
+  if (items?.blocked) warnings.push(`Square item sync paused: ${items.blocked}`)
+  if (items && items.failed > 0) warnings.push(`${items.failed} service(s) not synced to Square’s item library (Settings, Billing & integrations)`)
   return {
     key: 'square',
     label: 'Square (payments, links, memberships, counter)',
@@ -89,6 +110,7 @@ export async function squareStatus(db: Executor, env: Env, now: Date): Promise<I
       unmatched: counts.unmatched,
       failedRefunds: counts.failedRefunds,
       pendingEnrollments: location ? await pendingEnrollments(db, location.id) : 0,
+      itemsSync: squareItemsOn(env),
     },
   }
 }

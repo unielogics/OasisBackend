@@ -29770,6 +29770,55 @@
                           "serviceId": {
                             "type": "string"
                           },
+                          "square": {
+                            "additionalProperties": false,
+                            "description": "Staff with set.services only, and only while the Square item sync is on (SQUARE_WRITES_ENABLED and SQUARE_ITEMS_SYNC_ENABLED)",
+                            "properties": {
+                              "cells": {
+                                "additionalProperties": {
+                                  "enum": [
+                                    "synced",
+                                    "pending",
+                                    "failed",
+                                    "hidden"
+                                  ],
+                                  "type": "string"
+                                },
+                                "description": "Each size Oasis sells it at (key \"\" = the single price of a service without sizes): where its Square price stands",
+                                "propertyNames": {
+                                  "type": "string"
+                                },
+                                "type": "object"
+                              },
+                              "error": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "state": {
+                                "description": "The service’s Square item (ADR 0172): synced, pending (waiting for the next sync), failed (see error), archived, not_sold (never made)",
+                                "enum": [
+                                  "synced",
+                                  "pending",
+                                  "failed",
+                                  "archived",
+                                  "not_sold"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "state",
+                              "cells",
+                              "error"
+                            ],
+                            "type": "object"
+                          },
                           "version": {
                             "description": "The service’s version: the token a grid save of this row takes",
                             "maximum": 9007199254740991,
@@ -31060,6 +31109,55 @@
                           },
                           "serviceId": {
                             "type": "string"
+                          },
+                          "square": {
+                            "additionalProperties": false,
+                            "description": "Staff with set.services only, and only while the Square item sync is on (SQUARE_WRITES_ENABLED and SQUARE_ITEMS_SYNC_ENABLED)",
+                            "properties": {
+                              "cells": {
+                                "additionalProperties": {
+                                  "enum": [
+                                    "synced",
+                                    "pending",
+                                    "failed",
+                                    "hidden"
+                                  ],
+                                  "type": "string"
+                                },
+                                "description": "Each size Oasis sells it at (key \"\" = the single price of a service without sizes): where its Square price stands",
+                                "propertyNames": {
+                                  "type": "string"
+                                },
+                                "type": "object"
+                              },
+                              "error": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "state": {
+                                "description": "The service’s Square item (ADR 0172): synced, pending (waiting for the next sync), failed (see error), archived, not_sold (never made)",
+                                "enum": [
+                                  "synced",
+                                  "pending",
+                                  "failed",
+                                  "archived",
+                                  "not_sold"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "state",
+                              "cells",
+                              "error"
+                            ],
+                            "type": "object"
                           },
                           "version": {
                             "description": "The service’s version: the token a grid save of this row takes",
@@ -45250,11 +45348,13 @@
                                     "type": "string"
                                   },
                                   "key": {
+                                    "description": "tax: the Square item library’s tax check (ADR 0172); it fails Test connection only while the item sync is on",
                                     "enum": [
                                       "token",
                                       "location",
                                       "events",
-                                      "webhook"
+                                      "webhook",
+                                      "tax"
                                     ],
                                     "type": "string"
                                   },
@@ -45620,9 +45720,1033 @@
         "x-oasis-access": "set.billing"
       }
     },
+    "/api/v1/integrations/square/items": {
+      "get": {
+        "description": "Read from Oasis only (no Square call): whether the sync writes (`mode`), the last tax check, how many services are on Square, waiting, failed, archived or not sold, the last sync and drift check, the failures as service and error, and the last read-only preview. `version` is the token of PUT /integrations/square/items/tax.",
+        "operationId": "getSquareItems",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "counts": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "archived": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "failed": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "notSold": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "onSquare": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "waiting": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "onSquare",
+                        "waiting",
+                        "failed",
+                        "archived",
+                        "notSold"
+                      ],
+                      "type": "object"
+                    },
+                    "environment": {
+                      "enum": [
+                        "sim",
+                        "sandbox",
+                        "production"
+                      ],
+                      "type": "string"
+                    },
+                    "failures": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "error": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "service": {
+                            "type": "string"
+                          },
+                          "serviceId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "serviceId",
+                          "service",
+                          "error"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "itemsSyncEnabled": {
+                      "type": "boolean"
+                    },
+                    "lastDriftAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-]\\d{2}:\\d{2})))$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastError": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastErrorAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-]\\d{2}:\\d{2})))$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastSync": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": {},
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastSyncAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-]\\d{2}:\\d{2})))$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastWriteAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-]\\d{2}:\\d{2})))$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "mode": {
+                      "description": "on: the sync writes; preview: watch-only (SQUARE_WRITES_ENABLED=false); off: SQUARE_ITEMS_SYNC_ENABLED=false",
+                      "enum": [
+                        "on",
+                        "preview",
+                        "off"
+                      ],
+                      "type": "string"
+                    },
+                    "preview": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "archive": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "at": {
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-]\\d{2}:\\d{2})))$",
+                              "type": "string"
+                            },
+                            "categories": {
+                              "description": "Categories the sync would make (or adopt by name)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "create": {
+                              "description": "Items the sync would make",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "createPrices": {
+                              "description": "Prices (variations) on them",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "skipped": {
+                              "description": "Services not sold (off, quote-only, no price) and never made",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "tax": {
+                              "enum": [
+                                "create",
+                                "update",
+                                "adopt",
+                                "none",
+                                "blocked"
+                              ],
+                              "type": "string"
+                            },
+                            "unchanged": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "update": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "create",
+                            "createPrices",
+                            "update",
+                            "archive",
+                            "unchanged",
+                            "skipped",
+                            "categories",
+                            "tax",
+                            "at"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The last read-only preview (POST …/items/sync while the sync is not on)"
+                    },
+                    "taxCheck": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "description": "The last tax check (Test connection, the preview and every sync run it)",
+                          "properties": {
+                            "candidates": {
+                              "description": "The enabled Square taxes at the shop (Oasis’s own excluded): what PUT …/items/tax can adopt",
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "matches": {
+                                    "type": "boolean"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "percentage": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "problem": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "name",
+                                  "percentage",
+                                  "matches",
+                                  "problem"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "detail": {
+                              "description": "In plain words",
+                              "type": "string"
+                            },
+                            "mode": {
+                              "enum": [
+                                "auto",
+                                "adopt",
+                                "create"
+                              ],
+                              "type": "string"
+                            },
+                            "own": {
+                              "description": "Oasis made this tax: the sync keeps it at Oasis’s rate",
+                              "type": "boolean"
+                            },
+                            "percentage": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "Square’s percentage of that tax, as Square writes it (\"6.625\")"
+                            },
+                            "rounding": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "checked": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "detail": {
+                                  "type": "string"
+                                },
+                                "differ": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "checked",
+                                "differ",
+                                "detail"
+                              ],
+                              "type": "object"
+                            },
+                            "status": {
+                              "description": "ok: Oasis items use taxId; create: the sync will add Oasis’s own; blocked or error: the sync is paused",
+                              "enum": [
+                                "ok",
+                                "create",
+                                "blocked",
+                                "error"
+                              ],
+                              "type": "string"
+                            },
+                            "taxId": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "taxName": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "wantPercentage": {
+                              "description": "Oasis’s rate (tax.rate_dbp) as a Square percentage",
+                              "type": "string"
+                            },
+                            "warnings": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            }
+                          },
+                          "required": [
+                            "status",
+                            "mode",
+                            "taxId",
+                            "taxName",
+                            "percentage",
+                            "wantPercentage",
+                            "own",
+                            "detail",
+                            "warnings",
+                            "candidates"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "taxCheckedAt": {
+                      "anyOf": [
+                        {
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-]\\d{2}:\\d{2})))$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "taxMode": {
+                      "enum": [
+                        "auto",
+                        "adopt",
+                        "create"
+                      ],
+                      "type": "string"
+                    },
+                    "taxObjectId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "mode adopt: the Square tax picked"
+                    },
+                    "version": {
+                      "description": "The token PUT /integrations/square/items/tax takes",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "writesEnabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "mode",
+                    "environment",
+                    "writesEnabled",
+                    "itemsSyncEnabled",
+                    "taxMode",
+                    "taxObjectId",
+                    "taxCheck",
+                    "taxCheckedAt",
+                    "counts",
+                    "lastSyncAt",
+                    "lastSync",
+                    "lastDriftAt",
+                    "lastWriteAt",
+                    "lastError",
+                    "lastErrorAt",
+                    "failures",
+                    "preview",
+                    "version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "The Square item library: mode, tax check, counts, last sync, failures, preview",
+        "tags": [
+          "square"
+        ],
+        "x-oasis-access": "set.billing"
+      }
+    },
+    "/api/v1/integrations/square/items/archive-all": {
+      "post": {
+        "description": "Every item Oasis made is archived at Square (hidden from the POS, kept for reports; nothing is deleted). Needs Square writes on (409 `SQUARE_WRITES_OFF`) and the item sync turned off first (409 `SQUARE_ITEMS_SYNC_ON`: it would put them back on sale). Turning the sync on again later re-sends every item. Audited `square.items.archive_all`.",
+        "operationId": "archiveAllSquareItems",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "alreadyArchived": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "archived": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "failed": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "failures": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "archived",
+                    "alreadyArchived",
+                    "failed",
+                    "failures"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Rollback: archive every Oasis item at Square (asks first in the dashboard)",
+        "tags": [
+          "square"
+        ],
+        "x-oasis-access": "set.billing"
+      }
+    },
+    "/api/v1/integrations/square/items/sync": {
+      "post": {
+        "description": "Runs what the job `square.items.sync` runs every 5 minutes (`drift: true`: what the nightly `square.items.drift` runs: everything read back). With SQUARE_WRITES_ENABLED and SQUARE_ITEMS_SYNC_ENABLED on, items are made, updated, archived or hidden (never deleted); otherwise nothing is written at Square and the answer is `status: preview` with what the sync would do (`preview`) and the tax check. A tax that does not match blocks the sync (`status: blocked`, `reason`). Audited `square.items.sync`.",
+        "operationId": "syncSquareItems",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "drift": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "adopted": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "archived": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "categoriesCreated": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "changedInSquare": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "created": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "failed": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "failures": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "mode": {
+                      "enum": [
+                        "on",
+                        "preview",
+                        "off"
+                      ],
+                      "type": "string"
+                    },
+                    "preview": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "archive": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "at": {
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-]\\d{2}:\\d{2})))$",
+                          "type": "string"
+                        },
+                        "categories": {
+                          "description": "Categories the sync would make (or adopt by name)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "create": {
+                          "description": "Items the sync would make",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "createPrices": {
+                          "description": "Prices (variations) on them",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "skipped": {
+                          "description": "Services not sold (off, quote-only, no price) and never made",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "tax": {
+                          "enum": [
+                            "create",
+                            "update",
+                            "adopt",
+                            "none",
+                            "blocked"
+                          ],
+                          "type": "string"
+                        },
+                        "unchanged": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "update": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "create",
+                        "createPrices",
+                        "update",
+                        "archive",
+                        "unchanged",
+                        "skipped",
+                        "categories",
+                        "tax",
+                        "at"
+                      ],
+                      "type": "object"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "recreated": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "reported": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "restored": {
+                      "description": "Square-side edits of Oasis’s fields put back",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "status": {
+                      "enum": [
+                        "skipped",
+                        "preview",
+                        "blocked",
+                        "done"
+                      ],
+                      "type": "string"
+                    },
+                    "tax": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "description": "The last tax check (Test connection, the preview and every sync run it)",
+                          "properties": {
+                            "candidates": {
+                              "description": "The enabled Square taxes at the shop (Oasis’s own excluded): what PUT …/items/tax can adopt",
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "matches": {
+                                    "type": "boolean"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "percentage": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "problem": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "name",
+                                  "percentage",
+                                  "matches",
+                                  "problem"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "detail": {
+                              "description": "In plain words",
+                              "type": "string"
+                            },
+                            "mode": {
+                              "enum": [
+                                "auto",
+                                "adopt",
+                                "create"
+                              ],
+                              "type": "string"
+                            },
+                            "own": {
+                              "description": "Oasis made this tax: the sync keeps it at Oasis’s rate",
+                              "type": "boolean"
+                            },
+                            "percentage": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "Square’s percentage of that tax, as Square writes it (\"6.625\")"
+                            },
+                            "rounding": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "checked": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "detail": {
+                                  "type": "string"
+                                },
+                                "differ": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "checked",
+                                "differ",
+                                "detail"
+                              ],
+                              "type": "object"
+                            },
+                            "status": {
+                              "description": "ok: Oasis items use taxId; create: the sync will add Oasis’s own; blocked or error: the sync is paused",
+                              "enum": [
+                                "ok",
+                                "create",
+                                "blocked",
+                                "error"
+                              ],
+                              "type": "string"
+                            },
+                            "taxId": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "taxName": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "wantPercentage": {
+                              "description": "Oasis’s rate (tax.rate_dbp) as a Square percentage",
+                              "type": "string"
+                            },
+                            "warnings": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            }
+                          },
+                          "required": [
+                            "status",
+                            "mode",
+                            "taxId",
+                            "taxName",
+                            "percentage",
+                            "wantPercentage",
+                            "own",
+                            "detail",
+                            "warnings",
+                            "candidates"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "taxCreated": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "taxUpdated": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "updated": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "mode",
+                    "tax",
+                    "created",
+                    "updated",
+                    "archived",
+                    "recreated",
+                    "adopted",
+                    "restored",
+                    "failed",
+                    "categoriesCreated",
+                    "taxCreated",
+                    "taxUpdated",
+                    "failures",
+                    "changedInSquare",
+                    "reported"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Sync the services to Square’s item library now (a read-only preview while the sync is not on)",
+        "tags": [
+          "square"
+        ],
+        "x-oasis-access": "set.billing"
+      }
+    },
+    "/api/v1/integrations/square/items/tax": {
+      "put": {
+        "description": "`auto` (the default): the one Square tax at the shop that matches Oasis’s rate, else Oasis’s own when the shop has none; `adopt`: the tax `squareTaxId` (one of the tax check’s candidates; it must match Oasis’s rate or the sync stays paused); `create`: Oasis’s own \"Sales tax\" whatever the shop has. Takes effect at the next sync. `version` (or If-Match) required: 428 without, 412 when stale. Audited `square.items.tax`.",
+        "operationId": "putSquareItemsTax",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "mode": {
+                    "enum": [
+                      "auto",
+                      "adopt",
+                      "create"
+                    ],
+                    "type": "string"
+                  },
+                  "squareTaxId": {
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "version": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "mode"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "mode": {
+                      "enum": [
+                        "auto",
+                        "adopt",
+                        "create"
+                      ],
+                      "type": "string"
+                    },
+                    "squareTaxId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "version": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "mode",
+                    "squareTaxId",
+                    "version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Choose which Square tax Oasis items carry (ETag = version)",
+        "tags": [
+          "square"
+        ],
+        "x-oasis-access": "set.billing"
+      }
+    },
     "/api/v1/integrations/square/test": {
       "post": {
-        "description": "Calls ListLocations (the token works; SQUARE_LOCATION_ID is active, in USD and takes cards), EnableEvents, and ListWebhookSubscriptions (a subscription for SQUARE_WEBHOOK_URL carries every event type of `GET /integrations/square`). Stores the merchant id that /hooks/square checks deliveries against. With SQUARE_PROVIDER=sim it talks to the in-process simulator. A failed check is a 200 with `ok: false` and the check's plain-language detail. Audited (`square.test_connection`).",
+        "description": "Calls ListLocations (the token works; SQUARE_LOCATION_ID is active, in USD and takes cards), EnableEvents, and ListWebhookSubscriptions (a subscription for SQUARE_WEBHOOK_URL carries every event type of `GET /integrations/square`); then the Square item library's `tax` check (ADR 0172: Square's tax at the shop against Oasis's rate as exact decimals, and a CalculateOrder sample of Oasis's prices; read-only), which counts toward `ok` only while SQUARE_ITEMS_SYNC_ENABLED and writes are on. Stores the merchant id that /hooks/square checks deliveries against. With SQUARE_PROVIDER=sim it talks to the in-process simulator. A failed check is a 200 with `ok: false` and the check's plain-language detail. Audited (`square.test_connection`).",
         "responses": {
           "200": {
             "content": {
@@ -45638,11 +46762,13 @@
                             "type": "string"
                           },
                           "key": {
+                            "description": "tax: the Square item library’s tax check (ADR 0172); it fails Test connection only while the item sync is on",
                             "enum": [
                               "token",
                               "location",
                               "events",
-                              "webhook"
+                              "webhook",
+                              "tax"
                             ],
                             "type": "string"
                           },
@@ -111501,6 +112627,10 @@
                           "description": "Saved cards and fees work now (Square the processor)",
                           "type": "boolean"
                         },
+                        "itemsSyncEnabled": {
+                          "description": "SQUARE_ITEMS_SYNC_ENABLED: services and prices by size kept in step with Square’s item library (ADR 0172)",
+                          "type": "boolean"
+                        },
                         "membershipsEnabled": {
                           "description": "SQUARE_MEMBERSHIPS_ENABLED: tier prices synced to Square and the join page takes a card",
                           "type": "boolean"
@@ -111556,6 +112686,7 @@
                         "squareEnvironment",
                         "writesEnabled",
                         "membershipsEnabled",
+                        "itemsSyncEnabled",
                         "posAppSwitch",
                         "posAutomatch",
                         "publicLinksEnabled",
@@ -111702,11 +112833,13 @@
                                         "type": "string"
                                       },
                                       "key": {
+                                        "description": "tax: the Square item library’s tax check (ADR 0172); it fails Test connection only while the item sync is on",
                                         "enum": [
                                           "token",
                                           "location",
                                           "events",
-                                          "webhook"
+                                          "webhook",
+                                          "tax"
                                         ],
                                         "type": "string"
                                       },
@@ -111961,6 +113094,107 @@
                         "reconcile"
                       ],
                       "type": "object"
+                    },
+                    "squareItems": {
+                      "additionalProperties": false,
+                      "description": "The Square item library (ADR 0172) in short: GET /integrations/square/items has the whole block",
+                      "properties": {
+                        "counts": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "archived": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "failed": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "notSold": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "onSquare": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "waiting": {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "onSquare",
+                            "waiting",
+                            "failed",
+                            "archived",
+                            "notSold"
+                          ],
+                          "type": "object"
+                        },
+                        "lastSyncAt": {
+                          "anyOf": [
+                            {
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-]\\d{2}:\\d{2})))$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "mode": {
+                          "enum": [
+                            "on",
+                            "preview",
+                            "off"
+                          ],
+                          "type": "string"
+                        },
+                        "tax": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "detail": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "enum": [
+                                    "ok",
+                                    "create",
+                                    "blocked",
+                                    "error"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "detail"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The last tax check"
+                        }
+                      },
+                      "required": [
+                        "mode",
+                        "tax",
+                        "counts",
+                        "lastSyncAt"
+                      ],
+                      "type": "object"
                     }
                   },
                   "required": [
@@ -111972,6 +113206,7 @@
                     "renewalPolicy",
                     "priceChangeNotice",
                     "salesTax",
+                    "squareItems",
                     "consent"
                   ],
                   "type": "object"

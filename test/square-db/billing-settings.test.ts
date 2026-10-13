@@ -40,6 +40,7 @@ describe('GET /settings/billing', () => {
       squareEnvironment: 'sandbox',
       writesEnabled: false,
       membershipsEnabled: false,
+      itemsSyncEnabled: false,
       posAppSwitch: false,
       posAutomatch: 'evidence',
       publicLinksEnabled: false,
@@ -51,6 +52,8 @@ describe('GET /settings/billing', () => {
     expect(p.cardFees).toEqual({ fees: { enabled: false, noShowCents: 0, lateCancelCents: 0 }, version: v, active: false })
     expect(p.renewalPolicy).toEqual({ graceDays: 7, cancelDays: 21, version: v })
     expect(p.priceChangeNotice).toEqual({ days: 30, version: v })
+    // the Square item library in short (ADR 0172): watch-only, nothing checked or synced yet
+    expect(p.squareItems).toEqual({ mode: 'preview', tax: null, counts: { onSquare: 0, waiting: expect.any(Number), failed: 0, archived: 0, notSold: expect.any(Number) }, lastSyncAt: null })
     expect(p.consent).toMatchObject({ version: CURRENT_CONSENT_VERSION, checkedByDefault: false, purposes: ['membership_billing', 'no_show_fee', 'late_cancel_fee', 'balance'] })
     expect(p.consent.text.length).toBeGreaterThan(20)
     // never a token or a key

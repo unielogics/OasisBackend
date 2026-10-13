@@ -8,6 +8,7 @@
 //   PUT  /settings/billing/price-change-notice          set.billing   memberships.price_change_notice_days
 //   PUT  /settings/billing/sales-tax                    set.billing   tax.rate_dbp (ADR 0173: a percentage with up to 3 decimals)
 //                                                                     and, when sent, tax.rounding (half_up default, half_even = Square's)
+// The panel also carries the Square item library in short (squareItems, ADR 0172; the block: GET /integrations/square/items).
 // Reused: GET /integrations/square + POST /integrations/square/test (status, Test connection), PUT /catalog/guest-fee (booking fee
 // amount and collect mode, set.services), PUT /settings/card-fees (fees.card_on_file), POST /integrations/square/catalog/sync
 // ("Sync to Square"). Each block carries its own version (body `version` or If-Match on its PUT: 428 without, 412 stale); a save is
@@ -20,6 +21,7 @@ import { AppError } from '../../../platform/errors.js'
 import { parseTaxPercent, TAX_ROUNDINGS, taxPercentLabel, type TaxRounding } from '../../../platform/money.js'
 import { getSetting, updateSetting, type SettingKey } from '../../../platform/settings.js'
 import { etag, inTx, requestContext, requiredVersion, storedUserId } from '../../settings/http/runtime.js'
+import { loadItemsView } from '../../catalog/square/view.js'
 import { cardsOn } from '../charges.js'
 import { CARD_PURPOSES, CONSENT_CHECKED_BY_DEFAULT, CURRENT_CONSENT_VERSION, consentText } from '../consents.js'
 import { squareEnv } from '../runtime.js'
@@ -36,6 +38,7 @@ const Processing = z
     squareEnvironment: z.enum(['sandbox', 'production']).describe('SQUARE_ENVIRONMENT'),
     writesEnabled: z.boolean().describe('SQUARE_WRITES_ENABLED: off = observe-only (mirror and match, nothing created at Square)'),
     membershipsEnabled: z.boolean().describe('SQUARE_MEMBERSHIPS_ENABLED: tier prices synced to Square and the join page takes a card'),
+    itemsSyncEnabled: z.boolean().describe('SQUARE_ITEMS_SYNC_ENABLED: services and prices by size kept in step with Square’s item library (ADR 0172)'),
     posAppSwitch: z.boolean().describe('SQUARE_POS_API_ENABLED: "Open Square POS" from the dashboard'),
     posAutomatch: z.enum(['evidence', 'amount']).describe('SQUARE_POS_AUTOMATCH: counter payments recorded on strong evidence only, or also on an amount alone'),
     publicLinksEnabled: z.boolean().describe('PUBLIC_LINKS_ENABLED: the personal pay, card and membership pages'),
@@ -89,6 +92,14 @@ export const BillingSettingsView = z.object({
   renewalPolicy: RenewalPolicy.describe('memberships.billing_policy: PUT /settings/billing/renewal-policy'),
   priceChangeNotice: PriceNotice.describe('memberships.price_change_notice_days: PUT /settings/billing/price-change-notice'),
   salesTax: SalesTax.describe('tax.rate_dbp and tax.rounding: PUT /settings/billing/sales-tax (applies to invoices made from then on)'),
+  squareItems: z
+    .object({
+      mode: z.enum(['on', 'preview', 'off']),
+      tax: z.object({ status: z.enum(['ok', 'create', 'blocked', 'error']), detail: z.string() }).nullable().describe('The last tax check'),
+      counts: z.object({ onSquare: z.number().int(), waiting: z.number().int(), failed: z.number().int(), archived: z.number().int(), notSold: z.number().int() }),
+      lastSyncAt: z.iso.datetime({ offset: true }).nullable(),
+    })
+    .describe('The Square item library (ADR 0172) in short: GET /integrations/square/items has the whole block'),
   consent: z
     .object({
       version: z.string().describe('The card consent text version every new card is saved under'),
@@ -131,7 +142,7 @@ export function registerBillingSettingsRoutes(app: AppInstance): void {
     async (req) => {
       const { locationId } = requestContext(req)
       const env = squareEnv()
-      const [square, fee, tipping, fees, policy, notice, tax, rounding] = await Promise.all([
+      const [square, fee, tipping, fees, policy, notice, tax, rounding, items] = await Promise.all([
         squareIntegrationView(app, locationId),
         getSetting(app.db, locationId, 'booking.guest_fee'),
         getSetting(app.db, locationId, 'payments.link_tipping'),
@@ -140,6 +151,7 @@ export function registerBillingSettingsRoutes(app: AppInstance): void {
         getSetting(app.db, locationId, 'memberships.price_change_notice_days'),
         getSetting(app.db, locationId, 'tax.rate_dbp'),
         getSetting(app.db, locationId, 'tax.rounding'),
+        loadItemsView(app.db, locationId, env),
       ])
       return {
         square,
@@ -149,6 +161,7 @@ export function registerBillingSettingsRoutes(app: AppInstance): void {
           squareEnvironment: env.SQUARE_ENVIRONMENT,
           writesEnabled: env.SQUARE_WRITES_ENABLED,
           membershipsEnabled: env.SQUARE_MEMBERSHIPS_ENABLED,
+          itemsSyncEnabled: env.SQUARE_ITEMS_SYNC_ENABLED,
           posAppSwitch: env.SQUARE_POS_API_ENABLED,
           posAutomatch: env.SQUARE_POS_AUTOMATCH,
           publicLinksEnabled: app.env.PUBLIC_LINKS_ENABLED,
@@ -160,6 +173,12 @@ export function registerBillingSettingsRoutes(app: AppInstance): void {
         renewalPolicy: { ...policy.value, version: policy.version },
         priceChangeNotice: { days: notice.value, version: notice.version },
         salesTax: salesTaxView(tax, rounding.value),
+        squareItems: {
+          mode: items.mode,
+          tax: items.taxCheck ? { status: items.taxCheck.status, detail: items.taxCheck.detail } : null,
+          counts: items.counts,
+          lastSyncAt: items.lastSyncAt,
+        },
         consent: {
           version: CURRENT_CONSENT_VERSION,
           checkedByDefault: CONSENT_CHECKED_BY_DEFAULT,

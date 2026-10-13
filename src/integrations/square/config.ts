@@ -47,6 +47,12 @@ export const squareEnvShape = {
    * to Square's catalog and the membership page can join with a card. Needs SQUARE_WRITES_ENABLED; off by default.
    */
   SQUARE_MEMBERSHIPS_ENABLED: bool.default('false'),
+  /**
+   * The Square item library sync (ADR 0172): every active priced service becomes a Square item with a variation per vehicle size,
+   * kept in step every 5 minutes (prices, names, sizes, categories, the tax; archived or hidden, never deleted). Needs
+   * SQUARE_WRITES_ENABLED; off by default. While writes are off (observe-only) Settings shows a read-only preview and the tax check.
+   */
+  SQUARE_ITEMS_SYNC_ENABLED: bool.default('false'),
   /** The Point of Sale app switch from the dashboard (iPad). Production only. */
   SQUARE_POS_API_ENABLED: bool.default('false'),
   /** Seconds a counter payment waits before auto-matching (a subscription event or a POS callback may explain it first). */
@@ -122,6 +128,11 @@ export function squareEnvIssues(e: SquareEnv & { NODE_ENV: string }, need: Issue
 /** The API origin for an environment (no /v2): SQUARE_API_BASE when set, else Square's host for SQUARE_ENVIRONMENT. */
 export function squareBaseUrl(e: Pick<SquareEnv, 'SQUARE_API_BASE' | 'SQUARE_ENVIRONMENT'>): string {
   return (e.SQUARE_API_BASE ?? SQUARE_BASE_URLS[e.SQUARE_ENVIRONMENT]).replace(/\/+$/, '')
+}
+
+/** The item library sync writes to Square (ADR 0172): Square writes on and the item sync switched on. */
+export function squareItemsOn(e: Pick<SquareEnv, 'SQUARE_WRITES_ENABLED' | 'SQUARE_ITEMS_SYNC_ENABLED'>): boolean {
+  return e.SQUARE_WRITES_ENABLED && e.SQUARE_ITEMS_SYNC_ENABLED
 }
 
 /** Live and nothing the client needs is missing (the jobs that call Square run only then). */

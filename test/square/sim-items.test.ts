@@ -151,6 +151,15 @@ describe('the simulator item library', () => {
     ).rejects.toMatchObject({ code: 'VERSION_MISMATCH' })
   })
 
+  it('refuses a variation present where its item is not (sandbox 2026-10-13)', async () => {
+    const r = rig()
+    const ids = await library(r)
+    const cur = await r.api.catalog.retrieve(ids.item)
+    await expect(
+      r.api.catalog.upsert(key(), { ...cur, item_data: { ...cur.item_data, variations: [...cur.item_data!.variations!, { type: 'ITEM_VARIATION', id: '#all', item_variation_data: { item_id: cur.id, name: 'Everywhere', pricing_type: 'FIXED_PRICING', price_money: usd(1) } }] } }),
+    ).rejects.toMatchObject({ errors: [expect.objectContaining({ code: 'INVALID_VALUE', detail: expect.stringMatching(/enabled at all future locations, but the referenced object .* of type ITEM is not/) })] })
+  })
+
   it('archives, keeps CATEGORY global (a location list is refused) and TAX at the location, refuses a FIXED price without money', async () => {
     const r = rig()
     const ids = await library(r)

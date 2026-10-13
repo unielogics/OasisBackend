@@ -36,6 +36,7 @@ approved plan, the plan wins (section "Amendments").
 | `PAYMENT_PROCESSOR` | `squarespace` | The cutover: which processor new links, saved cards, memberships and refunds use. |
 | `SQUARE_POS_API_ENABLED` | `false` | The POS app switch from the dashboard (iPad). Only with live production Square. |
 | `SQUARE_POS_AUTOMATCH` (wave Q2b) | `evidence` | Counter payments recorded only on strong evidence; `amount` also on an amount matching exactly one open invoice (owner's call). |
+| `SQUARE_ITEMS_SYNC_ENABLED` (ADR 0172, wave K2e) | `false` | The item library sync: services × sizes as Square items (needs `SQUARE_WRITES_ENABLED`; otherwise a read-only preview). |
 | `SQSP_SYNC_MODE` (not built yet) | `active` | `history` keeps Squarespace read-only about 60 days for late refunds, then `off`. |
 
 The environment contract refuses: `live` without the token, location, application id, webhook key or webhook URL; production with
@@ -383,6 +384,7 @@ Recorded in `docs/integrations/square.md` section 8; the ones that change later 
 | Q3b (built) | Memberships on Square (section "Memberships on Square"): migration `20261014600000_square_memberships.sql`; catalog sync of the tier x size prices, enrollment with resume, billing webhooks (`invoice` and `subscription` handlers), the failure policy (D10), staff actions, Move members (D9); `verify:square` SQR-13 and SQR-14. |
 | Q3 dashapi (built) | The read models and settings routes the dashboard needs (section "Dashboard data"; api-spec 30.13). |
 | Q3c, Q3e | The website's v2 catalog, join and pay pages; the dashboard's billing block, saved cards and Settings, Billing & integrations (Square status and Test connection). |
+| K2e (built, ADR 0172) | The Square item library: every active priced service a Square item with a variation per vehicle size, kept in step (`square.items.sync`, `square.items.drift`), the `tax` check in Test connection, `SQUARE_ITEMS_SYNC_ENABLED`; see [ADR 0172](0172-square-item-library.md). |
 | Q4 (review fixes built) | See "Wave Q4 review notes" and "Wave Q4 fix notes" below (the re-verification and the sandbox end-to-end run on a disposable stack). |
 
 Rollout (plan): deploy with `SQUARE_PROVIDER=sim`; production token and `SQUARE_WEBHOOK_URL` into the secret and env (still sim),

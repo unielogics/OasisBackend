@@ -9,9 +9,11 @@ import type { z } from '../../../http/zod.js'
 import { SQUARE_EVENT_TYPES } from '../../../integrations/square/webhook.js'
 import * as audit from '../../../platform/audit.js'
 import { AppError } from '../../../platform/errors.js'
+import { squareItemsOn } from '../../../integrations/square/config.js'
+import { itemsTaxConnectionCheck } from '../../catalog/square/sync.js'
 import { testSquareConnection } from '../connection.js'
 import { currentSquareState, saveSquareState, squareEnvironment } from '../db/state.js'
-import { squareApi } from '../runtime.js'
+import { squareApi, squareEnv } from '../runtime.js'
 import { squareStatus } from '../status.js'
 import { SquareIntegrationView, SquareTestResult } from './schemas.js'
 
@@ -65,14 +67,20 @@ export function registerSquareRoutes(app: AppInstance): void {
         tags: [TAG],
         summary: 'Test the Square connection: token, location, Events API, webhook subscription',
         description:
-          'Calls ListLocations (the token works; SQUARE_LOCATION_ID is active, in USD and takes cards), EnableEvents, and ListWebhookSubscriptions (a subscription for SQUARE_WEBHOOK_URL carries every event type of `GET /integrations/square`). Stores the merchant id that /hooks/square checks deliveries against. With SQUARE_PROVIDER=sim it talks to the in-process simulator. A failed check is a 200 with `ok: false` and the check\'s plain-language detail. Audited (`square.test_connection`).',
+          'Calls ListLocations (the token works; SQUARE_LOCATION_ID is active, in USD and takes cards), EnableEvents, and ListWebhookSubscriptions (a subscription for SQUARE_WEBHOOK_URL carries every event type of `GET /integrations/square`); then the Square item library\'s `tax` check (ADR 0172: Square\'s tax at the shop against Oasis\'s rate as exact decimals, and a CalculateOrder sample of Oasis\'s prices; read-only), which counts toward `ok` only while SQUARE_ITEMS_SYNC_ENABLED and writes are on. Stores the merchant id that /hooks/square checks deliveries against. With SQUARE_PROVIDER=sim it talks to the in-process simulator. A failed check is a 200 with `ok: false` and the check\'s plain-language detail. Audited (`square.test_connection`).',
         response: { 200: SquareTestResult },
       },
     },
     async (req) => {
       const locationId = loc(req)
       const env = app.env
-      const r = await testSquareConnection(squareApi(env), env)
+      const api = squareApi(env)
+      // the item library's switches and location come from the Square runtime's environment (as its routes and jobs read them)
+      const itemsEnv = squareEnv()
+      const r = await testSquareConnection(api, env, {
+        tax: () => itemsTaxConnectionCheck(app.db, app.clock, api, locationId, itemsEnv),
+        taxBlocking: squareItemsOn(itemsEnv),
+      })
       const now = app.clock.now()
       const failed = r.checks.find((c) => !c.ok)
       await app.db.transaction().execute(async (tx) => {

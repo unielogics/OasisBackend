@@ -240,6 +240,15 @@ export class SimCatalog {
       const itemId = String((o.item_variation_data as Obj).item_id ?? '')
       const item = staged.get(itemId) ?? this.objects.get(itemId)
       if (!item || item.type !== 'ITEM') throw invalid(`item_id of variation \`${id}\` must name an ITEM.`, 'item_id')
+      // a variation cannot be present where its item is not (sandbox 2026-10-13)
+      if (item.present_at_all_locations === false) {
+        if (o.present_at_all_locations !== false)
+          throw invalid(`[object_id=${id}] Object \`${id}\` of type ITEM_VARIATION is enabled at all future locations, but the referenced object with token \`${itemId}\` of type ITEM is not.`)
+        const at = new Set((item.present_at_location_ids as string[] | undefined) ?? [])
+        const extra = ((o.present_at_location_ids as string[] | undefined) ?? []).find((l) => !at.has(l))
+        if (extra)
+          throw invalid(`[object_id=${id}] Object \`${id}\` of type ITEM_VARIATION is enabled at location ${extra}, but the referenced object with token \`${itemId}\` of type ITEM is not.`)
+      }
       if (!newLists.has(itemId)) {
         // a variation upserted on its own joins its item's list
         const list = [...(this.variationIds.get(itemId) ?? [])]

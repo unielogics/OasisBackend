@@ -380,6 +380,10 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/integrations/sms/devices/:id/test` | set.billing |  |
 | GET | `/api/v1/integrations/square` | set.billing | pay.reports |  |
 | POST | `/api/v1/integrations/square/catalog/sync` | set.billing |  |
+| GET | `/api/v1/integrations/square/items` | set.billing |  |
+| POST | `/api/v1/integrations/square/items/archive-all` | set.billing |  |
+| POST | `/api/v1/integrations/square/items/sync` | set.billing |  |
+| PUT | `/api/v1/integrations/square/items/tax` | set.billing |  |
 | POST | `/api/v1/integrations/square/test` | set.billing |  |
 | POST | `/api/v1/integrations/squarespace/alerts/:id/resolve` | set.billing |  |
 | DELETE | `/api/v1/integrations/squarespace/connection` | set.billing |  |
@@ -2161,6 +2165,7 @@ Body `{}`. Calls ListLocations, EnableEvents and ListWebhookSubscriptions (again
 | `location` | `SQUARE_LOCATION_ID` is among them, `ACTIVE`, in `USD`, with `CREDIT_CARD_PROCESSING` |
 | `events` | EnableEvents succeeded (the 10-minute catch-up can read) |
 | `webhook` | a subscription for exactly `SQUARE_WEBHOOK_URL` exists, is enabled and carries every event type (`pnpm square:webhooks --apply` fixes it) |
+| `tax` | (ADR 0172, section 30.14) the Square item library's tax check: the Square tax Oasis items would carry matches `tax.rate_dbp` exactly (or the shop has none yet: the sync would add Oasis's own); the detail adds a CalculateOrder sample of Oasis's prices and any warning. Counts toward `ok` only while `SQUARE_WRITES_ENABLED` and `SQUARE_ITEMS_SYNC_ENABLED` are on; runs only when the token works |
 
 A failing check is still `200` with `ok: false` and a plain reason. The merchant id, the location, `events_enabled_at` and the verified
 subscription are kept in `square_state` for the configured Square environment (sim, sandbox or production); the hook drops events of
@@ -2181,13 +2186,15 @@ override, the POS switch outside production, a catch-up that has not run for 30 
 webhook in 24 hours while the catch-up found events. `details`: environment, location, merchant, API version, writes, processor, POS
 switch, `token` and `webhookKey` as `set`/`not set`, events enabled, subscription verified, last webhook, catch-up and reconcile times,
 the last test result; `unmatched` (Square payments to match) and `failedRefunds` (card refunds Square refused in the last 14 days; both
-also warnings when not zero); `pendingEnrollments` (membership-page enrollments under way, wave Q3b).
+also warnings when not zero); `pendingEnrollments` (membership-page enrollments under way, wave Q3b); `itemsSync` (ADR 0172: the item
+library sync writes; while it does, a tax check that pauses it and services Square did not take are warnings).
 
 ### 30.5 Jobs and environment
 
 `square.event.process` (queue), `square.events.catchup` (every 10 minutes), `square.reconcile` (03:45), and since wave Q2b
 `square.payments.match`, `square.links.sweep`, `square.deposit-link` and `square.refunds.submit` (every minute) are in `docs/jobs.md`;
-the variables in `docs/integrations/square.md` section 2 (wave Q2b adds `SQUARE_POS_AUTOMATCH`). Scripts: `pnpm sim:square`,
+the variables in `docs/integrations/square.md` section 2 (wave Q2b adds `SQUARE_POS_AUTOMATCH`, wave K2e `SQUARE_ITEMS_SYNC_ENABLED` and
+the jobs `square.items.sync` and `square.items.drift`, section 30.14). Scripts: `pnpm sim:square`,
 `pnpm square:webhooks [--apply|--rotate-key]` (in production it accepts only `https://<domain>/hooks/square`), `pnpm verify:square`
 (also in `pnpm verify:all` and `verify.sh square`).
 
@@ -2425,7 +2432,7 @@ user, password or port; null for anything else and for every other row.
 
 | Route | Body | Answer |
 |---|---|---|
-| `GET /settings/billing` | | `{square, processing, guestFee, linkTipping, cardFees, renewalPolicy, priceChangeNotice, salesTax, consent}`: `square` is the body of `GET /integrations/square`; `processing {processor, squareProvider, squareEnvironment, writesEnabled, membershipsEnabled, posAppSwitch, posAutomatch, publicLinksEnabled, cardsOn}` is read only (server switches); `guestFee {cents, collect, version}` (saved with `PUT /catalog/guest-fee`, `set.services`); `linkTipping {enabled, version}`; `cardFees {fees, version, active}` (saved with `PUT /settings/card-fees`); `renewalPolicy {graceDays, cancelDays, version}`; `priceChangeNotice {days, version}`; `salesTax {percent, rateDbp, label, rounding, version}` (section 30.15); `consent {version, checkedByDefault: false, purposes, text}` (read only). Never a token or a key. |
+| `GET /settings/billing` | | `{square, processing, guestFee, linkTipping, cardFees, renewalPolicy, priceChangeNotice, salesTax, squareItems, consent}`: `square` is the body of `GET /integrations/square`; `processing {processor, squareProvider, squareEnvironment, writesEnabled, membershipsEnabled, itemsSyncEnabled, posAppSwitch, posAutomatch, publicLinksEnabled, cardsOn}` is read only (server switches); `squareItems {mode, tax {status, detail} | null, counts, lastSyncAt}` is the Square item library in short (section 30.14); `guestFee {cents, collect, version}` (saved with `PUT /catalog/guest-fee`, `set.services`); `linkTipping {enabled, version}`; `cardFees {fees, version, active}` (saved with `PUT /settings/card-fees`); `renewalPolicy {graceDays, cancelDays, version}`; `priceChangeNotice {days, version}`; `salesTax {percent, rateDbp, label, rounding, version}` (section 30.15); `consent {version, checkedByDefault: false, purposes, text}` (read only). Never a token or a key. |
 | `PUT /settings/billing/link-tipping` | `{enabled, version?}` | `{enabled, version}` (`payments.link_tipping`, off by default). |
 | `PUT /settings/billing/renewal-policy` | `{graceDays 0..60, cancelDays 1..90, version?}` | `{graceDays, cancelDays, version}` (`memberships.billing_policy`, default 7 / 21); 422 `VALIDATION_FAILED` unless cancelDays > graceDays. |
 | `PUT /settings/billing/price-change-notice` | `{days 0..90, version?}` | `{days, version}` (`memberships.price_change_notice_days`, default 30). |
@@ -2449,6 +2456,28 @@ sync keeps (`pending` until synced, always while `SQUARE_MEMBERSHIPS_ENABLED` is
 
 Tests: `test/square-db/dashboard-gaps.test.ts`, `test/square-db/billing-settings.test.ts`, `test/square-members/billing-view.test.ts`,
 `test/square/dashboard-gaps-pure.test.ts`.
+
+### 30.14 The Square item library (ADR 0172, wave K2e; `src/modules/catalog/square/http/routes.ts`)
+
+Every active priced service is a Square item with one variation per vehicle size, kept in step by the jobs `square.items.sync` (every
+5 minutes) and `square.items.drift` (04:40). Off by default: nothing is written at Square unless `SQUARE_WRITES_ENABLED` and
+`SQUARE_ITEMS_SYNC_ENABLED` are both on; otherwise "Sync now" answers a read-only preview. All routes `set.billing`, all audited.
+
+| Route | Body | Answer |
+|---|---|---|
+| `GET /integrations/square/items` | | `{mode: on\|preview\|off, environment, writesEnabled, itemsSyncEnabled, taxMode: auto\|adopt\|create, taxObjectId, taxCheck, taxCheckedAt, counts {onSquare, waiting, failed, archived, notSold}, lastSyncAt, lastSync, lastDriftAt, lastWriteAt, lastError, lastErrorAt, failures [{serviceId, service, error}], preview, version}`. Read from Oasis only. `mode`: `on` (the sync writes), `preview` (watch-only: writes off), `off` (writes on, the item sync off). `taxCheck {status: ok\|create\|blocked\|error, mode, taxId, taxName, percentage, wantPercentage, own, detail, warnings, candidates [{id, name, percentage, matches, problem}], rounding? {checked, differ, detail}}`: the last check (Test connection, the preview and every sync run it). `preview {create, createPrices, update, archive, unchanged, skipped, categories, tax: create\|update\|adopt\|none\|blocked, at}`: the last read-only preview. |
+| `POST /integrations/square/items/sync` | `{drift?}` | With the sync on: what `square.items.sync` runs (`drift: true`: what the nightly drift run runs, everything read back) and `{status: done\|blocked, reason?, mode, tax, created, updated, archived, recreated, adopted, restored, failed, categoriesCreated, taxCreated, taxUpdated, failures[], changedInSquare[], reported[]}`; `blocked` (with `reason`) when the tax check does not pass: nothing is written. Otherwise `status: preview` with `preview` and `tax`, nothing written (`skipped` only without a Square location). Audited `square.items.sync`. |
+| `PUT /integrations/square/items/tax` | `{mode: auto\|adopt\|create, squareTaxId?, version?}` | `{mode, squareTaxId, version}`. Which Square tax Oasis items carry: `auto` (the one matching tax at the shop, else Oasis's own when the shop has none), `adopt` (`squareTaxId`, one of the check's candidates; 422 `VALIDATION_FAILED` on `squareTaxId` without it; it must match Oasis's rate or the sync stays paused), `create` (Oasis's own "Sales tax"). `version` (or If-Match) required: 428 without, 412 stale. Applies at the next sync. Audited `square.items.tax`. |
+| `POST /integrations/square/items/archive-all` | `{}` | `{archived, alreadyArchived, failed, failures[]}`: every Oasis item archived at Square (never deleted). 409 `SQUARE_WRITES_OFF` watch-only; 409 `SQUARE_ITEMS_SYNC_ON` while the item sync is on (it would put them back on sale). Audited `square.items.archive_all`. |
+
+**Prices by size** (`GET /catalog`, `set.services` holders, only while the sync is on): each price row adds `square {state:
+synced|pending|failed|archived|not_sold, cells {<size key>: synced|pending|failed|hidden}, error}` (key `""` = the single price of a
+service without sizes).
+
+Notifications to the managers: `square.items_sync_failed` (once per set of failures, again a day later), `square.items_changed_in_square`
+("Changed in Square: … Oasis set it back", once per set, again a day later), `square.items_tax_mismatch` (once a day while the tax
+check pauses the sync). Problem code: `SQUARE_ITEMS_SYNC_ON` (409). Tests: `test/square-items/*.test.ts`,
+`test/jobs/matrix-square-items.test.ts`, `test/square/sim-items.test.ts`.
 
 ### 30.15 Sales tax rate and rounding (ADR 0173, wave K1e)
 

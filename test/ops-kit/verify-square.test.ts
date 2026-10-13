@@ -36,9 +36,16 @@ describe('verify:square', () => {
       'SQR-12': 'PASS',
       'SQR-13': 'PASS',
       'SQR-14': 'PASS',
-      // ADR 0173: the simulator has no CalculateOrder; the sandbox is the reference for tax rounding
-      'SQR-18': 'SKIP',
+      // ADR 0173: the simulator's CalculateOrder rounds like the sandbox (all 200 SQR-18 answers replayed in test/square/sim-items)
+      'SQR-18': 'PASS',
+      // ADR 0172: Oasis's own item library sync, and the read-only pre-flight
+      'SQR-15': 'PASS',
+      'SQR-16': 'PASS',
+      'SQR-17': 'PASS',
+      'SQR-19': 'PASS',
+      'SQR-20': 'PASS',
     })
+    expect(r.out).toMatch(/a BatchUpsert with a bad batch: 400 INVALID_VALUE.*the good batch KEPT/)
     expect(r.out).toContain('resume: refused: 400 INVALID_REQUEST_ERROR/INVALID_DATE')
     expect(r.out).toContain('unpaid invoice: invoice UNPAID: CreatePayment on its order refused: 403')
     for (const f of readdirSync(capture)) {
@@ -51,13 +58,27 @@ describe('verify:square', () => {
     rmSync(capture, { recursive: true, force: true })
   }, 120_000)
 
-  it('--tax-only runs SQR-01, SQR-18 and the cleanup only (SQR-18 is skipped against the simulator)', async () => {
+  it('--tax-only runs SQR-01, SQR-18 and the cleanup only', async () => {
     const r = await run(['--sim', '--tax-only'])
     expect(r.code, r.out).toBe(0)
     const st = statusOf(r, 'square')
-    expect([st['SQR-01'], st['SQR-11'], st['SQR-18']]).toEqual(['PASS', 'PASS', 'SKIP'])
-    expect(Object.entries(st).filter(([id, v]) => !['SQR-01', 'SQR-11'].includes(id) && v !== 'SKIP')).toEqual([])
-    expect(r.out).toContain('the simulator has no CalculateOrder')
+    expect([st['SQR-01'], st['SQR-11'], st['SQR-18']]).toEqual(['PASS', 'PASS', 'PASS'])
+    expect(Object.entries(st).filter(([id, v]) => !['SQR-01', 'SQR-11', 'SQR-18'].includes(id) && v !== 'SKIP')).toEqual([])
+  })
+
+  it('--items-only runs SQR-01, the item library checks SQR-15 to SQR-20 (not 18) and the cleanup; --read-only keeps only SQR-20', async () => {
+    const r = await run(['--sim', '--items-only'])
+    expect(r.code, r.out).toBe(0)
+    const st = statusOf(r, 'square')
+    expect(Object.entries(st).filter(([, v]) => v !== 'SKIP').map(([id]) => id).sort()).toEqual(['SQR-01', 'SQR-11', 'SQR-15', 'SQR-16', 'SQR-17', 'SQR-19', 'SQR-20'])
+    expect(Object.values(st).every((v) => v === 'PASS' || v === 'SKIP')).toBe(true)
+    const ro = await run(['--sim', '--items-only', '--read-only', '--rate', '7'])
+    const rs = statusOf(ro, 'square')
+    expect([rs['SQR-15'], rs['SQR-16'], rs['SQR-17'], rs['SQR-19']]).toEqual(['SKIP', 'SKIP', 'SKIP', 'SKIP'])
+    // the simulator has no tax: the sync would add Oasis's own
+    expect(rs['SQR-20']).toBe('PASS')
+    expect(ro.out).toMatch(/No sales tax in Square yet/)
+    expect((await run(['--sim', '--items-only', '--rate', 'abc'])).code).toBe(2)
   })
 
   it('without a token it does not start (exit 2) and names what is missing', async () => {

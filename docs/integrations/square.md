@@ -1,6 +1,6 @@
 # Square integration
 
-Status: **foundation (wave Q1b), core (wave Q2b) and cards on file and fees (wave Q3a, section 12) and memberships (wave Q3b, section 13) built**, verified against the Square sandbox
+Status: **foundation (wave Q1b), core (wave Q2b) and cards on file and fees (wave Q3a, section 12) and memberships (wave Q3b, section 13) built; the item library (wave K2e, section 14, ADR 0172) built, off by default**, verified against the Square sandbox
 on 2026-10-12 (`pnpm verify:square`, section 7). Off by default: nothing reaches Square until `SQUARE_PROVIDER=live`, nothing is
 created or changed at Square until `SQUARE_WRITES_ENABLED=true` (memberships also need `SQUARE_MEMBERSHIPS_ENABLED=true`), and links,
 deposits, refunds and memberships stay on Squarespace until `PAYMENT_PROCESSOR=square`.
@@ -33,6 +33,7 @@ API. Cards on file (Q3a) and memberships (Q3b) come next.
 | POS app switch | `src/modules/square/pos.ts` |
 | Memberships billed by Square (Q3b): catalog sync, enrollment, billing events, failure policy, staff actions, Move members | `src/modules/memberships/square/*` (`catalog-plan.ts` pure planner, `catalog-sync.ts`, `enroll.ts`, `billing.ts`, `policy.ts`, `timeline.ts`, `actions.ts`, `moves.ts`, `notify.ts`, `jobs.ts`, `http/routes.ts`); the link routes `src/modules/public/links/http/subscribe-routes.ts` |
 | The queue routes, alerts, card hint, reconciliation | `src/modules/square/http/payment-routes.ts`, `src/modules/square/db/alerts.ts` |
+| The item library sync (ADR 0172, section 14): desired library, planner, merge, sender, tax check, jobs, routes | `src/modules/catalog/square/*` (`desired.ts`, `plan.ts`, `merge.ts` pure; `engine.ts` the sender; `sync.ts` with the database; `tax.ts`; `jobs.ts`; `view.ts`; `http/routes.ts`) |
 
 ## 2. Environment
 
@@ -51,10 +52,17 @@ API. Cards on file (Q3a) and memberships (Q3b) come next.
 | `SQUARE_TIMEOUT_MS`, `SQUARE_MAX_ATTEMPTS` | `15000`, `4` | Per request. |
 | `SQUARE_WRITES_ENABLED` | `false` | Observe-only when false (section 6). |
 | `SQUARE_MEMBERSHIPS_ENABLED` | `false` | Memberships billed by Square (section 13): the catalog sync and joining with a card. The last stage of turning writes on; needs `SQUARE_WRITES_ENABLED`. |
+| `SQUARE_ITEMS_SYNC_ENABLED` | `false` | The item library sync (section 14): services × sizes as Square items. Needs `SQUARE_WRITES_ENABLED`; watch-only it gives a read-only preview. |
 | `SQUARE_POS_API_ENABLED` | `false` | The POS app switch (production only). |
 | `SQUARE_MATCH_DELAY_SECONDS` | `90` | How long a counter payment waits before matching (wave Q2b). |
 | `SQUARE_POS_AUTOMATCH` | `evidence` | `evidence`: counter payments are recorded only on strong evidence (plan decision 5). `amount`: also when the amount alone matches exactly one open invoice of the day (the owner's call). |
 | `PAYMENT_PROCESSOR` | `squarespace` | The cutover switch. |
+
+**The Square Developer app must be owned by the shop's own Square account** (sign in at developer.squareup.com with the shop's Square
+login and create the app there). Its Production access token is then a personal access token with full access to that one account
+(sales, items, subscriptions, customers): no OAuth is needed. An app made under another account (a developer's) sees the wrong
+merchant: Test connection then fails with "location … is not among the token's locations". The sandbox app used for
+`pnpm verify:square` must come from the same account (to check at the rollout).
 
 The contract refuses to start with: `live` and any of the token, location, application id, webhook key or webhook URL missing; production
 with `PAYMENT_PROCESSOR=square` while Square is the simulator or the sandbox; `SQUARE_POS_API_ENABLED` outside live production; in
@@ -128,6 +136,8 @@ USD and takes cards; the Events API is enabled; our subscription exists, is enab
 | `square.cards.nightly` | nightly 04:20 | Card links for membership cards about to expire; deleted clients' cards disabled at Square (section 12.5). |
 | `square.catalog.sync` | every 5 minutes, writes on | Tier prices a save left pending become plan variations (section 13.1). |
 | `square.catalog.drift` | nightly 04:20, writes on | The sync plus Square's catalog read back and compared (section 13.1). |
+| `square.items.sync` | every 5 minutes at 2, 7, 12 …, writes and item sync on | The tax check, what changed at Square read back, then the item library brought in step (section 14). |
+| `square.items.drift` | nightly 04:40, writes and item sync on | The same with everything linked read back and every item searched for Oasis's marker (section 14). |
 | `square.enrollments.resume` | every 5 minutes, writes on | Membership-page attempts resumed with the same keys, abandoned after an hour, cleaned up at Square; stale pending memberships closed; a newer saved card put on the subscription (section 13.2). |
 | `membership.billing` | daily 09:30 | The failure policy: day 7 past due, day 21 canceled at Square; a client not yet told is texted (section 13.4). |
 | `square.plans.swap` | daily 10:15, writes on | "Move members" whose notice has run get their SwapPlan (section 13.5). |
@@ -190,6 +200,8 @@ AWS_PROFILE=oasis-setup pnpm verify:square --secret oasis/sandbox/square --locat
 pnpm verify:square --sim                 # the same checks against the simulator
 pnpm verify:square --read-only           # production: reads only (a production token is refused without it)
 AWS_PROFILE=oasis-setup pnpm verify:square --secret oasis/sandbox/square --location LCEVRH6NQ775N --tax-only   # SQR-01, SQR-18, cleanup
+AWS_PROFILE=oasis-setup pnpm verify:square --secret oasis/sandbox/square --location LCEVRH6NQ775N --items-only # SQR-01, 15-17, 19, 20, cleanup
+pnpm verify:square --read-only --rate 6.625   # production pre-flight of the item library: SQR-01, SQR-02, SQR-20 (and SQR-09)
 ```
 
 | Item | Check |
@@ -207,7 +219,12 @@ AWS_PROFILE=oasis-setup pnpm verify:square --secret oasis/sandbox/square --locat
 | SQR-11 | Cleanup: links deleted, subscriptions canceled, card disabled, customer deleted (plan variations used by a subscription stay) |
 | SQR-13 | (Q3b) Oasis's own catalog sync (planner and executor): a plan and STATIC MONTHLY variations; the same keys answer the same objects; a price edit is a new variation, the old one kept |
 | SQR-14 | (Q3b) Oasis's own subscription request (`sb_` key, start today), a deliverable email, the first invoice paid and its period; swap, pause and cancel scheduled at the next billing date and undone; CancelInvoice of an unpaid invoice |
-| SQR-18 | (K1e, ADR 0173) Square's tax rounding: 200 CalculateOrder requests (6.625% and 7%; half-cent subtotals, baskets, quantities, an order discount; the tax at ORDER and LINE_ITEM scope and through catalog variations with a catalog TAX and `auto_apply_taxes`) equal `salesTaxCents` on every case; prints the result table and which rounding rules fit (section 15). Skipped with `--sim` (the simulator has no CalculateOrder) and `--read-only` |
+| SQR-18 | (K1e, ADR 0173) Square's tax rounding: 200 CalculateOrder requests (6.625% and 7%; half-cent subtotals, baskets, quantities, an order discount; the tax at ORDER and LINE_ITEM scope and through catalog variations with a catalog TAX and `auto_apply_taxes`) equal `salesTaxCents` on every case; prints the result table and which rounding rules fit (section 15). Skipped with `--read-only` and `--items-only`; with `--sim` it runs against the simulator's CalculateOrder (wave K2e), which replays the sandbox's answers |
+| SQR-15 | (K2e, ADR 0172) Oasis's own item library sync (desired library, planner, merge and sender, links in memory) on a library of the run's own: items with a variation per size, the categories and the tax made; the same key and body answer the same item and its `id_mappings` |
+| SQR-16 | (K2e) A price changed in place (same variation id, new version); a size renamed and the sizes reordered; a size off hidden with its id, then on again; the item archived and back on sale |
+| SQR-17 | (K2e) A variation staff added survives Oasis's read-modify-write; a stale version that changes a field changed since is VERSION_MISMATCH; a BatchUpsert with one bad batch answers 400 and keeps the good batch; a Square-side rename read back and put back |
+| SQR-19 | (K2e) A range is VARIABLE pricing (no price; the amount is rung up) and a $0 price is FIXED 0; CalculateOrder of those catalog lines with the catalog tax auto-applied equals `salesTaxCents` |
+| SQR-20 | (K2e, read-only: the production pre-flight, also with `--read-only`) the shop's taxes at the location against Oasis's rate (`--rate`, default 6.625) as the tax check decides them, and the number of items in the library; what the sync would create is the Settings preview |
 | SQR-12 | (Q2b) Oasis's own link builder (`balanceLines`: two lines, a "Sales tax (6.625%)" line rounded half to even and a "Tip" line) gives an order total of exactly the balance, paid through its order; a refund leg sent twice with its `rf_` key is one refund; one cent over what the payment can still give back is refused by the leg planner and by Square alike |
 
 Scrubbed answers of the 2026-10-12 run (ids replaced, no emails, URL paths dropped) are the fixtures in `test/fixtures/square/`; the
@@ -264,7 +281,11 @@ call of the port the way the sandbox did (section 8): real idempotency (the same
 IDEMPOTENCY_KEY_REUSED), the test nonces, refunds that settle with the clock, subscriptions that bill their first period at once and renew
 with the clock, scheduled actions, the event log for SearchEvents, and signed webhook delivery (normal, duplicate, out of order). Controls
 under `/__sim` (`pnpm sim:square --help`): pay a link, a POS card or cash payment, a refund in the Square app, bill a subscription (paid or
-failed), card auto-update and forget, fail a refund, faults (429, 500, a dropped connection), webhook mode, clock.
+failed), card auto-update and forget, fail a refund, faults (429, 500, a dropped connection), webhook mode, clock. The item library
+(ADR 0172) and CalculateOrder follow the sandbox of 2026-10-13 (section 14 and ADR 0172 "Sandbox findings"): nested variations with
+temp ids, Square's per-field version check, a variation left out of an item upsert deleted, hidden variations, archive, CATEGORY
+(never location-scoped) and TAX, BatchUpsert keeping the good batches of a failing request, and CalculateOrder rounding each tax once,
+half to even (all 200 SQR-18 totals replayed).
 
 ## 10. What comes next
 
@@ -485,6 +506,74 @@ would also move anyone Oasis did not notify), and Square swaps at the next billi
 2. `PAYMENT_PROCESSOR=square` with personal links open: `#/m` pages join with a card; staff use the billing actions.
 3. Watch the managers' notifications (`square.catalog_sync_failed`, `membership.payment_failed`, `membership.first_payment_failed`,
    `membership.canceled_unpaid`) and the status row's `pendingEnrollments`.
+
+## 14. The item library: services × vehicle sizes in Square (ADR 0172, wave K2e)
+
+Off by default. With `SQUARE_WRITES_ENABLED=true` and `SQUARE_ITEMS_SYNC_ENABLED=true` every active priced service is a Square ITEM
+(REGULAR) with one variation per vehicle size at the price Oasis charges (`classPrice`: a size's own price, else the starting price; a
+range is Square's variable price, "Compact car · $229–$279"; a service without sizes has one "Regular" variation), present at our
+location only, in its Oasis category and in the "Oasis" category, taxed by the shop's Square tax. A price edit updates the variation in
+place (same id) within about 5 minutes; a size turned off is hidden (same id when it comes back); a service turned off, made quote-only
+or left without a price is archived. Nothing is ever deleted at Square, and the shop's own items are never written: Oasis writes only
+the ids in `square_catalog_links` (per Square environment). Pictures, descriptions, modifiers, colours and variations staff added stay
+as they are (read-modify-write). Member prices and coverage are not in Square.
+
+**Watch-only.** With writes off (or the switch off) nothing is written. Settings → Billing & integrations → Square item library
+("Sync now" = `POST /api/v1/integrations/square/items/sync`) shows a read-only preview ("would create 41 items with 187 prices") and the
+tax check. Test connection shows the `tax` check (it fails Test connection only while the item sync is on).
+
+**The tax** (ADR 0172 "Tax"): the shop's Square tax must be Oasis's rate exactly (`percentage` "6.625" against `tax.rate_dbp`),
+ADDITIVE, subtotal phase, at the location. With none at all, Oasis makes "Sales tax" at its rate (and keeps it at Oasis's rate); with
+taxes that do not match, or several that do, the sync is **paused** (nothing written; the managers told once a day,
+`square.items_tax_mismatch`). Staff can pick the tax (`PUT /api/v1/integrations/square/items/tax {mode: adopt, squareTaxId}`) or let
+Oasis use its own (`mode: create`).
+
+**Square-side edits.** A field Oasis owns changed in the Square Dashboard (a price, a name, a size shown again, a price override at the
+shop) is put back at the next sync, and the managers are told once (`square.items_changed_in_square`: "Changed in Square: Signature Hand
+Wash · Large SUV was $45 in Square; Oasis charges $40. Oasis set it back."), again a day later while it keeps happening. An item deleted
+in Square is made again. Failures are told once per set (`square.items_sync_failed`), again a day later while they last.
+
+**Crash safety.** A create keeps its key and exact request in the link row (the outbox) before it is sent; the next run sends the same
+request and Square answers the same item. Before any create Oasis searches every item for its marker (variation `user_data`
+`oasis:v1:<service>:<size>`): an item it made earlier (a crash, a database restore) is adopted, never made twice. Creates are one
+UpsertCatalogObject per service: a BatchUpsert with one failing batch answers 400 but keeps the other batches (sandbox, SQR-17).
+
+**Sandbox runs (2026-10-13).** `pnpm verify:square --items-only` against the sandbox location: SQR-15, 16, 17, 19 and 20 PASS
+(7 PASS, 0 FAIL; everything the run made deleted). The end to end on a disposable stack (`scripts/e2e-square/run.sh --steps "s8
+cleanup"`): S8a the item sync made the 19 sold services at Square (Express Hand Wash: Compact car $40, Large car $45, Compact SUV $50,
+Large SUV $60, Truck $65); S8b an Oasis price edit ($60 to $65, Large SUV) appeared at Square on the same variation with a new version;
+S8c a guest basket (Express Hand Wash at Large SUV $65 + Interior deep clean $60) totals $133.28 with $8.28 tax at 6.625% half to even
+both as the Oasis invoice and as Square's CalculateOrder of the catalog lines with the tax auto-applied; the cleanup deleted the 19
+items, 4 categories and the tax. A variation cannot be present where its item is not (INVALID_VALUE "… enabled at all future
+locations, but the referenced object … of type ITEM is not"): the simulator refuses it too.
+
+**Runbook**
+
+- *Turn it on:* run Test connection (the `tax` check must be ok, or "No sales tax in Square yet"), look at the preview, then
+  `SQUARE_ITEMS_SYNC_ENABLED=true` with writes on. Within 5 minutes Settings shows the services "On Square".
+- *Paused by the tax:* Settings → Square item library lists the shop's taxes and why each does not fit; fix the tax in Square
+  (6.625%, added to the price, at the shop) or pick Oasis's own.
+- *A service shows "Square sync failed":* the error says why; "Sync now" tries again.
+- *Rollback:* turn `SQUARE_ITEMS_SYNC_ENABLED` off (the items freeze as they are), then `POST /api/v1/integrations/square/items/archive-all`
+  (Settings asks first) archives every Oasis item; turning the sync on again later puts them back on sale.
+- *After a Square-Version bump:* `pnpm verify:square` SQR-15 to SQR-19 against the sandbox.
+
+**Staff instructions** (the counter):
+
+- Ring up guests from the Oasis categories and pick the size. A tint range asks for the price: type the quoted amount.
+- For members, adjusted invoices and anything with coverage: use **Open Square POS** in Oasis, or type `INV-#####` in the note.
+- Don't edit Oasis items in Square (prices, names, sizes): Oasis puts them back. Change prices in Settings → Prices by size.
+- Add the Oasis categories to the POS home grid once per device (new items appear in the item library, not on custom pages).
+- After the rollout, archive the shop's own hand-made duplicates in the Square Dashboard; Oasis never touches them.
+
+**Production checklist** (with ADR 0171's):
+
+1. The Developer app is owned by the shop's Square account (section 2); `SQUARE_APPLICATION_ID`, the Production access token in the
+   secret (`SQUARE_ACCESS_TOKEN`), the shop's `SQUARE_LOCATION_ID`, `SQUARE_ENVIRONMENT=production`, the webhook (section 4).
+2. The shop's Square tax is 6.625%, ADDITIVE, at the location (or there is none); Oasis is at 6.625% with `half_even` (section 15).
+3. `pnpm verify:square --read-only` (SQR-20): the shop's taxes against Oasis's rate, the item count, what the sync would create.
+4. The shop has no published Square Online site (new REGULAR items could appear there); otherwise hide them from it.
+5. `SQUARE_WRITES_ENABLED=true`, `SQUARE_ITEMS_SYNC_ENABLED=true`; check Settings and the POS; staff instructions above.
 
 ## 15. Sales tax: rate and rounding (ADR 0173, wave K1e)
 
