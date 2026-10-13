@@ -506,6 +506,8 @@ const dedicated: Record<string, string> = {
   'ai.sweep': 'test/assistant/jobs.test.ts',
   'assistant.knowledge.extract': 'test/assistant-knowledge/jobs.test.ts',
   'assistant.knowledge.cleanup': 'test/assistant-knowledge/jobs.test.ts',
+  'ai.practice': 'test/assistant-practice/jobs.test.ts',
+  'assistant.practice.retention': 'test/assistant-practice/jobs.test.ts',
 }
 
 describe('every registered job runs twice through the real worker', () => {

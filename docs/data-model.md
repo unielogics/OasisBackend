@@ -458,7 +458,7 @@ Operations design day re-anchored on **today** in the business time zone with th
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (125 tables, 1 view, 15 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (127 tables, 1 view, 15 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -728,6 +728,57 @@ Primary key `(id)`. Unique `(s3_key)`. `(location_id)` references `locations(id)
 | `resolved_at` | timestamp with time zone | yes |  |
 
 Primary key `(id)`. `(appointment_id)` references `appointments(id)` on delete set null. `(confirm_message_id)` references `messages(id)` on delete set null. `(conversation_id)` references `assistant_conversations(id)` on delete cascade. `(customer_id)` references `customers(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. 10 check constraints. Index `assistant_pending_actions_conversation_idx` `(conversation_id)`. Index `assistant_pending_actions_expiry_idx` `(expires_at)` where `state = 'pending'::text`. Unique index `uq_assistant_pending_actions_phone` `(location_id, phone_e164)` where `state = 'pending'::text`.
+
+#### `assistant_practice_sessions`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `user_id` | uuid | no |  |
+| `persona` | text | no |  |
+| `customer_id` | uuid | yes |  |
+| `verified` | boolean | no | `false` |
+| `include_entry_ids` | uuid[] | no | `'{}'::uuid[]` |
+| `language` | text | no | `'en'::text` |
+| `state` | jsonb | no | `'{}'::jsonb` |
+| `turns` | integer | no | `0` |
+| `cost_micros` | bigint | no | `0` |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. `(customer_id)` references `customers(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. `(user_id)` references `users(id)` on delete cascade. 7 check constraints. Index `assistant_practice_sessions_created_idx` `(created_at)`. Index `assistant_practice_sessions_user_idx` `(user_id, created_at DESC)`.
+
+#### `assistant_practice_turns`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `session_id` | uuid | no |  |
+| `seq` | integer | no |  |
+| `rerun_of` | uuid | yes |  |
+| `client_text` | text | no |  |
+| `status` | text | no | `'running'::text` |
+| `reply_text` | text | yes |  |
+| `extra_texts` | jsonb | no | `'[]'::jsonb` |
+| `badges` | jsonb | no | `'[]'::jsonb` |
+| `error` | text | yes |  |
+| `model` | text | yes |  |
+| `prompt_version` | text | yes |  |
+| `facts_version` | text | yes |  |
+| `tokens_in` | integer | no | `0` |
+| `tokens_out` | integer | no | `0` |
+| `tokens_cache_read` | integer | no | `0` |
+| `tokens_cache_write` | integer | no | `0` |
+| `cost_micros` | bigint | no | `0` |
+| `latency_ms` | integer | yes |  |
+| `state_before` | jsonb | no | `'{}'::jsonb` |
+| `transcript` | jsonb | yes |  |
+| `tool_calls` | jsonb | no | `'[]'::jsonb` |
+| `started_at` | timestamp with time zone | no | `app_now()` |
+| `finished_at` | timestamp with time zone | yes |  |
+
+Primary key `(id)`. `(rerun_of)` references `assistant_practice_turns(id)` on delete cascade. `(session_id)` references `assistant_practice_sessions(id)` on delete cascade. 16 check constraints. Unique index `assistant_practice_turns_running_idx` `(session_id)` where `status = 'running'::text`. Unique index `assistant_practice_turns_seq_idx` `(session_id, seq)` where `rerun_of IS NULL`. Index `assistant_practice_turns_session_idx` `(session_id, started_at)`. Index `assistant_practice_turns_started_idx` `(started_at)`.
 
 #### `assistant_tool_calls`
 

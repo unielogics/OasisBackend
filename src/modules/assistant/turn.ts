@@ -35,17 +35,16 @@ import { AI_ACTOR_NAME, type AssistantLog, type AssistantQueue, type ShopFactsSo
 import type { AssistantConfig } from './config.js'
 import { appointmentRefs, loadAppointmentRefs, loadConversation, loadTurnContext, resolveIdentity } from './context.js'
 import { runEngine, TurnAbort, ZERO_USAGE, type ConversationRecord, type EngineResult } from './engine.js'
-import { renderShopFacts } from './facts.js'
-import { renderShopKnowledge } from './knowledge/render.js'
 import { looksLikeCardNumber, toGsm7 } from './guard.js'
 import { CARD_LINES, detectLanguage, isConvoLang, SAFETY_LINES, SPANISH_HANDOFF_TEXT, storeLanguage, withDisclosure, type ConvoLang } from './lang.js'
 import { whenWords } from './tools/common.js'
 import { liveToolEffects } from './tools/effects-live.js'
 import { HANDOFF_SUMMARIES, markUnanswered, openTurnHandoff, recipientOf, sendFallback, type ConversationRef, type HandoffDeps } from './handoff.js'
 import type { AssistantGate, AssistantInbox } from './ports.js'
-import { allLinkKinds, loadPolicy, policyHash } from './policy.js'
-import { asksForFree, buildSystem, declinesPlans, PROMPT_VERSION, renderConversation, renderOwnerBlock, renderTurnContext } from './prompt.js'
-import { liveRecorder, NON_PROGRESS_TOOLS, offeredTools, recordLine, toolSpecs } from './tool-runner.js'
+import { loadPolicy } from './policy.js'
+import { PROMPT_VERSION, renderConversation } from './prompt.js'
+import { liveRecorder, NON_PROGRESS_TOOLS, recordLine } from './tool-runner.js'
+import { buildTurnPrompt } from './turn-prompt.js'
 import { Transcript } from './transcript.js'
 import { TurnLinks } from './turn-links.js'
 import './schema.js'
@@ -389,11 +388,6 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
   const detected = detectLanguage(freshClient)
   const clientLang: ConvoLang = detected ?? (isConvoLang(claim.conv.language) ? claim.conv.language : 'en')
   if (detected) await storeLanguage(d.db, conv.id, detected)
-  // ADR 0174 §3b, Spanish: "english" answers a Spanish texter in English (the server's parts too); "handoff" answers with the
-  // server's fixed Spanish line and hands the chat to the team, without a model call
-  const englishOnly = clientLang === 'es' && policy.behavior.spanish === 'english'
-  const spanishHandoff = clientLang === 'es' && policy.behavior.spanish === 'handoff'
-  const lang: ConvoLang = englishOnly ? 'en' : clientLang
   const loaded = await loadTurnContext(d.db, {
     resolved,
     conversationId: conv.id,
@@ -403,34 +397,18 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
     now,
     tz,
   })
-  // W4 final check L7: "no just book it" (any client text in the window) skips the memberships step and says not to pitch them
-  const declinedPlans = loaded.membership === null && declinesPlans(snap.lines.filter((l) => l.who === 'client').map((l) => l.text))
-  const turnContext = {
-    ...loaded,
-    // ... and so does a shop that sells no plan online (facts-v4: a tier without a price is not sold)
-    ...((declinedPlans || facts.plans.length === 0) && loaded.intake === 'memberships' ? { intake: loaded.vehicles.length > 0 ? null : ('vehicle' as const) } : {}),
-    language: lang,
-    ...(asksForFree(freshClient) ? { asksFree: true } : {}),
-    ...(declinedPlans ? { declinedPlans: true } : {}),
-    limits: policy.tools,
-    ...(englishOnly ? { englishOnly: true } : {}),
-  }
-  // ADR 0174: the owner's active knowledge ('' without any: the prompt is then exactly what it was before) and (§3b) the owner
-  // block ('' with the default limits and tone)
-  const knowledgeText = renderShopKnowledge(facts)
-  const ownerText = renderOwnerBlock(policy)
-  const contextText = renderTurnContext({ ...turnContext, ...(knowledgeText ? { knowledge: true } : {}), ...(ownerText ? { owner: true } : {}) })
-  const tools = offeredTools(d.registry, policy.tools)
-  const specs = toolSpecs(tools, policy.tools)
-  const factsText = renderShopFacts(facts)
-  const system = buildSystem({ factsText, contextText, knowledgeText, ownerText })
-  transcript.add({
-    kind: 'system',
-    promptVersion: PROMPT_VERSION,
-    factsVersion: facts.version,
-    tools: tools.map((t) => t.name),
-    ...(ownerText || !allLinkKinds(policy.tools) ? { policy: policyHash(policy) } : {}),
+  // ADR 0174 §4c: the request is assembled by the code practice uses too (turn-prompt.ts), so both send the same bytes
+  const prompt = buildTurnPrompt({
+    facts,
+    loaded,
+    policy,
+    registry: d.registry,
+    freshClientTexts: freshClient,
+    allClientTexts: snap.lines.filter((l) => l.who === 'client').map((l) => l.text),
+    clientLang,
   })
+  const { lang, spanishHandoff, turnContext, contextText, knowledgeText, factsText, tools, specs, system } = prompt
+  transcript.add(prompt.systemEntry)
   transcript.add({ kind: 'context', text: contextText })
   const messages: AiMessage[] = [{ role: 'user', content: [{ type: 'text', text: renderConversation(snap.lines) }] }]
   transcript.add({ kind: 'message', message: messages[0]! })

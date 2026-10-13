@@ -729,6 +729,80 @@ CREATE TABLE public.assistant_pending_actions (
 );
 
 --
+-- Name: assistant_practice_sessions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.assistant_practice_sessions (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    persona text NOT NULL,
+    customer_id uuid,
+    verified boolean DEFAULT false NOT NULL,
+    include_entry_ids uuid[] DEFAULT '{}'::uuid[] NOT NULL,
+    language text DEFAULT 'en'::text NOT NULL,
+    state jsonb DEFAULT '{}'::jsonb NOT NULL,
+    turns integer DEFAULT 0 NOT NULL,
+    cost_micros bigint DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    CONSTRAINT assistant_practice_sessions_check CHECK (((persona = 'client'::text) = (customer_id IS NOT NULL))),
+    CONSTRAINT assistant_practice_sessions_cost_micros_check CHECK ((cost_micros >= 0)),
+    CONSTRAINT assistant_practice_sessions_include_entry_ids_check CHECK ((cardinality(include_entry_ids) <= 20)),
+    CONSTRAINT assistant_practice_sessions_language_check CHECK ((language = ANY (ARRAY['en'::text, 'es'::text]))),
+    CONSTRAINT assistant_practice_sessions_persona_check CHECK ((persona = ANY (ARRAY['new_texter'::text, 'client'::text]))),
+    CONSTRAINT assistant_practice_sessions_state_check CHECK ((jsonb_typeof(state) = 'object'::text)),
+    CONSTRAINT assistant_practice_sessions_turns_check CHECK ((turns >= 0))
+);
+
+--
+-- Name: assistant_practice_turns; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.assistant_practice_turns (
+    id uuid NOT NULL,
+    session_id uuid NOT NULL,
+    seq integer NOT NULL,
+    rerun_of uuid,
+    client_text text NOT NULL,
+    status text DEFAULT 'running'::text NOT NULL,
+    reply_text text,
+    extra_texts jsonb DEFAULT '[]'::jsonb NOT NULL,
+    badges jsonb DEFAULT '[]'::jsonb NOT NULL,
+    error text,
+    model text,
+    prompt_version text,
+    facts_version text,
+    tokens_in integer DEFAULT 0 NOT NULL,
+    tokens_out integer DEFAULT 0 NOT NULL,
+    tokens_cache_read integer DEFAULT 0 NOT NULL,
+    tokens_cache_write integer DEFAULT 0 NOT NULL,
+    cost_micros bigint DEFAULT 0 NOT NULL,
+    latency_ms integer,
+    state_before jsonb DEFAULT '{}'::jsonb NOT NULL,
+    transcript jsonb,
+    tool_calls jsonb DEFAULT '[]'::jsonb NOT NULL,
+    started_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    finished_at timestamp with time zone,
+    CONSTRAINT assistant_practice_turns_badges_check CHECK ((jsonb_typeof(badges) = 'array'::text)),
+    CONSTRAINT assistant_practice_turns_check CHECK (((status = 'running'::text) = (finished_at IS NULL))),
+    CONSTRAINT assistant_practice_turns_client_text_check CHECK (((char_length(client_text) >= 1) AND (char_length(client_text) <= 640))),
+    CONSTRAINT assistant_practice_turns_cost_micros_check CHECK ((cost_micros >= 0)),
+    CONSTRAINT assistant_practice_turns_error_check CHECK (((error IS NULL) OR (char_length(error) <= 2000))),
+    CONSTRAINT assistant_practice_turns_extra_texts_check CHECK ((jsonb_typeof(extra_texts) = 'array'::text)),
+    CONSTRAINT assistant_practice_turns_latency_ms_check CHECK (((latency_ms IS NULL) OR (latency_ms >= 0))),
+    CONSTRAINT assistant_practice_turns_reply_text_check CHECK (((reply_text IS NULL) OR (char_length(reply_text) <= 2000))),
+    CONSTRAINT assistant_practice_turns_seq_check CHECK ((seq >= 1)),
+    CONSTRAINT assistant_practice_turns_state_before_check CHECK ((jsonb_typeof(state_before) = 'object'::text)),
+    CONSTRAINT assistant_practice_turns_status_check CHECK ((status = ANY (ARRAY['running'::text, 'replied'::text, 'handed_off'::text, 'failed'::text, 'opted_out'::text]))),
+    CONSTRAINT assistant_practice_turns_tokens_cache_read_check CHECK ((tokens_cache_read >= 0)),
+    CONSTRAINT assistant_practice_turns_tokens_cache_write_check CHECK ((tokens_cache_write >= 0)),
+    CONSTRAINT assistant_practice_turns_tokens_in_check CHECK ((tokens_in >= 0)),
+    CONSTRAINT assistant_practice_turns_tokens_out_check CHECK ((tokens_out >= 0)),
+    CONSTRAINT assistant_practice_turns_tool_calls_check CHECK ((jsonb_typeof(tool_calls) = 'array'::text))
+);
+
+--
 -- Name: assistant_tool_calls; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3633,6 +3707,20 @@ ALTER TABLE ONLY public.assistant_pending_actions
     ADD CONSTRAINT assistant_pending_actions_pkey PRIMARY KEY (id);
 
 --
+-- Name: assistant_practice_sessions assistant_practice_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_practice_sessions
+    ADD CONSTRAINT assistant_practice_sessions_pkey PRIMARY KEY (id);
+
+--
+-- Name: assistant_practice_turns assistant_practice_turns_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_practice_turns
+    ADD CONSTRAINT assistant_practice_turns_pkey PRIMARY KEY (id);
+
+--
 -- Name: assistant_tool_calls assistant_tool_calls_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4958,6 +5046,42 @@ CREATE INDEX assistant_pending_actions_conversation_idx ON public.assistant_pend
 --
 
 CREATE INDEX assistant_pending_actions_expiry_idx ON public.assistant_pending_actions USING btree (expires_at) WHERE (state = 'pending'::text);
+
+--
+-- Name: assistant_practice_sessions_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_practice_sessions_created_idx ON public.assistant_practice_sessions USING btree (created_at);
+
+--
+-- Name: assistant_practice_sessions_user_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_practice_sessions_user_idx ON public.assistant_practice_sessions USING btree (user_id, created_at DESC);
+
+--
+-- Name: assistant_practice_turns_running_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX assistant_practice_turns_running_idx ON public.assistant_practice_turns USING btree (session_id) WHERE (status = 'running'::text);
+
+--
+-- Name: assistant_practice_turns_seq_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX assistant_practice_turns_seq_idx ON public.assistant_practice_turns USING btree (session_id, seq) WHERE (rerun_of IS NULL);
+
+--
+-- Name: assistant_practice_turns_session_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_practice_turns_session_idx ON public.assistant_practice_turns USING btree (session_id, started_at);
+
+--
+-- Name: assistant_practice_turns_started_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX assistant_practice_turns_started_idx ON public.assistant_practice_turns USING btree (started_at);
 
 --
 -- Name: assistant_tool_calls_tool_idx; Type: INDEX; Schema: public; Owner: -
@@ -6339,6 +6463,41 @@ ALTER TABLE ONLY public.assistant_pending_actions
 
 ALTER TABLE ONLY public.assistant_pending_actions
     ADD CONSTRAINT assistant_pending_actions_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: assistant_practice_sessions assistant_practice_sessions_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_practice_sessions
+    ADD CONSTRAINT assistant_practice_sessions_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id) ON DELETE CASCADE;
+
+--
+-- Name: assistant_practice_sessions assistant_practice_sessions_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_practice_sessions
+    ADD CONSTRAINT assistant_practice_sessions_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: assistant_practice_sessions assistant_practice_sessions_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_practice_sessions
+    ADD CONSTRAINT assistant_practice_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+--
+-- Name: assistant_practice_turns assistant_practice_turns_rerun_of_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_practice_turns
+    ADD CONSTRAINT assistant_practice_turns_rerun_of_fkey FOREIGN KEY (rerun_of) REFERENCES public.assistant_practice_turns(id) ON DELETE CASCADE;
+
+--
+-- Name: assistant_practice_turns assistant_practice_turns_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.assistant_practice_turns
+    ADD CONSTRAINT assistant_practice_turns_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.assistant_practice_sessions(id) ON DELETE CASCADE;
 
 --
 -- Name: assistant_tool_calls assistant_tool_calls_turn_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

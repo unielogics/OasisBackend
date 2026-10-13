@@ -503,6 +503,24 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
     tests: 'test/assistant-knowledge/documents.test.ts, test/jobs/registry.test.ts',
     status: 'built',
   },
+  'ai.practice': {
+    owner: 'assistant (practice)',
+    purpose:
+      'Answers one text of the practice chat (ADR 0174 §4c): the real engine (the same prompt, tools, guard and policy judge as a live turn, the judge forced on) with practice effects (a link shows as "[booking link]", a proposal shows the confirmation it would text; nothing is sent, booked or written to a client record) and a read-only database pool for the tools. Stores the answer, its badges and cost on the turn and tells its creator (assistant.practice.turn). Works whatever AI_ENABLED says; while AI_PRACTICE_ENABLED is off a queued turn fails (practice_off). Its spend counts against AI_PRACTICE_DAILY_BUDGET_USD only.',
+    idempotency: 'Only a turn still running is answered, and its result is stored only while it is still running; retryLimit 0 (a failed turn shows as failed).',
+    clock: 'Injected clock for the turn\'s instant and finished_at; the turn deadline is AI_TURN_DEADLINE_MS.',
+    enqueuedBy: 'POST /assistant/practice/sessions/:id/turns and POST /assistant/practice/turns/:id/rerun, after their commit',
+    tests: 'test/assistant-practice/practice.test.ts, test/assistant-practice/jobs.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'assistant.practice.retention': {
+    owner: 'assistant (practice)',
+    purpose: 'Daily (ADR 0174 §4c): deletes practice sessions older than 30 days with their turns, and fails turns still running after 5 minutes (a job that died) as timeout.',
+    idempotency: 'Deletes and updates by age only; a second run finds nothing left to do.',
+    clock: 'Injected clock against created_at and started_at.',
+    tests: 'test/assistant-practice/jobs.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
 }
 
 const policyOf = (d: JobDefinition<never>): string => d.policy ?? 'standard'

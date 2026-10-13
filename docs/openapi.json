@@ -25960,7 +25960,7 @@
     },
     "/api/v1/assistant/conversations": {
       "get": {
-        "description": "Contract only (ADR 0174): answers 501 NOT_BUILT until the practice and review wave builds it.",
+        "description": "The location’s conversations with an Oasis AI turn in the last `days` (1..90, default 30), newest first: the client’s first name and the last four digits of the number, the last turn, the number of turns, the handoff, and flags (`handed_off`, `fallback`: the fallback text went or a turn failed, `judge`: the policy check failed or did not answer, `corrected`: a correction was made from it). `filter` keeps one flag. `nextCursor` pages on.",
         "operationId": "listAssistantConversations",
         "parameters": [
           {
@@ -26143,7 +26143,7 @@
     },
     "/api/v1/assistant/conversations/{id}": {
       "get": {
-        "description": "Contract only (ADR 0174): answers 501 NOT_BUILT until the practice and review wave builds it.",
+        "description": "The turns of the last 90 days: the client’s texts and what was sent, loaded on the server and redacted (phone numbers, codes and card numbers masked, links as \"[link]\"), the handoff reason, what the output guard and the policy check did in plain words, the tools used, the model, the prompt version and the correction made from the turn. Another location’s conversation, or one without a turn in 90 days, is 404.",
         "operationId": "getAssistantConversation",
         "parameters": [
           {
@@ -26418,7 +26418,7 @@
     },
     "/api/v1/assistant/corrections": {
       "post": {
-        "description": "Contract only (ADR 0174): answers 501 NOT_BUILT until the practice and review wave builds it. With a turn named, the server loads the client’s text and the wrong reply itself (redacted; the wrong reply is never shown to the model). Same validation and warnings as notes; the budget applies (`active: false` saves a draft). 409 `CORRECTION_EXISTS {entryId}` for the same question (send `replaceEntryId` to replace it).",
+        "description": "With a turn named (`practiceTurnId`: one of my practice texts; `assistantTurnId`: a real conversation, needs cli.view), the server loads the wrong reply itself (redacted; never shown to the model) and stores it with the correction; `clientText` is the question as the owner words it (it may be generalised). Plain text (no hidden character, no HTML tag): the question 1..300 characters, the answer 1..500. Same warnings and budget as notes: on by default (`active: false` saves a draft), 422 `KNOWLEDGE_BUDGET {usedChars, maxChars, needed}` when it would not fit. 409 `CORRECTION_EXISTS {entryId}` for the same question (case, spaces and punctuation ignored) unless `replaceEntryId` names it (then it is replaced in place). The model reads it only as `Q: \"…\" A: \"…\"` in SHOP KNOWLEDGE. Audited (`assistant.knowledge.create` / `.update`, never the body) and published as `settings.changed {section: assistant_knowledge}`.",
         "operationId": "createAssistantCorrection",
         "requestBody": {
           "content": {
@@ -28008,7 +28008,6 @@
     },
     "/api/v1/assistant/practice/sessions": {
       "get": {
-        "description": "Contract only (ADR 0174): answers 501 NOT_BUILT until the practice and review wave builds it.",
         "operationId": "listAssistantPracticeSessions",
         "responses": {
           "200": {
@@ -28166,7 +28165,7 @@
         "x-oasis-access": "set.assistant"
       },
       "post": {
-        "description": "Contract only (ADR 0174): answers 501 NOT_BUILT until the practice and review wave builds it. A client persona needs cli.view (403). 409 `PRACTICE_OFF` while AI_PRACTICE_ENABLED is false; 20 sessions per user a day.",
+        "description": "A client persona needs cli.view (403) and a client of the shop (404). 409 `PRACTICE_OFF` while AI_PRACTICE_ENABLED is false (whatever AI_ENABLED says); 429 `PRACTICE_LIMIT` after 20 sessions a user a day. `includeEntryIds` are draft knowledge entries the session reads as if they were on (\"Try this draft\"; 422 when one does not exist). Practice mirrors the saved settings, AI_ACTIONS_ENABLED and PUBLIC_LINKS_ENABLED.",
         "operationId": "createAssistantPracticeSession",
         "requestBody": {
           "content": {
@@ -28345,7 +28344,6 @@
     },
     "/api/v1/assistant/practice/sessions/{id}": {
       "delete": {
-        "description": "Contract only (ADR 0174): answers 501 NOT_BUILT until the practice and review wave builds it.",
         "operationId": "deleteAssistantPracticeSession",
         "parameters": [
           {
@@ -28371,7 +28369,7 @@
         "x-oasis-access": "set.assistant"
       },
       "get": {
-        "description": "Contract only (ADR 0174): answers 501 NOT_BUILT until the practice and review wave builds it.",
+        "description": "Poll it every 2 s while a turn is `running`, or listen for `assistant.practice.turn {sessionId, turnId}` on the notifications channel.",
         "operationId": "getAssistantPracticeSession",
         "parameters": [
           {
@@ -28651,7 +28649,7 @@
     },
     "/api/v1/assistant/practice/sessions/{id}/turns": {
       "post": {
-        "description": "Contract only (ADR 0174): answers 501 NOT_BUILT until the practice and review wave builds it. Idempotency-Key required. 202 with the turn `running`; 409 `PRACTICE_BUSY` while one runs, `PRACTICE_OFF`; 429 `PRACTICE_BUDGET` when today’s practice budget is spent; 40 turns per session.",
+        "description": "Idempotency-Key required. 202 with the turn `running`; 409 `PRACTICE_BUSY` while one runs (a turn running over 5 minutes is failed as `timeout`), `PRACTICE_OFF`, `PRACTICE_ENDED` after the client opted out; 429 `PRACTICE_BUDGET` when today’s practice budget is spent, `PRACTICE_LIMIT` after 40 turns a session.",
         "operationId": "createAssistantPracticeTurn",
         "parameters": [
           {
@@ -28854,7 +28852,7 @@
     },
     "/api/v1/assistant/practice/turns/{id}/rerun": {
       "post": {
-        "description": "Contract only (ADR 0174): answers 501 NOT_BUILT until the practice and review wave builds it.",
+        "description": "The re-run reads the knowledge as it is now (a correction saved meanwhile is in it) and starts from the session as it was before that text; it never changes the session’s own state. Same switches, budget and limits as a text (409 `PRACTICE_BUSY`, `PRACTICE_OFF`; 429 `PRACTICE_BUDGET`, `PRACTICE_LIMIT`); another user’s turn is 404.",
         "operationId": "rerunAssistantPracticeTurn",
         "parameters": [
           {

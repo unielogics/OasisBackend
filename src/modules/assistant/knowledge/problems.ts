@@ -43,6 +43,16 @@ registerProblems({
     title: 'Practice used up today',
     detail: 'Today’s practice budget is used up. Try again tomorrow',
   },
+  PRACTICE_LIMIT: {
+    status: 429,
+    title: 'Practice limit reached',
+    detail: 'This practice chat, or today’s chats, reached the limit. Start a new chat or try again tomorrow',
+  },
+  PRACTICE_ENDED: {
+    status: 409,
+    title: 'This chat has ended',
+    detail: 'The client opted out in this practice chat. Start a new one',
+  },
   CORRECTION_EXISTS: {
     status: 409,
     title: 'Already corrected',

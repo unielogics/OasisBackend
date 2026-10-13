@@ -1,10 +1,9 @@
 // Settings → Oasis AI's routes (ADR 0174 §6): every route declares exactly the permission the design gives it (set.assistant; the
-// review of real conversations set.assistant + cli.view), the practice, correction and review contracts answer 501 NOT_BUILT to a
-// permitted caller (their schemas are fixed for the dashboard; the next wave builds them), and everything new is off by default.
+// review of real conversations set.assistant + cli.view), the practice, correction and review routes are built (wave K2c: no more
+// 501 NOT_BUILT; their own suites are test/assistant-practice/*), and everything new is off by default.
 import { describe, expect, it } from 'vitest'
 import { describeAccess } from '../../src/http/access.js'
 import { loadEnv } from '../../src/config/env.js'
-import { json } from '../settings-http/harness.js'
 import { useKnowledgeHarness } from './harness.js'
 
 const h = useKnowledgeHarness()
@@ -37,7 +36,7 @@ describe('the routes of Settings → Oasis AI (ADR 0174 §6)', () => {
     expect(routes.map((r) => [r.method, r.url, describeAccess(r.access), r.idempotency]).sort()).toEqual([...EXPECTED].sort())
   })
 
-  it('the contracts answer 501 NOT_BUILT to a permitted caller, 403 without the permission', async () => {
+  it('the practice, correction and review routes are built (wave K2c): no 501 to a permitted caller, 403 without the permission', async () => {
     const s = await h.admin()
     const calls: [string, string, unknown?, Record<string, string>?][] = [
       ['POST', 'assistant/practice/sessions', { persona: 'new_texter' }],
@@ -52,8 +51,8 @@ describe('the routes of Settings → Oasis AI (ADR 0174 §6)', () => {
     ]
     for (const [method, url, body, headers] of calls) {
       const r = await h.call(method as 'GET', url, { session: s, ...(body !== undefined ? { body } : {}), ...(headers ? { headers } : {}) })
-      expect(r.statusCode, `${method} ${url}: ${r.body}`).toBe(501)
-      expect(json(r).code).toBe('NOT_BUILT')
+      expect(r.statusCode, `${method} ${url}: ${r.body}`).not.toBe(501)
+      expect(r.statusCode, `${method} ${url}: ${r.body}`).toBeLessThan(500)
     }
     // a practice text needs its Idempotency-Key
     expect((await h.call('POST', `assistant/practice/sessions/${NIL}/turns`, { session: s, body: { text: 'Hi' } })).statusCode).toBe(400)

@@ -114,12 +114,7 @@ async function issueLink(ctx: ToolContext, input: ToolInputs['send_link'], o: { 
     // registered once the link row is committed: the reply never carries a link that does not exist
     const placeholder = ctx.addLink(issued.url, { kind: input.kind, expiresAt: issued.expiresAt })
     const minutes = Math.round((issued.expiresAt.getTime() - ctx.now.getTime()) / 60_000)
-    return ok({
-      placeholder,
-      kind: input.kind,
-      expiresInMinutes: minutes,
-      instruction: `Put ${placeholder} in your reply exactly once; it is replaced by the secure link. Never write a URL yourself.`,
-    })
+    return linkIssued(placeholder, input.kind, minutes)
   } catch (e) {
     if (e instanceof LinkRefused) return e.outcome
     // one link of a kind an hour (W4 leftover): a client who cannot find the link texted earlier gets the SAME link again (no new
@@ -160,6 +155,16 @@ async function issueLink(ctx: ToolContext, input: ToolInputs['send_link'], o: { 
       return fail('not_found', 'There is nothing that link could be for.')
     throw e
   }}
+
+/** What send_link answers for a link it texted (practice answers the same, ADR 0174 §4c). */
+export function linkIssued(placeholder: string, kind: ToolInputs['send_link']['kind'], expiresInMinutes: number): ToolOutcome {
+  return ok({
+    placeholder,
+    kind,
+    expiresInMinutes,
+    instruction: `Put ${placeholder} in your reply exactly once; it is replaced by the secure link. Never write a URL yourself.`,
+  })
+}
 
 /**
  * The same link again (identity/links.ts retextClientLink) in its own transaction, audited; null when there is none to re-text (no
@@ -311,6 +316,11 @@ async function propose(ctx: ToolContext, o: ProposeEffect): Promise<ToolOutcome>
     if (e instanceof Refused) return e.outcome
     throw e
   }
+  return proposed(o)
+}
+
+/** What a propose_* answers once its proposal is texted (practice answers the same, ADR 0174 §4c). */
+export function proposed(o: Pick<ProposeEffect, 'kind' | 'summary'>): ToolOutcome {
   return ok({
     proposed: o.kind,
     summary: o.summary,
@@ -438,23 +448,31 @@ async function saveVehicle(ctx: ToolContext, v: VehicleEffect): Promise<ToolOutc
     })
     // the size the car is priced at: staff's when they set one (the client's word does not replace it)
     const kept = saved?.vehicle_class_source === 'staff' && saved.vehicle_class !== size.key ? sizes.find((x) => x.key === saved.vehicle_class) : undefined
-    const at = kept ?? size
-    const priceKeys = [
-      ...ctx.facts.catalog.items
-        .filter((i) => i.kind === 'package' && !i.quoteOnly)
-        .slice(0, MAX_SIZE_KEYS)
-        .map((i) => ({ name: i.name, priceKey: pricePlaceholder(i.key, at.key) })),
-      ...ctx.facts.plans.map((p) => ({ name: `${p.label} membership`, priceKey: planPlaceholder(p.key, at.key) })),
-    ]
-    return ok({
-      saved: true,
-      vehicle: [v.year, make, model].filter((x) => x !== null).join(' '),
-      size: at.label,
-      sizeKey: at.key,
-      ...(kept ? { note: `The team already set this car as ${kept.label}; prices follow that size.` } : {}),
-      // the prices for their car's size, as placeholders (the model never writes an amount); a size without a price reads "priced at the shop"
-      priceKeys,
-    })
+    return vehicleSaved(ctx, v, kept)
+  })
+}
+
+/**
+ * What set_my_vehicle answers once the car is saved: the size it is priced at (`kept`: the size staff set on it) and the price keys of
+ * that size, as placeholders (practice answers the same, ADR 0174 §4c).
+ */
+export function vehicleSaved(ctx: Pick<ToolContext, 'facts'>, v: VehicleEffect, kept?: VehicleEffect['size']): ToolOutcome {
+  const at = kept ?? v.size
+  const priceKeys = [
+    ...ctx.facts.catalog.items
+      .filter((i) => i.kind === 'package' && !i.quoteOnly)
+      .slice(0, MAX_SIZE_KEYS)
+      .map((i) => ({ name: i.name, priceKey: pricePlaceholder(i.key, at.key) })),
+    ...ctx.facts.plans.map((p) => ({ name: `${p.label} membership`, priceKey: planPlaceholder(p.key, at.key) })),
+  ]
+  return ok({
+    saved: true,
+    vehicle: [v.year, v.make, v.model].filter((x) => x !== null).join(' '),
+    size: at.label,
+    sizeKey: at.key,
+    ...(kept ? { note: `The team already set this car as ${kept.label}; prices follow that size.` } : {}),
+    // the prices for their car's size, as placeholders (the model never writes an amount); a size without a price reads "priced at the shop"
+    priceKeys,
   })
 }
 
@@ -485,8 +503,11 @@ async function optOut(ctx: ToolContext): Promise<ToolOutcome> {
     }
     await ctx.audit(tx, 'assistant.opt_out', { entityType: id.customerId ? 'customer' : 'phone', entityId: id.customerId, after: { optedOut: true } })
   })
-  return ok({ optedOut: true, instruction: 'They are unsubscribed and got the opt-out confirmation. Send nothing else.' })
+  return OPTED_OUT
 }
+
+/** What opt_out answers (practice answers the same, ADR 0174 §4c). */
+export const OPTED_OUT: ToolOutcome = ok({ optedOut: true, instruction: 'They are unsubscribed and got the opt-out confirmation. Send nothing else.' })
 
 /** handoff_to_staff: the number's pending proposals are canceled (the chat is the staff's from here). */
 async function cancelPending(ctx: ToolContext): Promise<void> {
