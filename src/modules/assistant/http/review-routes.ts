@@ -10,7 +10,7 @@ import type { AppInstance } from '../../../http/types.js'
 import { z } from '../../../http/zod.js'
 import { inTx, storedUserId } from '../../settings/http/runtime.js'
 import { createCorrection, type CorrectionContext } from '../knowledge/corrections.js'
-import { knowledgeBudget } from '../knowledge/service.js'
+import { forReader, knowledgeBudget } from '../knowledge/service.js'
 import { getConversation, listConversations } from '../review.js'
 import { KnowledgeBudgetDto, KnowledgeEntryDto } from './knowledge-routes.js'
 
@@ -83,8 +83,9 @@ export function registerReviewRoutes(app: AppInstance): void {
     },
     async (req, reply) => {
       const c = await correctionContext(req)
-      const entry = await inTx(app.db, (tx) => createCorrection(tx, c, req.body))
-      return reply.status(201).send({ entry, budget: await knowledgeBudget(app.db, c.locationId, app.env.AI_KNOWLEDGE_MAX_CHARS) })
+      const created = await inTx(app.db, (tx) => createCorrection(tx, c, req.body))
+      const [entry] = await forReader(app.db, c.locationId, [created], c.canViewClients)
+      return reply.status(201).send({ entry: entry!, budget: await knowledgeBudget(app.db, c.locationId, app.env.AI_KNOWLEDGE_MAX_CHARS) })
     },
   )
 

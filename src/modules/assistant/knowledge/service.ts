@@ -233,6 +233,34 @@ export function entryView(r: EntryRow): KnowledgeEntryView {
   }
 }
 
+/**
+ * Verifier F3 (ADR 0174 D15): a correction's wrong reply is what Oasis AI texted, so it may hold a real client's words (their first
+ * name, a visit, a balance). A reader without cli.view gets it only when it came from a practice turn of a synthetic new texter whose
+ * session still exists; from a real conversation, a client on file, or a session since deleted (who was in it is unknown), it is
+ * null. Readers of clients get every entry as stored.
+ */
+export async function forReader<T extends KnowledgeEntryView>(db: Executor, locationId: string, entries: T[], canViewClients: boolean): Promise<T[]> {
+  if (canViewClients) return entries
+  const ids = entries.filter((e) => e.wrongReply !== null).map((e) => e.id)
+  if (ids.length === 0) return entries
+  const synthetic = new Set(
+    (
+      await db
+        .selectFrom('assistant_knowledge as k')
+        .innerJoin('assistant_practice_turns as t', 't.id', 'k.practice_turn_id')
+        .innerJoin('assistant_practice_sessions as s', 's.id', 't.session_id')
+        .select('k.id')
+        .where('k.location_id', '=', locationId)
+        .where('k.id', 'in', ids)
+        .where('k.source', '=', 'practice')
+        .where('k.assistant_turn_id', 'is', null)
+        .where('s.persona', '=', 'new_texter')
+        .execute()
+    ).map((r) => r.id),
+  )
+  return entries.map((e) => (e.wrongReply === null || synthetic.has(e.id) ? e : { ...e, wrongReply: null }))
+}
+
 export async function listEntries(db: Executor, locationId: string): Promise<KnowledgeEntryView[]> {
   const rows = await db
     .selectFrom('assistant_knowledge')

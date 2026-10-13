@@ -14,7 +14,7 @@
 // on, and only while AI_ENABLED (or, later, in the practice chat).
 import type { FastifyRequest } from 'fastify'
 import { access } from '../../../http/access.js'
-import { auditContextOf } from '../../../http/authorizer.js'
+import { auditContextOf, hasPermission } from '../../../http/authorizer.js'
 import type { AppInstance } from '../../../http/types.js'
 import { z } from '../../../http/zod.js'
 import { AppError } from '../../../platform/errors.js'
@@ -36,6 +36,7 @@ import {
   createNote,
   deleteEntry,
   DOCUMENT_ACTIVE_MAX,
+  forReader,
   DOCUMENT_STORE_MAX,
   knowledgeBudget,
   listEntries,
@@ -62,7 +63,7 @@ export const KnowledgeEntryDto = z.object({
   title: z.string(),
   body: z.string().describe('note: the text; document: the reviewed text of the PDF; correction: the right answer'),
   question: z.string().nullable().describe('correction: the client’s words'),
-  wrongReply: z.string().nullable().describe('correction: what Oasis AI said (redacted); never shown to the model'),
+  wrongReply: z.string().nullable().describe('correction: what Oasis AI said (redacted); never shown to the model. Null without cli.view unless it came from a practice text of a synthetic new texter whose session still exists (it may hold a real client’s words)'),
   source: z.enum(['manual', 'practice', 'live']),
   active: z.boolean().describe('Oasis AI reads it (counts against the budget)'),
   documentId: z.string().nullable(),
@@ -150,7 +151,7 @@ export function registerKnowledgeRoutes(app: AppInstance, storage: () => ObjectS
       const loc = req.auth!.locationId
       const [entries, documents, budget] = await Promise.all([listEntries(app.db, loc), listDocuments(app.db, loc), budgetOf(loc)])
       return {
-        entries,
+        entries: await forReader(app.db, loc, entries, hasPermission(req.auth!, 'cli.view')),
         documents,
         budget,
         limits: {
@@ -220,7 +221,8 @@ export function registerKnowledgeRoutes(app: AppInstance, storage: () => ObjectS
       const { title, body, question, active, reviewed, confirmInstructions } = req.body
       const patch = { title, body, question, active, reviewed, confirmInstructions, version }
       const entry = await inTx(app.db, (tx) => updateEntry(tx, c, req.params.id, patch))
-      return { entry, budget: await budgetOf(c.locationId) }
+      const [shown] = await forReader(app.db, c.locationId, [entry], hasPermission(req.auth!, 'cli.view'))
+      return { entry: shown!, budget: await budgetOf(c.locationId) }
     },
   )
 

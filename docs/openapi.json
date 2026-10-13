@@ -26671,7 +26671,7 @@
                               "type": "null"
                             }
                           ],
-                          "description": "correction: what Oasis AI said (redacted); never shown to the model"
+                          "description": "correction: what Oasis AI said (redacted); never shown to the model. Null without cli.view unless it came from a practice text of a synthetic new texter whose session still exists (it may hold a real client’s words)"
                         }
                       },
                       "required": [
@@ -27023,7 +27023,7 @@
                                 "type": "null"
                               }
                             ],
-                            "description": "correction: what Oasis AI said (redacted); never shown to the model"
+                            "description": "correction: what Oasis AI said (redacted); never shown to the model. Null without cli.view unless it came from a practice text of a synthetic new texter whose session still exists (it may hold a real client’s words)"
                           }
                         },
                         "required": [
@@ -27352,7 +27352,7 @@
                               "type": "null"
                             }
                           ],
-                          "description": "correction: what Oasis AI said (redacted); never shown to the model"
+                          "description": "correction: what Oasis AI said (redacted); never shown to the model. Null without cli.view unless it came from a practice text of a synthetic new texter whose session still exists (it may hold a real client’s words)"
                         }
                       },
                       "required": [
@@ -27670,7 +27670,7 @@
                               "type": "null"
                             }
                           ],
-                          "description": "correction: what Oasis AI said (redacted); never shown to the model"
+                          "description": "correction: what Oasis AI said (redacted); never shown to the model. Null without cli.view unless it came from a practice text of a synthetic new texter whose session still exists (it may hold a real client’s words)"
                         }
                       },
                       "required": [

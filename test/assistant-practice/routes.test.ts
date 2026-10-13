@@ -196,4 +196,49 @@ describe('corrections and "Try again" (ADR 0174 §5)', () => {
     // plain text only
     expect((await h.call('POST', 'assistant/corrections', { session: s, body: { ...body, clientText: 'Hours?', rightAnswer: '<b>8 to 6</b>' } })).statusCode).toBe(422)
   })
+
+  it('a wrong reply that may hold a real client’s words (a live turn, a client on file) is shown only with cli.view (verifier F3)', async () => {
+    const clients = await h.withPermissions(['set.assistant', 'cli.view'])
+    const noClients = await h.withPermissions(['set.assistant'])
+    // a correction from a practice turn with a real client on file
+    const maria = await customer('Maria Delgado')
+    const real = await session(clients, { persona: 'client', customerId: maria })
+    const t1 = json(await text(clients, real.id, 'What do I owe?')).turn
+    await answer(t1.id, 'Hi Maria, the team can tell you your balance.')
+    const fromClient = json(
+      await h.call('POST', 'assistant/corrections', { session: clients, body: { clientText: 'What do I owe?', rightAnswer: 'The team can check that for you.', source: 'practice', practiceTurnId: t1.id } }),
+    ).entry
+    expect(fromClient.wrongReply).toContain('Hi Maria')
+    // a correction from a synthetic new texter: nobody real is in it
+    const synthetic = await session(noClients)
+    const t2 = json(await text(noClients, synthetic.id, 'Do you have a lounge?')).turn
+    await answer(t2.id, 'No, we have no lounge.')
+    const fromSynthetic = json(
+      await h.call('POST', 'assistant/corrections', { session: noClients, body: { clientText: 'Do you have a lounge?', rightAnswer: 'Yes, with wifi.', source: 'practice', practiceTurnId: t2.id } }),
+    ).entry
+    expect(fromSynthetic.wrongReply).toContain('no lounge')
+    // a correction from a real conversation (its turn since deleted: the source still says live)
+    const loc = (await h.db.selectFrom('locations').select('id').executeTakeFirstOrThrow()).id
+    const liveId = h.fx.newId()
+    await h.db
+      .insertInto('assistant_knowledge')
+      .values({ id: liveId, location_id: loc, kind: 'correction', title: 'When is my visit?', question: 'When is my visit?', body: 'The team can confirm it.', wrong_reply: 'Hi Liam, your visit is Monday at 10.', source: 'live', active: false, chars: 40 } as never)
+      .execute()
+    const byId = (entries: Array<{ id: string; wrongReply: string | null }>) => Object.fromEntries(entries.map((e) => [e.id, e.wrongReply]))
+    const hidden = byId(json(await h.call('GET', 'assistant/knowledge', { session: noClients })).entries)
+    expect(hidden[fromClient.id]).toBeNull()
+    expect(hidden[liveId]).toBeNull()
+    expect(hidden[fromSynthetic.id]).toContain('no lounge')
+    const shown = byId(json(await h.call('GET', 'assistant/knowledge', { session: clients })).entries)
+    expect(shown[fromClient.id]).toContain('Hi Maria')
+    expect(shown[liveId]).toBe('Hi Liam, your visit is Monday at 10.')
+    expect(shown[fromSynthetic.id]).toContain('no lounge')
+    // an edit answers the entry the same way
+    const edited = await h.call('PUT', `assistant/knowledge/${liveId}`, { session: noClients, body: { version: 1, body: 'The team can confirm your visit.' } })
+    expect(edited.statusCode, edited.body).toBe(200)
+    expect(json(edited).entry.wrongReply).toBeNull()
+    // once the practice session is gone, who was in it is unknown: hidden too
+    await h.db.deleteFrom('assistant_practice_sessions').where('id', '=', synthetic.id).execute()
+    expect(byId(json(await h.call('GET', 'assistant/knowledge', { session: noClients })).entries)[fromSynthetic.id]).toBeNull()
+  })
 })
