@@ -33,6 +33,8 @@ export interface SessionAuthContext extends AuthContext {
   viewAsRole: { id: string; name: string } | null
   /** The roles that decide authority now: the person's own, or the one viewed role. */
   authority: Authority
+  /** The session was opened on a registered kiosk device (ADR 0180: short timings, a banner), else null. */
+  kioskDevice: { id: string; name: string } | null
 }
 
 export const isSessionContext = (ctx: AuthContext | null | undefined): ctx is SessionAuthContext =>

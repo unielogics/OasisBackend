@@ -759,7 +759,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "sched.view"
+        "x-oasis-access": "sched.view",
+        "x-oasis-kiosk": "none"
       },
       "post": {
         "description": "Upserts the customer by phone and the vehicle by plate, validates the slot under a lock (409 SLOT_UNAVAILABLE \"Would overbook a bay — override required\", SLOT_VIP_HELD, SLOT_CLOSED, SLOT_OUTSIDE_HOURS, SLOT_PAST), plans a bay, snapshots the checklist, creates the invoice and queues the booking SMS. `override.reason` needs sched.override and records an appointment_overrides row. Send `start` or `walkIn: true` (the next slot on the grid).",
@@ -1861,7 +1862,8 @@
           "appointments"
         ],
         "x-oasis-access": "sched.edit",
-        "x-oasis-idempotency": "required"
+        "x-oasis-idempotency": "required",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}": {
@@ -3959,7 +3961,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "sched.view"
+        "x-oasis-access": "sched.view",
+        "x-oasis-kiosk": "none"
       },
       "patch": {
         "parameters": [
@@ -4896,7 +4899,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "sched.edit"
+        "x-oasis-access": "sched.edit",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}/addons/{serviceId}": {
@@ -5509,7 +5513,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "sched.edit"
+        "x-oasis-access": "sched.edit",
+        "x-oasis-kiosk": "actor"
       },
       "put": {
         "description": "Priced at the visit’s size for the client (ADR 0170). On a visit the membership already covered, an add-on an inclusion names is covered too (the visit is settled again; noted on the visit).",
@@ -6120,7 +6125,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "sched.edit"
+        "x-oasis-access": "sched.edit",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}/advance": {
@@ -7024,7 +7030,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "jobs.status | sched.edit"
+        "x-oasis-access": "jobs.status | sched.edit",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}/arrival-link": {
@@ -7079,7 +7086,8 @@
         "tags": [
           "arrivals"
         ],
-        "x-oasis-access": "sched.edit"
+        "x-oasis-access": "sched.edit",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}/arrive": {
@@ -7975,7 +7983,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "jobs.status | sched.edit"
+        "x-oasis-access": "jobs.status | sched.edit",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}/assign-bay": {
@@ -8872,7 +8881,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "jobs.status"
+        "x-oasis-access": "jobs.status",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}/cancel": {
@@ -9886,7 +9896,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "jobs.checklist"
+        "x-oasis-access": "jobs.checklist",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}/checklist/items/{itemId}": {
@@ -10017,7 +10028,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "jobs.checklist"
+        "x-oasis-access": "jobs.checklist",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}/complete": {
@@ -10893,7 +10905,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "jobs.status"
+        "x-oasis-access": "jobs.status",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}/confirm": {
@@ -11768,7 +11781,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "sched.edit | jobs.status"
+        "x-oasis-access": "sched.edit | jobs.status",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}/fee-charges": {
@@ -12021,7 +12035,8 @@
         "tags": [
           "square"
         ],
-        "x-oasis-access": "pay.collect | sched.cancel"
+        "x-oasis-access": "pay.collect | sched.cancel",
+        "x-oasis-kiosk": "none"
       }
     },
     "/api/v1/appointments/{id}/fee-charges/{chargeId}/charge": {
@@ -17500,7 +17515,8 @@
         "tags": [
           "messages"
         ],
-        "x-oasis-access": "cli.view"
+        "x-oasis-access": "cli.view",
+        "x-oasis-kiosk": "none"
       },
       "post": {
         "description": "Free `text` goes out as an SMS (class staff_message) and a `templateKey` of a quick reply or an automation renders its wording; variables not supplied (`first`, `time`, `when`, `bay`) are filled from the appointment. The text passes the SMS policy: 422 SMS_OPTED_OUT after a STOP, SMS_NOT_OPTED_IN without consent, SMS_NO_PHONE without a number, SMS_TOO_LONG above the segment cap. It is queued, not sent inline; `message.status` events follow on the messages channel.",
@@ -17807,7 +17823,8 @@
           "messages"
         ],
         "x-oasis-access": "msg.send",
-        "x-oasis-idempotency": "required"
+        "x-oasis-idempotency": "required",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}/no-show": {
@@ -19581,7 +19598,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "msg.send"
+        "x-oasis-access": "msg.send",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}/photos/{photoId}": {
@@ -19704,7 +19722,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "jobs.checklist"
+        "x-oasis-access": "jobs.checklist",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}/photos/note": {
@@ -19767,7 +19786,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "jobs.checklist"
+        "x-oasis-access": "jobs.checklist",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}/photos/presign": {
@@ -19889,7 +19909,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "jobs.checklist"
+        "x-oasis-access": "jobs.checklist",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}/pickup": {
@@ -20788,7 +20809,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "jobs.status"
+        "x-oasis-access": "jobs.status",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}/prep-bay": {
@@ -21663,7 +21685,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "jobs.status | sched.edit"
+        "x-oasis-access": "jobs.status | sched.edit",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}/reopen": {
@@ -23479,7 +23502,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "sched.edit"
+        "x-oasis-access": "sched.edit",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}/start": {
@@ -24373,7 +24397,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "jobs.status"
+        "x-oasis-access": "jobs.status",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/{id}/vehicle-class": {
@@ -25275,7 +25300,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "sched.edit"
+        "x-oasis-access": "sched.edit",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/appointments/quote": {
@@ -25642,7 +25668,8 @@
         "tags": [
           "appointments"
         ],
-        "x-oasis-access": "sched.edit"
+        "x-oasis-access": "sched.edit",
+        "x-oasis-kiosk": "none"
       }
     },
     "/api/v1/arrival-settings": {
@@ -25981,11 +26008,12 @@
             "description": "Default Response"
           }
         },
-        "summary": "The synchronizer token to send as X-CSRF-Token on unsafe requests",
+        "summary": "The synchronizer token to send as X-CSRF-Token on unsafe requests (a signed-in person or an unlocked kiosk)",
         "tags": [
           "auth"
         ],
-        "x-oasis-access": "authenticated"
+        "x-oasis-access": "authenticated",
+        "x-oasis-kiosk": "none"
       }
     },
     "/api/v1/auth/invite/accept": {
@@ -26080,6 +26108,7 @@
     },
     "/api/v1/auth/login": {
       "post": {
+        "description": "On a registered kiosk device (its device cookie, ADR 0180) the session is short: 15 minutes idle and 4 hours at most.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -26585,7 +26614,8 @@
         "tags": [
           "operations"
         ],
-        "x-oasis-access": "sched.view"
+        "x-oasis-access": "sched.view",
+        "x-oasis-kiosk": "none"
       }
     },
     "/api/v1/bays": {
@@ -26646,7 +26676,8 @@
         "tags": [
           "operations"
         ],
-        "x-oasis-access": "sched.view"
+        "x-oasis-access": "sched.view",
+        "x-oasis-kiosk": "none"
       }
     },
     "/api/v1/bays/{id}": {
@@ -28637,7 +28668,8 @@
         "tags": [
           "operations"
         ],
-        "x-oasis-access": "sched.view"
+        "x-oasis-access": "sched.view",
+        "x-oasis-kiosk": "none"
       }
     },
     "/api/v1/calendar/summary": {
@@ -28794,7 +28826,8 @@
         "tags": [
           "operations"
         ],
-        "x-oasis-access": "sched.view"
+        "x-oasis-access": "sched.view",
+        "x-oasis-kiosk": "none"
       }
     },
     "/api/v1/catalog": {
@@ -33176,7 +33209,8 @@
         "tags": [
           "catalog"
         ],
-        "x-oasis-access": "authenticated"
+        "x-oasis-access": "authenticated",
+        "x-oasis-kiosk": "none"
       },
       "post": {
         "description": "`key` is immutable once created: a lowercase letter, then letters, digits or underscores (up to 32). `label` up to 40 characters, unique (case-insensitively). `sort` defaults to after the last (size order, smallest first). 409 CLASS_KEY_TAKEN; 422 CLASS_LIMIT past 12 sizes. A new size has no prices (“not set”). Publishes `settings.changed {section: \"catalog\", key: \"vehicle_classes\"}`.",
@@ -34719,7 +34753,8 @@
         "tags": [
           "customers"
         ],
-        "x-oasis-access": "cli.view"
+        "x-oasis-access": "cli.view",
+        "x-oasis-kiosk": "none"
       },
       "post": {
         "description": "The phone is normalised to E.164 and is the identity: an existing live customer is returned with `created: false` and only missing details are filled. Contact fields come back null without cli.contact. Without cli.contact a number that belongs to an existing customer answers a masked match (`masked: true`: initials only, no id, contact or vehicles) and the record is left untouched, so the box cannot be used to find out who owns a number; find the customer by name instead.",
@@ -35163,7 +35198,8 @@
         "tags": [
           "customers"
         ],
-        "x-oasis-access": "sched.edit"
+        "x-oasis-access": "sched.edit",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/customers/{id}/card-link": {
@@ -35493,7 +35529,8 @@
         "tags": [
           "square"
         ],
-        "x-oasis-access": "cli.view"
+        "x-oasis-access": "cli.view",
+        "x-oasis-kiosk": "none"
       }
     },
     "/api/v1/customers/{id}/cards/{cardId}": {
@@ -35906,7 +35943,8 @@
         "tags": [
           "customers"
         ],
-        "x-oasis-access": "cli.view"
+        "x-oasis-access": "cli.view",
+        "x-oasis-kiosk": "none"
       }
     },
     "/api/v1/customers/{id}/identity/confirm": {
@@ -38073,7 +38111,8 @@
         "tags": [
           "memberships"
         ],
-        "x-oasis-access": "cli.view"
+        "x-oasis-access": "cli.view",
+        "x-oasis-kiosk": "none"
       }
     },
     "/api/v1/customers/{id}/messages": {
@@ -38440,7 +38479,8 @@
         "tags": [
           "messages"
         ],
-        "x-oasis-access": "cli.view"
+        "x-oasis-access": "cli.view",
+        "x-oasis-kiosk": "none"
       }
     },
     "/api/v1/customers/{id}/messages/read": {
@@ -38484,7 +38524,8 @@
         "tags": [
           "messages"
         ],
-        "x-oasis-access": "msg.send"
+        "x-oasis-access": "msg.send",
+        "x-oasis-kiosk": "none"
       }
     },
     "/api/v1/customers/{id}/sms-consent": {
@@ -38591,7 +38632,8 @@
         "tags": [
           "customers"
         ],
-        "x-oasis-access": "cli.view"
+        "x-oasis-access": "cli.view",
+        "x-oasis-kiosk": "none"
       },
       "put": {
         "description": "`optedIn: true` records staff-attested consent. `optedOut: true` records a manual opt-out (every text to the number stops, emergencies included); `optedOut: false` lifts a MANUAL opt-out only. A STOP the customer texted is refused with 422 SMS_STOP_ACTIVE: they must reply START.",
@@ -42933,7 +42975,8 @@
         "tags": [
           "realtime"
         ],
-        "x-oasis-access": "authenticated"
+        "x-oasis-access": "authenticated",
+        "x-oasis-kiosk": "none"
       }
     },
     "/api/v1/identity/links/kill": {
@@ -51243,7 +51286,8 @@
         "tags": [
           "square"
         ],
-        "x-oasis-access": "pay.collect | pay.reports"
+        "x-oasis-access": "pay.collect | pay.reports",
+        "x-oasis-kiosk": "none"
       },
       "post": {
         "description": "Staff confirm a charge on one of the client’s saved cards whose consent covers `balance` (plan decision 6: only after staff confirm, with the client’s OK). CreatePayment (the card, its Square customer, autocomplete, `reference_id` the charge, a note naming the invoice) is sent before the command’s transaction and never while the invoice is locked; the payment is recorded as a confirmed Square `pay` (rule `charge`, the ledger reason \"Balance\"). 201 `{charge, invoice}` charged; 202 the same with `charge.state` `unknown` when Square did not answer (the job square.charges.resolve sends the same request with the same key and records it; nothing is charged twice). 422 `CARD_DECLINED` with the plain reason in `detail` (the charge is kept as `declined`); 422 `CARD_NOT_USABLE` (removed, expired, or no consent for balances), 422 `PAY_AMOUNT_INVALID` (more than the balance), 422 `PAY_NOTHING_TO_COLLECT`, 409 `CARD_CHARGE_IN_PROGRESS` (another charge waits for Square), 409 `CARD_PAYMENTS_OFF`, 409 `SQUARE_WRITES_OFF`. Idempotent: the same key answers the stored result. Audited (`card.charge_started`, `card.charged` / `card.charge_declined`).",
@@ -53966,7 +54010,8 @@
           "square"
         ],
         "x-oasis-access": "pay.collect",
-        "x-oasis-idempotency": "required"
+        "x-oasis-idempotency": "required",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/invoices/{id}/card-charges/{chargeId}/not-charged": {
@@ -56897,7 +56942,8 @@
           "payments"
         ],
         "x-oasis-access": "pay.collect",
-        "x-oasis-idempotency": "required"
+        "x-oasis-idempotency": "required",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/invoices/{id}/credits": {
@@ -59712,7 +59758,8 @@
           "payments"
         ],
         "x-oasis-access": "pay.collect",
-        "x-oasis-idempotency": "required"
+        "x-oasis-idempotency": "required",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/invoices/{id}/payments": {
@@ -61329,7 +61376,8 @@
           "payments"
         ],
         "x-oasis-access": "pay.collect",
-        "x-oasis-idempotency": "required"
+        "x-oasis-idempotency": "required",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/invoices/{id}/receipt": {
@@ -62491,7 +62539,8 @@
           "payments"
         ],
         "x-oasis-access": "msg.send | pay.collect",
-        "x-oasis-idempotency": "required"
+        "x-oasis-idempotency": "required",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/invoices/{id}/refunds": {
@@ -69587,7 +69636,8 @@
           "payments"
         ],
         "x-oasis-access": "pay.collect",
-        "x-oasis-idempotency": "required"
+        "x-oasis-idempotency": "required",
+        "x-oasis-kiosk": "actor"
       }
     },
     "/api/v1/invoices/{id}/void": {
@@ -71156,6 +71206,1535 @@
         ],
         "x-oasis-access": "pay.void",
         "x-oasis-idempotency": "required"
+      }
+    },
+    "/api/v1/kiosk": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "ageDays": {
+                          "anyOf": [
+                            {
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "set": {
+                          "type": "boolean"
+                        },
+                        "setAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "setBy": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "set",
+                        "setAt",
+                        "setBy",
+                        "ageDays"
+                      ],
+                      "type": "object"
+                    },
+                    "devices": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "createdBy": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "failedAttempts": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "lastIp": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "lastSeenAt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "lastUa": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "locksAt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "enum": [
+                              "unlocked",
+                              "locked",
+                              "locked_out",
+                              "revoked"
+                            ],
+                            "type": "string"
+                          },
+                          "version": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "state",
+                          "locksAt",
+                          "lastSeenAt",
+                          "lastIp",
+                          "lastUa",
+                          "failedAttempts",
+                          "createdAt",
+                          "createdBy",
+                          "version"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "recent": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "action": {
+                            "type": "string"
+                          },
+                          "at": {
+                            "type": "string"
+                          },
+                          "by": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "deviceName": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "at",
+                          "action",
+                          "label",
+                          "by",
+                          "deviceName"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "staff": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "listed": {
+                            "type": "boolean"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "enum": [
+                              "active",
+                              "invited",
+                              "inactive"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "status",
+                          "listed"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "thisDeviceId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "version": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "enabled",
+                    "version",
+                    "code",
+                    "thisDeviceId",
+                    "devices",
+                    "staff",
+                    "recent"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Settings → Kiosk: mode, code age, devices, who shows on the kiosk, recent kiosk events",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "team.roles"
+      }
+    },
+    "/api/v1/kiosk/code": {
+      "put": {
+        "description": "8 digits, never starting with 0218, no repeats, runs, patterns, dates, common codes or one of the last 3 codes: 422 KIOSK_CODE_REJECTED with the rule in errors[0].message. The code is never stored or logged in clear.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "maxLength": 32,
+                    "type": "string"
+                  },
+                  "generate": {
+                    "enum": [
+                      true
+                    ],
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "setAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "setAt"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Set the shop code ({code}) or generate one ({generate: true}, shown once); locks every kiosk now",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "team.roles"
+      }
+    },
+    "/api/v1/kiosk/devices": {
+      "post": {
+        "description": "409 KIOSK_DEVICE_EXISTS when this browser already is a kiosk. While kiosk mode is on the manager’s own session ends (signedOut: true) and the browser goes to the keypad.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "maxLength": 40,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "device": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "createdBy": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "failedAttempts": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "lastIp": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastSeenAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastUa": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "locksAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "unlocked",
+                            "locked",
+                            "locked_out",
+                            "revoked"
+                          ],
+                          "type": "string"
+                        },
+                        "version": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "state",
+                        "locksAt",
+                        "lastSeenAt",
+                        "lastIp",
+                        "lastUa",
+                        "failedAttempts",
+                        "createdAt",
+                        "createdBy",
+                        "version"
+                      ],
+                      "type": "object"
+                    },
+                    "signedOut": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "device",
+                    "signedOut"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "“Make this a kiosk”: register this browser; sets the device cookie (400 days)",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "team.roles"
+      }
+    },
+    "/api/v1/kiosk/devices/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "summary": "Remove a kiosk device: its cookie stops working for good and its kiosk session ends",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "team.roles"
+      },
+      "patch": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "maxLength": 40,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "version": {
+                    "maximum": 9007199254740991,
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "name",
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "createdBy": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "failedAttempts": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "lastIp": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastSeenAt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastUa": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "locksAt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "enum": [
+                        "unlocked",
+                        "locked",
+                        "locked_out",
+                        "revoked"
+                      ],
+                      "type": "string"
+                    },
+                    "version": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "state",
+                    "locksAt",
+                    "lastSeenAt",
+                    "lastIp",
+                    "lastUa",
+                    "failedAttempts",
+                    "createdAt",
+                    "createdBy",
+                    "version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Rename a kiosk device",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "team.roles"
+      }
+    },
+    "/api/v1/kiosk/devices/{id}/clear-lockout": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "createdBy": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "failedAttempts": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "lastIp": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastSeenAt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastUa": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "locksAt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "enum": [
+                        "unlocked",
+                        "locked",
+                        "locked_out",
+                        "revoked"
+                      ],
+                      "type": "string"
+                    },
+                    "version": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "state",
+                    "locksAt",
+                    "lastSeenAt",
+                    "lastIp",
+                    "lastUa",
+                    "failedAttempts",
+                    "createdAt",
+                    "createdBy",
+                    "version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Clear a kiosk’s wrong-code lockout (the counter starts over)",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "team.roles"
+      }
+    },
+    "/api/v1/kiosk/devices/{id}/lock": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "summary": "Lock one kiosk now",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "team.roles"
+      }
+    },
+    "/api/v1/kiosk/lock": {
+      "post": {
+        "description": "403 NOT_A_KIOSK for a signed-in person.",
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        },
+        "summary": "Lock this kiosk now (the keypad shows again); clears the kiosk session cookie",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "authenticated",
+        "x-oasis-kiosk": "none"
+      }
+    },
+    "/api/v1/kiosk/lock-all": {
+      "post": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "locked": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "locked"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Lock every kiosk now",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "team.roles"
+      }
+    },
+    "/api/v1/kiosk/me": {
+      "get": {
+        "description": "403 NOT_A_KIOSK for a signed-in person (their GET /me answers instead).",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "businessTz": {
+                      "type": "string"
+                    },
+                    "csrfToken": {
+                      "type": "string"
+                    },
+                    "device": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "type": "object"
+                    },
+                    "kind": {
+                      "enum": [
+                        "kiosk"
+                      ],
+                      "type": "string"
+                    },
+                    "limits": {
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    "lock": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "locksAt": {
+                          "type": "string"
+                        },
+                        "locksAtLabel": {
+                          "type": "string"
+                        },
+                        "rule": {
+                          "enum": [
+                            "closing",
+                            "previous_day",
+                            "two_hours"
+                          ],
+                          "type": "string"
+                        },
+                        "unlockedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "unlockedAt",
+                        "locksAt",
+                        "locksAtLabel",
+                        "rule"
+                      ],
+                      "type": "object"
+                    },
+                    "permissions": {
+                      "additionalProperties": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "on": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "on"
+                        ],
+                        "type": "object"
+                      },
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    "serverTime": {
+                      "type": "string"
+                    },
+                    "staff": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "avatarColor": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "bayStaff": {
+                            "type": "boolean"
+                          },
+                          "first": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "initials": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "first",
+                          "initials",
+                          "avatarColor",
+                          "title",
+                          "bayStaff"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "device",
+                    "lock",
+                    "permissions",
+                    "limits",
+                    "csrfToken",
+                    "staff",
+                    "businessTz",
+                    "serverTime"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "The unlocked kiosk: device, lock time, permissions, CSRF token and the employee picker list",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "authenticated",
+        "x-oasis-kiosk": "none"
+      }
+    },
+    "/api/v1/kiosk/settings": {
+      "put": {
+        "description": "Turning it on needs a shop code (409 KIOSK_CODE_NOT_SET); turning it off ends every kiosk session. `version` is the version GET /kiosk returned (412 VERSION_CONFLICT when it changed).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "version": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "enabled",
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "version": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "enabled",
+                    "version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Turn kiosk mode on or off",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "team.roles"
+      }
+    },
+    "/api/v1/kiosk/staff": {
+      "get": {
+        "description": "403 NOT_A_KIOSK for a signed-in person.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "avatarColor": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "bayStaff": {
+                            "type": "boolean"
+                          },
+                          "first": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "initials": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "first",
+                          "initials",
+                          "avatarColor",
+                          "title",
+                          "bayStaff"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Who the employee picker lists: active or invited employees shown on the kiosk, bay staff first",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "authenticated",
+        "x-oasis-kiosk": "none"
+      }
+    },
+    "/api/v1/kiosk/staff/{employeeId}": {
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "employeeId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "listed": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "listed"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "listed": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "active",
+                        "invited",
+                        "inactive"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "status",
+                    "listed"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "“Shows on the kiosk”: whether the employee picker lists this person",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "team.roles"
+      }
+    },
+    "/api/v1/kiosk/status": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "device": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "name"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "lockedOut": {
+                      "type": "boolean"
+                    },
+                    "retryAfterSec": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "unlocked": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "locksAt": {
+                              "type": "string"
+                            },
+                            "locksAtLabel": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "locksAt",
+                            "locksAtLabel"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "enabled",
+                    "device",
+                    "unlocked",
+                    "lockedOut",
+                    "retryAfterSec"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Kiosk mode on or off, and this browser’s kiosk state (device name, lock time, lockout, wait)",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "public"
+      }
+    },
+    "/api/v1/kiosk/unlock": {
+      "post": {
+        "description": "403 KIOSK_DEVICE_UNKNOWN (no live device cookie: the code is never checked); 409 KIOSK_OFF or KIOSK_CODE_NOT_SET; 401 KIOSK_CODE_WRONG with meta.retryAfterSec; 429 KIOSK_THROTTLED with Retry-After (the code is not checked); 423 KIOSK_LOCKED_OUT (20 wrong codes in a row: a manager clears it). Success ends the device’s previous kiosk session, signs out a user session on the device and sets the device cookie again (400 days).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "pattern": "^\\d{8}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "businessTz": {
+                      "type": "string"
+                    },
+                    "csrfToken": {
+                      "type": "string"
+                    },
+                    "device": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "type": "object"
+                    },
+                    "kind": {
+                      "enum": [
+                        "kiosk"
+                      ],
+                      "type": "string"
+                    },
+                    "limits": {
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    "lock": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "locksAt": {
+                          "type": "string"
+                        },
+                        "locksAtLabel": {
+                          "type": "string"
+                        },
+                        "rule": {
+                          "enum": [
+                            "closing",
+                            "previous_day",
+                            "two_hours"
+                          ],
+                          "type": "string"
+                        },
+                        "unlockedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "unlockedAt",
+                        "locksAt",
+                        "locksAtLabel",
+                        "rule"
+                      ],
+                      "type": "object"
+                    },
+                    "permissions": {
+                      "additionalProperties": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "on": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "on"
+                        ],
+                        "type": "object"
+                      },
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    "serverTime": {
+                      "type": "string"
+                    },
+                    "staff": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "avatarColor": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "bayStaff": {
+                            "type": "boolean"
+                          },
+                          "first": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "initials": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "first",
+                          "initials",
+                          "avatarColor",
+                          "title",
+                          "bayStaff"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "device",
+                    "lock",
+                    "permissions",
+                    "limits",
+                    "csrfToken",
+                    "staff",
+                    "businessTz",
+                    "serverTime"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "security": [],
+        "summary": "Unlock this registered kiosk with the shop code; sets the kiosk session cookie until the lock time",
+        "tags": [
+          "kiosk"
+        ],
+        "x-oasis-access": "public"
       }
     },
     "/api/v1/leads": {
@@ -73026,6 +74605,29 @@
                     "isSuperAdmin": {
                       "type": "boolean"
                     },
+                    "kioskDevice": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "limits": {
                       "additionalProperties": {
                         "anyOf": [
@@ -73265,7 +74867,8 @@
                     "preferences",
                     "viewAs",
                     "csrfToken",
-                    "session"
+                    "session",
+                    "kioskDevice"
                   ],
                   "type": "object"
                 }
@@ -73450,6 +75053,29 @@
                     "isSuperAdmin": {
                       "type": "boolean"
                     },
+                    "kioskDevice": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "limits": {
                       "additionalProperties": {
                         "anyOf": [
@@ -73689,7 +75315,8 @@
                     "preferences",
                     "viewAs",
                     "csrfToken",
-                    "session"
+                    "session",
+                    "kioskDevice"
                   ],
                   "type": "object"
                 }
@@ -76536,7 +78163,8 @@
         "tags": [
           "memberships"
         ],
-        "x-oasis-access": "cli.view"
+        "x-oasis-access": "cli.view",
+        "x-oasis-kiosk": "none"
       }
     },
     "/api/v1/membership-plans/rules/{id}": {
@@ -90794,7 +92422,8 @@
         "tags": [
           "messages"
         ],
-        "x-oasis-access": "msg.send"
+        "x-oasis-access": "msg.send",
+        "x-oasis-kiosk": "none"
       }
     },
     "/api/v1/meta/now": {
@@ -90965,7 +92594,8 @@
         "tags": [
           "operations"
         ],
-        "x-oasis-access": "sched.view"
+        "x-oasis-access": "sched.view",
+        "x-oasis-kiosk": "none"
       }
     },
     "/api/v1/ops/kpis": {
@@ -91095,7 +92725,8 @@
         "tags": [
           "operations"
         ],
-        "x-oasis-access": "sched.view"
+        "x-oasis-access": "sched.view",
+        "x-oasis-kiosk": "none"
       }
     },
     "/api/v1/ops/snapshot": {
@@ -94618,7 +96249,8 @@
         "tags": [
           "operations"
         ],
-        "x-oasis-access": "sched.view"
+        "x-oasis-access": "sched.view",
+        "x-oasis-kiosk": "none"
       }
     },
     "/api/v1/payments/approvals": {
@@ -108562,6 +110194,785 @@
         "x-oasis-access": "public"
       }
     },
+    "/api/v1/reports/employee-activity": {
+      "get": {
+        "description": "Counts per employee and per day from the staff events (kiosk and signed-in), the ledger and the messages. Amounts are null without pay.reports. With employeeId the cars that employee touched, step by step. Not built yet: answers 501 NOT_BUILT (ADR 0180 wave K2b).",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "employeeId",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "amounts": {
+                      "type": "boolean"
+                    },
+                    "cars": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "appointmentId": {
+                            "type": "string"
+                          },
+                          "bayMinutes": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "customer": {
+                            "type": "string"
+                          },
+                          "date": {
+                            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                            "type": "string"
+                          },
+                          "paidCents": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "seq": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "steps": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "at": {
+                                  "type": "string"
+                                },
+                                "by": {
+                                  "type": "string"
+                                },
+                                "kind": {
+                                  "enum": [
+                                    "confirm",
+                                    "arrive",
+                                    "assign_bay",
+                                    "start",
+                                    "complete",
+                                    "notify_ready",
+                                    "pickup",
+                                    "pickup_reopen",
+                                    "prep_bay",
+                                    "reschedule",
+                                    "update",
+                                    "book",
+                                    "walk_in",
+                                    "customer_create",
+                                    "addon_add",
+                                    "addon_remove",
+                                    "size_change",
+                                    "checklist",
+                                    "photo",
+                                    "payment",
+                                    "tip",
+                                    "receipt",
+                                    "payment_link",
+                                    "text",
+                                    "arrival_link",
+                                    "worker_set"
+                                  ],
+                                  "type": "string"
+                                },
+                                "via": {
+                                  "enum": [
+                                    "kiosk",
+                                    "signed_in"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "at",
+                                "by",
+                                "via"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "vehicle": {
+                            "type": "string"
+                          },
+                          "worker": {
+                            "anyOf": [
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "name"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "appointmentId",
+                          "seq",
+                          "customer",
+                          "vehicle",
+                          "date",
+                          "worker",
+                          "steps",
+                          "bayMinutes",
+                          "paidCents"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "employees": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "avatarColor": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "days": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "addons": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "bayMinutes": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "avg": {
+                                      "anyOf": [
+                                        {
+                                          "maximum": 9007199254740991,
+                                          "minimum": -9007199254740991,
+                                          "type": "integer"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "cars": {
+                                      "maximum": 9007199254740991,
+                                      "minimum": -9007199254740991,
+                                      "type": "integer"
+                                    },
+                                    "total": {
+                                      "maximum": 9007199254740991,
+                                      "minimum": -9007199254740991,
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "required": [
+                                    "total",
+                                    "avg",
+                                    "cars"
+                                  ],
+                                  "type": "object"
+                                },
+                                "baysStarted": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "bookings": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "checkIns": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "checklistTasks": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "completed": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "date": {
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                                  "type": "string"
+                                },
+                                "payments": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "amountCents": {
+                                      "anyOf": [
+                                        {
+                                          "maximum": 9007199254740991,
+                                          "minimum": -9007199254740991,
+                                          "type": "integer"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "count": {
+                                      "maximum": 9007199254740991,
+                                      "minimum": -9007199254740991,
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "required": [
+                                    "count",
+                                    "amountCents"
+                                  ],
+                                  "type": "object"
+                                },
+                                "photos": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "pickedUp": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "readyTexts": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "sizeChanges": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "textsSent": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "walkIns": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "checkIns",
+                                "baysStarted",
+                                "completed",
+                                "pickedUp",
+                                "readyTexts",
+                                "bookings",
+                                "walkIns",
+                                "addons",
+                                "sizeChanges",
+                                "checklistTasks",
+                                "photos",
+                                "textsSent",
+                                "payments",
+                                "bayMinutes",
+                                "date"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "initials": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "enum": [
+                              "active",
+                              "invited",
+                              "inactive"
+                            ],
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "totals": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "addons": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "bayMinutes": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "avg": {
+                                    "anyOf": [
+                                      {
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "cars": {
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  },
+                                  "total": {
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "total",
+                                  "avg",
+                                  "cars"
+                                ],
+                                "type": "object"
+                              },
+                              "baysStarted": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "bookings": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "checkIns": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "checklistTasks": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "completed": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "payments": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "amountCents": {
+                                    "anyOf": [
+                                      {
+                                        "maximum": 9007199254740991,
+                                        "minimum": -9007199254740991,
+                                        "type": "integer"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "count": {
+                                    "maximum": 9007199254740991,
+                                    "minimum": -9007199254740991,
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "count",
+                                  "amountCents"
+                                ],
+                                "type": "object"
+                              },
+                              "photos": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "pickedUp": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "readyTexts": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "sizeChanges": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "textsSent": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "walkIns": {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "checkIns",
+                              "baysStarted",
+                              "completed",
+                              "pickedUp",
+                              "readyTexts",
+                              "bookings",
+                              "walkIns",
+                              "addons",
+                              "sizeChanges",
+                              "checklistTasks",
+                              "photos",
+                              "textsSent",
+                              "payments",
+                              "bayMinutes"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "initials",
+                          "avatarColor",
+                          "title",
+                          "status",
+                          "totals",
+                          "days"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "from": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string"
+                    },
+                    "to": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string"
+                    },
+                    "tz": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to",
+                    "tz",
+                    "amounts",
+                    "employees"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Team activity per employee for a date range (at most 31 days, business time zone)",
+        "tags": [
+          "reports"
+        ],
+        "x-oasis-access": "team.edit"
+      }
+    },
+    "/api/v1/reports/employee-activity/{employeeId}/events": {
+      "get": {
+        "description": "Amounts are null without pay.reports. Not built yet: answers 501 NOT_BUILT (ADR 0180 wave K2b).",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "employeeId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "amountCents": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "appointmentId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "at": {
+                            "type": "string"
+                          },
+                          "customer": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "customerId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "deviceName": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "enum": [
+                              "confirm",
+                              "arrive",
+                              "assign_bay",
+                              "start",
+                              "complete",
+                              "notify_ready",
+                              "pickup",
+                              "pickup_reopen",
+                              "prep_bay",
+                              "reschedule",
+                              "update",
+                              "book",
+                              "walk_in",
+                              "customer_create",
+                              "addon_add",
+                              "addon_remove",
+                              "size_change",
+                              "checklist",
+                              "photo",
+                              "payment",
+                              "tip",
+                              "receipt",
+                              "payment_link",
+                              "text",
+                              "arrival_link",
+                              "worker_set"
+                            ],
+                            "type": "string"
+                          },
+                          "messageId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "meta": {
+                            "additionalProperties": {},
+                            "propertyNames": {
+                              "type": "string"
+                            },
+                            "type": "object"
+                          },
+                          "via": {
+                            "enum": [
+                              "kiosk",
+                              "signed_in"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "at",
+                          "kind",
+                          "via",
+                          "deviceName",
+                          "appointmentId",
+                          "customerId",
+                          "customer",
+                          "amountCents",
+                          "messageId",
+                          "meta"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "nextCursor": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "One employee’s activity timeline, newest first, paged",
+        "tags": [
+          "reports"
+        ],
+        "x-oasis-access": "team.edit"
+      }
+    },
     "/api/v1/roles": {
       "get": {
         "responses": {
@@ -109512,7 +111923,8 @@
         "tags": [
           "catalog"
         ],
-        "x-oasis-access": "authenticated"
+        "x-oasis-access": "authenticated",
+        "x-oasis-kiosk": "none"
       },
       "post": {
         "description": "Price in cents. Packages need `durationMin` (1 to 720); add-ons have no duration. Names are unique per kind, case-insensitively (422 otherwise). `category` names an active catalog category (422 otherwise); without it the default rule applies (add-ons → addons, tag tint → tint, detail/ceramic/exotic/executive → detail, else wash). The website fields start empty (PUT /catalog/services/{id}).",
@@ -115059,7 +117471,8 @@
         "tags": [
           "operations"
         ],
-        "x-oasis-access": "sched.view"
+        "x-oasis-access": "sched.view",
+        "x-oasis-kiosk": "none"
       }
     },
     "/api/v1/standing-series": {

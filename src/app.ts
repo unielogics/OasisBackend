@@ -15,6 +15,7 @@ import { registerHealthRoutes } from './http/routes/health.js'
 import { registerMetaRoutes } from './http/routes/meta.js'
 import { access, type RouteRecord } from './http/access.js'
 import type { Authorizer } from './http/authorizer.js'
+import { KIOSK_ROUTES, type KioskAllowlist } from './modules/kiosk/allowlist.js'
 import { installRawBodyParsers } from './http/webhooks.js'
 import type { AppInstance } from './http/types.js'
 import type { Clock } from './platform/clock.js'
@@ -41,6 +42,8 @@ export interface AppDeps {
   hookModules?: ApiModule[]
   /** Destination for log lines (tests capture them). */
   logStream?: DestinationStream
+  /** Override the kiosk route list (tests of the boot check); defaults to src/modules/kiosk/allowlist.ts. */
+  kioskRoutes?: KioskAllowlist
 }
 
 const REQUEST_ID = /^[A-Za-z0-9._-]{8,64}$/
@@ -84,8 +87,10 @@ export async function buildApp(deps: AppDeps): Promise<AppInstance> {
   app.decorate('hub', deps.hub ?? null)
   app.decorate('jobs', deps.jobs ?? null)
   app.decorate('routeRegistry', records)
+  const kioskRoutes = deps.kioskRoutes ?? KIOSK_ROUTES
+  app.decorate('kioskRoutes', kioskRoutes)
 
-  installRouteRegistry(app, records)
+  installRouteRegistry(app, records, kioskRoutes)
   installErrorHandling(app)
 
   await app.register(helmet, {

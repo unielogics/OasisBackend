@@ -7,6 +7,7 @@ import { messagingRuntimeFor, productionExternalAlerts, productionPaymentsPorts 
 import { authModule, peopleModule } from '../modules/auth/module.js'
 import { customersModule } from '../modules/customers/http/module.js'
 import { identityModule } from '../modules/identity/http/module.js'
+import { kioskModule } from '../modules/kiosk/module.js'
 import { leadsModule } from '../modules/leads/http/module.js'
 import { paymentsModule, createGatewayFor } from '../modules/payments/module.js'
 import { ledgerRevenueSource } from '../modules/payments/revenue.js'
@@ -83,6 +84,7 @@ export const squareModule: ApiModule = createSquareModule((deps) => ({ queue: ru
 export const apiModules: ApiModule[] = [
   authModule,
   peopleModule,
+  kioskModule,
   settingsModule,
   customersModule,
   identityModule,

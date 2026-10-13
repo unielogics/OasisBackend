@@ -366,6 +366,8 @@ CREATE TABLE public.activity_log (
     actor_type text DEFAULT 'staff'::text NOT NULL,
     actor_name text,
     meta jsonb DEFAULT '{}'::jsonb NOT NULL,
+    actor_employee_id uuid,
+    kiosk_device_id uuid,
     CONSTRAINT activity_log_actor_type_check CHECK ((actor_type = ANY (ARRAY['staff'::text, 'system'::text, 'automation'::text, 'customer'::text]))),
     CONSTRAINT activity_log_channels_check CHECK ((channels <@ ARRAY['sms'::text, 'email'::text, 'internal'::text, 'automation'::text, 'system'::text])),
     CONSTRAINT activity_log_text_check CHECK ((btrim(text) <> ''::text))
@@ -400,6 +402,7 @@ CREATE TABLE public.appointment_addons (
     list_price_cents integer,
     discount_bp integer,
     price_basis text DEFAULT 'legacy'::text NOT NULL,
+    added_by_employee_id uuid,
     CONSTRAINT appointment_addons_discount_bp_check CHECK (((discount_bp IS NULL) OR ((discount_bp >= 0) AND (discount_bp <= 10000)))),
     CONSTRAINT appointment_addons_list_price_cents_check CHECK (((list_price_cents IS NULL) OR (list_price_cents >= 0))),
     CONSTRAINT appointment_addons_name_check CHECK ((btrim(name) <> ''::text)),
@@ -452,6 +455,7 @@ CREATE TABLE public.appointment_photos (
     taken_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     uploaded_by uuid,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    uploaded_by_employee_id uuid,
     CONSTRAINT appointment_photos_bytes_check CHECK (((bytes IS NULL) OR (bytes >= 0))),
     CONSTRAINT appointment_photos_category_check CHECK ((category = ANY (ARRAY['arrival'::text, 'before'::text, 'after'::text, 'issue'::text]))),
     CONSTRAINT appointment_photos_check CHECK (((s3_key IS NOT NULL) OR ((category = 'issue'::text) AND (note IS NOT NULL) AND (btrim(note) <> ''::text)))),
@@ -511,6 +515,7 @@ CREATE TABLE public.appointments (
     list_price_cents integer,
     discount_bp integer,
     price_basis text DEFAULT 'legacy'::text NOT NULL,
+    created_by_employee_id uuid,
     CONSTRAINT appointments_categories_check CHECK (((array_position(categories, NULL::text) IS NULL) AND (cardinality(categories) <= 10))),
     CONSTRAINT appointments_check CHECK ((scheduled_end > scheduled_start)),
     CONSTRAINT appointments_check1 CHECK (((status <> 'cleaning'::text) OR (bay_id IS NOT NULL))),
@@ -734,7 +739,8 @@ CREATE TABLE public.audit_log (
     after jsonb,
     request_id text,
     idempotency_key text,
-    ip inet
+    ip inet,
+    kiosk_device_id uuid
 );
 
 --
@@ -1257,6 +1263,7 @@ CREATE TABLE public.employees (
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     deactivated_at timestamp with time zone,
+    kiosk_listed boolean DEFAULT true NOT NULL,
     CONSTRAINT employees_check CHECK (((status = 'inactive'::text) = (deactivated_at IS NOT NULL))),
     CONSTRAINT employees_employment_type_check CHECK ((employment_type = ANY (ARRAY['full_time'::text, 'part_time'::text, 'contractor'::text]))),
     CONSTRAINT employees_first_check CHECK ((btrim(first) <> ''::text)),
@@ -1472,6 +1479,72 @@ CREATE TABLE public.job_runs (
     last_duration_ms integer,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     CONSTRAINT job_runs_last_outcome_check CHECK ((last_outcome = ANY (ARRAY['running'::text, 'completed'::text, 'failed'::text])))
+);
+
+--
+-- Name: kiosk_codes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.kiosk_codes (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    code_hash text NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    created_by uuid,
+    created_by_name text,
+    retired_at timestamp with time zone,
+    CONSTRAINT kiosk_codes_code_hash_check CHECK ((code_hash ~~ '$scrypt$%'::text))
+);
+
+--
+-- Name: kiosk_devices; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.kiosk_devices (
+    id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    name text NOT NULL,
+    token_hash text NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    created_by uuid,
+    created_by_name text,
+    last_seen_at timestamp with time zone,
+    last_ip inet,
+    last_ua text,
+    failed_attempts integer DEFAULT 0 NOT NULL,
+    last_failed_at timestamp with time zone,
+    locked_out_at timestamp with time zone,
+    revoked_at timestamp with time zone,
+    revoked_by uuid,
+    version integer DEFAULT 1 NOT NULL,
+    CONSTRAINT kiosk_devices_failed_attempts_check CHECK ((failed_attempts >= 0)),
+    CONSTRAINT kiosk_devices_name_check CHECK (((btrim(name) <> ''::text) AND (length(name) <= 40))),
+    CONSTRAINT kiosk_devices_token_hash_check CHECK ((token_hash ~ '^[0-9a-f]{64}$'::text))
+);
+
+--
+-- Name: kiosk_sessions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.kiosk_sessions (
+    id text NOT NULL,
+    device_id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    code_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    lock_rule text NOT NULL,
+    csrf_secret text NOT NULL,
+    ip inet,
+    ua text,
+    last_seen_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    revoked_at timestamp with time zone,
+    revoked_reason text,
+    CONSTRAINT kiosk_sessions_check CHECK ((expires_at > created_at)),
+    CONSTRAINT kiosk_sessions_check1 CHECK (((revoked_at IS NULL) = (revoked_reason IS NULL))),
+    CONSTRAINT kiosk_sessions_id_check CHECK ((id ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT kiosk_sessions_lock_rule_check CHECK ((lock_rule = ANY (ARRAY['closing'::text, 'previous_day'::text, 'two_hours'::text]))),
+    CONSTRAINT kiosk_sessions_revoked_reason_check CHECK ((revoked_reason = ANY (ARRAY['lock'::text, 'lock_device'::text, 'lock_all'::text, 'code_changed'::text, 'device_revoked'::text, 'kiosk_off'::text, 'unlock_again'::text])))
 );
 
 --
@@ -2064,6 +2137,7 @@ CREATE TABLE public.payment_links (
     cancel_reason text,
     square_deleted_at timestamp with time zone,
     paid_square_payment_id text,
+    created_by_employee_id uuid,
     CONSTRAINT payment_links_cancel_reason_check CHECK (((cancel_reason IS NULL) OR (cancel_reason = ANY (ARRAY['superseded'::text, 'amount_changed'::text, 'paid_elsewhere'::text, 'invoice_canceled'::text, 'expired'::text, 'stale'::text, 'square_error'::text, 'deposit_paid'::text])))),
     CONSTRAINT payment_links_expected_cents_check CHECK ((expected_cents > 0)),
     CONSTRAINT payment_links_kind_check CHECK ((kind = ANY (ARRAY['checkout'::text, 'invoice'::text, 'square_order'::text, 'square_quick_pay'::text]))),
@@ -2396,6 +2470,7 @@ CREATE TABLE public.sessions (
     csrf_secret text NOT NULL,
     view_as_role_id uuid,
     revoked_at timestamp with time zone,
+    kiosk_device_id uuid,
     CONSTRAINT sessions_check CHECK ((idle_expires_at <= absolute_expires_at)),
     CONSTRAINT sessions_id_check CHECK ((id ~ '^[0-9a-f]{64}$'::text))
 );
@@ -3181,6 +3256,45 @@ CREATE TABLE public.square_subscription_invoices (
 );
 
 --
+-- Name: staff_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.staff_events (
+    id bigint NOT NULL,
+    location_id uuid NOT NULL,
+    at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    employee_id uuid,
+    employee_name text NOT NULL,
+    kind text NOT NULL,
+    appointment_id uuid,
+    customer_id uuid,
+    amount_cents integer,
+    ledger_event_id uuid,
+    message_id uuid,
+    via text NOT NULL,
+    kiosk_device_id uuid,
+    user_id uuid,
+    request_id text,
+    meta jsonb DEFAULT '{}'::jsonb NOT NULL,
+    CONSTRAINT staff_events_employee_name_check CHECK ((btrim(employee_name) <> ''::text)),
+    CONSTRAINT staff_events_kind_check CHECK ((kind = ANY (ARRAY['confirm'::text, 'arrive'::text, 'assign_bay'::text, 'start'::text, 'complete'::text, 'notify_ready'::text, 'pickup'::text, 'pickup_reopen'::text, 'prep_bay'::text, 'reschedule'::text, 'update'::text, 'book'::text, 'walk_in'::text, 'customer_create'::text, 'addon_add'::text, 'addon_remove'::text, 'size_change'::text, 'checklist'::text, 'photo'::text, 'payment'::text, 'tip'::text, 'receipt'::text, 'payment_link'::text, 'text'::text, 'arrival_link'::text, 'worker_set'::text]))),
+    CONSTRAINT staff_events_via_check CHECK ((via = ANY (ARRAY['kiosk'::text, 'signed_in'::text])))
+);
+
+--
+-- Name: staff_events_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+ALTER TABLE public.staff_events ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.staff_events_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+--
 -- Name: standing_occurrences; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3831,6 +3945,34 @@ ALTER TABLE ONLY public.job_checklist_items
 
 ALTER TABLE ONLY public.job_runs
     ADD CONSTRAINT job_runs_pkey PRIMARY KEY (name);
+
+--
+-- Name: kiosk_codes kiosk_codes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_codes
+    ADD CONSTRAINT kiosk_codes_pkey PRIMARY KEY (id);
+
+--
+-- Name: kiosk_devices kiosk_devices_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_devices
+    ADD CONSTRAINT kiosk_devices_pkey PRIMARY KEY (id);
+
+--
+-- Name: kiosk_devices kiosk_devices_token_hash_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_devices
+    ADD CONSTRAINT kiosk_devices_token_hash_key UNIQUE (token_hash);
+
+--
+-- Name: kiosk_sessions kiosk_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_sessions
+    ADD CONSTRAINT kiosk_sessions_pkey PRIMARY KEY (id);
 
 --
 -- Name: leads leads_location_id_phone_e164_key; Type: CONSTRAINT; Schema: public; Owner: -
@@ -4561,6 +4703,13 @@ ALTER TABLE ONLY public.square_subscription_invoices
     ADD CONSTRAINT square_subscription_invoices_square_invoice_id_key UNIQUE (square_invoice_id);
 
 --
+-- Name: staff_events staff_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.staff_events
+    ADD CONSTRAINT staff_events_pkey PRIMARY KEY (id);
+
+--
 -- Name: standing_occurrences standing_occurrences_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5080,6 +5229,36 @@ CREATE INDEX job_checklist_items_appointment_idx ON public.job_checklist_items U
 CREATE INDEX job_checklist_items_task_idx ON public.job_checklist_items USING btree (source_task_id) WHERE (source_task_id IS NOT NULL);
 
 --
+-- Name: kiosk_codes_current_uq; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX kiosk_codes_current_uq ON public.kiosk_codes USING btree (location_id) WHERE (retired_at IS NULL);
+
+--
+-- Name: kiosk_codes_history_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX kiosk_codes_history_idx ON public.kiosk_codes USING btree (location_id, created_at DESC);
+
+--
+-- Name: kiosk_devices_live_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX kiosk_devices_live_idx ON public.kiosk_devices USING btree (location_id) WHERE (revoked_at IS NULL);
+
+--
+-- Name: kiosk_sessions_live_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX kiosk_sessions_live_idx ON public.kiosk_sessions USING btree (device_id) WHERE (revoked_at IS NULL);
+
+--
+-- Name: kiosk_sessions_location_live_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX kiosk_sessions_location_live_idx ON public.kiosk_sessions USING btree (location_id) WHERE (revoked_at IS NULL);
+
+--
 -- Name: leads_customer_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5114,6 +5293,12 @@ CREATE INDEX ledger_events_customer_idx ON public.ledger_events USING btree (cus
 --
 
 CREATE INDEX ledger_events_invoice_idx ON public.ledger_events USING btree (invoice_id, occurred_at DESC, seq DESC);
+
+--
+-- Name: ledger_events_pay_actor_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ledger_events_pay_actor_idx ON public.ledger_events USING btree (actor_employee_id, occurred_at) WHERE (type = 'pay'::text);
 
 --
 -- Name: ledger_events_pending_idx; Type: INDEX; Schema: public; Owner: -
@@ -5246,6 +5431,12 @@ CREATE INDEX messages_in_flight_idx ON public.messages USING btree (status) WHER
 --
 
 CREATE INDEX messages_provider_idx ON public.messages USING btree (provider_message_id) WHERE (provider_message_id IS NOT NULL);
+
+--
+-- Name: messages_staff_sender_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX messages_staff_sender_idx ON public.messages USING btree (sender_employee_id, queued_at) WHERE (sender_kind = 'staff'::text);
 
 --
 -- Name: messages_thread_idx; Type: INDEX; Schema: public; Owner: -
@@ -5674,6 +5865,24 @@ CREATE INDEX square_subscription_invoices_membership_idx ON public.square_subscr
 CREATE INDEX square_subscription_invoices_order_idx ON public.square_subscription_invoices USING btree (square_order_id) WHERE (square_order_id IS NOT NULL);
 
 --
+-- Name: staff_events_appt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX staff_events_appt_idx ON public.staff_events USING btree (appointment_id, at);
+
+--
+-- Name: staff_events_emp_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX staff_events_emp_at_idx ON public.staff_events USING btree (employee_id, at);
+
+--
+-- Name: staff_events_loc_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX staff_events_loc_at_idx ON public.staff_events USING btree (location_id, at);
+
+--
 -- Name: standing_occurrences_appointment_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5944,11 +6153,32 @@ CREATE TRIGGER realtime_events_notify AFTER INSERT ON public.realtime_events FOR
 CREATE TRIGGER services_default_category BEFORE INSERT ON public.services FOR EACH ROW EXECUTE FUNCTION public.services_default_category();
 
 --
+-- Name: activity_log activity_log_actor_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.activity_log
+    ADD CONSTRAINT activity_log_actor_employee_id_fkey FOREIGN KEY (actor_employee_id) REFERENCES public.employees(id) ON DELETE SET NULL;
+
+--
 -- Name: activity_log activity_log_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.activity_log
     ADD CONSTRAINT activity_log_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id) ON DELETE CASCADE;
+
+--
+-- Name: activity_log activity_log_kiosk_device_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.activity_log
+    ADD CONSTRAINT activity_log_kiosk_device_id_fkey FOREIGN KEY (kiosk_device_id) REFERENCES public.kiosk_devices(id) ON DELETE SET NULL;
+
+--
+-- Name: appointment_addons appointment_addons_added_by_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointment_addons
+    ADD CONSTRAINT appointment_addons_added_by_employee_id_fkey FOREIGN KEY (added_by_employee_id) REFERENCES public.employees(id) ON DELETE SET NULL;
 
 --
 -- Name: appointment_addons appointment_addons_added_by_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -6007,6 +6237,13 @@ ALTER TABLE ONLY public.appointment_photos
     ADD CONSTRAINT appointment_photos_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id) ON DELETE CASCADE;
 
 --
+-- Name: appointment_photos appointment_photos_uploaded_by_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointment_photos
+    ADD CONSTRAINT appointment_photos_uploaded_by_employee_id_fkey FOREIGN KEY (uploaded_by_employee_id) REFERENCES public.employees(id) ON DELETE SET NULL;
+
+--
 -- Name: appointment_photos appointment_photos_uploaded_by_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6026,6 +6263,13 @@ ALTER TABLE ONLY public.appointments
 
 ALTER TABLE ONLY public.appointments
     ADD CONSTRAINT appointments_bay_id_fkey FOREIGN KEY (bay_id) REFERENCES public.bays(id);
+
+--
+-- Name: appointments appointments_created_by_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.appointments
+    ADD CONSTRAINT appointments_created_by_employee_id_fkey FOREIGN KEY (created_by_employee_id) REFERENCES public.employees(id) ON DELETE SET NULL;
 
 --
 -- Name: appointments appointments_created_by_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -6609,6 +6853,62 @@ ALTER TABLE ONLY public.job_checklist_items
     ADD CONSTRAINT job_checklist_items_source_task_id_fkey FOREIGN KEY (source_task_id) REFERENCES public.checklist_tasks(id) ON DELETE SET NULL;
 
 --
+-- Name: kiosk_codes kiosk_codes_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_codes
+    ADD CONSTRAINT kiosk_codes_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: kiosk_codes kiosk_codes_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_codes
+    ADD CONSTRAINT kiosk_codes_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: kiosk_devices kiosk_devices_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_devices
+    ADD CONSTRAINT kiosk_devices_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: kiosk_devices kiosk_devices_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_devices
+    ADD CONSTRAINT kiosk_devices_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: kiosk_devices kiosk_devices_revoked_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_devices
+    ADD CONSTRAINT kiosk_devices_revoked_by_fkey FOREIGN KEY (revoked_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: kiosk_sessions kiosk_sessions_code_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_sessions
+    ADD CONSTRAINT kiosk_sessions_code_id_fkey FOREIGN KEY (code_id) REFERENCES public.kiosk_codes(id) ON DELETE CASCADE;
+
+--
+-- Name: kiosk_sessions kiosk_sessions_device_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_sessions
+    ADD CONSTRAINT kiosk_sessions_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.kiosk_devices(id) ON DELETE CASCADE;
+
+--
+-- Name: kiosk_sessions kiosk_sessions_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.kiosk_sessions
+    ADD CONSTRAINT kiosk_sessions_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
 -- Name: leads leads_booked_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -7057,6 +7357,13 @@ ALTER TABLE ONLY public.password_resets
     ADD CONSTRAINT password_resets_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 --
+-- Name: payment_links payment_links_created_by_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.payment_links
+    ADD CONSTRAINT payment_links_created_by_employee_id_fkey FOREIGN KEY (created_by_employee_id) REFERENCES public.employees(id) ON DELETE SET NULL;
+
+--
 -- Name: payment_links payment_links_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -7244,6 +7551,13 @@ ALTER TABLE ONLY public.services
 
 ALTER TABLE ONLY public.services
     ADD CONSTRAINT services_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: sessions sessions_kiosk_device_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sessions
+    ADD CONSTRAINT sessions_kiosk_device_id_fkey FOREIGN KEY (kiosk_device_id) REFERENCES public.kiosk_devices(id) ON DELETE SET NULL;
 
 --
 -- Name: sessions sessions_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -7769,6 +8083,62 @@ ALTER TABLE ONLY public.square_subscription_invoices
 
 ALTER TABLE ONLY public.square_subscription_invoices
     ADD CONSTRAINT square_subscription_invoices_membership_id_fkey FOREIGN KEY (membership_id) REFERENCES public.memberships(id);
+
+--
+-- Name: staff_events staff_events_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.staff_events
+    ADD CONSTRAINT staff_events_appointment_id_fkey FOREIGN KEY (appointment_id) REFERENCES public.appointments(id) ON DELETE SET NULL;
+
+--
+-- Name: staff_events staff_events_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.staff_events
+    ADD CONSTRAINT staff_events_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id) ON DELETE SET NULL;
+
+--
+-- Name: staff_events staff_events_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.staff_events
+    ADD CONSTRAINT staff_events_employee_id_fkey FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE SET NULL;
+
+--
+-- Name: staff_events staff_events_kiosk_device_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.staff_events
+    ADD CONSTRAINT staff_events_kiosk_device_id_fkey FOREIGN KEY (kiosk_device_id) REFERENCES public.kiosk_devices(id) ON DELETE SET NULL;
+
+--
+-- Name: staff_events staff_events_ledger_event_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.staff_events
+    ADD CONSTRAINT staff_events_ledger_event_id_fkey FOREIGN KEY (ledger_event_id) REFERENCES public.ledger_events(id);
+
+--
+-- Name: staff_events staff_events_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.staff_events
+    ADD CONSTRAINT staff_events_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+--
+-- Name: staff_events staff_events_message_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.staff_events
+    ADD CONSTRAINT staff_events_message_id_fkey FOREIGN KEY (message_id) REFERENCES public.messages(id) ON DELETE SET NULL;
+
+--
+-- Name: staff_events staff_events_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.staff_events
+    ADD CONSTRAINT staff_events_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE SET NULL;
 
 --
 -- Name: standing_occurrences standing_occurrences_appointment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

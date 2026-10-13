@@ -10,6 +10,7 @@ import type { Jobs } from '../platform/jobs.js'
 import type { RealtimeHub } from '../platform/realtime.js'
 import type { IdempotencyMode, RouteAccess, RouteRecord } from './access.js'
 import type { AuthContext, Authorizer } from './authorizer.js'
+import type { KioskAllowlist } from '../modules/kiosk/allowlist.js'
 
 export type AppInstance = FastifyInstance<
   RawServerDefault,
@@ -38,5 +39,7 @@ declare module 'fastify' {
     hub: RealtimeHub | null
     jobs: Jobs | null
     routeRegistry: readonly RouteRecord[]
+    /** The routes a kiosk may call (ADR 0180; src/modules/kiosk/allowlist.ts unless a test overrides it). */
+    kioskRoutes: KioskAllowlist
   }
 }

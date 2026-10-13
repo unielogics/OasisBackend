@@ -2,10 +2,20 @@
 //   resolve:    cookie -> live session -> person -> effective authority (RBAC engine, cached by rbac version) -> AuthContext
 //   requirePerm: the platform's permission check over the context's effective permissions
 //   verifyCsrf: synchronizer token (X-CSRF-Token) derived from the session's secret; layer 2 after the Origin check
+// Kiosk mode (ADR 0180): when no live user session comes with the request, the kiosk resolver may produce a kiosk context (a kiosk
+// session cookie plus the cookie of the live device it was opened on, while kiosk mode is on). A user session always wins: with both,
+// the request is the user's and X-Oasis-Employee is ignored.
 import type { FastifyRequest } from 'fastify'
 import type { Env } from '../../config/env.js'
-import { checkPermissions, type AuthContext, type Authorizer } from '../../http/authorizer.js'
+import {
+  checkPermissions,
+  isKioskContext,
+  type AuthContext,
+  type Authorizer,
+  type KioskAuthContext,
+} from '../../http/authorizer.js'
 import { AppError } from '../../platform/errors.js'
+import '../kiosk/problems.js'
 import { PERMISSION_KEY_SET } from '../rbac/catalog.js'
 import type { RbacService } from '../rbac/service.js'
 import { displayName, isSessionContext, type SessionAuthContext } from './context.js'
@@ -19,6 +29,13 @@ export interface SessionAuthorizerDeps {
   rbac: RbacService
   /** Location used when an employee has no employee_locations row yet. */
   defaultLocationId: string
+  /** Kiosk mode (ADR 0180); absent = no kiosk contexts. */
+  kiosk?: KioskResolver
+}
+
+export interface KioskResolver {
+  resolveContext(req: FastifyRequest, opts?: { touch?: boolean }): Promise<KioskAuthContext | null>
+  bindActor(req: FastifyRequest, ctx: KioskAuthContext, required: boolean): Promise<void>
 }
 
 export function createSessionAuthorizer(deps: SessionAuthorizerDeps): Authorizer {
@@ -29,9 +46,8 @@ export function createSessionAuthorizer(deps: SessionAuthorizerDeps): Authorizer
 
     async resolve(req: FastifyRequest, opts?: { touch?: boolean }): Promise<AuthContext | null> {
       const token = req.cookies?.[cookieName]
-      if (!token) return null
-      const rec = await deps.sessions.lookup(token, opts)
-      if (!rec) return null
+      const rec = token ? await deps.sessions.lookup(token, opts) : null
+      if (!rec) return deps.kiosk ? deps.kiosk.resolveContext(req, opts) : null
 
       const real = await deps.rbac.authorityFor(rec.employee.id, rec.rbacVersion)
       const canViewAs = real.isSuper
@@ -75,6 +91,7 @@ export function createSessionAuthorizer(deps: SessionAuthorizerDeps): Authorizer
         isSuper: authority.isSuper,
         viewAsRole,
         authority,
+        kioskDevice: rec.kioskDevice,
       }
       return ctx
     },
@@ -82,11 +99,18 @@ export function createSessionAuthorizer(deps: SessionAuthorizerDeps): Authorizer
     requirePerm: (ctx, perms, mode) => checkPermissions(ctx, perms, mode),
 
     verifyCsrf(req: FastifyRequest, ctx: AuthContext): void {
-      if (!isSessionContext(ctx)) return
       const header = req.headers['x-csrf-token']
       const given = Array.isArray(header) ? header[0] : header
-      const expected = csrfTokenFor(ctx.session.csrfSecret, ctx.session.id)
+      let expected: string
+      if (isKioskContext(ctx)) expected = csrfTokenFor(ctx.kiosk.csrfSecret, ctx.kiosk.sessionId)
+      else if (isSessionContext(ctx)) expected = csrfTokenFor(ctx.session.csrfSecret, ctx.session.id)
+      else return
       if (!given || !safeEqual(given, expected)) throw new AppError('CSRF_INVALID')
+    },
+
+    async bindKioskActor(req: FastifyRequest, ctx: KioskAuthContext, required: boolean): Promise<void> {
+      if (!deps.kiosk) throw new AppError('KIOSK_FORBIDDEN')
+      await deps.kiosk.bindActor(req, ctx, required)
     },
   }
 }

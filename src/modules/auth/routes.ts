@@ -1,7 +1,7 @@
 // /api/v1/auth/* and /api/v1/me*: sign-in, sessions, invites, password flows, preferences, view-as.
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import { access } from '../../http/access.js'
-import { auditContextOf } from '../../http/authorizer.js'
+import { auditContextOf, isKioskContext } from '../../http/authorizer.js'
 import { z } from '../../http/zod.js'
 import type { AppInstance } from '../../http/types.js'
 import * as audit from '../../platform/audit.js'
@@ -11,7 +11,7 @@ import { PERMISSIONS } from '../rbac/catalog.js'
 import { roleLimit } from '../rbac/engine.js'
 import { loadGrants } from '../rbac/repository.js'
 import { sessionContext, initials, type SessionAuthContext } from './context.js'
-import { clearSessionCookie, sessionCookieName, setSessionCookie } from './cookie.js'
+import { clearSessionCookie, kioskDeviceCookieName, sessionCookieName, setSessionCookie } from './cookie.js'
 import type { Identity } from './identity.js'
 import { csrfTokenFor } from './tokens.js'
 
@@ -65,6 +65,8 @@ export const MeResponse = z.object({
   }),
   csrfToken: z.string(),
   session: z.object({ expiresAt: z.string() }),
+  /** Signed in on a registered kiosk device (ADR 0180): the session is short (15 minutes idle, 4 hours) and the dashboard shows a bar. */
+  kioskDevice: z.object({ id: z.string(), name: z.string() }).nullable(),
 })
 
 const noStore = (reply: FastifyReply): void => void reply.header('Cache-Control', 'no-store')
@@ -147,6 +149,7 @@ export async function buildMe(
     },
     csrfToken: csrfTokenFor(ctx.session.csrfSecret, ctx.session.id),
     session: { expiresAt: ctx.session.absoluteExpiresAt.toISOString() },
+    kioskDevice: ctx.kioskDevice,
   }
 }
 
@@ -180,6 +183,8 @@ export function registerAuthRoutes(app: AppInstance, identityOf: IdentityProvide
       schema: {
         tags: ['auth'],
         summary: 'Sign in with email and password; sets the session cookie',
+        description:
+          'On a registered kiosk device (its device cookie, ADR 0180) the session is short: 15 minutes idle and 4 hours at most.',
         body: z.object({ email: Email, password: Password }).strict(),
         response: { 200: SignedInResponse },
       },
@@ -189,6 +194,7 @@ export function registerAuthRoutes(app: AppInstance, identityOf: IdentityProvide
       const r = await id.auth.login({
         ...req.body,
         currentToken: req.cookies?.[cookieName],
+        kioskDeviceToken: req.cookies?.[kioskDeviceCookieName(app.env)],
         ...clientMeta(req),
       })
       return signedIn(reply, r)
@@ -221,13 +227,14 @@ export function registerAuthRoutes(app: AppInstance, identityOf: IdentityProvide
       config: { access: access.authenticated() },
       schema: {
         tags: ['auth'],
-        summary: 'The synchronizer token to send as X-CSRF-Token on unsafe requests',
+        summary: 'The synchronizer token to send as X-CSRF-Token on unsafe requests (a signed-in person or an unlocked kiosk)',
         response: { 200: z.object({ csrfToken: z.string() }) },
       },
     },
     async (req, reply) => {
-      const ctx = sessionContext(req)
       noStore(reply)
+      if (isKioskContext(req.auth)) return { csrfToken: csrfTokenFor(req.auth.kiosk.csrfSecret, req.auth.kiosk.sessionId) }
+      const ctx = sessionContext(req)
       return { csrfToken: csrfTokenFor(ctx.session.csrfSecret, ctx.session.id) }
     },
   )

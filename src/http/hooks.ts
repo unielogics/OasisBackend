@@ -1,9 +1,11 @@
 import type { FastifyReply, FastifyRequest, RouteOptions } from 'fastify'
 import { AppError } from '../platform/errors.js'
+import { checkKioskAllowlist, kioskRouteMode, type KioskAllowlist } from '../modules/kiosk/allowlist.js'
 import { assertValidKey } from '../platform/idempotency.js'
 import type { Env } from '../config/env.js'
 import type { RouteRecord, RouteAccess } from './access.js'
 import { isIdempotentHandler } from './idempotent.js'
+import { isKioskContext } from './authorizer.js'
 import type { RateLimits } from './rate-limit.js'
 import type { AppInstance } from './types.js'
 
@@ -43,8 +45,17 @@ export function assertOriginAllowed(req: FastifyRequest, allowed: ReadonlySet<st
   if (req.headers.cookie) throw new AppError('ORIGIN_NOT_ALLOWED')
 }
 
-/** Boot-time enforcement: every route declares access; required-idempotency routes use idempotentHandler. */
-export function installRouteRegistry(app: AppInstance, records: RouteRecord[]): void {
+/** The kiosk module's public status route: when it is mounted (always in production) the kiosk route list is checked at boot. */
+const KIOSK_MODULE_ROUTE = 'GET /api/v1/kiosk/status'
+
+/**
+ * Boot-time enforcement: every route declares access; required-idempotency routes use idempotentHandler; the kiosk route list
+ * (ADR 0180) names only registered routes the kiosk's permissions can satisfy (checked once every route is registered).
+ */
+export function installRouteRegistry(app: AppInstance, records: RouteRecord[], kioskRoutes?: KioskAllowlist): void {
+  app.addHook('onReady', async () => {
+    if (records.some((r) => `${r.method} ${r.url}` === KIOSK_MODULE_ROUTE)) checkKioskAllowlist(records, kioskRoutes)
+  })
   app.addHook('onRoute', (route: RouteOptions) => {
     const methods = ([] as string[]).concat(route.method)
     const where = `${methods.join(',')} ${route.url}`
@@ -109,8 +120,16 @@ export function installRequestHooks(app: AppInstance, limits?: RateLimits): void
     await limits?.charge(req, reply)
     if (UNSAFE.has(req.method)) assertOriginAllowed(req, origins)
     if (!ctx) throw new AppError('UNAUTHENTICATED')
+    // A kiosk (ADR 0180) reaches only the routes on its list, before any permission check: everything else is 403, fail-closed.
+    const kiosk = isKioskContext(ctx) ? ctx : null
+    const kioskMode = kiosk ? kioskRouteMode(app.kioskRoutes, req.method, req.routeOptions.url) : null
     if (access.kind === 'permission') app.authorizer.requirePerm(ctx, access.perms, access.mode)
-    if (UNSAFE.has(req.method)) await app.authorizer.verifyCsrf?.(req, ctx)
+    if (UNSAFE.has(req.method)) {
+      if (kiosk && (!app.authorizer.verifyCsrf || !app.authorizer.bindKioskActor)) throw new AppError('KIOSK_FORBIDDEN')
+      await app.authorizer.verifyCsrf?.(req, ctx)
+      // the employee tapped on the kiosk becomes the request's actor (required on 'actor' routes)
+      if (kiosk) await app.authorizer.bindKioskActor!(req, kiosk, kioskMode === 'actor')
+    }
   })
 
   app.addHook('preHandler', async (req: FastifyRequest) => {

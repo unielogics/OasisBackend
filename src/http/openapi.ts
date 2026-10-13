@@ -2,6 +2,7 @@ import swagger from '@fastify/swagger'
 import type { OpenAPIV3_1 } from 'openapi-types'
 import { jsonSchemaTransform, jsonSchemaTransformObject } from 'fastify-type-provider-zod'
 import { describeAccess, type RouteAccess } from './access.js'
+import { kioskRouteKey } from '../modules/kiosk/allowlist.js'
 import type { AppInstance } from './types.js'
 
 export const API_VERSION = '1.0.0'
@@ -53,11 +54,16 @@ export async function registerOpenApi(app: AppInstance): Promise<void> {
     transform: (arg) => {
       const out = jsonSchemaTransform(arg) as { schema?: Record<string, unknown>; url: string }
       out.schema ??= {}
-      const cfg = (arg as { route?: { config?: { access?: RouteAccess; idempotency?: string } } }).route
-        ?.config
+      const route = (arg as { route?: { method?: string | string[]; config?: { access?: RouteAccess; idempotency?: string } } })
+        .route
+      const cfg = route?.config
       if (cfg?.access && !out.schema.hide) {
         out.schema['x-oasis-access'] = describeAccess(cfg.access)
         if (cfg.idempotency) out.schema['x-oasis-idempotency'] = cfg.idempotency
+        // ADR 0180: whether the shop's kiosk may call it, and whether it must name the employee (X-Oasis-Employee)
+        const method = ([] as string[]).concat(route?.method ?? []).find((m) => m !== 'HEAD')
+        const kiosk = method ? app.kioskRoutes[kioskRouteKey(method, out.url)] : undefined
+        if (kiosk) out.schema['x-oasis-kiosk'] = kiosk
         if (cfg.access.kind === 'public' || cfg.access.kind === 'webhook') out.schema.security = []
       }
       return out as ReturnType<typeof jsonSchemaTransform>

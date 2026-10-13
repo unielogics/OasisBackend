@@ -21,6 +21,12 @@ export const DEFAULT_SESSION_TIMINGS: SessionTimings = {
   absoluteMs: SESSION_ABSOLUTE_MS,
 }
 
+/** A manager who signs in on a registered kiosk device (ADR 0180): 15 minutes idle, 4 hours at most, and a banner. */
+export const KIOSK_ADMIN_SESSION_TIMINGS: SessionTimings = {
+  idleMs: 15 * 60 * 1000,
+  absoluteMs: 4 * 60 * 60 * 1000,
+}
+
 export interface CreatedSession {
   token: string
   id: string
@@ -47,6 +53,8 @@ export interface SessionRecord {
   }
   locationId: string | null
   rbacVersion: number
+  /** The kiosk device the session was opened on (short timings), or null. */
+  kioskDevice: { id: string; name: string } | null
 }
 
 export class SessionService {
@@ -56,16 +64,18 @@ export class SessionService {
     private readonly timings: SessionTimings = DEFAULT_SESSION_TIMINGS,
   ) {}
 
+  /** `kioskDeviceId`: the session is opened on a registered kiosk device and gets the short kiosk-admin timings. */
   async create(
     userId: string,
-    meta: { ip?: string | null; ua?: string | null },
+    meta: { ip?: string | null; ua?: string | null; kioskDeviceId?: string | null },
     db: Executor = this.db,
   ): Promise<CreatedSession> {
     const now = this.clock.now()
     const token = newToken()
     const id = hashToken(token)
-    const absolute = new Date(now.getTime() + this.timings.absoluteMs)
-    const idle = new Date(Math.min(now.getTime() + this.timings.idleMs, absolute.getTime()))
+    const timings = this.timingsFor(meta.kioskDeviceId ?? null)
+    const absolute = new Date(now.getTime() + timings.absoluteMs)
+    const idle = new Date(Math.min(now.getTime() + timings.idleMs, absolute.getTime()))
     const csrfSecret = newCsrfSecret()
     await db
       .insertInto('sessions')
@@ -78,9 +88,19 @@ export class SessionService {
         ip: meta.ip && isIP(meta.ip) ? meta.ip : null,
         ua: meta.ua ? meta.ua.slice(0, 400) : null,
         csrf_secret: csrfSecret,
+        kiosk_device_id: meta.kioskDeviceId ?? null,
       })
       .execute()
     return { token, id, csrfToken: csrfTokenFor(csrfSecret, id), expiresAt: absolute }
+  }
+
+  /** The service's timings, or the shorter of them and the kiosk-admin timings on a kiosk device. */
+  private timingsFor(kioskDeviceId: string | null): SessionTimings {
+    if (!kioskDeviceId) return this.timings
+    return {
+      idleMs: Math.min(this.timings.idleMs, KIOSK_ADMIN_SESSION_TIMINGS.idleMs),
+      absoluteMs: Math.min(this.timings.absoluteMs, KIOSK_ADMIN_SESSION_TIMINGS.absoluteMs),
+    }
   }
 
   /** The live session behind a cookie token, or null when unknown, revoked, expired, or its user/employee is inactive. */
@@ -91,7 +111,10 @@ export class SessionService {
       .selectFrom('sessions as s')
       .innerJoin('users as u', 'u.id', 's.user_id')
       .innerJoin('employees as e', 'e.id', 'u.employee_id')
+      .leftJoin('kiosk_devices as kd', 'kd.id', 's.kiosk_device_id')
       .select((eb) => [
+        'kd.id as kiosk_device_id',
+        'kd.name as kiosk_device_name',
         's.id',
         's.user_id',
         's.csrf_secret',
@@ -127,7 +150,9 @@ export class SessionService {
     if (row.disabled_at || row.status !== 'active') return null
 
     if (opts.touch !== false && now - row.last_seen_at.getTime() >= SESSION_TOUCH_MS) {
-      const idle = new Date(Math.min(now + this.timings.idleMs, row.absolute_expires_at.getTime()))
+      const idle = new Date(
+        Math.min(now + this.timingsFor(row.kiosk_device_id).idleMs, row.absolute_expires_at.getTime()),
+      )
       await this.db
         .updateTable('sessions')
         .set({ last_seen_at: new Date(now), idle_expires_at: idle })
@@ -154,6 +179,8 @@ export class SessionService {
       },
       locationId: row.location_id,
       rbacVersion: Number(row.rbac_version ?? 1),
+      kioskDevice:
+        row.kiosk_device_id && row.kiosk_device_name ? { id: row.kiosk_device_id, name: row.kiosk_device_name } : null,
     }
   }
 

@@ -10,6 +10,9 @@ import { RbacService } from '../rbac/service.js'
 import { PeopleService } from '../people/employees.js'
 import { RolesService } from '../people/roles.js'
 import { unconfiguredBusinessHours, type BusinessHoursPort } from '../people/business-hours.js'
+import { KioskCodeHasher, kioskKey } from '../kiosk/code.js'
+import { KioskService } from '../kiosk/service.js'
+import { KioskUnlockGuard } from '../kiosk/throttle.js'
 import { createSessionAuthorizer } from './authorizer.js'
 import './problems.js'
 import { InMemoryNotifier, type NotificationPort } from './notifications.js'
@@ -21,7 +24,10 @@ import { DEFAULT_THROTTLE, LoginThrottle, type ThrottleOptions } from './throttl
 export type IdentityEnv = Pick<
   Env,
   'NODE_ENV' | 'COOKIE_SECURE' | 'SESSION_COOKIE_NAME' | 'PUBLIC_DASHBOARD_URL'
->
+> & {
+  /** The kiosk code key derives from it (ADR 0180); a fixed development value stands in outside production. */
+  SESSION_SECRET?: string
+}
 
 export interface IdentityOptions {
   db: Db
@@ -53,6 +59,9 @@ export interface Identity {
   readonly auth: AuthService
   readonly people: PeopleService
   readonly roles: RolesService
+  /** Kiosk mode (ADR 0180): devices, the unlock code, kiosk sessions, the acting employee. */
+  readonly kiosk: KioskService
+  readonly kioskGuard: KioskUnlockGuard
   readonly authorizer: Authorizer
 }
 
@@ -65,6 +74,18 @@ export function createIdentity(o: IdentityOptions): IdentityAuthorizer {
   const hasher = new PasswordHasher(o.passwordParams ?? DEFAULT_SCRYPT_PARAMS)
   const throttle = new LoginThrottle(o.clock, o.throttle ?? DEFAULT_THROTTLE)
   const notifier = o.notifier ?? new InMemoryNotifier()
+  const kioskGuard = new KioskUnlockGuard(o.clock)
+  const kiosk = new KioskService({
+    db: o.db,
+    clock: o.clock,
+    newId,
+    env: o.env,
+    hasher: new KioskCodeHasher(kioskKey(o.env), o.passwordParams ?? DEFAULT_SCRYPT_PARAMS),
+    guard: kioskGuard,
+    userSessions: sessions,
+    defaultLocationId: o.locationId,
+    warn: o.warn,
+  })
   const businessHours = o.businessHours ?? unconfiguredBusinessHours
   const auth = new AuthService({
     db: o.db,
@@ -77,6 +98,7 @@ export function createIdentity(o: IdentityOptions): IdentityAuthorizer {
     notifier,
     locationId: o.locationId,
     warn: o.warn,
+    kioskDeviceOf: (token) => kiosk.liveDeviceId(token),
   })
   const people = new PeopleService({
     db: o.db,
@@ -88,7 +110,13 @@ export function createIdentity(o: IdentityOptions): IdentityAuthorizer {
     warn: o.warn,
   })
   const roles = new RolesService({ db: o.db, newId })
-  const base = createSessionAuthorizer({ env: o.env, sessions, rbac, defaultLocationId: o.locationId })
+  const base = createSessionAuthorizer({
+    env: o.env,
+    sessions,
+    rbac,
+    defaultLocationId: o.locationId,
+    kiosk,
+  })
   const identity: Identity = {
     db: o.db,
     clock: o.clock,
@@ -104,6 +132,8 @@ export function createIdentity(o: IdentityOptions): IdentityAuthorizer {
     auth,
     people,
     roles,
+    kiosk,
+    kioskGuard,
     authorizer: base,
   }
   return Object.assign(base, { identity })

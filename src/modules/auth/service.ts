@@ -67,6 +67,8 @@ export interface AuthServiceDeps {
   notifier: NotificationPort
   locationId: string
   warn?: (msg: string, data?: Record<string, unknown>) => void
+  /** The live kiosk device behind a device cookie (ADR 0180): a sign-in there gets the short kiosk-admin session. */
+  kioskDeviceOf?: (token: string) => Promise<string | null>
 }
 
 const fieldError = (path: string, message: string): AppError =>
@@ -84,7 +86,13 @@ export class AuthService {
   }
 
   async login(
-    input: { email: string; password: string; currentToken?: string | null } & ClientMeta,
+    input: {
+      email: string
+      password: string
+      currentToken?: string | null
+      /** The kiosk device cookie, when the browser is a registered kiosk (ADR 0180). */
+      kioskDeviceToken?: string | null
+    } & ClientMeta,
   ): Promise<LoginResult> {
     const { db, hasher, throttle, clock } = this.d
     const email = normalizeEmail(input.email)
@@ -134,6 +142,8 @@ export class AuthService {
     const rehash = hasher.needsRehash(row.password_hash) ? await hasher.hash(input.password) : null
     const oldId =
       input.currentToken && TOKEN_SHAPE.test(input.currentToken) ? hashToken(input.currentToken) : null
+    const kioskDeviceId =
+      input.kioskDeviceToken && this.d.kioskDeviceOf ? await this.d.kioskDeviceOf(input.kioskDeviceToken) : null
 
     const session = await transaction(db, async (tx) => {
       if (oldId) await this.d.sessions.revoke(oldId, tx) // rotation: a pre-login session id never survives login
@@ -142,13 +152,14 @@ export class AuthService {
         .set({ failed_attempts: 0, last_login_at: clock.now(), ...(rehash ? { password_hash: rehash } : {}) })
         .where('id', '=', row.id)
         .execute()
-      const s = await this.d.sessions.create(row.id, input, tx)
+      const s = await this.d.sessions.create(row.id, { ip: input.ip, ua: input.ua, kioskDeviceId }, tx)
       await audit.record(tx, {
         locationId: this.d.locationId,
         action: 'auth.login',
         entityType: 'user',
         entityId: row.id,
-        ctx: this.actorCtx(user, input),
+        ...(kioskDeviceId ? { after: { kioskDevice: true } } : {}),
+        ctx: { ...this.actorCtx(user, input), kioskDeviceId },
       })
       return s
     })

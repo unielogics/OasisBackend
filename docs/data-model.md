@@ -55,6 +55,9 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261015100000_review_q4.sql` | review Q4 fixes (ADR 0171 wave Q4 notes): `square_refunds_waiting` (a refund made in the Square app before its payment was on an invoice, recorded on the invoice when the payment is); index `webhook_log_square_open_idx` (the catch-up runs the Square rows still received or failed outside its search window) |
 | `20261015100100_review_q4_fix.sql` | review Q4 re-verification and the Square sandbox run (ADR 0170 and ADR 0171 wave Q4 fix notes): `membership_inclusions.auto_apply` turned on for the default tiers' inclusions nobody edited (inclusions apply by themselves, plan decision 2); `webhook_log.attempts` (failures so far: the Square catch-up backs failed rows off by it; failed rows start at 1); `square_state.connected_at` (the connection point: counter payments Square made before it are history, never queued) |
 | `20261015100200_charge_after_close.sql` | review Q4FIX-N1 (ADR 0171 wave Q4 fix notes): `square_charges.charged_after_close_at` (Square completed the charge after Oasis closed it as not charged: recorded, and the invoice's "Overpaid via Square" alert says why) |
+| `20261016100000_kiosk.sql` | Kiosk mode (ADR 0180, wave K1a): `kiosk_devices` (registered tablets: the sha256 of the device cookie token, the persisted unlock throttle `failed_attempts` / `last_failed_at` / `locked_out_at`, revoke), `kiosk_codes` (the shop's unlock codes: scrypt over HMAC(key from SESSION_SECRET, location:code), history, one current), `kiosk_sessions` (sha256 id, device, code, `expires_at` = the lock time, `lock_rule`, CSRF secret, revoke reason); `employees.kiosk_listed` ("Shows on the kiosk"), `sessions.kiosk_device_id` (a manager signed in on a kiosk: short timings), `audit_log.kiosk_device_id` |
+| `20261016100100_staff_attribution.sql` | Kiosk mode (ADR 0180): the tapped employee next to the user columns, `activity_log.actor_employee_id` and `kiosk_device_id`, `appointments.created_by_employee_id`, `appointment_addons.added_by_employee_id`, `appointment_photos.uploaded_by_employee_id`, `payment_links.created_by_employee_id` (columns only in K1a; written from wave K1b) |
+| `20261016100200_staff_events.sql` | Kiosk mode (ADR 0180): `staff_events`, one row per car step, booking, payment, text and so on by whoever did it (kiosk or signed in), the source of the Team activity report; the report's indexes on `ledger_events` (pay by actor) and `messages` (staff sender) |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -386,6 +389,27 @@ no-show and late-cancel fees, the card lifecycle) and Q3b will (subscriptions).
 Square deliveries and catch-up events share `webhook_log` (provider `square`, `external_id` = Square's `event_id`): whichever claims the
 event first processes it; the raw body and the headers without the signature are kept for the 90-day trail.
 
+## Kiosk mode (migrations `20261016100000_kiosk.sql`, `20261016100100_staff_attribution.sql` and `20261016100200_staff_events.sql`, ADR 0180)
+
+The shop's shared tablet stays open all day without an email login: an admin registers it once ("Make this a kiosk"), and the 8-digit
+shop code unlocks it into a kiosk session until closing + 2 hours. Everything is off until `kiosk.enabled` (setting, default false).
+A kiosk request has no user (`AuthContext.userId` null): the employee tapped on the kiosk is the actor, so the attribution columns
+sit next to the user columns. Only token hashes are stored; the code itself never is.
+
+| Table | Purpose |
+| ----- | ------- |
+| `kiosk_devices` | A registered kiosk tablet of a location: `name` (≤ 40), `token_hash` (sha256 of the opaque `__Host-oasis_kdev` cookie token, unique), who registered it, `last_seen_at` / `last_ip` / `last_ua`, the persisted unlock throttle (`failed_attempts` consecutive wrong codes, `last_failed_at`; 20 sets `locked_out_at` until a manager clears it), `revoked_at` / `revoked_by` (the cookie stops working for good), `version` |
+| `kiosk_codes` | The location's unlock codes: `code_hash` (PHC scrypt over HMAC-SHA256(kiosk key, "<location id>:<code>"), the key derived from `SESSION_SECRET`), who set it and when; every code ever set (a new code may not be one of the last 3), the current one has `retired_at` null (unique index `kiosk_codes_current_uq`) |
+| `kiosk_sessions` | An unlocked kiosk: `id` = sha256 of the `__Host-oasis_ksid` cookie token, the device, location and code, `expires_at` (the lock time from `kioskLockTime`, absolute, no idle expiry), `lock_rule closing\|previous_day\|two_hours`, `csrf_secret`, address and browser, `last_seen_at`, `revoked_at` + `revoked_reason lock\|lock_device\|lock_all\|code_changed\|device_revoked\|kiosk_off\|unlock_again` (set together). Valid only with the cookie of its own live device and while kiosk mode is on |
+| `staff_events` | One row per thing an employee did, the source of the Team activity report: `employee_id` and `employee_name` (snapshot "Marco R."), `kind` (a car step `confirm`, `arrive`, `assign_bay`, `start`, `complete`, `notify_ready`, `pickup`, `pickup_reopen`, `prep_bay`, `reschedule`, `update`; `book`, `walk_in`, `customer_create`, `addon_add`, `addon_remove`, `size_change`, `checklist`, `photo`, `payment`, `tip`, `receipt`, `payment_link`, `text`, `arrival_link`, `worker_set`), the appointment, client, `amount_cents`, `ledger_event_id`, `message_id`, `via kiosk\|signed_in` with the `kiosk_device_id` or the `user_id`, `request_id`, `meta`. Written from wave K1b (audit-helper mapping) |
+
+Columns added to existing tables: `employees.kiosk_listed` (default true: who the picker lists among active and invited
+employees), `sessions.kiosk_device_id` (a manager signed in on a kiosk device: 15 minutes idle, 4 hours absolute), `audit_log.kiosk_device_id`
+(no foreign key, like the other audit actor columns), and the employee beside each user column: `activity_log.actor_employee_id` and
+`kiosk_device_id`, `appointments.created_by_employee_id`, `appointment_addons.added_by_employee_id`,
+`appointment_photos.uploaded_by_employee_id`, `payment_links.created_by_employee_id`. Payments and texts already carried the employee
+(`ledger_events.actor_employee_id`, `messages.sender_employee_id`).
+
 ## Foreign keys
 
 `domain_links` added the keys from the domain tables to `employees` and `users`. Two columns stay plain `uuid` on purpose, and a
@@ -454,7 +478,7 @@ Operations design day re-anchored on **today** in the business time zone with th
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (123 tables, 1 view, 15 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (127 tables, 1 view, 15 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -468,8 +492,10 @@ Generated from `db/schema.sql` by `pnpm data-model` (123 tables, 1 view, 15 func
 | `actor_type` | text | no | `'staff'::text` |
 | `actor_name` | text | yes |  |
 | `meta` | jsonb | no | `'{}'::jsonb` |
+| `actor_employee_id` | uuid | yes |  |
+| `kiosk_device_id` | uuid | yes |  |
 
-Primary key `(id)`. `(appointment_id)` references `appointments(id)` on delete cascade. 3 check constraints. Index `activity_log_appointment_idx` `(appointment_id, at, id)`.
+Primary key `(id)`. `(actor_employee_id)` references `employees(id)` on delete set null. `(appointment_id)` references `appointments(id)` on delete cascade. `(kiosk_device_id)` references `kiosk_devices(id)` on delete set null. 3 check constraints. Index `activity_log_appointment_idx` `(appointment_id, at, id)`.
 
 #### `appointment_addons`
 
@@ -486,8 +512,9 @@ Primary key `(id)`. `(appointment_id)` references `appointments(id)` on delete c
 | `list_price_cents` | integer | yes |  |
 | `discount_bp` | integer | yes |  |
 | `price_basis` | text | no | `'legacy'::text` |
+| `added_by_employee_id` | uuid | yes |  |
 
-Primary key `(id)`. `(added_by)` references `users(id)` on delete set null. `(appointment_id)` references `appointments(id)` on delete cascade. `(service_id)` references `services(id)`. 5 check constraints. Index `appointment_addons_appointment_idx` `(appointment_id)`. Unique index `uq_appointment_addons_live` `(appointment_id, service_id)` where `removed_at IS NULL`.
+Primary key `(id)`. `(added_by_employee_id)` references `employees(id)` on delete set null. `(added_by)` references `users(id)` on delete set null. `(appointment_id)` references `appointments(id)` on delete cascade. `(service_id)` references `services(id)`. 5 check constraints. Index `appointment_addons_appointment_idx` `(appointment_id)`. Unique index `uq_appointment_addons_live` `(appointment_id, service_id)` where `removed_at IS NULL`.
 
 #### `appointment_late_texts`
 
@@ -530,8 +557,9 @@ Primary key `(id)`. `(appointment_id)` references `appointments(id)` on delete c
 | `taken_at` | timestamp with time zone | no | `app_now()` |
 | `uploaded_by` | uuid | yes |  |
 | `created_at` | timestamp with time zone | no | `app_now()` |
+| `uploaded_by_employee_id` | uuid | yes |  |
 
-Primary key `(id)`. `(appointment_id)` references `appointments(id)` on delete cascade. `(uploaded_by)` references `users(id)` on delete set null. 4 check constraints. Index `appointment_photos_appointment_idx` `(appointment_id, category)`.
+Primary key `(id)`. `(appointment_id)` references `appointments(id)` on delete cascade. `(uploaded_by_employee_id)` references `employees(id)` on delete set null. `(uploaded_by)` references `users(id)` on delete set null. 4 check constraints. Index `appointment_photos_appointment_idx` `(appointment_id, category)`.
 
 #### `appointments`
 
@@ -585,8 +613,9 @@ Primary key `(id)`. `(appointment_id)` references `appointments(id)` on delete c
 | `list_price_cents` | integer | yes |  |
 | `discount_bp` | integer | yes |  |
 | `price_basis` | text | no | `'legacy'::text` |
+| `created_by_employee_id` | uuid | yes |  |
 
-Primary key `(id)`. Unique `(seq)`. `(assigned_employee_id)` references `employees(id)` on delete set null. `(bay_id)` references `bays(id)`. `(created_by)` references `users(id)` on delete set null. `(customer_id)` references `customers(id)`. `(emergency_closure_id)` references `emergency_closures(id)`. `(location_id)` references `locations(id)` on delete cascade. `(planned_bay_id)` references `bays(id)`. `(service_id)` references `services(id)`. `(vehicle_id)` references `vehicles(id)`. 15 check constraints. Index `appointments_active_idx` `(status)` where `status = ANY (ARRAY['booked'::text, 'confirmed'::text, 'arrived'::text, 'cleaning'::text])`. Index `appointments_categories_idx` `(categories)`. Index `appointments_customer_idx` `(customer_id, scheduled_start DESC)`. Index `appointments_emergency_idx` `(emergency_closure_id)` where `emergency_closure_id IS NOT NULL`. Index `appointments_location_start_idx` `(location_id, scheduled_start)`. Index `appointments_location_status_start_idx` `(location_id, status, scheduled_start)`. Index `appointments_planned_bay_idx` `(planned_bay_id, scheduled_start)` where `planned_bay_id IS NOT NULL`. Unique index `uq_appointments_arrival_token` `(arrival_token_hash)` where `arrival_token_hash IS NOT NULL`. Unique index `uq_bay_occupied` `(bay_id)` where `status = 'cleaning'::text`.
+Primary key `(id)`. Unique `(seq)`. `(assigned_employee_id)` references `employees(id)` on delete set null. `(bay_id)` references `bays(id)`. `(created_by_employee_id)` references `employees(id)` on delete set null. `(created_by)` references `users(id)` on delete set null. `(customer_id)` references `customers(id)`. `(emergency_closure_id)` references `emergency_closures(id)`. `(location_id)` references `locations(id)` on delete cascade. `(planned_bay_id)` references `bays(id)`. `(service_id)` references `services(id)`. `(vehicle_id)` references `vehicles(id)`. 15 check constraints. Index `appointments_active_idx` `(status)` where `status = ANY (ARRAY['booked'::text, 'confirmed'::text, 'arrived'::text, 'cleaning'::text])`. Index `appointments_categories_idx` `(categories)`. Index `appointments_customer_idx` `(customer_id, scheduled_start DESC)`. Index `appointments_emergency_idx` `(emergency_closure_id)` where `emergency_closure_id IS NOT NULL`. Index `appointments_location_start_idx` `(location_id, scheduled_start)`. Index `appointments_location_status_start_idx` `(location_id, status, scheduled_start)`. Index `appointments_planned_bay_idx` `(planned_bay_id, scheduled_start)` where `planned_bay_id IS NOT NULL`. Unique index `uq_appointments_arrival_token` `(arrival_token_hash)` where `arrival_token_hash IS NOT NULL`. Unique index `uq_bay_occupied` `(bay_id)` where `status = 'cleaning'::text`.
 
 #### `arrival_pings`
 
@@ -738,6 +767,7 @@ Primary key `(id)`. `(conversation_id)` references `assistant_conversations(id)`
 | `request_id` | text | yes |  |
 | `idempotency_key` | text | yes |  |
 | `ip` | inet | yes |  |
+| `kiosk_device_id` | uuid | yes |  |
 
 Primary key `(id)`. `(location_id)` references `locations(id)`. Index `audit_log_actor_idx` `(actor_user_id, id DESC)`. Index `audit_log_entity_idx` `(entity_type, entity_id, id DESC)`. Index `audit_log_location_at_idx` `(location_id, at DESC)`. Trigger: `audit_log_no_update_delete`.
 
@@ -1144,6 +1174,7 @@ Primary key `(employee_id, weekday)`. `(employee_id)` references `employees(id)`
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `updated_at` | timestamp with time zone | no | `app_now()` |
 | `deactivated_at` | timestamp with time zone | yes |  |
+| `kiosk_listed` | boolean | no | `true` |
 
 Primary key `(id)`. Unique `(email)`. 6 check constraints. Index `employees_phone_e164_idx` `(phone_e164)` where `phone_e164 IS NOT NULL`. Index `employees_status_idx` `(status)`.
 
@@ -1303,6 +1334,63 @@ Primary key `(id)`. `(appointment_addon_id)` references `appointment_addons(id)`
 
 Primary key `(name)`. 1 check constraint.
 
+#### `kiosk_codes`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `code_hash` | text | no |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `created_by` | uuid | yes |  |
+| `created_by_name` | text | yes |  |
+| `retired_at` | timestamp with time zone | yes |  |
+
+Primary key `(id)`. `(created_by)` references `users(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. 1 check constraint. Unique index `kiosk_codes_current_uq` `(location_id)` where `retired_at IS NULL`. Index `kiosk_codes_history_idx` `(location_id, created_at DESC)`.
+
+#### `kiosk_devices`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `name` | text | no |  |
+| `token_hash` | text | no |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `created_by` | uuid | yes |  |
+| `created_by_name` | text | yes |  |
+| `last_seen_at` | timestamp with time zone | yes |  |
+| `last_ip` | inet | yes |  |
+| `last_ua` | text | yes |  |
+| `failed_attempts` | integer | no | `0` |
+| `last_failed_at` | timestamp with time zone | yes |  |
+| `locked_out_at` | timestamp with time zone | yes |  |
+| `revoked_at` | timestamp with time zone | yes |  |
+| `revoked_by` | uuid | yes |  |
+| `version` | integer | no | `1` |
+
+Primary key `(id)`. Unique `(token_hash)`. `(created_by)` references `users(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. `(revoked_by)` references `users(id)` on delete set null. 3 check constraints. Index `kiosk_devices_live_idx` `(location_id)` where `revoked_at IS NULL`.
+
+#### `kiosk_sessions`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | text | no |  |
+| `device_id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `code_id` | uuid | no |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `expires_at` | timestamp with time zone | no |  |
+| `lock_rule` | text | no |  |
+| `csrf_secret` | text | no |  |
+| `ip` | inet | yes |  |
+| `ua` | text | yes |  |
+| `last_seen_at` | timestamp with time zone | no | `app_now()` |
+| `revoked_at` | timestamp with time zone | yes |  |
+| `revoked_reason` | text | yes |  |
+
+Primary key `(id)`. `(code_id)` references `kiosk_codes(id)` on delete cascade. `(device_id)` references `kiosk_devices(id)` on delete cascade. `(location_id)` references `locations(id)` on delete cascade. 5 check constraints. Index `kiosk_sessions_live_idx` `(device_id)` where `revoked_at IS NULL`. Index `kiosk_sessions_location_live_idx` `(location_id)` where `revoked_at IS NULL`.
+
 #### `leads`
 
 | Column | Type | Null | Default |
@@ -1381,7 +1469,7 @@ Primary key `(id)`. Unique `(location_id, phone_e164)`. `(booked_appointment_id)
 | `processor` | text | yes |  |
 | `processor_order_id` | text | yes |  |
 
-Primary key `(id)`. Unique `(idempotency_key)`. Unique `(seq)`. `(actor_employee_id)` references `employees(id)` on delete set null. `(actor_user_id)` references `users(id)` on delete set null. `(approved_by_employee_id)` references `employees(id)` on delete set null. `(approved_by_user_id)` references `users(id)` on delete set null. `(customer_id)` references `customers(id)`. `(denied_by_employee_id)` references `employees(id)` on delete set null. `(denied_by_user_id)` references `users(id)` on delete set null. `(invoice_id)` references `invoices(id)`. `(location_id)` references `locations(id)` on delete cascade. `(parent_event_id)` references `ledger_events(id)`. `(voids_event_id)` references `ledger_events(id)`. 20 check constraints. Index `ledger_events_awaiting_idx` `(location_id, occurred_at)` where `processor_state = 'awaiting_processor'::text`. Index `ledger_events_customer_idx` `(customer_id, type, occurred_at)`. Index `ledger_events_invoice_idx` `(invoice_id, occurred_at DESC, seq DESC)`. Index `ledger_events_pending_idx` `(location_id, occurred_at)` where `status = 'pending'::text`. Index `ledger_events_processor_ref_idx` `(processor, processor_ref)` where `processor_ref IS NOT NULL`. Index `ledger_events_sqsp_order_idx` `(sqsp_order_id)` where `sqsp_order_id IS NOT NULL`. Trigger: `ledger_events_guard`.
+Primary key `(id)`. Unique `(idempotency_key)`. Unique `(seq)`. `(actor_employee_id)` references `employees(id)` on delete set null. `(actor_user_id)` references `users(id)` on delete set null. `(approved_by_employee_id)` references `employees(id)` on delete set null. `(approved_by_user_id)` references `users(id)` on delete set null. `(customer_id)` references `customers(id)`. `(denied_by_employee_id)` references `employees(id)` on delete set null. `(denied_by_user_id)` references `users(id)` on delete set null. `(invoice_id)` references `invoices(id)`. `(location_id)` references `locations(id)` on delete cascade. `(parent_event_id)` references `ledger_events(id)`. `(voids_event_id)` references `ledger_events(id)`. 20 check constraints. Index `ledger_events_awaiting_idx` `(location_id, occurred_at)` where `processor_state = 'awaiting_processor'::text`. Index `ledger_events_customer_idx` `(customer_id, type, occurred_at)`. Index `ledger_events_invoice_idx` `(invoice_id, occurred_at DESC, seq DESC)`. Index `ledger_events_pay_actor_idx` `(actor_employee_id, occurred_at)` where `type = 'pay'::text`. Index `ledger_events_pending_idx` `(location_id, occurred_at)` where `status = 'pending'::text`. Index `ledger_events_processor_ref_idx` `(processor, processor_ref)` where `processor_ref IS NOT NULL`. Index `ledger_events_sqsp_order_idx` `(sqsp_order_id)` where `sqsp_order_id IS NOT NULL`. Trigger: `ledger_events_guard`.
 
 #### `ledger_integrity_runs`
 
@@ -1660,7 +1748,7 @@ Primary key `(id)`. Unique `(location_id, customer_id)`. `(ai_paused_by)` refere
 | `kind` | text | no | `'sms'::text` |
 | `attachments` | jsonb | yes |  |
 
-Primary key `(id)`. Unique `(idempotency_key)`. `(appointment_id)` references `appointments(id)` on delete set null. `(customer_id)` references `customers(id)`. `(device_id)` references `sms_devices(id)` on delete set null. `(employee_id)` references `employees(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. `(sender_employee_id)` references `employees(id)` on delete set null. `(thread_id)` references `message_threads(id)` on delete cascade. 10 check constraints. Index `messages_appointment_idx` `(appointment_id, queued_at, id)` where `appointment_id IS NOT NULL`. Index `messages_customer_idx` `(customer_id, queued_at DESC)` where `customer_id IS NOT NULL`. Index `messages_in_flight_idx` `(status)` where `status = ANY (ARRAY['queued'::text, 'sending'::text])`. Index `messages_provider_idx` `(provider_message_id)` where `provider_message_id IS NOT NULL`. Index `messages_thread_idx` `(thread_id, queued_at, id)` where `thread_id IS NOT NULL`. Index `messages_unread_idx` `(customer_id)` where `(direction = 'in'::text) AND (read_at IS NULL)`.
+Primary key `(id)`. Unique `(idempotency_key)`. `(appointment_id)` references `appointments(id)` on delete set null. `(customer_id)` references `customers(id)`. `(device_id)` references `sms_devices(id)` on delete set null. `(employee_id)` references `employees(id)` on delete set null. `(location_id)` references `locations(id)` on delete cascade. `(sender_employee_id)` references `employees(id)` on delete set null. `(thread_id)` references `message_threads(id)` on delete cascade. 10 check constraints. Index `messages_appointment_idx` `(appointment_id, queued_at, id)` where `appointment_id IS NOT NULL`. Index `messages_customer_idx` `(customer_id, queued_at DESC)` where `customer_id IS NOT NULL`. Index `messages_in_flight_idx` `(status)` where `status = ANY (ARRAY['queued'::text, 'sending'::text])`. Index `messages_provider_idx` `(provider_message_id)` where `provider_message_id IS NOT NULL`. Index `messages_staff_sender_idx` `(sender_employee_id, queued_at)` where `sender_kind = 'staff'::text`. Index `messages_thread_idx` `(thread_id, queued_at, id)` where `thread_id IS NOT NULL`. Index `messages_unread_idx` `(customer_id)` where `(direction = 'in'::text) AND (read_at IS NULL)`.
 
 #### `notice_debounce`
 
@@ -1779,8 +1867,9 @@ Primary key `(id)`. Unique `(token_hash)`. `(user_id)` references `users(id)` on
 | `cancel_reason` | text | yes |  |
 | `square_deleted_at` | timestamp with time zone | yes |  |
 | `paid_square_payment_id` | text | yes |  |
+| `created_by_employee_id` | uuid | yes |  |
 
-Primary key `(id)`. Unique `(square_order_id)`. Unique `(square_payment_link_id)`. `(created_by)` references `users(id)` on delete set null. `(invoice_id)` references `invoices(id)`. `(location_id)` references `locations(id)` on delete cascade. 9 check constraints. Index `payment_links_active_idx` `(location_id, created_at)` where `state = 'active'::text`. Index `payment_links_invoice_idx` `(invoice_id, created_at DESC)`. Index `payment_links_square_open_idx` `(location_id, created_at)` where `(provider = 'square'::text) AND (state = ANY (ARRAY['pending'::text, 'active'::text]))`.
+Primary key `(id)`. Unique `(square_order_id)`. Unique `(square_payment_link_id)`. `(created_by_employee_id)` references `employees(id)` on delete set null. `(created_by)` references `users(id)` on delete set null. `(invoice_id)` references `invoices(id)`. `(location_id)` references `locations(id)` on delete cascade. 9 check constraints. Index `payment_links_active_idx` `(location_id, created_at)` where `state = 'active'::text`. Index `payment_links_invoice_idx` `(invoice_id, created_at DESC)`. Index `payment_links_square_open_idx` `(location_id, created_at)` where `(provider = 'square'::text) AND (state = ANY (ARRAY['pending'::text, 'active'::text]))`.
 
 #### `pending_checkin_texts`
 
@@ -2042,8 +2131,9 @@ Primary key `(id)`. `(location_id, category)` references `catalog_categories(loc
 | `csrf_secret` | text | no |  |
 | `view_as_role_id` | uuid | yes |  |
 | `revoked_at` | timestamp with time zone | yes |  |
+| `kiosk_device_id` | uuid | yes |  |
 
-Primary key `(id)`. `(user_id)` references `users(id)` on delete cascade. `(view_as_role_id)` references `roles(id)` on delete set null. 2 check constraints. Index `sessions_absolute_idx` `(absolute_expires_at)`. Index `sessions_user_idx` `(user_id)` where `revoked_at IS NULL`.
+Primary key `(id)`. `(kiosk_device_id)` references `kiosk_devices(id)` on delete set null. `(user_id)` references `users(id)` on delete cascade. `(view_as_role_id)` references `roles(id)` on delete set null. 2 check constraints. Index `sessions_absolute_idx` `(absolute_expires_at)`. Index `sessions_user_idx` `(user_id)` where `revoked_at IS NULL`.
 
 #### `settings`
 
@@ -2704,6 +2794,29 @@ Primary key `(location_id)`. `(location_id)` references `locations(id)` on delet
 | `updated_at` | timestamp with time zone | no | `app_now()` |
 
 Primary key `(id)`. Unique `(square_invoice_id)`. `(location_id)` references `locations(id)` on delete cascade. `(membership_id)` references `memberships(id)`. 13 check constraints. Index `square_subscription_invoices_membership_idx` `(membership_id, created_at)`. Index `square_subscription_invoices_order_idx` `(square_order_id)` where `square_order_id IS NOT NULL`.
+
+#### `staff_events`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | bigint | no |  |
+| `location_id` | uuid | no |  |
+| `at` | timestamp with time zone | no | `app_now()` |
+| `employee_id` | uuid | yes |  |
+| `employee_name` | text | no |  |
+| `kind` | text | no |  |
+| `appointment_id` | uuid | yes |  |
+| `customer_id` | uuid | yes |  |
+| `amount_cents` | integer | yes |  |
+| `ledger_event_id` | uuid | yes |  |
+| `message_id` | uuid | yes |  |
+| `via` | text | no |  |
+| `kiosk_device_id` | uuid | yes |  |
+| `user_id` | uuid | yes |  |
+| `request_id` | text | yes |  |
+| `meta` | jsonb | no | `'{}'::jsonb` |
+
+Primary key `(id)`. `(appointment_id)` references `appointments(id)` on delete set null. `(customer_id)` references `customers(id)` on delete set null. `(employee_id)` references `employees(id)` on delete set null. `(kiosk_device_id)` references `kiosk_devices(id)` on delete set null. `(ledger_event_id)` references `ledger_events(id)`. `(location_id)` references `locations(id)` on delete cascade. `(message_id)` references `messages(id)` on delete set null. `(user_id)` references `users(id)` on delete set null. 3 check constraints. Index `staff_events_appt_idx` `(appointment_id, at)`. Index `staff_events_emp_at_idx` `(employee_id, at)`. Index `staff_events_loc_at_idx` `(location_id, at)`.
 
 #### `standing_occurrences`
 

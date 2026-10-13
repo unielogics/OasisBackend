@@ -58,10 +58,19 @@ const PUBLIC_ROUTES = new Set([
   'DELETE /api/v1/public/links/cards/:cardId',
   'POST /api/v1/public/links/membership/subscribe',
   'GET /api/v1/public/links/membership/status',
+  // kiosk mode (ADR 0180): the sign-in page asks whether the keypad is on (no personal data); the registered device cookie plus the
+  // shop code unlock it (per-device throttle and lockout, per-address and global limits); the code is never checked without the cookie
+  'GET /api/v1/kiosk/status',
+  'POST /api/v1/kiosk/unlock',
 ])
 
 /** 403 codes a permitted caller may still get from a business rule, keyed by "METHOD url". Empty with the generic {} body. */
-const GUARD_403: Record<string, string[]> = {}
+const GUARD_403: Record<string, string[]> = {
+  // kiosk-only routes (ADR 0180): a signed-in person is not an unlocked kiosk
+  'GET /api/v1/kiosk/me': ['NOT_A_KIOSK'],
+  'GET /api/v1/kiosk/staff': ['NOT_A_KIOSK'],
+  'POST /api/v1/kiosk/lock': ['NOT_A_KIOSK'],
+}
 
 const fill = (url: string): string =>
   url.replace(/:(\w+)/g, (_m, name: string) =>

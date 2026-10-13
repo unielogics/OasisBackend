@@ -408,6 +408,21 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/invoices/:id/square-pos-intents` | pay.collect | required |
 | PUT | `/api/v1/invoices/:id/tip` | pay.collect | required |
 | POST | `/api/v1/invoices/:id/void` | pay.void | required |
+| GET | `/api/v1/kiosk` | team.roles |  |
+| PUT | `/api/v1/kiosk/code` | team.roles |  |
+| POST | `/api/v1/kiosk/devices` | team.roles |  |
+| DELETE | `/api/v1/kiosk/devices/:id` | team.roles |  |
+| PATCH | `/api/v1/kiosk/devices/:id` | team.roles |  |
+| POST | `/api/v1/kiosk/devices/:id/clear-lockout` | team.roles |  |
+| POST | `/api/v1/kiosk/devices/:id/lock` | team.roles |  |
+| POST | `/api/v1/kiosk/lock` | authenticated |  |
+| POST | `/api/v1/kiosk/lock-all` | team.roles |  |
+| GET | `/api/v1/kiosk/me` | authenticated |  |
+| PUT | `/api/v1/kiosk/settings` | team.roles |  |
+| GET | `/api/v1/kiosk/staff` | authenticated |  |
+| PUT | `/api/v1/kiosk/staff/:employeeId` | team.roles |  |
+| GET | `/api/v1/kiosk/status` | public |  |
+| POST | `/api/v1/kiosk/unlock` | public |  |
 | GET | `/api/v1/leads` | cli.view |  |
 | POST | `/api/v1/ledger-events/:id/confirm-processor` | pay.collect | pay.refund | required |
 | GET | `/api/v1/me` | authenticated |  |
@@ -477,6 +492,8 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/public/memberships` | public | required |
 | POST | `/api/v1/public/otp` | public |  |
 | POST | `/api/v1/public/otp/verify` | public |  |
+| GET | `/api/v1/reports/employee-activity` | team.edit |  |
+| GET | `/api/v1/reports/employee-activity/:employeeId/events` | team.edit |  |
 | GET | `/api/v1/roles` | team.view |  |
 | POST | `/api/v1/roles` | team.roles |  |
 | DELETE | `/api/v1/roles/:id` | team.roles |  |
