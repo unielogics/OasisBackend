@@ -189,6 +189,7 @@ LCEVRH6NQ775N` (sandbox).
 AWS_PROFILE=oasis-setup pnpm verify:square --secret oasis/sandbox/square --location LCEVRH6NQ775N [--capture DIR] [--keep]
 pnpm verify:square --sim                 # the same checks against the simulator
 pnpm verify:square --read-only           # production: reads only (a production token is refused without it)
+AWS_PROFILE=oasis-setup pnpm verify:square --secret oasis/sandbox/square --location LCEVRH6NQ775N --tax-only   # SQR-01, SQR-18, cleanup
 ```
 
 | Item | Check |
@@ -206,7 +207,8 @@ pnpm verify:square --read-only           # production: reads only (a production 
 | SQR-11 | Cleanup: links deleted, subscriptions canceled, card disabled, customer deleted (plan variations used by a subscription stay) |
 | SQR-13 | (Q3b) Oasis's own catalog sync (planner and executor): a plan and STATIC MONTHLY variations; the same keys answer the same objects; a price edit is a new variation, the old one kept |
 | SQR-14 | (Q3b) Oasis's own subscription request (`sb_` key, start today), a deliverable email, the first invoice paid and its period; swap, pause and cancel scheduled at the next billing date and undone; CancelInvoice of an unpaid invoice |
-| SQR-12 | (Q2b) Oasis's own link builder (`balanceLines`: two lines, a "Sales tax" line at 6.625% and a "Tip" line) gives an order total of exactly the balance, paid through its order; a refund leg sent twice with its `rf_` key is one refund; one cent over what the payment can still give back is refused by the leg planner and by Square alike |
+| SQR-18 | (K1e, ADR 0173) Square's tax rounding: 200 CalculateOrder requests (6.625% and 7%; half-cent subtotals, baskets, quantities, an order discount; the tax at ORDER and LINE_ITEM scope and through catalog variations with a catalog TAX and `auto_apply_taxes`) equal `salesTaxCents` on every case; prints the result table and which rounding rules fit (section 15). Skipped with `--sim` (the simulator has no CalculateOrder) and `--read-only` |
+| SQR-12 | (Q2b) Oasis's own link builder (`balanceLines`: two lines, a "Sales tax (6.625%)" line rounded half to even and a "Tip" line) gives an order total of exactly the balance, paid through its order; a refund leg sent twice with its `rf_` key is one refund; one cent over what the payment can still give back is refused by the leg planner and by Square alike |
 
 Scrubbed answers of the 2026-10-12 run (ids replaced, no emails, URL paths dropped) are the fixtures in `test/fixtures/square/`; the
 wire schemas, the error mapping, the dispatcher and the simulator are tested against them.
@@ -483,3 +485,88 @@ would also move anyone Oasis did not notify), and Square swaps at the next billi
 2. `PAYMENT_PROCESSOR=square` with personal links open: `#/m` pages join with a card; staff use the billing actions.
 3. Watch the managers' notifications (`square.catalog_sync_failed`, `membership.payment_failed`, `membership.first_payment_failed`,
    `membership.canceled_unpaid`) and the status row's `pendingEnrollments`.
+
+## 15. Sales tax: rate and rounding (ADR 0173, wave K1e)
+
+**Square's rule (SQR-18, sandbox, Square-Version 2026-09-16, 2026-10-13):** the tax of an order is computed ONCE on its taxable
+subtotal (after an order discount) and rounded **half to even**; Square then spreads it over the lines (`$4 + $4` at 6.625% is 53
+cents, shown as 26 + 27). The same holds for an order-level tax, a tax applied per line item and catalog items with a catalog TAX
+auto-applied (the POS path). All 200 answers fit exactly one of the six rules tried (half-up or half-even, per order, per line or per
+unit): per order, half to even. Oasis rounds every new invoice that way (`tax_rounding half_even`); invoices made before ADR 0173
+keep `half_up`. At 7% a whole-dollar subtotal never ends in half a cent, so both rules agree; at 6.625% every subtotal of $4 + a
+multiple of $8 ends in exactly half a cent, and half of those ($4, $20, $36, ... $100, ... $500) are one cent lower at Square than
+half-up.
+
+The rate is `tax.rate_dbp` (thousandths of a percent: 7000 = 7%, 6625 = 6.625%), edited in Settings → Billing & integrations
+(`PUT /settings/billing/sales-tax {percent: "6.625"}`); each invoice keeps its own rate and rounding. The shop's tax in Square must be
+the same percentage, ADDITIVE, at the location (the item library's `tax` check, ADR 0172, compares them as exact decimals).
+
+Re-run after a Square-Version bump: `pnpm verify:square --secret oasis/sandbox/square --location LCEVRH6NQ775N --tax-only`. The
+answers of the 2026-10-13 run are `test/fixtures/square-tax/sqr18-tax-rounding-2026-10-13.json` (checked by
+`test/unit/tax-precision.test.ts`). The table below is that run, one row per case (the tax at ORDER scope; "Same answer" compares
+the LINE_ITEM and catalog runs of the same case where they were sent):
+
+| Case | Taxable subtotal | 6.625%: Square (lines) | 6.625% half-up | 7%: Square (lines) | 7% half-up | Same answer at LINE_ITEM / catalog |
+|---|---|---|---|---|---|---|
+| $4.00 | $4.00 | $0.26 | $0.27 | $0.28 | $0.28 | yes (LINE_ITEM), yes (catalog) |
+| $12.00 | $12.00 | $0.80 | $0.80 | $0.84 | $0.84 | yes (LINE_ITEM), yes (catalog) |
+| $20.00 | $20.00 | $1.32 | $1.33 | $1.40 | $1.40 | yes (LINE_ITEM), yes (catalog) |
+| $28.00 | $28.00 | $1.86 | $1.86 | $1.96 | $1.96 | - |
+| $36.00 | $36.00 | $2.38 | $2.39 | $2.52 | $2.52 | yes (catalog) |
+| $44.00 | $44.00 | $2.92 | $2.92 | $3.08 | $3.08 | - |
+| $52.00 | $52.00 | $3.44 | $3.45 | $3.64 | $3.64 | - |
+| $60.00 | $60.00 | $3.98 | $3.98 | $4.20 | $4.20 | - |
+| $68.00 | $68.00 | $4.50 | $4.51 | $4.76 | $4.76 | - |
+| $76.00 | $76.00 | $5.04 | $5.04 | $5.32 | $5.32 | - |
+| $84.00 | $84.00 | $5.56 | $5.57 | $5.88 | $5.88 | - |
+| $92.00 | $92.00 | $6.10 | $6.10 | $6.44 | $6.44 | - |
+| $100.00 | $100.00 | $6.62 | $6.63 | $7.00 | $7.00 | yes (catalog) |
+| $108.00 | $108.00 | $7.16 | $7.16 | $7.56 | $7.56 | - |
+| $116.00 | $116.00 | $7.68 | $7.69 | $8.12 | $8.12 | - |
+| $124.00 | $124.00 | $8.22 | $8.22 | $8.68 | $8.68 | - |
+| $132.00 | $132.00 | $8.74 | $8.75 | $9.24 | $9.24 | - |
+| $140.00 | $140.00 | $9.28 | $9.28 | $9.80 | $9.80 | - |
+| $148.00 | $148.00 | $9.80 | $9.81 | $10.36 | $10.36 | - |
+| $156.00 | $156.00 | $10.34 | $10.34 | $10.92 | $10.92 | - |
+| $164.00 | $164.00 | $10.86 | $10.87 | $11.48 | $11.48 | - |
+| $172.00 | $172.00 | $11.40 | $11.40 | $12.04 | $12.04 | - |
+| $180.00 | $180.00 | $11.92 | $11.93 | $12.60 | $12.60 | - |
+| $188.00 | $188.00 | $12.46 | $12.46 | $13.16 | $13.16 | - |
+| $196.00 | $196.00 | $12.98 | $12.99 | $13.72 | $13.72 | - |
+| $500.00 | $500.00 | $33.12 | $33.13 | $35.00 | $35.00 | - |
+| $1.00 | $1.00 | $0.07 | $0.07 | $0.07 | $0.07 | - |
+| $2.00 | $2.00 | $0.13 | $0.13 | $0.14 | $0.14 | - |
+| $3.00 | $3.00 | $0.20 | $0.20 | $0.21 | $0.21 | - |
+| $5.00 | $5.00 | $0.33 | $0.33 | $0.35 | $0.35 | - |
+| $10.00 | $10.00 | $0.66 | $0.66 | $0.70 | $0.70 | - |
+| $15.00 | $15.00 | $0.99 | $0.99 | $1.05 | $1.05 | - |
+| $25.00 | $25.00 | $1.66 | $1.66 | $1.75 | $1.75 | - |
+| $40.00 | $40.00 | $2.65 | $2.65 | $2.80 | $2.80 | yes (catalog) |
+| $45.00 | $45.00 | $2.98 | $2.98 | $3.15 | $3.15 | - |
+| $50.00 | $50.00 | $3.31 | $3.31 | $3.50 | $3.50 | - |
+| $55.00 | $55.00 | $3.64 | $3.64 | $3.85 | $3.85 | - |
+| $129.00 | $129.00 | $8.55 | $8.55 | $9.03 | $9.03 | - |
+| $250.00 | $250.00 | $16.56 | $16.56 | $17.50 | $17.50 | - |
+| $12.34 | $12.34 | $0.82 | $0.82 | $0.86 | $0.86 | - |
+| $19.99 | $19.99 | $1.32 | $1.32 | $1.40 | $1.40 | - |
+| $33.33 | $33.33 | $2.21 | $2.21 | $2.33 | $2.33 | - |
+| $1.50 | $1.50 | $0.10 | $0.10 | $0.10 | $0.11 | yes (LINE_ITEM), yes (catalog) |
+| $2.50 | $2.50 | $0.17 | $0.17 | $0.18 | $0.18 | yes (LINE_ITEM), yes (catalog) |
+| $12.50 | $12.50 | $0.83 | $0.83 | $0.88 | $0.88 | - |
+| $37.50 | $37.50 | $2.48 | $2.48 | $2.62 | $2.63 | - |
+| $40 - $4 | $36.00 | $2.38 | $2.39 | $2.52 | $2.52 | - |
+| $40 - 10% | $36.00 | $2.38 | $2.39 | $2.52 | $2.52 | - |
+| $20 + $36 - $4 | $52.00 | $3.44 ($1.23 + $2.21) | $3.45 | $3.64 ($1.30 + $2.34) | $3.64 | - |
+| $15 - $13.50 | $1.50 | $0.10 | $0.10 | $0.10 | $0.11 | - |
+| $4 + $4 | $8.00 | $0.53 ($0.26 + $0.27) | $0.53 | $0.56 ($0.28 + $0.28) | $0.56 | yes (LINE_ITEM), yes (catalog) |
+| $4 + $20 | $24.00 | $1.59 ($0.27 + $1.32) | $1.59 | $1.68 ($0.28 + $1.40) | $1.68 | yes (LINE_ITEM), yes (catalog) |
+| $12 + $4 | $16.00 | $1.06 ($0.80 + $0.26) | $1.06 | $1.12 ($0.84 + $0.28) | $1.12 | yes (LINE_ITEM), yes (catalog) |
+| $20 + $20 + $20 | $60.00 | $3.98 ($1.33 + $1.32 + $1.33) | $3.98 | $4.20 ($1.40 + $1.40 + $1.40) | $4.20 | yes (LINE_ITEM), yes (catalog) |
+| $40 + $15 | $55.00 | $3.64 ($2.65 + $0.99) | $3.64 | $3.85 ($2.80 + $1.05) | $3.85 | yes (LINE_ITEM), yes (catalog) |
+| $100 + $4 | $104.00 | $6.89 ($6.62 + $0.27) | $6.89 | $7.28 ($7.00 + $0.28) | $7.28 | yes (LINE_ITEM), yes (catalog) |
+| $20 + $36 | $56.00 | $3.71 ($1.32 + $2.39) | $3.71 | $3.92 ($1.40 + $2.52) | $3.92 | yes (LINE_ITEM), yes (catalog) |
+| $36 + $100 + $4 | $140.00 | $9.28 ($2.39 + $6.62 + $0.27) | $9.28 | $9.80 ($2.52 + $7.00 + $0.28) | $9.80 | yes (LINE_ITEM), yes (catalog) |
+| $4 x2 | $8.00 | $0.53 | $0.53 | $0.56 | $0.56 | yes (LINE_ITEM), yes (catalog) |
+| $20 x3 | $60.00 | $3.98 | $3.98 | $4.20 | $4.20 | yes (LINE_ITEM), yes (catalog) |
+| $1.50 + $1.50 | $3.00 | $0.20 ($0.10 + $0.10) | $0.20 | $0.21 ($0.10 + $0.11) | $0.21 | yes (LINE_ITEM), yes (catalog) |
+| $2.50 x2 + $1.50 | $6.50 | $0.43 ($0.33 + $0.10) | $0.43 | $0.46 ($0.35 + $0.11) | $0.46 | yes (LINE_ITEM), yes (catalog) |

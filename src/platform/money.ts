@@ -1,5 +1,6 @@
 // Integer cents only. This is the only module that does money arithmetic or formatting.
-// Rounding is half-up (toward +infinity on exact halves) in integer math; floats never touch a cent value.
+// Rounding is half-up (toward +infinity on exact halves) in integer math, except sales tax on invoices made since ADR 0173
+// (half to even, Square's rule); floats never touch a cent value.
 
 export const MAX_MONEY_CENTS = 1_000_000_000_000 // $10 billion, far below 2^53 so sums stay exact
 
@@ -17,11 +18,64 @@ export function divHalfUp(n: number, d: number): number {
   return q === 0 ? 0 : q
 }
 
-/** Tax on a subtotal at a rate in basis points (700 = 7%), half-up to the cent. */
-export function taxCents(subCents: number, taxBp: number): number {
+/** Divides n by d (d > 0) and rounds half to even ("bankers' rounding", Square's rule). Works for negative n. */
+export function divHalfEven(n: number, d: number): number {
+  assertSafe(n, 'numerator')
+  assertSafe(d, 'divisor')
+  if (d <= 0) throw new RangeError('divisor must be positive')
+  const q = Math.floor(n / d)
+  const r2 = 2 * (n - q * d)
+  const out = r2 < d ? q : r2 > d ? q + 1 : q % 2 === 0 ? q : q + 1
+  return out === 0 ? 0 : out
+}
+
+/**
+ * Sales tax (ADR 0173). The rate is in thousandths of a percent ("dbp", tenths of a basis point): 7000 = 7%, 6625 = 6.625%; an
+ * invoice keeps its own rate and its own rounding rule. Square (CalculateOrder, sandbox check SQR-18) rounds the tax of an order
+ * ONCE on its taxable subtotal, half to even; invoices made before ADR 0173 round half-up (the design's rule), so their numbers
+ * never change.
+ */
+export type TaxRounding = 'half_up' | 'half_even'
+export const TAX_ROUNDINGS: readonly TaxRounding[] = ['half_up', 'half_even']
+/** What a new invoice rounds with: Square's rule. */
+export const NEW_INVOICE_TAX_ROUNDING: TaxRounding = 'half_even'
+/** 100% in dbp: a rate is 0 to 100000 (0% to 100%). */
+export const TAX_DBP_PER_100_PERCENT = 100_000
+
+export interface TaxRate {
+  /** Thousandths of a percent: 6625 = 6.625%. */
+  dbp: number
+  rounding: TaxRounding
+}
+
+/** Tax on a (non-negative) subtotal, once per invoice, rounded to the cent by the invoice's rule. */
+export function salesTaxCents(subCents: number, rate: TaxRate): number {
   assertSafe(subCents, 'subtotal')
-  assertSafe(taxBp, 'tax rate')
-  return divHalfUp(subCents * taxBp, 10_000)
+  assertSafe(rate.dbp, 'tax rate')
+  const n = subCents * rate.dbp
+  return rate.rounding === 'half_even' ? divHalfEven(n, TAX_DBP_PER_100_PERCENT) : divHalfUp(n, TAX_DBP_PER_100_PERCENT)
+}
+
+/** The rate in whole basis points for readers that predate ADR 0173 (DTO field taxBp, deprecated): 6625 -> 663, 7000 -> 700. */
+export const legacyTaxBp = (dbp: number): number => divHalfUp(dbp, 10)
+
+/** "7%", "6.625%": the rate as staff read it (up to three decimals, no trailing zeros). */
+export function taxPercentLabel(dbp: number): string {
+  assertSafe(dbp, 'tax rate')
+  const whole = Math.floor(dbp / 1000)
+  const frac = String(dbp % 1000).padStart(3, '0').replace(/0+$/, '')
+  return `${whole}${frac ? `.${frac}` : ''}%`
+}
+
+/**
+ * Parses a percentage as staff type it ("6.625", "7", "6.625%") into dbp exactly (no floats): up to three decimals, 0 to 100.
+ * Returns null for anything else (four decimals, letters, a minus sign, more than 100).
+ */
+export function parseTaxPercent(raw: string): number | null {
+  const m = /^\s*(\d{1,3})(?:\.(\d{0,3}))?\s*%?\s*$/.exec(String(raw ?? ''))
+  if (!m) return null
+  const dbp = Number(m[1]) * 1000 + Number((m[2] ?? '').padEnd(3, '0') || '0')
+  return dbp <= TAX_DBP_PER_100_PERCENT ? dbp : null
 }
 
 /** A percentage of an amount; pctBp is the percent in basis points (1000 = 10%, two decimals allowed). */

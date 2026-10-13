@@ -529,7 +529,7 @@ export class PaymentsService {
       itemIds = chosen.map((i) => i.id)
       val = itemsRefundValue(
         chosen.map((i) => i.price_cents),
-        inv.tax_bp,
+        { dbp: inv.tax_dbp, rounding: inv.tax_rounding },
         calc.refundable,
       )
     } else val = input.amountCents ?? 0
@@ -748,7 +748,7 @@ export class PaymentsService {
     if (inv.canceled_at)
       throw new AppError('INVOICE_CANCELED', { detail: 'A canceled invoice can’t be adjusted' })
     const calc = await calcOf(tx, inv.id)
-    const p = adjustPreview(calc, inv.tax_bp, input)
+    const p = adjustPreview(calc, { dbp: inv.tax_dbp, rounding: inv.tax_rounding }, input)
     if (p.pre <= 0) throw new AppError('PAY_AMOUNT_INVALID')
     const limit = c.actor.limit('adjust')
     if (limit !== null && p.pre > limit) {

@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 import { calcInvoice } from '../../src/modules/payments/calc.js'
 
-const base = { itemPrices: [10_000], taxBp: 700, tipCents: 0, canceled: false }
+const base = { itemPrices: [10_000], taxDbp: 7000, taxRounding: 'half_up' as const, tipCents: 0, canceled: false }
 
 describe('paidCents', () => {
   it('counts payments and applied store credit, less voided payments', () => {

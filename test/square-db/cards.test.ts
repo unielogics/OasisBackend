@@ -301,7 +301,7 @@ describe('the migration’s rules', () => {
     await expect(consent(['balance', 'anything'])).rejects.toThrow(/check/)
     await consent(['membership_billing'])
 
-    const inv = await makeInvoice(t.db, r.pe, { customerId: maria, items: [{ name: 'Signature Hand Wash', priceCents: 4000 }], taxBp: 0, no: 91001 })
+    const inv = await makeInvoice(t.db, r.pe, { customerId: maria, items: [{ name: 'Signature Hand Wash', priceCents: 4000 }], taxDbp: 0, no: 91001 })
     const charge = (o: { state?: 'proposed' | 'charged' | 'charging'; paymentId?: string | null; decidedAt?: Date | null }) => {
       const id = r.newId()
       return t.db

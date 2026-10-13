@@ -75,7 +75,8 @@ describe('design fixtures vs the original bundle', () => {
           status: e.type === 'refund' ? (e.status ?? 'done') : undefined,
           dest: e.type === 'refund' ? (e.dest ?? 'card') : undefined,
         })),
-        taxBp: 700,
+        taxDbp: 7000,
+        taxRounding: 'half_up',
         tipCents: m.tipCents,
         canceled: m.canceled,
       })

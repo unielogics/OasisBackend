@@ -127,7 +127,7 @@ CREATE FUNCTION public.invoice_calc_of(p_invoice uuid) RETURNS TABLE(invoice_id 
     LANGUAGE sql STABLE
     AS $$
   with i as (
-    select id, tax_bp, tip_cents, canceled_at from invoices where id = p_invoice
+    select id, tax_dbp, tax_rounding, tip_cents, canceled_at from invoices where id = p_invoice
   ),
   it as (
     select coalesce(sum(price_cents), 0)::bigint as items from invoice_items where invoice_id = p_invoice
@@ -148,14 +148,14 @@ CREATE FUNCTION public.invoice_calc_of(p_invoice uuid) RETURNS TABLE(invoice_id 
     from ledger_events where invoice_id = p_invoice
   ),
   b as (
-    select i.id as invoice_id, i.tax_bp, i.tip_cents::bigint as tip, i.canceled_at,
+    select i.id as invoice_id, i.tax_dbp, i.tax_rounding, i.tip_cents::bigint as tip, i.canceled_at,
       it.items, e.adj, greatest(it.items + e.adj, 0) as sub,
       e.paid_orig, e.credit_applied, e.paid_orig + e.credit_applied as paid,
       e.refunded, e.ref_orig, e.pending_amt, e.pending_n, e.issued
     from i cross join it cross join e
   ),
   c as (
-    select b.*, (b.sub * b.tax_bp + 5000) / 10000 as tax from b
+    select b.*, sales_tax_cents(b.sub, b.tax_dbp, b.tax_rounding) as tax from b
   ),
   d as (
     select c.*, c.sub + c.tax + c.tip as total from c
@@ -168,7 +168,7 @@ CREATE FUNCTION public.invoice_calc_of(p_invoice uuid) RETURNS TABLE(invoice_id 
     f.pending_amt, f.pending_n, f.issued, f.balance,
     greatest(0, f.paid - f.refunded - f.pending_amt) as refundable,
     greatest(0, f.paid_orig - f.ref_orig) as to_orig_max,
-    f.items + f.adj - ((f.refunded * 10000 + (10000 + f.tax_bp) / 2) / (10000 + f.tax_bp)) as net,
+    f.items + f.adj - ((f.refunded * 100000 + (100000 + f.tax_dbp) / 2) / (100000 + f.tax_dbp)) as net,
     greatest(0, f.paid - f.refunded - f.total) as overpaid,
     case
       when f.canceled_at is not null and f.paid = 0 and f.refunded = 0 then 'canceled'
@@ -322,6 +322,25 @@ begin
   end if;
   return v_count;
 end
+$$;
+
+--
+-- Name: sales_tax_cents(bigint, integer, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.sales_tax_cents(p_sub bigint, p_dbp integer, p_rounding text) RETURNS bigint
+    LANGUAGE sql IMMUTABLE STRICT
+    AS $$
+  select case
+    when p_rounding = 'half_even' then
+      (p_sub * p_dbp) / 100000
+        + case
+            when 2 * ((p_sub * p_dbp) % 100000) > 100000 then 1
+            when 2 * ((p_sub * p_dbp) % 100000) = 100000 and ((p_sub * p_dbp) / 100000) % 2 = 1 then 1
+            else 0
+          end
+    else (p_sub * p_dbp + 50000) / 100000
+  end
 $$;
 
 --
@@ -1342,7 +1361,6 @@ CREATE TABLE public.invoices (
     occurred_at timestamp with time zone NOT NULL,
     biz_date date NOT NULL,
     date_frozen_at timestamp with time zone,
-    tax_bp integer NOT NULL,
     tip_cents integer DEFAULT 0 NOT NULL,
     canceled_at timestamp with time zone,
     canceled_by uuid,
@@ -1354,11 +1372,14 @@ CREATE TABLE public.invoices (
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     vehicle_class_label text,
+    tax_dbp integer NOT NULL,
+    tax_rounding text DEFAULT 'half_even'::text NOT NULL,
     CONSTRAINT invoices_cancel_reason_check CHECK (((cancel_reason IS NULL) OR (cancel_reason = ANY (ARRAY['canceled'::text, 'no_show'::text])))),
     CONSTRAINT invoices_check CHECK (((canceled_at IS NULL) = (cancel_reason IS NULL))),
     CONSTRAINT invoices_client_name_check CHECK ((btrim(client_name) <> ''::text)),
     CONSTRAINT invoices_invoice_no_check CHECK ((invoice_no > 0)),
-    CONSTRAINT invoices_tax_bp_check CHECK (((tax_bp >= 0) AND (tax_bp <= 10000))),
+    CONSTRAINT invoices_tax_dbp_check CHECK (((tax_dbp >= 0) AND (tax_dbp <= 100000))),
+    CONSTRAINT invoices_tax_rounding_check CHECK ((tax_rounding = ANY (ARRAY['half_up'::text, 'half_even'::text]))),
     CONSTRAINT invoices_tip_cents_check CHECK ((tip_cents >= 0)),
     CONSTRAINT invoices_vehicle_class_label_check CHECK (((vehicle_class_label IS NULL) OR (length(vehicle_class_label) <= 40)))
 );

@@ -57,7 +57,10 @@ export async function makeInvoice(
     customerId?: string
     client?: string
     items?: { name: string; priceCents: number; kind?: 'package' | 'addon' }[]
-    taxBp?: number
+    /** Thousandths of a percent (default 7000 = 7%). */
+    taxDbp?: number
+    /** Default half_up: the rule these fixtures were written with (new invoices from the gateway round half_even, ADR 0173). */
+    taxRounding?: 'half_up' | 'half_even'
     tipCents?: number
     bizDate?: string
     occurredAt?: Date
@@ -87,7 +90,8 @@ export async function makeInvoice(
       occurred_at: at,
       biz_date: o.bizDate ?? '2026-06-13',
       date_frozen_at: null,
-      tax_bp: o.taxBp ?? 700,
+      tax_dbp: o.taxDbp ?? 7000,
+      tax_rounding: o.taxRounding ?? 'half_up',
       tip_cents: o.tipCents ?? 0,
       canceled_at: null,
       canceled_by: null,

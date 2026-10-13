@@ -190,7 +190,11 @@ export const InvoiceDetail = z.object({
   refundPending: z.boolean(),
   canceled: z.boolean(),
   cancelReason: z.enum(['canceled', 'no_show']).nullable(),
-  taxBp: z.number().int(),
+  taxBp: z.number().int().describe('Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.'),
+  taxDbp: z.number().int().describe("The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)"),
+  taxRounding: z
+    .enum(['half_up', 'half_even'])
+    .describe("How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)"),
   tipCents: z.number().int(),
   paymentLinkUrl: z.string().nullable(),
   awaitingProcessorCount: z.number().int(),

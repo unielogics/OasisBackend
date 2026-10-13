@@ -75,9 +75,9 @@ export async function coreRig(t: Pick<TestDb, 'db' | 'clock'>, vars: Record<stri
     })
 
   /** An invoice of today with an appointment (booked) so it is "open today" for rule R4. */
-  const openInvoice = async (o: { items?: { name: string; priceCents: number }[]; taxBp?: number; email?: string | null; phone?: string | null; name?: string } = {}): Promise<MadeInvoice> => {
+  const openInvoice = async (o: { items?: { name: string; priceCents: number }[]; taxDbp?: number; email?: string | null; phone?: string | null; name?: string } = {}): Promise<MadeInvoice> => {
     const customerId = await makeCustomer(t.db, pe, { email: o.email ?? null, ...(o.phone !== undefined ? { phone: o.phone } : {}), name: o.name })
-    const inv = await makeInvoice(t.db, pe, { customerId, items: o.items ?? [{ name: 'Signature Hand Wash', priceCents: 4000 }], taxBp: o.taxBp ?? 700, no: 40000 + ++n })
+    const inv = await makeInvoice(t.db, pe, { customerId, items: o.items ?? [{ name: 'Signature Hand Wash', priceCents: 4000 }], taxDbp: o.taxDbp ?? 7000, no: 40000 + ++n })
     const serviceId = await makeService(t.db, pe)
     const appointmentId = await makeAppointment(t.db, pe, { customerId, serviceId, start: clock.now() })
     await t.db.updateTable('invoices').set({ appointment_id: appointmentId }).where('id', '=', inv.id).execute()

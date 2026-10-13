@@ -189,9 +189,9 @@ describe('locations', () => {
 
   it('does not overwrite settings that were already changed', async () => {
     const loc = await ensureLocation(t.db, newId)
-    await transaction(t.db, (tx) => updateSetting(tx, { locationId: loc.id, key: 'tax.rate_bp', value: 825 }))
+    await transaction(t.db, (tx) => updateSetting(tx, { locationId: loc.id, key: 'tax.rate_dbp', value: 8250 }))
     await ensureLocation(t.db, newId)
-    expect((await getSetting(t.db, loc.id, 'tax.rate_bp')).value).toBe(825)
+    expect((await getSetting(t.db, loc.id, 'tax.rate_dbp')).value).toBe(8250)
   })
 })
 
@@ -323,8 +323,8 @@ describe('settings', () => {
   it('reads defaults before anything is stored and lists the whole registry', async () => {
     const loc = await makeLocation(t.db, newId)
     await t.db.deleteFrom('settings').where('location_id', '=', loc.id).execute()
-    const rec = await getSetting(t.db, loc.id, 'tax.rate_bp')
-    expect(rec).toMatchObject({ value: 700, version: 0, updatedAt: null })
+    const rec = await getSetting(t.db, loc.id, 'tax.rate_dbp')
+    expect(rec).toMatchObject({ value: 7000, version: 0, updatedAt: null })
     const all = await listSettings(t.db, loc.id)
     expect(all.map((s) => s.key)).toEqual(settingKeys)
   })
@@ -335,30 +335,30 @@ describe('settings', () => {
     const v1 = await transaction(t.db, (tx) =>
       updateSetting(tx, {
         locationId: loc.id,
-        key: 'tax.rate_bp',
-        value: 825,
+        key: 'tax.rate_dbp',
+        value: 8250,
         expectedVersion: 1,
         updatedBy: userId,
         audit: { requestId: 'req-settings-1', actor: { userId, name: 'Rafael M.' } },
       }),
     )
-    expect(v1).toMatchObject({ value: 825, version: 2, updatedBy: userId })
+    expect(v1).toMatchObject({ value: 8250, version: 2, updatedBy: userId })
     const log = await t.db
       .selectFrom('audit_log')
       .selectAll()
-      .where('entity_id', '=', 'tax.rate_bp')
+      .where('entity_id', '=', 'tax.rate_dbp')
       .executeTakeFirstOrThrow()
     expect(log).toMatchObject({
       action: 'settings.update',
-      before: 700,
-      after: 825,
+      before: 7000,
+      after: 8250,
       request_id: 'req-settings-1',
     })
     const ev = await t.db.selectFrom('realtime_events').selectAll().executeTakeFirstOrThrow()
     expect(ev).toMatchObject({
       channel: 'settings',
       type: 'settings.changed',
-      payload: { section: 'tax', key: 'tax.rate_bp', version: 2 },
+      payload: { section: 'tax', key: 'tax.rate_dbp', version: 2 },
     })
   })
 
@@ -396,7 +396,7 @@ describe('settings', () => {
     const loc = await ensureLocation(t.db, newId)
     await expect(
       transaction(t.db, (tx) =>
-        updateSetting(tx, { locationId: loc.id, key: 'tax.rate_bp', value: 'seven' }),
+        updateSetting(tx, { locationId: loc.id, key: 'tax.rate_dbp', value: 'seven' }),
       ),
     ).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 })
   })

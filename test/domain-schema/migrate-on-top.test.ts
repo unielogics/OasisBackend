@@ -62,6 +62,9 @@ describe('domain_core on top of platform_core', () => {
       const loc = await sql<{ n: number }>`select count(*)::int as n from locations`.execute(db)
       const set = await sql<{ n: number }>`select count(*)::int as n from settings`.execute(db)
       expect([loc.rows[0]!.n, set.rows[0]!.n]).toEqual([1, 1])
+      // ADR 0173 (20261015150000_tax_precision): the stored 7% in basis points is carried over in thousandths of a percent
+      const tax = await sql<{ key: string; value: number }>`select key, value from settings`.execute(db)
+      expect(tax.rows).toEqual([{ key: 'tax.rate_dbp', value: 7000 }])
       const domain = await sql<{
         n: number
       }>`select count(*)::int as n from pg_tables where schemaname = ${schema} and tablename in ('services', 'customers', 'appointments', 'closures', 'bays')`.execute(

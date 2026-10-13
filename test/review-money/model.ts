@@ -10,7 +10,7 @@ import { createIdGenerator } from '../../src/platform/ids.js'
 import { makeAppointment, makeService } from '../domain-schema/helpers.js'
 import { makeCustomer, makeInvoice } from '../payments/helpers.js'
 import { freshKey, type PayHarness, type Person } from './pay-harness.js'
-import { creditOracle, oracleCalc, type Alloc, type Ev, type OracleCalc } from './oracle.js'
+import { creditOracle, oracleCalc, oracleTax, type Alloc, type Ev, type OracleCalc } from './oracle.js'
 
 export type Who = 'rafael' | 'sofia' | 'amara' | 'daniel' | 'kevin'
 export const WHO: readonly Who[] = ['rafael', 'sofia', 'amara', 'daniel', 'kevin']
@@ -46,14 +46,15 @@ interface InvRef {
   id: string
   customerId: string
   appointmentId: string
-  taxBp: number
+  taxDbp: number
 }
 
 interface Row {
   inv: {
     id: string
     customer_id: string
-    tax_bp: number
+    tax_dbp: number
+    tax_rounding: 'half_up' | 'half_even'
     tip_cents: number
     canceled_at: Date | null
     appointment_id: string | null
@@ -146,7 +147,9 @@ export class Model {
       ['b1', custB],
     ]
     for (const [, customerId] of plan) {
-      const taxBp = this.pick([700, 700, 825, 1000, 0, 625])
+      // ADR 0173: rates in thousandths of a percent (6.625% included) and both roundings
+      const taxDbp = this.pick([7000, 7000, 8250, 10_000, 0, 6250, 6625, 6625])
+      const taxRounding = this.pick(['half_up', 'half_even'] as const)
       const lines = this.int(1, 3)
       const items = Array.from({ length: lines }, (_, i) => ({
         name: `Line ${i}`,
@@ -156,7 +159,8 @@ export class Model {
       const inv = await makeInvoice(this.db, env, {
         customerId,
         items,
-        taxBp,
+        taxDbp,
+        taxRounding,
         tipCents: this.chance(0.3) ? this.int(0, 3000) : 0,
       })
       const appointmentId = await makeAppointment(this.db, f, {
@@ -169,7 +173,7 @@ export class Model {
         .set({ appointment_id: appointmentId })
         .where('id', '=', inv.id)
         .execute()
-      this.invs.push({ id: inv.id, customerId, appointmentId, taxBp })
+      this.invs.push({ id: inv.id, customerId, appointmentId, taxDbp })
     }
     for (const w of WHO) {
       const d = await this.p.get(this.people[w], 'me')
@@ -267,7 +271,7 @@ export class Model {
 
   private oc(row: Row): OracleCalc {
     return oracleCalc(
-      { tax_bp: row.inv.tax_bp, tip_cents: row.inv.tip_cents, canceled: row.inv.canceled_at !== null },
+      { tax_dbp: row.inv.tax_dbp, tax_rounding: row.inv.tax_rounding, tip_cents: row.inv.tip_cents, canceled: row.inv.canceled_at !== null },
       row.prices,
       row.evs,
     )
@@ -458,7 +462,7 @@ export class Model {
       if (ids.length === 0) ids.push(row.itemIds[0]!)
       body = { mode, dest, itemIds: ids }
       const sum = ids.reduce((a, id) => a + BigInt(row.itemPrice.get(id)!), 0n)
-      const raw = Number((2n * sum * BigInt(10_000 + row.inv.tax_bp) + 10_000n) / 20_000n)
+      const raw = Number(sum + oracleTax(sum, BigInt(row.inv.tax_dbp), row.inv.tax_rounding))
       val = Math.min(oc.refundable, raw)
       itemsClaimed = ids.some((id) => claimed.has(id))
     } else {
@@ -589,7 +593,7 @@ export class Model {
     if (oc.sub + signed < 0) return this.expectStatus(res, 422, 'discount larger than the invoice')
     // what the invoice must look like after: the oracle on the would-be ledger
     const newSub = Math.max(rawSub, 0)
-    const newTax = Number((2n * BigInt(newSub) * BigInt(row.inv.tax_bp) + 10_000n) / 20_000n)
+    const newTax = Number(oracleTax(BigInt(newSub), BigInt(row.inv.tax_dbp), row.inv.tax_rounding))
     const newTotal = newSub + newTax + row.inv.tip_cents
     const diff = oc.paid - oc.refunded - newTotal
     const settleVal = Math.min(diff, oc.refundable)
@@ -608,7 +612,7 @@ export class Model {
       expect(settlement, 'settlement refund').toBeDefined()
       if (settlement!.amount_cents !== settleVal)
         this.fail(
-          `settlement ${settlement!.amount_cents} but the oracle says ${settleVal}: ${JSON.stringify({ pre, signed, rawSub, newSub, newTax, newTotal, diff, oc, tip: row.inv.tip_cents, taxBp: row.inv.tax_bp, after: aft })}`,
+          `settlement ${settlement!.amount_cents} but the oracle says ${settleVal}: ${JSON.stringify({ pre, signed, rawSub, newSub, newTax, newTotal, diff, oc, tip: row.inv.tip_cents, taxDbp: row.inv.tax_dbp, rounding: row.inv.tax_rounding, after: aft })}`,
         )
       expect(settlement!.dest).toBe(settle === 'card' ? 'card' : 'credit')
       const rl = this.limit(who, 'refund')
@@ -730,7 +734,7 @@ export class Model {
     // expected: a removal that leaves the invoice overpaid is refused (409); everything else goes through
     const removed = cur.length > next.length || op === 'reprice'
     const would = oracleCalc(
-      { tax_bp: row.inv.tax_bp, tip_cents: row.inv.tip_cents, canceled: false },
+      { tax_dbp: row.inv.tax_dbp, tax_rounding: row.inv.tax_rounding, tip_cents: row.inv.tip_cents, canceled: false },
       next.map((n) => n.priceCents),
       row.evs,
     )
@@ -1096,10 +1100,10 @@ export class Model {
     // net: refunds lose their tax part once per tax rate, half-up on the aggregate
     const byRate = new Map<number, bigint>()
     for (const r of rows)
-      byRate.set(r.row.inv.tax_bp, (byRate.get(r.row.inv.tax_bp) ?? 0n) + BigInt(r.oc.refunded))
+      byRate.set(r.row.inv.tax_dbp, (byRate.get(r.row.inv.tax_dbp) ?? 0n) + BigInt(r.oc.refunded))
     let refundNet = 0n
-    for (const [bp, amt] of byRate)
-      refundNet += (2n * amt * 10_000n + BigInt(10_000 + bp)) / (2n * BigInt(10_000 + bp))
+    for (const [dbp, amt] of byRate)
+      refundNet += (2n * amt * 100_000n + BigInt(100_000 + dbp)) / (2n * BigInt(100_000 + dbp))
     const wantNet = Number(BigInt(tot((r) => r.oc.items + r.oc.adj)) - refundNet)
     if (k.netRevenue !== wantNet) mism.push(`netRevenue ${k.netRevenue} vs ${wantNet}`)
     if (mism.length) this.fail(`summary ${rangeKey}: ${mism.join('; ')}`)

@@ -61,7 +61,7 @@ describe('Square payment links', () => {
     expect(lines).toEqual([
       ['Premium Hand Wash + Interior', 12900],
       ['Rain repellent', 2500],
-      ['Sales tax', 1078],
+      ['Sales tax (7%)', 1078],
     ])
     expect((order.total_money as { amount: number }).amount).toBe(16478)
     expect(devOutbox.sms.map((m) => [m.klass, m.body.includes(b.paymentLink.url!)])).toEqual([['payment_link', true]])

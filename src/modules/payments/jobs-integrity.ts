@@ -102,7 +102,7 @@ async function checkCalc(
 ): Promise<{ checked: number; findings: IntegrityFinding[] }> {
   const invoices = await db
     .selectFrom('invoices')
-    .select(['id', 'invoice_no', 'tax_bp', 'tip_cents', 'canceled_at'])
+    .select(['id', 'invoice_no', 'tax_dbp', 'tax_rounding', 'tip_cents', 'canceled_at'])
     .where('location_id', '=', locationId)
     .execute()
   const items = await sql<{ invoice_id: string; price_cents: number }>`
@@ -138,7 +138,8 @@ async function checkCalc(
     const recomputed = calcInvoice({
       itemPrices: itemsOf.get(inv.id) ?? [],
       events: eventsOf.get(inv.id) ?? [],
-      taxBp: inv.tax_bp,
+      taxDbp: inv.tax_dbp,
+      taxRounding: inv.tax_rounding,
       tipCents: inv.tip_cents,
       canceled: inv.canceled_at !== null,
     })

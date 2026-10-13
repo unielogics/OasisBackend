@@ -212,21 +212,23 @@ describe('counter matcher R1-R5 (design 2.4, plan decision 5)', () => {
 
 describe('payment links (design 3.1, 3.3)', () => {
   const calc = { paid: 0, adj: 0, refunded: 0, pendingAmt: 0, tax: 1078, tip: 0, balance: 16478, total: 16478 }
-  it('an untouched invoice is its lines, a "Sales tax" line and a "Tip" line, adding up exactly to the balance', () => {
+  it('an untouched invoice is its lines, a "Sales tax (7%)" line and a "Tip" line, adding up exactly to the balance', () => {
     const items = [
       { name: 'Premium Hand Wash + Interior', priceCents: 12900 },
       { name: 'Rain repellent', priceCents: 2500 },
     ]
-    expect(balanceLines({ invoiceNo: 20640 }, items, calc)).toEqual([
+    expect(balanceLines({ invoiceNo: 20640, taxDbp: 7000 }, items, calc)).toEqual([
       { name: 'Premium Hand Wash + Interior', cents: 12900 },
       { name: 'Rain repellent', cents: 2500 },
-      { name: 'Sales tax', cents: 1078 },
+      { name: 'Sales tax (7%)', cents: 1078 },
     ])
-    expect(balanceLines({ invoiceNo: 20640 }, items, { ...calc, tip: 600, balance: 17078, total: 17078 }).at(-1)).toEqual({ name: 'Tip', cents: 600 })
+    // ADR 0173: the invoice's own rate, three decimals when it has them; the amount is the invoice's (Square adds no tax to a link)
+    expect(balanceLines({ invoiceNo: 20640, taxDbp: 6625 }, items, { ...calc, tax: 1020, balance: 16420, total: 16420 }).at(-1)).toEqual({ name: 'Sales tax (6.625%)', cents: 1020 })
+    expect(balanceLines({ invoiceNo: 20640, taxDbp: 7000 }, items, { ...calc, tip: 600, balance: 17078, total: 17078 }).at(-1)).toEqual({ name: 'Tip', cents: 600 })
     // anything paid or adjusted: one balance line
-    expect(balanceLines({ invoiceNo: 20640 }, items, { ...calc, paid: 2500, balance: 13978 })).toEqual([{ name: 'Balance due · INV-20640', cents: 13978 }])
+    expect(balanceLines({ invoiceNo: 20640, taxDbp: 7000 }, items, { ...calc, paid: 2500, balance: 13978 })).toEqual([{ name: 'Balance due · INV-20640', cents: 13978 }])
     // lines that do not add up are never sent
-    expect(() => balanceLines({ invoiceNo: 1 }, [{ name: 'x', priceCents: 100 }], calc)).toThrow(LinkSumError)
+    expect(() => balanceLines({ invoiceNo: 1, taxDbp: 7000 }, [{ name: 'x', priceCents: 100 }], calc)).toThrow(LinkSumError)
     expect(() => assertExactSum([{ name: 'a', cents: 0 }], 0)).toThrow(LinkSumError)
   })
 
@@ -347,7 +349,7 @@ describe('POS app switch (design 2.6)', () => {
 })
 
 describe('calc with a failed card refund (ADR 0171 D4; golden)', () => {
-  const base = { itemPrices: [10_000], taxBp: 700, tipCents: 0, canceled: false }
+  const base = { itemPrices: [10_000], taxDbp: 7000, taxRounding: 'half_up' as const, tipCents: 0, canceled: false }
   const payE: CalcEvent = { type: 'pay', amountCents: 10_700 }
   it('a refund Square reported failed is not refunded: refundable, net, status and the original-tender cap come back', () => {
     const done = calcInvoice({ ...base, events: [payE, { type: 'refund', amountCents: 4000, status: 'done', dest: 'card', processorState: 'confirmed' }] })

@@ -6,6 +6,7 @@
 //   PUT  /settings/billing/link-tipping                 set.billing   payments.link_tipping
 //   PUT  /settings/billing/renewal-policy               set.billing   memberships.billing_policy
 //   PUT  /settings/billing/price-change-notice          set.billing   memberships.price_change_notice_days
+//   PUT  /settings/billing/sales-tax                    set.billing   tax.rate_dbp (ADR 0173: a percentage with up to 3 decimals)
 // Reused: GET /integrations/square + POST /integrations/square/test (status, Test connection), PUT /catalog/guest-fee (booking fee
 // amount and collect mode, set.services), PUT /settings/card-fees (fees.card_on_file), POST /integrations/square/catalog/sync
 // ("Sync to Square"). Each block carries its own version (body `version` or If-Match on its PUT: 428 without, 412 stale); a save is
@@ -14,6 +15,8 @@ import type { FastifyRequest } from 'fastify'
 import { access } from '../../../http/access.js'
 import type { AppInstance } from '../../../http/types.js'
 import { z } from '../../../http/zod.js'
+import { AppError } from '../../../platform/errors.js'
+import { NEW_INVOICE_TAX_ROUNDING, parseTaxPercent, taxPercentLabel } from '../../../platform/money.js'
 import { getSetting, updateSetting, type SettingKey } from '../../../platform/settings.js'
 import { etag, inTx, requestContext, requiredVersion, storedUserId } from '../../settings/http/runtime.js'
 import { cardsOn } from '../charges.js'
@@ -50,6 +53,22 @@ const PriceNotice = z.object({
   version: z.number().int(),
 })
 
+const SalesTax = z.object({
+  percent: z.string().describe('The rate new invoices are made with, as a percentage with up to three decimals: "7", "6.625"'),
+  rateDbp: z.number().int().describe('The same rate in thousandths of a percent (tax.rate_dbp): 7000 = 7%, 6625 = 6.625%'),
+  label: z.string().describe('How the tax line reads it: "7%", "6.625%"'),
+  rounding: z
+    .enum(['half_up', 'half_even'])
+    .describe("How new invoices round their tax, once on the subtotal: half_even, Square's rule (ADR 0173; older invoices keep half_up)"),
+  version: z.number().int(),
+})
+
+/** The Sales tax block of Settings → Billing & integrations (ADR 0173). */
+export function salesTaxView(rec: { value: number; version: number }): z.infer<typeof SalesTax> {
+  const label = taxPercentLabel(rec.value)
+  return { percent: label.slice(0, -1), rateDbp: rec.value, label, rounding: NEW_INVOICE_TAX_ROUNDING, version: rec.version }
+}
+
 export const BillingSettingsView = z.object({
   square: SquareIntegrationView.describe('The same body as GET /integrations/square (Test connection: POST /integrations/square/test)'),
   processing: Processing,
@@ -66,6 +85,7 @@ export const BillingSettingsView = z.object({
     .describe('fees.card_on_file: PUT /settings/card-fees'),
   renewalPolicy: RenewalPolicy.describe('memberships.billing_policy: PUT /settings/billing/renewal-policy'),
   priceChangeNotice: PriceNotice.describe('memberships.price_change_notice_days: PUT /settings/billing/price-change-notice'),
+  salesTax: SalesTax.describe('tax.rate_dbp: PUT /settings/billing/sales-tax (applies to invoices made from then on)'),
   consent: z
     .object({
       version: z.string().describe('The card consent text version every new card is saved under'),
@@ -101,20 +121,21 @@ export function registerBillingSettingsRoutes(app: AppInstance): void {
         operationId: 'getBillingSettings',
         summary: 'Settings, Billing & integrations: everything the panel shows, in one read',
         description:
-          'The Square status row (as GET /integrations/square), the processor and its switches (read only, from the server environment), the booking fee (saved with PUT /catalog/guest-fee), link tipping, the no-show and late-cancel fees on a saved card (PUT /settings/card-fees), the renewal policy of memberships billed by Square, the "Move members" notice, and the card consent text in use. Each editable block carries its own `version`. Never contains a token or a key.',
+          'The Square status row (as GET /integrations/square), the processor and its switches (read only, from the server environment), the booking fee (saved with PUT /catalog/guest-fee), link tipping, the no-show and late-cancel fees on a saved card (PUT /settings/card-fees), the renewal policy of memberships billed by Square, the "Move members" notice, the sales tax rate of new invoices, and the card consent text in use. Each editable block carries its own `version`. Never contains a token or a key.',
         response: { 200: BillingSettingsView },
       },
     },
     async (req) => {
       const { locationId } = requestContext(req)
       const env = squareEnv()
-      const [square, fee, tipping, fees, policy, notice] = await Promise.all([
+      const [square, fee, tipping, fees, policy, notice, tax] = await Promise.all([
         squareIntegrationView(app, locationId),
         getSetting(app.db, locationId, 'booking.guest_fee'),
         getSetting(app.db, locationId, 'payments.link_tipping'),
         getSetting(app.db, locationId, 'fees.card_on_file'),
         getSetting(app.db, locationId, 'memberships.billing_policy'),
         getSetting(app.db, locationId, 'memberships.price_change_notice_days'),
+        getSetting(app.db, locationId, 'tax.rate_dbp'),
       ])
       return {
         square,
@@ -134,6 +155,7 @@ export function registerBillingSettingsRoutes(app: AppInstance): void {
         cardFees: { fees: fees.value, version: fees.version, active: fees.value.enabled && cardsOn(env) },
         renewalPolicy: { ...policy.value, version: policy.version },
         priceChangeNotice: { days: notice.value, version: notice.version },
+        salesTax: salesTaxView(tax),
         consent: {
           version: CURRENT_CONSENT_VERSION,
           checkedByDefault: CONSENT_CHECKED_BY_DEFAULT,
@@ -209,6 +231,33 @@ export function registerBillingSettingsRoutes(app: AppInstance): void {
       const r = await save(req, 'memberships.price_change_notice_days', b.days, b.version)
       etag(reply, r.version)
       return { days: r.value, version: r.version }
+    },
+  )
+  app.put(
+    '/settings/billing/sales-tax',
+    {
+      config: { access: access.perm('set.billing') },
+      schema: {
+        tags: TAGS,
+        operationId: 'putBillingSalesTax',
+        summary: 'Save the sales tax rate of new invoices (ETag = version)',
+        description:
+          'tax.rate_dbp (ADR 0173; default 7%). `percent` is the rate as staff type it, with up to three decimals ("6.625" for New Jersey; a trailing % is accepted), 0 to 100; anything else is 422 `VALIDATION_FAILED` on `percent`. It applies to invoices made from now on: each invoice keeps the rate and the rounding it was made with, and every new invoice rounds its tax like Square (half to even, once on the subtotal). `version` (or If-Match) required: 428 without, 412 when stale. Audited `settings.update`; publishes `settings.changed {key: "tax.rate_dbp"}`.',
+        body: z.object({ percent: z.string().max(12), version: Version.optional() }).strict(),
+        response: { 200: SalesTax },
+      },
+    },
+    async (req, reply) => {
+      const b = req.body as { percent: string; version?: number }
+      const dbp = parseTaxPercent(b.percent)
+      if (dbp === null)
+        throw new AppError('VALIDATION_FAILED', {
+          detail: 'Enter the tax rate as a percentage, such as 6.625',
+          errors: [{ path: 'percent', message: 'Use a percentage from 0 to 100 with up to three decimals, such as 6.625' }],
+        })
+      const r = await save(req, 'tax.rate_dbp', dbp, b.version)
+      etag(reply, r.version)
+      return salesTaxView(r)
     },
   )
 }

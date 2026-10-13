@@ -55,6 +55,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261015100000_review_q4.sql` | review Q4 fixes (ADR 0171 wave Q4 notes): `square_refunds_waiting` (a refund made in the Square app before its payment was on an invoice, recorded on the invoice when the payment is); index `webhook_log_square_open_idx` (the catch-up runs the Square rows still received or failed outside its search window) |
 | `20261015100100_review_q4_fix.sql` | review Q4 re-verification and the Square sandbox run (ADR 0170 and ADR 0171 wave Q4 fix notes): `membership_inclusions.auto_apply` turned on for the default tiers' inclusions nobody edited (inclusions apply by themselves, plan decision 2); `webhook_log.attempts` (failures so far: the Square catch-up backs failed rows off by it; failed rows start at 1); `square_state.connected_at` (the connection point: counter payments Square made before it are history, never queued) |
 | `20261015100200_charge_after_close.sql` | review Q4FIX-N1 (ADR 0171 wave Q4 fix notes): `square_charges.charged_after_close_at` (Square completed the charge after Oasis closed it as not charged: recorded, and the invoice's "Overpaid via Square" alert says why) |
+| `20261015150000_tax_precision.sql` | sales tax precision and Square's rounding (ADR 0173): `sales_tax_cents(sub, dbp, rounding)`; `invoices.tax_dbp` (thousandths of a percent, 7000 = 7%, 6625 = 6.625%; backfilled `tax_bp × 10`) and `invoices.tax_rounding half_up\|half_even` (existing rows `half_up`, new ones `half_even`) replace `invoices.tax_bp`; `invoice_calc_of` rounds with them; the setting `tax.rate_bp` becomes `tax.rate_dbp` (× 10) |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -169,16 +170,19 @@ check-in link; the plain token exists only in the response that issued it.
 | Table                | Key columns and rules                                                                                                                                                                                                                                                                                                                                                 |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `invoice_counters`   | pk `location_id`; `next_no` (starts at 20611), incremented under a row lock in the booking transaction: gap-free.                                                                                                                                                                                                                                                     |
-| `invoices`           | One per appointment (`appointment_id` unique), `invoice_no` unique per location, label snapshots, `occurred_at`/`biz_date` (frozen by `date_frozen_at` at completion), `tax_bp`, `tip_cents`, `canceled_at` + `cancel_reason canceled\|no_show`, `payment_link_url`, `version`.                                                                                       |
+| `invoices`           | One per appointment (`appointment_id` unique), `invoice_no` unique per location, label snapshots, `occurred_at`/`biz_date` (frozen by `date_frozen_at` at completion), `tax_dbp` + `tax_rounding` (the rate in thousandths of a percent and the rounding the invoice was made with, ADR 0173; `tax_bp` before), `tip_cents`, `canceled_at` + `cancel_reason canceled\|no_show`, `payment_link_url`, `version`.                                                                                       |
 | `invoice_items`      | Price snapshots (`package` or `addon`), `position`, `appointment_addon_id`; refund-by-item claims item ids.                                                                                                                                                                                                                                                           |
 | `ledger_events`      | Append-only (trigger): `type pay\|adjust\|refund\|credit_issue\|credit_apply\|void`, `amount_cents` (adjust signed), refund `status pending\|done\|denied` and `dest card\|credit\|cash`, method fields, actor and approver fields, `source oasis\|squarespace\|system\|seed\|square`, `processor_state na\|awaiting_processor\|confirmed\|failed` (a card refund the processor reported `failed` no longer counts as refunded), `processor squarespace\|square` and `processor_order_id` (ADR 0171), `idempotency_key` unique. |
 | `credit_allocations` | Append-only: which store-credit lot a `credit_apply` consumed (FIFO by expiry, skipping lots already expired).                                                                                                                                                                                                                                                        |
 | `payment_links`      | A staff-attached Squarespace checkout or invoice URL (https), or a Square link made for an exact amount (ADR 0171 D3: `provider square`, `kind square_order\|square_quick_pay`, `square_payment_link_id`, `square_order_id`, `invoice_version`, `origin staff\|pay_page\|booking\|deposit_page`; `state pending` until its command commits, or a booking's deposit request with no URL yet; canceled with `cancel_reason` and deleted at Square, `square_deleted_at`; `paid_square_payment_id`): `purpose balance\|deposit`, `expected_cents`, `state`, `matched_sqsp_order_id`. No ledger event until money actually arrives. |
 
-`invoice_calc_of(invoice)` and the `invoice_calc` view compute items, adjustments, tax (half-up), paid, refunded, balance, refundable
+`invoice_calc_of(invoice)` and the `invoice_calc` view computes items, adjustments, tax (rounded by the invoice's own rule, below), paid, refunded, balance, refundable
 and the status ladder in integer cents; `src/modules/payments/calc.ts` is the TypeScript twin (and `jobs-integrity.ts` checks them
 against each other nightly). Since `20261014400000_square_core.sql` a done card refund whose `processor_state` is `failed` (Square
-refused it) counts neither as `refunded` nor as `ref_orig` (ADR 0171 D4); the dashboard's `src/lib/payments/cents.ts` follows.
+refused it) counts neither as `refunded` nor as `ref_orig` (ADR 0171 D4); the dashboard's `src/lib/payments/cents.ts` follows. Since
+`20261015150000_tax_precision.sql` (ADR 0173) the tax is `sales_tax_cents(sub, tax_dbp, tax_rounding)`: rounded once on the adjusted
+subtotal, half to even (Square's rule, every new invoice) or half-up (invoices made before; their numbers are unchanged); the TS
+twin is `salesTaxCents` in `src/platform/money.ts`.
 
 ## Messaging (migration `20261006200000_messaging.sql`)
 
@@ -454,7 +458,7 @@ Operations design day re-anchored on **today** in the business time zone with th
 ## Schema reference (generated)
 
 <!-- schema-reference:start -->
-Generated from `db/schema.sql` by `pnpm data-model` (123 tables, 1 view, 15 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
+Generated from `db/schema.sql` by `pnpm data-model` (123 tables, 1 view, 16 functions). Do not edit by hand: change a migration, run `pnpm db:schema` then `pnpm data-model`.
 
 #### `activity_log`
 
@@ -1247,7 +1251,6 @@ Primary key `(id)`. `(appointment_addon_id)` references `appointment_addons(id)`
 | `occurred_at` | timestamp with time zone | no |  |
 | `biz_date` | date | no |  |
 | `date_frozen_at` | timestamp with time zone | yes |  |
-| `tax_bp` | integer | no |  |
 | `tip_cents` | integer | no | `0` |
 | `canceled_at` | timestamp with time zone | yes |  |
 | `canceled_by` | uuid | yes |  |
@@ -1259,8 +1262,10 @@ Primary key `(id)`. `(appointment_addon_id)` references `appointment_addons(id)`
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `updated_at` | timestamp with time zone | no | `app_now()` |
 | `vehicle_class_label` | text | yes |  |
+| `tax_dbp` | integer | no |  |
+| `tax_rounding` | text | no | `'half_even'::text` |
 
-Primary key `(id)`. Unique `(appointment_id)`. Unique `(location_id, invoice_no)`. `(appointment_id)` references `appointments(id)`. `(canceled_by)` references `users(id)` on delete set null. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. 7 check constraints. Index `invoices_biz_date_idx` `(location_id, biz_date DESC, invoice_no DESC)`. Index `invoices_customer_idx` `(customer_id, biz_date DESC)`.
+Primary key `(id)`. Unique `(appointment_id)`. Unique `(location_id, invoice_no)`. `(appointment_id)` references `appointments(id)`. `(canceled_by)` references `users(id)` on delete set null. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. 8 check constraints. Index `invoices_biz_date_idx` `(location_id, biz_date DESC, invoice_no DESC)`. Index `invoices_customer_idx` `(customer_id, biz_date DESC)`.
 
 #### `job_checklist_items`
 
@@ -2934,5 +2939,6 @@ Primary key `(id)`. Unique `(provider, external_id)`. 3 check constraints. Index
 - function `realtime_channel_name() returns text`
 - function `realtime_events_notify() returns trigger`
 - function `realtime_purge(p_before timestamp with time zone) returns bigint`
+- function `sales_tax_cents(p_sub bigint, p_dbp integer, p_rounding text) returns bigint`
 - function `services_default_category() returns trigger`
 <!-- schema-reference:end -->

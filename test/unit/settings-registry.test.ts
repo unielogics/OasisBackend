@@ -11,7 +11,7 @@ import {
 
 describe('settings registry', () => {
   it('has the design defaults', () => {
-    expect(defaultSetting('tax.rate_bp')).toBe(700)
+    expect(defaultSetting('tax.rate_dbp')).toBe(7000) // 7% in thousandths of a percent (ADR 0173)
     expect(defaultSetting('currency')).toBe('USD')
     expect(defaultSetting('ops.late_grace_min')).toBe(10)
     expect(defaultSetting('ops.eta_visible_max_min')).toBe(30)
@@ -33,8 +33,10 @@ describe('settings registry', () => {
   })
 
   it('validates values and reports a field error', () => {
-    expect(() => parseSetting('tax.rate_bp', 10_001)).toThrow(AppError)
-    expect(() => parseSetting('tax.rate_bp', 7.5)).toThrow(AppError)
+    expect(() => parseSetting('tax.rate_dbp', 100_001)).toThrow(AppError)
+    expect(() => parseSetting('tax.rate_dbp', 6625.5)).toThrow(AppError)
+    expect(() => parseSetting('tax.rate_dbp', -1)).toThrow(AppError)
+    expect(parseSetting('tax.rate_dbp', 6625)).toBe(6625)
     expect(() => parseSetting('sms.quiet_hours', { enabled: true, start: '9pm', end: '08:00' })).toThrow(
       AppError,
     )
@@ -47,7 +49,8 @@ describe('settings registry', () => {
   })
 
   it('knows its keys', () => {
-    expect(isSettingKey('tax.rate_bp')).toBe(true)
+    expect(isSettingKey('tax.rate_dbp')).toBe(true)
+    expect(isSettingKey('tax.rate_bp')).toBe(false)
     expect(isSettingKey('constructor')).toBe(false)
     expect(() => requireSettingKey('nope')).toThrow(AppError)
   })

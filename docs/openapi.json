@@ -1655,6 +1655,7 @@
                           "type": "integer"
                         },
                         "taxBp": {
+                          "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
@@ -1663,6 +1664,20 @@
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
+                        },
+                        "taxDbp": {
+                          "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "taxRounding": {
+                          "description": "How the invoice's tax is rounded (ADR 0173)",
+                          "enum": [
+                            "half_up",
+                            "half_even"
+                          ],
+                          "type": "string"
                         },
                         "tipCents": {
                           "maximum": 9007199254740991,
@@ -2718,6 +2733,7 @@
                               "type": "integer"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -2726,6 +2742,20 @@
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded (ADR 0173)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -4674,6 +4704,7 @@
                               "type": "integer"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -4682,6 +4713,20 @@
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded (ADR 0173)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -5423,6 +5468,7 @@
                           "type": "integer"
                         },
                         "taxBp": {
+                          "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
@@ -5431,6 +5477,20 @@
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
+                        },
+                        "taxDbp": {
+                          "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "taxRounding": {
+                          "description": "How the invoice's tax is rounded (ADR 0173)",
+                          "enum": [
+                            "half_up",
+                            "half_even"
+                          ],
+                          "type": "string"
                         },
                         "tipCents": {
                           "maximum": 9007199254740991,
@@ -6034,6 +6094,7 @@
                           "type": "integer"
                         },
                         "taxBp": {
+                          "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
@@ -6042,6 +6103,20 @@
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
+                        },
+                        "taxDbp": {
+                          "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "taxRounding": {
+                          "description": "How the invoice's tax is rounded (ADR 0173)",
+                          "enum": [
+                            "half_up",
+                            "half_even"
+                          ],
+                          "type": "string"
                         },
                         "tipCents": {
                           "maximum": 9007199254740991,
@@ -6802,6 +6877,7 @@
                               "type": "integer"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -6810,6 +6886,20 @@
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded (ADR 0173)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -7753,6 +7843,7 @@
                               "type": "integer"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -7761,6 +7852,20 @@
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded (ADR 0173)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -8650,6 +8755,7 @@
                               "type": "integer"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -8658,6 +8764,20 @@
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded (ADR 0173)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -9559,6 +9679,7 @@
                               "type": "integer"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -9567,6 +9688,20 @@
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded (ADR 0173)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -10671,6 +10806,7 @@
                               "type": "integer"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -10679,6 +10815,20 @@
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded (ADR 0173)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -11546,6 +11696,7 @@
                               "type": "integer"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -11554,6 +11705,20 @@
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded (ADR 0173)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -13342,9 +13507,24 @@
                               "type": "string"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -13381,6 +13561,8 @@
                             "canceled",
                             "cancelReason",
                             "taxBp",
+                            "taxDbp",
+                            "taxRounding",
                             "tipCents",
                             "paymentLinkUrl",
                             "awaitingProcessorCount",
@@ -14678,9 +14860,24 @@
                               "type": "string"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -14717,6 +14914,8 @@
                             "canceled",
                             "cancelReason",
                             "taxBp",
+                            "taxDbp",
+                            "taxRounding",
                             "tipCents",
                             "paymentLinkUrl",
                             "awaitingProcessorCount",
@@ -16550,9 +16749,24 @@
                           "type": "string"
                         },
                         "taxBp": {
+                          "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
+                        },
+                        "taxDbp": {
+                          "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "taxRounding": {
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "enum": [
+                            "half_up",
+                            "half_even"
+                          ],
+                          "type": "string"
                         },
                         "tipCents": {
                           "maximum": 9007199254740991,
@@ -16589,6 +16803,8 @@
                         "canceled",
                         "cancelReason",
                         "taxBp",
+                        "taxDbp",
+                        "taxRounding",
                         "tipCents",
                         "paymentLinkUrl",
                         "awaitingProcessorCount",
@@ -18483,6 +18699,7 @@
                               "type": "integer"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -18491,6 +18708,20 @@
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded (ADR 0173)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -19359,6 +19590,7 @@
                               "type": "integer"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -19367,6 +19599,20 @@
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded (ADR 0173)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -20566,6 +20812,7 @@
                               "type": "integer"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -20574,6 +20821,20 @@
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded (ADR 0173)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -21441,6 +21702,7 @@
                               "type": "integer"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -21449,6 +21711,20 @@
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded (ADR 0173)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -22347,6 +22623,7 @@
                               "type": "integer"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -22355,6 +22632,20 @@
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded (ADR 0173)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -23257,6 +23548,7 @@
                               "type": "integer"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -23265,6 +23557,20 @@
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded (ADR 0173)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -24151,6 +24457,7 @@
                               "type": "integer"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -24159,6 +24466,20 @@
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded (ADR 0173)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -25053,6 +25374,7 @@
                               "type": "integer"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -25061,6 +25383,20 @@
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded (ADR 0173)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -48930,9 +49266,24 @@
                       "type": "string"
                     },
                     "taxBp": {
+                      "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
                       "type": "integer"
+                    },
+                    "taxDbp": {
+                      "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "taxRounding": {
+                      "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                      "enum": [
+                        "half_up",
+                        "half_even"
+                      ],
+                      "type": "string"
                     },
                     "tipCents": {
                       "maximum": 9007199254740991,
@@ -48969,6 +49320,8 @@
                     "canceled",
                     "cancelReason",
                     "taxBp",
+                    "taxDbp",
+                    "taxRounding",
                     "tipCents",
                     "paymentLinkUrl",
                     "awaitingProcessorCount",
@@ -50519,9 +50872,24 @@
                           "type": "string"
                         },
                         "taxBp": {
+                          "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
+                        },
+                        "taxDbp": {
+                          "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "taxRounding": {
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "enum": [
+                            "half_up",
+                            "half_even"
+                          ],
+                          "type": "string"
                         },
                         "tipCents": {
                           "maximum": 9007199254740991,
@@ -50558,6 +50926,8 @@
                         "canceled",
                         "cancelReason",
                         "taxBp",
+                        "taxDbp",
+                        "taxRounding",
                         "tipCents",
                         "paymentLinkUrl",
                         "awaitingProcessorCount",
@@ -52554,9 +52924,24 @@
                               "type": "string"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -52593,6 +52978,8 @@
                             "canceled",
                             "cancelReason",
                             "taxBp",
+                            "taxDbp",
+                            "taxRounding",
                             "tipCents",
                             "paymentLinkUrl",
                             "awaitingProcessorCount",
@@ -53890,9 +54277,24 @@
                               "type": "string"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -53929,6 +54331,8 @@
                             "canceled",
                             "cancelReason",
                             "taxBp",
+                            "taxDbp",
+                            "taxRounding",
                             "tipCents",
                             "paymentLinkUrl",
                             "awaitingProcessorCount",
@@ -55273,9 +55677,24 @@
                               "type": "string"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -55312,6 +55731,8 @@
                             "canceled",
                             "cancelReason",
                             "taxBp",
+                            "taxDbp",
+                            "taxRounding",
                             "tipCents",
                             "paymentLinkUrl",
                             "awaitingProcessorCount",
@@ -56826,9 +57247,24 @@
                           "type": "string"
                         },
                         "taxBp": {
+                          "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
+                        },
+                        "taxDbp": {
+                          "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "taxRounding": {
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "enum": [
+                            "half_up",
+                            "half_even"
+                          ],
+                          "type": "string"
                         },
                         "tipCents": {
                           "maximum": 9007199254740991,
@@ -56865,6 +57301,8 @@
                         "canceled",
                         "cancelReason",
                         "taxBp",
+                        "taxDbp",
+                        "taxRounding",
                         "tipCents",
                         "paymentLinkUrl",
                         "awaitingProcessorCount",
@@ -58412,9 +58850,24 @@
                           "type": "string"
                         },
                         "taxBp": {
+                          "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
+                        },
+                        "taxDbp": {
+                          "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "taxRounding": {
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "enum": [
+                            "half_up",
+                            "half_even"
+                          ],
+                          "type": "string"
                         },
                         "tipCents": {
                           "maximum": 9007199254740991,
@@ -58451,6 +58904,8 @@
                         "canceled",
                         "cancelReason",
                         "taxBp",
+                        "taxDbp",
+                        "taxRounding",
                         "tipCents",
                         "paymentLinkUrl",
                         "awaitingProcessorCount",
@@ -59589,9 +60044,24 @@
                           "type": "string"
                         },
                         "taxBp": {
+                          "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
+                        },
+                        "taxDbp": {
+                          "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "taxRounding": {
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "enum": [
+                            "half_up",
+                            "half_even"
+                          ],
+                          "type": "string"
                         },
                         "tipCents": {
                           "maximum": 9007199254740991,
@@ -59628,6 +60098,8 @@
                         "canceled",
                         "cancelReason",
                         "taxBp",
+                        "taxDbp",
+                        "taxRounding",
                         "tipCents",
                         "paymentLinkUrl",
                         "awaitingProcessorCount",
@@ -61207,9 +61679,24 @@
                           "type": "string"
                         },
                         "taxBp": {
+                          "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
+                        },
+                        "taxDbp": {
+                          "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "taxRounding": {
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "enum": [
+                            "half_up",
+                            "half_even"
+                          ],
+                          "type": "string"
                         },
                         "tipCents": {
                           "maximum": 9007199254740991,
@@ -61246,6 +61733,8 @@
                         "canceled",
                         "cancelReason",
                         "taxBp",
+                        "taxDbp",
+                        "taxRounding",
                         "tipCents",
                         "paymentLinkUrl",
                         "awaitingProcessorCount",
@@ -62416,9 +62905,24 @@
                           "type": "string"
                         },
                         "taxBp": {
+                          "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
+                        },
+                        "taxDbp": {
+                          "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "taxRounding": {
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "enum": [
+                            "half_up",
+                            "half_even"
+                          ],
+                          "type": "string"
                         },
                         "tipCents": {
                           "maximum": 9007199254740991,
@@ -62455,6 +62959,8 @@
                         "canceled",
                         "cancelReason",
                         "taxBp",
+                        "taxDbp",
+                        "taxRounding",
                         "tipCents",
                         "paymentLinkUrl",
                         "awaitingProcessorCount",
@@ -64020,9 +64526,24 @@
                           "type": "string"
                         },
                         "taxBp": {
+                          "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
+                        },
+                        "taxDbp": {
+                          "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "taxRounding": {
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "enum": [
+                            "half_up",
+                            "half_even"
+                          ],
+                          "type": "string"
                         },
                         "tipCents": {
                           "maximum": 9007199254740991,
@@ -64059,6 +64580,8 @@
                         "canceled",
                         "cancelReason",
                         "taxBp",
+                        "taxDbp",
+                        "taxRounding",
                         "tipCents",
                         "paymentLinkUrl",
                         "awaitingProcessorCount",
@@ -65579,9 +66102,24 @@
                           "type": "string"
                         },
                         "taxBp": {
+                          "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
+                        },
+                        "taxDbp": {
+                          "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "taxRounding": {
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "enum": [
+                            "half_up",
+                            "half_even"
+                          ],
+                          "type": "string"
                         },
                         "tipCents": {
                           "maximum": 9007199254740991,
@@ -65618,6 +66156,8 @@
                         "canceled",
                         "cancelReason",
                         "taxBp",
+                        "taxDbp",
+                        "taxRounding",
                         "tipCents",
                         "paymentLinkUrl",
                         "awaitingProcessorCount",
@@ -67149,9 +67689,24 @@
                           "type": "string"
                         },
                         "taxBp": {
+                          "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
+                        },
+                        "taxDbp": {
+                          "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "taxRounding": {
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "enum": [
+                            "half_up",
+                            "half_even"
+                          ],
+                          "type": "string"
                         },
                         "tipCents": {
                           "maximum": 9007199254740991,
@@ -67188,6 +67743,8 @@
                         "canceled",
                         "cancelReason",
                         "taxBp",
+                        "taxDbp",
+                        "taxRounding",
                         "tipCents",
                         "paymentLinkUrl",
                         "awaitingProcessorCount",
@@ -68353,9 +68910,24 @@
                           "type": "string"
                         },
                         "taxBp": {
+                          "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
+                        },
+                        "taxDbp": {
+                          "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "taxRounding": {
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "enum": [
+                            "half_up",
+                            "half_even"
+                          ],
+                          "type": "string"
                         },
                         "tipCents": {
                           "maximum": 9007199254740991,
@@ -68392,6 +68964,8 @@
                         "canceled",
                         "cancelReason",
                         "taxBp",
+                        "taxDbp",
+                        "taxRounding",
                         "tipCents",
                         "paymentLinkUrl",
                         "awaitingProcessorCount",
@@ -69517,9 +70091,24 @@
                           "type": "string"
                         },
                         "taxBp": {
+                          "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
+                        },
+                        "taxDbp": {
+                          "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "taxRounding": {
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "enum": [
+                            "half_up",
+                            "half_even"
+                          ],
+                          "type": "string"
                         },
                         "tipCents": {
                           "maximum": 9007199254740991,
@@ -69556,6 +70145,8 @@
                         "canceled",
                         "cancelReason",
                         "taxBp",
+                        "taxDbp",
+                        "taxRounding",
                         "tipCents",
                         "paymentLinkUrl",
                         "awaitingProcessorCount",
@@ -71084,9 +71675,24 @@
                           "type": "string"
                         },
                         "taxBp": {
+                          "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
+                        },
+                        "taxDbp": {
+                          "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "taxRounding": {
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "enum": [
+                            "half_up",
+                            "half_even"
+                          ],
+                          "type": "string"
                         },
                         "tipCents": {
                           "maximum": 9007199254740991,
@@ -71123,6 +71729,8 @@
                         "canceled",
                         "cancelReason",
                         "taxBp",
+                        "taxDbp",
+                        "taxRounding",
                         "tipCents",
                         "paymentLinkUrl",
                         "awaitingProcessorCount",
@@ -72876,9 +73484,24 @@
                           "type": "string"
                         },
                         "taxBp": {
+                          "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                           "maximum": 9007199254740991,
                           "minimum": -9007199254740991,
                           "type": "integer"
+                        },
+                        "taxDbp": {
+                          "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "taxRounding": {
+                          "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                          "enum": [
+                            "half_up",
+                            "half_even"
+                          ],
+                          "type": "string"
                         },
                         "tipCents": {
                           "maximum": 9007199254740991,
@@ -72915,6 +73538,8 @@
                         "canceled",
                         "cancelReason",
                         "taxBp",
+                        "taxDbp",
+                        "taxRounding",
                         "tipCents",
                         "paymentLinkUrl",
                         "awaitingProcessorCount",
@@ -96705,9 +97330,24 @@
                               "type": "string"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -96744,6 +97384,8 @@
                             "canceled",
                             "cancelReason",
                             "taxBp",
+                            "taxDbp",
+                            "taxRounding",
                             "tipCents",
                             "paymentLinkUrl",
                             "awaitingProcessorCount",
@@ -97926,9 +98568,24 @@
                               "type": "string"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -97965,6 +98622,8 @@
                             "canceled",
                             "cancelReason",
                             "taxBp",
+                            "taxDbp",
+                            "taxRounding",
                             "tipCents",
                             "paymentLinkUrl",
                             "awaitingProcessorCount",
@@ -99132,9 +99791,24 @@
                               "type": "string"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points (6.625% reads 663). Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded, once on its subtotal: half_even (Square's rule, every invoice since ADR 0173) or half_up (older invoices)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,
@@ -99171,6 +99845,8 @@
                             "canceled",
                             "cancelReason",
                             "taxBp",
+                            "taxDbp",
+                            "taxRounding",
                             "tipCents",
                             "paymentLinkUrl",
                             "awaitingProcessorCount",
@@ -110654,7 +111330,7 @@
     },
     "/api/v1/settings/billing": {
       "get": {
-        "description": "The Square status row (as GET /integrations/square), the processor and its switches (read only, from the server environment), the booking fee (saved with PUT /catalog/guest-fee), link tipping, the no-show and late-cancel fees on a saved card (PUT /settings/card-fees), the renewal policy of memberships billed by Square, the \"Move members\" notice, and the card consent text in use. Each editable block carries its own `version`. Never contains a token or a key.",
+        "description": "The Square status row (as GET /integrations/square), the processor and its switches (read only, from the server environment), the booking fee (saved with PUT /catalog/guest-fee), link tipping, the no-show and late-cancel fees on a saved card (PUT /settings/card-fees), the renewal policy of memberships billed by Square, the \"Move members\" notice, the sales tax rate of new invoices, and the card consent text in use. Each editable block carries its own `version`. Never contains a token or a key.",
         "operationId": "getBillingSettings",
         "responses": {
           "200": {
@@ -110912,6 +111588,47 @@
                       "required": [
                         "graceDays",
                         "cancelDays",
+                        "version"
+                      ],
+                      "type": "object"
+                    },
+                    "salesTax": {
+                      "additionalProperties": false,
+                      "description": "tax.rate_dbp: PUT /settings/billing/sales-tax (applies to invoices made from then on)",
+                      "properties": {
+                        "label": {
+                          "description": "How the tax line reads it: \"7%\", \"6.625%\"",
+                          "type": "string"
+                        },
+                        "percent": {
+                          "description": "The rate new invoices are made with, as a percentage with up to three decimals: \"7\", \"6.625\"",
+                          "type": "string"
+                        },
+                        "rateDbp": {
+                          "description": "The same rate in thousandths of a percent (tax.rate_dbp): 7000 = 7%, 6625 = 6.625%",
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        },
+                        "rounding": {
+                          "description": "How new invoices round their tax, once on the subtotal: half_even, Square's rule (ADR 0173; older invoices keep half_up)",
+                          "enum": [
+                            "half_up",
+                            "half_even"
+                          ],
+                          "type": "string"
+                        },
+                        "version": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "percent",
+                        "rateDbp",
+                        "label",
+                        "rounding",
                         "version"
                       ],
                       "type": "object"
@@ -111253,6 +111970,7 @@
                     "cardFees",
                     "renewalPolicy",
                     "priceChangeNotice",
+                    "salesTax",
                     "consent"
                   ],
                   "type": "object"
@@ -111473,6 +112191,91 @@
           }
         },
         "summary": "Save what happens when Square cannot charge a membership renewal (ETag = version)",
+        "tags": [
+          "settings"
+        ],
+        "x-oasis-access": "set.billing"
+      }
+    },
+    "/api/v1/settings/billing/sales-tax": {
+      "put": {
+        "description": "tax.rate_dbp (ADR 0173; default 7%). `percent` is the rate as staff type it, with up to three decimals (\"6.625\" for New Jersey; a trailing % is accepted), 0 to 100; anything else is 422 `VALIDATION_FAILED` on `percent`. It applies to invoices made from now on: each invoice keeps the rate and the rounding it was made with, and every new invoice rounds its tax like Square (half to even, once on the subtotal). `version` (or If-Match) required: 428 without, 412 when stale. Audited `settings.update`; publishes `settings.changed {key: \"tax.rate_dbp\"}`.",
+        "operationId": "putBillingSalesTax",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "percent": {
+                    "maxLength": 12,
+                    "type": "string"
+                  },
+                  "version": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "percent"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "label": {
+                      "description": "How the tax line reads it: \"7%\", \"6.625%\"",
+                      "type": "string"
+                    },
+                    "percent": {
+                      "description": "The rate new invoices are made with, as a percentage with up to three decimals: \"7\", \"6.625\"",
+                      "type": "string"
+                    },
+                    "rateDbp": {
+                      "description": "The same rate in thousandths of a percent (tax.rate_dbp): 7000 = 7%, 6625 = 6.625%",
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "rounding": {
+                      "description": "How new invoices round their tax, once on the subtotal: half_even, Square's rule (ADR 0173; older invoices keep half_up)",
+                      "enum": [
+                        "half_up",
+                        "half_even"
+                      ],
+                      "type": "string"
+                    },
+                    "version": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "percent",
+                    "rateDbp",
+                    "label",
+                    "rounding",
+                    "version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Save the sales tax rate of new invoices (ETag = version)",
         "tags": [
           "settings"
         ],
@@ -118534,6 +119337,7 @@
                               "type": "integer"
                             },
                             "taxBp": {
+                              "description": "Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.",
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
@@ -118542,6 +119346,20 @@
                               "maximum": 9007199254740991,
                               "minimum": -9007199254740991,
                               "type": "integer"
+                            },
+                            "taxDbp": {
+                              "description": "The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)",
+                              "maximum": 9007199254740991,
+                              "minimum": -9007199254740991,
+                              "type": "integer"
+                            },
+                            "taxRounding": {
+                              "description": "How the invoice's tax is rounded (ADR 0173)",
+                              "enum": [
+                                "half_up",
+                                "half_even"
+                              ],
+                              "type": "string"
                             },
                             "tipCents": {
                               "maximum": 9007199254740991,

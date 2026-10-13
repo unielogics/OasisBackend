@@ -27,7 +27,8 @@ import { wire, wireEvent, type WireCard, type WireCustomer, type WireInvoice, ty
 import type { SquareApi } from '../../src/integrations/ports/square.js'
 import { balanceLines } from '../../src/modules/square/links.js'
 import { planRefundLegs } from '../../src/modules/square/refunds.js'
-import { taxCents } from '../../src/platform/money.js'
+import { salesTaxCents } from '../../src/platform/money.js'
+import { sqr18 } from './square-tax.js'
 import { MissingConfig, Report, UsageError, cli, type ItemDef, type RunContext, type RunResult } from './lib.js'
 
 const DOC = 'docs/integrations/square.md section 7 (Sandbox verification)'
@@ -60,10 +61,16 @@ export const SQUARE_ITEMS: readonly ItemDef[] = [
     title: "Oasis's own membership subscription: a deliverable email, CreateSubscription with sb_ from today, the first invoice paid and its period; swap, pause and cancel scheduled at the next billing date and undone; an unpaid invoice canceled",
     source: `${DOC}, check 13 (wave Q3b)`,
   },
+  {
+    id: 'SQR-18',
+    title:
+      "Square's sales-tax rounding: CalculateOrder at 6.625% and 7% (half-cent subtotals, baskets, quantities, ORDER / LINE_ITEM / catalog taxes) equals Oasis's tax on every case",
+    source: 'docs/integrations/square.md section 15 and ADR 0173 (wave K1e)',
+  },
 ]
 
 export const SQUARE_OPTIONS = {
-  flags: ['read-only', 'keep'],
+  flags: ['read-only', 'keep', 'tax-only'],
   options: ['secret', 'location', 'capture', 'webhook-url', 'wait'],
 } as const
 
@@ -277,6 +284,17 @@ async function verify(ctx: RunContext, cfg: Config): Promise<Report> {
   const locationId = location.id
   const tz = location.timezone ?? 'America/New_York'
 
+  // ---- SQR-18 tax rounding (CalculateOrder; the catalog objects it makes are removed by SQR-11) ------------------------------------
+  if (readOnly) report.skip('SQR-18', '--read-only: the catalog tax cases create objects')
+  else if (cfg.environment === 'sim') report.skip('SQR-18', 'the simulator has no CalculateOrder: the sandbox is the reference for tax rounding')
+  else await step('SQR-18', () => sqr18({ api, client, report, run, ref, locationId, cleanup }, ctx.log))
+  if (args.flag('tax-only')) {
+    for (const id of ['SQR-02', 'SQR-03', 'SQR-04', 'SQR-05', 'SQR-06', 'SQR-07', 'SQR-08', 'SQR-09', 'SQR-10', 'SQR-12', 'SQR-13', 'SQR-14']) report.skip(id, '--tax-only')
+    await runCleanup(report, cleanup, readOnly, keep, ref)
+    writeCapture(capture, captured, ctx)
+    return report
+  }
+
   // ---- SQR-02 events API and event types -------------------------------------------------------------------------------------
   await step('SQR-02', async () => {
     if (!readOnly) await api.events.enable()
@@ -457,15 +475,15 @@ async function verify(ctx: RunContext, cfg: Config): Promise<Report> {
 
     // ---- SQR-12 our link builder and refund legs ------------------------------------------------------------------------------------
     await step('SQR-12', async () => {
-      // an invoice nobody paid yet: two lines, 6.625% tax (half up) and a tip, as balanceLines builds them for prepareSquareLink
+      // an invoice nobody paid yet: two lines, 6.625% tax (half to even, ADR 0173) and a tip, as balanceLines builds them for prepareSquareLink
       const items = [
         { name: 'Signature Hand Wash · verify', priceCents: 4000 },
         { name: 'Rain repellent · verify', priceCents: 1500 },
       ]
-      const tax = taxCents(5500, 663)
+      const tax = salesTaxCents(5500, { dbp: 6625, rounding: 'half_even' })
       const tip = 300
       const balance = 5500 + tax + tip
-      const lines = balanceLines({ invoiceNo: 20640 }, items, { paid: 0, adj: 0, refunded: 0, pendingAmt: 0, tax, tip, balance, total: balance })
+      const lines = balanceLines({ invoiceNo: 20640, taxDbp: 6625 }, items, { paid: 0, adj: 0, refunded: 0, pendingAmt: 0, tax, tip, balance, total: balance })
       const { link } = await api.checkout.createLink(sqKey('pl', `${run}:oasis-link`), {
         order: { location_id: locationId, reference_id: ref, line_items: lines.map((l) => ({ name: l.name, quantity: '1', base_price_money: usd(l.cents) })) },
         payment_note: `${ref} INV-20640`,
@@ -566,24 +584,25 @@ async function verify(ctx: RunContext, cfg: Config): Promise<Report> {
     })
 
   // ---- SQR-11 cleanup -----------------------------------------------------------------------------------------------------------
-  if (!readOnly) {
-    if (keep) report.skip('SQR-11', `--keep: left ${cleanup.length} object(s) in place (reference ${ref})`)
-    else {
-      const left: string[] = []
-      for (const c of cleanup.reverse()) {
-        try {
-          await c.run()
-        } catch (e) {
-          left.push(`${c.what}: ${codeOf(e)}`)
-        }
-      }
-      if (left.length) report.note(`cleanup left: ${left.join('; ')}`)
-      report.pass('SQR-11', `${cleanup.length - left.length} of ${cleanup.length} cleaned${left.length ? `; ${left.length} kept by Square (see notes)` : ''}`)
-    }
-  }
+  await runCleanup(report, cleanup, readOnly, keep, ref)
   report.note(`findings: ${JSON.stringify(findings)}`)
   writeCapture(capture, captured, ctx)
   return report
+}
+
+async function runCleanup(report: Report, cleanup: Array<{ what: string; run: () => Promise<unknown> }>, readOnly: boolean, keep: boolean, ref: string): Promise<void> {
+  if (readOnly) return
+  if (keep) return report.skip('SQR-11', `--keep: left ${cleanup.length} object(s) in place (reference ${ref})`)
+  const left: string[] = []
+  for (const c of cleanup.reverse()) {
+    try {
+      await c.run()
+    } catch (e) {
+      left.push(`${c.what}: ${codeOf(e)}`)
+    }
+  }
+  if (left.length) report.note(`cleanup left: ${left.join('; ')}`)
+  report.pass('SQR-11', `${cleanup.length - left.length} of ${cleanup.length} cleaned${left.length ? `; ${left.length} kept by Square (see notes)` : ''}`)
 }
 
 async function subscriptions(
@@ -1057,6 +1076,7 @@ Exit code 0 = no FAIL, 1 = at least one FAIL, 2 = configuration missing or bad c
   --sim                 run against the built-in simulator over a loopback socket
   --read-only           only the reads (the only mode a production token may use)
   --keep                leave what the run created
+  --tax-only            only SQR-01 and SQR-18 (Square's tax rounding against Oasis's, ADR 0173) and the cleanup
   --wait SECONDS        how long to wait for a refund, an invoice or an event (default 120)
   --capture DIR         save scrubbed copies of every answer (ids replaced, no emails, URL paths dropped)
   --webhook-url URL     also send TestWebhookSubscription to the subscription for that URL

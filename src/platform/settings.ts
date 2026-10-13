@@ -69,7 +69,10 @@ const tintMatrix = z
   })
 
 export const settingDefs = {
-  'tax.rate_bp': { schema: z.number().int().min(0).max(10_000), default: 700 },
+  // Sales tax rate of new invoices in thousandths of a percent (ADR 0173): 7000 = 7%, 6625 = 6.625% (New Jersey). Each invoice keeps
+  // the rate (invoices.tax_dbp) and rounding it was made with. Edited in Settings -> Billing & integrations (PUT
+  // /settings/billing/sales-tax, a percentage with up to three decimals).
+  'tax.rate_dbp': { schema: z.number().int().min(0).max(100_000), default: 7000 },
   'tax.label': { schema: z.string().trim().min(1).max(40), default: 'Tax' },
   currency: { schema: z.enum(['USD']), default: 'USD' as const },
   'federal_holidays.auto': { schema: z.boolean(), default: true },

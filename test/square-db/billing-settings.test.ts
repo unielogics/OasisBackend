@@ -118,3 +118,44 @@ describe('the writes', () => {
     expect(await changed('memberships.price_change_notice_days')).toHaveLength(1)
   })
 })
+
+describe('the sales tax rate (ADR 0173)', () => {
+  it('reads 7% by default, rounded like Square on new invoices', async () => {
+    defaults()
+    expect((await panel()).salesTax).toEqual({ percent: '7', rateDbp: 7000, label: '7%', rounding: 'half_even', version: expect.any(Number) })
+  })
+
+  it('saves a percentage with up to three decimals (6.625 for New Jersey): version required, audited, settings.changed', async () => {
+    defaults()
+    const v = (await panel()).salesTax.version as number
+    expect((await put('sales-tax', { percent: '6.625' })).statusCode).toBe(428)
+    const ok = await put('sales-tax', { percent: '6.625', version: v })
+    expect(ok.statusCode, ok.body).toBe(200)
+    expect(ok.json()).toEqual({ percent: '6.625', rateDbp: 6625, label: '6.625%', rounding: 'half_even', version: v + 1 })
+    expect(ok.headers.etag).toBe(`"${v + 1}"`)
+    expect((await put('sales-tax', { percent: '7', version: v })).statusCode).toBe(412)
+    expect((await panel()).salesTax).toMatchObject({ percent: '6.625', rateDbp: 6625 })
+    expect(await changed('tax.rate_dbp')).toHaveLength(1)
+    expect((await audits('tax.rate_dbp')).map((a) => [a.before, a.after])).toEqual([[7000, 6625]])
+    const back = await put('sales-tax', { percent: '7.000%', version: v + 1 })
+    expect(back.json()).toMatchObject({ percent: '7', rateDbp: 7000, label: '7%' })
+  })
+
+  it('refuses anything that is not 0 to 100 with up to three decimals, on the percent field, with a plain message', async () => {
+    defaults()
+    const v = (await panel()).salesTax.version as number
+    for (const percent of ['6.6255', '101', '-1', 'seven', '', '6,625']) {
+      const r = await put('sales-tax', { percent, version: v })
+      expect(r.statusCode, percent).toBe(422)
+      expect(r.json()).toMatchObject({ code: 'VALIDATION_FAILED', errors: [{ path: 'percent', message: expect.stringMatching(/up to three decimals/) }] })
+    }
+    expect((await put('sales-tax', { percent: 6.625, version: v })).statusCode).toBe(422)
+    expect((await panel()).salesTax.version).toBe(v)
+  })
+
+  it('needs set.billing', async () => {
+    defaults()
+    const reports = (await m.h.userWithPermissions(['pay.reports', 'set.services'], 'tax-reports@example.test')).session
+    expect((await put('sales-tax', { percent: '6.625', version: 1 }, {}, reports)).statusCode).toBe(403)
+  })
+})

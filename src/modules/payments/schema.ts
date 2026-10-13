@@ -1,6 +1,7 @@
 // Kysely types for the payments tables (migration 20261006190000_payments.sql), registered by module augmentation.
 import type { PriceBasis } from '../customers/schema.js'
 import type { Generated } from 'kysely'
+import type { TaxRounding } from '../../platform/money.js'
 
 export type LedgerType = 'pay' | 'adjust' | 'refund' | 'credit_issue' | 'credit_apply' | 'void'
 export type RefundStatus = 'pending' | 'done' | 'denied'
@@ -40,7 +41,10 @@ export interface InvoicesTable {
   occurred_at: Date
   biz_date: string
   date_frozen_at: Date | null
-  tax_bp: number
+  /** Thousandths of a percent (ADR 0173): 7000 = 7%, 6625 = 6.625%. */
+  tax_dbp: number
+  /** half_up before ADR 0173 (numbers unchanged), half_even (Square's rule) since. */
+  tax_rounding: Generated<TaxRounding>
   tip_cents: Generated<number>
   canceled_at: Date | null
   canceled_by: string | null
