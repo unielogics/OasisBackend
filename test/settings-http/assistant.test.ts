@@ -1,6 +1,7 @@
 // Settings → Assistant (ADR 0160, design section 8, plan G): GET/PUT /settings/assistant over the real app, one version token for
 // the section (the sum of its six assistant.* setting versions), validation (E.164 allowlist, FAQ plain text), audit and
-// settings.changed per changed key, set.hours to save, and the read-only server switches. Everything stays off by default.
+// settings.changed per changed key, set.assistant to save (ADR 0174; set.hours before), and the read-only server switches. Everything
+// stays off by default.
 import { describe, expect, it } from 'vitest'
 import { auditActions, events, json, useSettingsHarness, type Session } from './harness.js'
 
@@ -36,7 +37,7 @@ describe('GET /settings/assistant', () => {
     expect((await h.call('GET', 'settings/assistant')).statusCode).toBe(401)
   })
 
-  it('shows the allowlist numbers in full only to who may save the section (set.hours); others see the last four digits', async () => {
+  it('shows the allowlist numbers in full only to who may save the section (set.assistant); others see the last four digits', async () => {
     const s = await h.admin()
     const v0 = await sectionVersion(s)
     expect((await h.put('settings/assistant', s, { version: v0, allowlist: ['+12015550142', '+18623885827'] })).statusCode).toBe(200)
@@ -44,7 +45,9 @@ describe('GET /settings/assistant', () => {
     const masked = json(await h.get('settings/assistant', crew))
     expect(masked.allowlist).toEqual(['+1******0142', '+1******5827'])
     expect(JSON.stringify(masked)).not.toContain('2015550142')
-    const manager = await h.withPermissions(['set.hours'])
+    // set.hours alone no longer unmasks them (ADR 0174: the section has its own permission)
+    expect(json(await h.get('settings/assistant', await h.withPermissions(['set.hours']))).allowlist).toEqual(['+1******0142', '+1******5827'])
+    const manager = await h.withPermissions(['set.assistant'])
     expect(json(await h.get('settings/assistant', manager)).allowlist).toEqual(['+12015550142', '+18623885827'])
     expect(json(await h.get('settings/assistant', s)).allowlist).toEqual(['+12015550142', '+18623885827'])
   })
@@ -189,11 +192,12 @@ describe('PUT /settings/assistant', () => {
     expect((await auditActions(h.db)).filter((a) => a === 'settings.update')).toEqual(['settings.update'])
   })
 
-  it('needs set.hours to save', async () => {
+  it('needs set.assistant to save (ADR 0174; set.hours alone no longer does)', async () => {
     const crew = await h.withPermissions(['set.services', 'msg.auto'])
     const v0 = await sectionVersion(await h.admin())
     expect((await h.put('settings/assistant', crew, { version: v0, enabled: true })).statusCode).toBe(403)
-    const manager = await h.withPermissions(['set.hours'])
+    expect((await h.put('settings/assistant', await h.withPermissions(['set.hours']), { version: v0, enabled: true })).statusCode).toBe(403)
+    const manager = await h.withPermissions(['set.assistant'])
     expect((await h.put('settings/assistant', manager, { version: v0, enabled: true })).statusCode).toBe(200)
   })
 })

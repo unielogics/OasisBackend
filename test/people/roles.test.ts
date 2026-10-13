@@ -30,7 +30,7 @@ const roleByKey = (o: Json, key: string): Json => o.roles.find((r: Json) => r.ke
 describe('GET /roles', () => {
   const h = useHarness()
 
-  it('returns roles, the 27-key catalog, the matrix, limits in cents and people counts', async () => {
+  it('returns roles, the 28-key catalog, the matrix, limits in cents and people counts', async () => {
     const { session } = await asSuper(h)
     await h.createUser({ email: 'r@example.test', roles: ['mgmt', 'acct'] })
     await h.createUser({ email: 'm@example.test', roles: ['crew'] })
@@ -42,7 +42,7 @@ describe('GET /roles', () => {
       'Customer Support',
       'Crew',
     ])
-    expect(o.permissions).toHaveLength(27)
+    expect(o.permissions).toHaveLength(28)
     expect(o.permissions.filter((p: Json) => p.hasLimit).map((p: Json) => p.key)).toEqual([
       'pay.refund',
       'pay.adjust',
@@ -54,7 +54,7 @@ describe('GET /roles', () => {
       label: 'View schedule & calendar',
       sort: 1,
     })
-    expect(o.roles.map((r: Json) => r.permissionCount)).toEqual([27, 26, 13, 13, 4])
+    expect(o.roles.map((r: Json) => r.permissionCount)).toEqual([28, 27, 13, 13, 4])
     expect(o.roles.map((r: Json) => r.peopleCount)).toEqual([1, 1, 1, 0, 1])
     expect(roleByKey(o, 'super')).toMatchObject({
       locked: true,

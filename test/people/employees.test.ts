@@ -354,7 +354,7 @@ describe('reading employees', () => {
     expect(e.overrides).toEqual({ 'sched.override': 'allow' })
     expect(e.schedule).toHaveLength(7)
     const perm = (k: string) => e.effectivePermissions.find((p: Json) => p.key === k)
-    expect(e.effectivePermissions).toHaveLength(27)
+    expect(e.effectivePermissions).toHaveLength(28)
     expect(perm('pay.refund')).toMatchObject({
       on: true,
       limit: 5000,
@@ -369,7 +369,7 @@ describe('reading employees', () => {
     const eff = h.json<Json>(
       await h.call('GET', `employees/${sofia.id}/effective-permissions`, { session: sup.session }),
     )
-    expect(eff).toMatchObject({ allowedCount: 16, total: 27 })
+    expect(eff).toMatchObject({ allowedCount: 16, total: 28 })
     expect(eff.items).toEqual(e.effectivePermissions)
     expect(
       (await h.call('GET', 'employees/00000000-0000-7000-8000-000000000000', { session: sup.session }))

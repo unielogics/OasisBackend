@@ -488,7 +488,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | PATCH | `/api/v1/services/:id` | set.services |  |
 | PUT | `/api/v1/services/:id/checklist` | set.services |  |
 | GET | `/api/v1/settings/assistant` | authenticated |  |
-| PUT | `/api/v1/settings/assistant` | set.hours |  |
+| PUT | `/api/v1/settings/assistant` | set.assistant |  |
 | PUT | `/api/v1/settings/auto-federal-holidays` | set.hours |  |
 | GET | `/api/v1/settings/billing` | set.billing |  |
 | PUT | `/api/v1/settings/billing/link-tipping` | set.billing |  |
@@ -772,11 +772,12 @@ The values are the registry settings `assistant.enabled`, `assistant.actions_ena
 `allowlist`, 12 hours); `version` is the sum of their versions, which any write to any of them raises. `server` are the environment
 switches `AI_ENABLED` and `AI_ACTIONS_ENABLED`, which this section cannot change: with `AI_ENABLED=false` the assistant answers nobody
 whatever the section says. `active` = `AI_ENABLED` and `enabled`. The allowlist holds the owner's and staff's own mobile numbers,
-so a reader without `set.hours` gets them masked to the last four digits (`+1******0142`); `set.hours` sees them in full. The
+so a reader without `set.assistant` gets them masked to the last four digits (`+1******0142`); `set.assistant` sees them in full. The
 welcome flow's hourly ceiling of new provisional clients, `assistant.new_texters_per_hour` (1..1000, default 30; W4c fixes), is a
 registry setting outside this section (section 23.4a, "Welcome flow").
 
-`PUT /settings/assistant` (`set.hours`, the permission of the shop's other business settings): any field (strict; `allowlist` and
+`PUT /settings/assistant` (`set.assistant`, ADR 0174: the section's own permission, given by migration 20261016200000 to every
+role that held `set.hours`, the permission it used before): any field (strict; `allowlist` and
 `faq` replace the whole list), `version` or `If-Match` required (428 without, 412 `VERSION_CONFLICT {currentVersion}` when stale;
 saves take a per-location advisory lock). Each value is validated by its registry schema, then the section's rules: allowlist numbers
 are read as E.164 (`(201) 555-0142` becomes `+12015550142`), must be textable US/Canadian numbers, the check the assistant's gate

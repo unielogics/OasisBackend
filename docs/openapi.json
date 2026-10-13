@@ -110249,7 +110249,7 @@
     },
     "/api/v1/settings/assistant": {
       "get": {
-        "description": "Any signed-in user may read it; without set.hours the allowlist numbers come masked to their last four digits.",
+        "description": "Any signed-in user may read it; without set.assistant the allowlist numbers come masked to their last four digits.",
         "operationId": "getSettingsAssistant",
         "responses": {
           "200": {
@@ -110267,7 +110267,7 @@
                       "type": "boolean"
                     },
                     "allowlist": {
-                      "description": "The numbers of the first stage (the owner and staff), E.164 (+12015550142; \"(201) 555-0142\" is read too), textable US/Canadian numbers, at most 50, each once. GET shows them masked to the last four digits (\"+1******0142\") to a reader without set.hours",
+                      "description": "The numbers of the first stage (the owner and staff), E.164 (+12015550142; \"(201) 555-0142\" is read too), textable US/Canadian numbers, at most 50, each once. GET shows them masked to the last four digits (\"+1******0142\") to a reader without set.assistant",
                       "items": {
                         "type": "string"
                       },
@@ -110379,7 +110379,7 @@
                   },
                   "active": {},
                   "allowlist": {
-                    "description": "The numbers of the first stage (the owner and staff), E.164 (+12015550142; \"(201) 555-0142\" is read too), textable US/Canadian numbers, at most 50, each once. GET shows them masked to the last four digits (\"+1******0142\") to a reader without set.hours",
+                    "description": "The numbers of the first stage (the owner and staff), E.164 (+12015550142; \"(201) 555-0142\" is read too), textable US/Canadian numbers, at most 50, each once. GET shows them masked to the last four digits (\"+1******0142\") to a reader without set.assistant",
                     "items": {
                       "type": "string"
                     },
@@ -110454,7 +110454,7 @@
                       "type": "boolean"
                     },
                     "allowlist": {
-                      "description": "The numbers of the first stage (the owner and staff), E.164 (+12015550142; \"(201) 555-0142\" is read too), textable US/Canadian numbers, at most 50, each once. GET shows them masked to the last four digits (\"+1******0142\") to a reader without set.hours",
+                      "description": "The numbers of the first stage (the owner and staff), E.164 (+12015550142; \"(201) 555-0142\" is read too), textable US/Canadian numbers, at most 50, each once. GET shows them masked to the last four digits (\"+1******0142\") to a reader without set.assistant",
                       "items": {
                         "type": "string"
                       },
@@ -110557,7 +110557,7 @@
         "tags": [
           "settings"
         ],
-        "x-oasis-access": "set.hours"
+        "x-oasis-access": "set.assistant"
       }
     },
     "/api/v1/settings/auto-federal-holidays": {

@@ -1,7 +1,8 @@
 // Settings → Assistant (ADR 0160, design section 8, plan G): GET/PUT /settings/assistant over the assistant.* settings, one version
-// token for the section (the sum of its six setting versions), validation, audit and settings.changed per changed key, set.hours to
-// save (the permission of the shop's other business settings: hours, rules, location, cancellation policy, reminders). The allowlist
-// holds the owner's and staff's own mobile numbers, so a reader without set.hours sees them masked to the last four digits (review F2).
+// token for the section (the sum of its setting versions), validation, audit and settings.changed per changed key, set.assistant to
+// save (ADR 0174: its own permission since 2026-10-13; the migration gave it to every role that held set.hours, the permission it
+// used before). The allowlist holds the owner's and staff's own mobile numbers, so a reader without set.assistant sees them masked
+// to the last four digits (review F2).
 import { access } from '../../../http/access.js'
 import { hasPermission } from '../../../http/authorizer.js'
 import { maskPhone } from '../../../platform/phone.js'
@@ -31,7 +32,7 @@ const Fields = z.object({
     .array(z.string())
     .describe(
       'The numbers of the first stage (the owner and staff), E.164 (+12015550142; "(201) 555-0142" is read too), textable US/Canadian numbers, at most 50, each once. ' +
-        'GET shows them masked to the last four digits ("+1******0142") to a reader without set.hours',
+        'GET shows them masked to the last four digits ("+1******0142") to a reader without set.assistant',
     ),
   staffPauseHours: z.number().int().describe('A staff reply pauses the assistant on that thread this many hours, 1 to 72'),
   faq: z.array(FaqPair).describe('Questions and answers the assistant answers from, at most 40 pairs, plain text, each question once'),
@@ -69,7 +70,7 @@ export function registerAssistantRoutes(rt: SettingsRuntime): void {
         tags: ['settings'],
         operationId: 'getSettingsAssistant',
         summary: 'The AI text assistant: on/off, in-chat actions, stage, allowlist, staff pause and FAQ (ETag = version)',
-        description: 'Any signed-in user may read it; without set.hours the allowlist numbers come masked to their last four digits.',
+        description: 'Any signed-in user may read it; without set.assistant the allowlist numbers come masked to their last four digits.',
         response: { 200: AssistantView },
       },
     },
@@ -77,14 +78,14 @@ export function registerAssistantRoutes(rt: SettingsRuntime): void {
       const c = requestContext(req)
       const s = await loadAssistantSettings(app.db, c.locationId)
       etag(reply, s.version)
-      return view(s, hasPermission(req.auth!, 'set.hours'))
+      return view(s, hasPermission(req.auth!, 'set.assistant'))
     },
   )
 
   app.put(
     '/settings/assistant',
     {
-      config: { access: access.perm('set.hours') },
+      config: { access: access.perm('set.assistant') },
       schema: {
         tags: ['settings'],
         operationId: 'putSettingsAssistant',

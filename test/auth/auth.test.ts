@@ -454,7 +454,7 @@ describe('/me and preferences', () => {
     expect(me.permissions['pay.refund']).toEqual({ on: true, limit: 5000 })
     expect(me.permissions['sched.override']).toEqual({ on: true })
     expect(me.permissions['team.edit']).toEqual({ on: false })
-    expect(Object.keys(me.permissions)).toHaveLength(27)
+    expect(Object.keys(me.permissions)).toHaveLength(28)
     expect(me.limits).toEqual({ refund: 5000, adjust: 2500, credit: 5000 })
     expect(me.isSuperAdmin).toBe(false)
     expect(me.viewAs).toMatchObject({ active: false, canViewAs: false, roleId: null, options: [] })

@@ -63,6 +63,8 @@ export const PERMISSIONS: readonly PermissionDef[] = [
     ['set.emergency', 'Emergency closing'],
     ['set.services', 'Services, pricing & checklists'],
     ['set.billing', 'Billing & integrations'],
+    // ADR 0174: appended last (permissions.sort is unique; migration 20261016200000 grants it to every role holding set.hours)
+    ['set.assistant', 'Oasis AI assistant'],
   ]),
 ]
 

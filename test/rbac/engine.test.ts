@@ -52,9 +52,10 @@ const custom = (name: string, perms: string[], limits: RoleGrant['limits'] = {})
 })
 
 describe('catalog and design defaults', () => {
-  it('has the 27 permission keys, 3 of them money-limited', () => {
-    expect(PERMISSION_KEYS).toHaveLength(27)
-    expect(new Set(PERMISSION_KEYS).size).toBe(27)
+  it('has the 28 permission keys (set.assistant appended last, ADR 0174), 3 of them money-limited', () => {
+    expect(PERMISSION_KEYS).toHaveLength(28)
+    expect(new Set(PERMISSION_KEYS).size).toBe(28)
+    expect(PERMISSION_KEYS.at(-1)).toBe('set.assistant')
     expect(LIMITED_PERMISSION).toEqual({
       'pay.refund': 'refund',
       'pay.adjust': 'adjust',
@@ -62,9 +63,9 @@ describe('catalog and design defaults', () => {
     })
   })
 
-  it('default role grants match Settings: super 27, mgmt 26 (all but set.billing), acct 13, support 13, crew 4', () => {
+  it('default role grants match Settings: super 28, mgmt 27 (all but set.billing), acct 13, support 13, crew 4', () => {
     const count = Object.fromEntries(DEFAULT_ROLES.map((r) => [r.key, r.perms.length]))
-    expect(count).toEqual({ super: 27, mgmt: 26, acct: 13, support: 13, crew: 4 })
+    expect(count).toEqual({ super: 28, mgmt: 27, acct: 13, support: 13, crew: 4 })
     expect(DEFAULT_ROLES.find((r) => r.key === 'mgmt')!.perms).not.toContain('set.billing')
     expect(DEFAULT_ROLES.map((r) => r.key)).toEqual([...BUILTIN_ROLE_KEYS])
     for (const r of DEFAULT_ROLES) for (const k of r.perms) expect(PERMISSION_KEYS).toContain(k)
@@ -82,7 +83,7 @@ describe('effective permissions (set-domain 2.1)', () => {
     expect(m['pay.adjust']).toMatchObject({ on: true, limit: 50_000 })
     expect(m['pay.credit']).toMatchObject({ on: true, limit: 50_000 })
     expect(m['set.billing']).toMatchObject({ on: true, src: 'via Accounting' })
-    expect(allowedKeys(m)).toHaveLength(27)
+    expect(allowedKeys(m)).toHaveLength(28)
   })
 
   it('Sofia = support + crew: refund limit 50 (only support grants it), sched.override via exception', () => {
@@ -168,7 +169,7 @@ describe('effective permissions (set-domain 2.1)', () => {
       limits: { refund: 1 },
     }
     const m = effectiveAll([owner])
-    expect(allowedKeys(m)).toHaveLength(27)
+    expect(allowedKeys(m)).toHaveLength(28)
     expect(m['pay.refund']!.limit).toBeNull()
     expect(roleLimit(owner, 'refund')).toBeNull()
     // a role merely named "Super Admin" that is not locked gets no special treatment
