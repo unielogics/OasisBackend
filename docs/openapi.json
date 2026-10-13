@@ -77104,6 +77104,10 @@
                     "enabled": {
                       "type": "boolean"
                     },
+                    "signedOut": {
+                      "description": "The caller was signed in on a kiosk device and is signed out (the browser goes to the keypad)",
+                      "type": "boolean"
+                    },
                     "version": {
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
@@ -77112,7 +77116,8 @@
                   },
                   "required": [
                     "enabled",
-                    "version"
+                    "version",
+                    "signedOut"
                   ],
                   "type": "object"
                 }
