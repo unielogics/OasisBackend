@@ -86,7 +86,7 @@ export function registerPracticeRoutes(app: AppInstance): void {
     const userId = await storedUserId(app.db, a.realUserId ?? a.userId)
     // practice belongs to a person with a login (a kiosk or service actor has none)
     if (!userId) throw new AppError('FORBIDDEN', { meta: { required: ['a user login'], mode: 'all' } })
-    return { locationId: a.locationId, userId, now: app.clock.now(), newId: app.newId, env: app.env }
+    return { locationId: a.locationId, userId, now: app.clock.now(), newId: app.newId, env: app.env, canViewClients: hasPermission(a, 'cli.view') }
   }
   /** ai.practice for a turn (after the commit); a turn whose job cannot be queued fails at once rather than hang. */
   const kick = async (turnId: string): Promise<void> => {
@@ -150,7 +150,8 @@ export function registerPracticeRoutes(app: AppInstance): void {
         tags: TAGS,
         operationId: 'getAssistantPracticeSession',
         summary: 'One of my practice chats with its turns (another user’s is 404)',
-        description: 'Poll it every 2 s while a turn is `running`, or listen for `assistant.practice.turn {sessionId, turnId}` on the notifications channel.',
+        description:
+          'Poll it every 2 s while a turn is `running`, or listen for `assistant.practice.turn {sessionId, turnId}` on the notifications channel. A chat playing a real client needs cli.view now, as starting one does (403; the list then shows it without the client).',
         params: IdParams,
         response: { 200: z.object({ session: PracticeSessionDto, turns: z.array(PracticeTurnDto) }) },
       },
@@ -198,7 +199,7 @@ export function registerPracticeRoutes(app: AppInstance): void {
         operationId: 'createAssistantPracticeTurn',
         summary: 'Text Oasis AI in a practice chat; the answer comes from a job (poll the session or listen for assistant.practice.turn)',
         description:
-          'Idempotency-Key required. 202 with the turn `running`; 409 `PRACTICE_BUSY` while one runs (a turn running over 5 minutes is failed as `timeout`), `PRACTICE_OFF`, `PRACTICE_ENDED` after the client opted out; 429 `PRACTICE_BUDGET` when today’s practice budget is spent, `PRACTICE_LIMIT` after 40 turns a session.',
+          'Idempotency-Key required. A chat playing a real client needs cli.view (403). 202 with the turn `running`; 409 `PRACTICE_BUSY` while one runs (a turn running over 5 minutes is failed as `timeout`), `PRACTICE_OFF`, `PRACTICE_ENDED` after the client opted out; 429 `PRACTICE_BUDGET` when today’s practice budget is spent, `PRACTICE_LIMIT` after 40 turns a session.',
         params: IdParams,
         body: z.object({ text: z.string().min(1).max(640) }).strict(),
         response: { 202: z.object({ turn: PracticeTurnDto }) },
@@ -221,7 +222,7 @@ export function registerPracticeRoutes(app: AppInstance): void {
         operationId: 'rerunAssistantPracticeTurn',
         summary: '"Try again": the same client text over the session’s earlier turns, as an alternate turn (after a correction)',
         description:
-          'The re-run reads the knowledge as it is now (a correction saved meanwhile is in it) and starts from the session as it was before that text; it never changes the session’s own state. Same switches, budget and limits as a text (409 `PRACTICE_BUSY`, `PRACTICE_OFF`; 429 `PRACTICE_BUDGET`, `PRACTICE_LIMIT`); another user’s turn is 404.',
+          'The re-run reads the knowledge as it is now (a correction saved meanwhile is in it) and starts from the session as it was before that text; it never changes the session’s own state. Same switches, budget, limits and cli.view rule as a text (409 `PRACTICE_BUSY`, `PRACTICE_OFF`; 429 `PRACTICE_BUDGET`, `PRACTICE_LIMIT`); another user’s turn is 404.',
         params: IdParams,
         response: { 202: z.object({ turn: PracticeTurnDto }) },
       },

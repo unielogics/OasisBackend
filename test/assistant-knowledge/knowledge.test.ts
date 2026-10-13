@@ -25,7 +25,8 @@ describe('notes (ADR 0174 §1)', () => {
     const r = await create(s, { title: 'Waiting area', body: 'We have a lounge with wifi and coffee.\nA full detail is $189.' })
     expect(r.statusCode, r.body).toBe(201)
     const e = json(r).entry
-    expect(e).toMatchObject({ kind: 'note', title: 'Waiting area', active: false, version: 1, source: 'manual', chars: 12 + 61 })
+    // what the model reads counts when it is longer (K4 review asst:K4A-5): "$189" is "[price in Settings]" (12 + 38 + 37)
+    expect(e).toMatchObject({ kind: 'note', title: 'Waiting area', active: false, version: 1, source: 'manual', chars: 12 + 38 + 37 })
     expect(e.warnings).toEqual([{ kind: 'amount', sample: '$189', line: 2 }])
     expect(json(r).budget.usedChars).toBe(0)
 

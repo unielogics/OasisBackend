@@ -5,8 +5,10 @@
 import { describe, expect, it } from 'vitest'
 import { cleanPdfText, looksScanned } from '../../src/modules/assistant/knowledge/extract/clean.js'
 import { extractPdf, PDF_LIMITS } from '../../src/modules/assistant/knowledge/extract/extract.js'
+import { PDF_DECODED_MAX, prescanPdf } from '../../src/modules/assistant/knowledge/extract/pdf-worker.js'
+import { deflateSync } from 'node:zlib'
 import { entryWarnings } from '../../src/modules/assistant/knowledge/service.js'
-import { CANARY, bombPdf, corruptPdf, encryptedPdf, jsActionPdf, manyPagesPdf, scanPdf, SHOP_TEXT, textPdf, whiteTextPdf } from './pdf-fixtures.js'
+import { CANARY, bombPdf, buildPdf, corruptPdf, deflatedSpaces, encryptedPdf, jsActionPdf, manyPagesPdf, scanPdf, SHOP_TEXT, textPdf, whiteTextPdf } from './pdf-fixtures.js'
 
 describe('extractPdf (worker thread, ADR 0174 §2)', () => {
   it('has the design limits: 60 pages, 30 s, 256 MB heap', () => {
@@ -60,6 +62,48 @@ describe('extractPdf (worker thread, ADR 0174 §2)', () => {
     // the worker died alone: the next read works
     expect((await extractPdf(textPdf())).ok).toBe(true)
   }, 30_000)
+
+  it('K4 review asst:K4A-1: an inflate bomb is refused before PDF.js decodes it (memory outside the heap stays bounded)', async () => {
+    // 512 MB of spaces in one FlateDecode content stream (about half a megabyte on disk), with the production limits
+    const bomb = buildPdf({ pages: [{ raw: await deflatedSpaces(512 * 1024 * 1024), filter: ' /Filter /FlateDecode' }] })
+    expect(bomb.length).toBeLessThan(2 * 1024 * 1024)
+    const base = process.memoryUsage().rss
+    let peak = base
+    const sample = setInterval(() => (peak = Math.max(peak, process.memoryUsage().rss)), 10)
+    const started = performance.now()
+    const r = await extractPdf(bomb)
+    clearInterval(sample)
+    expect(r).toEqual({ ok: false, error: 'too_large' })
+    expect(performance.now() - started).toBeLessThan(10_000)
+    expect(peak - base, `rss grew ${Math.round((peak - base) / 1e6)} MB`).toBeLessThan(600 * 1024 * 1024)
+    expect((await extractPdf(textPdf())).ok).toBe(true)
+  }, 60_000)
+
+  it('the prescan follows filter chains, a filter it cannot read plainly and run-length data; real files pass', async () => {
+    const small = 1024 * 1024
+    const spaces = (n: number) => Buffer.alloc(n, 0x20)
+    const page = (raw: Buffer, filter: string) => buildPdf({ pages: [{ raw, filter }] })
+    // a bomb inside a bomb: Flate of Flate
+    const nested = deflateSync(deflateSync(spaces(4 * small)))
+    expect(prescanPdf(page(nested, ' /Filter [/FlateDecode /FlateDecode]'), small)).toBe('too_large')
+    // ASCIIHex, then Flate
+    const hex = Buffer.from(deflateSync(spaces(4 * small)).toString('hex') + '>', 'latin1')
+    expect(prescanPdf(page(hex, ' /Filter [/AHx /Fl]'), small)).toBe('too_large')
+    // the filter as an indirect object: a zlib stream is inflated anyway
+    expect(prescanPdf(page(deflateSync(spaces(4 * small)), ' /Filter 3 0 R'), small)).toBe('too_large')
+    // run-length: 2 bytes give 128
+    const rl = Buffer.alloc(2 * 40_000)
+    for (let i = 0; i < rl.length; i += 2) [rl[i], rl[i + 1]] = [129, 0x20]
+    expect(prescanPdf(page(rl, ' /Filter /RunLengthDecode'), small)).toBe('too_large')
+    // a broken Flate stream counts the most it could give
+    const broken = Buffer.concat([Buffer.from([0x78, 0x9c]), Buffer.alloc(2000, 0xff)]) // a zlib header, then a reserved block type
+    expect(prescanPdf(page(broken, ' /Filter /FlateDecode'), small)).toBe('too_large')
+    // real files: well under the cap
+    for (const f of [textPdf(), scanPdf(), whiteTextPdf(), manyPagesPdf(60), page(deflateSync(spaces(4 * small)), ' /Filter /FlateDecode')])
+      expect(prescanPdf(f)).toBeNull()
+    expect(prescanPdf(encryptedPdf())).toBe('encrypted')
+    expect(PDF_DECODED_MAX).toBe(128 * 1024 * 1024)
+  })
 
   it('the time limit terminates the thread: timeout', async () => {
     expect(await extractPdf(manyPagesPdf(40), { timeoutMs: 1 })).toEqual({ ok: false, error: 'timeout' })

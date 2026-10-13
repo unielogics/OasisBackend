@@ -132,6 +132,9 @@ export function phrasePattern(phrase: string): RegExp | null {
   return new RegExp(`(?<![\\p{L}\\p{N}])${parts.join(' ')}(?![\\p{L}\\p{N}])`, 'u')
 }
 
+/** A sentence end inside a listed phrase: "." "!" or "?" followed by a space. */
+const SENTENCE_END = /[.!?]\s/
+
 /**
  * The listed phrases a text holds (case, accents and punctuation ignored; whole words), in the list's order. Read sentence by
  * sentence (the sentence ends of guard.ts sentencesOf): "Sorry! About the wait" holds no "sorry about", so the guard never flags
@@ -143,11 +146,16 @@ export function phrasesIn(text: string, phrases: readonly string[]): string[] {
     .map(foldPhrase)
     .filter((s) => s !== '')
   if (folded.length === 0) return []
+  const whole = foldPhrase(text)
   return phrases.filter((p) => {
     const re = phrasePattern(p)
-    return re !== null && folded.some((s) => re.test(s))
+    if (re === null) return false
+    // a phrase that itself holds a sentence end ("St. Louis", "Dr. Smith") is read over the whole text, which is folded the same
+    // way, so it can match at all; any other phrase never spans two sentences (K4 review asst:K4A-8, the N1 low)
+    return SENTENCE_END.test(p) ? re.test(whole) : folded.some((s) => re.test(s))
   })
 }
+
 
 /** The first handoff topic one of the client's texts names, or null. */
 export function handoffTopicIn(texts: readonly string[], topics: readonly string[]): string | null {

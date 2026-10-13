@@ -168,3 +168,35 @@ filter, pages, the 90-day window, redaction, the correction linked), `jobs.test.
   cache write).
 - **Follow-up flagged by the design** (§5): `assistant_turns.transcript` has no retention while `sms_inbox` and `messages` are kept
   24 months; the review reads at most 90 days of it.
+
+## K4 review (2026-10-13)
+
+- **asst:K4A-1 PDF memory.** The worker's `resourceLimits` bound only the V8 heap; PDF.js decodes streams into buffers outside it,
+  doubling them without a cap, so a 1.5 MB inflate bomb grew the worker process by 3 GB. The worker now prescans every stream before
+  PDF.js sees the file (`pdf-worker.ts prescanPdf`): FlateDecode (also a zlib stream whose filter is not written plainly, e.g. an
+  indirect `/Filter`), LZWDecode and RunLengthDecode, after ASCIIHex/ASCII85, decoded with a hard output cap; more than
+  `PDF_DECODED_MAX` (128 MB) of decoded content in all streams together is `too_large` ("This PDF holds too much to read …"); a broken
+  Flate stream counts the most it could still give (its size × 1032). An encrypted file (any `/Encrypt`, with or without an open
+  password) cannot be prescanned and is `encrypted` ("This PDF is protected (a password or locked editing) …").
+- **asst:K4A-2 long lines.** The e-mail and web-address detectors are quadratic on a long run of letters and dots: every detector and
+  mask now reads a line in chunks of at most 240 characters (`chunkLine`: cut at a space between letters, else a space, else hard;
+  a number, an amount or a phone number is never split; a hard cut is joined again after masking). "Try this draft" adds only drafts
+  that could go live (a document of 20,000 characters or fewer, within the budget).
+- **asst:K4A-3 the instruction gate.** The detectors also read each line's skeleton (look-alike letters such as a Cyrillic "о"
+  mapped, accents stripped, spaced-out letters joined) and each line joined with the one before it ("From now on, disregard all" /
+  "previous instructions"); new patterns: words addressed to the AI ("Note to the AI", "Assistants always …"), standing orders
+  ("Always tell every client …", "From now on"), the verdict in curly quotes or unquoted (`ok: true`). Text drawn under 2 pt in a PDF
+  (invisible) is left out of the extracted text and counted with the hidden characters. White or render-mode-3 text is still
+  extracted and shown in the review (PDF.js's text content carries no colour): the owner reads it, and the detectors above read it.
+- **asst:K4A-4 practice and cli.view.** Reading, continuing and re-running a practice chat that plays a real client needs `cli.view`
+  now (403), not only starting one; without it the list shows the chat without the client (it can still be deleted).
+- **asst:K4A-5 the budget.** An entry counts its stored characters or what the model reads of them (the masks), whichever is longer,
+  so the 20,000-character budget bounds the SHOP KNOWLEDGE block.
+- **asst:K4A-6 price tables.** A line with a column mark (|, a tab, dot leaders), two or more numbers, or a number of two or more
+  digits closing it ("Full detail 189") has its numbers hidden as `[number]` too, except percentages, times, years and numbers inside
+  a word ("F-150"); digits of another script are read as ASCII first. Prices still come only from Settings → Prices.
+- **asst:K4A-7 the sign-off** refuses offer words (off, on us, BOGO, deal, sale, promo, special, half, discount, coupon, save, bonus,
+  gift, percent) and any digit, and a word from "Words to avoid" (it is added to every reply and never judged).
+- **asst:K4A-8 (N1)** a listed word or topic holding a sentence end ("St. Louis") is matched over the whole text, so it can match;
+  every other phrase still never spans two sentences.
+

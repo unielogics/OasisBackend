@@ -17,6 +17,7 @@ import { normalizeTextableNanp } from '../../../platform/phone.js'
 import { getSetting, parseSetting, updateSetting, type SettingKey, type SettingValue } from '../../../platform/settings.js'
 import { PERK_PROMISE } from '../../assistant/facts.js'
 import { digitWords, moneyWords, secretRequests, urlWords } from '../../assistant/guard.js'
+import { foldPhrase, phrasesIn } from '../../assistant/policy.js'
 import { assertBudget, faqChars, lockKnowledge } from '../../assistant/knowledge/service.js'
 
 /** The section's fields and the setting each one is stored in. */
@@ -100,6 +101,13 @@ function plainText(text: string, path: string, issues: Issue[]): void {
 }
 
 /**
+ * Offer words a sign-off may not hold (K4 review asst:K4A-7): it is appended to every reply by the server and never judged, so "20% off",
+ * "on us", "BOGO" or "deal" there would be a promise in every text. Read on folded text (case, accents and punctuation ignored).
+ */
+const SIGN_OFF_OFFER =
+  /(?<![\p{L}\p{N}])(?:off|on us|bogo|b1g1|deals?|sales?|promos?|promotions?|specials?|half|discounts?|coupons?|savings?|save|bonus|gifts?|percent|pct)(?![\p{L}\p{N}])/u
+
+/**
  * ADR 0174 §3a: the behavior's own rules (settings only take abilities away): plain text everywhere, each list without repeats, a
  * topic either avoided or handed to the team (not both), and a sign-off the guard would let through as it is (no amount, no number,
  * no link, no promise word, no request for a code).
@@ -124,10 +132,20 @@ function behaviorIssues(b: AssistantValues['behavior'], issues: Issue[]): void {
   const s = b.signOff
   if (
     s !== '' &&
-    (moneyWords(s).length > 0 || digitWords(s).length > 0 || urlWords(s, '').length > 0 || secretRequests(s).length > 0 || PERK_PROMISE.test(s))
+    (moneyWords(s).length > 0 ||
+      digitWords(s).length > 0 ||
+      /\d/.test(s) ||
+      urlWords(s, '').length > 0 ||
+      secretRequests(s).length > 0 ||
+      PERK_PROMISE.test(s) ||
+      SIGN_OFF_OFFER.test(foldPhrase(s)))
   )
     issues.push({ path: 'behavior.signOff', message: 'The sign-off cannot hold an amount, a number, a link or a promise.' })
+  // the sign-off is added to every reply and never judged: it must not hold a word the owner asked to avoid either
+  else if (s !== '' && phrasesIn(s, b.avoidWords).length > 0)
+    issues.push({ path: 'behavior.signOff', message: 'The sign-off uses a word from “Words to avoid”.' })
 }
+
 
 /**
  * Merges a patch over the stored values and validates the result: each value by its registry schema, then the section's own rules

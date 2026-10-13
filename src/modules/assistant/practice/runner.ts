@@ -39,6 +39,7 @@ import { runEngine, TurnAbort, ZERO_USAGE, type EngineResult } from '../engine.j
 import { looksLikeCardNumber } from '../guard.js'
 import { HANDOFF_SUMMARIES } from '../handoff.js'
 import { knowledgeOrder, type ShopKnowledgeEntry } from '../knowledge/render.js'
+import { DOCUMENT_ACTIVE_MAX, knowledgeBudget } from '../knowledge/service.js'
 import { detectLanguage, FALLBACK_TEXTS, serverTextEs, SPANISH_HANDOFF_TEXT, type ConvoLang } from '../lang.js'
 import { loadPolicy } from '../policy.js'
 import { nextIntakeStep, renderConversation, type HistoryLine, type IntakeStep, type TurnContextData } from '../prompt.js'
@@ -442,18 +443,33 @@ async function answer(d: PracticeDeps, turn: TurnRow): Promise<PracticeTurnStatu
   })
 }
 
-/** The facts with the session's drafts read as if they were on ("Try this draft"); the cached facts otherwise. */
+/**
+ * The facts with the session's drafts read as if they were on ("Try this draft"); the cached facts otherwise. Only what could go live
+ * is tried: a document over DOCUMENT_ACTIVE_MAX is left out, and drafts are added only while the knowledge budget holds them (K4
+ * review asst:K4A-2: a 60,000-character draft must not reach the prompt, nor the maskers, through practice).
+ */
 async function withDrafts(d: PracticeDeps, facts: ShopFacts, locationId: string, ids: readonly string[]): Promise<ShopFacts> {
   if (ids.length === 0) return facts
   const rows = await d.db
     .selectFrom('assistant_knowledge')
-    .select(['id', 'kind', 'title', 'body', 'question', 'sort', 'created_at'])
+    .select(['id', 'kind', 'title', 'body', 'question', 'sort', 'created_at', 'chars'])
     .where('location_id', '=', locationId)
     .where('id', 'in', [...ids])
     .where('active', '=', false)
     .execute()
   if (rows.length === 0) return facts
-  const drafts: ShopKnowledgeEntry[] = rows.map((r) => ({ id: r.id, kind: r.kind, title: r.title, body: r.body, question: r.question, sort: r.sort, createdAt: r.created_at.toISOString() }))
+  const max = d.env.AI_KNOWLEDGE_MAX_CHARS
+  let used = (await knowledgeBudget(d.db, locationId, max)).usedChars
+  const drafts: ShopKnowledgeEntry[] = []
+  for (const r of rows
+    .map((x) => ({ ...x, entry: { id: x.id, kind: x.kind, title: x.title, body: x.body, question: x.question, sort: x.sort, createdAt: x.created_at.toISOString() } }))
+    .sort((a, b) => knowledgeOrder(a.entry, b.entry))) {
+    if (r.kind === 'document' && r.body.length > DOCUMENT_ACTIVE_MAX) continue
+    if (used + r.chars > max) continue
+    used += r.chars
+    drafts.push(r.entry)
+  }
+  if (drafts.length === 0) return facts
   return { ...facts, knowledge: { entries: [...(facts.knowledge?.entries ?? []), ...drafts].sort(knowledgeOrder) } }
 }
 

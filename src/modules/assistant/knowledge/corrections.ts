@@ -126,7 +126,7 @@ export async function createCorrection(tx: Tx, c: CorrectionContext, input: Corr
   if (input.replaceEntryId && !replace) throw new AppError('NOT_FOUND', { detail: 'That correction does not exist' })
   const active = input.active ?? true
   const title = question.slice(0, TITLE_MAX)
-  const chars = entryChars({ title, question, body: answer })
+  const chars = entryChars({ title, question, body: answer }, { shopNumbers: c.shopNumbers })
   const warnings = entryWarnings({ title, question, body: answer, kind: 'correction' }, { shopNumbers: c.shopNumbers })
   await assertBudget(tx, { locationId: c.locationId, maxChars: c.maxChars, before: replace?.active ? replace.chars : 0, after: active ? chars : 0 })
   const values = {

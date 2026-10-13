@@ -9,7 +9,7 @@
 //                      detectors (moneyWords, urlWords): prices still come only from Settings → Prices through the placeholders.
 import { maskCardNumbers } from '../../messaging/inbound/cards.js'
 import { PERK_PROMISE } from '../facts.js'
-import { moneyWords, urlWords } from '../guard.js'
+import { foldInput, moneyWords, skeleton, urlWords } from '../guard.js'
 import { maskPhones } from '../transcript.js'
 import type { KnowledgeWarning, KnowledgeWarningKind } from './schema.js'
 
@@ -62,6 +62,12 @@ const PLAIN_WS = /[\t\n\r]/g
  */
 const INSTRUCTION: readonly RegExp[] = [
   /\b(?:ignore|disregard|forget|override)\b[^.\n]{0,40}\b(?:rules?|instructions?|prompts?|guidelines?|above|previous)\b/i,
+  // K4 review asst:K4A-3: words addressed to the AI, standing orders, and the judge's verdict in any quotes
+  /\b(?:note|message|instructions?|reminder)\s+(?:to|for)\s+(?:the\s+)?(?:ai|assistant|bot|chatbot|model|oasis\s+ai)\b/i,
+  /\b(?:dear|hey|attention)\s+(?:ai|assistant|bot|chatbot|model)\b/i,
+  /\b(?:assistants?|ais?|bots?|chatbots?|models?)\s+(?:always|never|should\s+always|should\s+never)\b/i,
+  /\b(?:always|never)\s+(?:tell|say\s+to|confirm\s+to|promise|offer|give)\s+(?:every|all|each|any)\s+(?:clients?|customers?|callers?|texters?|people)\b/i,
+  /\bfrom\s+now\s+on\b/i,
   /\byou\s+are\s+(?:now|an?|the)\b/i,
   /\bsystem\s*(?:prompt|message|:)/i,
   /\b(?:assistant|ai|model|bot|chatbot|oasis\s+ai)\s+(?:must|should|will|shall|has\s+to|needs\s+to)\b/i,
@@ -71,8 +77,69 @@ const INSTRUCTION: readonly RegExp[] = [
   /\bnew\s+(?:rules?|instructions?)\b/i,
   /^\s*(?:#+\s*)?(?:SHOP\s+FACTS|SHOP\s+KNOWLEDGE|TURN\s+CONTEXT|RULES?|SYSTEM|INSTRUCTIONS?|HOW\s+TO\s+WRITE|WHAT\s+IS\s+DATA)\b\s*[:(]?/i,
   /[⟦⟧]|<\/?\s*(?:message|own-text|server-record|trusted)\b|\[\/?trusted\]/i,
-  /(?:"ok"\s*:\s*true|\bcategory"\s*:\s*"none")/i,
+  /(?:["“”'‘’]?\bok\b["“”'‘’]?\s*:\s*true\b|\bcategory["“”'‘’]?\s*:\s*["“”'‘’]?none\b)/i,
 ]
+
+/** True when a line (or two neighbouring lines joined) reads like an order to the model: on the text and on its skeleton (look-alike
+ *  letters such as a Cyrillic "о" mapped, accents stripped, spaced-out letters joined: "Ignоre", "i g n o r e"). */
+function instructionLike(text: string): boolean {
+  return INSTRUCTION.some((re) => re.test(text)) || INSTRUCTION.some((re) => re.test(skeleton(foldInput(text))))
+}
+
+/**
+ * At most this many characters reach a detector or a mask at once (K4 review asst:K4A-2): the e-mail and web-address patterns are
+ * quadratic on one long run of letters and dots, so a 60,000-character line would hold the event loop for tens of seconds. A long
+ * line is cut at a space between two letters (a number, an amount or a phone number is never split), else at any space, else hard.
+ */
+export const CHUNK_MAX = 240
+
+export function chunkLine(line: string, max = CHUNK_MAX): string[] {
+  if (line.length <= max) return [line]
+  const out: string[] = []
+  let rest = line
+  const letter = (c: string | undefined): boolean => c !== undefined && /\p{L}/u.test(c)
+  while (rest.length > max) {
+    let cut = -1
+    for (let i = max; i > max / 2 && cut < 0; i--) if (rest[i] === ' ' && letter(rest[i - 1]) && letter(rest[i + 1])) cut = i
+    for (let i = max; i > max / 2 && cut < 0; i--) if (/\s/.test(rest[i]!)) cut = i
+    if (cut < 0) cut = max
+    out.push(rest.slice(0, cut))
+    rest = rest.slice(cut)
+  }
+  out.push(rest)
+  return out
+}
+
+/** Decimal digits of any script as ASCII ("١٨٩" -> "189"): a price written in another script is still a number. */
+function asciiDigits(s: string): string {
+  return s.replace(/[^ -~\s]/gu, (c) => {
+    if (!/\p{Nd}/u.test(c)) return c
+    const cp = c.codePointAt(0)!
+    let base = cp
+    while (base > cp - 9 && /\p{Nd}/u.test(String.fromCodePoint(base - 1))) base--
+    return String((cp - base) % 10)
+  })
+}
+
+/**
+ * A price table (K4 review asst:K4A-6): a line with a column mark (|, a tab, dot leaders) or holding two or more numbers, or one of two
+ * or more digits closing the line ("Full detail 189"). Those numbers are hidden too, whatever stands next to them, except percentages
+ * (tint shades), times, years and numbers inside a word ("F-150", "X5"): a PDF price sheet with the "$" only in its header, or none
+ * at all, never reaches the model with its prices.
+ */
+const COLUMNS = /\||\t|\.{3,}|…/
+const BARE_NUMBER = /(?<![\p{L}\p{N}.,:]|\p{L}-)\d+(?:[.,]\d+)*(?![\p{L}\p{N}%]|[.,]\d|\s*%|\s*percent|:\d|\s*(?:a\.?m\.?|p\.?m\.?)\b)/giu
+const isYear = (n: string): boolean => /^(?:19|20)\d{2}$/.test(n)
+
+/** A number of two or more digits closing a line after words ("Full detail 189"): a price list's last column. */
+const END_NUMBER = /(?<=\p{L}[^\p{L}\p{N}]{1,3})(\d{2,}(?:[.,]\d+)?)(?=\s*[.!]?\s*$)/u
+
+function maskTableNumbers(s: string): string {
+  const numbers = [...s.matchAll(BARE_NUMBER)].map((m) => m[0]).filter((n) => !isYear(n))
+  if (numbers.length === 0) return s
+  if (COLUMNS.test(s) || numbers.length >= 2) return s.replace(BARE_NUMBER, (n) => (isYear(n) ? n : NUMBER_MASK))
+  return s.replace(END_NUMBER, (n) => (isYear(n) ? n : NUMBER_MASK))
+}
 
 const clip = (s: string): string => (s.length > 40 ? `${s.slice(0, 39)}…` : s)
 const digitsOf = (s: string): string => s.replace(/\D/g, '')
@@ -100,9 +167,15 @@ export function knowledgeWarnings(text: string, o: SanitizeOptions = {}): Knowle
     if (out.some((w) => w.kind === kind && w.line === line && w.sample === clip(sample))) return
     out.push({ kind, sample: clip(sample.trim()), line })
   }
-  text.split('\n').forEach((raw, i) => {
+  let prev = ''
+  text.split('\n').forEach((whole, i) => {
     const line = i + 1
-    if (raw.trim() === '') return
+    if (whole.trim() === '') return
+    for (const raw of chunkLine(whole)) segment(raw, line)
+  })
+  return out
+
+  function segment(raw: string, line: number): void {
     const hidden = hiddenCount(raw)
     if (hidden > 0) add('hidden', `${hidden} hidden character${hidden === 1 ? '' : 's'}`, line)
     for (const m of raw.match(MARKUP) ?? []) add('markup', m, line)
@@ -125,15 +198,11 @@ export function knowledgeWarnings(text: string, o: SanitizeOptions = {}): Knowle
     })
     const promise = PERK_PROMISE.exec(flat)
     if (promise) add('promise', promise[0], line)
-    for (const re of INSTRUCTION) {
-      const m = re.exec(flat)
-      if (m) {
-        add('instruction', flat.trim(), line)
-        break
-      }
-    }
-  })
-  return out
+    // an order split over two lines ("From now on, disregard all" / "previous instructions") is flagged on its second line
+    if (instructionLike(flat)) add('instruction', flat.trim(), line)
+    else if (prev && !instructionLike(prev) && instructionLike(`${prev} ${flat}`)) add('instruction', `${prev.trim()} ${flat.trim()}`, line)
+    prev = flat
+  }
 }
 
 /** True when the warnings hold an instruction-like line (a document then needs confirmInstructions to go live). */
@@ -144,9 +213,17 @@ export const hasInstructionWarning = (warnings: readonly KnowledgeWarning[]): bo
  * links, amounts and other phone numbers replaced. Empty when nothing is left.
  */
 export function maskForKnowledge(line: string, o: SanitizeOptions = {}): string {
+  if (line.length > CHUNK_MAX) {
+    // each chunk masked alone; a cut at a space keeps one space, a hard cut (no space near) joins the halves again as they were
+    let out = ''
+    for (const c of chunkLine(line)) {
+      const m = maskForKnowledge(c, o)
+      if (m !== '') out += out !== '' && /^\s/.test(c) ? ` ${m}` : m
+    }
+    return out
+  }
   const shop = shopDigits(o.shopNumbers ?? [])
-  let s = line
-    .normalize('NFKC')
+  let s = asciiDigits(line.normalize('NFKC'))
     .replace(/[\p{Cc}\p{Cf}\u2028\u2029]+/gu, ' ')
     .replace(MARKERS, ' ')
     .replace(MARKUP, ' ')
@@ -161,6 +238,7 @@ export function maskForKnowledge(line: string, o: SanitizeOptions = {}): string 
     return `§shop${'abcdefghijklmnopqrstuvwxyz'[Math.min(kept.length - 1, 25)]}§`
   })
   s = maskPhones(s, () => NUMBER_MASK)
+  s = maskTableNumbers(s)
   s = s.replace(/§shop([a-z])§/g, (_m, c: string) => kept[c.charCodeAt(0) - 97] ?? NUMBER_MASK)
   // the guard's own detectors have the last word: whatever money word or web address they still find goes too
   for (const w of moneyWords(s)) s = s.split(w).join(AMOUNT_MASK)

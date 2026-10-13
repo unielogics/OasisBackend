@@ -11,6 +11,7 @@ import { emptyPracticeState } from '../../src/modules/assistant/practice/effects
 import { handlePracticeJob } from '../../src/modules/assistant/practice/jobs.js'
 import { practiceConfig, type PracticeDeps } from '../../src/modules/assistant/practice/runner.js'
 import { createToolRegistry } from '../../src/modules/assistant/tools/index.js'
+import { bumpRbacVersion } from '../../src/modules/rbac/repository.js'
 import { json, type Session } from '../settings-http/harness.js'
 import { useKnowledgeHarness } from '../assistant-knowledge/harness.js'
 
@@ -84,6 +85,31 @@ describe('practice sessions (ADR 0174 §4c)', () => {
     expect(await session(s, { persona: 'client', customerId: id })).toMatchObject({ persona: 'client', client: { id, firstName: 'Maria' } })
     // a draft to try must exist
     expect((await h.call('POST', 'assistant/practice/sessions', { session: s, body: { persona: 'new_texter', includeEntryIds: [h.fx.newId()] } })).statusCode).toBe(422)
+  })
+
+  it('K4 review asst:K4A-4: losing cli.view ends a real client’s practice chat (read, text, re-run 403; the list hides the client)', async () => {
+    const id = await customer('Maria Delgado')
+    const s = await h.withPermissions(['set.assistant', 'cli.view'])
+    const { id: sessionId } = await session(s, { persona: 'client', customerId: id })
+    const first = await text(s, sessionId, 'Is my car ready?')
+    expect(first.statusCode, first.body).toBe(202)
+    await answer(json(first).turn.id, 'Not yet, Maria.')
+    // cli.view taken from the role
+    const roles = await h.db.selectFrom('roles').select('id').where('is_custom', '=', true).execute()
+    await h.db.deleteFrom('role_permissions').where('permission_key', '=', 'cli.view').where('role_id', 'in', roles.map((r) => r.id)).execute()
+    await h.db.transaction().execute((tx) => bumpRbacVersion(tx))
+    const read = await h.call('GET', `assistant/practice/sessions/${sessionId}`, { session: s })
+    expect(read.statusCode).toBe(403)
+    expect(read.body).not.toContain('Maria')
+    expect((await text(s, sessionId, 'And my balance?')).statusCode).toBe(403)
+    expect((await h.call('POST', `assistant/practice/turns/${json(first).turn.id}/rerun`, { session: s })).statusCode).toBe(403)
+    const list = json(await h.call('GET', 'assistant/practice/sessions', { session: s }))
+    expect(list.sessions).toEqual([expect.objectContaining({ id: sessionId, persona: 'client', client: null })])
+    expect(JSON.stringify(list)).not.toContain('Maria')
+    // it can still be deleted, and a synthetic texter's chat goes on as before
+    expect((await h.call('DELETE', `assistant/practice/sessions/${sessionId}`, { session: s })).statusCode).toBe(204)
+    const synthetic = await session(s)
+    expect((await text(s, synthetic.id, 'Do you have a lounge?')).statusCode).toBe(202)
   })
 
   it('a text is a running turn answered by ai.practice (queued once, never on a replay); one running turn a session', async () => {

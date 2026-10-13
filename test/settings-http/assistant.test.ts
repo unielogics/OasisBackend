@@ -238,8 +238,13 @@ describe('limits and tone (ADR 0174 §3a): stored with the section, validated, t
       path: 'behavior.handoffTopics.0',
       message: 'A topic is either avoided or handed to the team, not both.',
     })
-    for (const signOff of ['$5 off', 'Call 2015550142', 'oasis.com', 'Free wash!'])
+    // K4 review asst:K4A-7: offer words too (the sign-off is appended to every reply and never judged)
+    for (const signOff of ['$5 off', 'Call 2015550142', 'oasis.com', 'Free wash!', '20% off next wash', 'Wash on us Fridays', 'BOGO details Tuesdays', 'Big sale soon', 'Half price wax'])
       expect(await bad({ behavior: { ...BEHAVIOR, signOff } }), signOff).toContainEqual({ path: 'behavior.signOff', message: 'The sign-off cannot hold an amount, a number, a link or a promise.' })
+    expect(await bad({ behavior: { ...BEHAVIOR, avoidWords: ['dude'], signOff: 'Later, dude' } })).toContainEqual({
+      path: 'behavior.signOff',
+      message: 'The sign-off uses a word from “Words to avoid”.',
+    })
     expect(await sectionVersion(s)).toBe(v0)
   })
 })

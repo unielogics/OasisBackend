@@ -33,6 +33,18 @@ export interface PracticeContext {
   now: Date
   newId: NewId
   env: Pick<Env, 'AI_PRACTICE_ENABLED' | 'AI_PRACTICE_DAILY_BUDGET_USD' | 'BUSINESS_TZ' | 'AI_ACTIONS_ENABLED' | 'PUBLIC_LINKS_ENABLED'>
+  /**
+   * The caller holds cli.view now (K4 review asst:K4A-4). A session playing a real client is read, continued and re-run only while
+   * this holds (403 otherwise; the list keeps it without the client's name, so it can still be deleted). The routes always set it.
+   */
+  canViewClients?: boolean
+}
+
+type SessionReader = Pick<PracticeContext, 'locationId' | 'userId' | 'now' | 'canViewClients'>
+
+/** 403 for a session that plays a real client when the caller lost cli.view. */
+function assertClientAccess(c: SessionReader, persona: PracticePersona): void {
+  if (persona === 'client' && c.canViewClients === false) throw new AppError('FORBIDDEN', { meta: { required: ['cli.view'], mode: 'all' } })
 }
 
 export interface PracticeSessionView {
@@ -243,7 +255,7 @@ export async function createSession(tx: Tx, c: PracticeContext, input: NewSessio
   return (await findSession(tx, c, row.id))!
 }
 
-async function findSession(db: Executor, c: Pick<PracticeContext, 'locationId' | 'userId' | 'now'>, id: string): Promise<PracticeSessionView | null> {
+async function findSession(db: Executor, c: SessionReader, id: string): Promise<PracticeSessionView | null> {
   const r = await db
     .selectFrom('assistant_practice_sessions as s')
     .leftJoin('customers as c', 'c.id', 's.customer_id')
@@ -259,7 +271,7 @@ async function findSession(db: Executor, c: Pick<PracticeContext, 'locationId' |
 const keepSince = (now: Date): Date => new Date(now.getTime() - PRACTICE_KEEP_DAYS * 86_400_000)
 
 /** The caller's sessions of the last 30 days, newest first. */
-export async function listSessions(db: Executor, c: Pick<PracticeContext, 'locationId' | 'userId' | 'now'>): Promise<PracticeSessionView[]> {
+export async function listSessions(db: Executor, c: SessionReader): Promise<PracticeSessionView[]> {
   const rows = await db
     .selectFrom('assistant_practice_sessions as s')
     .leftJoin('customers as c', 'c.id', 's.customer_id')
@@ -271,13 +283,15 @@ export async function listSessions(db: Executor, c: Pick<PracticeContext, 'locat
     .orderBy('s.id', 'desc')
     .limit(100)
     .execute()
-  return rows.map((r) => sessionView(r as SessionRow))
+  // without cli.view a session of a real client is listed without the client
+  return rows.map((r) => sessionView(r as SessionRow)).map((v) => (v.persona === 'client' && c.canViewClients === false ? { ...v, client: null } : v))
 }
 
 /** One of the caller's sessions with its turns (another user's, or one past 30 days: 404). */
-export async function getSession(db: Executor, c: Pick<PracticeContext, 'locationId' | 'userId' | 'now'>, id: string): Promise<{ session: PracticeSessionView; turns: PracticeTurnView[] }> {
+export async function getSession(db: Executor, c: SessionReader, id: string): Promise<{ session: PracticeSessionView; turns: PracticeTurnView[] }> {
   const session = await findSession(db, c, id)
   if (!session) throw new AppError('NOT_FOUND', { detail: 'That practice chat does not exist' })
+  assertClientAccess(c, session.persona)
   const turns = await db.selectFrom('assistant_practice_turns').select([...TURN_COLUMNS]).where('session_id', '=', id).orderBy('seq').orderBy('started_at').orderBy('id').execute()
   return { session, turns: turns.map((t) => turnView(t as TurnViewRow)) }
 }
@@ -301,7 +315,7 @@ async function failStuck(tx: Tx, sessionId: string, now: Date): Promise<void> {
 async function lockedSession(tx: Tx, c: PracticeContext, id: string) {
   const s = await tx
     .selectFrom('assistant_practice_sessions')
-    .select(['id', 'state', 'turns'])
+    .select(['id', 'state', 'turns', 'persona'])
     .where('id', '=', id)
     .where('location_id', '=', c.locationId)
     .where('user_id', '=', c.userId)
@@ -309,6 +323,7 @@ async function lockedSession(tx: Tx, c: PracticeContext, id: string) {
     .forUpdate()
     .executeTakeFirst()
   if (!s) throw new AppError('NOT_FOUND', { detail: 'That practice chat does not exist' })
+  assertClientAccess(c, s.persona)
   return s
 }
 

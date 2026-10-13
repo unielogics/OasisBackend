@@ -1,7 +1,8 @@
 // The owner's knowledge entries (ADR 0174 §1): notes written in Settings → Oasis AI → Knowledge, the reviewed text of an uploaded
 // PDF (one entry per document, created by the extraction as an inactive draft) and corrections (the next wave creates them).
 //
-//   Budget   the ACTIVE entries and the Settings Q&A share AI_KNOWLEDGE_MAX_CHARS (default 20,000 characters, about 5k tokens).
+//   Budget   the ACTIVE entries and the Settings Q&A share AI_KNOWLEDGE_MAX_CHARS (default 20,000 characters, about 5k tokens); an
+//            entry counts its text, or what the model reads of it when the masks make that longer (entryChars).
 //            Every save that can add characters to the prompt (turning an entry on, editing an active one, a Q&A that grows) runs
 //            under one per-location advisory lock (`assistant.knowledge:<location>`, also taken by the Q&A save) and is refused with
 //            422 KNOWLEDGE_BUDGET {usedChars, maxChars, needed} when it would go over; the entry stays a draft and nothing is cut.
@@ -23,7 +24,7 @@ import type { NewId } from '../../../platform/ids.js'
 import * as realtime from '../../../platform/realtime.js'
 import { getSetting } from '../../../platform/settings.js'
 import { hasHiddenCharacters } from '../../settings/http/assistant-service.js'
-import { capWarnings, hasInstructionWarning, knowledgeWarnings } from './sanitize.js'
+import { capWarnings, hasInstructionWarning, knowledgeWarnings, maskForKnowledge, type SanitizeOptions } from './sanitize.js'
 import type { KnowledgeKind, KnowledgeSource, KnowledgeWarning } from './schema.js'
 import './schema.js'
 import './problems.js'
@@ -77,9 +78,16 @@ export interface KnowledgeEntryView {
   updatedAt: string
 }
 
-/** What one entry counts against the budget: its title, question and body. */
-export const entryChars = (e: { title: string; question?: string | null; body: string }): number =>
-  e.title.length + (e.question?.length ?? 0) + e.body.length
+/**
+ * What one entry counts against the budget: its title, question and body, or what the model reads of them when that is longer (each
+ * short amount, link or number becomes a mask of up to 19 characters: K4 review asst:K4A-5). Without `o` the stored text alone.
+ */
+export const entryChars = (e: { title: string; question?: string | null; body: string }, o?: SanitizeOptions): number => {
+  const raw = e.title.length + (e.question?.length ?? 0) + e.body.length
+  if (!o) return raw
+  const masked = [e.title, e.question ?? '', ...e.body.split('\n')].reduce((n, l) => n + maskForKnowledge(l, o).length, 0)
+  return Math.max(raw, masked)
+}
 
 /** What the Settings Q&A counts against the budget: every question and answer. */
 export const faqChars = (faq: readonly { q: string; a: string }[]): number => faq.reduce((n, x) => n + x.q.length + x.a.length, 0)
@@ -300,7 +308,7 @@ async function record(tx: Tx, c: KnowledgeContext, action: string, id: string, a
 export async function createNote(tx: Tx, c: KnowledgeContext, input: { title: string; body: string; active?: boolean }): Promise<KnowledgeEntryView> {
   const title = checkTitle(input.title)
   const body = checkBody('note', input.body)
-  const chars = entryChars({ title, body })
+  const chars = entryChars({ title, body }, { shopNumbers: c.shopNumbers })
   const active = input.active === true
   await lockKnowledge(tx, c.locationId)
   if (active) await assertBudget(tx, { locationId: c.locationId, maxChars: c.maxChars, before: 0, after: chars })
@@ -368,7 +376,7 @@ export async function updateEntry(tx: Tx, c: KnowledgeContext, id: string, patch
   }
   const active = patch.active ?? cur.active
   const textChanged = title !== cur.title || body !== cur.body || question !== cur.question
-  const chars = entryChars({ title, question, body })
+  const chars = entryChars({ title, question, body }, { shopNumbers: c.shopNumbers })
   let removedChars = 0
   if (cur.kind === 'document' && cur.document_id) {
     const doc = await tx.selectFrom('assistant_knowledge_documents').select('removed_chars').where('id', '=', cur.document_id).executeTakeFirst()

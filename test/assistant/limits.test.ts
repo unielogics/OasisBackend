@@ -261,6 +261,12 @@ describe('the owner’s lists (ADR 0174 §3b)', () => {
     expect(phrasesIn('Our cheapest option', ['cheap'])).toEqual([])
     expect(phrasesIn('Hey dudes!', ['dude'])).toEqual(['dude'])
     expect(phrasesIn('Está muy barato', ['barató'])).toEqual(['barató'])
+    // K4 review asst:K4A-8 (N1): a phrase holding a sentence end can match; others never span two sentences
+    expect(phrasesIn('Our St. Louis branch is closed', ['St. Louis'])).toEqual(['St. Louis'])
+    expect(phrasesIn('We are in St Louis', ['St. Louis'])).toEqual(['St. Louis'])
+    expect(phrasesIn('Ask Dr. Smith about it', ['Dr. Smith'])).toEqual(['Dr. Smith'])
+    expect(handoffTopicIn(['is the St. Louis shop open?'], ['St. Louis'])).toBe('St. Louis')
+    expect(phrasesIn('Sorry! About the wait', ['sorry about'])).toEqual([])
     expect(handoffTopicIn(['can you help with my insurance claim?'], ['insurance claims'])).toBe('insurance claims')
     expect(handoffTopicIn(['what is your insurance policy for the wash'], ['insurance claims'])).toBeNull()
     expect(handoffTopicIn(['hi'], [])).toBeNull()

@@ -1,6 +1,8 @@
 // Reading a PDF (ADR 0174 §2): the bytes go to a worker_threads Worker (pdf-worker.ts) with a 256 MB heap (32 MB young generation)
 // and a 30-second limit, so a heavy or hostile file can neither stall the worker process that also sends the live SMS turns nor
-// take its memory: the thread is terminated at the deadline (timeout) and dies alone when it runs out of heap (too_large). The raw
+// take its memory: the thread is terminated at the deadline (timeout) and dies alone when it runs out of heap (too_large). The heap
+// limit does not bound what PDF.js decodes outside the heap, so the worker first prescans the streams with a hard cap (more than
+// PDF_DECODED_MAX bytes of content: too_large; an encrypted file cannot be prescanned: encrypted; K4 review asst:K4A-1). The raw
 // page texts come back and are cleaned here (clean.ts); fewer than about 40 non-space characters per page on average is a scan
 // (no_text: no OCR).
 import { Worker } from 'node:worker_threads'
@@ -63,5 +65,7 @@ export async function extractPdf(bytes: Uint8Array, limits: Partial<PdfLimits> =
   if (!r.ok) return r
   const clean = cleanPdfText(r.pages)
   if (looksScanned(clean.text, r.pageCount)) return { ok: false, error: 'no_text', pageCount: r.pageCount }
-  return { ok: true, text: clean.text, pageCount: r.pageCount, removedChars: clean.removedChars, removedTags: clean.removedTags, cut: clean.cut }
+  // text too small to see is left out by the worker and counted with the hidden characters (the review shows "N hidden characters")
+  const removedChars = clean.removedChars + (r.tinyChars ?? 0)
+  return { ok: true, text: clean.text, pageCount: r.pageCount, removedChars, removedTags: clean.removedTags, cut: clean.cut }
 }

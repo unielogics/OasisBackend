@@ -7,10 +7,14 @@ export interface PdfPage {
   lines?: string[]
   /** Text drawn in white on the white page (invisible to a reader, not to a text extractor). */
   whiteLines?: string[]
+  /** Text drawn at half a point (too small to see; K4 review asst:K4A-3). */
+  tinyLines?: string[]
   /** A raw content stream instead of the lines (a drawing, a bomb). */
   raw?: string | Buffer
   /** Compress the content stream (FlateDecode). */
   deflate?: boolean
+  /** The stream dictionary's filter entry as written (" /Filter [/FlateDecode /FlateDecode]"); `raw` is then already encoded. */
+  filter?: string
 }
 
 export interface PdfOptions {
@@ -27,7 +31,12 @@ function contentOf(p: PdfPage): Buffer {
   if (p.raw !== undefined) return Buffer.isBuffer(p.raw) ? p.raw : Buffer.from(p.raw, 'latin1')
   const out: string[] = ['BT', '/F1 11 Tf', '72 740 Td', '14 TL']
   for (const l of p.lines ?? []) out.push(`(${esc(l)}) Tj T*`)
-  if (p.whiteLines?.length) {
+  if (p.tinyLines?.length) {
+    out.push('/F1 0.5 Tf')
+    for (const l of p.tinyLines) out.push(`(${esc(l)}) Tj T*`)
+    out.push('/F1 11 Tf')
+  }
+    if (p.whiteLines?.length) {
     out.push('1 1 1 rg')
     for (const l of p.whiteLines) out.push(`(${esc(l)}) Tj T*`)
   }
@@ -48,7 +57,7 @@ export function buildPdf(o: PdfOptions): Buffer {
   const kids: number[] = []
   for (const p of o.pages) {
     let data = contentOf(p)
-    const filter = p.deflate ? ' /Filter /FlateDecode' : ''
+    const filter = p.filter ?? (p.deflate ? ' /Filter /FlateDecode' : '')
     if (p.deflate) data = deflateSync(data)
     const content = add(Buffer.concat([Buffer.from(`<< /Length ${data.length}${filter} >>\nstream\n`, 'latin1'), data, Buffer.from('\nendstream', 'latin1')]))
     kids.push(add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${content} 0 R >>`))
@@ -96,3 +105,26 @@ export const whiteTextPdf = (): Buffer => buildPdf({ pages: [{ lines: SHOP_TEXT,
 export const manyPagesPdf = (n = 61): Buffer => buildPdf({ pages: Array.from({ length: n }, (_, i) => ({ lines: [`Page ${i + 1} of the long price sheet for every service we offer.`] })) })
 /** About 60 MB of text operators when inflated, from a few hundred kilobytes: a decompression bomb for the limits. */
 export const bombPdf = (): Buffer => buildPdf({ pages: [{ raw: Buffer.from(`BT /F1 1 Tf ${'(A) Tj '.repeat(8_000_000)} ET`, 'latin1'), deflate: true }] })
+
+/**
+ * `bytes` of spaces deflated without ever holding them (a stream of 4 MB writes): the inflate bomb of the K4 review (asst:K4A-1), about
+ * a thousandth of its inflated size.
+ */
+export async function deflatedSpaces(bytes: number): Promise<Buffer> {
+  const { createDeflate } = await import('node:zlib')
+  const z = createDeflate({ level: 9 })
+  const out: Buffer[] = []
+  z.on('data', (c: Buffer) => out.push(c))
+  const done = new Promise<void>((resolve, reject) => {
+    z.on('end', () => resolve())
+    z.on('error', reject)
+  })
+  const chunk = Buffer.alloc(4 * 1024 * 1024, 0x20)
+  for (let left = bytes; left > 0; left -= chunk.length) {
+    const piece = left >= chunk.length ? chunk : chunk.subarray(0, left)
+    if (!z.write(piece)) await new Promise((r) => z.once('drain', r))
+  }
+  z.end()
+  await done
+  return Buffer.concat(out)
+}

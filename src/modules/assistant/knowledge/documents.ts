@@ -42,12 +42,12 @@ export const STUCK_EXTRACTION_MS = 10 * 60_000
 export const DOCUMENT_ERROR_TEXT: Record<DocumentError, string> = {
   no_text:
     'This PDF is a scan (pictures of pages), so Oasis AI can’t read it. Upload the original file, or type the important parts as a note.',
-  encrypted: 'This PDF is protected with a password. Save a copy without the password and upload that.',
+  encrypted: 'This PDF is protected (a password or locked editing). Save a copy without the protection (Print → Save as PDF) and upload that.',
   corrupt: 'This PDF could not be read. Save it again (Print → Save as PDF) and upload the new copy.',
   too_many_pages: 'This PDF has more than 60 pages. Upload the pages Oasis AI needs, or type them as a note.',
   timeout: 'Reading this PDF took too long. Try again, or upload a smaller file.',
   not_pdf: 'This file is not a PDF.',
-  too_large: 'This PDF is too large to read. Upload a smaller file (at most 10 MB).',
+  too_large: 'This PDF holds too much to read. Upload a smaller file (at most 10 MB), or type the important parts as a note.',
 }
 
 export interface DocumentView {
@@ -330,7 +330,7 @@ export async function extractDocument(d: ExtractDeps, id: string): Promise<'read
           active: false,
           reviewed_at: null,
           warnings: JSON.stringify(capWarnings(warnings)),
-          chars: entryChars({ title, body }),
+          chars: entryChars({ title, body }, { shopNumbers: d.shopNumbers }),
           created_by: doc.uploaded_by,
           updated_by: doc.uploaded_by,
           created_at: now,
