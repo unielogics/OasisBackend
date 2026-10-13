@@ -53,16 +53,35 @@ export interface PricingView {
   totals: VisitQuote['totals']
 }
 
-/** The size flags of an appointment (none on a visit priced before sizes, none once staff confirmed the size). */
-export function sizeFlags(a: Pick<AppointmentRecord, 'priceBasis' | 'classConfirmedAt' | 'vehicleClass'>): {
+/**
+ * The size flags of an appointment (none on a visit priced before sizes, none once staff confirmed the size). "Confirm price" when
+ * the package OR a live add-on was charged its starting price because the size has no price of its own (`addonEstimated`; review Q4
+ * pricing:F5): the booking answer's confirmAtShop already reads every line.
+ */
+export function sizeFlags(
+  a: Pick<AppointmentRecord, 'priceBasis' | 'classConfirmedAt' | 'vehicleClass'>,
+  addonEstimated = false,
+): {
   needsSizeConfirm: boolean
   needsPriceConfirm: boolean
 } {
   const open = a.priceBasis !== 'legacy' && a.classConfirmedAt === null
   return {
     needsSizeConfirm: open && a.vehicleClass === null,
-    needsPriceConfirm: open && a.vehicleClass !== null && a.priceBasis === 'estimated',
+    needsPriceConfirm: open && a.vehicleClass !== null && (a.priceBasis === 'estimated' || addonEstimated),
   }
+}
+
+/** A live add-on of the visit charged its starting price (its size has no price of its own): "Confirm price". */
+export async function addonPriceEstimated(db: Executor, appointmentId: string): Promise<boolean> {
+  const r = await db
+    .selectFrom('appointment_addons')
+    .select('id')
+    .where('appointment_id', '=', appointmentId)
+    .where('removed_at', 'is', null)
+    .where('price_basis', '=', 'estimated')
+    .executeTakeFirst()
+  return !!r
 }
 
 /**
@@ -163,7 +182,7 @@ export function pricingView(p: VisitPricing, o: { confirmed?: boolean } = {}): P
   const pkg = p.quote.lines[0]!
   const flags = o.confirmed
     ? { needsSizeConfirm: false, needsPriceConfirm: false }
-    : sizeFlags({ priceBasis: pkg.basis, classConfirmedAt: null, vehicleClass: p.classKey })
+    : sizeFlags({ priceBasis: pkg.basis, classConfirmedAt: null, vehicleClass: p.classKey }, p.quote.lines.slice(1).some((l) => l.basis === 'estimated'))
   return {
     vehicleClass: p.classKey,
     vehicleClassLabel: p.classLabel,

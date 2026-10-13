@@ -251,7 +251,7 @@ export async function loadAppointmentFile(
     vehicle,
     vehicleClass: a.vehicleClass,
     vehicleClassLabel: a.vehicleClassLabel,
-    ...sizeFlags(a),
+    ...sizeFlags(a, addons.some((x) => x.priceBasis === 'estimated')),
     priceBasis: a.priceBasis,
     classConfirmedAt: a.classConfirmedAt?.toISOString() ?? null,
     overview: {

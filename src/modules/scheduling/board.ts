@@ -40,6 +40,8 @@ export interface BoardRow {
   } | null
   staff: { id: string; name: string; initials: string } | null
   addonCount: number
+  /** A live add-on charged its starting price (no price at the visit's size). */
+  addonEstimated?: boolean
   hasPhotos: boolean
   vip: boolean
   member: MembershipInfo | null
@@ -105,6 +107,10 @@ export async function loadBoardRows(db: Executor, c: SchedulingCtx, q: RowQuery)
       sql<boolean>`exists (select 1 from vip_clients vc where vc.location_id = a.location_id and vc.customer_id = a.customer_id)`.as(
         'is_vip',
       ),
+      // an add-on charged its starting price (its size has no price): "Confirm price" (review Q4 F5)
+      sql<boolean>`exists (select 1 from appointment_addons ad where ad.appointment_id = a.id and ad.removed_at is null and ad.price_basis = 'estimated')`.as(
+        'addon_estimated',
+      ),
     ])
     .where('a.location_id', '=', c.locationId)
     .where('a.status', 'in', [...statuses])
@@ -151,6 +157,7 @@ export async function loadBoardRows(db: Executor, c: SchedulingCtx, q: RowQuery)
           }
         : null,
       addonCount: r.addon_count,
+      addonEstimated: r.addon_estimated,
       hasPhotos: !!p && p.before + p.after > 0,
       vip: r.is_vip,
       member: memberships.get(r.id) ?? null,
@@ -342,7 +349,7 @@ export function toCard(
     version: a.version,
     vehicleClass: a.vehicleClass,
     vehicleClassLabel: a.vehicleClassLabel,
-    ...sizeFlags(a),
+    ...sizeFlags(a, row.addonEstimated ?? false),
   }
 }
 

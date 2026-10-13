@@ -234,19 +234,19 @@ export async function createAppointment(
   const v = input.vehicle
   const hasVehicle =
     !!v && [v.make, v.model, v.plate, v.color, v.year].some((x) => x !== undefined && x !== null && x !== '')
-  let vehicle: { id: string; vehicleClass: string | null } | null = null
+  let vehicle: { id: string; vehicleClass: string | null; source: string | null } | null = null
   if (input.vehicleId) {
     const own = isUuid(input.vehicleId)
       ? await tx
           .selectFrom('vehicles')
-          .select(['id', 'vehicle_class'])
+          .select(['id', 'vehicle_class', 'vehicle_class_source'])
           .where('id', '=', input.vehicleId)
           .where('customer_id', '=', customer.id)
           .where('deleted_at', 'is', null)
           .executeTakeFirst()
       : undefined
     if (!own) throw notTheirVehicle('vehicleId')
-    vehicle = { id: own.id, vehicleClass: own.vehicle_class }
+    vehicle = { id: own.id, vehicleClass: own.vehicle_class, source: own.vehicle_class_source }
   } else if (hasVehicle) {
     const up = (
       await upsertVehicleByPlate(tx, {
@@ -259,11 +259,17 @@ export async function createAppointment(
         plate: v!.plate,
       })
     ).vehicle
-    const row = await tx.selectFrom('vehicles').select('vehicle_class').where('id', '=', up.id).executeTakeFirstOrThrow()
-    vehicle = { id: up.id, vehicleClass: row.vehicle_class }
+    const row = await tx.selectFrom('vehicles').select(['vehicle_class', 'vehicle_class_source']).where('id', '=', up.id).executeTakeFirstOrThrow()
+    vehicle = { id: up.id, vehicleClass: row.vehicle_class, source: row.vehicle_class_source }
   }
-  // the size: the one named, else the car's on file (ADR 0170); recorded on the car only when the caller may write the record
-  const classKey = await resolveVisitClass(tx, c.locationId, { explicit: input.vehicleClass, vehicleClass: vehicle?.vehicleClass })
+  // the size: the one named, else the car's on file (ADR 0170); recorded on the car only when the caller may write the record. A size
+  // staff set on the car outranks one a client, the website or the assistant names (review Q4 SEC-2): the visit is priced at the staff
+  // size and the board notes what the client said
+  const staffSize = vehicle && vehicle.source === 'staff' && vehicle.vehicleClass ? vehicle.vehicleClass : null
+  const overruled = !!input.vehicleClass && input.recordClassAs !== 'staff' && staffSize !== null && input.vehicleClass !== staffSize
+  const named = await resolveVisitClass(tx, c.locationId, { explicit: input.vehicleClass, vehicleClass: vehicle?.vehicleClass })
+  const staffOn = overruled ? await resolveVisitClass(tx, c.locationId, { vehicleClass: staffSize }) : null
+  const classKey = staffOn ?? named
   if (input.vehicleClass && vehicle && input.recordClassAs) await recordVehicleClass(tx, vehicle.id, classKey!, input.recordClassAs)
   const member = await memberFor(tx, c, customer.id, input.memberPricing !== false)
   const priced = await priceVisit(tx, c, { packageId: pkg.id, addonIds: addons.map((a) => a.id), classKey, member })
@@ -349,6 +355,16 @@ export async function createAppointment(
     channels: ['system'],
     actor,
   })
+  if (staffOn && named && staffOn !== named) {
+    const labels = await tx.selectFrom('vehicle_classes').select(['key', 'label']).where('location_id', '=', c.locationId).where('key', 'in', [named, staffOn]).execute()
+    const label = (k: string) => labels.find((x) => x.key === k)?.label ?? k
+    await logActivity(tx, c, {
+      appointmentId: id,
+      text: `Size · the client chose ${label(named)}; staff set ${label(staffOn)} for this car, so it is priced at ${label(staffOn)}`,
+      channels: ['internal'],
+      actor,
+    })
+  }
   for (const o of decision.overrides)
     await logActivity(tx, c, {
       appointmentId: id,
