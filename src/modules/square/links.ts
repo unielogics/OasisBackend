@@ -29,6 +29,7 @@ import type { InvoiceCalc } from '../payments/calc.js'
 import { invoiceLabel } from '../payments/format.js'
 import { calcOf, lockInvoice } from '../payments/repository.js'
 import type { PaymentLinkCancelReason, PaymentLinkOrigin } from '../payments/schema.js'
+import { assertNoChargeWaiting } from './charge-guard.js'
 import type { SquareLogger } from './ingest.js'
 import './problems.js'
 
@@ -165,6 +166,8 @@ export async function prepareSquareLink(d: SquareLinkDeps, i: PrepareInput): Pro
   if (!location) throw new AppError('SQUARE_UNAVAILABLE', { detail: 'SQUARE_LOCATION_ID is not set' })
   const inv = await invoiceFor(d.db, i.locationId, i.invoiceId)
   if (inv.canceled_at) throw new AppError('INVOICE_CANCELED', { detail: 'A canceled invoice has nothing to pay' })
+  // a saved-card charge still waiting for Square: no link meanwhile (review Q4 money:H1; activateSquareLink checks again under the lock)
+  await assertNoChargeWaiting(d.db, inv.id, { client: i.origin === 'pay_page' || i.origin === 'deposit_page' })
   const calc = await calcOf(d.db, inv.id)
   let expected: number
   let body: Record<string, unknown>
@@ -285,6 +288,7 @@ export async function activateSquareLink(
   p: PreparedSquareLink,
 ): Promise<{ id: string; url: string; expectedCents: number }> {
   await lockInvoice(tx, d.locationId, p.invoiceId)
+  await assertNoChargeWaiting(tx, p.invoiceId)
   const row = await tx.selectFrom('payment_links').selectAll().where('id', '=', p.rowId).forUpdate().executeTakeFirst()
   if (!row || row.state !== 'pending') {
     if (row?.state === 'active' && row.url) return { id: row.id, url: row.url, expectedCents: row.expected_cents }

@@ -26,9 +26,15 @@ export interface SimResponse {
 }
 
 export interface SimFault {
-  /** 429 or 5xx; omitted with `hang`. */
+  /** 429 or 5xx; omitted with `hang` or `dropAnswer`. */
   status?: number
+  /** The request never reaches Square: nothing is made, the client times out. */
   hang?: boolean
+  /**
+   * Square makes what was asked (and keeps the key's answer) but the answer is lost on the way back: the client times out. The
+   * failure mode every "same key, same answer" recovery exists for (review Q4 SQ-SEM-7).
+   */
+  dropAnswer?: boolean
   times: number
   /** Substring of the path; omitted = any /v2 request. */
   path?: string
@@ -134,9 +140,13 @@ export class SquareSimApi {
     if (!token || !this.tokens.includes(token))
       return json(401, { errors: [err('AUTHENTICATION_ERROR', 'UNAUTHORIZED', 'This request could not be authorized.')] })
     const fault = this.faults.find((f) => f.times > 0 && (!f.path || req.path.includes(f.path)) && (!f.method || f.method === req.method))
+    let dropAnswer = false
     if (fault) {
       fault.times--
       if (fault.hang) return { status: 0, headers: {}, body: null, hang: true }
+      dropAnswer = !!fault.dropAnswer
+    }
+    if (fault && !dropAnswer) {
       const status = fault.status ?? 500
       return {
         status,
@@ -144,6 +154,12 @@ export class SquareSimApi {
         body: { errors: [status === 429 ? err('RATE_LIMIT_ERROR', 'RATE_LIMITED', 'Rate limited') : err('API_ERROR', 'INTERNAL_SERVER_ERROR', 'Simulated failure')] },
       }
     }
+    const res = await this.answer(req)
+    // the request was made at Square; only its answer is lost
+    return dropAnswer ? { status: 0, headers: {}, body: null, hang: true } : res
+  }
+
+  private async answer(req: SimRequest): Promise<SimResponse> {
     this.store.tick()
     const body = (req.body ?? {}) as Obj
     const key = typeof body.idempotency_key === 'string' ? body.idempotency_key : undefined

@@ -68,6 +68,7 @@ import { coverageOf, lineClassLabel } from '../../payments/gateway.js'
 import { activeMembership } from '../members.js'
 import { feeHow, requestDepositLink } from '../../square/deposits.js'
 import { CARD_PAGE_KINDS, cardSetupOf, pageCards, type CardSetup, type PageCard } from '../../square/card-page.js'
+import { assertNoChargeWaiting } from '../../square/charge-guard.js'
 import { squareProcessor } from '../../square/links.js'
 import { squareEnv } from '../../square/runtime.js'
 import { memberRefOf } from '../memberships.js'
@@ -797,6 +798,8 @@ export async function payPageInvoice(tx: Tx, d: LinkDeps, s: SessionView) {
     .where('location_id', '=', loc.id)
     .executeTakeFirst()
   if (!inv || inv.customer_id !== s.customerId) throw new AppError('LINK_WRONG_PURPOSE')
+  // a saved-card charge of the invoice still waiting for Square: the page sends nowhere to pay (review Q4 money:H1)
+  await assertNoChargeWaiting(tx, inv.id, { client: true })
   return { loc, inv, customerId: s.customerId, now }
 }
 

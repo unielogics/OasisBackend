@@ -35,6 +35,7 @@ import {
 import type { CreditExpiry, RefundDest } from './schema.js'
 import { issueClientLink } from '../identity/links.js'
 import { activateSquareLink, squareProcessor, squareSendsRefunds, type PreparedSquareLink } from '../square/links.js'
+import { assertNoChargeWaiting } from '../square/charge-guard.js'
 import { squareEnv } from '../square/runtime.js'
 import './problems.js'
 
@@ -276,6 +277,8 @@ export class PaymentsService {
     const inv = await lockInvoice(tx, c.locationId, invoiceId)
     const calc = await calcOf(tx, inv.id)
     if (calc.balance <= 0) throw new AppError('PAY_NOTHING_TO_COLLECT')
+    // a saved-card charge still waiting for Square: nothing else collects meanwhile (review Q4 money:H1)
+    await assertNoChargeWaiting(tx, inv.id)
     if (input.method === 'payment_link') {
       return this.createLink(tx, c, inv, calc, { kind: 'balance', url: input.url }, prepared)
     }
@@ -496,6 +499,7 @@ export class PaymentsService {
     assertCan(c.actor, 'pay.collect')
     const inv = await lockInvoice(tx, c.locationId, invoiceId)
     const calc = await calcOf(tx, inv.id)
+    await assertNoChargeWaiting(tx, inv.id)
     if (input.kind === 'deposit' && !input.amountCents) throw new AppError('PAY_AMOUNT_INVALID')
     if (input.kind === 'balance' && calc.balance <= 0) throw new AppError('PAY_NOTHING_TO_COLLECT')
     return this.createLink(tx, c, inv, calc, input, prepared)
