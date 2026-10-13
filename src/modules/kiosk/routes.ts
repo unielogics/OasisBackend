@@ -271,13 +271,19 @@ export function registerKioskRoutes(app: AppInstance, identityOf: KioskIdentityP
           '`version` is the ' +
           'version GET /kiosk returned (412 VERSION_CONFLICT when it changed).',
         body: z.object({ enabled: z.boolean(), version: z.number().int().min(0) }).strict(),
-        response: { 200: z.object({ enabled: z.boolean(), version: z.number().int() }) },
+        response: {
+          200: z.object({
+            enabled: z.boolean(),
+            version: z.number().int(),
+            signedOut: z.boolean().describe('The caller was signed in on a kiosk device and is signed out (the browser goes to the keypad)'),
+          }),
+        },
       },
     },
     async (req, reply) => {
       const r = await (await kioskService()).setEnabled(adminOf(req), req.body.enabled, req.body.version)
       if (r.signedOut) clearSessionCookie(reply, app.env)
-      return { enabled: r.enabled, version: r.version }
+      return { enabled: r.enabled, version: r.version, signedOut: r.signedOut }
     },
   )
 

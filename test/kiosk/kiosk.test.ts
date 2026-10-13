@@ -604,7 +604,7 @@ describe('K4 review: a manager on the tablet never keeps a long session (kiosk:F
     const version = ((await h.call('GET', 'kiosk', { session: tablet })).json() as Json).version
     const on = await h.call('PUT', 'kiosk/settings', { session: tablet, body: { enabled: true, version } })
     expect(on.statusCode).toBe(200)
-    expect(on.json()).toEqual({ enabled: true, version: expect.any(Number) })
+    expect(on.json()).toEqual({ enabled: true, version: expect.any(Number), signedOut: true })
     expect(on.cookies.find((c) => c.name === 'oasis_sid')?.value).toBe('')
     expect(await alive(tablet)).toBe(false)
     const status = await h.t.app.inject({ method: 'GET', url: '/api/v1/kiosk/status', headers: { cookie: `oasis_kdev=${deviceCookieOf(reg)}` } })
