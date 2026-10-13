@@ -817,7 +817,8 @@ verify with `bookingLinks` or in-chat actions, membership with `membershipLinks`
 `accountInfo`, `membershipLinks`, `paymentLinks`) and the runner refuses them if called; `behavior` adds the owner block after the
 unchanged rules (tone and length presets, words and topics to avoid, topics always handed to the team, quoted style notes), the
 guard rewrites a word to avoid (then drops its sentences, then the fallback), a handoff topic in the client's text the model did
-not hand off gets the server's fixed line and a handoff (reason `policy`), Spanish `english` answers a Spanish texter in English
+not hand off gets the server's fixed line and a handoff (reason `policy`; a proposal texted in that turn is canceled and the line
+names the visit too; the lists match sentence by sentence), Spanish `english` answers a Spanish texter in English
 and `handoff` answers with a fixed Spanish line and a handoff (reason `language`) without a model call, and `signOff` is appended
 by the server after the reply. With the defaults the assistant's requests are byte-identical to before. A FAQ that grows the shared knowledge budget past `AI_KNOWLEDGE_MAX_CHARS` is refused with 422
 `KNOWLEDGE_BUDGET {usedChars, maxChars, needed}` (section 15.6c); a save that shrinks it always passes. 422
@@ -833,7 +834,8 @@ changes what Oasis AI reads (the SHOP KNOWLEDGE block of its prompt and of the p
 Settings]", links and e-mails as "[link removed]", phone numbers other than the shop's as "[number]"), and only while it answers.
 
 `GET /assistant/knowledge` answers `{entries[], documents[], budget, limits}`. An entry is `{id, kind note|document|correction,
-title, body, question (correction), wrongReply (correction; redacted, never shown to the model), source manual|practice|live,
+title, body, question (correction), wrongReply (correction; redacted, never shown to the model; null without cli.view unless it came from a practice text of a synthetic
+new texter whose session still exists), source manual|practice|live,
 active, documentId, reviewedAt, warnings[{kind amount|link|phone|email|instruction|promise|hidden|markup|long, sample, line}],
 chars (title + question + body), sort, version, createdAt, updatedAt}`; `budget` is `{usedChars, maxChars, parts{faq, notes,
 documents, corrections}}` (active entries plus the Settings Q&A against `AI_KNOWLEDGE_MAX_CHARS`, default 20,000); `limits` names

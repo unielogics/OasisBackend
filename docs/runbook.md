@@ -604,7 +604,8 @@ confirm" proposals from the assistant, and a reply number sent then books nothin
   abilities away. With every setting at its default the assistant's prompt, tools and replies are exactly what they were before
   (byte-identical requests; `test/assistant/engine-parity.test.ts`). A switched-off ability is left out of the tools and refused by
   the runner (`assistant_tool_calls.error = policy_off`); words to avoid are rewritten once, then their sentences are dropped, then
-  the fallback; a handoff topic the model did not hand off gets the server's fixed line and a handoff (reason `policy`); Spanish
+  the fallback; a handoff topic the model did not hand off gets the server's fixed line and a handoff (reason `policy`; a booking
+  change texted to confirm in that turn is canceled, and the team's alert says so); Spanish
   "hand to the team" answers a Spanish text with a fixed Spanish line and a handoff (reason `language`) without calling the model.
   The rules themselves (`CORE_RULES`) never change with these settings.
 - **Practice** (Settings → Oasis AI → Practice) stays off until `AI_PRACTICE_ENABLED=true`, after `pnpm aws:provision --bedrock` and
@@ -620,6 +621,8 @@ confirm" proposals from the assistant, and a reply number sent then books nothin
   t.started_at > now() - interval '1 day';`.
 - **Corrections and review** (Knowledge → corrections; Conversations, `set.assistant` + `cli.view`): a correction is a knowledge
   entry (on by default, inside the budget); the wrong reply it was made from is kept for the owner and never shown to the model.
+  Someone with `set.assistant` but without `cli.view` sees that wrong reply only for practice texts of a synthetic new texter
+  (a real conversation or a client on file may hold a client's words).
   The review lists the real Oasis AI conversations of the last 90 days at most, redacted.
 
 ### The host cannot resolve its own new name (health check: "answered HTTP 000")
