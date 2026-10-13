@@ -35,6 +35,7 @@
     "sim:square": "tsx scripts/sim-square.ts",
     "sim:squarespace": "tsx scripts/sim-squarespace.ts",
     "square:webhooks": "tsx scripts/square-webhooks.ts",
+    "staff-events:backfill": "tsx scripts/backfill-staff-events.ts",
     "start": "node dist/server.js",
     "start:worker": "node dist/worker.js",
     "test": "vitest run --passWithNoTests",

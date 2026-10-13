@@ -6,10 +6,12 @@ import { auditContextOf } from '../../../http/authorizer.js'
 import { idempotentHandler } from '../../../http/idempotent.js'
 import type { AppInstance } from '../../../http/types.js'
 import { z } from '../../../http/zod.js'
+import * as audit from '../../../platform/audit.js'
 import { AppError } from '../../../platform/errors.js'
 import { transaction, type Executor, type Tx } from '../../../platform/db.js'
 import * as realtime from '../../../platform/realtime.js'
 import { getSetting } from '../../../platform/settings.js'
+import { recordStaffEvent } from '../../../platform/staff-events.js'
 import { actorName, type Actor } from '../../scheduling/context.js'
 import { loadCustomerTarget } from '../db/recipients.js'
 import { listThreadMessages, loadMessageDto, locationTz, type MessageDto } from '../db/messages.js'
@@ -328,9 +330,30 @@ export function registerThreadRoutes(app: AppInstance, rt: MessagingRuntime): vo
             channels: ['sms'],
             actor_type: 'staff',
             actor_name: actorName(actor),
+            // who sent it (ADR 0180): the tapped employee on a kiosk, else the signed-in person; and the kiosk device
+            actor_employee_id: req.auth!.employeeId,
+            kiosk_device_id: actor.audit.kioskDeviceId ?? null,
             meta: JSON.stringify({ messageId: out.messageId }) as never,
           })
           .execute()
+        // audited (never the text) and counted as the sender's activity
+        const auditId = await audit.record(tx, {
+          locationId,
+          action: 'message.staff_send',
+          entityType: 'message',
+          entityId: out.messageId,
+          after: { appointmentId: a.id, customerId: a.customer_id, ...(templateKey ? { templateKey } : {}), ...(tag ? { tag } : {}) },
+          ctx: actor.audit,
+        })
+        await recordStaffEvent(tx, {
+          locationId,
+          ctx: actor.audit,
+          kind: 'text',
+          appointmentId: a.id,
+          customerId: a.customer_id,
+          messageId: out.messageId,
+          auditId,
+        })
         // Answering a customer is reading what they wrote.
         await markRead(tx, locationId, { customerId: a.customer_id }, now)
         const loaded = await loadMessageDto(tx, out.messageId)

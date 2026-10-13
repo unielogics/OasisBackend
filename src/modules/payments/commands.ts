@@ -8,8 +8,9 @@ import { announceInvoiceChange } from './announce.js'
 import type { Clock } from '../../platform/clock.js'
 import type { Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
-import type { NewId } from '../../platform/ids.js'
+import { isUuid, type NewId } from '../../platform/ids.js'
 import { getSetting } from '../../platform/settings.js'
+import { recordStaffEvent } from '../../platform/staff-events.js'
 import { addDays, bizDayBounds, toBizDate } from '../../platform/time.js'
 import { sameUser, type PayActor } from './actor.js'
 import { adjustPreview, itemsRefundValue, type AdjustInput, type InvoiceCalc } from './calc.js'
@@ -33,6 +34,7 @@ import {
   type NewEvent,
 } from './repository.js'
 import type { CreditExpiry, RefundDest } from './schema.js'
+import { paymentStaffEventOf } from './staff-events.js'
 import { issueClientLink } from '../identity/links.js'
 import { activateSquareLink, squareProcessor, squareSendsRefunds, type PreparedSquareLink } from '../square/links.js'
 import { assertNoChargeWaiting } from '../square/charge-guard.js'
@@ -220,26 +222,45 @@ export class PaymentsService {
       after?: Record<string, unknown>
     },
   ): Promise<InvoiceDetail> {
-    await announceInvoiceChange(tx, {
+    const lead = {
+      events: o.events.map((e) => ({
+        id: e.id,
+        type: e.type,
+        amountCents: e.amount_cents,
+        status: e.status,
+      })),
+    }
+    const { auditId } = await announceInvoiceChange(tx, {
       locationId: c.locationId,
       invoiceId: inv.id,
       now: this.d.clock.now(),
       action: o.action,
       ctx: c.audit,
       before: o.before,
-      lead: {
-        events: o.events.map((e) => ({
-          id: e.id,
-          type: e.type,
-          amountCents: e.amount_cents,
-          status: e.status,
-        })),
-      },
+      lead,
       after: o.after,
       events: o.events,
       extra: o.extra,
     })
+    await this.staffEvent(tx, c, inv, o.action, { ...lead, ...o.after }, auditId)
     return this.detail(tx, c, inv.id)
+  }
+
+  /** The acting employee's activity (ADR 0180): a payment, tip, receipt or link, linked to its audit row. */
+  private async staffEvent(tx: Tx, c: CommandContext, inv: InvoiceRow, action: string, after: unknown, auditId: number): Promise<void> {
+    const ev = paymentStaffEventOf(action, after)
+    if (!ev) return
+    await recordStaffEvent(tx, {
+      locationId: c.locationId,
+      ctx: c.audit,
+      kind: ev.kind,
+      appointmentId: inv.appointment_id,
+      customerId: inv.customer_id,
+      amountCents: ev.amountCents,
+      ledgerEventId: ev.ledgerEventId,
+      auditId,
+      meta: { action, invoiceId: inv.id, ...ev.meta },
+    })
   }
 
   private snapshot(calc: InvoiceCalc): Record<string, number | string> {
@@ -383,6 +404,8 @@ export class PaymentsService {
         url,
         expected_cents: expected,
         created_by: c.actor.userId,
+        // who sent it (ADR 0180): the tapped employee on a kiosk has no user
+        created_by_employee_id: isUuid(c.actor.employeeId) ? c.actor.employeeId : null,
       })
       .execute()
     const sent = await this.d.ports.messenger.sendPaymentLink(tx, {
@@ -943,7 +966,7 @@ export class PaymentsService {
       refundedCents: calc.refunded,
       dedupeKey: `receipt:${inv.id}:${c.idempotencyKey ?? this.d.newId()}`,
     })
-    await audit.record(tx, {
+    const auditId = await audit.record(tx, {
       locationId: c.locationId,
       action: 'payments.receipt',
       entityType: 'invoice',
@@ -951,6 +974,7 @@ export class PaymentsService {
       after: { sms: sent.sms, email: sent.email },
       ctx: c.audit,
     })
+    await this.staffEvent(tx, c, inv, 'payments.receipt', null, auditId)
     return { ...sent, invoice: await this.detail(tx, c, inv.id) }
   }
 

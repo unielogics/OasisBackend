@@ -17,7 +17,7 @@ import {
 } from './board.js'
 import { loadSettingsBundle, type SchedulingCtx } from './context.js'
 import { loadCategoryCounts, loadKpis, loadOpsRows, type CategoryCounts, type Kpi } from './kpis.js'
-import { listBayStaff } from './staff.js'
+import { listBayStaff, loadWorkers } from './staff.js'
 
 export type OpsWindow = 'next24' | 'today' | 'tomorrow' | 'week'
 
@@ -263,8 +263,13 @@ export async function loadSnapshot(
       }
     })
 
+  // a car whose worker is not bay staff (the front desk placed it on the kiosk, an invited employee, a manager) gets that person's
+  // column after the bay staff, so no car disappears from the Staff view (ADR 0180, DV-1013)
+  const crewIds = new Set(staffRows.map((s) => s.id))
+  const extraIds = [...new Set(pool.map((r) => r.staff?.id).filter((id): id is string => !!id && !crewIds.has(id)))]
+  const extras = await loadWorkers(db, extraIds)
   const staff: StaffColumn[] = [
-    ...staffRows.map((s) => {
+    ...[...staffRows, ...extras].map((s) => {
       const jobs = pool.filter((r) => r.staff?.id === s.id).map(card)
       return {
         employeeId: s.id,

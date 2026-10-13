@@ -2982,6 +2982,8 @@ CREATE TABLE public.square_charges (
     reason text,
     request_key text,
     charged_after_close_at timestamp with time zone,
+    decided_by_employee_id uuid,
+    decided_kiosk_device_id uuid,
     CONSTRAINT square_charges_amount_cents_check CHECK ((amount_cents > 0)),
     CONSTRAINT square_charges_attempts_check CHECK ((attempts >= 0)),
     CONSTRAINT square_charges_check CHECK (((state <> 'charged'::text) OR (square_payment_id IS NOT NULL))),
@@ -3276,6 +3278,7 @@ CREATE TABLE public.staff_events (
     user_id uuid,
     request_id text,
     meta jsonb DEFAULT '{}'::jsonb NOT NULL,
+    audit_id bigint,
     CONSTRAINT staff_events_employee_name_check CHECK ((btrim(employee_name) <> ''::text)),
     CONSTRAINT staff_events_kind_check CHECK ((kind = ANY (ARRAY['confirm'::text, 'arrive'::text, 'assign_bay'::text, 'start'::text, 'complete'::text, 'notify_ready'::text, 'pickup'::text, 'pickup_reopen'::text, 'prep_bay'::text, 'reschedule'::text, 'update'::text, 'book'::text, 'walk_in'::text, 'customer_create'::text, 'addon_add'::text, 'addon_remove'::text, 'size_change'::text, 'checklist'::text, 'photo'::text, 'payment'::text, 'tip'::text, 'receipt'::text, 'payment_link'::text, 'text'::text, 'arrival_link'::text, 'worker_set'::text]))),
     CONSTRAINT staff_events_via_check CHECK ((via = ANY (ARRAY['kiosk'::text, 'signed_in'::text])))
@@ -5871,6 +5874,12 @@ CREATE INDEX square_subscription_invoices_order_idx ON public.square_subscriptio
 CREATE INDEX staff_events_appt_idx ON public.staff_events USING btree (appointment_id, at);
 
 --
+-- Name: staff_events_audit_uq; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX staff_events_audit_uq ON public.staff_events USING btree (audit_id) WHERE (audit_id IS NOT NULL);
+
+--
 -- Name: staff_events_emp_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -7889,11 +7898,25 @@ ALTER TABLE ONLY public.square_charges
     ADD CONSTRAINT square_charges_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
 
 --
+-- Name: square_charges square_charges_decided_by_employee_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_charges
+    ADD CONSTRAINT square_charges_decided_by_employee_id_fkey FOREIGN KEY (decided_by_employee_id) REFERENCES public.employees(id) ON DELETE SET NULL;
+
+--
 -- Name: square_charges square_charges_decided_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.square_charges
     ADD CONSTRAINT square_charges_decided_by_user_id_fkey FOREIGN KEY (decided_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+--
+-- Name: square_charges square_charges_decided_kiosk_device_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.square_charges
+    ADD CONSTRAINT square_charges_decided_kiosk_device_id_fkey FOREIGN KEY (decided_kiosk_device_id) REFERENCES public.kiosk_devices(id) ON DELETE SET NULL;
 
 --
 -- Name: square_charges square_charges_invoice_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

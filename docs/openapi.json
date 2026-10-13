@@ -110196,7 +110196,7 @@
     },
     "/api/v1/reports/employee-activity": {
       "get": {
-        "description": "Counts per employee and per day from the staff events (kiosk and signed-in), the ledger and the messages. Amounts are null without pay.reports. With employeeId the cars that employee touched, step by step. Not built yet: answers 501 NOT_BUILT (ADR 0180 wave K2b).",
+        "description": "Counts per employee and per business day from the staff events (kiosk and signed-in), the ledger and the messages: check-ins (arrive, and a drag from booked or confirmed onto a bay), bays started (assign-bay and start), completed, picked up, ready texts, bookings, walk-ins, add-ons, size changes, checklist tasks, photos and notes, texts sent, payments (`pay` events done; a voided one is never counted; amounts null without pay.reports) and bay minutes (completed minus cleaning started, for the cars the employee was the worker of). Every active or invited employee of the shop is listed, and anyone else with activity in the range; `days` holds only the days with activity. With employeeId: that employee alone (404 when not of the shop) and `cars`, every car they touched with each step and who did it. 422 VALIDATION_FAILED for a bad date, an end before the start or more than 31 days.",
         "parameters": [
           {
             "in": "query",
@@ -110764,7 +110764,7 @@
     },
     "/api/v1/reports/employee-activity/{employeeId}/events": {
       "get": {
-        "description": "Amounts are null without pay.reports. Not built yet: answers 501 NOT_BUILT (ADR 0180 wave K2b).",
+        "description": "Their staff events in the range (at most 31 days, business time zone), 50 a page: kind, kiosk or signed in (with the device), the client and the visit. Pass `nextCursor` back as `cursor` for the next page (null on the last). Amounts are null without pay.reports. 404 when the employee is not of the shop; 422 VALIDATION_FAILED for a bad range or cursor.",
         "parameters": [
           {
             "in": "query",

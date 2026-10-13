@@ -58,6 +58,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261016100000_kiosk.sql` | Kiosk mode (ADR 0180, wave K1a): `kiosk_devices` (registered tablets: the sha256 of the device cookie token, the persisted unlock throttle `failed_attempts` / `last_failed_at` / `locked_out_at`, revoke), `kiosk_codes` (the shop's unlock codes: scrypt over HMAC(key from SESSION_SECRET, location:code), history, one current), `kiosk_sessions` (sha256 id, device, code, `expires_at` = the lock time, `lock_rule`, CSRF secret, revoke reason); `employees.kiosk_listed` ("Shows on the kiosk"), `sessions.kiosk_device_id` (a manager signed in on a kiosk: short timings), `audit_log.kiosk_device_id` |
 | `20261016100100_staff_attribution.sql` | Kiosk mode (ADR 0180): the tapped employee next to the user columns, `activity_log.actor_employee_id` and `kiosk_device_id`, `appointments.created_by_employee_id`, `appointment_addons.added_by_employee_id`, `appointment_photos.uploaded_by_employee_id`, `payment_links.created_by_employee_id` (columns only in K1a; written from wave K1b) |
 | `20261016100200_staff_events.sql` | Kiosk mode (ADR 0180): `staff_events`, one row per car step, booking, payment, text and so on by whoever did it (kiosk or signed in), the source of the Team activity report; the report's indexes on `ledger_events` (pay by actor) and `messages` (staff sender) |
+| `20261016100300_staff_attribution_links.sql` | Kiosk mode, attribution (ADR 0180, wave K1b): `staff_events.audit_id` (the audit row the event was recorded with, unique when set, so the history backfill never doubles an event); `square_charges.decided_by_employee_id` and `decided_kiosk_device_id` (who confirmed a saved-card charge: its payment is recorded later in their name, and a kiosk has no user) |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -389,7 +390,7 @@ no-show and late-cancel fees, the card lifecycle) and Q3b will (subscriptions).
 Square deliveries and catch-up events share `webhook_log` (provider `square`, `external_id` = Square's `event_id`): whichever claims the
 event first processes it; the raw body and the headers without the signature are kept for the 90-day trail.
 
-## Kiosk mode (migrations `20261016100000_kiosk.sql`, `20261016100100_staff_attribution.sql` and `20261016100200_staff_events.sql`, ADR 0180)
+## Kiosk mode (migrations `20261016100000_kiosk.sql`, `20261016100100_staff_attribution.sql`, `20261016100200_staff_events.sql` and `20261016100300_staff_attribution_links.sql`, ADR 0180)
 
 The shop's shared tablet stays open all day without an email login: an admin registers it once ("Make this a kiosk"), and the 8-digit
 shop code unlocks it into a kiosk session until closing + 2 hours. Everything is off until `kiosk.enabled` (setting, default false).
@@ -401,14 +402,20 @@ sit next to the user columns. Only token hashes are stored; the code itself neve
 | `kiosk_devices` | A registered kiosk tablet of a location: `name` (≤ 40), `token_hash` (sha256 of the opaque `__Host-oasis_kdev` cookie token, unique), who registered it, `last_seen_at` / `last_ip` / `last_ua`, the persisted unlock throttle (`failed_attempts` consecutive wrong codes, `last_failed_at`; 20 sets `locked_out_at` until a manager clears it), `revoked_at` / `revoked_by` (the cookie stops working for good), `version` |
 | `kiosk_codes` | The location's unlock codes: `code_hash` (PHC scrypt over HMAC-SHA256(kiosk key, "<location id>:<code>"), the key derived from `SESSION_SECRET`), who set it and when; every code ever set (a new code may not be one of the last 3), the current one has `retired_at` null (unique index `kiosk_codes_current_uq`) |
 | `kiosk_sessions` | An unlocked kiosk: `id` = sha256 of the `__Host-oasis_ksid` cookie token, the device, location and code, `expires_at` (the lock time from `kioskLockTime`, absolute, no idle expiry), `lock_rule closing\|previous_day\|two_hours`, `csrf_secret`, address and browser, `last_seen_at`, `revoked_at` + `revoked_reason lock\|lock_device\|lock_all\|code_changed\|device_revoked\|kiosk_off\|unlock_again` (set together). Valid only with the cookie of its own live device and while kiosk mode is on |
-| `staff_events` | One row per thing an employee did, the source of the Team activity report: `employee_id` and `employee_name` (snapshot "Marco R."), `kind` (a car step `confirm`, `arrive`, `assign_bay`, `start`, `complete`, `notify_ready`, `pickup`, `pickup_reopen`, `prep_bay`, `reschedule`, `update`; `book`, `walk_in`, `customer_create`, `addon_add`, `addon_remove`, `size_change`, `checklist`, `photo`, `payment`, `tip`, `receipt`, `payment_link`, `text`, `arrival_link`, `worker_set`), the appointment, client, `amount_cents`, `ledger_event_id`, `message_id`, `via kiosk\|signed_in` with the `kiosk_device_id` or the `user_id`, `request_id`, `meta`. Written from wave K1b (audit-helper mapping) |
+| `staff_events` | One row per thing an employee did, the source of the Team activity report: `employee_id` and `employee_name` (snapshot "Marco R."), `kind` (a car step `confirm`, `arrive`, `assign_bay`, `start`, `complete`, `notify_ready`, `pickup`, `pickup_reopen`, `prep_bay`, `reschedule`, `update`; `book`, `walk_in`, `customer_create`, `addon_add`, `addon_remove`, `size_change`, `checklist`, `photo`, `payment`, `tip`, `receipt`, `payment_link`, `text`, `arrival_link`, `worker_set`), the appointment, client, `amount_cents`, `ledger_event_id`, `message_id`, `via kiosk\|signed_in` with the `kiosk_device_id` or the `user_id`, `request_id`, `meta`, `audit_id` (the audit row it was recorded with; unique). Written in the command's own transaction whenever the request has an acting employee (kiosk or signed in; `src/platform/staff-events.ts`, the exhaustive action map in `scheduling/audit-helper.ts`, `payments/staff-events.ts`); history rebuilt once by `pnpm staff-events:backfill` |
 
 Columns added to existing tables: `employees.kiosk_listed` (default true: who the picker lists among active and invited
 employees), `sessions.kiosk_device_id` (a manager signed in on a kiosk device: 15 minutes idle, 4 hours absolute), `audit_log.kiosk_device_id`
 (no foreign key, like the other audit actor columns), and the employee beside each user column: `activity_log.actor_employee_id` and
 `kiosk_device_id`, `appointments.created_by_employee_id`, `appointment_addons.added_by_employee_id`,
 `appointment_photos.uploaded_by_employee_id`, `payment_links.created_by_employee_id`. Payments and texts already carried the employee
-(`ledger_events.actor_employee_id`, `messages.sender_employee_id`).
+(`ledger_events.actor_employee_id`, `messages.sender_employee_id`). A saved-card charge records who confirmed it in
+`square_charges.decided_by_employee_id` and `decided_kiosk_device_id`, beside `decided_by_user_id`.
+
+Who is written where (wave K1b): every activity line of a staff actor carries `actor_employee_id` and, from a kiosk, `kiosk_device_id`;
+a kiosk request writes null in every user column and the tapped employee in the employee column beside it; a kiosk putting a car in a
+bay (assign-bay, start, advance to start) also makes the tapped employee the car's worker (`appointments.assigned_employee_id`, with
+the activity line "Worker: Marco R." and a `worker_set` event when it changed), while a signed-in person leaves the worker as it was.
 
 ## Foreign keys
 
@@ -2581,8 +2588,10 @@ Primary key `(id)`. Unique `(location_id, sqsp_subscription_id)`. `(location_id)
 | `reason` | text | yes |  |
 | `request_key` | text | yes |  |
 | `charged_after_close_at` | timestamp with time zone | yes |  |
+| `decided_by_employee_id` | uuid | yes |  |
+| `decided_kiosk_device_id` | uuid | yes |  |
 
-Primary key `(id)`. Unique `(idempotency_key)`. Unique `(square_payment_id)`. `(appointment_id)` references `appointments(id)`. `(card_id)` references `customer_cards(id)`. `(consent_id)` references `card_consents(id)`. `(customer_id)` references `customers(id)`. `(decided_by_user_id)` references `users(id)` on delete set null. `(invoice_id)` references `invoices(id)`. `(ledger_event_id)` references `ledger_events(id)`. `(location_id)` references `locations(id)` on delete cascade. 11 check constraints. Index `square_charges_customer_idx` `(customer_id)`. Index `square_charges_invoice_idx` `(invoice_id)` where `invoice_id IS NOT NULL`. Unique index `square_charges_open_fee_idx` `(appointment_id, purpose)` where `(appointment_id IS NOT NULL) AND (purpose = ANY (ARRAY['no_show_fee'::text, 'late_cancel_fee'::text])) AND (state = ANY (ARRAY['proposed'::text, 'charging'::text, 'unknown'::text, 'declined'::text]))`. Index `square_charges_open_idx` `(location_id, created_at)` where `state = ANY (ARRAY['proposed'::text, 'charging'::text, 'unknown'::text])`. Unique index `square_charges_request_key_idx` `(location_id, request_key)` where `request_key IS NOT NULL`.
+Primary key `(id)`. Unique `(idempotency_key)`. Unique `(square_payment_id)`. `(appointment_id)` references `appointments(id)`. `(card_id)` references `customer_cards(id)`. `(consent_id)` references `card_consents(id)`. `(customer_id)` references `customers(id)`. `(decided_by_employee_id)` references `employees(id)` on delete set null. `(decided_by_user_id)` references `users(id)` on delete set null. `(decided_kiosk_device_id)` references `kiosk_devices(id)` on delete set null. `(invoice_id)` references `invoices(id)`. `(ledger_event_id)` references `ledger_events(id)`. `(location_id)` references `locations(id)` on delete cascade. 11 check constraints. Index `square_charges_customer_idx` `(customer_id)`. Index `square_charges_invoice_idx` `(invoice_id)` where `invoice_id IS NOT NULL`. Unique index `square_charges_open_fee_idx` `(appointment_id, purpose)` where `(appointment_id IS NOT NULL) AND (purpose = ANY (ARRAY['no_show_fee'::text, 'late_cancel_fee'::text])) AND (state = ANY (ARRAY['proposed'::text, 'charging'::text, 'unknown'::text, 'declined'::text]))`. Index `square_charges_open_idx` `(location_id, created_at)` where `state = ANY (ARRAY['proposed'::text, 'charging'::text, 'unknown'::text])`. Unique index `square_charges_request_key_idx` `(location_id, request_key)` where `request_key IS NOT NULL`.
 
 #### `square_customer_links`
 
@@ -2815,8 +2824,9 @@ Primary key `(id)`. Unique `(square_invoice_id)`. `(location_id)` references `lo
 | `user_id` | uuid | yes |  |
 | `request_id` | text | yes |  |
 | `meta` | jsonb | no | `'{}'::jsonb` |
+| `audit_id` | bigint | yes |  |
 
-Primary key `(id)`. `(appointment_id)` references `appointments(id)` on delete set null. `(customer_id)` references `customers(id)` on delete set null. `(employee_id)` references `employees(id)` on delete set null. `(kiosk_device_id)` references `kiosk_devices(id)` on delete set null. `(ledger_event_id)` references `ledger_events(id)`. `(location_id)` references `locations(id)` on delete cascade. `(message_id)` references `messages(id)` on delete set null. `(user_id)` references `users(id)` on delete set null. 3 check constraints. Index `staff_events_appt_idx` `(appointment_id, at)`. Index `staff_events_emp_at_idx` `(employee_id, at)`. Index `staff_events_loc_at_idx` `(location_id, at)`.
+Primary key `(id)`. `(appointment_id)` references `appointments(id)` on delete set null. `(customer_id)` references `customers(id)` on delete set null. `(employee_id)` references `employees(id)` on delete set null. `(kiosk_device_id)` references `kiosk_devices(id)` on delete set null. `(ledger_event_id)` references `ledger_events(id)`. `(location_id)` references `locations(id)` on delete cascade. `(message_id)` references `messages(id)` on delete set null. `(user_id)` references `users(id)` on delete set null. 3 check constraints. Index `staff_events_appt_idx` `(appointment_id, at)`. Unique index `staff_events_audit_uq` `(audit_id)` where `audit_id IS NOT NULL`. Index `staff_events_emp_at_idx` `(employee_id, at)`. Index `staff_events_loc_at_idx` `(location_id, at)`.
 
 #### `standing_occurrences`
 

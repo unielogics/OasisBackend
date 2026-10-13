@@ -62,9 +62,4 @@ registerProblems({
     title: 'Already a kiosk',
     detail: 'This browser is already a kiosk',
   },
-  NOT_BUILT: {
-    status: 501,
-    title: 'Not ready yet',
-    detail: 'This isn’t ready yet',
-  },
 })

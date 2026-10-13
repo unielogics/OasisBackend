@@ -813,7 +813,7 @@ describe('prep-bay, pickup, notify-ready', () => {
 })
 
 describe('PATCH details', () => {
-  it('plans a bay without starting, assigns an active employee, edits notes; honours the version', async () => {
+  it('plans a bay without starting, assigns an active or invited employee, edits notes; honours the version', async () => {
     const b = await o.book({ at: at('14:00') })
     const r = await run((tx, a) =>
       updateDetails(
@@ -836,15 +836,24 @@ describe('PATCH details', () => {
     expect(
       await err(run((tx, a) => updateDetails(tx, o.ctx, a, b.appointment.id, { notes: 'x' }, 1))),
     ).toMatchObject({ code: 'VERSION_CONFLICT', status: 412 })
-    expect(
-      (
-        await err(
-          run((tx, a) =>
-            updateDetails(tx, o.ctx, a, b.appointment.id, { assignedEmployeeId: o.employee('Kevin') }),
-          ),
-        )
-      ).code,
-    ).toBe('VALIDATION_FAILED') // invited, not active
+    // invited works too (ADR 0180): crew on the kiosk may never have signed in
+    const invited = await run((tx, a) =>
+      updateDetails(tx, o.ctx, a, b.appointment.id, { assignedEmployeeId: o.employee('Kevin') }),
+    )
+    expect(invited.appointment.assignedEmployeeId).toBe(o.employee('Kevin'))
+    // an inactive employee, or one of another shop, cannot be assigned
+    const gone = o.ctx.newId()
+    await o.t.db
+      .insertInto('employees')
+      .values({ id: gone, first: 'Old', last: 'Hand', status: 'inactive', deactivated_at: new Date('2026-06-01T12:00:00Z') })
+      .execute()
+    await o.t.db.insertInto('employee_locations').values({ employee_id: gone, location_id: o.locationId }).execute()
+    const elsewhere = o.ctx.newId()
+    await o.t.db.insertInto('employees').values({ id: elsewhere, first: 'Far', last: 'Away', status: 'active' }).execute()
+    for (const bad of [gone, elsewhere])
+      expect(
+        (await err(run((tx, a) => updateDetails(tx, o.ctx, a, b.appointment.id, { assignedEmployeeId: bad })))).code,
+      ).toBe('VALIDATION_FAILED')
   })
 })
 

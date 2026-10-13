@@ -3,6 +3,7 @@
 // refused by the invoice gateway (409 ADDON_REMOVE_OVERPAID) and rolls the whole change back.
 import type { Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
+import { isUuid } from '../../platform/ids.js'
 import { refreshAppointmentCategories, visitCategory } from '../catalog/appointment-categories.js'
 import { requireService } from '../catalog/service.js'
 import '../customers/schema.js'
@@ -76,6 +77,7 @@ export async function addAddon(
         name: svc.name,
         ...lineColumns(line),
         added_by: actor.auth.userId,
+        added_by_employee_id: isUuid(actor.auth.employeeId) ? actor.auth.employeeId : null,
       })
       .execute()
     await addAddonChecklist(tx, c, a.id, rowId, svc)

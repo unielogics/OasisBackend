@@ -7,6 +7,7 @@ import type { AppInstance } from '../../../http/types.js'
 import * as audit from '../../../platform/audit.js'
 import { transaction } from '../../../platform/db.js'
 import { normalizePhone } from '../../../platform/phone.js'
+import { recordStaffEvent } from '../../../platform/staff-events.js'
 import { canSeeContact } from '../../people/redact.js'
 import { AppError } from '../../../platform/errors.js'
 import { requireVehicleClass } from '../../catalog/vehicle-classes.js'
@@ -236,14 +237,24 @@ export function registerCustomerBookingRoutes(app: AppInstance): void {
           [v.make, v.model, v.plate, v.color, v.year].some((x) => x !== undefined && x !== null && x !== '')
         )
           await upsertVehicleByPlate(tx, { newId: app.newId, customerId: r.customer.id, ...v })
-        if (r.created)
-          await audit.record(tx, {
+        if (r.created) {
+          const ctx = auditContextOf(req)
+          const auditId = await audit.record(tx, {
             locationId: req.auth!.locationId,
             action: 'customer.create',
             entityType: 'customer',
             entityId: r.customer.id,
-            ctx: auditContextOf(req),
+            ctx,
           })
+          // the walk-in's new client is the employee's activity (ADR 0180)
+          await recordStaffEvent(tx, {
+            locationId: req.auth!.locationId,
+            ctx,
+            kind: 'customer_create',
+            customerId: r.customer.id,
+            auditId,
+          })
+        }
         return {
           kind: 'full' as const,
           created: r.created,

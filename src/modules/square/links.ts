@@ -160,6 +160,8 @@ export interface PrepareInput {
   amountCents?: number
   origin: PaymentLinkOrigin
   createdBy?: string | null
+  /** The employee who sent it (ADR 0180: a kiosk has no user). */
+  createdByEmployeeId?: string | null
   /** An existing pending row to create at Square (a booking's deposit request). */
   rowId?: string
 }
@@ -216,6 +218,7 @@ export async function prepareSquareLink(d: SquareLinkDeps, i: PrepareInput): Pro
         url: null,
         expected_cents: expected,
         created_by: i.createdBy ?? null,
+        created_by_employee_id: i.createdByEmployeeId ?? null,
         state: 'pending',
         provider: 'square',
         origin: i.origin,

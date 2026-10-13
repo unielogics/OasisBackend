@@ -43,8 +43,9 @@ import type { AuditContext } from '../../platform/audit.js'
 import type { Clock } from '../../platform/clock.js'
 import { transaction, type Db, type Executor, type Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
-import type { NewId } from '../../platform/ids.js'
+import { isUuid, type NewId } from '../../platform/ids.js'
 import { formatUsd } from '../../platform/money.js'
+import { recordStaffEvent } from '../../platform/staff-events.js'
 import { invoiceLabel } from '../payments/format.js'
 import { calcOf, cardLabel, lockInvoice } from '../payments/repository.js'
 import { loadCustomerTarget } from '../messaging/db/recipients.js'
@@ -219,10 +220,36 @@ const auditCtx = (a: SquareActor): AuditContext =>
   a.audit ?? { actor: { userId: a.userId ?? null, employeeId: a.employeeId ?? null, name: a.name, roles: a.roles ?? null } }
 
 /** Who confirmed a charge, as the ledger and the audit name them (the webhook and the job record it in that person's name). */
-const deciderOf = (r: ChargeRow): SquareActor => ({ userId: r.decided_by_user_id, name: r.decided_by ?? 'Staff', manual: true })
+const deciderOf = (r: ChargeRow): SquareActor => ({
+  userId: r.decided_by_user_id,
+  // the employee and the kiosk device (ADR 0180): a kiosk has no user, and the ledger names the employee who tapped
+  employeeId: r.decided_by_employee_id,
+  name: r.decided_by ?? 'Staff',
+  manual: true,
+  ...(r.decided_by_employee_id || r.decided_kiosk_device_id
+    ? {
+        audit: {
+          actor: { userId: r.decided_by_user_id, employeeId: r.decided_by_employee_id, name: r.decided_by ?? 'Staff' },
+          kioskDeviceId: r.decided_kiosk_device_id,
+        },
+      }
+    : {}),
+})
 
-async function activity(tx: Tx, appointmentId: string | null, at: Date, text: string, actor: string | null, meta: Record<string, unknown>): Promise<void> {
+/** The employee and kiosk device columns of the person deciding a charge. */
+function decidedByIds(a: SquareActor): { decided_by_employee_id: string | null; decided_kiosk_device_id: string | null } {
+  const employeeId = a.employeeId ?? a.audit?.actor?.employeeId
+  const deviceId = a.audit?.kioskDeviceId
+  return {
+    decided_by_employee_id: isUuid(employeeId) ? employeeId : null,
+    decided_kiosk_device_id: isUuid(deviceId) ? deviceId : null,
+  }
+}
+
+/** An activity line of the visit, in the name of the person who decided (with their employee record and kiosk device: ADR 0180). */
+async function activity(tx: Tx, appointmentId: string | null, at: Date, text: string, actor: SquareActor | null | undefined, meta: Record<string, unknown>): Promise<void> {
   if (!appointmentId) return
+  const ids = actor ? decidedByIds(actor) : null
   await tx
     .insertInto('activity_log')
     .values({
@@ -231,7 +258,9 @@ async function activity(tx: Tx, appointmentId: string | null, at: Date, text: st
       text,
       channels: ['internal'],
       actor_type: actor ? 'staff' : 'system',
-      actor_name: actor,
+      actor_name: actor?.name ?? null,
+      actor_employee_id: ids?.decided_by_employee_id ?? null,
+      kiosk_device_id: ids?.decided_kiosk_device_id ?? null,
       meta: JSON.stringify(meta) as never,
     })
     .execute()
@@ -334,7 +363,7 @@ async function applyAnswer(tx: Tx, d: CardChargeDeps, chargeId: string, a: Answe
       ctx: auditCtx(a.by ?? deciderOf(r)),
     })
     const what = a.by ? 'marked not charged' : 'declined'
-    await activity(tx, r.appointment_id, now, `${row.reason ?? REASONS[r.purpose]} ${what} · ${formatUsd(r.amount_cents)} · ${a.text}`, a.by?.name ?? null, { chargeId })
+    await activity(tx, r.appointment_id, now, `${row.reason ?? REASONS[r.purpose]} ${what} · ${formatUsd(r.amount_cents)} · ${a.text}`, a.by ?? null, { chargeId })
     return out(row)
   }
   const row = await tx
@@ -398,7 +427,7 @@ export async function recordChargePayment(
     .execute()
   const card = r.card_id ? await tx.selectFrom('customer_cards').select(['brand', 'last4']).where('id', '=', r.card_id).executeTakeFirst() : undefined
   const label = cardLabel(card?.brand ?? f.brand, card?.last4 ?? f.last4).label
-  await audit.record(tx, {
+  const auditId = await audit.record(tx, {
     locationId: r.location_id,
     action: 'card.charged',
     entityType: 'square_charge',
@@ -406,7 +435,19 @@ export async function recordChargePayment(
     after: { purpose: r.purpose, amountCents: f.amountCents, squarePaymentId: f.paymentId, eventId: rec.eventId, invoiceId: r.invoice_id, card: label },
     ctx: auditCtx(actor),
   })
-  await activity(tx, r.appointment_id, now, `${r.reason ?? REASONS[r.purpose]} charged · ${formatUsd(f.amountCents)} on ${label}`, actor.name, { chargeId, squarePaymentId: f.paymentId })
+  // the payment is the activity of the employee who confirmed the charge (ADR 0180), whenever Square's answer is recorded
+  await recordStaffEvent(tx, {
+    locationId: r.location_id,
+    ctx: auditCtx(actor),
+    kind: 'payment',
+    appointmentId: r.appointment_id,
+    customerId: r.customer_id,
+    amountCents: f.amountCents,
+    ledgerEventId: rec.eventId,
+    auditId,
+    meta: { action: 'card.charged', method: 'saved_card', purpose: r.purpose, invoiceId: r.invoice_id },
+  })
+  await activity(tx, r.appointment_id, now, `${r.reason ?? REASONS[r.purpose]} charged · ${formatUsd(f.amountCents)} on ${label}`, actor, { chargeId, squarePaymentId: f.paymentId })
   if (r.purpose !== 'balance') await textFeeCharged(tx, d, r, f.amountCents, label)
   return { chargeId, state: 'charged', invoiceId: r.invoice_id, error: null }
 }
@@ -470,6 +511,7 @@ async function retryAttempt(tx: Tx, d: Pick<CardChargeDeps, 'clock'>, r: ChargeR
       ...(i.consentId ? { consent_id: i.consentId } : {}),
       decided_by: i.actor.name,
       decided_by_user_id: i.actor.userId ?? null,
+      ...decidedByIds(i.actor),
       decided_at: now,
       attempted_at: now,
       request_key: i.requestKey ?? null,
@@ -555,6 +597,7 @@ export async function chargeBalance(d: CardChargeDeps, i: BalanceChargeInput): P
         proposed_by: i.actor.name,
         decided_by: i.actor.name,
         decided_by_user_id: i.actor.userId ?? null,
+        ...decidedByIds(i.actor),
         decided_at: now,
         attempted_at: now,
         reason: REASONS.balance,
@@ -632,7 +675,7 @@ export async function waiveFee(
   const now = d.clock.now()
   await tx
     .updateTable('square_charges')
-    .set({ state: 'waived', waive_reason: i.reason, decided_by: i.actor.name, decided_by_user_id: i.actor.userId ?? null, decided_at: now, updated_at: now })
+    .set({ state: 'waived', waive_reason: i.reason, decided_by: i.actor.name, decided_by_user_id: i.actor.userId ?? null, ...decidedByIds(i.actor), decided_at: now, updated_at: now })
     .where('id', '=', r.id)
     .execute()
   await audit.record(tx, {
@@ -644,7 +687,7 @@ export async function waiveFee(
     after: { state: 'waived', purpose: r.purpose, amountCents: r.amount_cents, reason: i.reason },
     ctx: auditCtx(i.actor),
   })
-  await activity(tx, r.appointment_id, now, `${r.reason ?? REASONS[r.purpose]} waived · ${formatUsd(r.amount_cents)} · ${i.reason}`, i.actor.name, { chargeId: r.id })
+  await activity(tx, r.appointment_id, now, `${r.reason ?? REASONS[r.purpose]} waived · ${formatUsd(r.amount_cents)} · ${i.reason}`, i.actor, { chargeId: r.id })
 }
 
 // ---- the job: unanswered attempts ---------------------------------------------------------------------------------------------

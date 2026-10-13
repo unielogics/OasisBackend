@@ -56,3 +56,28 @@ export async function listBayStaff(db: Executor, locationId: string): Promise<Ba
     avatarColor: r.avatar_color,
   }))
 }
+
+/**
+ * Workers who are not bay staff, for their own Staff view columns (ADR 0180): whoever a car is assigned to, whatever their role or
+ * status, by first name. Never someone with no car: the caller passes the assigned ids of the cars shown.
+ */
+export async function loadWorkers(db: Executor, ids: readonly string[]): Promise<BayStaff[]> {
+  if (ids.length === 0) return []
+  const rows = await db
+    .selectFrom('employees as e')
+    .select(['e.id', 'e.first', 'e.last', 'e.title', 'e.avatar_color'])
+    .where('e.id', 'in', [...ids])
+    .orderBy('e.first')
+    .orderBy('e.last')
+    .orderBy('e.id')
+    .execute()
+  return rows.map((r) => ({
+    id: r.id,
+    first: r.first,
+    last: r.last,
+    name: displayName(r.first, r.last),
+    initials: initials(r.first, r.last),
+    title: r.title,
+    avatarColor: r.avatar_color,
+  }))
+}

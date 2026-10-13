@@ -235,6 +235,8 @@ export async function setChecklistItem(
     changed = 1
   }
   const progress = await checklistProgress(tx, appointmentId)
+  // one task is audited too (ADR 0180): who ticked it is the employee's activity
+  if (changed) await audit(tx, c, actor, 'checklist.item', appointmentId, { itemId: row.id, done: row.done }, { itemId: row.id, done })
   if (changed)
     await publishOps(tx, c.locationId, {
       kpi: false,

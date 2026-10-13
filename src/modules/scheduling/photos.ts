@@ -103,6 +103,7 @@ export async function presignPhoto(
       status: 'pending_upload',
       taken_at: c.clock.now(),
       uploaded_by: actor.auth.userId,
+      uploaded_by_employee_id: isUuid(actor.auth.employeeId) ? actor.auth.employeeId : null,
     })
     .execute()
   let upload: UploadSlot
@@ -197,6 +198,7 @@ export async function addIssueNote(
       status: 'ready',
       taken_at: c.clock.now(),
       uploaded_by: actor.auth.userId,
+      uploaded_by_employee_id: isUuid(actor.auth.employeeId) ? actor.auth.employeeId : null,
     })
     .execute()
   await logActivity(tx, c, {

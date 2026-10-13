@@ -30,12 +30,14 @@ export interface AnnounceInput {
 export interface Announced {
   version: number
   calc: InvoiceCalc
+  /** The audit_log row written (a staff event links it: ADR 0180). */
+  auditId: number
 }
 
 export async function announceInvoiceChange(tx: Tx, o: AnnounceInput): Promise<Announced> {
   const version = await touchInvoice(tx, o.invoiceId, o.now)
   const calc = await calcOf(tx, o.invoiceId)
-  await audit.record(tx, {
+  const auditId = await audit.record(tx, {
     locationId: o.locationId,
     action: o.action,
     entityType: 'invoice',
@@ -58,7 +60,7 @@ export async function announceInvoiceChange(tx: Tx, o: AnnounceInput): Promise<A
   for (const x of o.extra ?? [])
     await pub(x.type, x.eventId ? { invoiceId: o.invoiceId, eventId: x.eventId } : { invoiceId: o.invoiceId })
   await publishOpsForInvoice(tx, o.locationId, o.invoiceId)
-  return { version, calc }
+  return { version, calc, auditId }
 }
 
 /** The invoice's standing before a change, for the audit row's `before`. */

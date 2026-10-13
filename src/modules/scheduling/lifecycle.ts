@@ -1,8 +1,11 @@
 // The appointment state machine (backend design 4.1). Every command is one transaction: row lock, guard, update,
 // activity log, queued message, audit row and ops events. Guard errors carry the design's toast strings.
+import { isKioskContext } from '../../http/authorizer.js'
 import { advisoryXactLock, type Executor, type Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
+import { isUuid } from '../../platform/ids.js'
 import { getSetting } from '../../platform/settings.js'
+import { recordStaffEvent } from '../../platform/staff-events.js'
 import { toBizDate } from '../../platform/time.js'
 import { visitCategory } from '../catalog/appointment-categories.js'
 import '../customers/schema.js'
@@ -23,7 +26,7 @@ import {
   type BayRecord,
   type CustomerBrief,
 } from './appointments.js'
-import { can, firstName, loadSettingsBundle, type Actor, type SchedulingCtx } from './context.js'
+import { actorName, can, firstName, loadSettingsBundle, type Actor, type SchedulingCtx } from './context.js'
 import { noStatusTexts, type InvoiceSummary, type QueuedResult } from './ports.js'
 import { audit as audited } from './audit-helper.js'
 import { depositSentence } from './cancellation.js'
@@ -345,6 +348,11 @@ async function chooseBay(
   throw busyError(first, occ?.name ?? null)
 }
 
+/** The worker a bay placement sets: the acting employee of a kiosk request, else none (the worker stays as it was). */
+function workerOnBay(actor: Actor): string | null {
+  return isKioskContext(actor.auth) && isUuid(actor.auth.employeeId) ? actor.auth.employeeId : null
+}
+
 async function putInBay(
   tx: Tx,
   c: SchedulingCtx,
@@ -356,12 +364,17 @@ async function putInBay(
   const customer = await customerBrief(tx, a.customerId)
   const bay = await chooseBay(tx, c, a, { bayId: o.bayId })
   const implicitArrival = a.status === 'booked' || a.status === 'confirmed'
+  // the worker rule (ADR 0180): on the kiosk, the employee who puts the car in a bay is its worker; a signed-in person leaves the
+  // worker as it was (open decision 20)
+  const worker = workerOnBay(actor)
+  const workerChanged = worker !== null && worker !== a.assignedEmployeeId
   try {
     await applyPatch(tx, a, {
       status: 'cleaning',
       bay_id: bay.id,
       cleaning_started_at: now,
       ...(implicitArrival ? { arrived_at: a.arrivedAt ?? now, eta_minutes: null, eta_at: null } : {}),
+      ...(workerChanged ? { assigned_employee_id: worker } : {}),
     })
   } catch (e) {
     if (isBayOccupiedViolation(e)) throw busyError(bay, null)
@@ -369,6 +382,16 @@ async function putInBay(
   }
   if (implicitArrival)
     await logActivity(tx, c, { appointmentId: a.id, text: 'Arrival logged', channels: ['internal'], actor })
+  if (workerChanged) {
+    await logActivity(tx, c, { appointmentId: a.id, text: `Worker: ${actorName(actor) ?? 'Staff'}`, channels: ['internal'], actor })
+    await recordStaffEvent(tx, {
+      locationId: c.locationId,
+      ctx: actor.audit,
+      kind: 'worker_set',
+      appointmentId: a.id,
+      meta: { previousEmployeeId: a.assignedEmployeeId },
+    })
+  }
   const sent = await queue(tx, c, a, customer, { templateKey: 'in_progress', purpose: 'start' })
   await logActivity(tx, c, {
     appointmentId: a.id,
@@ -386,8 +409,8 @@ async function putInBay(
     actor,
     o.mode === 'assign' ? 'assign_bay' : 'start',
     a.id,
-    { status: a.status, bayId: a.bayId },
-    { status: 'cleaning', bayId: bay.id },
+    { status: a.status, bayId: a.bayId, ...(workerChanged ? { assignedEmployeeId: a.assignedEmployeeId } : {}) },
+    { status: 'cleaning', bayId: bay.id, ...(workerChanged ? { assignedEmployeeId: worker } : {}) },
   )
   return finish(tx, c, a, 'cleaning', {
     toast:
@@ -992,12 +1015,16 @@ export async function updateDetails(
   }
   if (p.assignedEmployeeId !== undefined) {
     if (p.assignedEmployeeId !== null) {
+      // an invited employee works too (ADR 0180): crew on the kiosk may never have signed in
       const e = await tx
-        .selectFrom('employees')
-        .select(['id', 'status'])
-        .where('id', '=', p.assignedEmployeeId)
+        .selectFrom('employees as e')
+        .innerJoin('employee_locations as el', (j) =>
+          j.onRef('el.employee_id', '=', 'e.id').on('el.location_id', '=', c.locationId),
+        )
+        .select(['e.id', 'e.status'])
+        .where('e.id', '=', p.assignedEmployeeId)
         .executeTakeFirst()
-      if (!e || e.status !== 'active')
+      if (!e || (e.status !== 'active' && e.status !== 'invited'))
         throw new AppError('VALIDATION_FAILED', {
           detail: 'Pick an active team member.',
           errors: [{ path: 'assignedEmployeeId', message: 'Pick an active team member.' }],

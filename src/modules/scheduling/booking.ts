@@ -317,6 +317,8 @@ export async function createAppointment(
       booked_with_pin: input.bookedWithPin === true,
       // a job's system actor is not a users row
       created_by: isUuid(actor.auth.userId) ? actor.auth.userId : null,
+      // who booked it (ADR 0180): the employee tapped on the kiosk, else the signed-in person's employee record
+      created_by_employee_id: isUuid(actor.auth.employeeId) ? actor.auth.employeeId : null,
     })
     .execute()
   for (const [i, a] of addons.entries()) {
@@ -330,6 +332,7 @@ export async function createAppointment(
         name: a.name,
         ...lineColumns(priced.quote.lines[i + 1]!),
         added_by: isUuid(actor.auth.userId) ? actor.auth.userId : null,
+        added_by_employee_id: isUuid(actor.auth.employeeId) ? actor.auth.employeeId : null,
       })
       .execute()
   }

@@ -597,13 +597,13 @@ describe('the manager’s controls', () => {
     expect((await h.call('DELETE', `kiosk/devices/${NIL}`, { session: admin })).statusCode).toBe(404)
   })
 
-  it('the activity report is a contract only for now', async () => {
+  it('the activity report answers the manager (test/kiosk/report.test.ts has the counts)', async () => {
     const { admin } = await h.kioskSetup()
     const r = await h.call('GET', 'reports/employee-activity?from=2026-06-01&to=2026-06-13', { session: admin })
-    expect(r.statusCode).toBe(501)
-    expect(r.json().code).toBe('NOT_BUILT')
+    expect(r.statusCode).toBe(200)
+    expect(r.json()).toMatchObject({ from: '2026-06-01', to: '2026-06-13', amounts: true })
     const e = await h.call('GET', `reports/employee-activity/${NIL}/events?from=2026-06-01&to=2026-06-13`, { session: admin })
-    expect(e.statusCode).toBe(501)
+    expect(e.statusCode).toBe(404)
   })
 })
 

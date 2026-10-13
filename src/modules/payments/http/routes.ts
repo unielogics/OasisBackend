@@ -122,6 +122,7 @@ export function registerPaymentsRoutes(
         ...(amountCents !== undefined ? { amountCents } : {}),
         origin: 'staff',
         createdBy: a.userId,
+        createdByEmployeeId: a.employeeId,
       },
     )
   }

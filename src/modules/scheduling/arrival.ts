@@ -17,6 +17,7 @@ import {
   publishOps,
   type AppointmentRecord,
 } from './appointments.js'
+import { audit } from './audit-helper.js'
 import { loadSettingsBundle, type Actor, type SchedulingCtx } from './context.js'
 import { arriveAppointment } from './lifecycle.js'
 import './problems.js'
@@ -76,6 +77,8 @@ export async function issueArrivalLink(
     channels: ['internal'],
     actor,
   })
+  // audited with the acting employee (ADR 0180); never the token
+  await audit(tx, c, actor, 'arrival_link', a.id, null, { expiresAt: expiresAt.toISOString() })
   return { token, path: `/a/${token}`, expiresAt }
 }
 

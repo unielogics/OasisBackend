@@ -340,6 +340,8 @@ export interface ActivityInput {
 
 export async function logActivity(tx: Tx, c: SchedulingCtx, e: ActivityInput): Promise<void> {
   const type = e.actorType ?? (e.actor ? 'staff' : 'system')
+  const employeeId = type === 'staff' ? e.actor?.auth.employeeId : null
+  const deviceId = type === 'staff' ? e.actor?.audit.kioskDeviceId : null
   await tx
     .insertInto('activity_log')
     .values({
@@ -349,6 +351,9 @@ export async function logActivity(tx: Tx, c: SchedulingCtx, e: ActivityInput): P
       channels: e.channels,
       actor_type: type,
       actor_name: type === 'staff' ? actorName(e.actor) : null,
+      // who did it (ADR 0180): the tapped employee on a kiosk, else the signed-in person's employee record; and the kiosk device
+      actor_employee_id: isUuid(employeeId) ? employeeId : null,
+      kiosk_device_id: isUuid(deviceId) ? deviceId : null,
       // the shared table type models jsonb as a ColumnType value; the driver wants the JSON text
       meta: JSON.stringify(e.meta ?? {}) as never,
     })

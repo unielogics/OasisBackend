@@ -1,6 +1,7 @@
 // Kysely table types for the kiosk migrations (ADR 0180): db/migrations/20261016100000_kiosk.sql (devices, codes, sessions and the
 // kiosk columns of employees, sessions and audit_log), 20261016100100_staff_attribution.sql (the employee columns next to the user
-// columns) and 20261016100200_staff_events.sql (per-employee activity).
+// columns), 20261016100200_staff_events.sql (per-employee activity) and 20261016100300_staff_attribution_links.sql (the audit row of a
+// staff event; who confirmed a saved-card charge).
 import type { ColumnType, Generated } from 'kysely'
 import type { JsonColumn, JsonValue } from '../../platform/schema.js'
 
@@ -108,6 +109,8 @@ export interface StaffEventsTable {
   user_id: string | null
   request_id: string | null
   meta: Generated<JsonColumn<Record<string, JsonValue>>>
+  /** The audit_log row the event was recorded with (no foreign key; unique when set). */
+  audit_id: number | null
 }
 
 declare module '../people/schema.js' {
@@ -154,5 +157,14 @@ declare module '../customers/schema.js' {
 declare module '../payments/schema.js' {
   interface PaymentLinksTable {
     created_by_employee_id: string | null
+  }
+}
+
+// Who confirmed a saved-card charge, beside decided_by_user_id (migration 20261016100300): the payment may be recorded later in their
+// name, and a kiosk has no user.
+declare module '../square/db/cards-schema.js' {
+  interface SquareChargesTable {
+    decided_by_employee_id: string | null
+    decided_kiosk_device_id: string | null
   }
 }
