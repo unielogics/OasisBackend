@@ -590,6 +590,20 @@ confirm" proposals from the assistant, and a reply number sent then books nothin
    `membership_duplicate_payment` alerts point at it); the 180-day stale-record window (a recycled number is the old client to the
    assistant until then); an invalid-number bounce holds even a paid-up member's record until staff confirm the client.
 
+### Oasis AI knowledge, PDFs and practice (ADR 0174)
+
+- **Knowledge** (Settings → Oasis AI → Knowledge, `set.assistant`): notes and PDFs the owner adds are drafts until turned on; only
+  active entries reach the assistant, masked (no amount, link or other number), and they share `AI_KNOWLEDGE_MAX_CHARS` (20,000
+  characters) with the Settings Q&A. A PDF is read by the worker (`assistant.knowledge.extract`, unpdf in a worker thread: 256 MB,
+  30 s, 60 pages); a scan cannot be read (no OCR). Every new key lives under `kb/` in the photos bucket, outside the photo lifecycle
+  rule: no AWS change is needed. A document stuck "reading" for 10 minutes is failed as a timeout by `assistant.knowledge.cleanup`
+  (every 15 minutes); the owner presses "Try again".
+- **Who may edit Oasis AI** is the `set.assistant` permission (every role that had `set.hours` got it on 2026-10-13); take it away
+  from a role in Team → Roles.
+- **Practice** (wave K2c) stays off until `AI_PRACTICE_ENABLED=true`, after `pnpm aws:provision --bedrock` and `AI_PROVIDER=bedrock`;
+  it has its own `AI_PRACTICE_DAILY_BUDGET_USD` (3). With full knowledge and a cold cache a turn costs about $0.07–0.12: review
+  `AI_DAILY_BUDGET_USD` before go-live.
+
 ### The host cannot resolve its own new name (health check: "answered HTTP 000")
 
 A name created in Route 53 after a resolver already answered "no such record" stays negative in that resolver for the zone's

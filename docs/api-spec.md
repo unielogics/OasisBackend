@@ -819,6 +819,89 @@ nothing is written. Only changed keys are written, each audited (`settings.updat
 `settings.changed {section: assistant, key, version}`. The answer is the view plus `changed`. A loaded view may be sent back as it
 is (`server` and `active` are accepted and ignored). Tests: `test/settings-http/assistant.test.ts`.
 
+### 15.6c Oasis AI knowledge: `/assistant/knowledge` (ADR 0174 §1)
+
+Every route needs `set.assistant` (ADR 0174 D3) and is outside the kiosk's route list. Nothing here reaches a client: an ACTIVE entry
+changes what Oasis AI reads (the SHOP KNOWLEDGE block of its prompt and of the policy judge, masked: amounts as "[price in
+Settings]", links and e-mails as "[link removed]", phone numbers other than the shop's as "[number]"), and only while it answers.
+
+`GET /assistant/knowledge` answers `{entries[], documents[], budget, limits}`. An entry is `{id, kind note|document|correction,
+title, body, question (correction), wrongReply (correction; redacted, never shown to the model), source manual|practice|live,
+active, documentId, reviewedAt, warnings[{kind amount|link|phone|email|instruction|promise|hidden|markup|long, sample, line}],
+chars (title + question + body), sort, version, createdAt, updatedAt}`; `budget` is `{usedChars, maxChars, parts{faq, notes,
+documents, corrections}}` (active entries plus the Settings Q&A against `AI_KNOWLEDGE_MAX_CHARS`, default 20,000); `limits` names
+the caps (title 120, note 4,000, document stored 60,000 and 20,000 to be on, correction answer 500 and question 300, a PDF 10 MB and
+60 pages).
+
+`POST /assistant/knowledge` `{title, body, active?}` creates a note (201 `{entry, budget}`): plain text (no hidden character, no HTML
+tag; 422 naming `title` or `body`), a draft unless `active`. `PUT /assistant/knowledge/:id` `{title?, body?, question?
+(correction), active?, reviewed?, confirmInstructions?, version}` edits, turns on or off, or records the review of a document;
+`version` or `If-Match` is required (428 without, 412 `VERSION_CONFLICT {currentVersion}` when stale). `DELETE
+/assistant/knowledge/:id` (If-Match optional) answers 204; a document entry deletes its document (text cleared, object removed).
+
+The budget: turning an entry on, growing an active one, or a Settings Q&A that grows (section 15.6b) is refused with 422
+`KNOWLEDGE_BUDGET {usedChars, maxChars, needed}` when it would pass the cap; nothing is cut and the entry stays a draft. A save that
+removes characters always passes. All of these run under one per-location advisory lock, so two concurrent saves cannot both pass.
+
+The review gate: a document goes on only once reviewed (`reviewed: true` in that save, or an earlier review of the same text) and,
+when its warnings hold an instruction-like line, with `confirmInstructions: true`; else 422 `KNOWLEDGE_NEEDS_REVIEW {needs:
+[reviewed|confirmInstructions]}`. Editing a document's text clears its review; a document needs 20,000 characters or fewer to be on.
+
+Audit `assistant.knowledge.{create,update,activate,deactivate,delete}` with `{kind, title, active, chars, bodySha256}` (never the
+body); every change publishes `settings.changed {section: assistant_knowledge}`. Tests: `test/assistant-knowledge/knowledge.test.ts`,
+`render.test.ts`, `turn.test.ts`.
+
+### 15.6d Oasis AI knowledge PDFs: `/assistant/knowledge/documents` (ADR 0174 §2)
+
+`POST /assistant/knowledge/documents/presign` `{filename, bytes (1..10 MB), sha256 (the browser's, hex)}` answers 201 `{documentId,
+upload{key, url, fields, expiresAt}}`: a presigned POST for exactly `kb/{location}/{id}.pdf`, `application/pdf`, 1 byte to 10 MB, 5
+minutes (upload like a photo: every field, then `file`). A file already in the knowledge is 409 `DUPLICATE_DOCUMENT {documentId,
+entryId}`. `POST …/:id/complete` checks the object (size, type, `%PDF-`) and its SHA-256 (the server's own: a copy is deleted and 409
+answered) and answers 202 `{status: extracting}` (job `assistant.knowledge.extract`), or 200 `{status: failed, errorCode: not_pdf,
+error}`; 422 when the file was not uploaded. The extraction makes the document `ready` with one inactive, unreviewed entry (its
+text cleaned, its warnings computed), or `failed` with `errorCode no_text|encrypted|corrupt|too_many_pages|timeout|too_large` and a
+plain `error` for the owner (a scan: "This PDF is a scan (pictures of pages), so Oasis AI can't read it. ..."). Poll GET
+`/assistant/knowledge` or listen for `settings.changed {section: assistant_knowledge}`.
+
+`POST …/:id/extract` reads a failed document again (202; at most 5 reads, never a not-PDF: 409 `DOCUMENT_NOT_READY`). `DELETE
+…/documents/:id` deletes a document and its entry (204). `GET …/:id/file` answers `{url, expiresInSeconds: 600}`, a presigned GET
+that saves the PDF as a file (`Content-Disposition: attachment`; 409 while not uploaded). Audit `assistant.document.{upload,
+extract,delete}`. Jobs: `assistant.knowledge.extract`, `assistant.knowledge.cleanup` (docs/jobs.md). Storage: docs/integrations/s3.md
+"Knowledge PDFs". Tests: `test/assistant-knowledge/documents.test.ts`, `pdf.test.ts`, `jobs.test.ts`.
+
+### 15.6e The practice chat: `/assistant/practice` (ADR 0174 §4; contract, 501 until wave K2c)
+
+The schemas are final (docs/openapi.json, tag `assistant`); every route answers 501 `NOT_BUILT` until wave K2c. `set.assistant`;
+a session that plays a real client also needs `cli.view` (403). Practice runs the real engine with practice effects (nothing is
+sent, booked or written to a client record), works whatever `AI_ENABLED` says, and is off until `AI_PRACTICE_ENABLED` (409
+`PRACTICE_OFF`); its own daily budget `AI_PRACTICE_DAILY_BUDGET_USD` (429 `PRACTICE_BUDGET`).
+- `POST /assistant/practice/sessions` `{persona new_texter|client, customerId?, verified?, language? en|es, includeEntryIds?
+  (drafts read as if on, at most 20)}` → 201 `{session}`; 20 sessions per user a day.
+- `GET /assistant/practice/sessions` → `{sessions[], practice{enabled, budgetUsd, spentTodayUsd, actionsEnabled, linksEnabled}}`
+  (mine, newest first, kept 30 days); `GET …/:id` → `{session, turns[]}` (another user's: 404); `DELETE …/:id` → 204.
+- `POST …/sessions/:id/turns` `{text (1..640)}`, Idempotency-Key required, 10 a minute → 202 `{turn}` (status `running`; the answer
+  comes from job `ai.practice`, published as `assistant.practice.turn` to the user); 409 `PRACTICE_BUSY` while one runs; 40 turns a
+  session.
+- `POST /assistant/practice/turns/:id/rerun` → 202 `{turn}` ("Try again" after a correction, `rerunOf` set).
+- A session is `{id, persona, client{id, firstName}|null, verified, language, includeEntryIds, turns, costMicros, createdAt,
+  updatedAt}`; a turn `{id, sessionId, seq, rerunOf, clientText, status running|replied|handed_off|failed|opted_out, replyText
+  (links as "[booking link]"), extraTexts (the confirmation a proposal would text), badges[{kind, label}], error, latencyMs,
+  startedAt, finishedAt}`.
+
+### 15.6f Corrections and the review of real conversations (ADR 0174 §5; contract, 501 until wave K2c)
+
+- `POST /assistant/corrections` (`set.assistant`) `{clientText (1..300), rightAnswer (1..500), source practice|live,
+  practiceTurnId?, assistantTurnId?, active?, replaceEntryId?}` → 201 `{entry, budget}`: a knowledge entry of kind `correction`
+  (rendered to the model only as its question and answer; the wrong reply, loaded by the server from the named turn and redacted,
+  is never shown to it). Same validation, warnings and budget as notes (`active: false` saves a draft); 409 `CORRECTION_EXISTS
+  {entryId}` for the same question unless `replaceEntryId` names it.
+- `GET /assistant/conversations?days=1..90&filter=all|handed_off|fallback|judge|corrected&cursor&limit` (`set.assistant` +
+  `cli.view`) → `{conversations[{id, client{firstName, phoneLast4}, lastTurnAt, turns, handoff{open, reason}|null, flags[]}],
+  nextCursor}`; `GET /assistant/conversations/:id` → `{conversation, turns[{id, startedAt, status, clientTexts (redacted), reply
+  (redacted, links as "[link]"), handoffReason, guard[], judge{verdict, category, words}|null, tools[], model, promptVersion,
+  correctionEntryId}]}`.
+Tests (contracts): `test/assistant-knowledge/contracts.test.ts`.
+
 ### 15.7 The public website's hours: `GET /api/v1/public/hours`
 
 The first route of the API that answered without a session (`access.public`, listed in the authz matrix's `PUBLIC_ROUTES`; ADR 0145;
