@@ -230,3 +230,23 @@ the assistant's side is ADR 0160 "Wave Q3d". API: api-spec 26.1.
   `membership_tier_prices` row a plan variation; "Move members").
 * **Later:** a migration drops `vehicles.vehicle_type`, the member/guest/VIP columns, `plan_credit_rules`, `catalog.tint_matrix`
   and `catalog.guest_markup_pct`.
+
+## Wave Q4 review notes (2026-10-13)
+
+- **F1.** The `website-catalog` seed gives Gold and VIP the inclusions their perks promise, applied by themselves (plan decision 2),
+  while the tier covers no active service: Gold 4 hand washes a month (Signature and Exterior Hand Wash); VIP those, Hand wax and
+  Engine bay wash every visit, Leather conditioning 2 and Stain removal 1 a month. The owner's own inclusions are never replaced.
+  Gold's perks no longer say "Member prices on everything else" (the % off starts at 0, plan decision 3).
+- **F2.** `GET /public/catalog/v2` (the website and the assistant's facts) lists no item without a price at any active size, whatever
+  its legacy `services.price_cents` (design section 11). Staff bookings keep rule 1's `base` (a service with no cells is charged
+  `services.price_cents`, unflagged): that is this ADR's rule, unchanged here; v1 is unchanged too.
+- **F3.** A price move is never billed sooner than 30 days after its notice: `POST /catalog/tiers/:key/move-members` takes `notice`
+  30 to 90, `memberships.price_change_notice_days` is 30 to 90, and the move uses at least 30 days whatever asked for less.
+- **F5.** "Confirm price" (`needsPriceConfirm`: the board, the appointment file, the appointment in every answer) reads the add-ons
+  too: a live add-on charged its starting price because the visit's size has no price of its own flags the visit like the package.
+- **F6.** A staff billing change to the member's own tier and size is refused (409 `MEMBERSHIP_BILLING_STATE`: "use Move members"):
+  a grandfathered price moves only with Move members and its notice (plan decision 8).
+- **F7.** With `PAYMENT_PROCESSOR=square`, `POST /public/memberships` refuses a tier with no current price at any size (422 on
+  `body.tier`, "That plan is not available right now."); with Squarespace the checkout product carries the price, as before.
+- **SEC-2.** A size staff set on a car (`vehicle_class_source = staff`) outranks a different size a client, the website or the
+  assistant names for it: the visit is priced at the staff size and an internal activity line says what the client chose.

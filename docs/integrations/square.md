@@ -121,7 +121,7 @@ USD and takes cards; the Events API is enabled; our subscription exists, is enab
 | `square.events.catchup` | every 10 minutes, live only | SearchEvents from the watermark minus 10 minutes (the first run reads the last day; never more than 28 days back), ascending, paged; each event claimed in `webhook_log` and processed. A failed event holds the watermark back so the next run tries it again; a complete run with no failure moves it to at least the run time minus 10 minutes (a quiet week is not an alert); a row the hook claimed whose job was lost (still `received` after 15 minutes) is run here. A watermark older than 27 days (runs failing or never finishing for that long) is an alert (status row and `square_state.last_error`): Square keeps events 28 days. |
 | `square.reconcile` | nightly 03:45, live only | Lists the last 72 hours of payments and refunds at our location and keeps the counts (by status, source, product) in `square_state.last_reconcile`; decides every completed payment and records every completed refund the webhook and the catch-up both missed (same locks and keys). |
 | `square.payments.match` | every minute | Counter payments past `SQUARE_MATCH_DELAY_SECONDS` through the matcher (section 11.2). |
-| `square.links.sweep` | every minute | Cancels Square links that no longer match what is owed, gives up on pending rows, deletes canceled links at Square (writes on). |
+| `square.links.sweep` | every minute | Cancels Square links that no longer match what is owed, gives up on pending rows, deletes canceled links at Square (observe-only too: a clean-up, review Q4 M2). |
 | `square.deposit-link` | every minute, processor square, writes on | A booking's deposit request becomes a texted quick-pay link. |
 | `square.refunds.submit` | every minute, processor square, writes on | Card refunds through the API: legs planned and sent (section 11.4). |
 | `square.charges.resolve` | every minute, writes on | Saved-card charges Square did not answer: GetPayment, or the same CreatePayment with the same key (section 12.3). |
@@ -208,7 +208,7 @@ The design's "check in the sandbox" list, answered:
 
 | Question | Finding |
 |---|---|
-| Payment link URL hosts | Sandbox: `url` on `sandbox.square.link`, `long_url` on `connect.squareupsandbox.com`. Production hosts to confirm on the first production link; `PAYMENT_LINK_HOSTS` becomes `square.link,square.site` (plus `squareupsandbox.com` outside production). |
+| Payment link URL hosts | Sandbox: `url` on `sandbox.square.link`, `long_url` on `connect.squareupsandbox.com`. Production hosts to confirm on the first production link; the defaults are the exact hosts `=square.link,=checkout.square.site` (plus `=sandbox.square.link` and `squareupsandbox.com` outside production; review Q4 SEC-3: never `square.site` as a whole). |
 | Paying a link through its order | The link's order is **DRAFT**; `CreatePayment(order_id)` answers 400 "The order must be OPEN to be paid." until it is opened (UpdateOrder `state OPEN`, as Square's checkout does). Then the payment completes with `order_id` set; the order stays OPEN (its DIGITAL fulfillment is PROPOSED); the link stays retrievable; DeletePaymentLink still succeeds. The order total is exactly the lines (a "Sales tax" line item, not a Square tax). |
 | Apple Pay / wallet `source_type` | Not producible through the sandbox API. A card nonce pays as `CARD`, entry `KEYED`; a saved card as `CARD`, entry `ON_FILE`. Per Square's documentation Apple Pay and Google Pay arrive as `CARD` and Cash App Pay as `WALLET`: `method_kind` maps CARD to card, CASH to cash, anything else to other. Confirm on the first production wallet payment. |
 | Does CreatePayment on a subscription invoice's order mark it paid? | **No**: 403 FORBIDDEN "The order … is owned by another application." The invoice is paid by Square's own retry, by the client from its `public_url`, or after a card update on the subscription. The design's day-3 retry is dropped (ADR 0171 D10). |
@@ -272,7 +272,8 @@ lines, else one "Balance due" line; a deposit is a quick-pay link. Staff "Send l
 Square call and made `active` by the command; older links of the purpose are superseded; `square.links.sweep` cancels and deletes
 what no longer matches. The booking fee is a deposit toward the visit (ADR 0150): with the fee collected by link, every online booking
 asks for a deposit link (a pending row) and `square.deposit-link` makes and texts it; the calendar page's "Pay the deposit now" opens
-it. Link hosts: `square.link`, `square.site`, and `squareupsandbox.com` outside production (`PAYMENT_LINK_HOSTS` overrides).
+it. Link hosts: exactly `square.link` and `checkout.square.site`, and the sandbox's outside production (`PAYMENT_LINK_HOSTS` overrides;
+`=host` is an exact host; a sandbox host never passes in production).
 
 ### 11.4 Refunds
 

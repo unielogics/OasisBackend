@@ -356,9 +356,51 @@ Recorded in `docs/integrations/square.md` section 8; the ones that change later 
 | Q3a (built) | Migration `20261014500100_card_charges.sql`; the card page routes and `LinkState.cards`/`cardSetup`; the staff card routes; saved-card charges (balance, fees) with `square.charges.resolve`; the fee proposal in `settleClosed` and `fees.card_on_file`; the `card` and `customer` handlers and `square.cards.nightly`; the site CSP with Square's SDK hosts (section "Cards on file and fees"). The site's card component and `#/k` page are the site package's. |
 | Q3b (built) | Memberships on Square (section "Memberships on Square"): migration `20261014600000_square_memberships.sql`; catalog sync of the tier x size prices, enrollment with resume, billing webhooks (`invoice` and `subscription` handlers), the failure policy (D10), staff actions, Move members (D9); `verify:square` SQR-13 and SQR-14. |
 | Q3c, Q3e | The website's v2 catalog, join and pay pages; the dashboard's billing block, saved cards and Settings, Billing & integrations (Square status and Test connection). |
-| Q4 | The adversarial money and security review, and a sandbox end-to-end run on a disposable stack. |
+| Q4 (review fixes built) | See "Wave Q4 review notes" below. A sandbox end-to-end run on a disposable stack is still to do. |
 
 Rollout (plan): deploy with `SQUARE_PROVIDER=sim`; production token and `SQUARE_WEBHOOK_URL` into the secret and env (still sim),
 `pnpm square:webhooks --apply` (it needs only the token and the URL, not the key it creates), the key pushed, `SQUARE_PROVIDER=live`,
 Test connection, observe-only for about a week; writes on in stages (links, deposits and refunds; saved cards and fees; catalog and
 memberships); then `PAYMENT_PROCESSOR=square` with the production CSP and redirect hosts; Squarespace to `history`, then `off`.
+
+## Wave Q4 review notes (2026-10-13)
+
+Four adversarial reviews of ws/q3-int; the fixes (branch ws/q4-fix, migration `20261015100000_review_q4.sql`):
+
+- **H1, one way of collecting at a time.** While a saved-card charge of an invoice is `charging` or `unknown`, Collect (cash or card),
+  Send link, a Square link made for the staff or the pay page, and the pay page itself answer 409 `CARD_CHARGE_IN_PROGRESS`
+  (`square/charge-guard.ts`; the pay page in the client's words). `square.charges.resolve` no longer re-sends blindly: with no payment
+  id it first looks for the payment the request made (ListPayments from a minute before the attempt to 15 minutes after it, by
+  `reference_id` = the charge id); none, and a balance charge whose invoice was canceled or now owes less than the charge, closes it
+  `declined` with code `NOT_SENT` ("Nothing was charged: the invoice no longer owes it."); none otherwise sends the same request with
+  the same key as before. A payment found is recorded (the overpaid alert then asks for a refund if the invoice was paid twice).
+- **M1, R1 and R2 beside a waiting staff entry.** A counter payment naming the invoice (R1) or opened from Oasis (R2) whose amount is
+  not the staff "Square reader" entry waiting there goes to the queue ("a staff card entry of another amount is waiting on this
+  invoice"), as R4 already did; the same for POS cash beside a staff cash entry of another amount. The overpaid alert reads "a staff
+  card entry is still waiting: check it before refunding" while one is on the invoice.
+- **M2, a link paid after the cancel.** A payment-link payment whose invoice is canceled is never recorded as kept money of the
+  canceled invoice: it waits in the queue ("paid by a payment link after the visit was canceled: refund it in Square, or apply it").
+  `square.links.sweep` deletes canceled links at Square in observe-only mode too (DeletePaymentLink is a clean-up, marked `setup` in
+  the client).
+- **SEC-1, one card-decline lock.** The membership page's subscribe checks the number's card-decline lock before anything reaches
+  Square (429 `CARD_SAVE_LOCKED`) and counts its declined cards under the same `card_decline:phone:<n>` key as the card page.
+- **SEC-3 and SQ-SEM-4, exact Square hosts.** `PAYMENT_LINK_HOSTS` entries keep matching the host and its subdomains; an entry written
+  `=host` matches that host only. The defaults are `squarespace.com` (until the cutover), `=square.link`, `=checkout.square.site`,
+  and outside production `=sandbox.square.link`, `squareupsandbox.com`. A sandbox host never passes in production, whatever the list
+  says. The website's `links.redirectHosts` follows the same rule.
+- **SQ-SEM-1, refunds before the match.** A refund made in the Square app while its payment is not on an invoice is kept in
+  `square_refunds_waiting` and recorded on the invoice (a refund needing review) in the transaction that records the payment there:
+  the matcher after the counter delay, the queue's apply (any time later), a link or a charge.
+- **SQ-SEM-2, the swap lock.** A swap Oasis deletes to schedule another (a second change, a move replacing a swap) is added to
+  `swap_undone_variations` like a staff undo, so a change back to it in the same period is refused before Square locks the
+  subscription. The simulator now locks as the sandbox did (SwapPlan 500 "locked and is not billable" after the same swap was deleted,
+  then DeleteSubscriptionAction 409 until the next billing).
+- **SQ-SEM-3.** With `PAYMENT_PROCESSOR=square` in production, `SQUARE_API_BASE` must be unset (or Square's production host).
+- **SQ-SEM-5.** Each catch-up also runs, from the log itself, the Square rows the hook claimed whose job was lost (still `received`
+  after 15 minutes) and failed rows, up to 50 a run, whatever the search window (index `webhook_log_square_open_idx`).
+- **SQ-SEM-6.** A booking deposit link Square refuses for good (a 4xx other than auth, permission or rate limit, a key reused with
+  another body, lines that cannot add up) is given up at once (`square_error`) and the managers get "Deposit link failed · <client>";
+  network errors and 5xx keep the per-minute retry.
+- **SQ-SEM-7.** The simulator's `dropAnswer` fault makes the request at Square (and keeps the key's answer) and loses the answer; tests
+  resolve a charge and a deposit link after it.
+
