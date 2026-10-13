@@ -1,6 +1,7 @@
 // Runs the model's tool calls (ADR 0160, design section 4; the W3 contract's AssistantTool rules): an unknown tool, an action tool
 // while in-chat actions are off, a trust below the tool's minimum and an input its strict schema refuses never run; every call is
-// recorded in assistant_tool_calls (input, output, outcome, latency; an exception's message is never stored: it may hold data).
+// recorded (input, output, outcome, latency; an exception's message is never stored: it may hold data) through the caller's
+// `record`: the live turn writes assistant_tool_calls (liveRecorder), practice keeps them with its own turn (ADR 0174 §4a).
 import { z } from 'zod/v4'
 import type { AiContentBlock, AiJson, AiJsonObject, AiToolSpec } from '../../integrations/ports/ai.js'
 import type { Db } from '../../platform/db.js'
@@ -56,11 +57,36 @@ export interface ToolRoundResult {
 
 type ToolUse = Extract<AiContentBlock, { type: 'toolUse' }>
 
+/** One recorded call (a tool's, or the policy judge's verdict): the assistant_tool_calls row without its id and turn. */
+export interface ToolCallRecord {
+  seq: number
+  round: number
+  tool: string
+  tool_use_id: string | null
+  /** Redacted JSON text. */
+  input: string
+  output: string | null
+  outcome: 'ok' | 'error' | 'denied'
+  error: string | null
+  latency_ms: number | null
+}
+
+export type RecordCall = (row: ToolCallRecord) => Promise<void>
+
+/** The live turn's recorder: one assistant_tool_calls row per call. */
+export function liveRecorder(db: Db, newId: NewId, turnId: string): RecordCall {
+  return async (row) => {
+    await db
+      .insertInto('assistant_tool_calls')
+      .values({ id: newId(), turn_id: turnId, ...row })
+      .execute()
+  }
+}
+
 export interface ToolRunnerDeps {
-  db: Db
-  newId: NewId
   /** Monotonic milliseconds (latency). */
   nowMs: () => number
+  record: RecordCall
 }
 
 const errorResult = (u: ToolUse, outcome: { error: string; message: string; detail?: AiJsonObject }): AiContentBlock => ({
@@ -125,22 +151,17 @@ export async function runToolRound(
     out.calls.push({ tool: u.name, outcome: rowOutcome, ...(rowError ? { error: rowError } : {}) })
     const line = recordLine(u.name, outcome)
     if (line) out.record.push(line)
-    await d.db
-      .insertInto('assistant_tool_calls')
-      .values({
-        id: d.newId(),
-        turn_id: o.ctx.turnId,
-        seq,
-        round: o.round,
-        tool: /^[a-z][a-z0-9_]{0,63}$/.test(u.name) ? u.name : 'unknown',
-        tool_use_id: u.id.slice(0, 200),
-        input: JSON.stringify(redactJson(u.input ?? {})),
-        output: JSON.stringify(redactJson(json)),
-        outcome: rowOutcome,
-        error: rowError,
-        latency_ms: Math.max(0, Math.round(d.nowMs() - began)),
-      })
-      .execute()
+    await d.record({
+      seq,
+      round: o.round,
+      tool: /^[a-z][a-z0-9_]{0,63}$/.test(u.name) ? u.name : 'unknown',
+      tool_use_id: u.id.slice(0, 200),
+      input: JSON.stringify(redactJson(u.input ?? {})),
+      output: JSON.stringify(redactJson(json)),
+      outcome: rowOutcome,
+      error: rowError,
+      latency_ms: Math.max(0, Math.round(d.nowMs() - began)),
+    })
   }
   return { ...out, seq }
 }

@@ -1,6 +1,7 @@
 // The assistant's prompt (ADR 0160, design sections 3 and 3b): the static rules (cached with the shop facts), the turn context (who
 // is texting, what they have, the next intake step; never a phone number, an id or a token) and the conversation as one user
 // message. Everything rendered here is deterministic for the same input, so the cached prefix stays byte-identical.
+import type { AiSystemBlock } from '../../integrations/ports/ai.js'
 import { oneLine } from './facts.js'
 import { MAX_REPLY_CHARS, PROBLEM_HINTS, type GuardProblem } from './guard.js'
 
@@ -73,6 +74,14 @@ OTHER
 - Whether the shop is open right now: compare the time in the turn context with today's hours in SHOP FACTS.
 - If the client asks to stop getting texts, call opt_out.
 - If you are not sure, say a team member will text them back and use handoff_to_staff.`
+
+/**
+ * The system blocks of a turn (ADR 0174 §4a: one assembly for the live turn and practice, so both send the same bytes): the static
+ * rules, then SHOP FACTS with a cache point (the tools carry the first one), then the turn context (not cached).
+ */
+export function buildSystem(o: { factsText: string; contextText: string }): AiSystemBlock[] {
+  return [{ text: STATIC_RULES }, { text: o.factsText, cache: true }, { text: o.contextText }]
+}
 
 /** The text of the last call when the tool rounds are spent (the provider cannot forbid tools once tool blocks exist). */
 export const REPLY_NOW_TEXT = 'Reply to the client now, in one short text, without calling any tool.'
