@@ -356,7 +356,7 @@ Recorded in `docs/integrations/square.md` section 8; the ones that change later 
 | Q3a (built) | Migration `20261014500100_card_charges.sql`; the card page routes and `LinkState.cards`/`cardSetup`; the staff card routes; saved-card charges (balance, fees) with `square.charges.resolve`; the fee proposal in `settleClosed` and `fees.card_on_file`; the `card` and `customer` handlers and `square.cards.nightly`; the site CSP with Square's SDK hosts (section "Cards on file and fees"). The site's card component and `#/k` page are the site package's. |
 | Q3b (built) | Memberships on Square (section "Memberships on Square"): migration `20261014600000_square_memberships.sql`; catalog sync of the tier x size prices, enrollment with resume, billing webhooks (`invoice` and `subscription` handlers), the failure policy (D10), staff actions, Move members (D9); `verify:square` SQR-13 and SQR-14. |
 | Q3c, Q3e | The website's v2 catalog, join and pay pages; the dashboard's billing block, saved cards and Settings, Billing & integrations (Square status and Test connection). |
-| Q4 (review fixes built) | See "Wave Q4 review notes" below. A sandbox end-to-end run on a disposable stack is still to do. |
+| Q4 (review fixes built) | See "Wave Q4 review notes" and "Wave Q4 fix notes" below (the re-verification and the sandbox end-to-end run on a disposable stack). |
 
 Rollout (plan): deploy with `SQUARE_PROVIDER=sim`; production token and `SQUARE_WEBHOOK_URL` into the secret and env (still sim),
 `pnpm square:webhooks --apply` (it needs only the token and the URL, not the key it creates), the key pushed, `SQUARE_PROVIDER=live`,
@@ -404,3 +404,34 @@ Four adversarial reviews of ws/q3-int; the fixes (branch ws/q4-fix, migration `2
 - **SQ-SEM-7.** The simulator's `dropAnswer` fault makes the request at Square (and keeps the key's answer) and loses the answer; tests
   resolve a charge and a deposit link after it.
 
+## Wave Q4 fix notes (2026-10-13: the re-verification and the Square sandbox run)
+
+Migration `20261015100100_review_q4_fix.sql`:
+
+- **H1-R1, a stuck saved-card charge has a way out.** The H1 guard blocks collecting while a charge is `charging` or `unknown`, and a
+  charge could stay `unknown` for good (writes turned off, the rollback lever; or past the 23-hour re-send window). Now
+  `square.charges.resolve` runs with writes off too: it always looks the payment up first (GetPayment, or ListPayments by
+  `reference_id` from a minute before the first request to 15 minutes after the last one, so a late re-send is found); found, it is
+  recorded (or declined as Square has it); none and the invoice no longer owes it: closed NOT_SENT as before; none otherwise: re-sent
+  with the same key only within 23 hours and with writes on; watch-only or older, nothing is sent and the charge is closed `declined`
+  (NOT_SENT, "Nothing was charged: Square has no payment for it.") once its last request is 15 minutes old. A look-up that changes
+  nothing leaves the row as it is. Staff have **Not charged (checked Square)**: `POST /invoices/:id/card-charges/:chargeId/not-charged`
+  (pay.collect, Idempotency-Key; a balance or a fee) does the same read-only look-up at once (writes off too): Square has it, it is
+  recorded; none, the charge is closed NOT_SENT in the staff member's name (audit `card.charge_not_charged`, an activity line); 409
+  `CARD_CHARGE_NOT_WAITING`, 409 `CARD_CHARGE_IN_PROGRESS` (its request is under 5 minutes old, or Square shows it pending), 503
+  `SQUARE_UNAVAILABLE`. The "Saved-card charge not confirmed" alert says to press Not charged when Square has no such payment. A late
+  webhook of a payment Square did make still finds a declined charge by its reference and records it (the overpaid alert then asks
+  for a refund if the invoice was collected another way meanwhile).
+- **SQ-SEM-5-R1, the rescue's budgets and back-off.** The catch-up's rescue outside its window takes up to 50 lost rows (still
+  `received` after 15 minutes, oldest first) and, separately, up to 50 failed rows (least recently tried first), so rows that keep
+  failing never starve a lost one. A failed row is tried again only after its back-off: 10 minutes after its last failure, doubling
+  with `webhook_log.attempts` (counted by every failure; existing failed rows start at 1), at most a day; the search window skips a
+  failed row that is not due yet (the rescue takes it up once it is).
+- **SANDBOX-F2, history before the connection.** Both sandbox runs found 72 and 78 payments made before the run in "Square payments to
+  match": the first catch-up reads the last day of events (the reconcile 72 hours). The first successful Test connection of a stack
+  that has not read events yet stamps `square_state.connected_at` (reset with the environment, like every learned column); a counter
+  payment Square made before it is mirrored as history (`ignored`, reason `other`, note "before connection: a sale from before Square
+  was connected to Oasis"), never queued nor alerted. A later test keeps the stamp; a stack that already read events before the stamp
+  existed gets none (nothing is cut). Rollout: Test connection before `SQUARE_PROVIDER=live` lets the catch-up run.
+- **SANDBOX-F1** (inclusions apply by themselves by default; a booking shows as covered only what will be covered) and the staff side
+  of pricing **F2** ("Confirm price" on a `base` line) are in ADR 0170's Q4 fix notes.

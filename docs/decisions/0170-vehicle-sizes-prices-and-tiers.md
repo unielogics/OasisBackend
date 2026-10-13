@@ -239,7 +239,8 @@ the assistant's side is ADR 0160 "Wave Q3d". API: api-spec 26.1.
   Gold's perks no longer say "Member prices on everything else" (the % off starts at 0, plan decision 3).
 - **F2.** `GET /public/catalog/v2` (the website and the assistant's facts) lists no item without a price at any active size, whatever
   its legacy `services.price_cents` (design section 11). Staff bookings keep rule 1's `base` (a service with no cells is charged
-  `services.price_cents`, unflagged): that is this ADR's rule, unchanged here; v1 is unchanged too.
+  `services.price_cents`): that is this ADR's rule, unchanged here; v1 is unchanged too. (Since the Q4 fix notes below, a `base`
+  line asks "Confirm price".)
 - **F3.** A price move is never billed sooner than 30 days after its notice: `POST /catalog/tiers/:key/move-members` takes `notice`
   30 to 90, `memberships.price_change_notice_days` is 30 to 90, and the move uses at least 30 days whatever asked for less.
 - **F5.** "Confirm price" (`needsPriceConfirm`: the board, the appointment file, the appointment in every answer) reads the add-ons
@@ -250,3 +251,20 @@ the assistant's side is ADR 0160 "Wave Q3d". API: api-spec 26.1.
   `body.tier`, "That plan is not available right now."); with Squarespace the checkout product carries the price, as before.
 - **SEC-2.** A size staff set on a car (`vehicle_class_source = staff`) outranks a different size a client, the website or the
   assistant names for it: the visit is priced at the staff size and an internal activity line says what the client chose.
+
+## Wave Q4 fix notes (2026-10-13: the re-verification and the Square sandbox run)
+
+Migration `20261015100100_review_q4_fix.sql`:
+
+- **SANDBOX-F1, what the booking shows as covered is what completion covers.** A tier's inclusions apply by themselves at completion
+  by default (plan decision 2): `ensurePlans` creates the default tiers' inclusions with `auto_apply = true` (the column default and
+  the seeds already were), and the migration turns it on for the inclusions nobody edited (no `catalog.tier.create` /
+  `catalog.tier.update` audit on their tier, no `membership.rule.update` on themselves; production has no members yet). The engine's
+  callers price a member with only the inclusions that will cover the visit by themselves (`autoApplied`: `autoApply`, every one for a
+  member whose `memberships.auto_apply` is on, and those the visit already redeems): a booking, an added add-on, a size change and
+  `POST /appointments/quote`. An inclusion the owner leaves to staff is priced as a member line (the tier's % off) until "Apply credit"
+  covers it, so completion never reprices a line the client was shown as "Covered $40 · $20 size difference" down to the member price.
+- **F2, staff side (accepted dispute).** Rule 1 keeps the amount: a service with no prices by size is charged `services.price_cents`
+  (basis `base`). The line now carries "Confirm price" like an `estimated` one (the package or a live add-on; not a service priced
+  on a quote, `quote_only`), on the booking answer, the board, the file and the command core, until staff confirm the size; the
+  client's `confirmAtShop` is unchanged. The owner sees which services still need their prices by size.

@@ -396,6 +396,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/invoices/:id/adjustments` | pay.adjust | required |
 | GET | `/api/v1/invoices/:id/card-charges` | pay.collect | pay.reports |  |
 | POST | `/api/v1/invoices/:id/card-charges` | pay.collect | required |
+| POST | `/api/v1/invoices/:id/card-charges/:chargeId/not-charged` | pay.collect | required |
 | POST | `/api/v1/invoices/:id/credit-applications` | pay.collect | required |
 | POST | `/api/v1/invoices/:id/credits` | pay.credit | required |
 | POST | `/api/v1/invoices/:id/payment-links` | pay.collect | required |
@@ -1031,10 +1032,15 @@ Code: `src/modules/scheduling/{visit-pricing,sizing,booking,addons,invoicing}.ts
   `membership_id` (the membership that priced it); each add-on keeps the same price columns; each invoice line `list_cents`,
   `discount_bp`, `price_basis`; the invoice `vehicle_class_label`. A client who holds or shares (household) an active membership is
   charged the member price (price × (1 − tier %), whole dollars, half up) on every line no inclusion covers, and the regular price
-  on a line an inclusion will cover (the coverage itself is written when the visit is completed, section 24.3). `invoice_calc_of` and
+  on a line an inclusion will cover (the coverage itself is written when the visit is completed, section 24.3). Only an inclusion that
+  applies by itself (`autoApply`, or every inclusion for a member with `autoApply`) is priced and shown as covered by a booking, an
+  add-on, a size change or `POST /appointments/quote`; one staff apply by hand is priced as a member line until "Apply credit" covers
+  it, so completion never drops a coverage the client was shown (sandbox run F1). `invoice_calc_of` and
   `calcInvoice` do not change.
-* **Badges.** `needsSizeConfirm` (no size known) and `needsPriceConfirm` (the size has no price of its own) are on every card, the
-  file and the command core until staff set the size (`class_confirmed_at`); never on a visit booked before sizes. A booking answer's
+* **Badges.** `needsSizeConfirm` (no size known) and `needsPriceConfirm` (the package or a live add-on was charged a price the owner
+  has not set for the size: its starting price, `estimated`, or the service's one price because it has no prices by size, `base`,
+  unless the service is priced on a quote; review Q4 pricing:F2) are on every card, the file and the command core until staff set the
+  size (`class_confirmed_at`); never on a visit booked before sizes. The client is not told about a `base` line (`confirmAtShop`). A booking answer's
   `pricing {vehicleClass, vehicleClassLabel, basis, needsSizeConfirm, needsPriceConfirm, member, confirmAtShop, totals {listCents,
   discountCents, coveredCents, dueCents}}`; `confirmAtShop`: a price depends on a size not known yet or without a price (the website's
   and the assistant's confirmations then add "We’ll confirm the exact price at the shop.").
@@ -1650,8 +1656,8 @@ that would leave a paid invoice above its new total (a member's paid size differ
 so another paid line becomes covered) is refused whole, 409 `PRICE_CHANGE_OVERPAID` for a size change, `ADDON_REMOVE_OVERPAID` for an
 add-on, `MEMBERSHIP_NO_BALANCE` for an apply: staff choose how to give the money back (refund or adjust the invoice first), the
 settlement never refunds to store credit on its own. An apply with nothing new to cover answers 409 `MEMBERSHIP_CREDIT_APPLIED`; one that finds a newly covered line (an inclusion
-that does not apply itself) covers it. Auto-apply: the inclusions with `autoApply` (all of them
-for a member with `autoApply`, `PATCH /memberships/:id`) settle when the visit is **completed** (no payments permission needed; under
+that does not apply itself) covers it. Auto-apply: the inclusions with `autoApply` (the default tiers' inclusions and every new one
+by default, plan decision 2; all of them for a member with `autoApply`, `PATCH /memberships/:id`) settle when the visit is **completed** (no payments permission needed; under
 a savepoint: anything that stops it is a quiet skip, the completion never fails; a skip keeps the repricing). `GET /appointments/:id` gains `membershipUpgrade {candidate, visits60, copy} | null` (non-members only; real
 completed visits in 60 days, 3 or more = candidate). An emergency closure with "Protect member credits" marks held credits (`protect`) and a later cancel or
 no-show of such a visit restores every credit it held (one `restore` per redeem, ADR 0170); a reschedule keeps them. `GET /customers/:id/membership` credit rules carry `autoApply`.
@@ -2152,6 +2158,10 @@ Body `{}`. Calls ListLocations, EnableEvents and ListWebhookSubscriptions (again
 A failing check is still `200` with `ok: false` and a plain reason. The merchant id, the location, `events_enabled_at` and the verified
 subscription are kept in `square_state` for the configured Square environment (sim, sandbox or production); the hook drops events of
 any other merchant from then on. A row learned in another environment counts as none (switching environment starts it afresh).
+The first successful test of a stack that has not read Square's events yet stamps `connected_at`, the connection point (sandbox run
+F2): a counter payment Square made before it (the first catch-up reads a day back, the reconcile 72 hours) is the shop's history,
+mirrored as `ignored` (reason `other`, note "before connection: ..."), never queued in "Square payments to match" nor alerted. A later
+test keeps the stamp; a stack that already read events before the stamp existed gets none (nothing is cut).
 
 ### 30.4 `GET /api/v1/system/integrations`: the `square` row
 
@@ -2179,7 +2189,8 @@ path brings it (webhook job, catch-up, reconcile, `square.payments.match`, a POS
 `square:payment:<id>`, the mirror row, ledger keys `square:pay:<id>` and `square:tip:<id>`, and never a second live `pay` of one payment.
 Classification (first rule wins): another location ignored; already in the ledger; its order is one of our payment links (`link`:
 recorded at once, `deposit` per the link's purpose, the link `paid`); a card-on-file charge (Q3a); a subscription invoice (Q3b); a POS
-intent; else `counter`, matched after `SQUARE_MATCH_DELAY_SECONDS` (90): R1 the invoice number in the note or reference id (record, or
+intent; else `counter` (one made before the connection point, section 30.3, is ignored as history), matched after
+`SQUARE_MATCH_DELAY_SECONDS` (90): R1 the invoice number in the note or reference id (record, or
 confirm its awaiting card entry of that amount); R2 a POS intent (confirm its entry); R3 exactly one staff "Square reader" (awaiting
 card) entry of the amount, tip excluded (narrowed by the payer's identity); R4 exactly one open invoice of the day whose balance is the
 amount, backed by the payer's identity (buyer email, the Square customer's email or phone); R4a amount only with
@@ -2268,6 +2279,7 @@ squarePaymentId, error, declineCode, attempts, proposedBy, decidedBy, decidedAt,
 | `GET /invoices/:id/card-charges` | pay.collect or pay.reports | | `{items: ChargeDto[]}`, newest first. |
 | `POST /invoices/:id/card-charges` (Idempotency-Key) | pay.collect | `{cardId, amountCents}` | A balance on a saved card with the client's OK: the card's live consent must cover `balance` (422 `CARD_NOT_USABLE` otherwise, or a removed or expired card), at most the balance (422 `PAY_AMOUNT_INVALID`), one charge at a time per invoice (409 `CARD_CHARGE_IN_PROGRESS`). 201 `{charge, invoice}` charged (a Square `pay`, rule `charge`, ledger reason "Balance"); 202 `{charge (state unknown), invoice}` when Square did not answer (`square.charges.resolve` finishes it; nothing is charged twice); 422 `CARD_DECLINED` (title "Card declined", the plain reason in `detail`, `meta.chargeId`; the charge stays `declined`, the key is released; the same key sent again is a new attempt on that charge after the same checks as a new charge, so a paid or canceled invoice answers 422 `PAY_NOTHING_TO_COLLECT`, a smaller balance 422 `PAY_AMOUNT_INVALID`, another waiting charge 409 `CARD_CHARGE_IN_PROGRESS`). 409 `CARD_PAYMENTS_OFF`, 409 `SQUARE_WRITES_OFF`, 422 `PAY_NOTHING_TO_COLLECT`. |
 | `GET /appointments/:id/fee-charges` | pay.collect or sched.cancel | | `{items: ChargeDto[]}`: the visit's no-show and late-cancel fees. |
+| `POST /invoices/:id/card-charges/:chargeId/not-charged` (Idempotency-Key) | pay.collect | `{}` | "Not charged (checked Square)", the way out of a charge stuck `unknown` (review Q4 H1-R1; a balance or a fee): Oasis looks the payment up at Square, read-only (GetPayment, or ListPayments by the charge's `reference_id`), so it works with Square watch-only too. Square has it: recorded as usual, 200 `{charge (charged), invoice}`, never closed as not charged. None: 200 `{charge, invoice}` with the charge `declined`, `declineCode` NOT_SENT, `error` "Nothing was charged: Square has no payment for it. Checked by <name>." (audit `card.charge_not_charged`, an activity line); the invoice can be collected again. 409 `CARD_CHARGE_NOT_WAITING` (charged, declined or waived), 409 `CARD_CHARGE_IN_PROGRESS` (its request went out less than 5 minutes ago, or Square shows the payment pending), 503 `SQUARE_UNAVAILABLE` (nothing changes), 404 `CARD_CHARGE_NOT_FOUND`. |
 | `POST /appointments/:id/fee-charges/:chargeId/charge` (Idempotency-Key) | pay.collect | `{cardId?}` | Charges a proposed (or declined: a new attempt, a new key) fee on its card or `cardId` (another of the client's cards whose consent covers that fee). 201 / 202 / 422 `CARD_DECLINED` as above; the payment lands on the visit's canceled invoice (ledger reason "No-show fee" / "Late-cancel fee"; the invoice reads canceled, kept) and the client is texted `card_fee_charged`. 409 `CARD_CHARGE_DECIDED` (charged or waived), 409 `CARD_CHARGE_IN_PROGRESS`, 404 `CARD_CHARGE_NOT_FOUND`, 422 `CARD_NOT_USABLE`. |
 | `POST /appointments/:id/fee-charges/:chargeId/waive` (Idempotency-Key) | pay.collect | `{reason}` | 200 `{charge}` waived (audit `card.fee_waived`, an activity line). 409 `CARD_CHARGE_DECIDED`, 409 `CARD_CHARGE_IN_PROGRESS`, 404. |
 | `GET /settings/card-fees` | set.billing or pay.reports | | `{fees: {enabled, noShowCents, lateCancelCents}, version, active}` (`fees.card_on_file`; off and $0 by default; `active`: enabled and Square the processor). |
@@ -2279,9 +2291,12 @@ staff refund of the deposit: nothing proposed). The cancel and no-show answers c
 amountCents, cardLabel}`, the activity log says "No-show fee proposed · $15.00 on Visa ••4242 (charge or waive it)", and reopening the
 visit waives it.
 
-**Jobs.** `square.charges.resolve` (every minute, writes on): charges Square did not answer are asked again within 23 hours (GetPayment,
-or the same CreatePayment with the same key); one still unanswered after 10 minutes is a "Needs attention" alert
-(`square_charge_unknown`, amber, "Saved-card charge not confirmed · Maria Delgado"). `square.cards.nightly` (04:20): a card link for each membership card that expires within 30
+**Jobs.** `square.charges.resolve` (every minute): charges Square did not answer are looked up (GetPayment, or ListPayments by
+`reference_id`) and, within 23 hours and with Square writes on, sent again with the same key; past the 23 hours or with Square
+watch-only nothing is sent, and a charge Square has no payment for 15 minutes after its last request is closed `declined` (NOT_SENT),
+so no charge blocks its invoice for good (review Q4 H1-R1). One still unanswered after 10 minutes is a "Needs attention" alert
+(`square_charge_unknown`, amber, "Saved-card charge not confirmed · Maria Delgado", "... if it is not in the Square dashboard, press
+Not charged on the invoice"). `square.cards.nightly` (04:20): a card link for each membership card that expires within 30
 days (once per expiry), and the cards of deleted clients disabled at Square. The webhook's `card.*` and `customer.deleted` events keep
 the saved cards in step (ADR 0171, "Cards on file and fees").
 

@@ -3130,6 +3130,7 @@ CREATE TABLE public.square_state (
     last_error_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
     updated_at timestamp with time zone DEFAULT public.app_now() NOT NULL,
+    connected_at timestamp with time zone,
     CONSTRAINT square_state_environment_check CHECK ((environment = ANY (ARRAY['sandbox'::text, 'production'::text, 'sim'::text]))),
     CONSTRAINT square_state_last_catchup_events_check CHECK ((last_catchup_events >= 0))
 );
@@ -3420,6 +3421,8 @@ CREATE TABLE public.webhook_log (
     processed_at timestamp with time zone,
     status text DEFAULT 'received'::text NOT NULL,
     error text,
+    attempts integer DEFAULT 0 NOT NULL,
+    CONSTRAINT webhook_log_attempts_check CHECK ((attempts >= 0)),
     CONSTRAINT webhook_log_provider_check CHECK ((provider = ANY (ARRAY['squarespace'::text, 'smsgate'::text, 'ses'::text, 'square'::text]))),
     CONSTRAINT webhook_log_status_check CHECK ((status = ANY (ARRAY['received'::text, 'processed'::text, 'ignored'::text, 'failed'::text, 'unparsed'::text])))
 );

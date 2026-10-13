@@ -118,13 +118,13 @@ USD and takes cards; the Events API is enabled; our subscription exists, is enab
 | Job | When | What |
 |---|---|---|
 | `square.event.process` | queued by the hook | Re-fetch and dispatch one logged event (section 4). 5 retries, 30 s apart. |
-| `square.events.catchup` | every 10 minutes, live only | SearchEvents from the watermark minus 10 minutes (the first run reads the last day; never more than 28 days back), ascending, paged; each event claimed in `webhook_log` and processed. A failed event holds the watermark back so the next run tries it again; a complete run with no failure moves it to at least the run time minus 10 minutes (a quiet week is not an alert); a row the hook claimed whose job was lost (still `received` after 15 minutes) is run here. A watermark older than 27 days (runs failing or never finishing for that long) is an alert (status row and `square_state.last_error`): Square keeps events 28 days. |
+| `square.events.catchup` | every 10 minutes, live only | SearchEvents from the watermark minus 10 minutes (the first run reads the last day; never more than 28 days back), ascending, paged; each event claimed in `webhook_log` and processed. A failed event holds the watermark back so the next run tries it again; a complete run with no failure moves it to at least the run time minus 10 minutes (a quiet week is not an alert). From the log itself, wherever the window is: rows the hook claimed whose job was lost (still `received` after 15 minutes, up to 50 a run) and failed rows (another 50, least recently tried first, each only after its back-off: 10 minutes after its last failure, doubling with `webhook_log.attempts`, at most a day; review Q4 SQ-SEM-5-R1), so rows that keep failing never starve a lost one. A watermark older than 27 days (runs failing or never finishing for that long) is an alert (status row and `square_state.last_error`): Square keeps events 28 days. |
 | `square.reconcile` | nightly 03:45, live only | Lists the last 72 hours of payments and refunds at our location and keeps the counts (by status, source, product) in `square_state.last_reconcile`; decides every completed payment and records every completed refund the webhook and the catch-up both missed (same locks and keys). |
 | `square.payments.match` | every minute | Counter payments past `SQUARE_MATCH_DELAY_SECONDS` through the matcher (section 11.2). |
 | `square.links.sweep` | every minute | Cancels Square links that no longer match what is owed, gives up on pending rows, deletes canceled links at Square (observe-only too: a clean-up, review Q4 M2). |
 | `square.deposit-link` | every minute, processor square, writes on | A booking's deposit request becomes a texted quick-pay link. |
 | `square.refunds.submit` | every minute, processor square, writes on | Card refunds through the API: legs planned and sent (section 11.4). |
-| `square.charges.resolve` | every minute, writes on | Saved-card charges Square did not answer: GetPayment, or the same CreatePayment with the same key (section 12.3). |
+| `square.charges.resolve` | every minute | Saved-card charges Square did not answer: looked up (GetPayment, or ListPayments by reference); with writes on and within 23 hours the same CreatePayment with the same key; watch-only or older, nothing is sent and a charge Square has no payment for is closed NOT_SENT (section 12.3). |
 | `square.cards.nightly` | nightly 04:20 | Card links for membership cards about to expire; deleted clients' cards disabled at Square (section 12.5). |
 | `square.catalog.sync` | every 5 minutes, writes on | Tier prices a save left pending become plan variations (section 13.1). |
 | `square.catalog.drift` | nightly 04:20, writes on | The sync plus Square's catalog read back and compared (section 13.1). |
@@ -137,6 +137,12 @@ the sweep, the deposit links and the refunds find nothing (no Square link or Squ
 and the last two skip unless the processor is Square and writes are on.
 
 ## 6. Runbook
+
+**History before the connection.** The first successful Test connection of a stack that has not read Square's events yet stamps
+`square_state.connected_at`. The first catch-up reads the last day of events and the nightly reconcile the last 72 hours, so the shop's
+earlier POS sales are mirrored too: a counter payment made before the stamp is kept as history (ignored, "before connection"), never in
+"Square payments to match" and never alerted (sandbox run F2). Later tests keep the stamp; a stack already reading events before the
+stamp existed gets none. Run Test connection first, before `SQUARE_PROVIDER=live` lets the catch-up run, so day one starts clean.
 
 **Observe-only first.** With `SQUARE_WRITES_ENABLED=false` the client refuses, before sending, every call that would create or change
 something at Square (payments, refunds, links, customers, cards, catalog, subscription actions). Reads, searches and the setup calls
@@ -339,10 +345,14 @@ ledger reason "Balance" / "No-show fee" / "Late-cancel fee", in the name of the 
 `CARD_DECLINED` with the plain reason and keeps the charge `declined`. The same balance request sent again after a decline is a new
 attempt on that charge, checked like a new charge first (the invoice not canceled, the amount still within the balance, no other
 charge waiting for Square), so a card is never charged for money no longer owed. No answer leaves it `unknown` (202): `square.charges.resolve`
-asks again within 23 hours (GetPayment when the payment id is known, otherwise the same request with the same key: Square answers the
-payment it made, or makes it once); after 10 minutes without an answer staff see the alert "Saved-card charge not confirmed". The
-webhook of the payment finds the charge by its `reference_id` and records it the same way, so
-whichever comes first records it.
+looks the payment up (GetPayment when the payment id is known, otherwise ListPayments by `reference_id`) and, within 23 hours and with
+writes on, sends the same request with the same key (Square answers the payment it made, or makes it once). Watch-only (the rollback
+lever) or past the 23 hours, nothing is sent: a charge Square has no payment for 15 minutes after its last request is closed `declined`
+(NOT_SENT, "Nothing was charged: Square has no payment for it."), so it never blocks its invoice for good (review Q4 H1-R1). After 10
+minutes without an answer staff see the alert "Saved-card charge not confirmed"; when the Square dashboard has no such payment they
+press **Not charged** (`POST /invoices/:id/card-charges/:chargeId/not-charged`, pay.collect, audited `card.charge_not_charged`): the
+same read-only look-up at once, which records the payment instead if Square has it. The webhook of the payment finds the charge by its
+`reference_id` (a declined one too) and records it the same way, so whichever comes first records it.
 
 ### 12.4 Fees
 

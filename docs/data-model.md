@@ -53,6 +53,7 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261014600000_square_memberships.sql` | Memberships on Square (ADR 0171, wave Q3b): `memberships.source` gains `square`; the membership's Square subscription, customer and card (`card_id`), `square_status`, `billing_status ok\|failed` with `payment_failed_at` and `failure_notified_at`, what Square scheduled (`cancel_effective_at`, `pause_effective_at`, `scheduled_change` jsonb, `swap_undone_variations`); `membership_tier_prices.square_state` gains `retired`, plus `square_error`, the variation id unique (the guard re-created with `square_error` mutable); `square_enrollments` (the membership page's attempt, a resumable state machine) and `square_subscription_invoices`; card and consent end reason `membership_failed` |
 | `20261014700000_link_retext.sql` | re-texting a personal link (ADR 0160, wave Q3d): `client_links.retexted_at` (when the assistant texted the same link again: once per link, counted in the day's links; its token derives from the link id under a key from `PIN_PEPPER`) |
 | `20261015100000_review_q4.sql` | review Q4 fixes (ADR 0171 wave Q4 notes): `square_refunds_waiting` (a refund made in the Square app before its payment was on an invoice, recorded on the invoice when the payment is); index `webhook_log_square_open_idx` (the catch-up runs the Square rows still received or failed outside its search window) |
+| `20261015100100_review_q4_fix.sql` | review Q4 re-verification and the Square sandbox run (ADR 0170 and ADR 0171 wave Q4 fix notes): `membership_inclusions.auto_apply` turned on for the default tiers' inclusions nobody edited (inclusions apply by themselves, plan decision 2); `webhook_log.attempts` (failures so far: the Square catch-up backs failed rows off by it; failed rows start at 1); `square_state.connected_at` (the connection point: counter payments Square made before it are history, never queued) |
 
 Conventions: UUIDv7 ids supplied by the application (`createIdGenerator(clock)`), money as integer cents, every default reads
 `app_now()` (never `now()`), enums are `text` with a `check`, business dates are `date` (read as `'YYYY-MM-DD'` strings),
@@ -2667,6 +2668,7 @@ Primary key `(square_refund_id)`. `(location_id)` references `locations(id)` on 
 | `last_error_at` | timestamp with time zone | yes |  |
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `updated_at` | timestamp with time zone | no | `app_now()` |
+| `connected_at` | timestamp with time zone | yes |  |
 
 Primary key `(location_id)`. `(location_id)` references `locations(id)` on delete cascade. 2 check constraints.
 
@@ -2909,8 +2911,9 @@ Primary key `(id)`. Unique `(entry_id, slot_start)`. `(entry_id)` references `wa
 | `processed_at` | timestamp with time zone | yes |  |
 | `status` | text | no | `'received'::text` |
 | `error` | text | yes |  |
+| `attempts` | integer | no | `0` |
 
-Primary key `(id)`. Unique `(provider, external_id)`. 2 check constraints. Index `webhook_log_received_idx` `(received_at)`. Index `webhook_log_square_open_idx` `(received_at)` where `(provider = 'square'::text) AND (status = ANY (ARRAY['received'::text, 'failed'::text]))`.
+Primary key `(id)`. Unique `(provider, external_id)`. 3 check constraints. Index `webhook_log_received_idx` `(received_at)`. Index `webhook_log_square_open_idx` `(received_at)` where `(provider = 'square'::text) AND (status = ANY (ARRAY['received'::text, 'failed'::text]))`.
 
 #### Views and functions
 
