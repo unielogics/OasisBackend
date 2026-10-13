@@ -1,7 +1,8 @@
 // The tax check of the Square item library (ADR 0172 section 5, ADR 0173 T8): which Square tax Oasis items carry, compared with
 // Oasis's own rate (tax.rate_dbp) as EXACT decimals ("6.625" = 6625 thousandths of a percent). Read-only: it runs in Test connection
 // (check `tax`), in the watch-only preview and before every sync, and a mismatch BLOCKS the sync (nothing is written).
-//   auto    Oasis's own tax when it made one (it keeps its percentage equal to Oasis's rate); else the shop's one tax that is enabled at
+//   auto    Oasis's own tax when it made one (the sync keeps it as Oasis made it: Oasis's rate, enabled at the location, ADDITIVE,
+//           subtotal phase, never on custom amounts; a staff edit of any of these is named in `ownChanged` and put back); else the shop's one tax that is enabled at
 //           the location, ADDITIVE, in the subtotal phase and at exactly Oasis's rate (adopted: referenced, never changed); else, when
 //           the location has no enabled tax at all, Oasis creates "Sales tax"; anything else (taxes that do not match, or several that
 //           do) is `blocked`.
@@ -44,6 +45,9 @@ export interface TaxCheck {
   wantPercentage: string
   /** Oasis made this tax: the sync keeps its percentage equal to Oasis's rate. */
   own: boolean
+  /** Oasis's own tax only: what was changed in Square on the fields Oasis owns besides the percentage (plain words; the next sync puts
+   *  them back). Empty otherwise. */
+  ownChanged: string[]
   /** In plain words. */
   detail: string
   warnings: string[]
@@ -65,7 +69,7 @@ export function squarePercentDbp(p: string | null | undefined): number | null {
   return parseTaxPercent(frac ? `${m[1]}.${frac}` : m[1]!)
 }
 
-const presentAt = (o: WireCatalogObject, loc: string): boolean =>
+export const presentAt = (o: WireCatalogObject, loc: string): boolean =>
   o.present_at_all_locations !== false ? !(o.absent_at_location_ids ?? []).includes(loc) : (o.present_at_location_ids ?? []).includes(loc)
 
 function problemOf(t: WireCatalogObject, loc: string, rateDbp: number): string | null {
@@ -76,6 +80,18 @@ function problemOf(t: WireCatalogObject, loc: string, rateDbp: number): string |
   if ((d.calculation_phase ?? 'TAX_SUBTOTAL_PHASE') !== 'TAX_SUBTOTAL_PHASE') return 'computed on the total, not the subtotal'
   if (squarePercentDbp(d.percentage) !== rateDbp) return `${d.percentage ?? '?'}%, not ${taxPercentLabel(rateDbp)}`
   return null
+}
+
+/** What was changed in Square on Oasis's own tax, besides its percentage (each field Oasis owns, in plain words). */
+export function ownChangesOf(t: WireCatalogObject, loc: string): string[] {
+  const d = t.tax_data ?? {}
+  const out: string[] = []
+  if (d.enabled === false) out.push('turned off')
+  if (!presentAt(t, loc)) out.push('not used at the shop')
+  if ((d.inclusion_type ?? 'ADDITIVE') !== 'ADDITIVE') out.push('included in the price, not added to it')
+  if ((d.calculation_phase ?? 'TAX_SUBTOTAL_PHASE') !== 'TAX_SUBTOTAL_PHASE') out.push('computed on the total, not the subtotal')
+  if (d.applies_to_custom_amounts === true) out.push('also added to custom amounts')
+  return out
 }
 
 const why = (e: unknown): string =>
@@ -126,17 +142,26 @@ export function decideTax(taxes: readonly WireCatalogObject[], i: TaxCheckInput)
   const ok = (t: WireCatalogObject, isOwn: boolean, detail: string): TaxCheck => {
     if (!isOwn && t.tax_data?.applies_to_custom_amounts === true)
       warnings.push(`Square also adds “${t.tax_data?.name ?? 'this tax'}” to custom amounts: an Oasis total rung up as a custom amount would be taxed twice (ring up Oasis items, or turn that off in Square)`)
-    return { ...base, status: 'ok', taxId: t.id, taxName: t.tax_data?.name ?? null, percentage: t.tax_data?.percentage ?? null, own: isOwn, detail }
+    const ownChanged = isOwn ? ownChangesOf(t, i.locationId) : []
+    return { ...base, status: 'ok', taxId: t.id, taxName: t.tax_data?.name ?? null, percentage: t.tax_data?.percentage ?? null, own: isOwn, ownChanged, detail }
   }
-  const none = (status: TaxStatus, detail: string): TaxCheck => ({ ...base, status, taxId: null, taxName: null, percentage: null, own: false, detail })
+  const none = (status: TaxStatus, detail: string): TaxCheck => ({ ...base, status, taxId: null, taxName: null, percentage: null, own: false, ownChanged: [], detail })
+  // Oasis's own tax: ok (the sync can run), and the detail says what the next sync puts back; never "the same" while a field differs
   const ownOk = (t: WireCatalogObject): TaxCheck => {
+    const name = `Oasis’s Square tax “${t.tax_data?.name ?? OASIS_TAX_NAME}”`
     const same = squarePercentDbp(t.tax_data?.percentage) === i.rateDbp
+    const changed = ownChangesOf(t, i.locationId)
+    const what = changed.join('; ')
     return ok(
       t,
       true,
-      same
-        ? `Oasis’s Square tax “${t.tax_data?.name ?? OASIS_TAX_NAME}” is ${label}, the same as Oasis`
-        : `Oasis’s Square tax “${t.tax_data?.name ?? OASIS_TAX_NAME}” is ${t.tax_data?.percentage ?? '?'}%: the next sync sets it to ${label}`,
+      same && !changed.length
+        ? `${name} is ${label}, the same as Oasis`
+        : same
+          ? `${name} was changed in Square (${what}): the next sync puts it back`
+          : !changed.length
+            ? `${name} is ${t.tax_data?.percentage ?? '?'}%: the next sync sets it to ${label}`
+            : `${name} is ${t.tax_data?.percentage ?? '?'}% and was changed in Square (${what}): the next sync sets it to ${label} and puts it back`,
     )
   }
   const list = (xs: readonly TaxCandidate[]): string => xs.map((c) => `${c.name} ${c.percentage ?? '?'}%`).join(', ')
@@ -172,6 +197,7 @@ export async function checkItemsTax(api: SquareApi, i: TaxCheckInput): Promise<T
       percentage: null,
       wantPercentage: squarePercent(i.rateDbp),
       own: false,
+      ownChanged: [],
       detail: why(e),
       warnings: [],
       candidates: [],

@@ -29,6 +29,9 @@ const TaxCheckView = z
     percentage: z.string().nullable().describe('Square’s percentage of that tax, as Square writes it ("6.625")'),
     wantPercentage: z.string().describe('Oasis’s rate (tax.rate_dbp) as a Square percentage'),
     own: z.boolean().describe('Oasis made this tax: the sync keeps it at Oasis’s rate'),
+    ownChanged: z
+      .array(z.string())
+      .describe('Oasis’s own tax only: what was changed in Square besides its percentage ("turned off", "included in the price, not added to it", …); the next sync puts it back'),
     detail: z.string().describe('In plain words'),
     warnings: z.array(z.string()),
     candidates: z
@@ -133,7 +136,7 @@ export function registerSquareItemsRoutes(app: AppInstance): void {
         operationId: 'syncSquareItems',
         summary: 'Sync the services to Square’s item library now (a read-only preview while the sync is not on)',
         description:
-          'Runs what the job `square.items.sync` runs every 5 minutes (`drift: true`: what the nightly `square.items.drift` runs: everything read back). With SQUARE_WRITES_ENABLED and SQUARE_ITEMS_SYNC_ENABLED on, items are made, updated, archived or hidden (never deleted); otherwise nothing is written at Square and the answer is `status: preview` with what the sync would do (`preview`) and the tax check. A tax that does not match blocks the sync (`status: blocked`, `reason`). Audited `square.items.sync`.',
+          'Runs what the job `square.items.sync` runs every 5 minutes (`drift: true`: what the nightly `square.items.drift` runs: everything read back). With SQUARE_WRITES_ENABLED and SQUARE_ITEMS_SYNC_ENABLED on, items are made, updated, archived or hidden (never deleted); otherwise nothing is written at Square and the answer is `status: preview` with what the sync would do (`preview`) and the tax check. A tax that does not match blocks the sync (`status: blocked`, `reason`). One writing run at a time: while the job (or another Sync now) is running the answer is `status: skipped` with `reason` "A Square item sync is already running: try again in a minute". Audited `square.items.sync`.',
         body: z.object({ drift: z.boolean().optional() }).strict(),
         response: { 200: SyncReport },
       },

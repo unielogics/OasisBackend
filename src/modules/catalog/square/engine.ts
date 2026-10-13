@@ -24,7 +24,7 @@ import {
   type RemoteView,
   type SetupAction,
 } from './plan.js'
-import { OASIS_TAX_NAME, type TaxCheck } from './tax.js'
+import { OASIS_TAX_NAME, presentAt, squarePercentDbp, type TaxCheck } from './tax.js'
 
 type Obj = Record<string, unknown>
 
@@ -222,14 +222,33 @@ async function runSetup(i: EngineInput, a: SetupAction, r: EngineResult, shop: (
         break
       }
       case 'update_tax': {
+        // Oasis's own tax, as Oasis made it: its rate, enabled at our location, added to the price, on the subtotal, never on custom
+        // amounts (read-modify-write: the name and anything else stay as they are)
         const cur = await i.api.catalog.retrieve(a.objectId)
+        const d = cur.tax_data ?? {}
+        const presence = presentAt(cur, i.locationId)
+          ? {}
+          : cur.present_at_all_locations !== false
+            ? { absent_at_location_ids: (cur.absent_at_location_ids ?? []).filter((x) => x !== i.locationId) }
+            : { present_at_location_ids: [...(cur.present_at_location_ids ?? []), i.locationId] }
         const res = await i.api.catalog.upsert(sqKey('ct', `items:tax:update:${a.objectId}:${cur.version ?? 0}:${a.percentage}`), {
           ...cur,
-          tax_data: { ...(cur.tax_data ?? {}), percentage: a.percentage },
+          ...presence,
+          tax_data: { ...d, percentage: a.percentage, enabled: true, inclusion_type: 'ADDITIVE', calculation_phase: 'TAX_SUBTOTAL_PHASE', applies_to_custom_amounts: false },
         })
         r.writes++
-        await i.store.put({ ...taxLink()!, version: res.object.version ?? null, state: 'synced', contentHash: hashOf({ percentage: a.percentage }), error: null })
+        const link = taxLink()!
+        // a percentage Oasis already wrote that Square now shows otherwise was changed by staff (an Oasis rate change is not reported)
+        const was = squarePercentDbp(d.percentage)
+        const changed = [...a.changed]
+        if (link.contentHash === hashOf({ percentage: a.percentage }) && was !== squarePercentDbp(a.percentage))
+          changed.push(`${d.percentage ?? '?'}%, not ${a.percentage}%`)
+        await i.store.put({ ...link, version: res.object.version ?? null, state: 'synced', contentHash: hashOf({ percentage: a.percentage }), error: null })
         r.taxUpdated++
+        if (changed.length) {
+          r.restored++
+          r.changedInSquare.push(`The sales tax “${d.name ?? OASIS_TAX_NAME}” (${changed.join('; ')})`)
+        }
         break
       }
       case 'adopt_tax': {

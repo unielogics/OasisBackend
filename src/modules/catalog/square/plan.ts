@@ -1,7 +1,8 @@
 // The planner of the Square item library sync (ADR 0172 section 3), pure: what Square must change so the item library matches the
 // desired library. Two passes, run by the sender one after the other so the items can name a tax or category made in the same run:
 //   planSetup  1 blocked (the tax check failed: nothing else is planned, nothing is written)
-//              2 create_tax / update_tax (only a tax Oasis made) / adopt_tax (recorded, never written)
+//              2 create_tax / update_tax (only a tax Oasis made: its percentage, compared as exact decimals, and every other field Oasis
+//                owns put back) / adopt_tax (recorded, never written)
 //              3 create_category / rename_category (only one Oasis made) / retire_category (no longer used: left in Square)
 //   planItems  4 resend_pending (a create in flight: the outbox, re-sent unchanged)
 //              5 adopt_orphan (Oasis's marker found at Square with no link: after a crash or a restore; never a second item)
@@ -14,7 +15,7 @@ import type { WireCatalogObject } from '../../../integrations/square/wire.js'
 import { hashOf, itemHash, OASIS_CATEGORY_KEY, parseMarker, type DesiredCategory, type DesiredItem, type DesiredLibrary, type ItemRefs } from './desired.js'
 import { ownedDiff, type MergeContext } from './merge.js'
 import type { CatalogLinkKind, CatalogLinkState } from './schema.js'
-import type { TaxCheck } from './tax.js'
+import { squarePercentDbp, type TaxCheck } from './tax.js'
 
 export interface LinkRow {
   id: string
@@ -49,7 +50,8 @@ export interface RemoteView {
 export type SetupAction =
   | { kind: 'blocked'; detail: string }
   | { kind: 'create_tax'; percentage: string }
-  | { kind: 'update_tax'; linkId: string; objectId: string; percentage: string }
+  /** changed: what staff changed in Square besides the percentage (TaxCheck.ownChanged), put back and reported. */
+  | { kind: 'update_tax'; linkId: string; objectId: string; percentage: string; changed: string[] }
   | { kind: 'adopt_tax'; objectId: string; name: string | null }
   | { kind: 'create_category'; key: string; name: string }
   | { kind: 'rename_category'; linkId: string; key: string; objectId: string; name: string }
@@ -76,8 +78,10 @@ export function planSetup(lib: DesiredLibrary, links: readonly LinkRow[], tax: T
   const taxLink = linksOf(links, 'tax')[0]
   if (tax.status === 'create') out.push({ kind: 'create_tax', percentage: tax.wantPercentage })
   else if (tax.own) {
-    if (tax.percentage !== tax.wantPercentage && taxLink?.objectId)
-      out.push({ kind: 'update_tax', linkId: taxLink.id, objectId: taxLink.objectId, percentage: tax.wantPercentage })
+    // exact decimals ("7.0" is 7): an equal percentage written another way is never sent again
+    const pctDiffers = squarePercentDbp(tax.percentage) === null || squarePercentDbp(tax.percentage) !== squarePercentDbp(tax.wantPercentage)
+    if ((pctDiffers || tax.ownChanged.length > 0) && taxLink?.objectId)
+      out.push({ kind: 'update_tax', linkId: taxLink.id, objectId: taxLink.objectId, percentage: tax.wantPercentage, changed: [...tax.ownChanged] })
   } else if (tax.taxId && (!taxLink || taxLink.objectId !== tax.taxId || !taxLink.adopted)) out.push({ kind: 'adopt_tax', objectId: tax.taxId, name: tax.taxName })
   const catLinks = linksOf(links, 'category')
   for (const c of lib.categories) {

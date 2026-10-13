@@ -4,6 +4,7 @@
 //                        the read-back since the watermark and what the library needs (sync.ts)
 //   square.items.drift   nightly 04:40 (04:20 is square.catalog.drift and square.cards.nightly): everything linked read back, every
 //                        item searched for Oasis's marker; Square-side edits to Oasis's fields put back, the managers told once
+//                        (it waits up to 5 minutes for a 5-minute run still going; the 5-minute run skips while another holds the lock)
 // With the defaults both skip without reading Square (SQUARE_WRITES_ENABLED and SQUARE_ITEMS_SYNC_ENABLED are false).
 import { createIdGenerator } from '../../../platform/ids.js'
 import type { JobContext, JobDefinition } from '../../../platform/jobs.js'
@@ -44,7 +45,8 @@ export const squareItemsDriftJob: JobDefinition = {
   async handler(ctx) {
     const x = await depsOf(ctx)
     if (!x) return
-    const r = await runItemSync(x.deps, x.locationId, { drift: true })
+    // a 5-minute run going: wait for it (the nightly run is not skipped for it)
+    const r = await runItemSync(x.deps, x.locationId, { drift: true, waitForLockMs: 5 * 60_000 })
     if (r.status === 'skipped') ctx.logger.debug({ reason: r.reason }, 'square.items.drift skipped')
     else ctx.logger.info({ square: { ...r, tax: r.tax?.status } }, 'square.items.drift done')
   },

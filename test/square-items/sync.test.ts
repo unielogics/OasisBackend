@@ -3,12 +3,13 @@
 // back with one notice (and a reminder a day later); an item staff deleted made again; the shop's own items byte-identical and a
 // variation staff added kept; a VERSION_MISMATCH between the read and the write; a lost answer recovered from the outbox with no
 // duplicate; a wiped link table re-adopted by the marker; watch-only skipped with a preview; an environment switch; 429s; and the
-// tax gate (a mismatch blocks and tells the managers once a day; Oasis's own tax follows the rate).
+// tax gate (a mismatch blocks and tells the managers once a day; Oasis's own tax follows the rate, and a staff edit of it is put back);
+// overlapping runs (one runs, the other is skipped; the nightly run waits its turn).
 import { sql } from 'kysely'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { SquareApi } from '../../src/integrations/ports/square.js'
 import type { WireCatalogObject } from '../../src/integrations/square/wire.js'
-import { runItemSync, type ItemSyncDeps } from '../../src/modules/catalog/square/sync.js'
+import { itemsLockKey, runItemSync, type ItemSyncDeps } from '../../src/modules/catalog/square/sync.js'
 import { configureSquareRuntime } from '../../src/modules/square/runtime.js'
 import type { FixedClock } from '../../src/platform/clock.js'
 import { useRig } from '../scheduling-gaps/support.js'
@@ -445,6 +446,81 @@ describe('switches and the tax gate', () => {
     expect(res).toMatchObject({ taxUpdated: 1, failed: 0 })
     const own = (await links('tax'))[0]!
     expect((r.sim.store.items.view(own.square_object_id!)!.tax_data as { percentage: string }).percentage).toBe('6.625')
+  })
+
+  it('Oasis’s own tax edited in Square (turned off, included in the price, off the shop, on custom amounts, its percentage) is put back and the managers told', async () => {
+    const r = on()
+    expect(await r.run()).toMatchObject({ failed: 0, taxCreated: 1 })
+    const id = (await links('tax'))[0]!.square_object_id!
+    const view = () => r.sim.store.items.view(id) as unknown as WireCatalogObject
+    const owned = { name: 'Sales tax', percentage: '7', inclusion_type: 'ADDITIVE', calculation_phase: 'TAX_SUBTOTAL_PHASE', applies_to_custom_amounts: false, enabled: true }
+    ;(m.h.clock as FixedClock).advance(60_000)
+    await staffEdit(r.sim.api, id, (o) => ({
+      ...o,
+      present_at_all_locations: false,
+      present_at_location_ids: [],
+      tax_data: { ...o.tax_data, enabled: false, inclusion_type: 'INCLUSIVE', applies_to_custom_amounts: true },
+    }))
+    // Test connection no longer says "the same as Oasis"
+    const test = (await m.send(m.superS(), 'POST', '/integrations/square/test', {}, false)).json() as Json
+    expect(test.checks.find((c: Json) => c.key === 'tax').detail).toMatch(/was changed in Square \(turned off; not used at the shop; included in the price, not added to it; also added to custom amounts\): the next sync puts it back/)
+    const res = await r.run()
+    expect(res).toMatchObject({ status: 'done', failed: 0, taxUpdated: 1, restored: 1, tax: { status: 'ok', own: true, ownChanged: [] } })
+    expect(res.changedInSquare).toEqual(['The sales tax “Sales tax” (turned off; not used at the shop; included in the price, not added to it; also added to custom amounts)'])
+    expect(view().tax_data).toMatchObject(owned)
+    expect(view()).toMatchObject({ present_at_all_locations: false, present_at_location_ids: [SIM_LOCATION] })
+    expect(await notices('square.items_changed_in_square')).toHaveLength(1)
+    // nothing left to do: the next run writes nothing
+    let before = writes(r)
+    expect(await r.run()).toMatchObject({ failed: 0, taxUpdated: 0 })
+    expect(writes(r)).toBe(before)
+    // the nightly run sees it too
+    ;(m.h.clock as FixedClock).advance(60_000)
+    await staffEdit(r.sim.api, id, (o) => ({ ...o, tax_data: { ...o.tax_data, calculation_phase: 'TAX_TOTAL_PHASE' } }))
+    expect(await r.run({ drift: true })).toMatchObject({ failed: 0, taxUpdated: 1, changedInSquare: ['The sales tax “Sales tax” (computed on the total, not the subtotal)'] })
+    expect(view().tax_data).toMatchObject(owned)
+    // staff change its percentage: put back and reported (an Oasis rate change is not reported: see the next test)
+    ;(m.h.clock as FixedClock).advance(60_000)
+    await staffEdit(r.sim.api, id, (o) => ({ ...o, tax_data: { ...o.tax_data, percentage: '8' } }))
+    expect(await r.run()).toMatchObject({ failed: 0, taxUpdated: 1, changedInSquare: ['The sales tax “Sales tax” (8%, not 7%)'] })
+    expect(view().tax_data).toMatchObject(owned)
+    // "7.0" is 7%: nothing is sent (no rewrite every 5 minutes)
+    ;(m.h.clock as FixedClock).advance(60_000)
+    await staffEdit(r.sim.api, id, (o) => ({ ...o, tax_data: { ...o.tax_data, percentage: '7.0' } }))
+    before = writes(r)
+    expect(await r.run()).toMatchObject({ failed: 0, taxUpdated: 0, changedInSquare: [] })
+    expect(await r.run()).toMatchObject({ failed: 0, taxUpdated: 0 })
+    expect(writes(r)).toBe(before)
+  })
+
+  it('runs that overlap (Sync now while the job runs): one syncs, the other is skipped and says why, with no false failure or notice; the nightly run waits its turn', async () => {
+    const r = on()
+    const [a, b] = await Promise.all([r.run(), r.run()])
+    expect([a.status, b.status].sort()).toEqual(['done', 'skipped'])
+    const [done, skipped] = a.status === 'done' ? [a, b] : [b, a]
+    expect(done).toMatchObject({ failed: 0, taxCreated: 1 })
+    expect(skipped).toMatchObject({ failed: 0, failures: [], created: 0, reason: 'A Square item sync is already running: try again in a minute' })
+    expect(await notices('square.items_sync_failed')).toEqual([])
+    expect([...r.sim.store.catalog.values()].filter((o) => o.type === 'TAX')).toHaveLength(1)
+    // while a run holds the lock: Sync now answers skipped (never a failure), the nightly run waits its turn, then runs
+    ;(m.h.clock as FixedClock).advance(60_000)
+    await setPrices('Express Hand Wash', [{ class: 'compact_car', cents: 4100 }])
+    const key = itemsLockKey(loc(), 'sim')
+    await db()
+      .connection()
+      .execute(async (conn) => {
+        await sql`select pg_advisory_lock(hashtext(${key} || current_schema()))`.execute(conn)
+        const now = await m.send(m.superS(), 'POST', '/integrations/square/items/sync', {}, false)
+        expect(now.statusCode, now.body).toBe(200)
+        expect(now.json()).toMatchObject({ status: 'skipped', failed: 0, reason: 'A Square item sync is already running: try again in a minute' })
+        const nightly = r.run({ drift: true, waitForLockMs: 60_000 })
+        await new Promise((res) => setTimeout(res, 1500))
+        await sql`select pg_advisory_unlock(hashtext(${key} || current_schema()))`.execute(conn)
+        expect(await nightly).toMatchObject({ status: 'done', failed: 0, updated: 1 })
+      })
+    expect(await notices('square.items_sync_failed')).toEqual([])
+    // the lock is let go: a later run runs
+    expect(await r.run()).toMatchObject({ status: 'done', failed: 0 })
   })
 
   it('archive-all: refused watch-only and while the sync is on; with writes on and the sync off every Oasis item is archived', async () => {

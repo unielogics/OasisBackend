@@ -26,13 +26,17 @@ Oasis invoice (ADR 0173: 6.625%, rounded once, half to even).
 | I9 | **Triggers:** the job `square.items.sync` every 5 minutes at 2, 7, 12 … (offset from `square.catalog.sync`: Square lets one catalog write run at a time), the nightly `square.items.drift` at 04:40, and "Sync now". No hook in the catalog routes: a price saved in Prices by size is in the POS within about 5 minutes. The 5-minute run reads back only what changed (SearchCatalogObjects `begin_time` = the watermark, deleted objects included, linked ids only, Oasis's own versions ignored) and has a fast path (the library fingerprint unchanged, nothing open, nothing changed at Square: no write); the nightly run reads everything linked (BatchRetrieve) and searches every item for the marker. |
 | I10 | **Switch:** `SQUARE_ITEMS_SYNC_ENABLED` (default false) on top of `SQUARE_WRITES_ENABLED`. Watch-only (writes off) and with the switch off nothing is written; "Sync now" then answers a read-only **preview** ("would create 41 items with 187 prices") with the tax check. **Rollback:** turn the switch off (the items freeze), then `POST /integrations/square/items/archive-all` (writes on, switch off) archives every Oasis item; turning the switch on again re-sends them all. |
 | I11 | **Members are not in Square.** Member prices (whole-dollar rounding) and coverage cannot be expressed as items: members pay through the POS app switch (ADR 0171 R2) or with `INV-…` in the note (R1). |
+| I12 | **One writing run at a time** per location and Square environment: a session advisory lock (`itemsLockKey`, scoped to the database schema) around every run that can write. "Sync now" while the job runs (or a 5-minute run while another holds the lock) answers `skipped`, "A Square item sync is already running: try again in a minute", never a false failure or manager notice; the nightly run waits up to 5 minutes for its turn. The preview takes no lock (it writes nothing at Square). |
 
 ## Tax
 
 `tax.ts` lists Square's TAX objects (read-only) and compares their `percentage` with `tax.rate_dbp` as **exact decimals** ("6.625"
 = 6625 thousandths of a percent; "6.6250" too; more precision than a thousandth never matches):
 
-- `auto` (default): Oasis's own tax when it made one (the sync keeps its percentage equal to Oasis's rate, so 7% → 6.625% is an update);
+- `auto` (default): Oasis's own tax when it made one (the sync keeps it as Oasis made it: its percentage equal to Oasis's rate, so
+  7% → 6.625% is an update, and enabled at the location, ADDITIVE, in the subtotal phase, never on custom amounts; a staff edit of
+  any of these is named in the check's `ownChanged` and in its detail, never "the same as Oasis", put back by the next run like I5
+  and told once as "Changed in Square"; an equal percentage written another way, "7.0" for 7, is the same and never re-sent);
   else the shop's one tax that is enabled at the location, ADDITIVE, in the subtotal phase and at exactly Oasis's rate (adopted, never
   changed); else, when the location has no enabled tax at all, Oasis creates "Sales tax" (ADDITIVE, subtotal phase, our location only,
   never on custom amounts); anything else (taxes that do not match, or several that do) is **blocked**.
@@ -82,6 +86,8 @@ variation, and a guest basket's Square CalculateOrder total ($133.28, tax $8.28 
 - **Archive-all** needs the item sync off first (409 `SQUARE_ITEMS_SYNC_ON`), else the next run would put the items back on sale.
 - **Adopting the "Oasis" category by name** after its link was lost (a database restore) adopts it as Oasis's own; an adopted shop
   category is only referenced (a rename in Oasis is then only reported).
+- **Oasis's own tax is kept whole**, not only its percentage (enabled, presence, ADDITIVE, subtotal phase, never on custom amounts),
+  and **writing runs take a lock** (I12): both after the package review (findings F1, F2).
 - Optional phase 6 (the `catalog.version.updated` trigger, POS order lines as a matching signal, R4b) is not built.
 
 ## Rollout
@@ -90,8 +96,8 @@ variation, and a guest basket's Square CalculateOrder total ($133.28, tax $8.28 
    integrations → Square item library shows the preview and the tax check; Test connection shows the `tax` check.
 2. The shop's Square tax must be 6.625%, ADDITIVE, at the location (or none: Oasis then makes "Sales tax"); Oasis set to 6.625% with
    `half_even` (ADR 0173 rollout).
-3. `pnpm verify:square --read-only` (SQR-20, the production pre-flight: the shop's taxes against Oasis's rate, the item count, what
-   the sync would create).
+3. `pnpm verify:square --read-only` (SQR-20, the production pre-flight: the shop's taxes against Oasis's rate and the item count;
+   SQR-20 has no database, so what the sync would create is the Settings preview: Sync now while watch-only).
 4. `SQUARE_WRITES_ENABLED=true` and `SQUARE_ITEMS_SYNC_ENABLED=true` (still `PAYMENT_PROCESSOR=squarespace`): items appear within 5
    minutes; check the counts; add the Oasis categories to the POS home grid on each device.
 5. Then links and refunds, cards and fees, memberships, the processor (ADR 0171).

@@ -563,6 +563,8 @@ locations, but the referenced object … of type ITEM is not"): the simulator re
 - Ring up guests from the Oasis categories and pick the size. A tint range asks for the price: type the quoted amount.
 - For members, adjusted invoices and anything with coverage: use **Open Square POS** in Oasis, or type `INV-#####` in the note.
 - Don't edit Oasis items in Square (prices, names, sizes): Oasis puts them back. Change prices in Settings → Prices by size.
+- Don't edit Oasis's own "Sales tax" in Square (rate, on or off, included in the price, custom amounts, locations): Oasis puts it
+  back. Change the rate in Settings → Billing & integrations → Sales tax.
 - Add the Oasis categories to the POS home grid once per device (new items appear in the item library, not on custom pages).
 - After the rollout, archive the shop's own hand-made duplicates in the Square Dashboard; Oasis never touches them.
 
@@ -571,7 +573,8 @@ locations, but the referenced object … of type ITEM is not"): the simulator re
 1. The Developer app is owned by the shop's Square account (section 2); `SQUARE_APPLICATION_ID`, the Production access token in the
    secret (`SQUARE_ACCESS_TOKEN`), the shop's `SQUARE_LOCATION_ID`, `SQUARE_ENVIRONMENT=production`, the webhook (section 4).
 2. The shop's Square tax is 6.625%, ADDITIVE, at the location (or there is none); Oasis is at 6.625% with `half_even` (section 15).
-3. `pnpm verify:square --read-only` (SQR-20): the shop's taxes against Oasis's rate, the item count, what the sync would create.
+3. `pnpm verify:square --read-only` (SQR-20): the shop's taxes against Oasis's rate and the item count. What the sync would create
+   is the Settings preview (Sync now while watch-only): SQR-20 has no database.
 4. The shop has no published Square Online site (new REGULAR items could appear there); otherwise hide them from it.
 5. `SQUARE_WRITES_ENABLED=true`, `SQUARE_ITEMS_SYNC_ENABLED=true`; check Settings and the POS; staff instructions above.
 

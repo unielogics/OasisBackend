@@ -10,6 +10,8 @@
 // the library's fingerprint equal to the last complete sync's, nothing open and nothing changed at Square: no write at all. The
 // Square calls run outside any transaction (engine.ts); each answer is recorded at once. Failures are told to the managers once per
 // set (again a day later while they last), Square-side edits put back once per set; each run that did something is audited.
+// One writing run at a time per location and Square environment (a session advisory lock): "Sync now" while the job runs (or the
+// nightly run during a 5-minute one) is skipped and says so (the nightly run waits its turn), never a false "Square did not answer".
 import { createHash } from 'node:crypto'
 import { sql } from 'kysely'
 import type { Env } from '../../../config/env.js'
@@ -376,15 +378,53 @@ function previewOf(lib: DesiredLibrary, links: readonly LinkRow[], tax: TaxCheck
   }
 }
 
+/** The advisory lock of the writing runs of one location and Square environment (scoped to the database schema). */
+export const itemsLockKey = (locationId: string, environment: string): string => `square.items:${locationId}:${environment}`
+
+export const ITEMS_SYNC_BUSY = 'A Square item sync is already running: try again in a minute'
+
+const LOCK_POLL_MS = 500
+
+/**
+ * Runs fn holding the session advisory lock `key` on one pooled connection (fn's own queries use the pool), or null when another
+ * run holds it for longer than waitMs. The connection is given back between tries, and the lock is let go when fn ends or throws
+ * (a process that dies lets it go with its connection).
+ */
+async function withItemsLock<T>(db: Db, key: string, waitMs: number, fn: () => Promise<T>): Promise<T | null> {
+  for (let tries = Math.max(0, Math.ceil(waitMs / LOCK_POLL_MS)); ; tries--) {
+    const got = await db.connection().execute(async (conn) => {
+      const r = await sql<{ ok: boolean }>`select pg_try_advisory_lock(hashtext(${key} || current_schema())) as ok`.execute(conn)
+      if (!r.rows[0]?.ok) return null
+      try {
+        return { value: await fn() }
+      } finally {
+        await sql`select pg_advisory_unlock(hashtext(${key} || current_schema()))`.execute(conn).catch(() => undefined)
+      }
+    })
+    if (got) return got.value
+    if (tries <= 0) return null
+    await new Promise((res) => setTimeout(res, LOCK_POLL_MS))
+  }
+}
+
 /**
  * Syncs one location's services to Square's item library (see the header). `drift` reads everything back; `dryRun` only reads and
- * plans (the preview: allowed watch-only). `actor` names who pressed Sync now (audited even when nothing changed).
+ * plans (the preview: allowed watch-only). `actor` names who pressed Sync now (audited even when nothing changed). A writing run
+ * takes the location's lock: when another run holds it the answer is `skipped` (ITEMS_SYNC_BUSY), or with `waitForLockMs` (the
+ * nightly run) it waits that long first.
  */
 export async function runItemSync(
   deps: ItemSyncDeps,
   locationId: string,
-  o: { drift?: boolean; dryRun?: boolean; actor?: audit.AuditContext } = {},
+  o: { drift?: boolean; dryRun?: boolean; actor?: audit.AuditContext; waitForLockMs?: number } = {},
 ): Promise<ItemSyncReport> {
+  const writing = o.dryRun !== true && itemsMode(deps.env) === 'on' && !!squareLocationId(deps.env as Env)
+  if (!writing) return syncOnce(deps, locationId, o)
+  const ran = await withItemsLock(deps.db, itemsLockKey(locationId, squareEnvironment(deps.env)), o.waitForLockMs ?? 0, () => syncOnce(deps, locationId, o))
+  return ran ?? report('skipped', 'on', { reason: ITEMS_SYNC_BUSY })
+}
+
+async function syncOnce(deps: ItemSyncDeps, locationId: string, o: { drift?: boolean; dryRun?: boolean; actor?: audit.AuditContext }): Promise<ItemSyncReport> {
   const mode = itemsMode(deps.env)
   const environment = squareEnvironment(deps.env)
   const squareLocation = squareLocationId(deps.env as Env)
@@ -426,7 +466,7 @@ export async function runItemSync(
     await saveItemsState(deps.db, locationId, environment, started, { last_error: `read-back: ${text}`, last_error_at: started })
     return report('done', mode, { tax, failed: 1, failures: [`Reading Square back: ${text}`] })
   }
-  if (tax.status === 'ok' && !o.drift && !open && !remote && state?.fingerprint === fingerprintOf(links)) {
+  if (tax.status === 'ok' && !tax.ownChanged.length && !o.drift && !open && !remote && state?.fingerprint === fingerprintOf(links)) {
     await saveItemsState(deps.db, locationId, environment, started, { watermark: new Date(started.getTime() - WATERMARK_SKEW_MS), last_sync_at: started })
     return report('done', mode, { tax })
   }

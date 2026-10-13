@@ -46038,6 +46038,13 @@
                               "description": "Oasis made this tax: the sync keeps it at Oasis’s rate",
                               "type": "boolean"
                             },
+                            "ownChanged": {
+                              "description": "Oasis’s own tax only: what was changed in Square besides its percentage (\"turned off\", \"included in the price, not added to it\", …); the next sync puts it back",
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
                             "percentage": {
                               "anyOf": [
                                 {
@@ -46122,6 +46129,7 @@
                             "percentage",
                             "wantPercentage",
                             "own",
+                            "ownChanged",
                             "detail",
                             "warnings",
                             "candidates"
@@ -46275,7 +46283,7 @@
     },
     "/api/v1/integrations/square/items/sync": {
       "post": {
-        "description": "Runs what the job `square.items.sync` runs every 5 minutes (`drift: true`: what the nightly `square.items.drift` runs: everything read back). With SQUARE_WRITES_ENABLED and SQUARE_ITEMS_SYNC_ENABLED on, items are made, updated, archived or hidden (never deleted); otherwise nothing is written at Square and the answer is `status: preview` with what the sync would do (`preview`) and the tax check. A tax that does not match blocks the sync (`status: blocked`, `reason`). Audited `square.items.sync`.",
+        "description": "Runs what the job `square.items.sync` runs every 5 minutes (`drift: true`: what the nightly `square.items.drift` runs: everything read back). With SQUARE_WRITES_ENABLED and SQUARE_ITEMS_SYNC_ENABLED on, items are made, updated, archived or hidden (never deleted); otherwise nothing is written at Square and the answer is `status: preview` with what the sync would do (`preview`) and the tax check. A tax that does not match blocks the sync (`status: blocked`, `reason`). One writing run at a time: while the job (or another Sync now) is running the answer is `status: skipped` with `reason` \"A Square item sync is already running: try again in a minute\". Audited `square.items.sync`.",
         "operationId": "syncSquareItems",
         "requestBody": {
           "content": {
@@ -46513,6 +46521,13 @@
                               "description": "Oasis made this tax: the sync keeps it at Oasis’s rate",
                               "type": "boolean"
                             },
+                            "ownChanged": {
+                              "description": "Oasis’s own tax only: what was changed in Square besides its percentage (\"turned off\", \"included in the price, not added to it\", …); the next sync puts it back",
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
                             "percentage": {
                               "anyOf": [
                                 {
@@ -46597,6 +46612,7 @@
                             "percentage",
                             "wantPercentage",
                             "own",
+                            "ownChanged",
                             "detail",
                             "warnings",
                             "candidates"

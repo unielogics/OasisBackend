@@ -29,7 +29,7 @@ import {
   type LibraryService,
 } from '../../src/modules/catalog/square/desired.js'
 import { memoryLinkStore, runEngine, type LinkStore } from '../../src/modules/catalog/square/engine.js'
-import { planItems, planSetup, type RemoteView } from '../../src/modules/catalog/square/plan.js'
+import { planItems, planSetup, type LinkRow, type RemoteView } from '../../src/modules/catalog/square/plan.js'
 import { decideTax, type TaxCheck } from '../../src/modules/catalog/square/tax.js'
 import { FixedClock } from '../../src/platform/clock.js'
 
@@ -434,5 +434,27 @@ describe('the tax gate', () => {
     expect(res).toMatchObject({ status: 'blocked', blocked: t.detail, writes: 0 })
     expect(r.writes).toEqual([])
     expect((await tax()).status).toBe('create')
+  })
+
+  it('Oasis’s own tax: an equal percentage written another way plans nothing; a field staff changed plans update_tax naming it', () => {
+    const own = (o: Record<string, unknown>, pct = '7'): WireCatalogObject => ({
+      type: 'TAX',
+      id: 'OWNTAX',
+      present_at_all_locations: false,
+      present_at_location_ids: [LOC],
+      tax_data: { name: 'Sales tax', percentage: pct, inclusion_type: 'ADDITIVE', calculation_phase: 'TAX_SUBTOTAL_PHASE', enabled: true, applies_to_custom_amounts: false, ...o },
+    })
+    const check = (t: WireCatalogObject) => decideTax([t], { locationId: LOC, rateDbp: 7000, rounding: 'half_up', mode: 'auto', chosenTaxId: null, ownTaxId: 'OWNTAX' })
+    const link: LinkRow = { id: 'L-TAX', kind: 'tax', serviceId: null, classKey: null, categoryKey: null, objectId: 'OWNTAX', itemId: null, version: 1, desiredHash: null, contentHash: null, state: 'synced', adopted: false, error: null, pendingKey: null, pendingBody: null, pendingAt: null }
+    const lib = desiredLibrary(input({ active: [true, true, true, true, true], services: [] }))
+    const taxActions = (t: WireCatalogObject) => planSetup(lib, [link], check(t)).filter((a) => a.kind.endsWith('_tax'))
+    expect(taxActions(own({}, '7'))).toEqual([])
+    expect(taxActions(own({}, '7.0'))).toEqual([])
+    expect(taxActions(own({}, '7.000'))).toEqual([])
+    expect(taxActions(own({}, '6.625'))).toEqual([{ kind: 'update_tax', linkId: 'L-TAX', objectId: 'OWNTAX', percentage: '7', changed: [] }])
+    expect(taxActions(own({ enabled: false }))).toEqual([{ kind: 'update_tax', linkId: 'L-TAX', objectId: 'OWNTAX', percentage: '7', changed: ['turned off'] }])
+    expect(taxActions(own({ inclusion_type: 'INCLUSIVE', calculation_phase: 'TAX_TOTAL_PHASE' }))).toEqual([
+      { kind: 'update_tax', linkId: 'L-TAX', objectId: 'OWNTAX', percentage: '7', changed: ['included in the price, not added to it', 'computed on the total, not the subtotal'] },
+    ])
   })
 })

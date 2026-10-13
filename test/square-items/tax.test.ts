@@ -67,7 +67,31 @@ describe('decideTax', () => {
     expect(decideTax([tax('T1', { percentage: '6.63' })], input()).status).toBe('blocked')
     // Oasis's own tax wins and follows Oasis's rate
     const own = decideTax([tax('OWN', { percentage: '7' }), tax('T9', { percentage: '8' })], input({ ownTaxId: 'OWN' }))
-    expect(own).toMatchObject({ status: 'ok', taxId: 'OWN', own: true, percentage: '7', detail: expect.stringMatching(/the next sync sets it to 6.625%/) })
+    expect(own).toMatchObject({ status: 'ok', taxId: 'OWN', own: true, percentage: '7', ownChanged: [], detail: expect.stringMatching(/the next sync sets it to 6.625%/) })
+  })
+
+  it('Oasis’s own tax: every field Oasis owns is checked, not only the percentage; an equal percentage written another way is the same', () => {
+    const ownCheck = (o: Parameters<typeof tax>[1]) => decideTax([tax('OWN', o)], input({ ownTaxId: 'OWN', rateDbp: 7000 }))
+    expect(ownCheck({ percentage: '7' })).toMatchObject({ status: 'ok', own: true, ownChanged: [], detail: 'Oasis’s Square tax “Sales tax” is 7%, the same as Oasis' })
+    expect(ownCheck({ percentage: '7.0' })).toMatchObject({ status: 'ok', ownChanged: [], detail: expect.stringMatching(/is 7%, the same as Oasis/) })
+    const cases: Array<[Parameters<typeof tax>[1], string]> = [
+      [{ percentage: '7', enabled: false }, 'turned off'],
+      [{ percentage: '7', inclusion: 'INCLUSIVE' }, 'included in the price, not added to it'],
+      [{ percentage: '7', phase: 'TAX_TOTAL_PHASE' }, 'computed on the total, not the subtotal'],
+      [{ percentage: '7', at: ['LOTHER'] }, 'not used at the shop'],
+      [{ percentage: '7', custom: true }, 'also added to custom amounts'],
+    ]
+    for (const [o, what] of cases) {
+      const t = ownCheck(o)
+      expect(t, what).toMatchObject({ status: 'ok', taxId: 'OWN', own: true, ownChanged: [what] })
+      expect(t.detail, what).toBe(`Oasis’s Square tax “Sales tax” was changed in Square (${what}): the next sync puts it back`)
+    }
+    // several at once, and a percentage that is not Oasis's
+    const many = ownCheck({ percentage: '8', enabled: false, inclusion: 'INCLUSIVE' })
+    expect(many.ownChanged).toEqual(['turned off', 'included in the price, not added to it'])
+    expect(many.detail).toBe('Oasis’s Square tax “Sales tax” is 8% and was changed in Square (turned off; included in the price, not added to it): the next sync sets it to 7% and puts it back')
+    // the shop's taxes never get ownChanged (they are never written)
+    expect(decideTax([tax('T1')], input()).ownChanged).toEqual([])
   })
 
   it('adopt mode needs the picked tax to match; create mode always uses Oasis’s own', () => {
