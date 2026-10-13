@@ -638,6 +638,12 @@ again. Nothing else changes; the devices and the code are kept for next time.
 **Who shows on the kiosk**: every active or invited employee of the shop, unless "Shows on the kiosk" is unticked for them (Settings →
 Kiosk). Deactivated employees never show.
 
+**Team activity history (once, at the rollout of the release that brings it)**: the report counts what each person did from the day
+that release runs. To give it the history from before, run once on the server, from the release:
+`cd /opt/oasis/current/backend && sudo -u oasis bash -c 'set -a; . /etc/oasis/common.env; . /etc/oasis/api.env; set +a; pnpm staff-events:backfill'`
+(the same environment as `pnpm migrate up` in the restore steps, section 4; it reads the audit log and the staff texts;
+it prints how many it added; running it again adds nothing). Activity from before has no kiosk (there was none) and shows "Signed in".
+
 ## Appendix: where things are
 
 | Question | Answer |

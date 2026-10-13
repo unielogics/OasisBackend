@@ -2464,7 +2464,7 @@ sync keeps (`pending` until synced, always while `SQUARE_MEMBERSHIPS_ENABLED` is
 Tests: `test/square-db/dashboard-gaps.test.ts`, `test/square-db/billing-settings.test.ts`, `test/square-members/billing-view.test.ts`,
 `test/square/dashboard-gaps-pure.test.ts`.
 
-## 31. Kiosk mode (ADR 0180, wave K1a)
+## 31. Kiosk mode (ADR 0180, waves K1a and K1b)
 
 The shop's shared tablet stays open all day without an email login. A manager signs in once on the tablet and taps "Make this a
 kiosk" (a registered device: an HttpOnly device cookie); the 8-digit shop code then unlocks it into a **kiosk session** that lasts
@@ -2564,12 +2564,40 @@ the code), `kiosk.mode.on|off`, `kiosk.unlock`, `kiosk.unlock.failed`, `kiosk.un
 idle, 4 hours at most, `sessions.kiosk_device_id`); `GET /me` then answers `kioskDevice: {id, name}` (null elsewhere) and the dashboard
 shows a bar.
 
-### 31.4 Team activity (contract only in wave K1a)
+### 31.4 Team activity (`team.edit`; amounts need `pay.reports`)
 
-`GET /reports/employee-activity?from&to&employeeId` and `GET /reports/employee-activity/:employeeId/events?from&to&cursor` (`team.edit`;
-amounts null without `pay.reports`) have their final schemas (`EmployeeActivityResponse`, `EmployeeEventsResponse` in the API contract)
-and answer `501 NOT_BUILT` until wave K2b builds them from `staff_events`, the ledger and the messages.
+`GET /reports/employee-activity?from=YYYY-MM-DD&to=YYYY-MM-DD[&employeeId]` answers `EmployeeActivityResponse`
+`{from, to, tz, amounts, employees, cars?}`. The range is whole business days in the shop's time zone (from's midnight to the midnight
+after `to`, 23 or 25 hours on a daylight-saving day), at most 31 days: a bad date, an end before the start or more days answer
+`422 VALIDATION_FAILED` (`errors[0].path` `from` or `to`).
 
-Tests: `test/kiosk/*.test.ts` (code rules, lock time, throttle, permissions, principals, the HTTP flows, event streams),
+- `employees`: everyone active or invited at the shop, and anyone else with activity in the range, by first name; each
+  `{id, name, initials, avatarColor, title, status, totals, days}`, `days` holding only the days with activity.
+- Counts (`totals` and each day): `checkIns` (arrive, and a drag onto a bay from booked or confirmed), `baysStarted` (assign-bay and
+  start), `completed`, `pickedUp`, `readyTexts` (notify-ready), `bookings`, `walkIns`, `addons`, `sizeChanges`, `checklistTasks` (by
+  task: "Check all" of 6 is 6), `photos` (photos and written notes) from `staff_events` (kiosk and signed in); `textsSent` from
+  `messages` (out, sent by the employee as staff); `payments {count, amountCents}` from the ledger (`pay` events done by the employee;
+  one a void cancels is never counted; `amountCents` null without `pay.reports`); `bayMinutes {total, avg, cars}` (completed minus
+  cleaning started, whole minutes, for the cars the employee was the worker of when completed).
+- With `employeeId` (404 when not of the shop): that employee alone, and `cars`: every car they touched in the range (a staff event, or
+  the worker of a car finished in it) `{appointmentId, seq, customer, vehicle, date, worker, steps: [{kind, at, by, via}], bayMinutes,
+  paidCents}`, the steps by whoever did them, `paidCents` null without `pay.reports`.
+
+`GET /reports/employee-activity/:employeeId/events?from&to[&cursor]` answers `{items, nextCursor}`: their staff events, newest first, 50
+a page (`nextCursor` back as `cursor`; null on the last page; a bad cursor `422`), each `{id, at, kind, via, deviceName, appointmentId,
+customerId, customer, amountCents, messageId, meta}`, `amountCents` null without `pay.reports`. A kiosk gets `403 KIOSK_FORBIDDEN` for
+both.
+
+**Where the events come from (wave K1b).** Every command with an acting employee (the tapped employee on a kiosk, or a signed-in
+person's own record) writes one `staff_events` row in its transaction, linked to its audit row: the car steps, a booking (`book` or
+`walk_in`), a new client, add-ons, a size change, a checklist tick or "Check all", a photo or note, a payment (cash, card, store
+credit, a saved card when its payment is recorded), a tip, a receipt, a payment link, a text and a check-in link. A kiosk putting a car
+in a bay also becomes its worker (`worker_set`, "Worker: Marco R." in the history); a signed-in person never changes the worker that
+way. Texts sent by staff, one checklist tick and a check-in link are now audited too (`message.staff_send`, `appointment.checklist.item`,
+`appointment.arrival_link`). `PATCH /appointments/:id` accepts an invited employee as the worker (of the shop only). History:
+`pnpm staff-events:backfill`, once.
+
+Tests: `test/kiosk/*.test.ts` (code rules, lock time, throttle, permissions, principals, the HTTP flows, event streams, attribution in
+every command path generated from the route list, the report),
 `test/authz-matrix/kiosk-matrix.test.ts` (generated: every route against a kiosk, the contract marks, the boot check),
 `test/authz-matrix/matrix.test.ts` (the two public routes and the kiosk-only routes).
