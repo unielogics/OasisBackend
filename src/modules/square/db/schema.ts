@@ -29,6 +29,11 @@ export interface SquareStateTable {
   square_location_id: string | null
   merchant_id: string | null
   events_enabled_at: Date | null
+  /**
+   * The connection point (sandbox run F2): the first successful Test connection of this environment. A counter payment Square made
+   * before it is the shop's history: mirrored as ignored ("before connection"), never queued or alerted.
+   */
+  connected_at: Date | null
   webhook_subscription_id: string | null
   webhook_checked_at: Date | null
   last_webhook_at: Date | null

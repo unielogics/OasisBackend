@@ -15,6 +15,7 @@ export interface SquareStatePatch {
   square_location_id?: string | null
   merchant_id?: string | null
   events_enabled_at?: Date | null
+  connected_at?: Date | null
   webhook_subscription_id?: string | null
   webhook_checked_at?: Date | null
   last_webhook_at?: Date | null
@@ -50,6 +51,7 @@ const LEARNED = {
   square_location_id: null,
   merchant_id: null,
   events_enabled_at: null,
+  connected_at: null,
   webhook_subscription_id: null,
   webhook_checked_at: null,
   last_webhook_at: null,

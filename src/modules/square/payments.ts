@@ -16,6 +16,7 @@ import { addDays, toBizDate } from '../../platform/time.js'
 import { calcOf, lockInvoice } from '../payments/repository.js'
 import { classifySquarePayment, invoiceNoIn, posCodeIn, type ClassifyContext, type LinkRef, type PosIntentRef } from './classify.js'
 import type { SquareCandidate, SquarePaymentsTable } from './db/schema.js'
+import { currentSquareState } from './db/state.js'
 import type { SquarePaymentFacts } from './facts.js'
 import { SquareLedgerOps, SquareStaleDecision, payKey, type SquareActor } from './ledger.js'
 import { planSquarePayment, rankCandidates, type Identity, type MatchContext, type MatchEntry, type MatchInvoice } from './matcher.js'
@@ -357,6 +358,12 @@ async function decide(tx: Tx, d: SquarePaymentDeps, f: SquarePaymentFacts, o: De
     case 'pos_intent':
     case 'counter': {
       const classification = c.kind
+      // a sale the shop made before Square was connected to Oasis (the first catch-up reads a day back, the reconcile 72 hours):
+      // history, never queued or alerted (sandbox run F2)
+      if (c.kind === 'counter' && (await beforeConnection(tx, d, f))) {
+        await setClass('counter', { match_state: 'ignored', ignore_reason: 'other', ignore_note: BEFORE_CONNECTION, decided_by: 'Square', decided_at: now })
+        return 'ignored'
+      }
       const after = row.match_after ?? new Date(f.createdAt.getTime() + d.env.SQUARE_MATCH_DELAY_SECONDS * 1000)
       if (!o.force && now.getTime() < after.getTime()) {
         await setClass(classification, { match_after: after })
@@ -372,6 +379,15 @@ async function decide(tx: Tx, d: SquarePaymentDeps, f: SquarePaymentFacts, o: De
       return runMatcher(tx, d, ops, f, row, c.kind === 'pos_intent' ? c.intent : null, o.payer)
     }
   }
+}
+
+export const BEFORE_CONNECTION = 'before connection: a sale from before Square was connected to Oasis'
+
+/** The payment was made before the connection point (square_state.connected_at of this environment; none: no cut). */
+async function beforeConnection(tx: Tx, d: SquarePaymentDeps, f: SquarePaymentFacts): Promise<boolean> {
+  if (d.env.SQUARE_PROVIDER !== 'sim' && !d.env.SQUARE_ENVIRONMENT) return false
+  const state = await currentSquareState(tx, d.locationId, { SQUARE_PROVIDER: d.env.SQUARE_PROVIDER, SQUARE_ENVIRONMENT: d.env.SQUARE_ENVIRONMENT ?? 'sandbox' })
+  return !!state?.connected_at && f.createdAt.getTime() < state.connected_at.getTime()
 }
 
 async function runMatcher(

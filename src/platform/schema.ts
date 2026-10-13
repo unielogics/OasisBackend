@@ -88,6 +88,8 @@ export interface WebhookLogTable {
   /** 'unparsed': signed, but an event Oasis does not handle or could not read (body cut to 4 KB, purged after 7 days). */
   status: Generated<'received' | 'processed' | 'ignored' | 'failed' | 'unparsed'>
   error: string | null
+  /** How many times processing failed (the Square catch-up backs failed rows off by it; review Q4 SQ-SEM-5-R1). */
+  attempts: Generated<number>
 }
 
 export interface NotificationsTable {

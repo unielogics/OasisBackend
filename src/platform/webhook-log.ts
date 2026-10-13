@@ -53,10 +53,16 @@ export class DbWebhookLog {
       .execute()
   }
 
+  /** Closes the row; a failure also counts one more attempt (processed_at is then the last try). */
   async finish(externalId: string, status: WebhookLogStatus, now: Date, error?: string): Promise<void> {
     await this.db
       .updateTable('webhook_log')
-      .set({ status, processed_at: now, error: error ? error.slice(0, 500) : null })
+      .set((eb) => ({
+        status,
+        processed_at: now,
+        error: error ? error.slice(0, 500) : null,
+        ...(status === 'failed' ? { attempts: eb('attempts', '+', 1) } : {}),
+      }))
       .where('provider', '=', this.provider)
       .where('external_id', '=', externalId)
       .execute()
