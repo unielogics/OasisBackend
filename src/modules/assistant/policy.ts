@@ -132,11 +132,21 @@ export function phrasePattern(phrase: string): RegExp | null {
   return new RegExp(`(?<![\\p{L}\\p{N}])${parts.join(' ')}(?![\\p{L}\\p{N}])`, 'u')
 }
 
-/** The listed phrases a text holds (case, accents and punctuation ignored; whole words), in the list's order. */
+/**
+ * The listed phrases a text holds (case, accents and punctuation ignored; whole words), in the list's order. Read sentence by
+ * sentence (the sentence ends of guard.ts sentencesOf): "Sorry! About the wait" holds no "sorry about", so the guard never flags
+ * what the engine's sentence drop could not find (verifier F1).
+ */
 export function phrasesIn(text: string, phrases: readonly string[]): string[] {
-  const folded = foldPhrase(text)
-  if (folded === '') return []
-  return phrases.filter((p) => phrasePattern(p)?.test(folded) === true)
+  const folded = text
+    .split(/(?<=[.!?])\s+/)
+    .map(foldPhrase)
+    .filter((s) => s !== '')
+  if (folded.length === 0) return []
+  return phrases.filter((p) => {
+    const re = phrasePattern(p)
+    return re !== null && folded.some((s) => re.test(s))
+  })
 }
 
 /** The first handoff topic one of the client's texts names, or null. */

@@ -14,7 +14,9 @@ import { CORE_RULES, OWNER_BLOCK_HEADER, OWNER_ONLY_REMINDER } from '../../src/m
 import { AssistantRuntime } from '../../src/modules/assistant/runtime.js'
 import { runTurn, type TurnResult } from '../../src/modules/assistant/turn.js'
 import { BOOKING_LINKS_OFF_RULE } from '../../src/modules/assistant/tools/availability.js'
-import { SPANISH_HANDOFF_TEXT, TOPIC_HANDOFF_TEXTS } from '../../src/modules/assistant/lang.js'
+import { SPANISH_HANDOFF_TEXT, TOPIC_HANDOFF_AFTER_PROPOSAL_TEXTS, TOPIC_HANDOFF_TEXTS } from '../../src/modules/assistant/lang.js'
+import { openTimes } from '../../src/modules/assistant/tools/common.js'
+import { grantTrust } from '../../src/modules/identity/trust.js'
 import { useWorld } from '../messaging-db/world.js'
 
 const w = useWorld({
@@ -28,7 +30,7 @@ beforeAll(async () => {
 })
 
 beforeEach(async () => {
-  await sql`truncate table assistant_conversations, leads, sms_opt_outs, client_links cascade`.execute(w.t.db)
+  await sql`truncate table assistant_conversations, leads, sms_opt_outs, client_links, assistant_pending_actions, phone_trust cascade`.execute(w.t.db)
   await sql`delete from settings where key like 'assistant.%'`.execute(w.t.db)
   await setting('assistant.enabled', true)
   await setting('assistant.stage', 'everyone')
@@ -164,6 +166,50 @@ describe('a turn under the owner’s limits (ADR 0174 §3b)', () => {
     expect(p.r.status).toBe('handed_off')
     expect((await turnRow(p.conversationId)).error).toBe('guard:avoid_word')
     expect(p.sent.join(' ')).not.toMatch(/cheap/i)
+  })
+
+  it('a phrase to avoid split by a sentence end is not that phrase: the reply goes out as written (verifier F1)', async () => {
+    await limits({}, { avoidWords: ['sorry about'] })
+    const p = await play('Are you open today?', [simText('Sorry! About the wait, we are open today until 6.')])
+    expect(p.r.status).toBe('replied')
+    expect(p.model).toHaveLength(1)
+    expect(p.sent.at(-1)).toContain('Sorry! About the wait, we are open today until 6.')
+    expect((await conversation(p.conversationId)).handoff_state).toBeNull()
+    expect(JSON.stringify((await turnRow(p.conversationId)).transcript)).not.toContain('avoid_word')
+  })
+
+  it('a handoff topic after a texted proposal: the proposal is canceled, the reply names the visit too, the team is told (verifier F2)', async () => {
+    await limits({}, { handoffTopics: ['insurance claims'] })
+    await setting('assistant.actions_enabled', true)
+    const maria = w.customer('Maria Delgado')
+    await w.tx((tx) => grantTrust(tx, { locationId: w.locationId, phone: maria.phone, customerId: maria.id, verifiedBy: 'code', now: w.clock.now() }))
+    const rt = new AssistantRuntime({ db: w.t.db, clock: w.clock, newId: w.newId, env: w.env, messaging: w.rt, provider: new SimAiProvider([]) })
+    const service = (await rt.deps.facts.get(w.locationId)).catalog.items.find((i) => i.kind === 'package' && !i.quoteOnly)!
+    const at = new Date(w.clock.now().getTime() + 3 * 3600_000)
+    let slot: { date: string; startMin: number } | null = null
+    for (let d = 1; d <= 7 && !slot; d++) {
+      const date = addDays(toBizDate(at, 'America/New_York'), d)
+      const open = await openTimes(w.t.db, { locationId: w.locationId, tz: w.env.BUSINESS_TZ, now: at, date, durationMin: service.durationMin ?? 60, vip: false, customerId: null })
+      if (open.slots.length > 0) slot = { date, startMin: open.slots[0]!.startMin }
+    }
+    const p = await play('Book me a wash tomorrow, and I also have an insurance claim question', [
+      simToolUse('propose_booking', { serviceKey: service.key, addonKeys: [], date: slot!.date, startMin: slot!.startMin, vehicle: null, vehicleClass: null }),
+      simText('{confirm}.'),
+    ])
+    expect(p.r.status).toBe('replied')
+    expect((await calls(p.conversationId)).filter((c) => c.tool !== 'policy_judge').map((c) => [c.tool, c.outcome])).toEqual([['propose_booking', 'ok']])
+    // the proposal's text went out, then the reply: the topic line that names the visit too (never the dangling "{confirm}" pointer)
+    expect(p.sent.some((t) => /to confirm/.test(t))).toBe(true)
+    expect(p.sent.at(-1)).toContain(TOPIC_HANDOFF_AFTER_PROPOSAL_TEXTS.en)
+    expect(p.sent.at(-1)).not.toContain('I just texted you the details')
+    expect(await conversation(p.conversationId)).toEqual({ handoff_state: 'open', handoff_reason: 'policy' })
+    // the reply number no longer runs anything, and the team's alert says so
+    const pending = await w.t.db.selectFrom('assistant_pending_actions').select(['state']).where('phone_e164', '=', p.phone).execute()
+    expect(pending.length).toBe(1)
+    expect(pending[0]!.state).not.toBe('pending')
+    const alert = await w.t.db.selectFrom('notifications').select('body').where('kind', '=', 'assistant.handoff').orderBy('created_at', 'desc').executeTakeFirstOrThrow()
+    expect(alert.body).toContain('insurance claims')
+    expect(alert.body).toContain('was canceled')
   })
 
   it('a handoff topic the model did not hand off: the server’s fixed line replaces the reply and the chat goes to the team', async () => {

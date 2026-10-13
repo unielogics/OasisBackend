@@ -391,6 +391,9 @@ async function answer(d: PracticeDeps, turn: TurnRow): Promise<PracticeTurnStatu
   }
   state.lines = state.lines.slice(-8)
 
+  // the live chat ends a proposal waiting for its reply number whenever a handoff opens (inbox.openHandoff): practice mirrors it
+  if (r.kind === 'handoff' || (r.kind === 'reply' && r.handoff !== null)) state.pending = null
+
   // ---- the preview: what the client would get
   const badges = badgesOf(transcript, calls, links, sink, r)
   let status: PracticeTurnStatus

@@ -278,6 +278,19 @@ describe('the owner’s lists (ADR 0174 §3b)', () => {
     expect(PROBLEM_HINTS.avoid_word).toContain('never to use some words')
   })
 
+  it('a phrase never spans two sentences: the guard, the sentence drop and the handoff topics read sentence by sentence (verifier F1)', () => {
+    // "Sorry! About the wait" holds no "sorry about": the sentence end breaks the phrase
+    expect(phrasesIn('Sorry! About the wait: we open at 9 tomorrow.', ['sorry about'])).toEqual([])
+    expect(phrasesIn('Sorry. About your car, it is ready.', ['sorry about'])).toEqual([])
+    expect(phrasesIn('Hi! Sorry about the wait.', ['sorry about'])).toEqual(['sorry about'])
+    expect(phrasesIn('So sorry about the wait! We open at 9.', ['sorry about'])).toEqual(['sorry about'])
+    expect(guardReply({ text: 'Sorry! About the wait, we are open today until 6.', website: 'https://oasisautospanj.com', avoidWords: ['sorry about'] }).kind).toBe('ok')
+    const v = guardReply({ text: 'Sorry about the wait! We are open today until 6.', website: 'https://oasisautospanj.com', avoidWords: ['sorry about'] })
+    expect(v.kind === 'fix' && v.problems).toEqual(['avoid_word'])
+    expect(handoffTopicIn(['I filed with insurance. Claims take long, right?'], ['insurance claims'])).toBeNull()
+    expect(handoffTopicIn(['Question. Insurance claims, do you take them?'], ['insurance claims'])).toBe('insurance claims')
+  })
+
   it('the knowledge is never named as a source (META)', () => {
     expect(metaNotes('The shop knowledge says we have wifi.')).not.toEqual([])
     expect(metaNotes('According to the corrections, yes.')).not.toEqual([])

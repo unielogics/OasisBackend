@@ -43,10 +43,11 @@ import {
   type GuardProblem,
   type ReplySegment,
 } from './guard.js'
-import { CARD_LINES, FALLBACK_TEXTS, SAFETY_LINES, TOPIC_HANDOFF_TEXTS, type ConvoLang } from './lang.js'
+import { CARD_LINES, FALLBACK_TEXTS, SAFETY_LINES, TOPIC_HANDOFF_AFTER_PROPOSAL_TEXTS, TOPIC_HANDOFF_TEXTS, type ConvoLang } from './lang.js'
 import { JUDGE_HINTS, runJudge } from './judge.js'
 import { judgeRewriteInstruction, REPLY_NOW_TEXT, rewriteInstruction, type TurnContextData } from './prompt.js'
 import { runToolRound, type RecordCall } from './tool-runner.js'
+import { effectsOf } from './tools/effects-live.js'
 import { redactText, type Transcript } from './transcript.js'
 import type { TurnLinks } from './turn-links.js'
 
@@ -574,9 +575,20 @@ export async function runEngine(d: EngineDeps, i: EngineInput): Promise<EngineRe
   const topic = links.requested() ? null : handoffTopicIn(i.freshClientTexts ?? [], i.policy?.behavior.handoffTopics ?? [])
   if (topic !== null) {
     links.drop()
-    links.handoff('policy', `The client asked about "${oneLine(topic, 80)}" (Settings → Oasis AI: always hand to the team).`)
+    // a proposal's reply-number text already went out in this turn: the handoff ends it as handoff_to_staff does (the reply number
+    // no longer runs anything once the chat is the staff's), the team is told, and the line names the visit (verifier F2)
+    if (confirmTexted)
+      await effectsOf(ctx)
+        .cancelPending(ctx)
+        // the handoff that opens next ends it too (inbox.openHandoff): a failure here only leaves that to it
+        .catch((e: unknown) => d.log.warn({ conversation: conv.id, turn: turnId, error: String(e) }, 'could not cancel the proposal before the topic handoff'))
+    links.handoff(
+      'policy',
+      `The client asked about "${oneLine(topic, 80)}" (Settings → Oasis AI: always hand to the team).` +
+        (confirmTexted ? ' The visit change Oasis AI texted them to confirm in this turn was canceled (its reply number no longer works): help them with it too.' : ''),
+    )
     transcript.add({ kind: 'guard', verdict: 'handoff_topic', problems: ['handoff_topic'] })
-    const line = TOPIC_HANDOFF_TEXTS[lang]
+    const line = (confirmTexted ? TOPIC_HANDOFF_AFTER_PROPOSAL_TEXTS : TOPIC_HANDOFF_TEXTS)[lang]
     return { kind: 'reply', reply: line, replyRaw: line, rendered: [], safety: false, card, handoff: links.handoffRequest, ...meter() }
   }
   // ADR 0174 §3b: with an ability switched off, a reply that tells the client a team member will text them must reach the team

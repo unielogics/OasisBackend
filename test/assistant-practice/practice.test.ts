@@ -11,6 +11,8 @@ import type { AiConverseRequest } from '../../src/integrations/ports/ai.js'
 import { openTimes } from '../../src/modules/assistant/tools/common.js'
 import type { AnyAssistantTool, ToolRegistry } from '../../src/modules/assistant/contract.js'
 import { parsePracticeState } from '../../src/modules/assistant/practice/effects.js'
+import { DEFAULT_BEHAVIOR } from '../../src/modules/assistant/policy.js'
+import { TOPIC_HANDOFF_AFTER_PROPOSAL_TEXTS } from '../../src/modules/assistant/lang.js'
 import { createToolRegistry } from '../../src/modules/assistant/tools/index.js'
 import { addDays, toBizDate } from '../../src/platform/time.js'
 import { useWorld } from '../messaging-db/world.js'
@@ -230,5 +232,37 @@ describe('the practice runtime writes nothing outside practice (ADR 0174 §4c)',
     await say(w, practiceDeps(w, readDb(), { provider: p2, judge: new SimAiProvider() }), without, 'Is there a lounge?')
     expect(JSON.stringify(p1.requests[0]!.system)).toContain('> We have a lounge with free-to-use wifi.')
     expect(JSON.stringify(p2.requests[0]!.system)).not.toContain('lounge with')
+  })
+
+  it('a handoff topic after a texted proposal: the proposal is canceled as live does, the reply names the visit too (verifier F2)', async () => {
+    const s = await shop()
+    await sql`insert into settings (location_id, key, value) values (${w.locationId}, 'assistant.behavior', ${JSON.stringify({ ...DEFAULT_BEHAVIOR, handoffTopics: ['insurance claims'] })}::jsonb)
+      on conflict (location_id, key) do update set value = excluded.value, version = settings.version + 1`.execute(w.t.db)
+    const sessionId = await newSession(w, { persona: 'new_texter', verified: true })
+    const provider = scripted([
+      simToolUse('propose_booking', { serviceKey: s.service.key, addonKeys: [], date: s.tomorrow, startMin: s.startMin, vehicle: null, vehicleClass: null }, 'p1'),
+      (req) => (after(req).includes('confirmationTexted') ? simText('{confirm}.') : simText('The team can help with that.')),
+    ])
+    const r = await say(w, practiceDeps(w, readDb(), { provider, judge: new SimAiProvider() }), sessionId, 'Book me a wash tomorrow, and I also have an insurance claim question')
+    expect(r.status).toBe('replied')
+    const t = await turnRow(r.turnId)
+    expect(JSON.stringify(t.extra_texts)).toMatch(/Reply #### to confirm/)
+    expect(t.reply_text).toContain(TOPIC_HANDOFF_AFTER_PROPOSAL_TEXTS.en)
+    expect(JSON.stringify(t.badges)).toContain('Handed to staff')
+    const session = await w.t.db.selectFrom('assistant_practice_sessions').select('state').where('id', '=', sessionId).executeTakeFirstOrThrow()
+    expect(parsePracticeState(session.state).pending).toBeNull()
+  })
+
+  it('any handoff ends a proposal waiting for its reply number, as the live chat does (the fallback after a proposal)', async () => {
+    const s = await shop()
+    const sessionId = await newSession(w, { persona: 'new_texter', verified: true })
+    const provider = scripted([
+      simToolUse('propose_booking', { serviceKey: s.service.key, addonKeys: [], date: s.tomorrow, startMin: s.startMin, vehicle: null, vehicleClass: null }, 'q1'),
+      { error: 'invalid_request', message: 'the model failed' },
+    ])
+    const r = await say(w, practiceDeps(w, readDb(), { provider, judge: new SimAiProvider() }), sessionId, 'Book me a wash tomorrow')
+    expect(r.status).toBe('handed_off')
+    const session = await w.t.db.selectFrom('assistant_practice_sessions').select('state').where('id', '=', sessionId).executeTakeFirstOrThrow()
+    expect(parsePracticeState(session.state).pending).toBeNull()
   })
 })
