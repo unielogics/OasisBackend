@@ -8,26 +8,20 @@
 // is recorded or texted (W4c re-review 2, N3).
 // A cancel inside the late window or with money held on the visit is the staff's (handoff).
 import { z } from 'zod/v4'
-import { transaction } from '../../../platform/db.js'
-import { AppError } from '../../../platform/errors.js'
 import { toBizDate, minutesOfDay } from '../../../platform/time.js'
 import { listVehicles } from '../../customers/service.js'
-import { attachConfirmMessage, createPendingAction } from '../../identity/pending-actions.js'
-import type { PendingActionKind } from '../../identity/schema.js'
-import type { JsonValue } from '../../../platform/schema.js'
-import { loadCustomerTarget } from '../../messaging/db/recipients.js'
 import { loadBoardServices } from '../../public/availability-loader.js'
-import { TOOL_MIN_TRUST, type AssistantTool, type ToolContext, type ToolInputs, type ToolOutcome } from '../contract.js'
+import { TOOL_MIN_TRUST, type AssistantTool, type ProposeEffect, type ToolContext, type ToolInputs, type ToolOutcome } from '../contract.js'
 import { cancelBlockOf, serviceWithAddons, type BookPayload, type CancelPayload, type ReschedulePayload } from '../actions/plan.js'
 import { bookablePackage, vipFor } from './availability.js'
-import { actionConfirmText, actionSummaryIn, conversationVoice, markDisclosed, whenIn, withDisclosure } from '../lang.js'
+import { actionSummaryIn, conversationVoice, whenIn } from '../lang.js'
+import { effectsOf, HANDED_OFF, NEEDS_VERIFY } from './effects-live.js'
 import {
   aiBookingsAhead,
   BIZ_DATE,
   fail,
   json,
   MAX_AI_BOOKINGS_AHEAD,
-  ok,
   ownAppointment,
   slotVerdict,
   whenWords,
@@ -39,16 +33,7 @@ import {
 const Ref = z.enum(['A1', 'A2', 'A3'])
 const StartMin = z.number().int().min(0).max(24 * 60 - 1)
 
-const NEEDS_VERIFY = 'This needs a quick verification first: send the client a verify link (send_link kind verify).'
 const OFF = 'Booking, moving or canceling by text is switched off right now. Offer the booking link or a team member.'
-const STAFF_HOLDS = 'A team member has this conversation now: nothing was proposed. Tell the client a team member will text them.'
-const HANDED_OFF = 'This conversation was handed to a team member in this turn: nothing was proposed. Tell the client a team member will text them.'
-
-class Refused extends Error {
-  constructor(readonly outcome: ToolOutcome) {
-    super('refused')
-  }
-}
 
 /** The pre-checks every action shares: actions on, no handoff asked for in this turn, a client, a trust the server agrees with. */
 function precheck(ctx: ToolContext): ToolOutcome | null {
@@ -63,91 +48,10 @@ function slotFailure(v: Extract<SlotVerdict, { ok: false }>): ToolOutcome {
   return fail('invalid', v.message, { detail: json({ openTimesThatDay: v.open }) })
 }
 
-/**
- * Records the proposal and texts its reply number in one transaction: the text is queued with the number as a secretVar (masked in
- * the message row) and linked to the action. When the text cannot be queued (opted out, no recent text from them, ...) nothing is kept.
- */
-async function propose(
-  ctx: ToolContext,
-  o: { kind: PendingActionKind; summary: string; payload: { [key: string]: JsonValue }; appointmentId: string | null },
-): Promise<ToolOutcome> {
-  const customerId = ctx.identity.customerId!
+/** Records the proposal and texts its reply number (the context's effects, ADR 0174 §4b), unless the turn asked for a handoff. */
+async function propose(ctx: ToolContext, o: ProposeEffect): Promise<ToolOutcome> {
   if (ctx.handoffRequested()) return fail('unavailable', HANDED_OFF)
-  try {
-    await transaction(ctx.db, async (tx) => {
-      let proposal
-      try {
-        proposal = await createPendingAction(
-          tx,
-          { newId: ctx.newId, now: ctx.now },
-          { locationId: ctx.identity.locationId, conversationId: ctx.conversationId, customerId, phone: ctx.identity.phone, kind: o.kind, payload: o.payload },
-        )
-      } catch (e) {
-        if (e instanceof AppError && e.code === 'IDENTITY_NOT_TRUSTED') throw new Refused(fail('needs_verification', NEEDS_VERIFY))
-        // AGENT or a staff text arrived while this turn ran (W4c re-review L2): the chat is the staff's, nothing is proposed
-        if (e instanceof AppError && e.code === 'IDENTITY_STAFF_HOLDS_CHAT') throw new Refused(fail('unavailable', STAFF_HOLDS))
-        // too many wrong reply numbers from this number today (W4c): no new number to guess, a person takes over
-        if (e instanceof AppError && e.code === 'IDENTITY_TOO_MANY_TRIES')
-          throw new Refused(
-            withHandoff(
-              ctx,
-              fail('rate_limited', 'Too many wrong confirmation numbers from this number today. Tell the client a team member will text them shortly.'),
-              'cannot_help',
-              'Several wrong confirmation numbers came from this number today, so the assistant stopped proposing bookings or changes by text.',
-            ),
-          )
-        throw e
-      }
-      const target = await loadCustomerTarget(tx, ctx.identity.locationId, customerId)
-      if (!target || target.recipient.phone !== ctx.identity.phone)
-        throw new Refused(fail('not_allowed', 'This number is not the client’s number on file.'))
-      // W4b X1: when this is the first text of the conversation's AI flow (a trusted client's first text can be a proposal), it
-      // carries the automated-assistant disclosure and the STOP footer, and the reply that follows does not repeat them; X5: in the
-      // conversation's language
-      const voice = await conversationVoice(tx, ctx.conversationId)
-      const body = actionConfirmText(o.summary, voice.lang)
-      const out = await ctx.queue.enqueueFor(tx, {
-        locationId: ctx.identity.locationId,
-        customerId,
-        recipient: target.recipient,
-        appointmentId: o.appointmentId,
-        text: voice.disclosed ? body : withDisclosure(body, voice.lang),
-        klass: 'action_confirm',
-        tag: 'action_confirm',
-        secretVars: { code: proposal.code },
-        purpose: `assistant-${o.kind}-confirm`,
-        senderKind: 'ai',
-        dedupeKey: `action-confirm:${proposal.id}`,
-      })
-      if (!out.queued)
-        throw new Refused(
-          fail(
-            'unavailable',
-            'The confirmation text could not be sent to this number. Offer a team member instead.',
-          ),
-        )
-      if (!voice.disclosed) await markDisclosed(tx, ctx.conversationId, ctx.now)
-      await attachConfirmMessage(tx, proposal.id, out.messageId)
-      await ctx.audit(tx, `assistant.${o.kind}.proposed`, {
-        entityType: o.appointmentId ? 'appointment' : 'customer',
-        entityId: o.appointmentId ?? customerId,
-        after: { kind: o.kind, summary: o.summary, expiresAt: proposal.expiresAt.toISOString() },
-      })
-    })
-  } catch (e) {
-    if (e instanceof Refused) return e.outcome
-    throw e
-  }
-  return ok({
-    proposed: o.kind,
-    summary: o.summary,
-    confirmationTexted: true,
-    expiresInMinutes: 15,
-    // the server's own text already says how to confirm; the policy judge fails any reply of the model that asks for a number they
-    // received (design 3c rubric (c)), so the model only points at that text
-    instruction:
-      'The server just texted the client this summary with how to confirm it. In your reply write the placeholder {confirm} as its own sentence ("{confirm}."): the server writes "I just texted you the details with how to confirm." Add nothing else about confirming, and never mention, ask for or repeat any number or code. Nothing is booked or changed until they confirm.',
-  })
+  return effectsOf(ctx).propose(ctx, o)
 }
 
 export const proposeBooking: AssistantTool<ToolInputs['propose_booking']> = {
@@ -218,7 +122,7 @@ export const proposeBooking: AssistantTool<ToolInputs['propose_booking']> = {
     })
     if (!v.ok) return slotFailure(v)
     const today = toBizDate(ctx.now, ctx.scheduling.tz)
-    const { lang } = await conversationVoice(ctx.db, ctx.conversationId)
+    const lang = ctx.lang ?? (await conversationVoice(ctx.db, ctx.conversationId)).lang
     const service = serviceWithAddons(found.item.name, addons.map((a) => a.name))
     const payload: BookPayload = {
       serviceKey: found.item.key,
@@ -266,7 +170,7 @@ export const proposeReschedule: AssistantTool<ToolInputs['propose_reschedule']> 
     const today = toBizDate(ctx.now, tz)
     if (toBizDate(a.start, tz) === input.date && minutesOfDay(a.start, tz) === input.startMin) return fail('invalid', 'That is already the time of that visit.')
     const payload: ReschedulePayload = { appointmentId: a.id, serviceName: a.serviceName, date: input.date, startMin: input.startMin }
-    const { lang } = await conversationVoice(ctx.db, ctx.conversationId)
+    const lang = ctx.lang ?? (await conversationVoice(ctx.db, ctx.conversationId)).lang
     return propose(ctx, {
       kind: 'reschedule',
       summary: actionSummaryIn(lang, { kind: 'reschedule', service: a.serviceName, when: whenIn(lang, input.date, input.startMin, today) }),
@@ -302,7 +206,7 @@ export const proposeCancel: AssistantTool<ToolInputs['propose_cancel']> = {
         `The client asked by text to cancel their ${a.serviceName} ${when} (${block === 'late' ? 'inside the free-cancellation window' : 'money is held on the visit'}). Reason: ${input.reason.slice(0, 120)}`,
       )
     const payload: CancelPayload = { appointmentId: a.id, serviceName: a.serviceName, reason: input.reason.replace(/\s+/g, ' ').trim().slice(0, 200) }
-    const { lang } = await conversationVoice(ctx.db, ctx.conversationId)
+    const lang = ctx.lang ?? (await conversationVoice(ctx.db, ctx.conversationId)).lang
     const summary = actionSummaryIn(lang, { kind: 'cancel', service: a.serviceName, when: lang === 'en' ? when : whenIn(lang, toBizDate(a.start, tz), minutesOfDay(a.start, tz), today) })
     return propose(ctx, { kind: 'cancel', summary, payload, appointmentId: a.id })
   },

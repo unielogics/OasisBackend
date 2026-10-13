@@ -39,6 +39,7 @@ import { renderShopFacts } from './facts.js'
 import { looksLikeCardNumber } from './guard.js'
 import { CARD_LINES, detectLanguage, isConvoLang, SAFETY_LINES, storeLanguage, withDisclosure, type ConvoLang } from './lang.js'
 import { whenWords } from './tools/common.js'
+import { liveToolEffects } from './tools/effects-live.js'
 import { HANDOFF_SUMMARIES, markUnanswered, openTurnHandoff, recipientOf, sendFallback, type ConversationRef, type HandoffDeps } from './handoff.js'
 import type { AssistantGate, AssistantInbox } from './ports.js'
 import { asksForFree, buildSystem, declinesPlans, PROMPT_VERSION, renderConversation, renderTurnContext } from './prompt.js'
@@ -469,6 +470,9 @@ export async function runTurn(d: TurnDeps, conversationId: string): Promise<Turn
       state.threadCustomerId = again.threadCustomerId
       await d.db.updateTable('assistant_conversations').set({ customer_id: customerId, updated_at: d.clock.now() }).where('id', '=', conv.id).execute()
     },
+    // ADR 0174 §4b: the tools write through the live effects, and their own words follow the language this turn answers in
+    effects: liveToolEffects,
+    lang,
   }
 
   try {

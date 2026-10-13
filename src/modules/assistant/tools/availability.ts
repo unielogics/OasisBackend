@@ -2,9 +2,7 @@
 // website's board reads (online channel: lead time, booking window, paused days). VIP-held times and the VIP window count only for a
 // trusted VIP client; anyone else sees what the public board shows. No names, no other bookings, no ids.
 import { z } from 'zod/v4'
-import { transaction } from '../../../platform/db.js'
 import { addDays, diffDays, fmtT, isValidBizDate, toBizDate } from '../../../platform/time.js'
-import { noteLeadInterest } from '../../leads/service.js'
 import { loadBoardServices } from '../../public/availability-loader.js'
 import {
   TOOL_MIN_TRUST,
@@ -14,6 +12,7 @@ import {
   type ToolOutcome,
 } from '../contract.js'
 import { issueLinkOutcome } from './conversation.js'
+import { effectsOf } from './effects-live.js'
 import {
   BIZ_DATE,
   fail,
@@ -63,7 +62,7 @@ export const checkAvailability: AssistantTool<ToolInputs['check_availability']> 
     // asking for open times of a service says what the texter wants: their lead (a new texter's, opened by the welcome flow) notes
     // the service's category, so the welcome intake moves on to the memberships even when the model never called note_interest
     // (W4 live eval: it almost never did, and the intake stayed on "what would you like" for the whole conversation)
-    await transaction(ctx.db, (tx) => noteLeadInterest(tx, { locationId: ctx.identity.locationId, phone: ctx.identity.phone, categories: [found.item.category], at: ctx.now }))
+    await effectsOf(ctx).noteInterest(ctx, [found.item.category], { openLead: false })
     const vip = await vipFor(ctx)
     const windowDays = await windowDaysFor(ctx.db, ctx.identity.locationId, vip)
     if (diffDays(today, input.date) > windowDays)

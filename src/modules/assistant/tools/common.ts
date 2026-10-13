@@ -220,3 +220,13 @@ export function plainSchedulingError(e: unknown): string | null {
   if (e.code === 'VALIDATION_FAILED') return 'that service is no longer offered online.'
   return 'something on our side did not work.'
 }
+
+/** A person's name as typed: letters (any alphabet), spaces, apostrophes, hyphens and periods; one to four words. */
+export function cleanPersonName(raw: string): string | null {
+  const name = raw.normalize('NFC').replace(/\s+/g, ' ').trim()
+  if (name.length < 2 || name.length > 60) return null
+  if (!/^\p{L}[\p{L}\p{M}'’ .-]*$/u.test(name)) return null
+  const words = name.split(' ')
+  if (words.length > 4 || words.some((w) => !/\p{L}/u.test(w))) return null
+  return name
+}

@@ -1,17 +1,9 @@
 // Tools about the conversation itself (ADR 0160, design section 4): what the texter is interested in (their lead), a personal link
 // to their own number, a natural-language opt-out, and the handoff to staff.
-import { sql } from 'kysely'
 import { z } from 'zod/v4'
-import { transaction, type Tx } from '../../../platform/db.js'
-import { AppError } from '../../../platform/errors.js'
-import { cancelPendingActions } from '../../identity/pending-actions.js'
-import { issueClientLink, linkTokenKey, retextClientLink, type IssuedLink } from '../../identity/links.js'
-import { PgOptOutRepository } from '../../messaging/db/optout-repo.js'
-import { loadCustomerTarget, strangerRecipient } from '../../messaging/db/recipients.js'
-import { noteLeadInterest, openLead } from '../../leads/service.js'
-import { TOOL_MIN_TRUST, type AssistantTool, type ToolContext, type ToolInputs } from '../contract.js'
-import { atLeast, fail, json, ok, ownAppointment, withHandoff } from './common.js'
-import { conversationVoice, serverTextEs } from '../lang.js'
+import { TOOL_MIN_TRUST, type AssistantTool, type ToolContext, type ToolInputs, type ToolOutcome } from '../contract.js'
+import { atLeast, fail, json, ok, withHandoff } from './common.js'
+import { effectsOf } from './effects-live.js'
 
 export const noteInterest: AssistantTool<ToolInputs['note_interest']> = {
   name: 'note_interest',
@@ -23,25 +15,12 @@ export const noteInterest: AssistantTool<ToolInputs['note_interest']> = {
     const known = new Set(ctx.facts.catalog.categories.map((c) => c.key))
     const keys = [...new Set(categories.map((c) => c.trim().toLowerCase()))].filter((k) => known.has(k))
     if (keys.length === 0) return fail('invalid', 'Use category keys from the catalog.', { detail: json({ categories: ctx.facts.catalog.categories }) })
-    const interests = await transaction(ctx.db, async (tx) => {
-      // a record the stale-record rule hides (trust 'unknown') is not tied to the lead: whoever holds the number now may be someone else
-      const customerId = atLeast(ctx.identity.trust, 'caller') ? ctx.identity.customerId : null
-      await openLead(tx, ctx.newId, { locationId: ctx.identity.locationId, phone: ctx.identity.phone, customerId, source: 'text', at: ctx.now })
-      return noteLeadInterest(tx, { locationId: ctx.identity.locationId, phone: ctx.identity.phone, categories: keys, at: ctx.now })
-    })
+    const interests = await effectsOf(ctx).noteInterest(ctx, keys, { openLead: true })
     return ok({ noted: keys, interests: interests ?? keys })
   },
 }
 
 const LINK_KINDS = ['calendar', 'verify', 'pin', 'membership', 'pay'] as const
-
-class NoPaymentLink extends Error {}
-
-class LinkRefused extends Error {
-  constructor(readonly outcome: ReturnType<typeof fail>) {
-    super('link refused')
-  }
-}
 
 export const sendLink: AssistantTool<ToolInputs['send_link']> = {
   name: 'send_link',
@@ -61,7 +40,7 @@ export const sendLink: AssistantTool<ToolInputs['send_link']> = {
  * use it. check_availability calls it too (W4b X4: an unverified booking gets the calendar link in the same reply), without the
  * re-text (`retext: false`: a link of the hour is pointed to, not texted again; only send_link re-texts, when the client asks).
  */
-export async function issueLinkOutcome(ctx: ToolContext, input: ToolInputs['send_link'], o: { retext?: boolean } = {}) {
+export async function issueLinkOutcome(ctx: ToolContext, input: ToolInputs['send_link'], o: { retext?: boolean } = {}): Promise<ToolOutcome> {
   if (!ctx.env.PUBLIC_LINKS_ENABLED)
     return fail(
       'unavailable',
@@ -83,166 +62,8 @@ export async function issueLinkOutcome(ctx: ToolContext, input: ToolInputs['send
   // a tier with no current price is not sold online (plan decision 3): only the plans of SHOP FACTS (facts-v4) get a link
   if (input.kind === 'membership' && !ctx.facts.plans.some((p) => p.key === input.tier))
     return fail('unavailable', 'That plan cannot be started by link right now; a team member can help.')
-  try {
-    const issued = await transaction(ctx.db, async (tx) => {
-      let appointmentId: string | null = null
-      let invoiceId: string | null = null
-      if (input.appointmentRef && (input.kind === 'calendar' || input.kind === 'pay')) {
-        const a = await ownAppointment(tx, ctx, input.appointmentRef)
-        if (!a) throw new LinkRefused(fail('not_found', 'No such appointment for this client.'))
-        appointmentId = a.id
-      }
-      if (input.kind === 'pay') invoiceId = await payableInvoice(tx, ctx, appointmentId)
-      if (input.kind === 'membership') {
-        const plan = await tx
-          .selectFrom('membership_plans')
-          .select('key')
-          .where('location_id', '=', id.locationId)
-          .where('key', '=', input.tier ?? '')
-          .where('active', '=', true)
-          .where('public', '=', true)
-          .executeTakeFirst()
-        if (!plan)
-          throw new LinkRefused(
-            fail('unavailable', 'Memberships cannot be started by link right now; a team member can help.'),
-          )
-      }
-      const issued = await issueClientLink(
-        tx,
-        {
-          newId: ctx.newId,
-          now: ctx.now,
-          ...(ctx.env.PUBLIC_SITE_URL ? { siteUrl: ctx.env.PUBLIC_SITE_URL } : {}),
-          // a token the server can derive again (re-texting the same link, below)
-          tokenKey: linkTokenKey(ctx.env),
-        },
-        {
-          locationId: id.locationId,
-          kind: input.kind,
-          customerId: client,
-          phone: client ? null : id.phone,
-          appointmentId: input.kind === 'calendar' ? appointmentId : null,
-          invoiceId,
-          planKey: input.kind === 'membership' ? input.tier : null,
-          issuedBy: 'assistant',
-        },
-      )
-      // the link goes only to the number that is texting (the client's number on file is the same number)
-      if (issued.phone !== id.phone)
-        throw new LinkRefused(fail('not_allowed', 'This number is not the client’s number on file.'))
-      await ctx.audit(tx, 'assistant.link.sent', {
-        entityType: client ? 'customer' : 'lead',
-        entityId: client,
-        after: { kind: input.kind, expiresAt: issued.expiresAt.toISOString() },
-      })
-      return issued
-    })
-    // registered once the link row is committed: the reply never carries a link that does not exist
-    const placeholder = ctx.addLink(issued.url, { kind: input.kind, expiresAt: issued.expiresAt })
-    const minutes = Math.round((issued.expiresAt.getTime() - ctx.now.getTime()) / 60_000)
-    return ok({
-      placeholder,
-      kind: input.kind,
-      expiresInMinutes: minutes,
-      instruction: `Put ${placeholder} in your reply exactly once; it is replaced by the secure link. Never write a URL yourself.`,
-    })
-  } catch (e) {
-    if (e instanceof LinkRefused) return e.outcome
-    // one link of a kind an hour (W4 leftover): a client who cannot find the link texted earlier gets the SAME link again (no new
-    // token; once per link; counted in the day's links), not a handoff
-    if (e instanceof AppError && e.code === 'IDENTITY_LINK_LIMIT' && e.meta?.limit === 'kind_hour' && o.retext !== false) {
-      const again = await retext(ctx, input)
-      if (again) {
-        const placeholder = ctx.addLink(again.url, { kind: again.kind, expiresAt: again.expiresAt })
-        return ok({
-          placeholder,
-          kind: input.kind,
-          resent: true,
-          instruction: `This is the same link texted earlier, sent again. Put ${placeholder} in your reply exactly once ("Here it is again: ${placeholder}"); it is replaced by the secure link. Never write a URL yourself, never mention a limit.`,
-        })
-      }
-    }
-    if (e instanceof AppError && e.code === 'IDENTITY_LINK_LIMIT')
-      return fail(
-        'rate_limited',
-        // W4 live eval: "I've hit the link limit for today" confused clients (a limit they never heard of)
-        // full Bedrock run: "It's good for 3 days so no rush!" and "scroll up" to a client who could not find the link
-        'No new link can go to this number right now. If a link of this kind was texted earlier in this conversation and still works (a calendar link works for 3 days, a verify link for 15 minutes), point them to it (it is in their texts; never tell them how long it works); otherwise say a team member will text them. If they say they cannot find it, say a team member will text it to them and call handoff_to_staff. Never mention a limit or a count.',
-      )
-    if (e instanceof NoPaymentLink)
-      return withHandoff(
-        ctx,
-        fail(
-          'unavailable',
-          'There is no online payment for that invoice yet; a team member will text a payment link.',
-        ),
-        'no_payment_link',
-        'The client asked to pay online; the invoice has no payment link yet.',
-      )
-    if (
-      e instanceof AppError &&
-      (e.code === 'VALIDATION_FAILED' || e.code === 'NOT_FOUND' || e.code === 'IDENTITY_NO_PHONE')
-    )
-      return fail('not_found', 'There is nothing that link could be for.')
-    throw e
-  }
-}
-
-/**
- * The same link again (identity/links.ts retextClientLink) in its own transaction, audited; null when there is none to re-text (no
- * key, none live, already re-texted, issued before re-texting) or the day's links are used up.
- */
-async function retext(ctx: ToolContext, input: ToolInputs['send_link']): Promise<IssuedLink | null> {
-  const tokenKey = linkTokenKey(ctx.env)
-  if (!tokenKey) return null
-  try {
-    return await transaction(ctx.db, async (tx) => {
-      // the binding the new link would have had (as in issueLinkOutcome): only a link bound to exactly that is texted again
-      let visitId: string | null = null
-      if (input.appointmentRef && (input.kind === 'calendar' || input.kind === 'pay')) {
-        visitId = (await ownAppointment(tx, ctx, input.appointmentRef))?.id ?? null
-        if (!visitId) return null
-      }
-      const invoiceId = input.kind === 'pay' ? await payableInvoice(tx, ctx, visitId) : null
-      const again = await retextClientLink(
-        tx,
-        { now: ctx.now, tokenKey, ...(ctx.env.PUBLIC_SITE_URL ? { siteUrl: ctx.env.PUBLIC_SITE_URL } : {}) },
-        {
-          locationId: ctx.identity.locationId,
-          phone: ctx.identity.phone,
-          kind: input.kind,
-          appointmentId: input.kind === 'calendar' ? visitId : null,
-          invoiceId,
-          planKey: input.kind === 'membership' ? input.tier : null,
-        },
-      )
-      if (!again) return null
-      await ctx.audit(tx, 'assistant.link.resent', {
-        entityType: ctx.identity.customerId ? 'customer' : 'lead',
-        entityId: ctx.identity.customerId,
-        after: { kind: input.kind, expiresAt: again.expiresAt.toISOString() },
-      })
-      return again
-    })
-  } catch (e) {
-    if (e instanceof AppError && e.code === 'IDENTITY_LINK_LIMIT') return null
-    if (e instanceof LinkRefused || e instanceof NoPaymentLink) return null
-    throw e
-  }
-}
-
-/** The open invoice a pay link is for: the visit's, or the client's latest with a balance; it needs a staff-attached payment URL. */
-async function payableInvoice(tx: Tx, ctx: ToolContext, appointmentId: string | null): Promise<string> {
-  const rows = await sql<{ id: string; payment_link_url: string | null }>`
-    select i.id, i.payment_link_url from invoices i cross join lateral invoice_calc_of(i.id) c
-    where i.customer_id = ${ctx.identity.customerId} and i.location_id = ${ctx.identity.locationId} and i.canceled_at is null
-      and c.balance > 0 ${appointmentId ? sql`and i.appointment_id = ${appointmentId}` : sql``}
-    order by i.occurred_at desc, i.id desc limit 1`.execute(tx)
-  const inv = rows.rows[0]
-  if (!inv) throw new LinkRefused(fail('not_found', 'There is no open invoice to pay.'))
-  // with Square the pay page makes a link for the exact balance when the client opens it (ADR 0171 D3): no staff link needed
-  if (!inv.payment_link_url && ctx.env.PAYMENT_PROCESSOR !== 'square') throw new NoPaymentLink()
-  return inv.id
+  // the link row, its audit and the placeholder (or the link of the hour again): the context's effects (ADR 0174 §4b)
+  return effectsOf(ctx).issueLink(ctx, input, o)
 }
 
 export const optOut: AssistantTool<ToolInputs['opt_out']> = {
@@ -251,30 +72,7 @@ export const optOut: AssistantTool<ToolInputs['opt_out']> = {
   input: z.strictObject({}),
   minTrust: TOOL_MIN_TRUST.opt_out,
   async run(ctx) {
-    const id = ctx.identity
-    await transaction(ctx.db, async (tx) => {
-      const repo = new PgOptOutRepository(tx, { locationId: id.locationId, newId: ctx.newId })
-      const already = (await repo.findActive(id.phone)) !== null
-      await repo.optOut({ phone: id.phone, optedOutAt: ctx.now, source: 'keyword', keyword: 'stop (in words, to Oasis AI)' })
-      if (!already) {
-        const target = id.customerId ? await loadCustomerTarget(tx, id.locationId, id.customerId) : null
-        const recipient = target?.recipient ?? (await strangerRecipient(tx, id.locationId, id.phone))
-        // a Spanish conversation gets the Spanish confirmation (guard polish after W4b-fix, P3)
-        const es = (await conversationVoice(tx, ctx.conversationId)).lang === 'es' ? serverTextEs('opt_out_confirm') : null
-        await ctx.queue.enqueueFor(tx, {
-          locationId: id.locationId,
-          customerId: id.customerId,
-          recipient,
-          appointmentId: null,
-          ...(es ? { text: es, klass: 'opt_out_confirm' as const, tag: 'opt_out_confirm' } : { templateKey: 'opt_out_confirm' }),
-          purpose: 'inbound-reply',
-          senderKind: 'system',
-          dedupeKey: `assistant-opt-out:${ctx.turnId}`,
-        })
-      }
-      await ctx.audit(tx, 'assistant.opt_out', { entityType: id.customerId ? 'customer' : 'phone', entityId: id.customerId, after: { optedOut: true } })
-    })
-    return ok({ optedOut: true, instruction: 'They are unsubscribed and got the opt-out confirmation. Send nothing else.' })
+    return effectsOf(ctx).optOut(ctx)
   },
 }
 
@@ -286,9 +84,7 @@ export const handoffToStaff: AssistantTool<ToolInputs['handoff_to_staff']> = {
   minTrust: TOOL_MIN_TRUST.handoff_to_staff,
   async run(ctx, { reason, summary }) {
     const clean = summary.replace(/\d[\d\s-]{3,}\d/g, '[number]').trim()
-    await transaction(ctx.db, (tx) =>
-      cancelPendingActions(tx, { locationId: ctx.identity.locationId, phone: ctx.identity.phone, now: ctx.now, error: 'handed to staff' }),
-    )
+    await effectsOf(ctx).cancelPending(ctx)
     return withHandoff(ctx, ok({ handedOff: true, instruction: 'Tell them a team member will text them back shortly.' }), reason, clean)
   },
 }

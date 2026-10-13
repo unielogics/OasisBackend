@@ -30,9 +30,11 @@ import type { NewId } from '../../platform/ids.js'
 import type { JobDefinition } from '../../platform/jobs.js'
 import type { Logger } from '../../platform/logging.js'
 import type { IdentityQueue } from '../identity/deps.js'
-import type { ClientLinkKind } from '../identity/schema.js'
+import type { ClientLinkKind, PendingActionKind } from '../identity/schema.js'
+import type { JsonValue } from '../../platform/schema.js'
 import type { PublicTier } from '../public/tiers.js'
 import type { Actor, SchedulingCtx } from '../scheduling/context.js'
+import type { ConvoLang } from './lang.js'
 import type { ActionCodeHandler, NewTexters } from './ports.js'
 
 // ---------------------------------------------------------------------------------------------------------------------------
@@ -437,6 +439,64 @@ export interface ToolContext {
    * trust and records it on the conversation. For the welcome flow when the adoption happens in the turn rather than the webhook.
    */
   setCustomer(customerId: string): Promise<void>
+  /**
+   * What the tools DO (ADR 0174 §4b): every write a tool makes goes through this seam, its checks and reads stay in the tool. The live
+   * turn passes the live effects (tools/effects-live.ts: the code the tools always ran, moved as it was); practice passes effects that
+   * change only its own session. Absent: the live effects (the tools' own tests build a context without it).
+   */
+  effects?: ToolEffects
+  /**
+   * The conversation's language for the tools' own words (a proposal's summary). The live turn passes the language it answers in;
+   * absent, the tools read the conversation's stored language (conversationVoice), as before ADR 0174.
+   */
+  lang?: ConvoLang
+}
+
+/** A proposal to record and text (propose_booking / propose_reschedule / propose_cancel; identity/pending-actions.ts). */
+export interface ProposeEffect {
+  kind: PendingActionKind
+  /** The summary the client reads ("Signature Hand Wash, Sat Jun 13 at 10:00 AM"), in the conversation's language. */
+  summary: string
+  payload: { [key: string]: JsonValue }
+  appointmentId: string | null
+}
+
+/** A vehicle set_my_vehicle saves (validated by the tool: the size is one of SHOP FACTS' sizes, the words are plain). */
+export interface VehicleEffect {
+  size: ShopFactsSize
+  make: string
+  model: string
+  year: number | null
+  color: string | null
+}
+
+/**
+ * The tools' side effects (ADR 0174 §4b). Live (tools/effects-live.ts): the existing code, writing the live tables in its own
+ * transactions with audit rows and texts. Practice: session state only (a link becomes "[booking link]", a proposal shows the
+ * confirmation it would text); nothing is written to a client record, a lead, a link, a pending action, the outbox or the audit log.
+ */
+export interface ToolEffects {
+  /**
+   * The categories the texter asked about: added to the number's lead (note_interest also opens the lead first, `openLead`;
+   * check_availability only adds to an open one). Returns the lead's interests, or null without a lead.
+   */
+  noteInterest(ctx: ToolContext, categories: readonly string[], o: { openLead: boolean }): Promise<string[] | null>
+  /**
+   * Issues a personal link of an allowed kind to the number that is texting (the tool checked the switch, the kind against the
+   * texter and the plan), registers it with ctx.addLink and answers with its placeholder; `retext: false` never re-texts a link of
+   * the hour (check_availability).
+   */
+  issueLink(ctx: ToolContext, input: ToolInputs['send_link'], o: { retext?: boolean }): Promise<ToolOutcome>
+  /** Records a proposal and texts its reply number (the tool checked the switches, the trust, the slot and the handoff). */
+  propose(ctx: ToolContext, o: ProposeEffect): Promise<ToolOutcome>
+  /** Saves the new client's name (a cleaned person's name; the record decides whether it may change). */
+  saveName(ctx: ToolContext, fullName: string): Promise<ToolOutcome>
+  /** Adds the vehicle to the client's own record and answers with the price keys of its size. */
+  saveVehicle(ctx: ToolContext, v: VehicleEffect): Promise<ToolOutcome>
+  /** Records the opt-out (exactly like STOP) and texts the confirmation once. */
+  optOut(ctx: ToolContext): Promise<ToolOutcome>
+  /** handoff_to_staff: cancels the number's pending proposals (the chat is the staff's from here). */
+  cancelPending(ctx: ToolContext): Promise<void>
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------
