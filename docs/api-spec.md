@@ -811,8 +811,15 @@ joiner between two emoji pass), each question once (case and spaces ignored). `c
 (strict; ADR 0174 §3a): style notes at most 400 characters, words 2..40 characters (at most 30), topics 3..80 (at most 15 per
 list), every text plain (the FAQ's rules), each list without repeats (case and spaces ignored), a topic either avoided or handed to
 the team, and a sign-off of at most 24 characters with no amount, number, link or promise word (`The sign-off cannot hold an amount, a
-number, a link or a promise.`). They are stored and validated from this wave on; the turn applies them from the policy wave (K2c)
-on, so until then they change nothing. A FAQ that grows the shared knowledge budget past `AI_KNOWLEDGE_MAX_CHARS` is refused with 422
+number, a link or a promise.`). The turn applies them (ADR 0174 §3b, wave K2c), and they only take abilities away: a capability
+switched off leaves its tools out of the model's request (send_link offers only the allowed kinds: calendar with `bookingLinks`,
+verify with `bookingLinks` or in-chat actions, membership with `membershipLinks`, pay with `paymentLinks`, pin with any of
+`accountInfo`, `membershipLinks`, `paymentLinks`) and the runner refuses them if called; `behavior` adds the owner block after the
+unchanged rules (tone and length presets, words and topics to avoid, topics always handed to the team, quoted style notes), the
+guard rewrites a word to avoid (then drops its sentences, then the fallback), a handoff topic in the client's text the model did
+not hand off gets the server's fixed line and a handoff (reason `policy`), Spanish `english` answers a Spanish texter in English
+and `handoff` answers with a fixed Spanish line and a handoff (reason `language`) without a model call, and `signOff` is appended
+by the server after the reply. With the defaults the assistant's requests are byte-identical to before. A FAQ that grows the shared knowledge budget past `AI_KNOWLEDGE_MAX_CHARS` is refused with 422
 `KNOWLEDGE_BUDGET {usedChars, maxChars, needed}` (section 15.6c); a save that shrinks it always passes. 422
 names every field (`allowlist.1`, `faq.0.a`, `staffPauseHours`; a stage outside the enum is the request schema's `body.stage`), and
 nothing is written. Only changed keys are written, each audited (`settings.update`, before/after) and published as
@@ -870,38 +877,58 @@ that saves the PDF as a file (`Content-Disposition: attachment`; 409 while not u
 extract,delete}`. Jobs: `assistant.knowledge.extract`, `assistant.knowledge.cleanup` (docs/jobs.md). Storage: docs/integrations/s3.md
 "Knowledge PDFs". Tests: `test/assistant-knowledge/documents.test.ts`, `pdf.test.ts`, `jobs.test.ts`.
 
-### 15.6e The practice chat: `/assistant/practice` (ADR 0174 §4; contract, 501 until wave K2c)
+### 15.6e The practice chat: `/assistant/practice` (ADR 0174 §4c)
 
-The schemas are final (docs/openapi.json, tag `assistant`); every route answers 501 `NOT_BUILT` until wave K2c. `set.assistant`;
-a session that plays a real client also needs `cli.view` (403). Practice runs the real engine with practice effects (nothing is
-sent, booked or written to a client record), works whatever `AI_ENABLED` says, and is off until `AI_PRACTICE_ENABLED` (409
-`PRACTICE_OFF`); its own daily budget `AI_PRACTICE_DAILY_BUDGET_USD` (429 `PRACTICE_BUDGET`).
-- `POST /assistant/practice/sessions` `{persona new_texter|client, customerId?, verified?, language? en|es, includeEntryIds?
-  (drafts read as if on, at most 20)}` → 201 `{session}`; 20 sessions per user a day.
+`set.assistant`; a session that plays a real client also needs `cli.view` (403). Practice runs the real engine (the same prompt,
+tools, guard and policy judge as a live turn, the judge always on) with practice effects: nothing is sent or booked and nothing is
+written to a client record, a lead, a link, a pending action, the outbox or the audit log (its tools read through a read-only
+database pool). It works whatever `AI_ENABLED` says, is off until `AI_PRACTICE_ENABLED` (409 `PRACTICE_OFF`), mirrors the saved
+settings, `AI_ACTIONS_ENABLED` and `PUBLIC_LINKS_ENABLED`, and has its own daily budget `AI_PRACTICE_DAILY_BUDGET_USD` (the
+location's practice spend of the business day; 429 `PRACTICE_BUDGET`), never counted in `AI_DAILY_BUDGET_USD`.
+- `POST /assistant/practice/sessions` `{persona new_texter|client, customerId? (client: a client of the shop, 404 otherwise),
+  verified?, language? en|es, includeEntryIds? (draft knowledge entries read as if on, at most 20; 422 when one does not exist)}` →
+  201 `{session}`; 429 `PRACTICE_LIMIT` after 20 sessions a user a day. A new texter is synthetic (its id and a fictional 555-01xx
+  number exist only in the session); a client on file is read-only.
 - `GET /assistant/practice/sessions` → `{sessions[], practice{enabled, budgetUsd, spentTodayUsd, actionsEnabled, linksEnabled}}`
-  (mine, newest first, kept 30 days); `GET …/:id` → `{session, turns[]}` (another user's: 404); `DELETE …/:id` → 204.
-- `POST …/sessions/:id/turns` `{text (1..640)}`, Idempotency-Key required, 10 a minute → 202 `{turn}` (status `running`; the answer
-  comes from job `ai.practice`, published as `assistant.practice.turn` to the user); 409 `PRACTICE_BUSY` while one runs; 40 turns a
-  session.
-- `POST /assistant/practice/turns/:id/rerun` → 202 `{turn}` ("Try again" after a correction, `rerunOf` set).
+  (mine, newest first, kept 30 days); `GET …/:id` → `{session, turns[]}` (another user's, or older than 30 days: 404); `DELETE
+  …/:id` → 204.
+- `POST …/sessions/:id/turns` `{text (1..640)}`, Idempotency-Key required (a replay answers the stored turn and queues nothing), 10
+  a minute → 202 `{turn}` with status `running`. Job `ai.practice` answers it (queued after the commit) and publishes
+  `assistant.practice.turn {sessionId, turnId}` on the notifications channel to the session's creator; the dashboard polls the
+  session every 2 s while a turn runs. 409 `PRACTICE_BUSY` while one runs (a turn running over 5 minutes is failed as `timeout`),
+  `PRACTICE_ENDED` after the client opted out in the chat; 429 `PRACTICE_LIMIT` after 40 turns a session.
+- `POST /assistant/practice/turns/:id/rerun` → 202 `{turn}` ("Try again" after a correction): the same text over the session's
+  earlier turns, from the session as it was before that text, reading the knowledge as it is now (`rerunOf` set, the original's
+  `seq`); it never changes the session's own state. Same switches and limits; another user's turn is 404.
 - A session is `{id, persona, client{id, firstName}|null, verified, language, includeEntryIds, turns, costMicros, createdAt,
-  updatedAt}`; a turn `{id, sessionId, seq, rerunOf, clientText, status running|replied|handed_off|failed|opted_out, replyText
-  (links as "[booking link]"), extraTexts (the confirmation a proposal would text), badges[{kind, label}], error, latencyMs,
-  startedAt, finishedAt}`.
+  updatedAt}`; a turn `{id, sessionId, seq, rerunOf, clientText, status running|replied|handed_off|failed|opted_out, replyText (what
+  the client would get, links as "[booking link]", "[verify link]", "[PIN link]", "[membership link]", "[payment link]"),
+  extraTexts (the confirmation a proposal would text, "Reply #### to confirm.", or the opt-out confirmation), badges[{kind
+  rewritten|shortened|policy_rewrite|handed_off|fallback|link|proposal|opted_out|looked_up, label}], error, latencyMs, startedAt,
+  finishedAt}`.
+Tests: `test/assistant-practice/practice.test.ts` (every production table's row count unchanged, the read-only pool, AI_ENABLED
+off, the judge forced on), `parity.test.ts` (live and practice send identical requests), `routes.test.ts`, `jobs.test.ts`.
 
-### 15.6f Corrections and the review of real conversations (ADR 0174 §5; contract, 501 until wave K2c)
+### 15.6f Corrections and the review of real conversations (ADR 0174 §5)
 
 - `POST /assistant/corrections` (`set.assistant`) `{clientText (1..300), rightAnswer (1..500), source practice|live,
-  practiceTurnId?, assistantTurnId?, active?, replaceEntryId?}` → 201 `{entry, budget}`: a knowledge entry of kind `correction`
-  (rendered to the model only as its question and answer; the wrong reply, loaded by the server from the named turn and redacted,
-  is never shown to it). Same validation, warnings and budget as notes (`active: false` saves a draft); 409 `CORRECTION_EXISTS
-  {entryId}` for the same question unless `replaceEntryId` names it.
-- `GET /assistant/conversations?days=1..90&filter=all|handed_off|fallback|judge|corrected&cursor&limit` (`set.assistant` +
-  `cli.view`) → `{conversations[{id, client{firstName, phoneLast4}, lastTurnAt, turns, handoff{open, reason}|null, flags[]}],
-  nextCursor}`; `GET /assistant/conversations/:id` → `{conversation, turns[{id, startedAt, status, clientTexts (redacted), reply
-  (redacted, links as "[link]"), handoffReason, guard[], judge{verdict, category, words}|null, tools[], model, promptVersion,
-  correctionEntryId}]}`.
-Tests (contracts): `test/assistant-knowledge/contracts.test.ts`.
+  practiceTurnId? (one of my practice texts, 404 otherwise), assistantTurnId? (a real turn of the location; needs cli.view, 403),
+  active? (default true), replaceEntryId?}` → 201 `{entry, budget}`: a knowledge entry of kind `correction` (its title is the
+  question). The wrong reply is loaded by the server from the named turn and stored redacted (`wrongReply`, links as "[link]"); the
+  browser's copy is never used and the model reads only `Q: "…" A: "…"` in SHOP KNOWLEDGE. Plain text (422 otherwise), the warnings
+  of notes, the shared budget (422 `KNOWLEDGE_BUDGET`; `active: false` saves a draft); 409 `CORRECTION_EXISTS {entryId}` for the same
+  question (case, spaces and punctuation ignored) unless `replaceEntryId` names it (then it is replaced in place, `version` + 1).
+  Audited `assistant.knowledge.create` / `.update` (never the body); `settings.changed {section: assistant_knowledge}`.
+- `GET /assistant/conversations?days=1..90 (30)&filter=all|handed_off|fallback|judge|corrected&cursor&limit=1..100 (50)`
+  (`set.assistant` + `cli.view`) → `{conversations[{id, client{firstName, phoneLast4 "•••0142"}, lastTurnAt, turns, handoff{open,
+  reason}|null, flags[]}], nextCursor}`: the location's conversations with an Oasis AI turn in the window, newest first. Flags:
+  `handed_off` (a handoff), `fallback` (a turn failed or the fallback text went), `judge` (the policy check failed a draft or did not
+  answer), `corrected` (a correction was made from a turn).
+- `GET /assistant/conversations/:id` → `{conversation, turns[{id, startedAt, status, clientTexts (the texts the turn answered,
+  redacted), reply (what was sent, redacted, links as "[link]"), handoffReason, guard[] (what the output guard changed, in plain
+  words), judge{verdict pass|fail|error, category, words}|null, tools[], model, promptVersion, correctionEntryId}]}` (the turns of
+  the last 90 days; another location's conversation or one with none in 90 days: 404).
+Tests: `test/assistant-practice/routes.test.ts` (corrections), `review.test.ts`; access: `test/assistant-knowledge/contracts.test.ts`.
 
 ### 15.7 The public website's hours: `GET /api/v1/public/hours`
 

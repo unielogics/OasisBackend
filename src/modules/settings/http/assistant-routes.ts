@@ -46,7 +46,7 @@ const Fields = z.object({
     })
     .strict()
     .describe(
-      'ADR 0174 limits: what the assistant may do (all on by default = today). Settings only take abilities away; booking, moving and cancelling by text stays `actionsEnabled`. "Answer questions only" is all five off. Stored now, applied by the turn from the policy wave on',
+      'ADR 0174 limits: what the assistant may do (all on by default = today). Settings only take abilities away; booking, moving and cancelling by text stays `actionsEnabled`. "Answer questions only" is all five off (with actionsEnabled off). A switched-off ability is left out of the model’s tools and refused if called',
     ),
   behavior: z
     .object({
@@ -64,7 +64,7 @@ const Fields = z.object({
         .describe('An optional sign-off the server adds, at most 24 characters, no amount, number, link or promise ("" = none)'),
     })
     .strict()
-    .describe('ADR 0174 tone: how the assistant writes (defaults = today). Stored now, applied by the turn from the policy wave on'),
+    .describe('ADR 0174 tone: how the assistant writes (defaults = today): the owner block after the rules, words to avoid (guard), topics handed to the team (server backstop), the Spanish mode and the server\'s sign-off'),
 })
 
 export const AssistantView = Fields.extend({

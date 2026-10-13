@@ -113348,7 +113348,7 @@
                     },
                     "behavior": {
                       "additionalProperties": false,
-                      "description": "ADR 0174 tone: how the assistant writes (defaults = today). Stored now, applied by the turn from the policy wave on",
+                      "description": "ADR 0174 tone: how the assistant writes (defaults = today): the owner block after the rules, words to avoid (guard), topics handed to the team (server backstop), the Spanish mode and the server's sign-off",
                       "properties": {
                         "avoidTopics": {
                           "description": "Topics it does not discuss: 3 to 80 characters each, at most 15, each once",
@@ -113421,7 +113421,7 @@
                     },
                     "capabilities": {
                       "additionalProperties": false,
-                      "description": "ADR 0174 limits: what the assistant may do (all on by default = today). Settings only take abilities away; booking, moving and cancelling by text stays `actionsEnabled`. \"Answer questions only\" is all five off. Stored now, applied by the turn from the policy wave on",
+                      "description": "ADR 0174 limits: what the assistant may do (all on by default = today). Settings only take abilities away; booking, moving and cancelling by text stays `actionsEnabled`. \"Answer questions only\" is all five off (with actionsEnabled off). A switched-off ability is left out of the model’s tools and refused if called",
                       "properties": {
                         "accountInfo": {
                           "description": "It may tell a client their balance, visits and membership",
@@ -113569,7 +113569,7 @@
                   },
                   "behavior": {
                     "additionalProperties": false,
-                    "description": "ADR 0174 tone: how the assistant writes (defaults = today). Stored now, applied by the turn from the policy wave on",
+                    "description": "ADR 0174 tone: how the assistant writes (defaults = today): the owner block after the rules, words to avoid (guard), topics handed to the team (server backstop), the Spanish mode and the server's sign-off",
                     "properties": {
                       "avoidTopics": {
                         "description": "Topics it does not discuss: 3 to 80 characters each, at most 15, each once",
@@ -113642,7 +113642,7 @@
                   },
                   "capabilities": {
                     "additionalProperties": false,
-                    "description": "ADR 0174 limits: what the assistant may do (all on by default = today). Settings only take abilities away; booking, moving and cancelling by text stays `actionsEnabled`. \"Answer questions only\" is all five off. Stored now, applied by the turn from the policy wave on",
+                    "description": "ADR 0174 limits: what the assistant may do (all on by default = today). Settings only take abilities away; booking, moving and cancelling by text stays `actionsEnabled`. \"Answer questions only\" is all five off (with actionsEnabled off). A switched-off ability is left out of the model’s tools and refused if called",
                     "properties": {
                       "accountInfo": {
                         "description": "It may tell a client their balance, visits and membership",
@@ -113751,7 +113751,7 @@
                     },
                     "behavior": {
                       "additionalProperties": false,
-                      "description": "ADR 0174 tone: how the assistant writes (defaults = today). Stored now, applied by the turn from the policy wave on",
+                      "description": "ADR 0174 tone: how the assistant writes (defaults = today): the owner block after the rules, words to avoid (guard), topics handed to the team (server backstop), the Spanish mode and the server's sign-off",
                       "properties": {
                         "avoidTopics": {
                           "description": "Topics it does not discuss: 3 to 80 characters each, at most 15, each once",
@@ -113824,7 +113824,7 @@
                     },
                     "capabilities": {
                       "additionalProperties": false,
-                      "description": "ADR 0174 limits: what the assistant may do (all on by default = today). Settings only take abilities away; booking, moving and cancelling by text stays `actionsEnabled`. \"Answer questions only\" is all five off. Stored now, applied by the turn from the policy wave on",
+                      "description": "ADR 0174 limits: what the assistant may do (all on by default = today). Settings only take abilities away; booking, moving and cancelling by text stays `actionsEnabled`. \"Answer questions only\" is all five off (with actionsEnabled off). A switched-off ability is left out of the model’s tools and refused if called",
                       "properties": {
                         "accountInfo": {
                           "description": "It may tell a client their balance, visits and membership",

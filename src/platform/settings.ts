@@ -156,8 +156,8 @@ export const settingDefs = {
     default: [] as { q: string; a: string }[],
   },
   'assistant.actions_enabled': { schema: z.boolean(), default: false },
-  // ADR 0174 (limits and tone): settings only take abilities away; the defaults are today's behaviour. Stored and validated by
-  // Settings → Oasis AI from this wave on; the turn applies them from the next one (policy wiring), so until then they change nothing.
+  // ADR 0174 (limits and tone): settings only take abilities away; the defaults are today's behaviour. Edited in Settings → Oasis AI
+  // → Limits & tone and applied by the turn (src/modules/assistant/policy.ts).
   'assistant.capabilities': {
     schema: z
       .object({

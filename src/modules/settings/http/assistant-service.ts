@@ -27,7 +27,7 @@ export const ASSISTANT_FIELDS = {
   allowlist: 'assistant.allowlist',
   staffPauseHours: 'assistant.staff_pause_hours',
   faq: 'assistant.faq',
-  // ADR 0174: limits and tone (stored and validated now; the turn applies them from the policy wave on)
+  // ADR 0174: limits and tone (the turn applies them: policy.ts; only ever taking abilities away)
   capabilities: 'assistant.capabilities',
   behavior: 'assistant.behavior',
 } as const satisfies Record<string, SettingKey>

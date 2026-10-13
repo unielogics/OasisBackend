@@ -316,9 +316,15 @@ line by line after the rules, and never shows the model an amount, a link or ano
   (unpdf in a worker thread: 256 MB, 30 s, 60 pages; scans are `no_text`) → a draft entry with warnings → the owner reviews it
   (and confirms instruction-like lines) before it goes live. Delete clears the text and the object; `assistant.knowledge.cleanup`
   every 15 minutes. Downloads are 10-minute attachments.
-- Limits and tone: `assistant.capabilities` and `assistant.behavior` stored and validated with the section (built); the turn
-  applies them in wave K2c (offered tools and link kinds, the owner block after `CORE_RULES`, avoid words, handoff topics, Spanish
-  modes, sign-off).
-- Practice chat, corrections, review of real conversations: contracts fixed (api-spec 15.6e, 15.6f; 501 until wave K2c). Practice
-  runs the engine with practice effects, a read-only pool and a throwing queue, as a job; its own budget
-  (`AI_PRACTICE_DAILY_BUDGET_USD`, `AI_PRACTICE_ENABLED` off by default).
+- Limits and tone (built, wave K2c; `policy.ts`): what is switched off is left out of the model's tools (send_link narrowed to the
+  allowed kinds) and refused by the runner; `CORE_RULES` are the rules as they were (byte-identical for every setting) and the
+  owner block follows them only when a setting differs from the defaults (tone and length presets, fixed "off" sentences, words and
+  topics to avoid, topics handed to the team, quoted style notes); the guard rewrites a word to avoid, then cuts its sentences;
+  server backstops for the handoff topics and, while an ability is off, for a promised team text; Spanish `english` or `handoff`
+  (a fixed line, no model call); the server's sign-off. Defaults: requests byte-identical to before.
+- Practice chat (built, wave K2c): the same request assembly as a live turn (`turn-prompt.ts`; live and practice requests are
+  identical), practice effects, a read-only pool and refusing ports, the judge always on, as job `ai.practice`; a synthetic new
+  texter or a real client read-only (`cli.view`); its own tables, budget (`AI_PRACTICE_DAILY_BUDGET_USD`) and switch
+  (`AI_PRACTICE_ENABLED`, off by default), kept 30 days. Corrections (built): a correction entry from the owner's question and
+  answer, the wrong reply loaded and redacted by the server and never shown to the model; "Try again" re-runs the text. Review of
+  real conversations (built): 90 days at most, redacted, `set.assistant` + `cli.view`.
