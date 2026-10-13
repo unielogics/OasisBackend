@@ -18,6 +18,7 @@ import {
 } from './appointments.js'
 import type { SchedulingCtx } from './context.js'
 import type { InvoiceSummary, MembershipInfo } from './ports.js'
+import type { InvoiceProcessing } from '../square/tenders.js'
 import { photoCounts } from './photos.js'
 import { visitCategory } from '../catalog/appointment-categories.js'
 import { priceUnconfirmedSql, sizeFlags } from './visit-pricing.js'
@@ -196,6 +197,8 @@ export interface PayView {
   awaitingCents: number
   invoiceNo: number | null
   status: string | null
+  /** The invoice's processor and usable Square tenders (wave Q3 dashapi), so the board's Collect offers the right ones. */
+  processing?: InvoiceProcessing
 }
 
 export function payView(inv: InvoiceSummary | null): PayView {
@@ -214,6 +217,7 @@ export function payView(inv: InvoiceSummary | null): PayView {
     awaitingCents,
     invoiceNo: inv.invoiceNo,
     status: inv.status,
+    ...(inv.processing ? { processing: inv.processing } : {}),
   }
   if (inv.status.startsWith('canceled')) return { ...base, label: 'Canceled', kind: 'none' }
   // Card money staff recorded counts toward the balance at once, but the invoice reads "Paid" only when the
@@ -252,7 +256,8 @@ export interface OpsCard {
   badge: { label: string; color: string }
   customer: { id: string; name: string }
   vip: boolean
-  member: { plan: string; label: string } | null
+  /** The tier's badge colours (color, bgColor) when the memberships port gives them, as the file's membership. */
+  member: { plan: string; label: string; color?: string; bgColor?: string } | null
   vehicle: {
     year: number | null
     make: string | null
@@ -319,7 +324,14 @@ export function toCard(
     badge: { label: meta.label, color: meta.color },
     customer: { id: row.customer.id, name: row.customer.fullName },
     vip: row.vip,
-    member: row.member ? { plan: row.member.plan, label: row.member.plan.split(' ')[0]! } : null,
+    member: row.member
+      ? {
+          plan: row.member.plan,
+          label: row.member.plan.split(' ')[0]!,
+          ...(row.member.color ? { color: row.member.color } : {}),
+          ...(row.member.bgColor ? { bgColor: row.member.bgColor } : {}),
+        }
+      : null,
     vehicle: v,
     vehicleLine: vehicleLine(v),
     vehicleShort: v ? [v.make, v.model].filter(Boolean).join(' ') : 'Vehicle',

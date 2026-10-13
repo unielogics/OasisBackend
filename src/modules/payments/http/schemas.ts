@@ -2,6 +2,9 @@
 import { z } from '../../../http/zod.js'
 import { FILTER_KEYS } from '../reports.js'
 import { RANGE_KEYS } from '../ranges.js'
+import { InvoiceProcessing } from './tender-schemas.js'
+
+export { DepositView, InvoiceProcessing } from './tender-schemas.js'
 
 export const Uuid = z.string().uuid()
 export const IdParams = z.object({ id: Uuid })
@@ -132,6 +135,11 @@ export const LedgerEvent = z.object({
   sqspOrderId: z.string().nullable(),
   processor: z.enum(['squarespace', 'square']).nullable(),
   processorOrderId: z.string().nullable(),
+  receiptNumber: z.string().nullable().describe('Square’s receipt number of a Square payment; null otherwise'),
+  receiptUrl: z
+    .string()
+    .nullable()
+    .describe('Square’s receipt page of a Square payment, only an https page on squareup.com or squareupsandbox.com; null otherwise'),
   needsReview: z.boolean(),
   canApprove: z.boolean(),
   approveBlock: z.enum(['permission', 'limit', 'self']).nullable(),
@@ -186,10 +194,7 @@ export const InvoiceDetail = z.object({
   tipCents: z.number().int(),
   paymentLinkUrl: z.string().nullable(),
   awaitingProcessorCount: z.number().int(),
-  processing: z.object({
-    processor: z.enum(['squarespace', 'square']).describe('PAYMENT_PROCESSOR: who takes new card money, links and refunds'),
-    squarePosAppSwitch: z.boolean().describe('SQUARE_POS_API_ENABLED: "Open Square POS" (POST /invoices/{id}/square-pos-intents)'),
-  }),
+  processing: InvoiceProcessing,
   version: z.number().int(),
   items: z.array(
     z.object({

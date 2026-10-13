@@ -1,6 +1,7 @@
 // Zod 4 schemas of the Operations API: the card view model, snapshot, calendar, file and command results. Response
 // schemas are enforced by the serializer, so they double as a contract test of the read models.
 import { z } from '../../../http/zod.js'
+import { DepositView, InvoiceProcessing } from '../../payments/http/tender-schemas.js'
 
 export const Uuid = z.string().uuid()
 export const Instant = z.string()
@@ -28,6 +29,7 @@ export const PayView = z.object({
   awaitingCents: z.number().int(),
   invoiceNo: z.number().int().nullable(),
   status: z.string().nullable(),
+  processing: InvoiceProcessing.optional().describe('The invoice’s processor and usable Square tenders (as its summary); absent without an invoice'),
 })
 
 export const InvoiceSummary = z.object({
@@ -78,6 +80,11 @@ export const InvoiceSummary = z.object({
     )
     .optional()
     .describe('What the membership covered: "Covered $40 · $20 size difference due"'),
+  refundedCents: z.number().int().optional().describe('Refunds done (a failed card refund and one waiting for approval are not counted)'),
+  processing: InvoiceProcessing.optional().describe(
+    'Who takes card money and which Square tenders the Collect sheet may offer, for every role (no pay.reports needed)',
+  ),
+  deposit: DepositView.nullable().optional().describe('The visit’s deposit: asked for by link, paid, kept, refunded, or a refund waiting for approval; null without one'),
 })
 
 /** appointments.categories (ADR 0160, plan K): the category keys of the package and live add-ons, in category order. */
@@ -182,7 +189,14 @@ export const OpsCard = z.object({
   badge: z.object({ label: z.string(), color: z.string() }),
   customer: z.object({ id: z.string(), name: z.string() }),
   vip: z.boolean(),
-  member: z.object({ plan: z.string(), label: z.string() }).nullable(),
+  member: z
+    .object({
+      plan: z.string(),
+      label: z.string(),
+      color: z.string().optional().describe('The tier’s badge colour (#RRGGBB), as the file’s membership'),
+      bgColor: z.string().optional().describe('The tier’s badge background'),
+    })
+    .nullable(),
   vehicle: Vehicle.nullable(),
   vehicleLine: z.string(),
   vehicleShort: z.string(),

@@ -61,7 +61,7 @@ describe('billing actions', () => {
     expect((await billing(m.membershipId, 'change', { planKey: 'gold' })).body).toMatchObject({ status: 409, code: 'MEMBERSHIP_BILLING_STATE' })
     const ch = await billing(m.membershipId, 'change', { planKey: 'vip', planClass: 'large_suv' })
     expect(ch.status, JSON.stringify(ch.body)).toBe(200)
-    expect(ch.body.membership.billing.change).toEqual({ kind: 'change', planKey: 'vip', planClass: 'large_suv', monthlyCents: 21900, effectiveDate: '2026-07-13', swapAfter: null })
+    expect(ch.body.membership.billing.change).toEqual({ kind: 'change', planKey: 'vip', planName: expect.any(String), planClass: 'large_suv', planClassLabel: 'Large SUV', monthlyCents: 21900, effectiveDate: '2026-07-13', swapAfter: null })
     expect((await billing(m.membershipId, 'change/undo')).body.membership.billing.change).toBeNull()
     expect(r.sim.store.retrieveSubscription(m.subscriptionId).actions).toEqual([])
     // the same change again in this billing period is refused (Square locked the subscription for it in the sandbox)

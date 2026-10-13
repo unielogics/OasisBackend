@@ -17,6 +17,9 @@ import { invoiceLabel } from './format.js'
 import { calcFromRow, touchInvoice, type InvoiceRow } from './repository.js'
 import type { PriceBasis } from '../customers/schema.js'
 import type { InvoiceCalcRow, InvoiceStatus, ItemKind } from './schema.js'
+import { depositRowFacts, depositViewOf, type DepositView } from './deposit-view.js'
+import { balanceCardsFor, processingOf, type InvoiceProcessing } from '../square/tenders.js'
+import { squareEnv } from '../square/runtime.js'
 import './problems.js'
 
 export type ActorRef = AuditActor
@@ -44,6 +47,12 @@ export interface InvoiceSummary {
   vehicleClassLabel: string | null
   /** What the membership covered, one entry per covered line (the redeem events of the invoice's adjusts). */
   coverage: CoverageLine[]
+  /** Refunds done (a refund its processor reported failed is not counted; one waiting for approval neither). */
+  refundedCents: number
+  /** Who takes card money and which Square tenders staff may offer (wave Q3 dashapi): the same for every role. */
+  processing: InvoiceProcessing
+  /** The visit's deposit: asked for by link, paid, kept, refunded or a refund waiting for approval; null without one. */
+  deposit: DepositView | null
 }
 
 /** An invoice line as the summaries show it: the charge, and from wave Q2 the regular price, the member % off and the size. */
@@ -144,6 +153,8 @@ interface SummaryRow extends InvoiceCalcRow {
   invoice_no: number
   tax_bp: number
   vehicle_class_label: string | null
+  customer_id: string
+  canceled_at: Date | null
 }
 
 /** The size label of a line: the invoice's, for a line priced at the size's own price or its starting price. */
@@ -198,7 +209,7 @@ export async function summariesByAppointment(
   const out = new Map<string, InvoiceSummary>()
   if (appointmentIds.length === 0) return out
   const r = await sql<SummaryRow>`
-    select c.*, i.appointment_id, i.invoice_no, i.tax_bp, i.vehicle_class_label
+    select c.*, i.appointment_id, i.invoice_no, i.tax_bp, i.vehicle_class_label, i.customer_id, i.canceled_at
     from invoices i cross join lateral invoice_calc_of(i.id) c
     where i.appointment_id = any(${appointmentIds}::uuid[])`.execute(db)
   if (r.rows.length === 0) return out
@@ -210,11 +221,11 @@ export async function summariesByAppointment(
     .orderBy('position')
     .execute()
   const coverage = await coverageOf(db, ids)
-  const deposits = await sql<{ invoice_id: string; cents: number }>`
-    select invoice_id,
-           (coalesce(sum(amount_cents) filter (where type = 'pay' and deposit), 0)
-            - coalesce(sum(amount_cents) filter (where type = 'void' and deposit), 0))::bigint as cents
-    from ledger_events where invoice_id = any(${ids}::uuid[]) group by invoice_id`.execute(db)
+  const deposits = await depositRowFacts(db, ids)
+  const env = squareEnv()
+  const cards = await balanceCardsFor(db, env, {
+    customerIds: r.rows.filter((x) => x.canceled_at === null).map((x) => x.customer_id),
+  })
   const awaiting = await sql<{ invoice_id: string; cents: number }>`
     select e.invoice_id, sum(e.amount_cents)::bigint as cents
     from ledger_events e
@@ -229,7 +240,8 @@ export async function summariesByAppointment(
     order by e.invoice_id, e.occurred_at desc, e.seq desc`.execute(db)
   for (const row of r.rows) {
     const calc = calcFromRow(row)
-    const flagged = deposits.rows.find((d) => d.invoice_id === row.invoice_id)?.cents ?? 0
+    const flagged = deposits.depositPaidCents.get(row.invoice_id) ?? 0
+    const refunds = deposits.refunds.get(row.invoice_id)
     out.set(row.appointment_id!, {
       invoiceId: row.invoice_id,
       invoiceNo: row.invoice_no,
@@ -260,6 +272,19 @@ export async function summariesByAppointment(
       payMethodLabel: methods.rows.find((m) => m.invoice_id === row.invoice_id)?.method ?? null,
       vehicleClassLabel: row.vehicle_class_label,
       coverage: coverage.get(row.invoice_id) ?? [],
+      refundedCents: calc.refunded,
+      processing: processingOf(env, { card: cards.get(row.customer_id) ?? null, canceled: row.canceled_at !== null }),
+      deposit: depositViewOf({
+        canceled: row.canceled_at !== null,
+        paidCents: calc.paid,
+        refundedCents: calc.refunded,
+        pendingRefundCents: calc.pendingAmt,
+        pendingRefunds: calc.pendingN,
+        depositPaidCents: Number(flagged),
+        refundFailed: refunds?.failed ?? false,
+        refundSending: refunds?.sending ?? false,
+        link: deposits.links.get(row.invoice_id) ?? null,
+      }),
     })
   }
   return out

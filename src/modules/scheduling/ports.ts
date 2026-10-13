@@ -15,6 +15,8 @@ import type { Actor, SchedulingCtx } from './context.js'
 import type { SettlementKind, SettlementView } from './cancellation.js'
 import type { AppointmentRecord } from './appointments.js'
 import { ensureSchedulingProblems } from './problems.js'
+import type { DepositView } from '../payments/deposit-view.js'
+import type { InvoiceProcessing } from '../square/tenders.js'
 
 export type ActorRef = AuditActor
 
@@ -83,6 +85,12 @@ export interface InvoiceSummary {
   vehicleClassLabel?: string | null
   /** What the membership covered on this invoice, one entry per covered line (ADR 0170). */
   coverage?: InvoiceCoverage[]
+  /** Refunds done (failed card refunds and refunds waiting for approval not counted); absent from the in-memory gateway. */
+  refundedCents?: number
+  /** The processor and the usable Square tenders (ADR 0171, wave Q3 dashapi); absent from the in-memory gateway. */
+  processing?: InvoiceProcessing
+  /** The visit's deposit (link asked for, paid, kept, refunded, refund waiting for approval); absent from the in-memory gateway. */
+  deposit?: DepositView | null
 }
 
 export interface EnsureInvoiceInput {

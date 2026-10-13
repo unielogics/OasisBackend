@@ -59,6 +59,10 @@ export interface TierPriceView {
   priceVersion: number
   effectiveFrom: Date
   squareState: TierPriceSquareState
+  /** Why the last sync of this price to Square failed (plain words, at most 300 characters); null otherwise. */
+  squareError: string | null
+  /** When it was last synced to Square (created as a plan variation, or retired). */
+  squareSyncedAt: Date | null
 }
 
 export interface Tier {
@@ -131,7 +135,7 @@ export async function listTiers(db: Executor, locationId: string): Promise<Tier[
       .execute(),
     db
       .selectFrom('membership_tier_prices')
-      .select(['plan_id', 'class_key', 'monthly_cents', 'price_version', 'effective_from', 'square_state'])
+      .select(['plan_id', 'class_key', 'monthly_cents', 'price_version', 'effective_from', 'square_state', 'square_error', 'square_synced_at'])
       .where('location_id', '=', locationId)
       .where('superseded_at', 'is', null)
       .execute(),
@@ -175,6 +179,8 @@ export async function listTiers(db: Executor, locationId: string): Promise<Tier[
         priceVersion: x.price_version,
         effectiveFrom: x.effective_from,
         squareState: x.square_state,
+        squareError: x.square_error,
+        squareSyncedAt: x.square_synced_at,
       })),
       fromMonthlyCents:
         tierFromPrice(

@@ -19,6 +19,8 @@ import {
 import type { CreditExpiry, InvoiceStatus } from './schema.js'
 import { coverageOf, lineClassLabel, type CoverageLine } from './gateway.js'
 import { squareEnv } from '../square/runtime.js'
+import { balanceCardsFor, processingOf, type InvoiceProcessing } from '../square/tenders.js'
+import '../square/db/schema.js'
 
 export const EXPIRY_LABELS: Record<CreditExpiry, string> = {
   none: 'No expiry',
@@ -66,6 +68,10 @@ export interface LedgerEventDto {
   processor: EventRow['processor']
   /** The Square order of a Square payment (a link's order, a POS order). */
   processorOrderId: string | null
+  /** Square's receipt number of a Square payment ("1a2B"); null for anything else or before Square told it. */
+  receiptNumber: string | null
+  /** Square's receipt page of that payment, only when it is an https page on Square's own receipt hosts; else null. */
+  receiptUrl: string | null
   needsReview: boolean
   /** Pending refunds only: whether the caller can approve it now, and why not. */
   canApprove: boolean
@@ -153,8 +159,11 @@ export interface InvoiceDetail {
   paymentLinkUrl: string | null
   /** Count of awaiting_processor events on this invoice (card money recorded but not yet confirmed by its processor). */
   awaitingProcessorCount: number
-  /** Who takes new card money (PAYMENT_PROCESSOR, ADR 0171) and whether "Open Square POS" is on (SQUARE_POS_API_ENABLED). */
-  processing: { processor: 'squarespace' | 'square'; squarePosAppSwitch: boolean }
+  /**
+   * Who takes new card money (PAYMENT_PROCESSOR, ADR 0171), whether "Open Square POS" is on (SQUARE_POS_API_ENABLED) and which
+   * Square tenders may be offered (the same block as the appointment file's invoice summary).
+   */
+  processing: InvoiceProcessing
   version: number
   items: InvoiceItemDto[]
   adjustments: AdjustmentLineDto[]
@@ -185,10 +194,51 @@ export function approvalRights(
   return { canApprove: true, block: null }
 }
 
+/** Square's receipt pages: https on squareup.com or squareupsandbox.com (or a subdomain). Anything else is not shown. */
+export function safeReceiptUrl(url: string | null | undefined): string | null {
+  if (!url || url.length > 2048) return null
+  try {
+    const u = new URL(url)
+    const host = u.hostname.toLowerCase()
+    const square = ['squareup.com', 'squareupsandbox.com'].some((d) => host === d || host.endsWith(`.${d}`))
+    return u.protocol === 'https:' && square && !u.username && !u.password && !u.port ? u.toString() : null
+  } catch {
+    return null
+  }
+}
+
+export interface SquareReceipt {
+  receiptNumber: string | null
+  receiptUrl: string | null
+}
+
+/** The receipts of the Square payments behind these ledger rows (pay rows with processor square), by Square payment id. */
+export async function squareReceiptsOf(db: Executor, locationId: string, events: readonly EventRow[]): Promise<Map<string, SquareReceipt>> {
+  const ids = [...new Set(events.filter((e) => e.type === 'pay' && e.processor === 'square' && e.processor_ref).map((e) => e.processor_ref!))]
+  const out = new Map<string, SquareReceipt>()
+  if (ids.length === 0) return out
+  const rows = await db
+    .selectFrom('square_payments')
+    .select(['square_payment_id', 'receipt_number', 'receipt_url'])
+    .where('location_id', '=', locationId)
+    .where('square_payment_id', 'in', ids)
+    .execute()
+  for (const r of rows) out.set(r.square_payment_id, { receiptNumber: r.receipt_number, receiptUrl: safeReceiptUrl(r.receipt_url) })
+  return out
+}
+
 export function toEventDto(
   e: EventRow,
-  o: { now: Date; tz: string; actor: PayActor | null; rules: ApprovalRules; voidedIds: ReadonlySet<string> },
+  o: {
+    now: Date
+    tz: string
+    actor: PayActor | null
+    rules: ApprovalRules
+    voidedIds: ReadonlySet<string>
+    receipts?: ReadonlyMap<string, SquareReceipt>
+  },
 ): LedgerEventDto {
+  const receipt = e.type === 'pay' && e.processor === 'square' && e.processor_ref ? o.receipts?.get(e.processor_ref) : undefined
   const rights = approvalRights(o.actor, e, o.rules)
   return {
     id: e.id,
@@ -229,6 +279,8 @@ export function toEventDto(
     sqspOrderId: e.sqsp_order_id,
     processor: e.processor,
     processorOrderId: e.processor_order_id,
+    receiptNumber: receipt?.receiptNumber ?? null,
+    receiptUrl: receipt?.receiptUrl ?? null,
     needsReview: e.needs_review,
     canApprove: rights.canApprove,
     approveBlock: rights.block,
@@ -298,8 +350,12 @@ export async function buildDetail(db: Executor, c: DetailContext, inv: InvoiceRo
       .flatMap((e) => e.item_ids),
   )
   const env = squareEnv()
+  const [receipts, cards] = await Promise.all([
+    squareReceiptsOf(db, inv.location_id, events),
+    balanceCardsFor(db, env, { locationId: inv.location_id, customerIds: inv.canceled_at ? [] : [inv.customer_id], now: c.now }),
+  ])
   const dto = events.map((e) =>
-    toEventDto(e, { now: c.now, tz: c.tz, actor: c.actor, rules: c.rules, voidedIds }),
+    toEventDto(e, { now: c.now, tz: c.tz, actor: c.actor, rules: c.rules, voidedIds, receipts }),
   )
   const refundPending = calc.pendingN > 0
   const today = toBizDate(c.now, c.tz)
@@ -324,7 +380,7 @@ export async function buildDetail(db: Executor, c: DetailContext, inv: InvoiceRo
     tipCents: inv.tip_cents,
     paymentLinkUrl: inv.payment_link_url,
     awaitingProcessorCount: events.filter((e) => e.processor_state === 'awaiting_processor').length,
-    processing: { processor: env.PAYMENT_PROCESSOR, squarePosAppSwitch: env.SQUARE_POS_API_ENABLED },
+    processing: processingOf(env, { card: cards.get(inv.customer_id) ?? null, canceled: inv.canceled_at !== null }),
     version: inv.version,
     items: items.map((i) => ({
       id: i.id,

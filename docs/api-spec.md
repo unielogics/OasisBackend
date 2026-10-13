@@ -490,6 +490,10 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | GET | `/api/v1/settings/assistant` | authenticated |  |
 | PUT | `/api/v1/settings/assistant` | set.hours |  |
 | PUT | `/api/v1/settings/auto-federal-holidays` | set.hours |  |
+| GET | `/api/v1/settings/billing` | set.billing |  |
+| PUT | `/api/v1/settings/billing/link-tipping` | set.billing |  |
+| PUT | `/api/v1/settings/billing/price-change-notice` | set.billing |  |
+| PUT | `/api/v1/settings/billing/renewal-policy` | set.billing |  |
 | GET | `/api/v1/settings/bundle` | authenticated |  |
 | GET | `/api/v1/settings/cancellation-policy` | authenticated |  |
 | PUT | `/api/v1/settings/cancellation-policy` | set.hours |  |
@@ -1137,7 +1141,8 @@ Canceling or a no-show cancels the invoice: `canceled` (nothing paid), `canceled
   `POST /invoices/:id/payment-links`, a Square link made for the staff or the pay page, and `POST /public/links/pay/start` answer
   409 `CARD_CHARGE_IN_PROGRESS` (ADR 0171 Q4 H1).
 * Invoice detail and ledger rows (ADR 0171): each ledger event carries `processor` (`squarespace|square|null`) and
-  `processorOrderId`, `source` may be `square`; the detail carries `processing{processor, squarePosAppSwitch}`.
+  `processorOrderId`, `source` may be `square`, and (wave Q3 dashapi) `receiptNumber` / `receiptUrl` for a Square payment; the
+  detail carries `processing{processor, squarePosAppSwitch, squareTenders{reader, link, savedCard}}` (section 30.13).
 * Settings used: `tax.rate_bp` (snapshotted on each invoice), `approvals.allow_self`.
 * Job `payments.lag-scan` (every 15 minutes) is registered in `src/platform/job-registry.ts`.
 
@@ -2361,9 +2366,83 @@ refund). Each answers 200 `{membership}` (the membership view, section 23) and i
 
 `PATCH /memberships/:id` on a Square membership changes only `autoApply` and `note`; `status`, `planKey`, `planClass`, `planLabel`
 or `renewsOn` answer 409 `MEMBERSHIP_BILLED_BY_SQUARE`. The membership view gains `source: square` and `billing` (null for any other
-membership): `{status ok|failed, squareStatus, failedAt, notifiedAt, pastDueOn, cancelOn, monthlyCents, card {brand, last4, expMonth,
-expYear, state}, cancelAt, pauseAt, change {kind change|move, planKey, planClass, monthlyCents, effectiveDate, swapAfter}, lastInvoice
-{status, amountCents, dueDate, paidAt, refundedCents, payUrl}, enrollment {state, failure}}`.
+membership): `{status ok|failed, squareStatus, failedAt, notifiedAt, pastDueOn, cancelOn, monthlyCents, planClassLabel, nextChargeOn,
+card {brand, last4, label, expMonth, expYear, state}, cancelAt, pauseAt, change {kind change|move, planKey, planName, planClass,
+planClassLabel, monthlyCents, effectiveDate, swapAfter}, lastInvoice {status, amountCents, dueDate, paidAt, refundedCents, payUrl},
+lastPaid {amountCents, paidAt, dueDate, refundedCents}, lastFailed {amountCents, failedAt, dueDate, paid, payUrl}, enrollment {state,
+failure}}` (`planClassLabel`, `nextChargeOn`, `card.label`, the change's names, `lastPaid` and `lastFailed`: wave Q3 dashapi, section
+30.13).
 
 Jobs: `square.catalog.sync`, `square.catalog.drift`, `square.enrollments.resume`, `membership.billing`, `square.plans.swap`
 (`docs/jobs.md`). The integrations status row counts `pendingEnrollments`.
+
+### 30.13 What the dashboard reads before the cutover (wave Q3 dashapi)
+
+Read models only (no migration, no job, no new switch); every Square tender is off with the defaults. ADR 0171 "Dashboard data".
+
+**The processor and the Square tenders for every role** (dashboard review Q2c F3). The invoice summary (the appointment file's
+`invoice`, every command answer's `invoice`, `POST /appointments` and the add-on answers), the board and file `pay` view (`OpsCard.pay`,
+`overview.pay`; absent without an invoice) and `GET /invoices/:id` carry the same block, so a role with `pay.collect` but without
+`pay.reports` sees the right Collect options before its first collect:
+
+```
+processing: {
+  processor: 'squarespace' | 'square',      // PAYMENT_PROCESSOR
+  squarePosAppSwitch: boolean,              // SQUARE_POS_API_ENABLED
+  squareTenders: {
+    reader: boolean,                        // Square the processor ("Square reader"; works observe-only)
+    link: boolean,                          // Square the processor and SQUARE_WRITES_ENABLED
+    savedCard: {cardId, label, brand, last4} | null
+  }
+}
+```
+
+`savedCard` is the card `POST /invoices/:id/card-charges` would charge: the client's newest active, unexpired card whose live consent
+covers `balance`; null when there is none, the invoice is canceled, Square is not the processor or writes are off (no card query is
+made then). The summary also adds `refundedCents` (refunds done; a failed card refund and one waiting for approval are not counted).
+
+**The deposit of a visit** (Q2c N1). The invoice summary adds `deposit` (null when there is no deposit to speak of):
+`{state, requestedCents, paidCents, refundedCents, pendingRefundCents, keptCents, refundFailed, refundSending, link {state, sentAt,
+expiresAt, createdAt} | null}`. `state`: `requested` (a deposit link asked for: being made, or made and not texted), `link_sent`,
+`link_expired` (lapsed or withdrawn unpaid; withdrawn because the deposit was paid some other way gives null), `paid` (deposit
+payments, less voids, on an open visit; a deposit paid by link and then voided gives null; a partial refund shows in
+`refundedCents`); on an open visit also `refund_pending` (a refund waiting for approval would leave the invoice holding less than the
+deposit) and `refunded` (the invoice holds nothing any more; refunds are kept per invoice, not per payment); for a canceled visit holding money: `refund_pending` (a refund waits for approval: no longer
+read as kept), `refunded` (all of it given back; `refundSending` while a card refund is still on its way), `kept` (some or all stays;
+`keptCents`, partial refunds in `refundedCents`, `refundFailed` when a card refund failed). The link's URL is never in it.
+
+**Board cards** add the tier colours: `member {plan, label, color?, bgColor?}` (as the file's `membership.color` / `bgColor`).
+
+**Square receipts on ledger rows.** A `pay` row of a Square payment (`processor: square`) adds `receiptNumber` and `receiptUrl` from the
+Square mirror (`square_payments`); the URL only when it is an https page on `squareup.com` or `squareupsandbox.com` (or a subdomain), no
+user, password or port; null for anything else and for every other row.
+
+**Settings, Billing & integrations** (`src/modules/square/http/billing-routes.ts`; `set.billing`). Each editable block carries its own
+`version`; a PUT takes it in the body or If-Match (428 `PRECONDITION_REQUIRED` without, 412 `VERSION_CONFLICT` stale), answers with an
+`ETag`, is audited `settings.update` and publishes `settings.changed {key}`.
+
+| Route | Body | Answer |
+|---|---|---|
+| `GET /settings/billing` | | `{square, processing, guestFee, linkTipping, cardFees, renewalPolicy, priceChangeNotice, consent}`: `square` is the body of `GET /integrations/square`; `processing {processor, squareProvider, squareEnvironment, writesEnabled, membershipsEnabled, posAppSwitch, posAutomatch, publicLinksEnabled, cardsOn}` is read only (server switches); `guestFee {cents, collect, version}` (saved with `PUT /catalog/guest-fee`, `set.services`); `linkTipping {enabled, version}`; `cardFees {fees, version, active}` (saved with `PUT /settings/card-fees`); `renewalPolicy {graceDays, cancelDays, version}`; `priceChangeNotice {days, version}`; `consent {version, checkedByDefault: false, purposes, text}` (read only). Never a token or a key. |
+| `PUT /settings/billing/link-tipping` | `{enabled, version?}` | `{enabled, version}` (`payments.link_tipping`, off by default). |
+| `PUT /settings/billing/renewal-policy` | `{graceDays 0..60, cancelDays 1..90, version?}` | `{graceDays, cancelDays, version}` (`memberships.billing_policy`, default 7 / 21); 422 `VALIDATION_FAILED` unless cancelDays > graceDays. |
+| `PUT /settings/billing/price-change-notice` | `{days 0..90, version?}` | `{days, version}` (`memberships.price_change_notice_days`, default 30). |
+
+Reused, not copied: `POST /integrations/square/test` (Test connection), `PUT /catalog/guest-fee` (the fee and its collect mode),
+`PUT /settings/card-fees`, `POST /integrations/square/catalog/sync` ("Sync to Square").
+
+**The membership billing block** (section 30.12) adds `planClassLabel`, `nextChargeOn` (the shop-local date Square charges next: the end
+of the paid period; null when no charge is due on a known date: not ACTIVE at Square, not an active membership, a failed renewal, or a
+cancel or pause on or before it), `card.label` ("Visa ••4242"), `change.planName` / `change.planClassLabel`, `lastPaid {amountCents,
+paidAt, dueDate, refundedCents}` and `lastFailed {amountCents, failedAt, dueDate, paid, payUrl}`.
+
+**The tier price grid** (`GET /catalog/tiers`, the tiers of `GET /catalog`, every tier answer; `set.services` holders only) adds to each
+price `squareError` (the last sync problem in plain words: why it failed when `failed`, or, on a `pending` price, why it is being made
+again because Square lost its plan variation; null once synced and when there was none) and `squareSyncedAt`; `squareState` is the real state the catalog
+sync keeps (`pending` until synced, always while `SQUARE_MEMBERSHIPS_ENABLED` is off).
+
+**Saved cards** (`GET /customers/:id/cards`, section 30.11) already carry each consent's `version`, `acceptedAt` and `purposes`
+(confirmed, no change).
+
+Tests: `test/square-db/dashboard-gaps.test.ts`, `test/square-db/billing-settings.test.ts`, `test/square-members/billing-view.test.ts`,
+`test/square/dashboard-gaps-pure.test.ts`.
