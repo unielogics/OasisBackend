@@ -31,7 +31,7 @@ import { settleClosed, settlementLog, type Settlement } from './closing.js'
 import { ensureInvoiceFor, staffLabel } from './invoicing.js'
 import { checkSlot, recordOverrides, type OverrideRequest } from './slots.js'
 import './problems.js'
-import { addonPriceEstimated, sizeFlags } from './visit-pricing.js'
+import { priceUnconfirmed, sizeFlags } from './visit-pricing.js'
 
 export interface Toast {
   title: string
@@ -82,7 +82,7 @@ export async function toCore(db: Executor, c: SchedulingCtx, a: AppointmentRecor
   const [bays, late, addonEstimated] = await Promise.all([
     listBays(db, c.locationId),
     getSetting(db, c.locationId, 'ops.late_grace_min'),
-    addonPriceEstimated(db, a.id),
+    priceUnconfirmed(db, a.id),
   ])
   return {
     id: a.id,

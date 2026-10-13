@@ -5,7 +5,7 @@
 // The size of a visit, in order: the size the caller names (a size of the shop that is on), then the size on file for the visit's
 // vehicle (when that size is still on), else none: priced at the smallest size, the "starts at" price (basis unknown_class), and
 // the appointment shows "Confirm size" until staff set it at the shop (class_confirmed_at).
-import { sql } from 'kysely'
+import { sql, type RawBuilder } from 'kysely'
 import type { Executor, Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
 import {
@@ -55,12 +55,14 @@ export interface PricingView {
 
 /**
  * The size flags of an appointment (none on a visit priced before sizes, none once staff confirmed the size). "Confirm price" when
- * the package OR a live add-on was charged its starting price because the size has no price of its own (`addonEstimated`; review Q4
- * pricing:F5): the booking answer's confirmAtShop already reads every line.
+ * the package OR a live add-on was charged a price the owner has not set for the size: its starting price because the size has no
+ * price of its own (`estimated`; review Q4 pricing:F5), or the service's one price because it has no prices by size at all (`base`,
+ * unless the service is priced on a quote; review Q4 pricing:F2). `otherLines`: an add-on, or a base package, needs it
+ * (priceUnconfirmed / priceUnconfirmedSql).
  */
 export function sizeFlags(
   a: Pick<AppointmentRecord, 'priceBasis' | 'classConfirmedAt' | 'vehicleClass'>,
-  addonEstimated = false,
+  otherLines = false,
 ): {
   needsSizeConfirm: boolean
   needsPriceConfirm: boolean
@@ -68,20 +70,29 @@ export function sizeFlags(
   const open = a.priceBasis !== 'legacy' && a.classConfirmedAt === null
   return {
     needsSizeConfirm: open && a.vehicleClass === null,
-    needsPriceConfirm: open && a.vehicleClass !== null && (a.priceBasis === 'estimated' || addonEstimated),
+    needsPriceConfirm: open && a.vehicleClass !== null && (a.priceBasis === 'estimated' || otherLines),
   }
 }
 
-/** A live add-on of the visit charged its starting price (its size has no price of its own): "Confirm price". */
-export async function addonPriceEstimated(db: Executor, appointmentId: string): Promise<boolean> {
-  const r = await db
-    .selectFrom('appointment_addons')
-    .select('id')
-    .where('appointment_id', '=', appointmentId)
-    .where('removed_at', 'is', null)
-    .where('price_basis', '=', 'estimated')
-    .executeTakeFirst()
-  return !!r
+/** A priced line the owner has not priced for the size: the starting price (`estimated`), or a service's one price (`base`, not a quote). */
+export const linePriceUnset = (book: PriceBook, l: { basis: string; serviceId: string }): boolean =>
+  l.basis === 'estimated' || (l.basis === 'base' && !book.services.get(l.serviceId)?.quoteOnly)
+
+/**
+ * The visit has a line asking "Confirm price" beyond an `estimated` package: a live add-on charged its starting price or its one price
+ * (no prices by size, not a quote), or a package charged its one price. `appointmentId`: an id, or a column reference (the board).
+ */
+export const priceUnconfirmedSql = (appointmentId: string | RawBuilder<unknown>): RawBuilder<boolean> => sql<boolean>`(
+  exists (select 1 from appointment_addons ad join services s on s.id = ad.service_id
+          where ad.appointment_id = ${appointmentId} and ad.removed_at is null
+            and (ad.price_basis = 'estimated' or (ad.price_basis = 'base' and not s.quote_only)))
+  or exists (select 1 from appointments ap join services s on s.id = ap.service_id
+          where ap.id = ${appointmentId} and ap.price_basis = 'base' and not s.quote_only))`
+
+/** priceUnconfirmedSql for one appointment. */
+export async function priceUnconfirmed(db: Executor, appointmentId: string): Promise<boolean> {
+  const r = await sql<{ x: boolean }>`select ${priceUnconfirmedSql(appointmentId)} as x`.execute(db)
+  return r.rows[0]?.x === true
 }
 
 /**
@@ -117,8 +128,20 @@ export async function memberFor(
 }
 
 /**
+ * The inclusions that cover a visit by themselves when it is completed (sandbox run F1): the ones marked auto-apply, every one when
+ * the member asked for it, and those the visit already redeems (staff applied them). A booking, an add-on, a size change and a quote
+ * price with only these, so a line shown as covered is covered at completion, and a line staff still have to apply is priced as a
+ * member line until they do ("Apply credit" then covers it).
+ */
+export function autoApplied(member: MemberContext | null, held: ReadonlySet<string> = new Set()): MemberContext | null {
+  if (!member || member.autoApplyAll) return member
+  return { ...member, inclusions: member.inclusions.filter((i) => i.autoApply || held.has(i.id)) }
+}
+
+/**
  * The member's credits as if this visit had not spent any yet: a visit the membership already covered is priced again with the
- * credits its own redeems took (a size change after the coverage keeps the covered lines covered).
+ * credits its own redeems took (a size change after the coverage keeps the covered lines covered). Only the inclusions that apply by
+ * themselves or that the visit already redeems (autoApplied).
  */
 export async function withVisitCredits(
   db: Executor,
@@ -142,15 +165,18 @@ export async function withVisitCredits(
       ),
     )
     .execute()
-  if (rows.length === 0) return member
+  if (rows.length === 0) return autoApplied(member)
   const spent = new Map<string, number>()
   for (const r of rows) if (r.inclusion_id) spent.set(r.inclusion_id, (spent.get(r.inclusion_id) ?? 0) + (r.qty ?? 1))
-  return {
-    ...member,
-    inclusions: member.inclusions.map((i) =>
-      i.left === null || !spent.has(i.id) ? i : { ...i, left: i.left + spent.get(i.id)! },
-    ),
-  }
+  return autoApplied(
+    {
+      ...member,
+      inclusions: member.inclusions.map((i) =>
+        i.left === null || !spent.has(i.id) ? i : { ...i, left: i.left + spent.get(i.id)! },
+      ),
+    },
+    new Set(spent.keys()),
+  )
 }
 
 /** Prices a visit: the package then the add-ons in order, at the size, for the member (or a guest). */
@@ -182,7 +208,10 @@ export function pricingView(p: VisitPricing, o: { confirmed?: boolean } = {}): P
   const pkg = p.quote.lines[0]!
   const flags = o.confirmed
     ? { needsSizeConfirm: false, needsPriceConfirm: false }
-    : sizeFlags({ priceBasis: pkg.basis, classConfirmedAt: null, vehicleClass: p.classKey }, p.quote.lines.slice(1).some((l) => l.basis === 'estimated'))
+    : sizeFlags(
+        { priceBasis: pkg.basis, classConfirmedAt: null, vehicleClass: p.classKey },
+        p.quote.lines.some((l, i) => (i > 0 || l.basis === 'base') && linePriceUnset(p.book, l)),
+      )
   return {
     vehicleClass: p.classKey,
     vehicleClassLabel: p.classLabel,

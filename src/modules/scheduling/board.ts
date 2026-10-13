@@ -20,7 +20,7 @@ import type { SchedulingCtx } from './context.js'
 import type { InvoiceSummary, MembershipInfo } from './ports.js'
 import { photoCounts } from './photos.js'
 import { visitCategory } from '../catalog/appointment-categories.js'
-import { sizeFlags } from './visit-pricing.js'
+import { priceUnconfirmedSql, sizeFlags } from './visit-pricing.js'
 
 export interface BoardRow {
   a: AppointmentRecord
@@ -107,10 +107,9 @@ export async function loadBoardRows(db: Executor, c: SchedulingCtx, q: RowQuery)
       sql<boolean>`exists (select 1 from vip_clients vc where vc.location_id = a.location_id and vc.customer_id = a.customer_id)`.as(
         'is_vip',
       ),
-      // an add-on charged its starting price (its size has no price): "Confirm price" (review Q4 F5)
-      sql<boolean>`exists (select 1 from appointment_addons ad where ad.appointment_id = a.id and ad.removed_at is null and ad.price_basis = 'estimated')`.as(
-        'addon_estimated',
-      ),
+      // a line charged a price the owner has not set for the size: an add-on's starting price (review Q4 F5), a service's one price
+      // (review Q4 pricing:F2): "Confirm price"
+      priceUnconfirmedSql(sql.ref('a.id')).as('addon_estimated'),
     ])
     .where('a.location_id', '=', c.locationId)
     .where('a.status', 'in', [...statuses])

@@ -133,8 +133,9 @@ export async function ensurePlans(db: Executor, d: { locationId: string; clock: 
           label: r.label,
           mode: 'per_cycle',
           per_cycle: r.perCycle,
-          // as the rules were: applied by staff unless the member (or staff on the inclusion) turns auto-apply on
-          auto_apply: false,
+          // applied by itself when a covered visit is completed (plan decision 2; sandbox run F1): what the booking and the quote
+          // showed as covered is what the invoice covers. The owner may turn it off per inclusion in Settings.
+          auto_apply: true,
           sort: j,
           created_at: now,
           updated_at: now,

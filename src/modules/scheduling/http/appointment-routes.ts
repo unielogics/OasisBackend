@@ -206,7 +206,7 @@ export function registerAppointmentRoutes(app: AppInstance, ports: SchedulingPor
         tags: TAGS,
         summary: 'Price preview for the booking sheet (nothing is written)',
         description:
-          'The same rules as the booking (ADR 0170): the size named, else the vehicle’s size on file, else unknown (the smallest size’s price, the "starts at" price); a client who holds or shares an active membership gets the member price, and a line an inclusion covers shows the regular price with what the membership would cover (up to the price at the plan size) and the size difference due. Coverage itself is applied when the visit is completed.',
+          'The same rules as the booking (ADR 0170): the size named, else the vehicle’s size on file, else unknown (the smallest size’s price, the "starts at" price); a client who holds or shares an active membership gets the member price, and a line an inclusion covers by itself at completion (`autoApply`, or every inclusion for a member with `autoApply`) shows the regular price with what the membership will cover (up to the price at the plan size) and the size difference due; an inclusion staff apply by hand is not shown as covered. Coverage itself is applied when the visit is completed.',
         body: QuoteBody,
         response: { 200: QuoteResult },
       },

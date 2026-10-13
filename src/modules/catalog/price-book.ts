@@ -177,6 +177,11 @@ export interface MemberContext {
   tierName: string
   /** The member % off, in basis points. */
   discountBp: number
+  /**
+   * The member asked for every inclusion to apply by itself (memberships.auto_apply). Absent or false: only the inclusions marked
+   * auto-apply cover a visit by themselves; the others wait for staff ("Apply credit"), so a booking shows them as not covered.
+   */
+  autoApplyAll?: boolean
   /** The size the membership is priced at: a covered line is covered up to this size's price. */
   planClass: string
   vipBooking: boolean
@@ -419,7 +424,7 @@ export async function loadMemberContext(db: Executor, locationId: string, custom
   if (!ref) return null
   const m = await db
     .selectFrom('memberships')
-    .select(['id', 'customer_id', 'plan_id', 'plan_class', 'current_period_start'])
+    .select(['id', 'customer_id', 'plan_id', 'plan_class', 'current_period_start', 'auto_apply'])
     .where('id', '=', ref.id)
     .where('location_id', '=', locationId)
     .executeTakeFirst()
@@ -438,6 +443,7 @@ export async function loadMemberContext(db: Executor, locationId: string, custom
     tierKey: plan.key,
     tierName: plan.name,
     discountBp: plan.memberDiscountBp,
+    autoApplyAll: m.auto_apply,
     planClass: m.plan_class,
     vipBooking: plan.vipBooking,
     inclusions: plan.inclusions

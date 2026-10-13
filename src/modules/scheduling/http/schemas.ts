@@ -98,7 +98,9 @@ export const SizeFields = {
     .describe('No size known: priced at the smallest size (the starting price) until staff confirm the size at the shop ("Confirm size")'),
   needsPriceConfirm: z
     .boolean()
-    .describe('The size has no price of its own: charged the starting price until staff confirm it ("Confirm price")'),
+    .describe(
+      'A line (the package or a live add-on) was charged a price the owner has not set for the size: the starting price (the size has no price of its own) or the service’s one price (no prices by size, not a quote): "Confirm price" until staff confirm the size',
+    ),
 }
 
 export const PriceBasis = z

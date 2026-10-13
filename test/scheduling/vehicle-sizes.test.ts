@@ -71,10 +71,11 @@ describe('vehicle sizes on the staff booking path', () => {
     expect(truck.body.appointment).toMatchObject({ needsSizeConfirm: false, needsPriceConfirm: true })
   })
 
-  it('a service without prices by size keeps its one price and asks nothing', async () => {
+  it('a service without prices by size keeps its one price; staff see Confirm price (review Q4 pricing:F2), the client is told nothing', async () => {
     const b = await bookAt(m, 'Liam Chen', WASH, { vehicleClass: 'large_suv' })
     expect(await apptRow(m, b.appointmentId)).toMatchObject({ price_cents: 4500, price_basis: 'base', vehicle_class: 'large_suv' })
     expect(b.body.pricing.confirmAtShop).toBe(false)
+    expect(b.body.appointment).toMatchObject({ needsPriceConfirm: true })
   })
 
   it('the car on file: vehicleId books it (no duplicate), its size prices the visit; a size named is recorded on it (staff)', async () => {

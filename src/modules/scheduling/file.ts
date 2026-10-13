@@ -11,7 +11,7 @@ import { listCatalog } from '../catalog/service.js'
 import '../customers/schema.js'
 import type { AppointmentStatus, PriceBasis } from '../customers/schema.js'
 import { classPrice, loadPriceBook } from '../catalog/price-book.js'
-import { sizeFlags } from './visit-pricing.js'
+import { linePriceUnset, sizeFlags } from './visit-pricing.js'
 import { isVipCustomer } from '../customers/service.js'
 import { canSeeContact } from '../people/redact.js'
 import {
@@ -251,7 +251,12 @@ export async function loadAppointmentFile(
     vehicle,
     vehicleClass: a.vehicleClass,
     vehicleClassLabel: a.vehicleClassLabel,
-    ...sizeFlags(a, addons.some((x) => x.priceBasis === 'estimated')),
+    ...sizeFlags(
+      a,
+      [...addons.map((x) => ({ basis: x.priceBasis, serviceId: x.serviceId })), ...(a.priceBasis === 'base' ? [{ basis: a.priceBasis, serviceId: a.serviceId }] : [])].some(
+        (l) => linePriceUnset(book, l),
+      ),
+    ),
     priceBasis: a.priceBasis,
     classConfirmedAt: a.classConfirmedAt?.toISOString() ?? null,
     overview: {

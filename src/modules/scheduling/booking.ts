@@ -34,6 +34,7 @@ import type { InvoiceSummary } from './ports.js'
 import type { TemplateVars } from '../messaging/templates/render.js'
 import { checkSlot, recordOverrides, type AppliedOverride, type OverrideRequest } from './slots.js'
 import {
+  autoApplied,
   lineColumns,
   memberFor,
   notTheirVehicle,
@@ -271,7 +272,8 @@ export async function createAppointment(
   const staffOn = overruled ? await resolveVisitClass(tx, c.locationId, { vehicleClass: staffSize }) : null
   const classKey = staffOn ?? named
   if (input.vehicleClass && vehicle && input.recordClassAs) await recordVehicleClass(tx, vehicle.id, classKey!, input.recordClassAs)
-  const member = await memberFor(tx, c, customer.id, input.memberPricing !== false)
+  // only what will cover the visit by itself at completion is priced as covered (sandbox run F1)
+  const member = autoApplied(await memberFor(tx, c, customer.id, input.memberPricing !== false))
   const priced = await priceVisit(tx, c, { packageId: pkg.id, addonIds: addons.map((a) => a.id), classKey, member })
   const pkgLine = priced.quote.lines[0]!
 

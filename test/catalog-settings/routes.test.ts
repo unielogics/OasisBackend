@@ -155,7 +155,7 @@ describe('GET /catalog', () => {
     ])
     expect(b.tiers[1]).toMatchObject({ name: 'Gold', memberDiscountBp: 0, priceVersion: 1, prices: [], fromMonthlyCents: null, sold: false, squarePlanId: null })
     expect(b.tiers[1].inclusions).toEqual([
-      { id: expect.any(String), label: 'Premium wash', mode: 'per_cycle', perCycle: 2, autoApply: false, active: true, serviceIds: [] },
+      { id: expect.any(String), label: 'Premium wash', mode: 'per_cycle', perCycle: 2, autoApply: true, active: true, serviceIds: [] },
     ])
     expect(b.guestFee).toEqual({ cents: 2500, collect: 'counter', version: expect.any(Number) })
     expect(b.guestBookingFeeCents).toBe(2500)

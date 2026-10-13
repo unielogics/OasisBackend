@@ -18,6 +18,7 @@ import { liveAddons, syncInvoiceItems } from './invoicing.js'
 import { toCore, type CommandResult } from './lifecycle.js'
 import type { InvoiceSummary } from './ports.js'
 import {
+  autoApplied,
   lineColumns,
   memberFor,
   notTheirVehicle,
@@ -175,7 +176,8 @@ export async function quoteFor(db: Executor, c: SchedulingCtx, input: QuoteInput
       ? await db.selectFrom('customers').select('id').where('id', '=', input.customerId).where('deleted_at', 'is', null).executeTakeFirst()
       : undefined
   if (input.customerId && !customer) throw new AppError('NOT_FOUND', { detail: 'That customer does not exist' })
-  const member = customer ? await memberFor(db, c, customer.id) : null
+  // the quote shows as covered only what the booking will cover (sandbox run F1)
+  const member = customer ? autoApplied(await memberFor(db, c, customer.id)) : null
   const priced = await priceVisit(db, c, { packageId: pkg.id, addonIds: addons.map((a) => a.id), classKey, member })
   const names = [pkg, ...addons]
   return {
