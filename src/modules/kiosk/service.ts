@@ -324,7 +324,7 @@ export class KioskService {
           after: { failures },
           ctx,
         })
-        if (lockedOut)
+        if (lockedOut) {
           await audit.record(tx, {
             locationId,
             action: 'kiosk.device.lockout',
@@ -333,6 +333,8 @@ export class KioskService {
             after: { failures },
             ctx,
           })
+          await this.changed(tx, locationId)
+        }
         return { ok: false, failures, lockedOut }
       }
 
@@ -377,6 +379,7 @@ export class KioskService {
         after: { locksAt: lock.locksAt.toISOString(), rule: lock.rule, userSignedOut },
         ctx,
       })
+      await this.changed(tx, locationId)
       return { ok: true, token: s.token, sessionId: s.id, csrfSecret: s.csrfSecret, lock, createdAt: s.createdAt, userSignedOut }
     })
 
@@ -447,6 +450,7 @@ export class KioskService {
         entityId: ctx.kiosk.deviceId,
         ctx: auditCtx,
       })
+      await this.changed(tx, ctx.locationId)
     })
   }
 

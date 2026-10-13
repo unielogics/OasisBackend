@@ -600,6 +600,44 @@ on the host: an `/etc/hosts` line `127.0.0.1 oasisautospanj.com www.oasisautospa
 address), which the production host carries permanently; remove it only if the website moves to another host. certbot is
 unaffected (Let's Encrypt resolves the name itself).
 
+## 11. Kiosk mode (the shop tablet)
+
+The front-desk tablet can stay open all day without an email login (ADR 0180, `docs/api-spec.md` section 31). It is **off** until a
+manager turns it on; with it off the sign-in page and everything else are exactly as before. All of this is done in the dashboard,
+signed in as someone with "Assign roles & permissions" (Management or Super Admin).
+
+**Set it up once**
+1. Settings → Kiosk → Unlock code: type an 8-digit code twice, or tap Generate and write it down (it is shown once). A code can't start
+   with 0218, repeat a digit, run in a row (12345678), repeat a pattern, be a date, or be one of the last 3 codes.
+2. On the tablet itself: sign in with your email and password, Settings → Kiosk → "This device": give it a name ("Front desk tablet")
+   and tap **Make this a kiosk**. Only this browser on this tablet becomes the kiosk (a cookie it keeps for 400 days; clearing the
+   browser's data or using another browser undoes it: then do this step again and remove the old device).
+3. Turn **Kiosk mode** on. The tablet goes to the keypad. Type the code: the board opens and stays open until closing + 2 hours
+   (2 hours on a closed day or late at night).
+4. Check: Settings → Kiosk lists the device as "Unlocked" with its lock time; "Recent kiosk events" shows the unlock.
+5. On the tablet, turn on the system's own guided access / screen pinning and a screen lock, so the browser can't be left.
+
+**Every day.** Staff tap their name when they move a car, take a payment, text or book. "Lock kiosk" in the menu locks it; it also
+locks by itself at its lock time. A manager can still sign in on the tablet: type 0218 on the keypad to show the email and password
+form. That sign-in signs out after 15 minutes without use (4 hours at most); the next unlock with the code signs it out too.
+
+**Change the code** (someone left, or every few months; Settings shows how old it is): Settings → Kiosk → Change code. Every kiosk
+locks at once; give the new code to the staff. If `SESSION_SECRET` was rotated (section 8), the old code stops working: set a new one.
+
+**"Too many wrong codes"** (the tablet says a manager needs to sign in): after 3 wrong codes the keypad makes people wait (2 seconds,
+then 4, 8 ... up to 5 minutes); after 20 in a row the device is locked out. Settings → Kiosk → the device → **Clear lockout**, then
+the code works again. Many wrong codes in an hour on every kiosk slow every keypad down and add "Many wrong codes on every kiosk" to
+Recent kiosk events: check who is at the tablets, and change the code.
+
+**Lost, stolen or replaced tablet**: Settings → Kiosk → the device → **Remove** (its cookie never works again), and change the code.
+"Lock all kiosks" locks every tablet now without removing anything.
+
+**Turn it off** (rollback): Settings → Kiosk → Kiosk mode off. Every kiosk session ends and the sign-in page shows the email form
+again. Nothing else changes; the devices and the code are kept for next time.
+
+**Who shows on the kiosk**: every active or invited employee of the shop, unless "Shows on the kiosk" is unticked for them (Settings →
+Kiosk). Deactivated employees never show.
+
 ## Appendix: where things are
 
 | Question | Answer |
@@ -612,3 +650,4 @@ unaffected (Let's Encrypt resolves the name itself).
 | nginx | `/etc/nginx/conf.d/oasis.conf` (the dashboard), `oasis-site.conf` (the website); `sudo nginx -t && sudo systemctl reload nginx` |
 | Which website release is live? | `readlink /var/www/site/current; cat /var/www/site/current/REVISION; tail /var/log/oasis/site-deploys.list` |
 | Everything the tablet and API do | `docs/integrations/smsgate.md`, `docs/api-spec.md` sections 22 and 23 |
+| Kiosk mode (the shop tablet) | section 11; `docs/api-spec.md` section 31; ADR 0180 |

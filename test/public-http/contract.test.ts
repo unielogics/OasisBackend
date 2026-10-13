@@ -34,7 +34,18 @@ describe('the public website API contract', () => {
     // development object store live outside the prefix)
     const others = h.t.app.routeRegistry.filter((r) => r.access.kind === 'public' && r.url.startsWith('/api/') && !r.url.startsWith('/api/v1/public/'))
     expect(others.map((r) => r.url).sort()).toEqual(
-      ['/api/v1/arrivals/ping', '/api/v1/auth/invite/accept', '/api/v1/auth/login', '/api/v1/auth/password/forgot', '/api/v1/auth/password/reset', '/api/v1/meta/now', '/api/v1/openapi.json'].sort(),
+      [
+        '/api/v1/arrivals/ping',
+        '/api/v1/auth/invite/accept',
+        '/api/v1/auth/login',
+        '/api/v1/auth/password/forgot',
+        '/api/v1/auth/password/reset',
+        // kiosk mode (ADR 0180): the keypad's status and the unlock (the registered device cookie plus the code)
+        '/api/v1/kiosk/status',
+        '/api/v1/kiosk/unlock',
+        '/api/v1/meta/now',
+        '/api/v1/openapi.json',
+      ].sort(),
     )
   })
 

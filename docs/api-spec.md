@@ -2463,3 +2463,113 @@ sync keeps (`pending` until synced, always while `SQUARE_MEMBERSHIPS_ENABLED` is
 
 Tests: `test/square-db/dashboard-gaps.test.ts`, `test/square-db/billing-settings.test.ts`, `test/square-members/billing-view.test.ts`,
 `test/square/dashboard-gaps-pure.test.ts`.
+
+## 31. Kiosk mode (ADR 0180, wave K1a)
+
+The shop's shared tablet stays open all day without an email login. A manager signs in once on the tablet and taps "Make this a
+kiosk" (a registered device: an HttpOnly device cookie); the 8-digit shop code then unlocks it into a **kiosk session** that lasts
+until closing + 2 hours. Off until `kiosk.enabled` (setting, default false): with it off the keypad answers `409 KIOSK_OFF`, every
+kiosk session is invalid and nothing else changes. On the dashboard, typing `0218` as the first four digits reveals the email/password
+card (dashboard only; no code may start with 0218).
+
+### 31.1 Cookies and the request context
+
+| Cookie | Production name | Other | Attributes | Lifetime |
+|---|---|---|---|---|
+| Device | `__Host-oasis_kdev` | `oasis_kdev` | HttpOnly, Secure (`COOKIE_SECURE`), SameSite=Lax, Path=/ | 400 days, set again on every unlock |
+| Kiosk session | `__Host-oasis_ksid` | `oasis_ksid` | the same | until the lock time (browser-counted) |
+
+Only sha256 hashes of both tokens are stored (`kiosk_devices.token_hash`, `kiosk_sessions.id`). Resolution order: **a live user session
+wins**; otherwise a kiosk session whose own live device cookie comes with it, while `kiosk.enabled` is on at its location; otherwise
+unauthenticated. A kiosk context has `kind: 'kiosk'`, `userId: null`, the built-in `KIOSK_PERMISSIONS` (`sched.view`, `sched.edit`,
+`jobs.status`, `jobs.checklist`, `cli.view`, `cli.contact`, `pay.collect`, `msg.send`; not a role, never assignable), no money limits,
+roles `Kiosk`, and the actor name `Kiosk · <device name>` until an employee is bound.
+
+**The route list (fail-closed).** `src/modules/kiosk/allowlist.ts` lists every route a kiosk may call, as `none` or `actor`; the API
+contract marks each listed operation `x-oasis-kiosk: none|actor` (the dashboard generates its copy from it). Before any permission check a
+kiosk gets `403 KIOSK_FORBIDDEN` on every other route, even by direct URL; the person's own account routes (`GET /me`,
+`PUT /me/preferences`, `POST /me/view-as`, `POST /auth/logout`, `POST /auth/password/change`) answer `403 KIOSK_SESSION` (the dashboard
+then loads `GET /kiosk/me`). The app refuses to start when an entry names no registered route, a public route, or a route whose
+permissions the kiosk cannot satisfy.
+
+| Mode | Routes |
+|---|---|
+| Reads (`none`) | `GET /kiosk/me`, `/kiosk/staff`, `/auth/csrf`, `/events`, `/ops/snapshot`, `/ops/kpis`, `/ops/alerts`, `/calendar/summary`, `/calendar/day`, `/availability`, `/bays`, `/staff`, `/appointments`, `/appointments/:id`, `/appointments/:id/messages`, `/appointments/:id/fee-charges`, `/customers`, `/customers/:id/messages`, `/customers/:id/membership`, `/customers/:id/identity`, `/customers/:id/cards`, `/customers/:id/sms-consent`, `/messages/templates`, `/membership-plans`, `/services`, `/catalog/vehicle-classes`, `/invoices/:id/card-charges` |
+| Writes without an acting employee (`none`) | `POST /kiosk/lock`, `POST /appointments/quote`, `POST /customers/:id/messages/read` |
+| Writes that record who did it (`actor`) | `POST /appointments`, `POST /customers`, `PATCH /appointments/:id`, `PUT /appointments/:id/vehicle-class`, `POST /appointments/:id/{confirm,arrive,start,assign-bay,complete,advance,prep-bay,pickup,notify-ready,reschedule,arrival-link,messages}`, `PUT` and `DELETE /appointments/:id/addons/:serviceId`, `PUT /appointments/:id/checklist/items/:itemId`, `POST /appointments/:id/checklist/bulk`, `POST /appointments/:id/photos/{presign,:photoId/complete,note}`, `POST /invoices/:id/{payments,credit-applications,receipt,payment-links,card-charges}`, `PUT /invoices/:id/tip` |
+
+Left out on purpose though the kiosk holds the permission: "Not charged (checked Square)" and fee charge/waive, the Square apply/ignore
+and POS intents, Squarespace matching and confirm-processor, deleting a photo, the outbox and inbox, every Settings, catalog, standing
+and membership route; and by permission: refunds, voids, adjustments, credits, reports, team, cancel and no-show.
+
+**The acting employee.** On every unsafe kiosk request the CSRF token (`X-CSRF-Token`, from `GET /kiosk/me`, the unlock answer or
+`GET /auth/csrf`) is checked, then the `X-Oasis-Employee` header (a uuid) is bound: an `active` or `invited` employee of the device's
+location with "Shows on the kiosk" on, else `422 KIOSK_EMPLOYEE_INVALID`; on `actor` routes a missing header is `428
+KIOSK_EMPLOYEE_REQUIRED`. The employee becomes the request's `employeeId` and actor name ("Marco R."): the audit row
+(`actor_user_id` null, `actor_employee_id`, `actor_roles` "Kiosk", `audit_log.kiosk_device_id`), the ledger and the message sender.
+Reads ignore the header; with a user session present it is ignored too.
+
+**Per device.** Rate limits, idempotency keys (`kiosk:<device id>`), the ledger and saved-card request keys and the event-stream cap
+(8) count the device, whoever taps. The event stream gives a kiosk `ops`, `messages` and `settings`, never `notifications` (nor
+`payments`, which needs `pay.reports`); its 15-second re-check ends the stream after a lock, revoke or the lock time.
+
+### 31.2 The keypad and the unlocked kiosk
+
+| Method | Path | Access | Body | Answers |
+|---|---|---|---|---|
+| GET | `/kiosk/status` | public | – | `{enabled, device: {name} \| null, unlocked: {locksAt, locksAtLabel} \| null, lockedOut, retryAfterSec}`; no personal data |
+| POST | `/kiosk/unlock` | public (device cookie + code), 20/min | `{code: 8 digits}` | `200 KioskMe` + the kiosk cookie, the device cookie again; `403 KIOSK_DEVICE_UNKNOWN` (no live device cookie: the code is never checked); `409 KIOSK_OFF`, `409 KIOSK_CODE_NOT_SET`; `401 KIOSK_CODE_WRONG {meta.retryAfterSec}`; `429 KIOSK_THROTTLED` + Retry-After (not evaluated); `423 KIOSK_LOCKED_OUT` |
+| GET | `/kiosk/me` | an unlocked kiosk (else `403 NOT_A_KIOSK`) | – | `KioskMe` |
+| GET | `/kiosk/staff` | an unlocked kiosk | – | `{items: KioskPerson[]}` |
+| POST | `/kiosk/lock` | an unlocked kiosk, no actor | – | `204`, clears the kiosk cookie |
+
+`KioskMe = {kind: 'kiosk', device: {id, name}, lock: {unlockedAt, locksAt, locksAtLabel ("7:00 PM"), rule}, permissions: {<key>: {on}}
+(every catalog key), limits: {}, csrfToken, staff: KioskPerson[], businessTz, serverTime}`;
+`KioskPerson = {id, name ("Marco R."), first, initials, avatarColor, title, bayStaff}`: every active or invited employee of the location
+shown on the kiosk, bay staff (the staff view's rule) first, then by first name.
+
+**Lock time** (`kioskLockTime`, computed once at unlock from today's and yesterday's hours, closures and the emergency): `previous_day`
+when yesterday's closing + 2 h is still ahead (a late close past midnight); `closing` when today is open and its closing + 2 h is
+ahead, unless it is more than 3 hours before opening; otherwise `two_hours` (a closed day, an emergency closure, after closing + 2 h, the
+night); never more than 20 hours. The 2 hours are added to the instant (real hours across daylight saving). Later hours changes do not
+move it: "Lock all" does.
+
+**Unlock throttle** (ADR 0180 departs from ADR 0008's no-lockout rule): per device, persisted, 3 free wrong codes, then a wait of 2, 4,
+8 ... seconds up to 5 minutes before the next code is evaluated; 20 in a row lock the device out until a manager clears it. Per
+address, 10 free failures up to 120 s; across every device, more than 60 failures an hour slows everyone by 30 s and writes one
+`kiosk.unlock.alert` an hour. A success resets the device. A success also ends the device's previous kiosk session (`unlock_again`)
+and signs out a user session that came with the request (its cookie is cleared).
+
+### 31.3 The manager's controls (`team.roles`, a signed-in person)
+
+| Method | Path | Body | Answers |
+|---|---|---|---|
+| GET | `/kiosk` | – | `{enabled, version, code: {set, setAt, setBy, ageDays}, thisDeviceId, devices: KioskDevice[], staff: [{id, name, status, listed}], recent: [{at, action, label, by, deviceName}]}` |
+| PUT | `/kiosk/settings` | `{enabled, version}` | `{enabled, version}`; `409 KIOSK_CODE_NOT_SET` to turn it on without a code; `412 VERSION_CONFLICT`; off revokes every kiosk session (`kiosk_off`) |
+| PUT | `/kiosk/code` | `{code}` or `{generate: true}` | `{setAt, code?}` (a generated code is shown once); `422 KIOSK_CODE_REJECTED` with the rule in `errors[0].message`: 8 digits, not starting with 0218, not one digit, no runs (with wrap), no repeating pattern of period 1 to 4 or doubled pairs, no date (YYYYMMDD / MMDDYYYY, 1900 to 2099), not a common code, not one of the last 3; every kiosk session ends (`code_changed`) |
+| POST | `/kiosk/devices` | `{name ≤ 40}` | `201 {device, signedOut}` + the device cookie; `409 KIOSK_DEVICE_EXISTS`; while kiosk mode is on the manager's own session ends and its cookie is cleared |
+| PATCH | `/kiosk/devices/:id` | `{name, version}` | `KioskDevice`; `412 VERSION_CONFLICT` |
+| DELETE | `/kiosk/devices/:id` | – | `204`; the cookie stops working for good, its session ends (`device_revoked`) |
+| POST | `/kiosk/devices/:id/lock` | – | `204` (`lock_device`) |
+| POST | `/kiosk/devices/:id/clear-lockout` | – | `KioskDevice` (the counter starts over) |
+| POST | `/kiosk/lock-all` | – | `{locked: n}` (`lock_all`) |
+| PUT | `/kiosk/staff/:employeeId` | `{listed}` | `{id, name, status, listed}` ("Shows on the kiosk") |
+
+`KioskDevice = {id, name, state: unlocked|locked|locked_out|revoked, locksAt, lastSeenAt, lastIp, lastUa, failedAttempts, createdAt,
+createdBy, version}`. Every change is audited (`kiosk.device.register|rename|revoke|lock|lockout|lockout.clear`, `kiosk.code.set` (never
+the code), `kiosk.mode.on|off`, `kiosk.unlock`, `kiosk.unlock.failed`, `kiosk.unlock.alert`, `kiosk.lock`, `kiosk.lock_all`,
+`kiosk.staff.listed`) with the device in `audit_log.kiosk_device_id`, and publishes `settings.changed {section: 'kiosk'}`.
+
+**A manager on a kiosk device.** `POST /auth/login` from a browser carrying a live device cookie opens a short session (15 minutes
+idle, 4 hours at most, `sessions.kiosk_device_id`); `GET /me` then answers `kioskDevice: {id, name}` (null elsewhere) and the dashboard
+shows a bar.
+
+### 31.4 Team activity (contract only in wave K1a)
+
+`GET /reports/employee-activity?from&to&employeeId` and `GET /reports/employee-activity/:employeeId/events?from&to&cursor` (`team.edit`;
+amounts null without `pay.reports`) have their final schemas (`EmployeeActivityResponse`, `EmployeeEventsResponse` in the API contract)
+and answer `501 NOT_BUILT` until wave K2b builds them from `staff_events`, the ledger and the messages.
+
+Tests: `test/kiosk/*.test.ts` (code rules, lock time, throttle, permissions, principals, the HTTP flows, event streams),
+`test/authz-matrix/kiosk-matrix.test.ts` (generated: every route against a kiosk, the contract marks, the boot check),
+`test/authz-matrix/matrix.test.ts` (the two public routes and the kiosk-only routes).

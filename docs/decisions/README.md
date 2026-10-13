@@ -79,3 +79,4 @@
 | [0160](0160-ai-assistant-and-phone-identity.md) | An AI text assistant on the shop's number, the phone as the client's identity, personal links, status texts and one catalog |
 | [0170](0170-vehicle-sizes-prices-and-tiers.md) | Prices by vehicle size, a computed member price, and editable membership tiers |
 | [0171](0171-square-payments.md) | Square for everything: pay-by-link, memberships, counter payments and cards on file (foundation built in wave Q1b) |
+| [0180](0180-kiosk-mode.md) | Kiosk mode: the shop tablet unlocked by a shop code, the employee tapped for each change, a fail-closed route list |
