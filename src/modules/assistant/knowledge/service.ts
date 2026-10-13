@@ -23,7 +23,7 @@ import type { NewId } from '../../../platform/ids.js'
 import * as realtime from '../../../platform/realtime.js'
 import { getSetting } from '../../../platform/settings.js'
 import { hasHiddenCharacters } from '../../settings/http/assistant-service.js'
-import { hasInstructionWarning, knowledgeWarnings } from './sanitize.js'
+import { capWarnings, hasInstructionWarning, knowledgeWarnings } from './sanitize.js'
 import type { KnowledgeKind, KnowledgeSource, KnowledgeWarning } from './schema.js'
 import './schema.js'
 import './problems.js'
@@ -161,7 +161,7 @@ export function entryWarnings(
   if (o.removedChars && o.removedChars > 0) extra.push({ kind: 'hidden', sample: `${o.removedChars} hidden characters removed`, line: 0 })
   if (e.kind === 'document' && e.body.length > DOCUMENT_ACTIVE_MAX)
     extra.push({ kind: 'long', sample: `${e.body.length} characters`, line: 0 })
-  return [...extra, ...head, ...knowledgeWarnings(e.body, o)].slice(0, 50)
+  return capWarnings([...extra, ...head, ...knowledgeWarnings(e.body, o)])
 }
 
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex')

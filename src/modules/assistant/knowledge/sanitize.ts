@@ -19,6 +19,16 @@ export const NUMBER_MASK = '[number]'
 
 /** The most warnings kept per entry (the editor lists them; the rest are "and more"). */
 export const MAX_WARNINGS = 50
+/** Kinds kept past the cap: a long price sheet must never hide an order-like line, markup or hidden text (the review gate reads
+ *  the instruction warnings, so a dropped one would let a document go live without confirmInstructions). */
+const UNCAPPED: ReadonlySet<KnowledgeWarningKind> = new Set<KnowledgeWarningKind>(['instruction', 'markup', 'hidden'])
+
+/** A list of warnings cut to the cap, keeping every order-like line, markup and hidden text (line order kept). */
+export function capWarnings<W extends { kind: KnowledgeWarningKind }>(ws: readonly W[]): W[] {
+  const out: W[] = []
+  for (const w of ws) if (out.length < MAX_WARNINGS || UNCAPPED.has(w.kind)) out.push(w)
+  return out
+}
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g
 /** A URL's characters; it never ends on sentence punctuation ("see www.x.com, then" keeps the comma). */
@@ -61,7 +71,7 @@ const INSTRUCTION: readonly RegExp[] = [
   /\bnew\s+(?:rules?|instructions?)\b/i,
   /^\s*(?:#+\s*)?(?:SHOP\s+FACTS|SHOP\s+KNOWLEDGE|TURN\s+CONTEXT|RULES?|SYSTEM|INSTRUCTIONS?|HOW\s+TO\s+WRITE|WHAT\s+IS\s+DATA)\b\s*[:(]?/i,
   /[⟦⟧]|<\/?\s*(?:message|own-text|server-record|trusted)\b|\[\/?trusted\]/i,
-  /\b(?:"ok"\s*:\s*true|category"\s*:\s*"none")/i,
+  /(?:"ok"\s*:\s*true|\bcategory"\s*:\s*"none")/i,
 ]
 
 const clip = (s: string): string => (s.length > 40 ? `${s.slice(0, 39)}…` : s)
@@ -81,12 +91,12 @@ export function hiddenCount(text: string): number {
   return (text.replace(PLAIN_WS, '').match(HIDDEN) ?? []).length
 }
 
-/** The warnings of an entry's text, in line order (at most MAX_WARNINGS). */
+/** The warnings of an entry's text, in line order (at most MAX_WARNINGS, plus every order-like line, markup and hidden text). */
 export function knowledgeWarnings(text: string, o: SanitizeOptions = {}): KnowledgeWarning[] {
   const shop = shopDigits(o.shopNumbers ?? [])
   const out: KnowledgeWarning[] = []
   const add = (kind: KnowledgeWarningKind, sample: string, line: number): void => {
-    if (out.length >= MAX_WARNINGS) return
+    if (out.length >= MAX_WARNINGS && !UNCAPPED.has(kind)) return
     if (out.some((w) => w.kind === kind && w.line === line && w.sample === clip(sample))) return
     out.push({ kind, sample: clip(sample.trim()), line })
   }

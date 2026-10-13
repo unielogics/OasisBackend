@@ -24,6 +24,7 @@ import { sniffPdf } from '../../../integrations/storage/sniff.js'
 import { DOWNLOAD_TTL_SEC, KNOWLEDGE_TYPES, MAX_KNOWLEDGE_BYTES, normalizeContentType, UPLOAD_TTL_SEC } from '../../../integrations/storage/types.js'
 import type { ObjectStorage } from '../../../integrations/storage/types.js'
 import { extractPdf, type PdfLimits } from './extract/extract.js'
+import { capWarnings } from './sanitize.js'
 import type { DocumentError, DocumentStatus } from './schema.js'
 import { DOCUMENT_STORE_MAX, entryChars, entryWarnings, lockKnowledge, markDocumentDeleted, publishKnowledge, type KnowledgeContext } from './service.js'
 import './schema.js'
@@ -328,7 +329,7 @@ export async function extractDocument(d: ExtractDeps, id: string): Promise<'read
           document_id: id,
           active: false,
           reviewed_at: null,
-          warnings: JSON.stringify(warnings.slice(0, 50)),
+          warnings: JSON.stringify(capWarnings(warnings)),
           chars: entryChars({ title, body }),
           created_by: doc.uploaded_by,
           updated_by: doc.uploaded_by,
