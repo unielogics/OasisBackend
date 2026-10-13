@@ -1266,9 +1266,9 @@ is the design's day as data.
 | `POST /invoices/:id/adjustments` `{kind, unit: $\|%, value, reason?, note?, settle?}` | `pay.adjust` | `value` is cents for `$`, basis points of the items subtotal for `%` (1000 = 10%); applied before tax. Over the limit: 422 `OVER_LIMIT` with `Over your $25 limit as Customer Support. Ask Management or a Super Admin.` (no approval path). `ADJUST_EXCEEDS_INVOICE`, 409 `INVOICE_CANCELED`. A discount that leaves a paid invoice overpaid adds a settlement **refund event** (`settle` credit by default or card) under the normal refund rules (pending above the caller's refund limit, card settlements await Squarespace); `{event, settlement, invoice}`. |
 | `POST /invoices/:id/credits` `{amountCents, reason?, note?, expiry: none\|d30\|d90 (or the design labels)}` | `pay.credit` | Expires at the end of the business day 30 or 90 days out. Over the limit: 422 `OVER_LIMIT` (`Over your $50 limit as Customer Support.`). |
 | `POST /invoices/:id/void` `{eventId, note?}` | `pay.void` | Cash, or card still awaiting its processor; 422 `VOID_NOT_ALLOWED` (the detail names the processor: Square, Squarespace or "the card processor"), 409 `PAYMENT_ALREADY_VOIDED`. |
-| `PUT /invoices/:id/tip` `{tipCents}` | `pay.collect` | Untaxed; reopens a balance when the invoice was settled. |
+| `PUT /invoices/:id/tip` `{tipCents}` | `pay.collect` | Untaxed; reopens a balance when the invoice was settled. Never lowered below what the client already paid (409 `PAY_TIP_BELOW_PAID`: refund instead). An unlocked kiosk raises a tip to at most half the bill before the tip, and never less than $20 (422 `PAY_TIP_KIOSK_LIMIT`; ADR 0180). |
 | `POST /invoices/:id/receipt` | `msg.send` or `pay.collect` | SMS to opted-in clients and email, through the `PaymentMessenger` port; audited; not a ledger event. |
-| `POST /invoices/:id/payment-links` `{kind: balance\|deposit, amountCents?, url?}` | `pay.collect` | Before the Square cutover: attach and text a Squarespace checkout or invoice link. With `PAYMENT_PROCESSOR=square` (ADR 0171 D3): a `balance` link is the client's personal pay page while `PUBLIC_LINKS_ENABLED` (template `payment_link_personal`, the link masked in the message row; `paymentLink.url` null, `provider personal`), else a Square link made now for exactly the balance (its lines, a "Sales tax (7%)" line at the invoice's own rate (ADR 0173) and a "Tip" line, or one "Balance due" line; asserted to add up exactly); a `deposit` is a Square quick-pay link for `amountCents`. The Square call runs before the transaction (idempotency `prepare`); the link becomes active under the invoice lock (409 `CONCURRENT_UPDATE` if the amount changed meanwhile), older active links of the purpose are superseded (and deleted at Square by `square.links.sweep`). 409 `SQUARE_WRITES_OFF` (watch-only), 503 `SQUARE_UNAVAILABLE`. `paymentLink{id,url,expectedCents,purpose,sms,provider}`. |
+| `POST /invoices/:id/payment-links` `{kind: balance\|deposit, amountCents?, url?}` | `pay.collect` | Before the Square cutover: attach and text a Squarespace checkout or invoice link. With `PAYMENT_PROCESSOR=square` (ADR 0171 D3): a `balance` link is the client's personal pay page while `PUBLIC_LINKS_ENABLED` (template `payment_link_personal`, the link masked in the message row; `paymentLink.url` null, `provider personal`), else a Square link made now for exactly the balance (its lines, a "Sales tax (7%)" line at the invoice's own rate (ADR 0173) and a "Tip" line, or one "Balance due" line; asserted to add up exactly); a `deposit` is a Square quick-pay link for `amountCents`. The Square call runs before the transaction (idempotency `prepare`); the link becomes active under the invoice lock (409 `CONCURRENT_UPDATE` if the amount changed meanwhile), older active links of the purpose are superseded (and deleted at Square by `square.links.sweep`). 409 `SQUARE_WRITES_OFF` (watch-only), 503 `SQUARE_UNAVAILABLE`. `paymentLink{id,url,expectedCents,purpose,sms,provider}`. An unlocked kiosk (ADR 0180) texts the balance only: a `deposit` or an `amountCents` is 403 `PAYMENT_LINK_KIOSK`; a `url` it pastes (here or through `POST /invoices/:id/payments`) must be on a host `PAYMENT_LINK_HOSTS` names exactly (`=shop.squarespace.com`, never Square's shared link hosts), else 422 `PAYMENT_LINK_KIOSK_URL`; the invoice's own stored link needs no paste. |
 | `POST /ledger-events/:id/confirm-processor` `{processorRef?, sqspOrderId?}` | `pay.collect` for a payment, `pay.refund` for a refund | `awaiting_processor` to `confirmed` by hand; 409 `EVENT_NOT_AWAITING` (names the processor); 409 `REFUND_SENT_TO_SQUARE` for a refund sent through the Square API, or one the Square job will send (`processor square` while `PAYMENT_PROCESSOR=square` and Square writes are on; its legs settle it; the "Card refund not confirmed" alert then offers Review, not Confirm). Observe-only: confirmed by hand as before. |
 
 Limits and roles: the limit of a kind is the highest among the roles that grant the permission (`null` unlimited, no row 2500
@@ -2747,14 +2747,14 @@ and signs out a user session that came with the request (its cookie is cleared).
 | Method | Path | Body | Answers |
 |---|---|---|---|
 | GET | `/kiosk` | – | `{enabled, version, code: {set, setAt, setBy, ageDays}, thisDeviceId, devices: KioskDevice[], staff: [{id, name, status, listed}], recent: [{at, action, label, by, deviceName}]}` |
-| PUT | `/kiosk/settings` | `{enabled, version}` | `{enabled, version}`; `409 KIOSK_CODE_NOT_SET` to turn it on without a code; `412 VERSION_CONFLICT`; off revokes every kiosk session (`kiosk_off`) |
-| PUT | `/kiosk/code` | `{code}` or `{generate: true}` | `{setAt, code?}` (a generated code is shown once); `422 KIOSK_CODE_REJECTED` with the rule in `errors[0].message`: 8 digits, not starting with 0218, not one digit, no runs (with wrap), no repeating pattern of period 1 to 4 or doubled pairs, no date (YYYYMMDD / MMDDYYYY, 1900 to 2099), not a common code, not one of the last 3; every kiosk session ends (`code_changed`); two changes at once take turns (the shop's row is locked), the last one wins |
+| PUT | `/kiosk/settings` | `{enabled, version}` | `{enabled, version}`; `409 KIOSK_CODE_NOT_SET` to turn it on without a code; `412 VERSION_CONFLICT`; off revokes every kiosk session (`kiosk_off`); turning it on or off also signs out every manager on a kiosk device (the caller too when on one: its cookie is cleared) |
+| PUT | `/kiosk/code` | `{code}` or `{generate: true}` | `{setAt, code?}` (a generated code is shown once); `422 KIOSK_CODE_REJECTED` with the rule in `errors[0].message`: 8 digits, not starting with 0218, not one digit, no runs (with wrap), no repeating pattern of period 1 to 4 or doubled pairs, no date (YYYYMMDD / MMDDYYYY, 1900 to 2099), not a common code, not one of the last 3; every kiosk session ends (`code_changed`); two changes at once take turns (the shop's row is locked, the last-3 check under it: the same new code twice at once is one 200 and one 422), the last one wins |
 | POST | `/kiosk/devices` | `{name ≤ 40}` | `201 {device, signedOut}` + the device cookie; `409 KIOSK_DEVICE_EXISTS`; while kiosk mode is on the manager's own session ends and its cookie is cleared |
 | PATCH | `/kiosk/devices/:id` | `{name, version}` | `KioskDevice`; `412 VERSION_CONFLICT` |
-| DELETE | `/kiosk/devices/:id` | – | `204`; the cookie stops working for good, its session ends (`device_revoked`) |
-| POST | `/kiosk/devices/:id/lock` | – | `204` (`lock_device`) |
+| DELETE | `/kiosk/devices/:id` | – | `204`; the cookie stops working for good, its session ends (`device_revoked`), and a manager signed in on it is signed out |
+| POST | `/kiosk/devices/:id/lock` | – | `204` (`lock_device`); a manager signed in on it is signed out |
 | POST | `/kiosk/devices/:id/clear-lockout` | – | `KioskDevice` (the counter starts over) |
-| POST | `/kiosk/lock-all` | – | `{locked: n}` (`lock_all`); takes the shop's device rows first, so an unlock in progress finishes and its session is ended too |
+| POST | `/kiosk/lock-all` | – | `{locked: n}` (`lock_all`); takes the shop's device rows first, so an unlock in progress finishes and its session is ended too; every manager signed in on a kiosk device is signed out (not counted in `locked`) |
 | PUT | `/kiosk/staff/:employeeId` | `{listed}` | `{id, name, status, listed}` ("Shows on the kiosk") |
 
 `KioskDevice = {id, name, state: unlocked|locked|locked_out|revoked, locksAt, lastSeenAt, lastIp, lastUa, failedAttempts, createdAt,
@@ -2762,9 +2762,11 @@ createdBy, version}`. Every change is audited (`kiosk.device.register|rename|rev
 the code), `kiosk.mode.on|off`, `kiosk.unlock`, `kiosk.unlock.failed`, `kiosk.unlock.alert`, `kiosk.lock`, `kiosk.lock_all`,
 `kiosk.staff.listed`) with the device in `audit_log.kiosk_device_id`, and publishes `settings.changed {section: 'kiosk'}`.
 
-**A manager on a kiosk device.** `POST /auth/login` from a browser carrying a live device cookie opens a short session (15 minutes
-idle, 4 hours at most, `sessions.kiosk_device_id`); `GET /me` then answers `kioskDevice: {id, name}` (null elsewhere) and the dashboard
-shows a bar.
+**A manager on a kiosk device.** `POST /auth/login` (and `POST /auth/invite/accept`) from a browser carrying a live device cookie opens a
+short session (15 minutes idle, 4 hours at most, `sessions.kiosk_device_id`); `GET /me` then answers `kioskDevice: {id, name}` (null
+elsewhere) and the dashboard shows a bar. A session opened any other way (before the tablet was registered, or elsewhere) that comes
+with a live device cookie is tied to that device on that request, for good, with the same short timings (K4 review kiosk:F1). Lock
+all, locking or removing the device and a kiosk mode change sign it out.
 
 ### 31.4 Team activity (`team.edit`; amounts need `pay.reports`)
 
@@ -2779,15 +2781,19 @@ after `to`, 23 or 25 hours on a daylight-saving day), at most 31 days: a bad dat
   start), `completed`, `pickedUp`, `readyTexts` (notify-ready), `bookings`, `walkIns`, `addons`, `sizeChanges`, `photos` (photos and written notes)
   from `staff_events` (kiosk and signed in); `checklistTasks` from the checklist: the tasks done now, by task ("Check all" of 6 is 6),
   for whoever ticked them, on the day they did (un-ticking takes one back, so ticking a task on and off never adds up); `textsSent` from
-  `messages` (out, sent by the employee as staff); `payments {count, amountCents}` from the ledger (`pay` events done by the employee;
-  one a void cancels is never counted; `amountCents` null without `pay.reports`); `bayMinutes {total, avg, cars}` (completed minus
-  cleaning started, whole minutes, for the cars the employee was the worker of when completed).
+  `messages` (out, sent by the employee as staff); `payments {count, amountCents}` from the ledger (`pay` and store credit applied,
+  `credit_apply`, done by the employee, as the timeline shows them; one a void cancels is never counted; `amountCents` null without
+  `pay.reports`); `bayMinutes {total, avg, cars}` (completed minus cleaning started, whole minutes, for the cars the employee was the
+  worker of when completed: `appointments.completed_worker_id`, so a worker change after completion moves neither the bay time nor the
+  car). `pickedUp` counts cars: a pickup undone and done again by the same person on the same day is one car.
 - With `employeeId` (404 when not of the shop): that employee alone, and `cars`: every car they touched in the range (a staff event, or
-  the worker of a car finished in it) `{appointmentId, seq, customer, vehicle, date, worker, steps: [{kind, at, by, via}], bayMinutes,
-  paidCents}`, the steps by whoever did them, `paidCents` null without `pay.reports`.
+  the worker of a car finished in it, as it was at completion) `{appointmentId, seq, customer, vehicle, date, worker, steps: [{kind, at, by,
+  via}], bayMinutes, paidCents}`, the steps by whoever did them, `worker` the worker at completion for a finished car, `paidCents` (payments
+  and store credit) null without `pay.reports`.
 
 `GET /reports/employee-activity/:employeeId/events?from&to[&cursor]` answers `{items, nextCursor}`: their staff events, newest first, 50
-a page (`nextCursor` back as `cursor`, opaque, keeping the instant to the microsecond; null on the last page; a bad cursor `422`), each `{id, at, kind, via, deviceName, appointmentId,
+a page (`nextCursor` back as `cursor`, opaque, keeping the instant to the microsecond; null on the last page; a bad cursor, an
+impossible date such as Feb 30 included, `422`), each `{id, at, kind, via, deviceName, appointmentId,
 customerId, customer, amountCents, messageId, meta}`, `amountCents` null without `pay.reports`. A kiosk gets `403 KIOSK_FORBIDDEN` for
 both.
 
