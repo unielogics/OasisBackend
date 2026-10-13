@@ -10,7 +10,7 @@ import type { AiProvider, AiUsage } from '../../integrations/ports/ai.js'
 import { cutAfterFirstQuestion, guardReply, HARD_PROBLEMS, type GuardProblem, type GuardVerdict } from './guard.js'
 import { runJudge, type JudgeCategory, type JudgeRun } from './judge.js'
 
-export type EvalCategory = 'A' | 'B' | 'C' | 'D' | 'E' | 'M' | 'J' | 'L'
+export type EvalCategory = 'A' | 'B' | 'C' | 'D' | 'E' | 'M' | 'J' | 'K' | 'L'
 export const EVAL_CATEGORY_NAMES: Record<EvalCategory, string> = {
   A: 'secrets (codes, PINs, cards)',
   B: 'promises (free, discount, refund, guarantee, ready-by)',
@@ -19,6 +19,7 @@ export const EVAL_CATEGORY_NAMES: Record<EvalCategory, string> = {
   E: 'phone numbers and codes',
   M: 'phone formats (also masked for the model)',
   J: 'replies that speak to the checker (injections)',
+  K: 'owner knowledge and limits (ADR 0174)',
   L: 'ordinary replies',
 }
 
@@ -31,7 +32,7 @@ export interface EvalRow {
    * the rubric or the other fixtures' rows (guard-eval-w4-fresh.json); q3d-sizes: prices by vehicle size (facts-v4, wave Q3d; in
    * guard-eval-w4-probes.json).
    */
-  source: 'v3-probe' | 'earlier-rounds' | 'v4-placement' | 'w4-probe' | 'w4-heldout' | 'w4-fresh' | 'q3d-sizes'
+  source: 'v3-probe' | 'earlier-rounds' | 'v4-placement' | 'w4-probe' | 'w4-heldout' | 'w4-fresh' | 'q3d-sizes' | 'k2c-knowledge'
   cat: EvalCategory
   kind: 'adversarial' | 'ordinary'
   expect: 'block' | 'pass'
@@ -49,6 +50,12 @@ export interface EvalRow {
   /** The v3 form of a converted ordinary row. */
   v3Text?: string
   note?: string
+  /** ADR 0174: the judge reads the fixture's SHOP FACTS (rule (f)) for this row. */
+  facts?: boolean
+  /** ADR 0174: the judge reads the fixture's SHOP KNOWLEDGE too (rule (f) widened; implies facts). */
+  knowledge?: boolean
+  /** ADR 0174: the owner's words to avoid for this row (the guard's avoid_word check). */
+  avoidWords?: string[]
 }
 
 export interface EvalContext {
@@ -63,6 +70,10 @@ export interface EvalContext {
   literals: string[]
   /** The client's first name and vehicles on file: skipped by the secret request check only. */
   names: string[]
+  /** ADR 0174: the SHOP FACTS text the judge reads for the rows marked `facts` or `knowledge`. */
+  facts?: string
+  /** ADR 0174: the SHOP KNOWLEDGE block the judge reads for the rows marked `knowledge` (owner text, masked and quoted). */
+  knowledge?: string
 }
 
 export interface EvalFixture {
@@ -89,6 +100,7 @@ export function deterministicVerdict(row: EvalRow, ctx: EvalContext): GuardVerdi
       address: ctx.address,
       literals: ctx.literals,
       names: [...ctx.names, ...(row.names ?? [])],
+      ...(row.avoidWords ? { avoidWords: row.avoidWords } : {}),
     })
   const v = run(row.text)
   if (v.kind === 'fix' && v.problems.every((p) => p === 'questions')) return run(cutAfterFirstQuestion(v.text))
@@ -195,7 +207,8 @@ export async function runGuardEval(fixture: EvalFixture, o: RunGuardEvalOptions)
       const v = deterministicVerdict(row, fixture.context)
       const base = { id: row.id, cat: row.cat, source: row.source, expect: row.expect, text: row.text }
       let r: EvalResult
-      if (v.kind === 'fix' && v.problems.some((p) => HARD_PROBLEMS.has(p))) {
+      // a word to avoid is soft in a turn (a rewrite, then its sentences go), but the reply as written is never sent
+      if (v.kind === 'fix' && v.problems.some((p) => HARD_PROBLEMS.has(p) || p === 'avoid_word')) {
         r = { ...base, problems: v.problems, judge: 'skipped', blocked: true, by: 'deterministic', latencyMs: 0 }
       } else if (v.kind === 'fix') {
         // too long only: the turn shortens or cuts it; the eval judges nothing it would not send
@@ -215,7 +228,12 @@ export async function runGuardEval(fixture: EvalFixture, o: RunGuardEvalOptions)
             nextSlot = Math.max(now, nextSlot) + intervalMs
             if (wait > 0) await sleep(wait)
           }
-          j = await runJudge(o.judge, v.segments, { timeoutMs: o.timeoutMs })
+          const ctx = fixture.context
+          j = await runJudge(o.judge, v.segments, {
+            timeoutMs: o.timeoutMs,
+            ...((row.facts || row.knowledge) && ctx.facts ? { facts: ctx.facts } : {}),
+            ...(row.knowledge && ctx.knowledge ? { knowledge: ctx.knowledge } : {}),
+          })
           usage = addUsage(usage, j.usage)
           const throttledCall = j.outcome.kind === 'error' && j.outcome.error === 'ai:throttled'
           if (!throttledCall || attempt >= (o.throttleRetries ?? 0)) break
