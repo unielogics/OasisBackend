@@ -10,7 +10,10 @@
 //                                                       payment the request made (ListPayments, reference_id = the charge); only when
 //                                                       Square has none and the invoice still owes it does it send the SAME request
 //                                                       with the SAME key; otherwise the charge is closed `declined` (NOT_SENT).
-//                                                       Meanwhile nothing else collects the invoice (charge-guard.ts, review Q4 H1)
+//                                                       Meanwhile nothing else collects the invoice (charge-guard.ts, review Q4 H1).
+//                                                       Watch-only Square or past the 23-hour re-send window: the job only looks
+//                                                       (none 15 minutes after the last request: closed NOT_SENT), and staff may
+//                                                       press "Not charged (checked Square)", the same look-up (review Q4 H1-R1)
 //   proposed | declined -> waived (a fee only, audited)
 //
 // CreatePayment (`source_id` the card, `customer_id` its Square customer, `autocomplete`, `reference_id` the charge id, a note naming
@@ -19,7 +22,7 @@
 // Square answered. The webhook of the same payment (classified `charge` by its reference_id) records it the same way, so whichever
 // comes first records it and the other finds it recorded. Nothing is charged while PAYMENT_PROCESSOR is squarespace (409
 // CARD_PAYMENTS_OFF) or Square is watch-only (409 SQUARE_WRITES_OFF).
-import { sql, type ExpressionBuilder, type Selectable } from 'kysely'
+import { sql, type Selectable } from 'kysely'
 import type { Env } from '../../config/env.js'
 import type { CreatePaymentInput, SquareApi } from '../../integrations/ports/square.js'
 import { squareLocationId } from '../../integrations/square/config.js'
@@ -42,7 +45,6 @@ import { transaction, type Db, type Executor, type Tx } from '../../platform/db.
 import { AppError } from '../../platform/errors.js'
 import type { NewId } from '../../platform/ids.js'
 import { formatUsd } from '../../platform/money.js'
-import type { Database } from '../../platform/schema.js'
 import { invoiceLabel } from '../payments/format.js'
 import { calcOf, cardLabel, lockInvoice } from '../payments/repository.js'
 import { loadCustomerTarget } from '../messaging/db/recipients.js'
@@ -260,8 +262,11 @@ export async function paymentRequestOf(db: Executor, env: Env, r: ChargeRow): Pr
 
 type Answer =
   | { kind: 'paid'; payment: WirePayment }
-  | { kind: 'declined'; code: string | null; text: string }
+  /** `by`: staff closed it ("Not charged (checked Square)"), recorded in their name. */
+  | { kind: 'declined'; code: string | null; text: string; by?: SquareActor }
   | { kind: 'unknown'; error: string; paymentId?: string | null }
+  /** Only looked, nothing sent and nothing learned: the row is left as it is (its last request time stays). */
+  | { kind: 'wait' }
 
 /** What one CreatePayment answered, sorted into the three outcomes. */
 async function send(d: CardChargeDeps, r: ChargeRow): Promise<Answer> {
@@ -308,6 +313,7 @@ async function applyAnswer(tx: Tx, d: CardChargeDeps, chargeId: string, a: Answe
   const out = (row: ChargeRow): ChargeOutcome => ({ chargeId, state: row.state, invoiceId: row.invoice_id, error: row.error })
   // the webhook recorded it meanwhile, or another path decided it
   if (r.state !== 'charging' && r.state !== 'unknown') return out(r)
+  if (a.kind === 'wait') return out(r)
   const now = d.clock.now()
   if (a.kind === 'declined') {
     const row = await tx
@@ -318,13 +324,14 @@ async function applyAnswer(tx: Tx, d: CardChargeDeps, chargeId: string, a: Answe
       .executeTakeFirstOrThrow()
     await audit.record(tx, {
       locationId: r.location_id,
-      action: 'card.charge_declined',
+      action: a.by ? 'card.charge_not_charged' : 'card.charge_declined',
       entityType: 'square_charge',
       entityId: chargeId,
       after: { purpose: r.purpose, amountCents: r.amount_cents, code: a.code, invoiceId: r.invoice_id },
-      ctx: auditCtx(deciderOf(r)),
+      ctx: auditCtx(a.by ?? deciderOf(r)),
     })
-    await activity(tx, r.appointment_id, now, `${row.reason ?? REASONS[r.purpose]} declined · ${formatUsd(r.amount_cents)} · ${a.text}`, null, { chargeId })
+    const what = a.by ? 'marked not charged' : 'declined'
+    await activity(tx, r.appointment_id, now, `${row.reason ?? REASONS[r.purpose]} ${what} · ${formatUsd(r.amount_cents)} · ${a.text}`, a.by?.name ?? null, { chargeId })
     return out(row)
   }
   const row = await tx
@@ -631,63 +638,61 @@ export interface ResolveReport {
   charged: number
   declined: number
   unknown: number
-  /** Older than the re-send window: left for the webhook and the people (an alert). */
+  /** Past the re-send window, or Square watch-only: only looked up, never sent again (review Q4 H1-R1). */
   stale: number
 }
 
+/** Square has no payment for the charge this long after its last request: nothing was charged (the job closes it, NOT_SENT). */
+export const CHARGE_SETTLE_MS = 15 * MIN
+
+/** When the charge's last request ended: each re-send that got no answer moves updated_at (a look-up alone never does). */
+const lastRequestAt = (r: ChargeRow): Date => {
+  const at = r.attempted_at ?? r.created_at
+  return r.updated_at > at ? r.updated_at : at
+}
+
+const NONE_AT_SQUARE = 'Nothing was charged: Square has no payment for it.'
+
 /**
  * square.charges.resolve: every charge Square did not answer (state `unknown`, or `charging` for more than 5 minutes: its process
- * died between the call and the answer). With the payment id known: GetPayment. Otherwise the payment the first request made is
- * looked for (ListPayments from a minute before the attempt to 15 minutes after it, by reference_id); none, and a balance charge
- * whose invoice was canceled or now owes less than the charge, is closed `declined` (NOT_SENT, nothing charged); none otherwise:
- * the SAME CreatePayment with the SAME key (Square answers the payment it already made, or makes it now, exactly once). Only within
- * 23 hours of the attempt (Square keeps a key's answer about a day); older ones are left to the webhook and to staff (the alert).
+ * died between the call and the answer). With the payment id known: GetPayment. Otherwise the payment a request made is looked for
+ * (ListPayments from a minute before the first request to 15 minutes after the last, by reference_id); found: recorded (or declined
+ * as Square has it). None, and a balance charge whose invoice was canceled or now owes less than the charge: closed `declined`
+ * (NOT_SENT, nothing charged). None otherwise: within 23 hours of the attempt and with Square writes on, the SAME CreatePayment with
+ * the SAME key (Square answers the payment it already made, or makes it now, exactly once); past the window or watch-only
+ * (SQUARE_WRITES_ENABLED=false, the rollback lever), nothing is sent and the charge is closed NOT_SENT once its last request is 15
+ * minutes old, so a charge never blocks its invoice for good (review Q4 H1-R1). Square not answering the look-up: it waits.
  */
 export async function resolveCharges(d: CardChargeDeps): Promise<ResolveReport> {
   const report: ResolveReport = { considered: 0, charged: 0, declined: 0, unknown: 0, stale: 0 }
-  if (!squareWritesOn(d.env)) return report
+  const writes = squareWritesOn(d.env)
   const now = d.clock.now()
-  const waiting = (eb: ExpressionBuilder<Database, 'square_charges'>) =>
-    eb.or([eb('state', '=', 'unknown'), eb.and([eb('state', '=', 'charging'), eb('attempted_at', '<', new Date(now.getTime() - CHARGING_STALE_MS))])])
   const oldest = new Date(now.getTime() - RESEND_WINDOW_MS)
-  // past the re-send window: left to the webhook and to staff (the alert "Saved-card charge not confirmed")
-  const stale = await d.db
-    .selectFrom('square_charges')
-    .select((eb) => eb.fn.countAll<string>().as('n'))
-    .where('location_id', '=', d.locationId)
-    .where(waiting)
-    .where((eb) => eb.or([eb('attempted_at', 'is', null), eb('attempted_at', '<', oldest)]))
-    .executeTakeFirst()
-  report.stale = Number(stale?.n ?? 0)
   const rows = await d.db
     .selectFrom('square_charges')
     .selectAll()
     .where('location_id', '=', d.locationId)
-    .where(waiting)
-    .where('attempted_at', '>=', oldest)
+    .where((eb) =>
+      eb.or([eb('state', '=', 'unknown'), eb.and([eb('state', '=', 'charging'), eb('attempted_at', '<', new Date(now.getTime() - CHARGING_STALE_MS))])]),
+    )
     .orderBy('attempted_at')
+    .orderBy('id')
     .limit(50)
     .execute()
   for (const r of rows) {
     report.considered += 1
+    const resend = writes && r.attempted_at !== null && r.attempted_at >= oldest
+    if (!resend) report.stale += 1
     let answer: Answer
-    if (r.square_payment_id) {
-      try {
-        answer = answerOf(await d.api.payments.get(r.square_payment_id))
-      } catch {
-        answer = { kind: 'unknown', error: 'Square did not answer' }
-      }
-    } else {
-      // the payment Square may have made from the first request (its answer lost): found by its reference_id, never made again
-      const found = await paymentOfCharge(d, r)
-      if (found === 'unreachable') answer = { kind: 'unknown', error: 'Square did not answer' }
-      else if (found) answer = answerOf(found)
-      // Square never got it, and the invoice no longer owes it (paid another way, or canceled): nothing is sent (plan decision 6:
-      // staff confirmed a charge of a balance that is gone)
-      else if (await noLongerOwed(d.db, r))
-        answer = { kind: 'declined', code: 'NOT_SENT', text: 'Nothing was charged: the invoice no longer owes it.' }
-      else answer = await send(d, r)
-    }
+    const found = await lookUp(d, r)
+    if (found === 'unreachable') answer = { kind: 'wait' }
+    else if (found) answer = answerOf(found)
+    // Square never got it, and the invoice no longer owes it (paid another way, or canceled): nothing is sent (plan decision 6:
+    // staff confirmed a charge of a balance that is gone)
+    else if (await noLongerOwed(d.db, r)) answer = { kind: 'declined', code: 'NOT_SENT', text: 'Nothing was charged: the invoice no longer owes it.' }
+    else if (resend) answer = await send(d, r)
+    else if (now.getTime() - lastRequestAt(r).getTime() >= CHARGE_SETTLE_MS) answer = { kind: 'declined', code: 'NOT_SENT', text: NONE_AT_SQUARE }
+    else answer = { kind: 'wait' }
     try {
       const out = await transaction(d.db, (tx) => applyAnswer(tx, d, r.id, answer))
       if (out.state === 'charged') report.charged += 1
@@ -701,6 +706,49 @@ export async function resolveCharges(d: CardChargeDeps): Promise<ResolveReport> 
   return report
 }
 
+/** The Square payment of a charge: GetPayment when its id is known, else by reference_id; null: none, 'unreachable': no answer. */
+async function lookUp(d: CardChargeDeps, r: ChargeRow): Promise<WirePayment | null | 'unreachable'> {
+  if (!r.square_payment_id) return paymentOfCharge(d, r)
+  try {
+    return await d.api.payments.get(r.square_payment_id)
+  } catch {
+    return 'unreachable'
+  }
+}
+
+/**
+ * Staff "Not charged (checked Square)" (POST /invoices/:id/card-charges/:chargeId/not-charged, review Q4 H1-R1): the same read-only
+ * look-up as the job, at once and with Square watch-only too. Square has the payment: it is recorded (or declined as Square has it),
+ * never closed as not charged; Square has none: the charge is closed `declined` (NOT_SENT) in the staff member's name (audit
+ * `card.charge_not_charged`, an activity line) and the invoice can be collected again. 404 CARD_CHARGE_NOT_FOUND (another invoice's),
+ * 409 CARD_CHARGE_NOT_WAITING (already charged, declined or waived), 409 CARD_CHARGE_IN_PROGRESS (its request is still out, or
+ * Square shows the payment pending), 503 SQUARE_UNAVAILABLE (Square did not answer: nothing changes).
+ */
+export async function closeUnanswered(d: CardChargeDeps, i: { invoiceId: string; chargeId: string; actor: SquareActor }): Promise<ChargeOutcome> {
+  const r = await d.db
+    .selectFrom('square_charges')
+    .selectAll()
+    .where('id', '=', i.chargeId)
+    .where('location_id', '=', d.locationId)
+    .where('invoice_id', '=', i.invoiceId)
+    .executeTakeFirst()
+  if (!r) throw new AppError('CARD_CHARGE_NOT_FOUND')
+  if (r.state !== 'charging' && r.state !== 'unknown') throw new AppError('CARD_CHARGE_NOT_WAITING')
+  if (r.state === 'charging' && (r.attempted_at ?? r.created_at).getTime() > d.clock.now().getTime() - CHARGING_STALE_MS)
+    throw new AppError('CARD_CHARGE_IN_PROGRESS')
+  const found = await lookUp(d, r)
+  if (found === 'unreachable') throw new AppError('SQUARE_UNAVAILABLE')
+  let answer: Answer
+  if (found) {
+    answer = answerOf(found)
+    if (answer.kind === 'unknown')
+      throw new AppError('CARD_CHARGE_IN_PROGRESS', { detail: 'Square shows this payment as still going through. Check again in a few minutes.' })
+  } else answer = { kind: 'declined', code: 'NOT_SENT', text: `${NONE_AT_SQUARE} Checked by ${i.actor.name}.`, by: i.actor }
+  const out = await transaction(d.db, (tx) => applyAnswer(tx, d, r.id, answer))
+  if (out.state !== 'charged' && out.state !== 'declined') throw new AppError('CARD_CHARGE_NOT_WAITING')
+  return out
+}
+
 const answerOf = (p: WirePayment): Answer =>
   p.status === 'COMPLETED'
     ? { kind: 'paid', payment: p }
@@ -711,17 +759,21 @@ const answerOf = (p: WirePayment): Answer =>
 /** How far around the attempt the job looks for the payment Square may have made (ListPayments by creation time). */
 export const CHARGE_LOOKUP_BEFORE_MS = MIN
 export const CHARGE_LOOKUP_AFTER_MS = 15 * MIN
-const CHARGE_LOOKUP_PAGES = 10
+const CHARGE_LOOKUP_PAGES = 20
 
-/** The Square payment a charge's request made (its reference_id is the charge id), null when none, 'unreachable' when Square did not answer. */
+/**
+ * The Square payment a charge's requests made (its reference_id is the charge id), null when none, 'unreachable' when Square did not
+ * answer. From a minute before the attempt to 15 minutes after its last request (a re-send hours later made it then).
+ */
 async function paymentOfCharge(d: CardChargeDeps, r: ChargeRow): Promise<WirePayment | null | 'unreachable'> {
   const at = (r.attempted_at ?? r.created_at).getTime()
+  const last = lastRequestAt(r).getTime()
   try {
     let cursor: string | undefined
     for (let page = 0; page < CHARGE_LOOKUP_PAGES; page++) {
       const res = await d.api.payments.list({
         begin_time: new Date(at - CHARGE_LOOKUP_BEFORE_MS).toISOString(),
-        end_time: new Date(at + CHARGE_LOOKUP_AFTER_MS).toISOString(),
+        end_time: new Date(last + CHARGE_LOOKUP_AFTER_MS).toISOString(),
         ...(squareLocationId(d.env) ? { location_id: squareLocationId(d.env) } : {}),
         sort_order: 'ASC',
         ...(cursor ? { cursor } : {}),

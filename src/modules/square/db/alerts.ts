@@ -225,7 +225,8 @@ export const squareExternalAlerts: ExternalAlertSource = {
         kind: 'square_charge_unknown',
         tone: 'amber',
         title: `Saved-card charge not confirmed · ${q.client}`,
-        desc: `${q.reason ?? 'Charge'} of ${formatUsd(q.amount_cents)}: Square has not answered yet · check the Square dashboard before charging again`,
+        // the way out (review Q4 H1-R1): the job closes it by itself once Square shows no payment; staff need not wait for it
+        desc: `${q.reason ?? 'Charge'} of ${formatUsd(q.amount_cents)}: Square has not answered yet · if it is not in the Square dashboard, press Not charged on the invoice`,
         actionLabel: 'Review',
         appointmentId: q.appointment_id,
         priority: 0,

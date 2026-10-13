@@ -105,6 +105,11 @@ registerProblems({
     title: 'Already handled',
     detail: 'This fee was already charged or waived.',
   },
+  CARD_CHARGE_NOT_WAITING: {
+    status: 409,
+    title: 'Already handled',
+    detail: 'This charge is not waiting for Square any more: it was charged, declined or waived.',
+  },
   CARD_CHARGE_NOT_FOUND: {
     status: 404,
     title: 'Charge not found',

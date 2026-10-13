@@ -4,6 +4,7 @@
 //   POST   /customers/:id/card-link                               cli.edit     text the client a card link (#/k)
 //   GET    /invoices/:id/card-charges                             pay.collect | pay.reports   the saved-card charges of an invoice
 //   POST   /invoices/:id/card-charges                             pay.collect  charge a balance on a saved card (client's OK)
+//   POST   /invoices/:id/card-charges/:chargeId/not-charged       pay.collect  an unanswered charge Square has no payment for: closed
 //   GET    /appointments/:id/fee-charges                          pay.collect | sched.cancel  the visit's no-show / late-cancel fees
 //   POST   /appointments/:id/fee-charges/:chargeId/charge         pay.collect  charge a proposed (or declined) fee
 //   POST   /appointments/:id/fee-charges/:chargeId/waive          pay.collect  waive it (audited)
@@ -28,7 +29,7 @@ import { InvoiceDetail as InvoiceDetailSchema } from '../../payments/http/schema
 import { cardLabel, getInvoice } from '../../payments/repository.js'
 import { textCardLink } from '../card-events.js'
 import { disableCard } from '../cards.js'
-import { chargeBalance, chargeFee, chargeViews, chargeView, cardsOn, waiveFee, type ChargeOutcome } from '../charges.js'
+import { chargeBalance, chargeFee, chargeViews, chargeView, cardsOn, closeUnanswered, waiveFee, type ChargeOutcome } from '../charges.js'
 import { CARD_PURPOSES } from '../consents.js'
 import type { SquareActor } from '../ledger.js'
 import { squareApi, squareEnv, type SquareQueue } from '../runtime.js'
@@ -340,6 +341,31 @@ export function registerSquareCardRoutes(app: AppInstance, w: SquareCardRoutesWi
         )
       },
     }) as never,
+  )
+
+  app.post(
+    '/invoices/:id/card-charges/:chargeId/not-charged',
+    {
+      config: { access: access.perm('pay.collect'), idempotency: 'required' as const },
+      schema: {
+        tags: [TAG],
+        summary: 'Not charged (checked Square): close a saved-card charge Square never answered',
+        description:
+          'The way out of a charge stuck `unknown` (review Q4 H1-R1): Oasis looks the payment up at Square (read-only, so it works with Square watch-only too: GetPayment, or ListPayments by the charge’s reference). Square has it: it is recorded as usual (200, `charge.state` `charged`), never closed as not charged. Square has none: the charge is closed `declined` (`declineCode` NOT_SENT, "Nothing was charged") in the staff member’s name (audit `card.charge_not_charged`, an activity line), and the invoice can be collected again. A balance or a fee. 409 `CARD_CHARGE_NOT_WAITING` (charged, declined or waived), 409 `CARD_CHARGE_IN_PROGRESS` (its request is still out, or Square shows the payment pending), 503 `SQUARE_UNAVAILABLE` (nothing changes), 404 `CARD_CHARGE_NOT_FOUND`. Idempotent.',
+        params: ChargeParams,
+        body: z.object({}).strict(),
+        response: { 200: ChargeResult },
+      },
+    },
+    idempotentHandler<FastifyRequest, ChargeOutcome>(
+      async (req, tx, _reply, o) => ({ status: 200, body: { charge: await chargeView(tx, o.chargeId), invoice: await detailOf(req, tx as never, o.invoiceId) } }),
+      {
+        prepare: async (req) => {
+          const { id, chargeId } = req.params as z.infer<typeof ChargeParams>
+          return closeUnanswered(deps(req), { invoiceId: id, chargeId, actor: actorOf(req, 'pay.collect') })
+        },
+      },
+    ) as never,
   )
 
   app.get(

@@ -335,7 +335,7 @@ describe('a balance on a saved card (POST /invoices/:id/card-charges)', () => {
     expect(await resolveCharges({ db: m.h.t.db, clock: m.h.clock, newId: m.h.t.app.newId, env: lost.env, api: lost.sim.api, locationId: m.locationId(), logger: silent })).toMatchObject({ considered: 0 })
   })
 
-  it('the job leaves an attempt older than 23 hours to the webhook and staff (no re-send)', async () => {
+  it('the job never re-sends an attempt older than 23 hours: it looks it up and closes it when Square has none (review Q4 H1-R1)', async () => {
     const maria = await m.customer('Maria Delgado')
     const card = await saveCard(maria)
     const a = await m.book('Maria Delgado', 'Express Hand Wash')
@@ -343,9 +343,9 @@ describe('a balance on a saved card (POST /invoices/:id/card-charges)', () => {
     expect((await chargeCard(a.invoiceId, { cardId: card.cardId, amountCents: await balanceOf(a.invoiceId) })).statusCode).toBe(202)
     m.h.clock.set(new Date(m.h.clock.now().getTime() + 24 * 3_600_000))
     const report = await resolveCharges({ db: m.h.t.db, clock: m.h.clock, newId: m.h.t.app.newId, env: sq.env, api: sq.sim.api, locationId: m.locationId(), logger: silent })
-    expect(report).toMatchObject({ considered: 0, stale: 1 })
+    expect(report).toMatchObject({ considered: 1, declined: 1, stale: 1 })
     expect(sq.sim.store.payments.size).toBe(0)
-    expect((await charges())[0]).toMatchObject({ state: 'unknown' })
+    expect((await charges())[0]).toMatchObject({ state: 'declined', decline_code: 'NOT_SENT' })
   })
 
   it('an unanswered charge whose request never reached Square is made once by the job', async () => {

@@ -6,7 +6,8 @@
 //   square.links.sweep     every minute: Square links that no longer match what is owed canceled and deleted at Square (wave Q2b)
 //   square.deposit-link    every minute: a booking's deposit request becomes a texted quick-pay link (wave Q2b)
 //   square.refunds.submit  every minute: card refunds through the Square API, the refund row being the outbox (wave Q2b)
-//   square.charges.resolve every minute: saved-card charges Square did not answer, re-sent with the same key (wave Q3a)
+//   square.charges.resolve every minute: saved-card charges Square did not answer, looked up, re-sent with the same key (writes on,
+//                          within 23 hours) or closed when Square has none (wave Q3a; review Q4 H1-R1)
 //   square.cards.nightly   nightly 04:20: card links for membership cards about to expire; deleted clients' cards disabled (wave Q3a)
 // With the defaults nothing happens: the catch-up and the reconcile need SQUARE_PROVIDER=live; nothing reaches the matcher without
 // them; links, deposits and refunds need PAYMENT_PROCESSOR=square and SQUARE_WRITES_ENABLED=true (none exist before); no card is
