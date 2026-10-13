@@ -54986,6 +54986,28 @@
                                       }
                                     ]
                                   },
+                                  "receiptNumber": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "Square’s receipt number of a Square payment; null otherwise"
+                                  },
+                                  "receiptUrl": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "description": "Square’s receipt page of a Square payment, only an https page on squareup.com or squareupsandbox.com; null otherwise"
+                                  },
                                   "resolvedAt": {
                                     "anyOf": [
                                       {
@@ -55089,6 +55111,8 @@
                                   "sqspOrderId",
                                   "processor",
                                   "processorOrderId",
+                                  "receiptNumber",
+                                  "receiptUrl",
                                   "needsReview",
                                   "canApprove",
                                   "approveBlock"
@@ -55124,11 +55148,79 @@
                                 "squarePosAppSwitch": {
                                   "description": "SQUARE_POS_API_ENABLED: \"Open Square POS\" (POST /invoices/{id}/square-pos-intents)",
                                   "type": "boolean"
+                                },
+                                "squareTenders": {
+                                  "additionalProperties": false,
+                                  "description": "The Square tenders the Collect sheet may offer; all off before the cutover (PAYMENT_PROCESSOR=squarespace)",
+                                  "properties": {
+                                    "link": {
+                                      "description": "\"Payment link\" by Square: Square is the processor and Square writes are on",
+                                      "type": "boolean"
+                                    },
+                                    "reader": {
+                                      "description": "\"Square reader\": Square is the processor (the entry waits for the counter matcher; works observe-only)",
+                                      "type": "boolean"
+                                    },
+                                    "savedCard": {
+                                      "anyOf": [
+                                        {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "brand": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string"
+                                                },
+                                                {
+                                                  "type": "null"
+                                                }
+                                              ]
+                                            },
+                                            "cardId": {
+                                              "type": "string"
+                                            },
+                                            "label": {
+                                              "description": "\"Visa ••4242\"",
+                                              "type": "string"
+                                            },
+                                            "last4": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string"
+                                                },
+                                                {
+                                                  "type": "null"
+                                                }
+                                              ]
+                                            }
+                                          },
+                                          "required": [
+                                            "cardId",
+                                            "label",
+                                            "brand",
+                                            "last4"
+                                          ],
+                                          "type": "object"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "description": "\"Saved card\": the card POST /invoices/{id}/card-charges would charge (the newest active, unexpired card whose live consent covers balances); null when there is none, the invoice is canceled, Square is not the processor or writes are off"
+                                    }
+                                  },
+                                  "required": [
+                                    "reader",
+                                    "link",
+                                    "savedCard"
+                                  ],
+                                  "type": "object"
                                 }
                               },
                               "required": [
                                 "processor",
-                                "squarePosAppSwitch"
+                                "squarePosAppSwitch",
+                                "squareTenders"
                               ],
                               "type": "object"
                             },
