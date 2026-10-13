@@ -1,0 +1,92 @@
+{
+ "a plain reply with a price placeholder": {
+  "status": "replied",
+  "model": [
+   "a308864e711494a4c5a5d58dedb451d37efb7d558c6ca9a9a7794e7381ebc71d"
+  ],
+  "judge": [
+   "be9aa6c662e9c6669524bf387574a45b8a496b54c552ff6887dfbc1c694a36a3"
+  ]
+ },
+ "a tool round, then the reply": {
+  "status": "replied",
+  "model": [
+   "6159eb70a2a62609afd85c471d9dab0f1e4e154fc8605ed48b8da60601d1186f",
+   "9901a0f752728bf28be3d374db698b59798b658f7e8536ef7fe9f2e9dd836407"
+  ],
+  "judge": [
+   "74be548de1488ed690ed020325358d0d71fcd547b145a891066afc2bab5e78b7"
+  ]
+ },
+ "a model-written amount: one guard rewrite": {
+  "status": "replied",
+  "model": [
+   "6c79df3026a291f26fd838df8bdb9731ea0a3a316b418475cd7a2c895036f8a3",
+   "a6c64ce3b88c6738a8cf0a9b673cd90a2a175bc5979a27922a076272c4b7ab57"
+  ],
+  "judge": [
+   "be9aa6c662e9c6669524bf387574a45b8a496b54c552ff6887dfbc1c694a36a3"
+  ]
+ },
+ "a judge fail, one rewrite, then a pass": {
+  "status": "replied",
+  "model": [
+   "06a51d22b24ff58b559887956509e7741bd25bca394619f586f85f1982fe4b25",
+   "5b33706b8e1651b07ddb0332fbceaa8a290e8dd26924ca8c238c9f9e3d4f35c8"
+  ],
+  "judge": [
+   "fa5cd3568af9a37ef9f18f22be0209202d82516d25feca7f431a0aa9449d3497",
+   "68e513f2eb352867015fef336850c64cfa8fba13f9762563c0fc22a28e309b4e"
+  ]
+ },
+ "a throttled judge call retried once": {
+  "status": "replied",
+  "model": [
+   "b1d535a47f2690f0f9364d09915aeaf607ffee7ec57dac6f755306db22866926"
+  ],
+  "judge": [
+   "56f84cc5870f825125f40432887b97223257ea1a2f543f9b12f761ecc77424cb",
+   "56f84cc5870f825125f40432887b97223257ea1a2f543f9b12f761ecc77424cb"
+  ]
+ },
+ "the link nudge, then a reply without the offer": {
+  "status": "replied",
+  "model": [
+   "763d896f06e55795fcc4cadbefcd9397add3d7a2dcd6f19416b8e774a5b8771c",
+   "06c19b18fc84fff69ee7757f74f29348746f0d017cbc83abbf715c9288af0d5e"
+  ],
+  "judge": [
+   "07699162c9b2a22f9b2a987dd1dd1cf135d0c3c12c9f3ec7524863fa55a27eaf"
+  ]
+ },
+ "handoff_to_staff with text in the same round": {
+  "status": "replied",
+  "model": [
+   "56936bbfa463dc72f11021845b7c652070a6d7baf9f426d4ac4ebe7620aaf677",
+   "25f39ca8c5f38cddc78f4d61bc9cb9157a81c33964afeb1c8f9963329f4f33ee"
+  ],
+  "judge": [
+   "86b9a701e272afd7bfda2883e498458730b4aa37b207a130586b8f456f8ac9ab"
+  ]
+ },
+ "four tool rounds, then the reply-now call": {
+  "status": "replied",
+  "model": [
+   "35b5ed9202e750ac6616d2efdaf34dad53a72f80c60eee72f925ec69892d55b4",
+   "35797fe41c1ce840a9e60f574cc0b796ff262ca1fa17197c363ef723c1dfbc7e",
+   "e1ff43b661c84bf49ee4eebd5c732ac64439560818d554ac9f9ef373aa955e7b",
+   "cf869c0fcb4eaa85d02258ed924246b36421c3bc12c8f6cf589d2cb1edf6d018",
+   "504903393ce5f2979ba5c2dce3c0c7a0fcde4c5099a22719def99e949232497d"
+  ],
+  "judge": [
+   "b36fab8aa586e0eb2be2daedd5e6557ac52faec07cf47d80a00b4feed6066129"
+  ]
+ },
+ "an opt-out in words": {
+  "status": "skipped",
+  "model": [
+   "e4c61209381a566eea53a44678223c2016e0c479ad967c4442acdb4c22378c8b"
+  ],
+  "judge": []
+ }
+}
