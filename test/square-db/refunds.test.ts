@@ -25,7 +25,7 @@ describe('Square refunds', () => {
 
   /** An invoice paid in the Square POS app (one payment per amount); `squarespaceCents` adds a card payment finished in Squarespace. */
   async function paidBySquare(r: Rig, amounts: number[] = [4280], o: { squarespaceCents?: number } = {}) {
-    const inv = await r.openInvoice({ items: [{ name: 'Detail', priceCents: amounts.reduce((s, a) => s + a, 0) + (o.squarespaceCents ?? 0) }], taxBp: 0 })
+    const inv = await r.openInvoice({ items: [{ name: 'Detail', priceCents: amounts.reduce((s, a) => s + a, 0) + (o.squarespaceCents ?? 0) }], taxDbp: 0 })
     if (o.squarespaceCents) {
       const sqsp = await r.staffCard(inv, o.squarespaceCents)
       await t.db.updateTable('ledger_events').set({ processor_state: 'confirmed', sqsp_order_id: 'sqsp-order-1' }).where('id', '=', sqsp).execute()

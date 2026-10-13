@@ -1,6 +1,7 @@
 import type { ApiModule } from '../../../http/modules.js'
 import type { AppDeps } from '../../../app.js'
 import { squareQueue, type SquareQueue } from '../runtime.js'
+import { registerSquareItemsRoutes } from '../../catalog/square/http/routes.js'
 import { registerBillingSettingsRoutes } from './billing-routes.js'
 import { registerSquareCardRoutes } from './card-routes.js'
 import { registerSquarePaymentRoutes } from './payment-routes.js'
@@ -14,7 +15,7 @@ export interface SquareModuleWiring {
 /**
  * Square (ADR 0171): the status and Test connection routes, the "Square payments to match" queue, the POS app switch and the cards on
  * file (saved cards, card links, charges, fees; wave Q3a) and Settings, Billing & integrations (wave Q3 dashapi) under /api/v1; the
- * webhook is squareHookModule under /hooks.
+ * webhook is squareHookModule under /hooks; and the Square item library routes (ADR 0172, src/modules/catalog/square/http).
  */
 export function createSquareModule(wiring?: (deps: AppDeps) => SquareModuleWiring): ApiModule {
   return (app, deps) => {
@@ -23,6 +24,8 @@ export function createSquareModule(wiring?: (deps: AppDeps) => SquareModuleWirin
     registerSquarePaymentRoutes(app)
     registerSquareCardRoutes(app, { queue: () => w?.queue ?? squareQueue() })
     registerBillingSettingsRoutes(app)
+    // the Square item library (ADR 0172)
+    registerSquareItemsRoutes(app)
   }
 }
 

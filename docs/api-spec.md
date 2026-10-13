@@ -11,7 +11,7 @@ by each vertical below the generated table.
 |---|---|
 | Prefix and version | Domain routes live under `/api/v1` (additive changes only; breaking changes mean `/v2`). Every `/api/*` response carries `X-API-Version: 1`. Probes (`/healthz`, `/readyz`) and provider callbacks (`/hooks/*`) sit outside the prefix. |
 | Same origin | The dashboard and API share one origin behind the reverse proxy, so there is no CORS. Cookies are host-only. |
-| Money | Integer cents everywhere (`...Cents`). The API never formats money; CSV uses plain decimals (`1234.50`). Tax is half-up on the subtotal at `tax.rate_bp` (700); tip is untaxed. Helpers: `src/platform/money.ts`. |
+| Money | Integer cents everywhere (`...Cents`). The API never formats money; CSV uses plain decimals (`1234.50`). Tax is rounded once on the adjusted subtotal at the invoice's own rate `taxDbp` (thousandths of a percent: 7000 = 7%, 6625 = 6.625%; the location's `tax.rate_dbp`, default 7000) by the invoice's own `taxRounding` (the location's `tax.rounding` when it was made: `half_up` by default, `half_even` = Square's rule once switched; ADR 0173); tip is untaxed. Helpers: `src/platform/money.ts`. |
 | Time | Instants are ISO-8601 UTC. Business dates are `YYYY-MM-DD` in the location timezone (`America/New_York`); wall-clock times are minutes from midnight. Read models that show a time string also carry a ready label (`time`, `atLabel`). Helpers: `src/platform/time.ts`. Time is injected (`Clock`, SQL `app_now()`); see section 8. |
 | Ids | UUIDv7 generated in the app (`createIdGenerator(clock)`); human refs (`INV-20611`, appointment seq) are separate fields. |
 | Request id | `X-Request-Id` is accepted (8-64 chars of `A-Za-z0-9._-`) or generated, echoed on every response, present on every log line and in every error body as `requestId`. |
@@ -398,6 +398,10 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | POST | `/api/v1/integrations/sms/devices/:id/test` | set.billing |  |
 | GET | `/api/v1/integrations/square` | set.billing | pay.reports |  |
 | POST | `/api/v1/integrations/square/catalog/sync` | set.billing |  |
+| GET | `/api/v1/integrations/square/items` | set.billing |  |
+| POST | `/api/v1/integrations/square/items/archive-all` | set.billing |  |
+| POST | `/api/v1/integrations/square/items/sync` | set.billing |  |
+| PUT | `/api/v1/integrations/square/items/tax` | set.billing |  |
 | POST | `/api/v1/integrations/square/test` | set.billing |  |
 | POST | `/api/v1/integrations/squarespace/alerts/:id/resolve` | set.billing |  |
 | DELETE | `/api/v1/integrations/squarespace/connection` | set.billing |  |
@@ -529,6 +533,7 @@ Generated from the route registry by `pnpm openapi`; do not edit between the mar
 | PUT | `/api/v1/settings/billing/link-tipping` | set.billing |  |
 | PUT | `/api/v1/settings/billing/price-change-notice` | set.billing |  |
 | PUT | `/api/v1/settings/billing/renewal-policy` | set.billing |  |
+| PUT | `/api/v1/settings/billing/sales-tax` | set.billing |  |
 | GET | `/api/v1/settings/bundle` | authenticated |  |
 | GET | `/api/v1/settings/cancellation-policy` | authenticated |  |
 | PUT | `/api/v1/settings/cancellation-policy` | set.hours |  |
@@ -1108,7 +1113,7 @@ Search and window never affect it; the seven `kpis` are unchanged. Tests: `test/
 
 Pay views (`pay` on a card and in the file): `kind` is `paid`, `deposit`, `due`, `pending` or `none`. `pending` (label `Payment pending`, or
 `Payment pending · $X due` while the invoice is not fully funded) means card money staff recorded and Squarespace has not confirmed;
-`awaitingCents` says how much. It is `paid` only once confirmed (ADR 0074). The invoice summary also carries `taxBp`. Payment changes
+`awaitingCents` says how much. It is `paid` only once confirmed (ADR 0074). The invoice summary also carries `taxDbp` and `taxRounding` (ADR 0173; `taxBp`, the rate rounded to whole basis points, is deprecated). Payment changes
 also publish `ops` `appointment.updated {change: "payment"}` and `kpi.dirty`.
 ## 21. Payments: invoices, ledger, store credit, reports
 
@@ -1263,7 +1268,7 @@ is the design's day as data.
 | `POST /invoices/:id/void` `{eventId, note?}` | `pay.void` | Cash, or card still awaiting its processor; 422 `VOID_NOT_ALLOWED` (the detail names the processor: Square, Squarespace or "the card processor"), 409 `PAYMENT_ALREADY_VOIDED`. |
 | `PUT /invoices/:id/tip` `{tipCents}` | `pay.collect` | Untaxed; reopens a balance when the invoice was settled. |
 | `POST /invoices/:id/receipt` | `msg.send` or `pay.collect` | SMS to opted-in clients and email, through the `PaymentMessenger` port; audited; not a ledger event. |
-| `POST /invoices/:id/payment-links` `{kind: balance\|deposit, amountCents?, url?}` | `pay.collect` | Before the Square cutover: attach and text a Squarespace checkout or invoice link. With `PAYMENT_PROCESSOR=square` (ADR 0171 D3): a `balance` link is the client's personal pay page while `PUBLIC_LINKS_ENABLED` (template `payment_link_personal`, the link masked in the message row; `paymentLink.url` null, `provider personal`), else a Square link made now for exactly the balance (its lines, a "Sales tax" line and a "Tip" line, or one "Balance due" line; asserted to add up exactly); a `deposit` is a Square quick-pay link for `amountCents`. The Square call runs before the transaction (idempotency `prepare`); the link becomes active under the invoice lock (409 `CONCURRENT_UPDATE` if the amount changed meanwhile), older active links of the purpose are superseded (and deleted at Square by `square.links.sweep`). 409 `SQUARE_WRITES_OFF` (watch-only), 503 `SQUARE_UNAVAILABLE`. `paymentLink{id,url,expectedCents,purpose,sms,provider}`. |
+| `POST /invoices/:id/payment-links` `{kind: balance\|deposit, amountCents?, url?}` | `pay.collect` | Before the Square cutover: attach and text a Squarespace checkout or invoice link. With `PAYMENT_PROCESSOR=square` (ADR 0171 D3): a `balance` link is the client's personal pay page while `PUBLIC_LINKS_ENABLED` (template `payment_link_personal`, the link masked in the message row; `paymentLink.url` null, `provider personal`), else a Square link made now for exactly the balance (its lines, a "Sales tax (7%)" line at the invoice's own rate (ADR 0173) and a "Tip" line, or one "Balance due" line; asserted to add up exactly); a `deposit` is a Square quick-pay link for `amountCents`. The Square call runs before the transaction (idempotency `prepare`); the link becomes active under the invoice lock (409 `CONCURRENT_UPDATE` if the amount changed meanwhile), older active links of the purpose are superseded (and deleted at Square by `square.links.sweep`). 409 `SQUARE_WRITES_OFF` (watch-only), 503 `SQUARE_UNAVAILABLE`. `paymentLink{id,url,expectedCents,purpose,sms,provider}`. |
 | `POST /ledger-events/:id/confirm-processor` `{processorRef?, sqspOrderId?}` | `pay.collect` for a payment, `pay.refund` for a refund | `awaiting_processor` to `confirmed` by hand; 409 `EVENT_NOT_AWAITING` (names the processor); 409 `REFUND_SENT_TO_SQUARE` for a refund sent through the Square API, or one the Square job will send (`processor square` while `PAYMENT_PROCESSOR=square` and Square writes are on; its legs settle it; the "Card refund not confirmed" alert then offers Review, not Confirm). Observe-only: confirmed by hand as before. |
 
 Limits and roles: the limit of a kind is the highest among the roles that grant the permission (`null` unlimited, no row 2500
@@ -1301,7 +1306,8 @@ Canceling or a no-show cancels the invoice: `canceled` (nothing paid), `canceled
 * Invoice detail and ledger rows (ADR 0171): each ledger event carries `processor` (`squarespace|square|null`) and
   `processorOrderId`, `source` may be `square`, and (wave Q3 dashapi) `receiptNumber` / `receiptUrl` for a Square payment; the
   detail carries `processing{processor, squarePosAppSwitch, squareTenders{reader, link, savedCard}}` (section 30.13).
-* Settings used: `tax.rate_bp` (snapshotted on each invoice), `approvals.allow_self`.
+* Settings used: `tax.rate_dbp` and `tax.rounding` (snapshotted on each invoice as `tax_dbp` and `tax_rounding`; ADR 0173), `approvals.allow_self`.
+* The invoice detail carries `taxDbp`, `taxRounding` and the deprecated `taxBp` (section 30.15).
 * Job `payments.lag-scan` (every 15 minutes) is registered in `src/platform/job-registry.ts`.
 
 ### 20.5 Seeds, oracle and tests
@@ -2317,6 +2323,7 @@ Body `{}`. Calls ListLocations, EnableEvents and ListWebhookSubscriptions (again
 | `location` | `SQUARE_LOCATION_ID` is among them, `ACTIVE`, in `USD`, with `CREDIT_CARD_PROCESSING` |
 | `events` | EnableEvents succeeded (the 10-minute catch-up can read) |
 | `webhook` | a subscription for exactly `SQUARE_WEBHOOK_URL` exists, is enabled and carries every event type (`pnpm square:webhooks --apply` fixes it) |
+| `tax` | (ADR 0172, section 30.14) the Square item library's tax check: the Square tax Oasis items would carry matches `tax.rate_dbp` exactly (or the shop has none yet: the sync would add Oasis's own); the detail adds a CalculateOrder sample of Oasis's prices and any warning. Counts toward `ok` only while `SQUARE_WRITES_ENABLED` and `SQUARE_ITEMS_SYNC_ENABLED` are on; runs only when the token works |
 
 A failing check is still `200` with `ok: false` and a plain reason. The merchant id, the location, `events_enabled_at` and the verified
 subscription are kept in `square_state` for the configured Square environment (sim, sandbox or production); the hook drops events of
@@ -2337,13 +2344,15 @@ override, the POS switch outside production, a catch-up that has not run for 30 
 webhook in 24 hours while the catch-up found events. `details`: environment, location, merchant, API version, writes, processor, POS
 switch, `token` and `webhookKey` as `set`/`not set`, events enabled, subscription verified, last webhook, catch-up and reconcile times,
 the last test result; `unmatched` (Square payments to match) and `failedRefunds` (card refunds Square refused in the last 14 days; both
-also warnings when not zero); `pendingEnrollments` (membership-page enrollments under way, wave Q3b).
+also warnings when not zero); `pendingEnrollments` (membership-page enrollments under way, wave Q3b); `itemsSync` (ADR 0172: the item
+library sync writes; while it does, a tax check that pauses it and services Square did not take are warnings).
 
 ### 30.5 Jobs and environment
 
 `square.event.process` (queue), `square.events.catchup` (every 10 minutes), `square.reconcile` (03:45), and since wave Q2b
 `square.payments.match`, `square.links.sweep`, `square.deposit-link` and `square.refunds.submit` (every minute) are in `docs/jobs.md`;
-the variables in `docs/integrations/square.md` section 2 (wave Q2b adds `SQUARE_POS_AUTOMATCH`). Scripts: `pnpm sim:square`,
+the variables in `docs/integrations/square.md` section 2 (wave Q2b adds `SQUARE_POS_AUTOMATCH`, wave K2e `SQUARE_ITEMS_SYNC_ENABLED` and
+the jobs `square.items.sync` and `square.items.drift`, section 30.14). Scripts: `pnpm sim:square`,
 `pnpm square:webhooks [--apply|--rotate-key]` (in production it accepts only `https://<domain>/hooks/square`), `pnpm verify:square`
 (also in `pnpm verify:all` and `verify.sh square`).
 
@@ -2581,10 +2590,11 @@ user, password or port; null for anything else and for every other row.
 
 | Route | Body | Answer |
 |---|---|---|
-| `GET /settings/billing` | | `{square, processing, guestFee, linkTipping, cardFees, renewalPolicy, priceChangeNotice, consent}`: `square` is the body of `GET /integrations/square`; `processing {processor, squareProvider, squareEnvironment, writesEnabled, membershipsEnabled, posAppSwitch, posAutomatch, publicLinksEnabled, cardsOn}` is read only (server switches); `guestFee {cents, collect, version}` (saved with `PUT /catalog/guest-fee`, `set.services`); `linkTipping {enabled, version}`; `cardFees {fees, version, active}` (saved with `PUT /settings/card-fees`); `renewalPolicy {graceDays, cancelDays, version}`; `priceChangeNotice {days, version}`; `consent {version, checkedByDefault: false, purposes, text}` (read only). Never a token or a key. |
+| `GET /settings/billing` | | `{square, processing, guestFee, linkTipping, cardFees, renewalPolicy, priceChangeNotice, salesTax, squareItems, consent}`: `square` is the body of `GET /integrations/square`; `processing {processor, squareProvider, squareEnvironment, writesEnabled, membershipsEnabled, itemsSyncEnabled, posAppSwitch, posAutomatch, publicLinksEnabled, cardsOn}` is read only (server switches); `squareItems {mode, tax {status, detail} | null, counts, lastSyncAt}` is the Square item library in short (section 30.14); `guestFee {cents, collect, version}` (saved with `PUT /catalog/guest-fee`, `set.services`); `linkTipping {enabled, version}`; `cardFees {fees, version, active}` (saved with `PUT /settings/card-fees`); `renewalPolicy {graceDays, cancelDays, version}`; `priceChangeNotice {days, version}`; `salesTax {percent, rateDbp, label, rounding, version}` (section 30.15); `consent {version, checkedByDefault: false, purposes, text}` (read only). Never a token or a key. |
 | `PUT /settings/billing/link-tipping` | `{enabled, version?}` | `{enabled, version}` (`payments.link_tipping`, off by default). |
 | `PUT /settings/billing/renewal-policy` | `{graceDays 0..60, cancelDays 1..90, version?}` | `{graceDays, cancelDays, version}` (`memberships.billing_policy`, default 7 / 21); 422 `VALIDATION_FAILED` unless cancelDays > graceDays. |
 | `PUT /settings/billing/price-change-notice` | `{days 0..90, version?}` | `{days, version}` (`memberships.price_change_notice_days`, default 30). |
+| `PUT /settings/billing/sales-tax` | `{percent, rounding?, version?}` | `{percent, rateDbp, label, rounding, version}` (`tax.rate_dbp`, default 7%, and `tax.rounding`, default `half_up`; section 30.15). |
 
 Reused, not copied: `POST /integrations/square/test` (Test connection), `PUT /catalog/guest-fee` (the fee and its collect mode),
 `PUT /settings/card-fees`, `POST /integrations/square/catalog/sync` ("Sync to Square").
@@ -2604,6 +2614,57 @@ sync keeps (`pending` until synced, always while `SQUARE_MEMBERSHIPS_ENABLED` is
 
 Tests: `test/square-db/dashboard-gaps.test.ts`, `test/square-db/billing-settings.test.ts`, `test/square-members/billing-view.test.ts`,
 `test/square/dashboard-gaps-pure.test.ts`.
+
+### 30.14 The Square item library (ADR 0172, wave K2e; `src/modules/catalog/square/http/routes.ts`)
+
+Every active priced service is a Square item with one variation per vehicle size, kept in step by the jobs `square.items.sync` (every
+5 minutes) and `square.items.drift` (04:40). Off by default: nothing is written at Square unless `SQUARE_WRITES_ENABLED` and
+`SQUARE_ITEMS_SYNC_ENABLED` are both on; otherwise "Sync now" answers a read-only preview. All routes `set.billing`, all audited.
+
+| Route | Body | Answer |
+|---|---|---|
+| `GET /integrations/square/items` | | `{mode: on\|preview\|off, environment, writesEnabled, itemsSyncEnabled, taxMode: auto\|adopt\|create, taxObjectId, taxCheck, taxCheckedAt, counts {onSquare, waiting, failed, archived, notSold}, lastSyncAt, lastSync, lastDriftAt, lastWriteAt, lastError, lastErrorAt, failures [{serviceId, service, error}], preview, version}`. Read from Oasis only. `mode`: `on` (the sync writes), `preview` (watch-only: writes off), `off` (writes on, the item sync off). `taxCheck {status: ok\|create\|blocked\|error, mode, taxId, taxName, percentage, wantPercentage, own, ownChanged, detail, warnings, candidates [{id, name, percentage, matches, problem}], rounding? {checked, differ, detail}}`: the last check (Test connection, the preview and every sync run it). `preview {create, createPrices, update, archive, unchanged, skipped, categories, tax: create\|update\|adopt\|none\|blocked, at}`: the last read-only preview. |
+| `POST /integrations/square/items/sync` | `{drift?}` | With the sync on: what `square.items.sync` runs (`drift: true`: what the nightly drift run runs, everything read back) and `{status: done\|blocked, reason?, mode, tax, created, updated, archived, recreated, adopted, restored, failed, categoriesCreated, taxCreated, taxUpdated, failures[], changedInSquare[], reported[]}`; `blocked` (with `reason`) when the tax check does not pass: nothing is written. Otherwise `status: preview` with `preview` and `tax`, nothing written. `skipped` (with `reason`) without a Square location, or while another writing run (the job, the nightly run or another Sync now) holds the location's lock: "A Square item sync is already running: try again in a minute" (nothing is written and nothing is reported as failed; the nightly run waits up to 5 minutes for its turn instead). Oasis's own tax is kept as Oasis made it (its rate, enabled at the location, added to the price, on the subtotal, never on custom amounts): a staff edit of any of these is put back (`taxUpdated`, `restored`) and named in `changedInSquare` ("The sales tax “Sales tax” (turned off)"). Audited `square.items.sync`. |
+| `PUT /integrations/square/items/tax` | `{mode: auto\|adopt\|create, squareTaxId?, version?}` | `{mode, squareTaxId, version}`. Which Square tax Oasis items carry: `auto` (the one matching tax at the shop, else Oasis's own when the shop has none), `adopt` (`squareTaxId`, one of the check's candidates; 422 `VALIDATION_FAILED` on `squareTaxId` without it; it must match Oasis's rate or the sync stays paused), `create` (Oasis's own "Sales tax"). `version` (or If-Match) required: 428 without, 412 stale. Applies at the next sync. Audited `square.items.tax`. |
+| `POST /integrations/square/items/archive-all` | `{}` | `{archived, alreadyArchived, failed, failures[]}`: every Oasis item archived at Square (never deleted). 409 `SQUARE_WRITES_OFF` watch-only; 409 `SQUARE_ITEMS_SYNC_ON` while the item sync is on (it would put them back on sale). Audited `square.items.archive_all`. |
+
+**Prices by size** (`GET /catalog`, `set.services` holders, only while the sync is on): each price row adds `square {state:
+synced|pending|failed|archived|not_sold, cells {<size key>: synced|pending|failed|hidden}, error}` (key `""` = the single price of a
+service without sizes).
+
+Notifications to the managers: `square.items_sync_failed` (once per set of failures, again a day later), `square.items_changed_in_square`
+("Changed in Square: … Oasis set it back", once per set, again a day later), `square.items_tax_mismatch` (once a day while the tax
+check pauses the sync). Problem code: `SQUARE_ITEMS_SYNC_ON` (409). Tests: `test/square-items/*.test.ts`,
+`test/jobs/matrix-square-items.test.ts`, `test/square/sim-items.test.ts`.
+
+### 30.15 Sales tax rate and rounding (ADR 0173, wave K1e)
+
+The rate is stored in thousandths of a percent ("dbp"): 7000 = 7%, 6625 = 6.625% (New Jersey), 0 to 100000. Each invoice keeps the
+rate (`tax_dbp`) and the rounding (`tax_rounding`) it was made with, taken from the location's `tax.rate_dbp` and `tax.rounding`.
+`tax.rounding` is `half_up` by default (the design's rule: every 7% invoice is made exactly as before) and is switched to `half_even`,
+Square's rule (sandbox check SQR-18: CalculateOrder rounds the tax of an order once, on its taxable subtotal, half to even), at the
+rollout together with 6.625%, after the dashboard twin is deployed. Invoices made before keep their rule (their numbers never
+change). The tax is rounded once on `max(items + adjustments, 0)`; tips are untaxed.
+
+| Field (invoice detail `GET /invoices/:id`, the invoice summary of operations answers) | Meaning |
+|---|---|
+| `taxDbp` | The invoice's rate in thousandths of a percent. |
+| `taxRounding` | `half_up` or `half_even`. |
+| `taxBp` | Deprecated: the rate rounded half-up to whole basis points (6.625% reads 663). Kept one release for older dashboards. |
+
+`GET /settings/billing` → `salesTax {percent: "7", rateDbp: 7000, label: "7%", rounding: "half_up", version}` by default (`rounding`
+is `tax.rounding`, what new invoices use; `version` is the version of `tax.rate_dbp`). `PUT /settings/billing/sales-tax {percent,
+rounding?, version?}` (`set.billing`): `percent` is a string, the rate as staff type it with up to three decimals, 0 to 100 (`"7"`,
+`"6.625"`, `"6.625%"`); anything else is 422 `VALIDATION_FAILED` with `errors[0].path = "percent"` ("Use a percentage from 0 to 100
+with up to three decimals, such as 6.625"). `rounding` (`half_up` | `half_even`, anything else 422) is optional: left out, it stays as
+it is; sent and different, it is saved in the same transaction. The rate is always written, so `version` (or If-Match) guards both:
+428 without, 412 when stale (nothing saved). Audited `settings.update`, publishes `settings.changed {key: "tax.rate_dbp"}` (and
+`{key: "tax.rounding"}` when it changed). Both apply to invoices made from then on. Rollout: `{percent: "6.625", rounding:
+"half_even"}` in one save, only after the dashboard twin (`taxDbp`/`taxRounding`) is deployed.
+
+The Square payment link's tax line reads `Sales tax (6.625%)` (the invoice's own rate); its amount is the invoice's tax (a link sets no
+Square tax). Tests: `test/unit/tax-precision.test.ts` (golden vectors, including the 200 recorded sandbox answers),
+`test/payments/tax-precision.test.ts` (SQL equals TS; invoices keep their rate and rounding), `test/square-db/billing-settings.test.ts`.
 
 ## 31. Kiosk mode (ADR 0180, waves K1a and K1b)
 

@@ -228,6 +228,9 @@ the assistant's side is ADR 0160 "Wave Q3d". API: api-spec 26.1.
   not sold online: v2 and the assistant's links leave it out (wave Q3d), which v1 `plans` and `POST /public/memberships/join` do not
   do yet: the join route is wave Q3c's), the assistant's facts-v4 (wave Q3d), memberships billed as Square subscriptions (each
   `membership_tier_prices` row a plan variation; "Move members").
+* **K2e (built, [ADR 0172](0172-square-item-library.md)):** the prices by size are Square's item library: each active priced service a
+  Square item with one variation per size at `classPrice` (a range as Square's variable price), a price edit updated in place within
+  about 5 minutes, a size turned off hidden, never deleted.
 * **Later:** a migration drops `vehicles.vehicle_type`, the member/guest/VIP columns, `plan_credit_rules`, `catalog.tint_matrix`
   and `catalog.guest_markup_pct`.
 

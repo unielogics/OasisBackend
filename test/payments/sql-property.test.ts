@@ -48,14 +48,17 @@ describe('SQL invoice_calc_of equals the TS twin', () => {
         fc.record({
           prices: fc.array(fc.integer({ min: 0, max: 100_000 }), { minLength: 1, maxLength: 5 }),
           events: fc.array(arbEvent, { maxLength: 10 }),
-          taxBp: fc.constantFrom(0, 500, 700, 825, 1000),
+          // ADR 0173: rates in thousandths of a percent, 6.625% (NJ) and odd ones included, both roundings
+          taxDbp: fc.constantFrom(0, 5000, 7000, 8250, 10_000, 6625, 6875, 1, 99_999),
+          taxRounding: fc.constantFrom('half_up' as const, 'half_even' as const),
           tipCents: fc.integer({ min: 0, max: 5000 }),
           canceled: fc.boolean(),
         }),
         async (i) => {
           const inv = await makeInvoice(t.db, env, {
             items: i.prices.map((priceCents, n) => ({ name: `Line ${n}`, priceCents })),
-            taxBp: i.taxBp,
+            taxDbp: i.taxDbp,
+            taxRounding: i.taxRounding,
             tipCents: i.tipCents,
           })
           if (i.canceled) {
@@ -75,7 +78,8 @@ describe('SQL invoice_calc_of equals the TS twin', () => {
           const twin = calcInvoice({
             itemPrices: i.prices,
             events: twinEvents,
-            taxBp: i.taxBp,
+            taxDbp: i.taxDbp,
+            taxRounding: i.taxRounding,
             tipCents: i.tipCents,
             canceled: i.canceled,
           })

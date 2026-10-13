@@ -27,6 +27,7 @@ import {
 } from '../../integrations/square/errors.js'
 import { sqKey } from '../../integrations/square/keys.js'
 import { usd } from '../../integrations/square/money.js'
+import { taxPercentLabel } from '../../platform/money.js'
 import type { Clock } from '../../platform/clock.js'
 import { transaction, type Db, type Executor, type Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
@@ -81,11 +82,12 @@ export interface LinkLine {
 const lineName = (s: string): string => (s.length > 120 ? `${s.slice(0, 119)}…` : s)
 
 /**
- * The lines of a balance link (pure). An invoice nobody paid, adjusted or refunded anything on is shown line by line, with the tax and
+ * The lines of a balance link (pure). An invoice nobody paid, adjusted or refunded anything on is shown line by line, with the tax
+ * ("Sales tax (6.625%)": the invoice's own rate, ADR 0173; the amount is the invoice's, never Square's: the link sets no Square tax) and
  * the tip as lines of their own; any other is one "Balance due" line. The lines always add up to the amount exactly (asserted).
  */
 export function balanceLines(
-  inv: { invoiceNo: number },
+  inv: { invoiceNo: number; taxDbp: number },
   items: ReadonlyArray<{ name: string; priceCents: number }>,
   calc: Pick<InvoiceCalc, 'paid' | 'adj' | 'refunded' | 'pendingAmt' | 'tax' | 'tip' | 'balance' | 'total'>,
 ): LinkLine[] {
@@ -93,7 +95,7 @@ export function balanceLines(
   const lines: LinkLine[] = untouched
     ? [
         ...items.filter((i) => i.priceCents > 0).map((i) => ({ name: lineName(i.name), cents: i.priceCents })),
-        ...(calc.tax > 0 ? [{ name: 'Sales tax', cents: calc.tax }] : []),
+        ...(calc.tax > 0 ? [{ name: `Sales tax (${taxPercentLabel(inv.taxDbp)})`, cents: calc.tax }] : []),
         ...(calc.tip > 0 ? [{ name: 'Tip', cents: calc.tip }] : []),
       ]
     : [{ name: `Balance due · ${invoiceLabel(inv.invoiceNo)}`, cents: calc.balance }]
@@ -137,7 +139,7 @@ export function squareSendsRefunds(env: Pick<Env, 'PAYMENT_PROCESSOR' | 'SQUARE_
 async function invoiceFor(db: Executor, locationId: string, invoiceId: string) {
   const inv = await db
     .selectFrom('invoices')
-    .select(['id', 'invoice_no', 'customer_id', 'canceled_at', 'version'])
+    .select(['id', 'invoice_no', 'customer_id', 'canceled_at', 'version', 'tax_dbp'])
     .where('id', '=', invoiceId)
     .where('location_id', '=', locationId)
     .executeTakeFirst()
@@ -191,7 +193,7 @@ export async function prepareSquareLink(d: SquareLinkDeps, i: PrepareInput): Pro
     expected = calc.balance
     if (expected <= 0) throw new AppError('PAY_NOTHING_TO_COLLECT')
     const items = await d.db.selectFrom('invoice_items').select(['name', 'price_cents']).where('invoice_id', '=', inv.id).orderBy('position').execute()
-    const lines = balanceLines({ invoiceNo: inv.invoice_no }, items.map((x) => ({ name: x.name, priceCents: x.price_cents })), calc)
+    const lines = balanceLines({ invoiceNo: inv.invoice_no, taxDbp: inv.tax_dbp }, items.map((x) => ({ name: x.name, priceCents: x.price_cents })), calc)
     body = {
       order: {
         location_id: location,

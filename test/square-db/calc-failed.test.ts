@@ -43,12 +43,13 @@ describe('calc with failed card refunds: SQL equals the TS twin', () => {
         fc.record({
           prices: fc.array(fc.integer({ min: 0, max: 100_000 }), { minLength: 1, maxLength: 4 }),
           events: fc.array(arbEvent, { maxLength: 8 }),
-          taxBp: fc.constantFrom(0, 700, 825),
+          taxDbp: fc.constantFrom(0, 7000, 8250, 6625),
+          taxRounding: fc.constantFrom('half_up' as const, 'half_even' as const),
           tipCents: fc.integer({ min: 0, max: 3000 }),
           canceled: fc.boolean(),
         }),
         async (i) => {
-          const inv = await makeInvoice(t.db, env, { items: i.prices.map((priceCents, k) => ({ name: `Line ${k}`, priceCents })), taxBp: i.taxBp, tipCents: i.tipCents })
+          const inv = await makeInvoice(t.db, env, { items: i.prices.map((priceCents, k) => ({ name: `Line ${k}`, priceCents })), taxDbp: i.taxDbp, taxRounding: i.taxRounding, tipCents: i.tipCents })
           if (i.canceled) await t.db.updateTable('invoices').set({ canceled_at: t.clock.now(), cancel_reason: 'canceled' }).where('id', '=', inv.id).execute()
           for (const e of i.events) await addEvent(t.db, env, inv, e)
           const twin = calcInvoice({
@@ -62,7 +63,8 @@ describe('calc with failed card refunds: SQL equals the TS twin', () => {
                 processorState: e.processorState ?? 'na',
               }),
             ),
-            taxBp: i.taxBp,
+            taxDbp: i.taxDbp,
+            taxRounding: i.taxRounding,
             tipCents: i.tipCents,
             canceled: i.canceled,
           })

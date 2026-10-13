@@ -500,6 +500,8 @@ const dedicated: Record<string, string> = {
   'square.enrollments.resume': 'test/jobs/matrix-square-members.test.ts',
   'membership.billing': 'test/jobs/matrix-square-members.test.ts',
   'square.plans.swap': 'test/jobs/matrix-square-members.test.ts',
+  'square.items.sync': 'test/jobs/matrix-square-items.test.ts',
+  'square.items.drift': 'test/jobs/matrix-square-items.test.ts',
   'leads.follow_up': 'test/leads/follow-up.test.ts',
   'leads.provisional_archive': 'test/leads/archive.test.ts',
   'ai.respond': 'test/assistant/jobs.test.ts',

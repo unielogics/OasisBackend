@@ -55,6 +55,8 @@ database. After a migration: `pnpm db:schema`, add the table's row to the right 
 | `20261015100000_review_q4.sql` | review Q4 fixes (ADR 0171 wave Q4 notes): `square_refunds_waiting` (a refund made in the Square app before its payment was on an invoice, recorded on the invoice when the payment is); index `webhook_log_square_open_idx` (the catch-up runs the Square rows still received or failed outside its search window) |
 | `20261015100100_review_q4_fix.sql` | review Q4 re-verification and the Square sandbox run (ADR 0170 and ADR 0171 wave Q4 fix notes): `membership_inclusions.auto_apply` turned on for the default tiers' inclusions nobody edited (inclusions apply by themselves, plan decision 2); `webhook_log.attempts` (failures so far: the Square catch-up backs failed rows off by it; failed rows start at 1); `square_state.connected_at` (the connection point: counter payments Square made before it are history, never queued) |
 | `20261015100200_charge_after_close.sql` | review Q4FIX-N1 (ADR 0171 wave Q4 fix notes): `square_charges.charged_after_close_at` (Square completed the charge after Oasis closed it as not charged: recorded, and the invoice's "Overpaid via Square" alert says why) |
+| `20261015150000_tax_precision.sql` | sales tax precision and Square's rounding (ADR 0173): `sales_tax_cents(sub, dbp, rounding)`; `invoices.tax_dbp` (thousandths of a percent, 7000 = 7%, 6625 = 6.625%; backfilled `tax_bp × 10`) and `invoices.tax_rounding half_up\|half_even` (existing rows `half_up`; new ones the setting `tax.rounding`, default `half_up`) replace `invoices.tax_bp`; `invoice_calc_of` rounds with them; the setting `tax.rate_bp` becomes `tax.rate_dbp` (× 10) |
+| `20261015200000_square_items.sql` | the Square item library sync (ADR 0172): `square_catalog_links` (the only Square ids Oasis writes, per Square environment: items, variations, categories, the tax; the create outbox `pending_key`/`pending_body`) and `square_items_state` (per location and environment: the tax choice and the last tax check, the library fingerprint, the read-back watermark, the last sync, drift check and preview) |
 | `20261016100000_kiosk.sql` | Kiosk mode (ADR 0180, wave K1a): `kiosk_devices` (registered tablets: the sha256 of the device cookie token, the persisted unlock throttle `failed_attempts` / `last_failed_at` / `locked_out_at`, revoke), `kiosk_codes` (the shop's unlock codes: scrypt over HMAC(key from SESSION_SECRET, location:code), history, one current), `kiosk_sessions` (sha256 id, device, code, `expires_at` = the lock time, `lock_rule`, CSRF secret, revoke reason); `employees.kiosk_listed` ("Shows on the kiosk"), `sessions.kiosk_device_id` (a manager signed in on a kiosk: short timings), `audit_log.kiosk_device_id` |
 | `20261016100100_staff_attribution.sql` | Kiosk mode (ADR 0180): the tapped employee next to the user columns, `activity_log.actor_employee_id` and `kiosk_device_id`, `appointments.created_by_employee_id`, `appointment_addons.added_by_employee_id`, `appointment_photos.uploaded_by_employee_id`, `payment_links.created_by_employee_id` (columns only in K1a; written from wave K1b) |
 | `20261016100200_staff_events.sql` | Kiosk mode (ADR 0180): `staff_events`, one row per car step, booking, payment, text and so on by whoever did it (kiosk or signed in), the source of the Team activity report; the report's indexes on `ledger_events` (pay by actor) and `messages` (staff sender) |
@@ -176,16 +178,20 @@ check-in link; the plain token exists only in the response that issued it.
 | Table                | Key columns and rules                                                                                                                                                                                                                                                                                                                                                 |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `invoice_counters`   | pk `location_id`; `next_no` (starts at 20611), incremented under a row lock in the booking transaction: gap-free.                                                                                                                                                                                                                                                     |
-| `invoices`           | One per appointment (`appointment_id` unique), `invoice_no` unique per location, label snapshots, `occurred_at`/`biz_date` (frozen by `date_frozen_at` at completion), `tax_bp`, `tip_cents`, `canceled_at` + `cancel_reason canceled\|no_show`, `payment_link_url`, `version`.                                                                                       |
+| `invoices`           | One per appointment (`appointment_id` unique), `invoice_no` unique per location, label snapshots, `occurred_at`/`biz_date` (frozen by `date_frozen_at` at completion), `tax_dbp` + `tax_rounding` (the rate in thousandths of a percent and the rounding the invoice was made with: the settings `tax.rate_dbp` and `tax.rounding`, ADR 0173; `tax_bp` before), `tip_cents`, `canceled_at` + `cancel_reason canceled\|no_show`, `payment_link_url`, `version`.                                                                                       |
 | `invoice_items`      | Price snapshots (`package` or `addon`), `position`, `appointment_addon_id`; refund-by-item claims item ids.                                                                                                                                                                                                                                                           |
 | `ledger_events`      | Append-only (trigger): `type pay\|adjust\|refund\|credit_issue\|credit_apply\|void`, `amount_cents` (adjust signed), refund `status pending\|done\|denied` and `dest card\|credit\|cash`, method fields, actor and approver fields, `source oasis\|squarespace\|system\|seed\|square`, `processor_state na\|awaiting_processor\|confirmed\|failed` (a card refund the processor reported `failed` no longer counts as refunded), `processor squarespace\|square` and `processor_order_id` (ADR 0171), `idempotency_key` unique. |
 | `credit_allocations` | Append-only: which store-credit lot a `credit_apply` consumed (FIFO by expiry, skipping lots already expired).                                                                                                                                                                                                                                                        |
 | `payment_links`      | A staff-attached Squarespace checkout or invoice URL (https), or a Square link made for an exact amount (ADR 0171 D3: `provider square`, `kind square_order\|square_quick_pay`, `square_payment_link_id`, `square_order_id`, `invoice_version`, `origin staff\|pay_page\|booking\|deposit_page`; `state pending` until its command commits, or a booking's deposit request with no URL yet; canceled with `cancel_reason` and deleted at Square, `square_deleted_at`; `paid_square_payment_id`): `purpose balance\|deposit`, `expected_cents`, `state`, `matched_sqsp_order_id`. No ledger event until money actually arrives. |
 
-`invoice_calc_of(invoice)` and the `invoice_calc` view compute items, adjustments, tax (half-up), paid, refunded, balance, refundable
+`invoice_calc_of(invoice)` and the `invoice_calc` view computes items, adjustments, tax (rounded by the invoice's own rule, below), paid, refunded, balance, refundable
 and the status ladder in integer cents; `src/modules/payments/calc.ts` is the TypeScript twin (and `jobs-integrity.ts` checks them
 against each other nightly). Since `20261014400000_square_core.sql` a done card refund whose `processor_state` is `failed` (Square
-refused it) counts neither as `refunded` nor as `ref_orig` (ADR 0171 D4); the dashboard's `src/lib/payments/cents.ts` follows.
+refused it) counts neither as `refunded` nor as `ref_orig` (ADR 0171 D4); the dashboard's `src/lib/payments/cents.ts` follows. Since
+`20261015150000_tax_precision.sql` (ADR 0173) the tax is `sales_tax_cents(sub, tax_dbp, tax_rounding)`: rounded once on the adjusted
+subtotal, half-up (every older invoice, and new ones while the setting `tax.rounding` keeps its default) or half to even (Square's
+rule, once `tax.rounding` is switched at the rollout); the TS
+twin is `salesTaxCents` in `src/platform/money.ts`.
 
 ## Messaging (migration `20261006200000_messaging.sql`)
 
@@ -393,6 +399,15 @@ no-show and late-cancel fees, the card lifecycle) and Q3b will (subscriptions).
 
 | `square_enrollments` | One attempt to join on a membership page with a card (wave Q3b, `src/modules/memberships/square/enroll.ts`): the client, the pending membership, the link, tier, price row, `plan_class`, the Square `square_variation_id` and `monthly_cents` it joins at, the `email` Square bills to, `state started\|customer_ready\|card_saved\|subscribed\|active\|failed\|abandoned` (one live per membership; an attempt that left a subscription or a cleanup at Square keeps its membership to itself: a retry starts a new one), the Square customer, the saved card and consent, `square_subscription_id` (unique), `start_date`, `failure_code`, `failure_detail`, `cleanup none\|pending\|done` (what a failed attempt still owes at Square), `attempts`, times. Square keys from the row id: `cd_<id>`, `sb_<id>` |
 | `square_subscription_invoices` | Every invoice Square makes for a membership's subscription (wave Q3b, `billing.ts`): `square_invoice_id` (unique), the subscription and order, `status`, `amount_cents`, `paid_cents`, `due_date`, the paid `period_start`/`period_end`, Square's `public_url`, `paid_at`, `applied_at` (the cycle applied once: period moved, credits granted), `failed_at` (the failure policy), `canceled_at`, `square_payment_id`, `refunded_cents` with `square_refund_id`, `refunded_at` and Square's `refund_status PENDING\|COMPLETED\|FAILED\|REJECTED` (staff "Refund last payment"; a failed or rejected refund sets `refunded_cents` back to 0 and keeps its id, so a new try uses a new key) |
+
+The Square item library (ADR 0172, migration `20261015200000_square_items.sql`; `src/modules/catalog/square/`): every active priced
+service is a Square ITEM with a variation per vehicle size. Nothing is written while `SQUARE_ITEMS_SYNC_ENABLED` is off, except the
+read-only preview and tax check in `square_items_state`.
+
+| Table | Purpose |
+|---|---|
+| `square_catalog_links` | The ONLY Square ids Oasis writes, per `environment` (`sim\|sandbox\|production`: a switch starts afresh): `kind item\|variation\|category\|tax`; an item and its variations name their `service_id` (a variation its `class_key`, null = the "Regular" price of a service without sizes, and `square_item_id`); a category its `category_key` (`_oasis` = the "Oasis" marker category); `square_object_id` (unique per environment) and `square_version` (the version Oasis last wrote or read: the read-back ignores Oasis's own writes by it); `desired_hash`/`content_hash` (what Oasis wants, what Square last confirmed: an item whose hash differs is sent); `state pending\|synced\|failed\|archived\|hidden\|gone` with `error` (plain words, 300); `adopted` (the shop's own tax or category: referenced, never written); the outbox of a create in flight (`pending_key` = the `ct_` key, `pending_body` = the exact request as JSON text, `pending_at`): sent again unchanged after a crash; `synced_at`, `checked_at`. Unique: one item per service, one variation per service and size, one category per key, one tax (per location and environment) |
+| `square_items_state` | One row per location and Square environment: `tax_mode auto\|adopt\|create` and `tax_object_id` (the tax staff picked), the last `tax_check` (jsonb: status, the tax, the detail, warnings, the shop's candidate taxes, the rounding sample) and its time; `fingerprint` (the whole library at the last complete sync: a run with the same one, nothing open and nothing changed at Square sends nothing); `watermark` (the read-back's `begin_time`); `last_write_at`, `last_sync_at`/`last_sync`, `last_drift_at`/`last_drift`, `last_preview_at`/`last_preview` (what a watch-only preview found), `last_error` and its time; `version` (the token of PUT /integrations/square/items/tax) |
 
 Square deliveries and catch-up events share `webhook_log` (provider `square`, `external_id` = Square's `event_id`): whichever claims the
 event first processes it; the raw body and the headers without the signature are kept for the 90-day trail.
@@ -1396,7 +1411,6 @@ Primary key `(id)`. `(appointment_addon_id)` references `appointment_addons(id)`
 | `occurred_at` | timestamp with time zone | no |  |
 | `biz_date` | date | no |  |
 | `date_frozen_at` | timestamp with time zone | yes |  |
-| `tax_bp` | integer | no |  |
 | `tip_cents` | integer | no | `0` |
 | `canceled_at` | timestamp with time zone | yes |  |
 | `canceled_by` | uuid | yes |  |
@@ -1408,8 +1422,10 @@ Primary key `(id)`. `(appointment_addon_id)` references `appointment_addons(id)`
 | `created_at` | timestamp with time zone | no | `app_now()` |
 | `updated_at` | timestamp with time zone | no | `app_now()` |
 | `vehicle_class_label` | text | yes |  |
+| `tax_dbp` | integer | no |  |
+| `tax_rounding` | text | no | `'half_up'::text` |
 
-Primary key `(id)`. Unique `(appointment_id)`. Unique `(location_id, invoice_no)`. `(appointment_id)` references `appointments(id)`. `(canceled_by)` references `users(id)` on delete set null. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. 7 check constraints. Index `invoices_biz_date_idx` `(location_id, biz_date DESC, invoice_no DESC)`. Index `invoices_customer_idx` `(customer_id, biz_date DESC)`.
+Primary key `(id)`. Unique `(appointment_id)`. Unique `(location_id, invoice_no)`. `(appointment_id)` references `appointments(id)`. `(canceled_by)` references `users(id)` on delete set null. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. 8 check constraints. Index `invoices_biz_date_idx` `(location_id, biz_date DESC, invoice_no DESC)`. Index `invoices_customer_idx` `(customer_id, biz_date DESC)`.
 
 #### `job_checklist_items`
 
@@ -2667,6 +2683,35 @@ Primary key `(id)`. Unique `(location_id, sqsp_txn_id)`. `(location_id)` referen
 
 Primary key `(id)`. Unique `(location_id, sqsp_subscription_id)`. `(location_id)` references `locations(id)` on delete cascade. 1 check constraint.
 
+#### `square_catalog_links`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | no |  |
+| `location_id` | uuid | no |  |
+| `environment` | text | no |  |
+| `kind` | text | no |  |
+| `service_id` | uuid | yes |  |
+| `class_key` | text | yes |  |
+| `category_key` | text | yes |  |
+| `square_object_id` | text | yes |  |
+| `square_item_id` | text | yes |  |
+| `square_version` | bigint | yes |  |
+| `desired_hash` | text | yes |  |
+| `content_hash` | text | yes |  |
+| `state` | text | no | `'pending'::text` |
+| `adopted` | boolean | no | `false` |
+| `error` | text | yes |  |
+| `pending_key` | text | yes |  |
+| `pending_body` | text | yes |  |
+| `pending_at` | timestamp with time zone | yes |  |
+| `synced_at` | timestamp with time zone | yes |  |
+| `checked_at` | timestamp with time zone | yes |  |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(id)`. `(location_id)` references `locations(id)` on delete cascade. `(service_id)` references `services(id)`. 17 check constraints. Index `ix_square_catalog_links_open` `(location_id, environment, state)` where `state = ANY (ARRAY['pending'::text, 'failed'::text])`. Unique index `uq_square_catalog_links_category` `(location_id, environment, category_key)` where `kind = 'category'::text`. Unique index `uq_square_catalog_links_item` `(location_id, environment, service_id)` where `kind = 'item'::text`. Unique index `uq_square_catalog_links_object` `(environment, square_object_id)` where `square_object_id IS NOT NULL`. Unique index `uq_square_catalog_links_tax` `(location_id, environment)` where `kind = 'tax'::text`. Unique index `uq_square_catalog_links_variation` `(location_id, environment, service_id, COALESCE(class_key, ''::text))` where `kind = 'variation'::text`.
+
 #### `square_charges`
 
 | Column | Type | Null | Default |
@@ -2749,6 +2794,33 @@ Primary key `(id)`. Unique `(location_id, customer_id)`. Unique `(location_id, s
 | `updated_at` | timestamp with time zone | no | `app_now()` |
 
 Primary key `(id)`. `(card_id)` references `customer_cards(id)`. `(consent_id)` references `card_consents(id)`. `(customer_id)` references `customers(id)`. `(location_id)` references `locations(id)` on delete cascade. `(membership_id)` references `memberships(id)`. `(plan_id)` references `membership_plans(id)`. `(tier_price_id)` references `membership_tier_prices(id)`. 14 check constraints. Index `square_enrollments_membership_idx` `(membership_id, started_at)`. Index `square_enrollments_open_idx` `(location_id, state, started_at)` where `(state = ANY (ARRAY['started'::text, 'customer_ready'::text, 'card_saved'::text, 'subscribed'::text])) OR (cleanup = 'pending'::text)`. Unique index `uq_square_enrollments_live` `(membership_id)` where `state = ANY (ARRAY['started'::text, 'customer_ready'::text, 'card_saved'::text, 'subscribed'::text])`. Unique index `uq_square_enrollments_subscription` `(square_subscription_id)` where `square_subscription_id IS NOT NULL`.
+
+#### `square_items_state`
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `location_id` | uuid | no |  |
+| `environment` | text | no |  |
+| `tax_mode` | text | no | `'auto'::text` |
+| `tax_object_id` | text | yes |  |
+| `tax_check` | jsonb | yes |  |
+| `tax_checked_at` | timestamp with time zone | yes |  |
+| `fingerprint` | text | yes |  |
+| `watermark` | timestamp with time zone | yes |  |
+| `last_write_at` | timestamp with time zone | yes |  |
+| `last_sync_at` | timestamp with time zone | yes |  |
+| `last_sync` | jsonb | yes |  |
+| `last_drift_at` | timestamp with time zone | yes |  |
+| `last_drift` | jsonb | yes |  |
+| `last_preview` | jsonb | yes |  |
+| `last_preview_at` | timestamp with time zone | yes |  |
+| `last_error` | text | yes |  |
+| `last_error_at` | timestamp with time zone | yes |  |
+| `version` | integer | no | `1` |
+| `created_at` | timestamp with time zone | no | `app_now()` |
+| `updated_at` | timestamp with time zone | no | `app_now()` |
+
+Primary key `(location_id, environment)`. `(location_id)` references `locations(id)` on delete cascade. 5 check constraints.
 
 #### `square_payments`
 
@@ -3168,5 +3240,6 @@ Primary key `(id)`. Unique `(provider, external_id)`. 3 check constraints. Index
 - function `realtime_channel_name() returns text`
 - function `realtime_events_notify() returns trigger`
 - function `realtime_purge(p_before timestamp with time zone) returns bigint`
+- function `sales_tax_cents(p_sub bigint, p_dbp integer, p_rounding text) returns bigint`
 - function `services_default_category() returns trigger`
 <!-- schema-reference:end -->

@@ -556,7 +556,7 @@ async function projectedCalc(
   itemPrices: number[],
   coverCents: number[],
 ): Promise<InvoiceCalc> {
-  const inv = await tx.selectFrom('invoices').select(['tax_bp', 'tip_cents']).where('id', '=', invoiceId).executeTakeFirstOrThrow()
+  const inv = await tx.selectFrom('invoices').select(['tax_dbp', 'tax_rounding', 'tip_cents']).where('id', '=', invoiceId).executeTakeFirstOrThrow()
   const rows = await tx
     .selectFrom('ledger_events')
     .select(['type', 'amount_cents', 'status', 'dest'])
@@ -564,7 +564,7 @@ async function projectedCalc(
     .execute()
   const events: CalcEvent[] = rows.map((e) => ({ type: e.type, amountCents: e.amount_cents, status: e.status, dest: e.dest }))
   for (const cents of releaseCents) if (cents > 0) events.push({ type: 'adjust', amountCents: cents })
-  const calc = (): InvoiceCalc => calcInvoice({ itemPrices, events, taxBp: inv.tax_bp, tipCents: inv.tip_cents, canceled: false })
+  const calc = (): InvoiceCalc => calcInvoice({ itemPrices, events, taxDbp: inv.tax_dbp, taxRounding: inv.tax_rounding, tipCents: inv.tip_cents, canceled: false })
   let sub = calc().sub
   for (const cents of coverCents) {
     const value = Math.min(cents, sub)

@@ -27,7 +27,10 @@ describe('Square routes', () => {
       ['location', true],
       ['events', true],
       ['webhook', true],
+      // the Square item library's tax check (ADR 0172): the simulator has no tax yet, so the sync would add Oasis's own
+      ['tax', true],
     ])
+    expect(body.checks.find((c: { key: string }) => c.key === 'tax').detail).toMatch(/No sales tax in Square yet: the item sync will add “Sales tax” at 7%/)
     expect(sim.store.eventsEnabled).toBe(true)
     const state = await app.db.selectFrom('square_state').selectAll().executeTakeFirstOrThrow()
     expect(state).toMatchObject({ merchant_id: sim.store.merchantId, square_location_id: 'LSIMTEST0001', environment: 'sandbox' })

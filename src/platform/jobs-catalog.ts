@@ -406,6 +406,25 @@ export const jobCatalog: Record<string, JobCatalogEntry> = {
     tests: 'test/square-members/catalog.test.ts, test/jobs/matrix-square-members.test.ts, test/jobs/registry.test.ts',
     status: 'built',
   },
+  'square.items.sync': {
+    owner: 'catalog (Square item library)',
+    purpose:
+      'Every 5 minutes at 2, 7, 12 ... (offset from square.catalog.sync: one catalog writer at a time) while SQUARE_WRITES_ENABLED and SQUARE_ITEMS_SYNC_ENABLED (ADR 0172): the tax check first (Square’s tax against tax.rate_dbp as exact decimals; a mismatch blocks the run and the managers are told once a day); what changed at Square since the watermark read back (linked objects only, Oasis’s own versions ignored); then every active priced service is a REGULAR item with a variation per vehicle size at the price Oasis charges, in its category and "Oasis", made (outbox: key and body kept before the call), updated in place (read-modify-write, staff variations kept, VERSION_MISMATCH merged again once), archived or hidden, never deleted. Square-side edits to Oasis’s fields (Oasis’s own Square tax included: its rate, on, at the location, added to the price, on the subtotal, never on custom amounts) are put back and the managers told once; failures told once per set, again a day later. One writing run at a time per location (an advisory lock): skipped while Sync now or the nightly run holds it. Skipped with the defaults.',
+    idempotency:
+      'Each create carries ct_ items:create:<env>:<service>:<content hash> and its exact body in the outbox, so a run that stopped after Square answered gets the same item back; each update carries ct_ items:update:<item>:<version>:<hash>; the fast path (the same library fingerprint, nothing open, nothing changed at Square) sends nothing.',
+    clock: 'Injected clock (the watermark, the outbox age, the notice reminders).',
+    tests: 'test/square-items/plan.test.ts, test/square-items/sync.test.ts, test/jobs/matrix-square-items.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
+  'square.items.drift': {
+    owner: 'catalog (Square item library)',
+    purpose:
+      'Nightly 04:40 while SQUARE_WRITES_ENABLED and SQUARE_ITEMS_SYNC_ENABLED (ADR 0172): the item sync with everything linked read back (BatchRetrieve) and every Square item searched for Oasis’s marker: an item deleted at Square while Oasis sells it is made again, Square-side edits to Oasis’s fields are put back (the managers told once), an Oasis item found by its marker with no link (a crash or a restore) is adopted instead of made twice. Waits up to 5 minutes for a run still holding the item sync’s lock. Skipped with the defaults.',
+    idempotency: 'Read-and-compare; the writes are the item sync’s (keyed), and a second run finds Square as the first left it.',
+    clock: 'Injected clock.',
+    tests: 'test/square-items/sync.test.ts, test/jobs/matrix-square-items.test.ts, test/jobs/registry.test.ts',
+    status: 'built',
+  },
   'square.enrollments.resume': {
     owner: 'memberships',
     purpose:

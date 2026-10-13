@@ -49,12 +49,26 @@ export interface OracleCalc {
   status: string
 }
 
+/**
+ * Tax of a non-negative subtotal at a rate in thousandths of a percent (ADR 0173), written independently of the product code:
+ * half_up rounds the exact half up, half_even (Square's rule) rounds it to the even cent.
+ */
+export function oracleTax(sub: bigint, dbp: bigint, rounding: 'half_up' | 'half_even'): bigint {
+  const n = sub * dbp
+  if (rounding === 'half_up') return (2n * n + 100_000n) / 200_000n
+  const q = n / 100_000n
+  const twice = 2n * (n % 100_000n)
+  if (twice > 100_000n) return q + 1n
+  if (twice < 100_000n) return q
+  return q % 2n === 0n ? q : q + 1n
+}
+
 export function oracleCalc(
-  inv: { tax_bp: number; tip_cents: number; canceled: boolean },
+  inv: { tax_dbp: number; tax_rounding: 'half_up' | 'half_even'; tip_cents: number; canceled: boolean },
   prices: readonly number[],
   evs: readonly Ev[],
 ): OracleCalc {
-  const bp = big(inv.tax_bp)
+  const dbp = big(inv.tax_dbp)
   let items = 0n
   for (const p of prices) items += big(p)
   let adj = 0n
@@ -84,8 +98,7 @@ export function oracleCalc(
     }
   }
   const sub = max0(items + adj)
-  // round-half-up of sub * bp / 10000 without the (n + d/2) / d shortcut the product code uses
-  const tax = (2n * sub * bp + 10_000n) / 20_000n
+  const tax = oracleTax(sub, dbp, inv.tax_rounding)
   const total = sub + tax + big(inv.tip_cents)
   const paidOrig = pay - voided
   const paid = paidOrig + creditApplied
@@ -93,8 +106,8 @@ export function oracleCalc(
   const refundable = max0(paid - refunded - pending)
   const toOrigMax = max0(paidOrig - refOrig)
   const overpaid = max0(paid - refunded - total)
-  const d = 10_000n + bp
-  const net = items + adj - (2n * refunded * 10_000n + d) / (2n * d)
+  const d = 100_000n + dbp
+  const net = items + adj - (2n * refunded * 100_000n + d) / (2n * d)
   let status: string
   if (inv.canceled && paid === 0n && refunded === 0n) status = 'canceled'
   else if (inv.canceled && refunded >= paid) status = 'canceled_refunded'

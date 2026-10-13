@@ -218,6 +218,7 @@ export class SquareSimApi {
         const ids = (body.order_ids as string[] | undefined) ?? []
         return ok({ orders: ids.filter((id) => s.orders.has(id)).map((id) => s.retrieveOrder(id)) })
       }
+      if (m === 'POST' && p === '/v2/orders/calculate') return ok({ order: s.calculateOrder((body.order ?? {}) as Obj) })
       if ((x = /^\/v2\/orders\/([^/]+)$/.exec(p))) {
         if (m === 'GET') return ok({ order: s.retrieveOrder(dec(x[1])) })
         if (m === 'PUT') return ok({ order: s.updateOrder(dec(x[1]), body) })
@@ -251,14 +252,31 @@ export class SquareSimApi {
       if (m === 'POST' && (x = /^\/v2\/cards\/([^/]+)\/disable$/.exec(p))) return ok({ card: s.disableCard(dec(x[1])) })
       // catalog
       if (m === 'POST' && p === '/v2/catalog/object') {
-        const r = s.upsertCatalog([(body.object ?? {}) as Obj])
+        const r = s.upsertCatalog([[(body.object ?? {}) as Obj]])
         return ok({ catalog_object: r.objects[0], id_mappings: r.id_mappings })
       }
       if (m === 'POST' && p === '/v2/catalog/batch-upsert') {
-        const objects = ((body.batches as Obj[] | undefined) ?? []).flatMap((b) => (b.objects as Obj[] | undefined) ?? [])
-        return ok(s.upsertCatalog(objects))
+        const batches = ((body.batches as Obj[] | undefined) ?? []).map((b) => (b.objects as Obj[] | undefined) ?? [])
+        if (!batches.length) throw new SimError(400, 'INVALID_REQUEST_ERROR', 'MISSING_REQUIRED_PARAMETER', 'batches is required.', {}, 'batches')
+        return ok(s.upsertCatalog(batches))
       }
-      if (m === 'POST' && p === '/v2/catalog/search') return this.page('objects', s.searchCatalog((body.object_types as string[] | undefined) ?? []), q, body)
+      if (m === 'POST' && p === '/v2/catalog/batch-retrieve')
+        return ok(
+          s.batchRetrieveCatalog((body.object_ids as string[] | undefined) ?? [], {
+            include_related_objects: body.include_related_objects === true,
+            include_deleted_objects: body.include_deleted_objects === true,
+          }),
+        )
+      if (m === 'POST' && p === '/v2/catalog/search')
+        return this.page(
+          'objects',
+          s.searchCatalog((body.object_types as string[] | undefined) ?? [], {
+            include_deleted_objects: body.include_deleted_objects === true,
+            begin_time: typeof body.begin_time === 'string' ? body.begin_time : undefined,
+          }),
+          q,
+          body,
+        )
       if ((x = /^\/v2\/catalog\/object\/([^/]+)$/.exec(p))) {
         if (m === 'GET') return ok({ object: s.retrieveCatalog(dec(x[1])) })
         if (m === 'DELETE') return ok({ deleted_object_ids: s.deleteCatalog(dec(x[1])), deleted_at: s.now().toISOString() })
@@ -392,6 +410,7 @@ export class SquareSimApi {
           refunds: s.refunds.size,
           links: s.links.size,
           orders: s.orders.size,
+          catalog: s.catalog.size,
           subscriptions: s.subscriptions.size,
           invoices: s.invoices.size,
           events: s.events.length,
@@ -464,7 +483,7 @@ function err(category: string, code: string, detail: string, field?: string): Ob
 }
 
 function fromError(e: unknown): SimResponse {
-  if (e instanceof SimError) return json(e.status, { errors: [err(e.category, e.code, e.detail)], ...e.extra })
+  if (e instanceof SimError) return json(e.status, { errors: [err(e.category, e.code, e.detail, e.field)], ...e.extra })
   return json(500, { errors: [err('API_ERROR', 'INTERNAL_SERVER_ERROR', e instanceof Error ? e.message : String(e))] })
 }
 

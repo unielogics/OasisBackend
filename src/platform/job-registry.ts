@@ -4,6 +4,7 @@ import type { JobDefinition } from './jobs.js'
 import { assistantJobs } from '../modules/assistant/jobs.js'
 import { knowledgeJobs } from '../modules/assistant/knowledge/jobs.js'
 import { practiceJobs } from '../modules/assistant/practice/jobs.js'
+import { squareItemsJobs } from '../modules/catalog/square/jobs.js'
 import { membershipJobs } from '../modules/memberships/jobs.js'
 import { squareMembershipJobs } from '../modules/memberships/square/jobs.js'
 import { messagingJobs } from '../modules/messaging/jobs/index.js'
@@ -43,6 +44,7 @@ export const jobDefinitions: readonly JobDefinition<never>[] = [
   ...squareJobs,
   ...membershipJobs,
   ...squareMembershipJobs,
+  ...squareItemsJobs,
   ...standingJobs,
   ...leadJobs,
   ...assistantJobs,

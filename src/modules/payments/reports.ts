@@ -4,7 +4,7 @@
 import { sql } from 'kysely'
 import type { Executor } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
-import { divHalfUp, formatDecimal } from '../../platform/money.js'
+import { divHalfUp, formatDecimal, TAX_DBP_PER_100_PERCENT } from '../../platform/money.js'
 import { decodeCursor, encodeCursor, type Page } from '../../platform/pagination.js'
 import { csvLine, csvCell, CSV_BOM, type CsvKind } from '../../platform/csv.js'
 import { addDays, atLabel, clockLabel, minutesOfDay, toBizDate } from '../../platform/time.js'
@@ -48,7 +48,7 @@ interface RangeRow extends InvoiceCalcRow {
   client_name: string
   vehicle_label: string
   staff_label: string
-  tax_bp: number
+  tax_dbp: number
   first_item: string | null
   item_count: number
   item_names: string | null
@@ -72,7 +72,7 @@ const INVOICE_CATEGORIES = sql`coalesce(
 
 async function rangeRows(db: Executor, locationId: string, from: string, to: string): Promise<RangeRow[]> {
   const r = await sql<RangeRow>`
-    select c.*, i.invoice_no, i.biz_date, i.occurred_at, i.customer_id, i.client_name, i.vehicle_label, i.staff_label, i.tax_bp,
+    select c.*, i.invoice_no, i.biz_date, i.occurred_at, i.customer_id, i.client_name, i.vehicle_label, i.staff_label, i.tax_dbp,
            (select it.name from invoice_items it where it.invoice_id = i.id order by it.position limit 1) as first_item,
            (select count(*)::int from invoice_items it where it.invoice_id = i.id) as item_count,
            (select string_agg(it.name, '; ' order by it.position) from invoice_items it where it.invoice_id = i.id) as item_names,
@@ -210,11 +210,12 @@ export async function summary(db: Executor, c: ReportContext, key: RangeKey): Pr
   const gross = sum((r) => r.items)
   const adj = sum((r) => r.adj)
   const refunds = sum((r) => r.refunded)
-  // net: refunds are tax-inclusive; the tax part is removed once per tax rate on the aggregate (one rate in practice)
+  // net: refunds are tax-inclusive; the tax part is removed once per tax rate on the aggregate (one rate in practice; 7% and 6.625%
+  // invoices are two groups, ADR 0173). In dbp the half-up result for a whole-bp rate is the same as it was in bp.
   const byRate = new Map<number, number>()
-  for (const r of rows) byRate.set(r.tax_bp, (byRate.get(r.tax_bp) ?? 0) + r.refunded)
+  for (const r of rows) byRate.set(r.tax_dbp, (byRate.get(r.tax_dbp) ?? 0) + r.refunded)
   let refundNet = 0
-  for (const [bp, amt] of byRate) refundNet += divHalfUp(amt * 10_000, 10_000 + bp)
+  for (const [dbp, amt] of byRate) refundNet += divHalfUp(amt * TAX_DBP_PER_100_PERCENT, TAX_DBP_PER_100_PERCENT + dbp)
   const credited = rows.filter((r) => r.issued > 0)
 
   // chart: hourly 8a-5p for today (extended when data falls outside, never dropped), one bucket per day otherwise
@@ -375,7 +376,7 @@ function listSql(
     : sql``
   return sql<RangeRow & { id: string }>`
     select * from (
-      select c.*, i.id, i.invoice_no, i.biz_date, i.occurred_at, i.customer_id, i.client_name, i.vehicle_label, i.staff_label, i.tax_bp,
+      select c.*, i.id, i.invoice_no, i.biz_date, i.occurred_at, i.customer_id, i.client_name, i.vehicle_label, i.staff_label, i.tax_dbp,
              (select it.name from invoice_items it where it.invoice_id = i.id order by it.position limit 1) as first_item,
              (select count(*)::int from invoice_items it where it.invoice_id = i.id) as item_count,
              (select string_agg(it.name, '; ' order by it.position) from invoice_items it where it.invoice_id = i.id) as item_names,

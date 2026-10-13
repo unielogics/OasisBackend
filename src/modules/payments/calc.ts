@@ -1,6 +1,6 @@
 // Pure twin of the invoice_calc SQL (migration 20261006190000_payments.sql): the Payments design's calc() in integer
 // cents with the review fixes. Used for sheet previews (adjust, by-item refund), seeds and the equality tests against SQL.
-import { divHalfUp, percentOfCents, taxCents } from '../../platform/money.js'
+import { divHalfUp, percentOfCents, salesTaxCents, TAX_DBP_PER_100_PERCENT, type TaxRate, type TaxRounding } from '../../platform/money.js'
 import type { InvoiceStatus, LedgerType, ProcessorState, RefundDest, RefundStatus } from './schema.js'
 
 export interface CalcEvent {
@@ -17,7 +17,10 @@ export interface CalcInput {
   /** Price snapshot of every invoice line (package and add-ons). */
   itemPrices: readonly number[]
   events: readonly CalcEvent[]
-  taxBp: number
+  /** The invoice's own rate in thousandths of a percent (invoices.tax_dbp: 7000 = 7%, 6625 = 6.625%; ADR 0173). */
+  taxDbp: number
+  /** The invoice's own rounding (invoices.tax_rounding): half_up (the default) or half_even (Square's rule, ADR 0173). */
+  taxRounding: TaxRounding
   tipCents: number
   canceled: boolean
 }
@@ -52,9 +55,12 @@ const sum = (xs: Iterable<number>): number => {
 }
 
 /** net revenue of an invoice: items + adjustments less the refunds with their tax portion removed (half-up). */
-export function netCents(items: number, adj: number, refunded: number, taxBp: number): number {
-  return items + adj - divHalfUp(refunded * 10_000, 10_000 + taxBp)
+export function netCents(items: number, adj: number, refunded: number, taxDbp: number): number {
+  return items + adj - divHalfUp(refunded * TAX_DBP_PER_100_PERCENT, TAX_DBP_PER_100_PERCENT + taxDbp)
 }
+
+/** The rate of a calc input as salesTaxCents takes it. */
+export const rateOf = (i: { taxDbp: number; taxRounding: TaxRounding }): TaxRate => ({ dbp: i.taxDbp, rounding: i.taxRounding })
 
 export function deriveStatus(v: {
   canceled: boolean
@@ -79,7 +85,7 @@ export function calcInvoice(input: CalcInput): InvoiceCalc {
   const items = sum(input.itemPrices)
   const adj = of('adjust')
   const sub = Math.max(items + adj, 0)
-  const tax = taxCents(sub, input.taxBp)
+  const tax = salesTaxCents(sub, rateOf(input))
   const total = sub + tax + input.tipCents
   const paidOrig = of('pay') - of('void')
   const creditApplied = of('credit_apply')
@@ -109,7 +115,7 @@ export function calcInvoice(input: CalcInput): InvoiceCalc {
     balance,
     refundable: Math.max(0, paid - refunded - pendingAmt),
     toOrigMax: Math.max(0, paidOrig - refOrig),
-    net: netCents(items, adj, refunded, input.taxBp),
+    net: netCents(items, adj, refunded, input.taxDbp),
     overpaid: Math.max(0, paid - refunded - total),
     status: deriveStatus({ canceled: input.canceled, paid, refunded, balance }),
   }
@@ -134,13 +140,13 @@ export const PAYMENT_PENDING_LABEL = 'Payment pending'
 export const statusLabel = (status: InvoiceStatus, refundPending: boolean): string =>
   refundPending ? REFUND_PENDING_LABEL : STATUS_LABELS[status]
 
-/** By-item refund value: the selected lines with the invoice tax rate, never more than what is refundable. */
-export function itemsRefundValue(
-  selectedPrices: readonly number[],
-  taxBp: number,
-  refundable: number,
-): number {
-  return Math.min(refundable, divHalfUp(sum(selectedPrices) * (10_000 + taxBp), 10_000))
+/**
+ * By-item refund value: the selected lines plus their tax at the invoice's rate and rounding, never more than what is refundable.
+ * (Half-up: the same as the selected lines times (1 + rate) rounded half-up, the rule before ADR 0173.)
+ */
+export function itemsRefundValue(selectedPrices: readonly number[], rate: TaxRate, refundable: number): number {
+  const lines = sum(selectedPrices)
+  return Math.min(refundable, lines + salesTaxCents(lines, rate))
 }
 
 export interface AdjustInput {
@@ -160,10 +166,10 @@ export interface AdjustPreview {
   diff: number
 }
 
-export function adjustPreview(c: InvoiceCalc, taxBp: number, a: AdjustInput): AdjustPreview {
+export function adjustPreview(c: InvoiceCalc, rate: TaxRate, a: AdjustInput): AdjustPreview {
   const pre = a.unit === '%' ? percentOfCents(c.items, a.value) : a.value
   const signed = a.kind === 'discount' ? -pre : pre
   const newSub = c.sub + signed
-  const newTotal = newSub + taxCents(Math.max(newSub, 0), taxBp) + c.tip
+  const newTotal = newSub + salesTaxCents(Math.max(newSub, 0), rate) + c.tip
   return { pre, signed, newSub, newTotal, diff: c.paid - c.refunded - newTotal }
 }

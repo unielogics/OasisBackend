@@ -11,6 +11,7 @@ import { AppError } from '../../platform/errors.js'
 import type { NewId } from '../../platform/ids.js'
 import * as realtime from '../../platform/realtime.js'
 import { getSetting } from '../../platform/settings.js'
+import { legacyTaxBp, type TaxRounding } from '../../platform/money.js'
 import { toBizDate } from '../../platform/time.js'
 import { calcInvoice, type CalcEvent, type InvoiceCalc } from './calc.js'
 import { invoiceLabel } from './format.js'
@@ -39,8 +40,12 @@ export interface InvoiceSummary {
   refundPending: boolean
   /** Card money staff recorded that its processor has not confirmed yet (it counts toward the balance at once). */
   awaitingCents: number
-  /** The rate snapshotted on the invoice, in basis points (700 = 7%). */
+  /** Deprecated (ADR 0173): the invoice's rate rounded to whole basis points (700 = 7%; 6.625% reads 663). Use taxDbp. */
   taxBp: number
+  /** The rate snapshotted on the invoice in thousandths of a percent (7000 = 7%, 6625 = 6.625%; ADR 0173). */
+  taxDbp: number
+  /** How the invoice's tax is rounded (the location's tax.rounding when it was made): half_up (default) or half_even (Square's rule). */
+  taxRounding: TaxRounding
   items: SummaryItem[]
   payMethodLabel: string | null
   /** The size the visit is priced at ("Large SUV"; ADR 0170); null when unknown or priced before sizes. */
@@ -151,7 +156,8 @@ export async function nextInvoiceNo(tx: Tx, locationId: string): Promise<number>
 interface SummaryRow extends InvoiceCalcRow {
   appointment_id: string | null
   invoice_no: number
-  tax_bp: number
+  tax_dbp: number
+  tax_rounding: TaxRounding
   vehicle_class_label: string | null
   customer_id: string
   canceled_at: Date | null
@@ -209,7 +215,7 @@ export async function summariesByAppointment(
   const out = new Map<string, InvoiceSummary>()
   if (appointmentIds.length === 0) return out
   const r = await sql<SummaryRow>`
-    select c.*, i.appointment_id, i.invoice_no, i.tax_bp, i.vehicle_class_label, i.customer_id, i.canceled_at
+    select c.*, i.appointment_id, i.invoice_no, i.tax_dbp, i.tax_rounding, i.vehicle_class_label, i.customer_id, i.canceled_at
     from invoices i cross join lateral invoice_calc_of(i.id) c
     where i.appointment_id = any(${appointmentIds}::uuid[])`.execute(db)
   if (r.rows.length === 0) return out
@@ -256,7 +262,9 @@ export async function summariesByAppointment(
       status: calc.status,
       refundPending: calc.pendingN > 0,
       awaitingCents: Number(awaiting.rows.find((a) => a.invoice_id === row.invoice_id)?.cents ?? 0),
-      taxBp: row.tax_bp,
+      taxBp: legacyTaxBp(row.tax_dbp),
+      taxDbp: row.tax_dbp,
+      taxRounding: row.tax_rounding,
       items: items
         .filter((i) => i.invoice_id === row.invoice_id)
         .map((i) => ({
@@ -376,7 +384,8 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
         await touchInvoice(tx, existing.id, d.clock.now())
         return summaryOf(tx, a.appointmentId)
       }
-      const taxBp = (await getSetting(tx, a.locationId, 'tax.rate_bp')).value
+      const taxDbp = (await getSetting(tx, a.locationId, 'tax.rate_dbp')).value
+      const taxRounding = (await getSetting(tx, a.locationId, 'tax.rounding')).value
       const invoiceNo = await nextInvoiceNo(tx, a.locationId)
       const id = d.newId()
       await tx
@@ -392,7 +401,9 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
           staff_label: a.staffLabel,
           occurred_at: a.occurredAt,
           biz_date: toBizDate(a.occurredAt, tz),
-          tax_bp: taxBp,
+          tax_dbp: taxDbp,
+          // ADR 0173: the location's rounding (half_up by default; half_even, Square's rule, once the rollout sets it)
+          tax_rounding: taxRounding,
           vehicle_class_label: a.vehicleClassLabel ?? null,
         })
         .execute()
@@ -472,7 +483,8 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
         const next: InvoiceCalc = calcInvoice({
           itemPrices: items.map((i) => i.priceCents),
           events,
-          taxBp: inv.tax_bp,
+          taxDbp: inv.tax_dbp,
+          taxRounding: inv.tax_rounding,
           tipCents: inv.tip_cents,
           canceled: false,
         })

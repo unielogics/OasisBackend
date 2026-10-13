@@ -1,6 +1,7 @@
 // Read models of one invoice: the ledger events as the UI needs them and the full invoice detail (items, adjustment lines,
 // calc, client credit, per-event approval rights for the caller). Shared by GET /invoices/:id and every command response.
 import type { Executor } from '../../platform/db.js'
+import { legacyTaxBp, type TaxRounding } from '../../platform/money.js'
 import { atLabel, clockLabel, toBizDate } from '../../platform/time.js'
 import { sameUser, type PayActor } from './actor.js'
 import { statusLabel, type InvoiceCalc } from './calc.js'
@@ -154,7 +155,12 @@ export interface InvoiceDetail {
   refundPending: boolean
   canceled: boolean
   cancelReason: InvoiceRow['cancel_reason']
+  /** Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp. */
   taxBp: number
+  /** The invoice's rate in thousandths of a percent (7000 = 7%, 6625 = 6.625%). */
+  taxDbp: number
+  /** The location's tax.rounding when the invoice was made: half_up (the default) or half_even (Square's rule; ADR 0173). */
+  taxRounding: TaxRounding
   tipCents: number
   paymentLinkUrl: string | null
   /** Count of awaiting_processor events on this invoice (card money recorded but not yet confirmed by its processor). */
@@ -376,7 +382,9 @@ export async function buildDetail(db: Executor, c: DetailContext, inv: InvoiceRo
     refundPending,
     canceled: inv.canceled_at !== null,
     cancelReason: inv.cancel_reason,
-    taxBp: inv.tax_bp,
+    taxBp: legacyTaxBp(inv.tax_dbp),
+    taxDbp: inv.tax_dbp,
+    taxRounding: inv.tax_rounding,
     tipCents: inv.tip_cents,
     paymentLinkUrl: inv.payment_link_url,
     awaitingProcessorCount: events.filter((e) => e.processor_state === 'awaiting_processor').length,

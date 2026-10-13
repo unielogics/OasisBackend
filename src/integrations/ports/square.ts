@@ -5,6 +5,7 @@
 import type { SquareKey } from '../square/keys.js'
 import type {
   WireCard,
+  WireCalculatedOrder,
   WireCatalogObject,
   WireCustomer,
   WireEvent,
@@ -103,6 +104,25 @@ export interface EventSearchQuery {
   end_at?: string
 }
 
+/** SearchCatalogObjects (read-only). `begin_time`: only objects changed after it (deleted ones too with include_deleted_objects). */
+export interface CatalogSearchQuery {
+  object_types: string[]
+  cursor?: string
+  include_deleted_objects?: boolean
+  include_related_objects?: boolean
+  begin_time?: string
+  limit?: number
+  query?: Extra
+}
+
+/** BatchRetrieveCatalogObjects options (read-only; the port pages the ids by 1,000). */
+export interface CatalogBatchRetrieveOptions {
+  include_related_objects?: boolean
+  include_deleted_objects?: boolean
+}
+
+export type CatalogIdMapping = { client_object_id?: string | null; object_id?: string | null }
+
 export interface WebhookSubscriptionInput extends Extra {
   name?: string
   event_types: string[]
@@ -138,6 +158,11 @@ export interface SquareApi {
   orders: {
     retrieve(id: string): Promise<WireOrder>
     batchRetrieve(locationId: string, ids: string[]): Promise<WireOrder[]>
+    /**
+     * CalculateOrder (read-only: nothing is created; allowed observe-only): Square prices an order as the POS would, catalog lines,
+     * auto-applied catalog taxes and discounts included (ADR 0172 tax check, ADR 0173 SQR-18).
+     */
+    calculate(order: Extra & { location_id: string }): Promise<WireCalculatedOrder>
   }
   customers: {
     search(q: { reference_id?: string; email_address?: string; phone_number?: string; cursor?: string; limit?: number }): Promise<Paged<WireCustomer>>
@@ -154,10 +179,16 @@ export interface SquareApi {
     disable(id: string): Promise<WireCard | null>
   }
   catalog: {
-    upsert(key: SquareKey, object: Extra): Promise<{ object: WireCatalogObject; idMappings: { client_object_id?: string | null; object_id?: string | null }[] }>
-    batchUpsert(key: SquareKey, objects: Extra[]): Promise<{ objects: WireCatalogObject[]; idMappings: { client_object_id?: string | null; object_id?: string | null }[] }>
+    upsert(key: SquareKey, object: Extra): Promise<{ object: WireCatalogObject; idMappings: CatalogIdMapping[] }>
+    /**
+     * BatchUpsertCatalogObjects with one or more batches. Each batch is all or nothing, but a request with a failing batch answers 400
+     * while the OTHER batches are kept (sandbox 2026-10-13, SQR-17): never retry such a request as smaller requests without looking.
+     */
+    batchUpsert(key: SquareKey, batches: Extra[][]): Promise<{ objects: WireCatalogObject[]; idMappings: CatalogIdMapping[] }>
     retrieve(id: string): Promise<WireCatalogObject>
-    search(q: { object_types: string[]; cursor?: string; include_deleted_objects?: boolean }): Promise<Paged<WireCatalogObject>>
+    /** BatchRetrieveCatalogObjects (read-only): objects that do not exist are left out; deleted ones only with include_deleted_objects. */
+    batchRetrieve(ids: string[], o?: CatalogBatchRetrieveOptions): Promise<{ objects: WireCatalogObject[]; related: WireCatalogObject[] }>
+    search(q: CatalogSearchQuery): Promise<Paged<WireCatalogObject> & { related?: WireCatalogObject[] }>
     delete(id: string): Promise<string[]>
   }
   subscriptions: {

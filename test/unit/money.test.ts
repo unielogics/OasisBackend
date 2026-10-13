@@ -8,9 +8,12 @@ import {
   formatUsdOps,
   parseMoneyToCents,
   percentOfCents,
+  salesTaxCents,
   sumCents,
-  taxCents,
 } from '../../src/platform/money.js'
+
+/** The design's rule (invoices made before ADR 0173): half-up, the rate in basis points. Its golden vectors never change. */
+const taxCents = (sub: number, bp: number): number => salesTaxCents(sub, { dbp: bp * 10, rounding: 'half_up' })
 
 const TAX_BP = 700
 const invoice = (items: number, adj = 0, tip = 0) => {

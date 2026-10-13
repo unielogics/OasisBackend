@@ -95,7 +95,8 @@ interface MkOpts {
 
 const dollars = (n: number): number => Math.round(n * 100)
 
-const CALC_TAX_BP = 700
+/** The design's invoices: 7% rounded half-up (their numbers are the design's; ADR 0173 keeps them). */
+const CALC_TAX_DBP = 7000
 
 function build(): DesignInvoice[] {
   const out: DesignInvoice[] = []
@@ -113,7 +114,8 @@ function build(): DesignInvoice[] {
     const total = calcInvoice({
       itemPrices: items.map((i) => i.priceCents),
       events: calcEvents,
-      taxBp: CALC_TAX_BP,
+      taxDbp: CALC_TAX_DBP,
+      taxRounding: 'half_up',
       tipCents: dollars(o.tip ?? 0),
       canceled: !!o.canceled,
     }).total
@@ -573,7 +575,7 @@ export async function seedDesignInvoices(
   const tz = location.timezone
   const now = ctx.clock.now()
   const today = toBizDate(now, tz)
-  const taxBp = (await getSetting(tx, location.id, 'tax.rate_bp')).value
+  const taxDbp = (await getSetting(tx, location.id, 'tax.rate_dbp')).value
   const seeded: SeededInvoice[] = []
 
   const services = new Map(
@@ -661,7 +663,8 @@ export async function seedDesignInvoices(
         occurred_at: occurredAt,
         biz_date: bizDate,
         date_frozen_at: occurredAt,
-        tax_bp: taxBp,
+        tax_dbp: taxDbp,
+        tax_rounding: 'half_up',
         tip_cents: inv.tipCents,
         canceled_at: inv.canceled ? occurredAt : null,
         canceled_by: null,

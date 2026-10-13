@@ -31,7 +31,9 @@ import {
   type VehicleClass,
 } from '../../catalog/vehicle-classes.js'
 import { putWebsiteFields, syncBookingPrices } from '../../catalog/website.js'
+import { priceRowsSquare } from '../../catalog/square/view.js'
 import { loadPlans } from '../../memberships/plans.js'
+import { squareEnv } from '../../square/runtime.js'
 import { etag, expectedVersion, idem, inTx, requestContext, requiredVersion, storedUserId, type SettingsRuntime } from './runtime.js'
 
 const TAGS = ['catalog']
@@ -98,6 +100,18 @@ export const PriceRowView = z.object({
   cells: z.array(PriceCell).describe('The sizes that have a price, in size order (a size not listed is not set)'),
   fromCents: Cents.describe('The starting price: the lowest over the active sizes, else the base price'),
   missing: z.number().int().describe('Active sizes without a price (priced at the starting price, confirm at the shop)'),
+  square: z
+    .object({
+      state: z
+        .enum(['synced', 'pending', 'failed', 'archived', 'not_sold'])
+        .describe('The service’s Square item (ADR 0172): synced, pending (waiting for the next sync), failed (see error), archived, not_sold (never made)'),
+      cells: z
+        .record(z.string(), z.enum(['synced', 'pending', 'failed', 'hidden']))
+        .describe('Each size Oasis sells it at (key "" = the single price of a service without sizes): where its Square price stands'),
+      error: z.string().nullable(),
+    })
+    .optional()
+    .describe('Staff with set.services only, and only while the Square item sync is on (SQUARE_WRITES_ENABLED and SQUARE_ITEMS_SYNC_ENABLED)'),
 })
 
 const InclusionView = z.object({
@@ -340,7 +354,13 @@ export async function loadCatalogSettings(
     listTiers(db, locationId),
     pricingOf(db, locationId),
   ])
-  const prices = [...catalog.packages, ...catalog.addons].map((s) => priceRowView(s, p.book))
+  // the Square item library's state of each row (ADR 0172): staff with set.services, while the sync is on
+  const square = admin ? await priceRowsSquare(db, locationId, squareEnv()) : null
+  const prices = [...catalog.packages, ...catalog.addons].map((s) => {
+    const row = priceRowView(s, p.book)
+    const sq = square?.get(s.id)
+    return sq ? { ...row, square: { state: sq.state, cells: sq.cells, error: sq.error } } : row
+  })
   return {
     categories: categories.map(categoryView),
     packages: catalog.packages.map((s) => websiteServiceView(s, p)),

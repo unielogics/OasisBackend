@@ -20,7 +20,7 @@ async function invoice(customerId: string, cents = 5000): Promise<string> {
   await w.t.db
     .insertInto('invoices')
     .values({ id, location_id: w.locationId, invoice_no: ++invoiceNo, appointment_id: null, customer_id: customerId, client_name: 'Maria Delgado',
-      occurred_at: w.clock.now(), biz_date: '2026-06-13', tax_bp: 0, tip_cents: 0 })
+      occurred_at: w.clock.now(), biz_date: '2026-06-13', tax_dbp: 0, tip_cents: 0 })
     .execute()
   await w.t.db.insertInto('invoice_items').values({ id: w.newId(), invoice_id: id, position: 0, kind: 'package', service_id: null, name: 'Express Hand Wash', price_cents: cents }).execute()
   return id

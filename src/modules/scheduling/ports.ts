@@ -4,7 +4,7 @@
 import { appError } from '../../platform/errors.js'
 import type { AuditActor, AuditContext } from '../../platform/audit.js'
 import type { Executor, Tx } from '../../platform/db.js'
-import { taxCents } from '../../platform/money.js'
+import { salesTaxCents, type TaxRate, type TaxRounding } from '../../platform/money.js'
 import type { StorageProvider } from '../../integrations/ports/storage.js'
 import { renderTemplate, type TemplateVars } from '../messaging/templates/render.js'
 import { QUICK_REPLIES } from '../messaging/templates/registry.js'
@@ -77,8 +77,12 @@ export interface InvoiceSummary {
   refundPending: boolean
   /** Card money recorded by staff and not yet confirmed in Squarespace (counted in `paidCents`); absent = none. */
   awaitingCents?: number
-  /** The invoice's own tax rate in basis points; absent = the location default. */
+  /** Deprecated (ADR 0173): the invoice's rate rounded to whole basis points; absent = the location default. Use taxDbp. */
   taxBp?: number
+  /** The invoice's own tax rate in thousandths of a percent (7000 = 7%, 6625 = 6.625%); absent = the location default. */
+  taxDbp?: number
+  /** How the invoice's tax is rounded (ADR 0173: the location's tax.rounding when it was made, half_up by default); absent = half_up. */
+  taxRounding?: TaxRounding
   items: InvoiceItem[]
   payMethodLabel: string | null
   /** The size the invoice is priced at ("Large SUV"); absent/null when unknown or priced before sizes. */
@@ -186,7 +190,8 @@ export interface WaitlistPort {
   slotFreed(tx: Tx, c: SchedulingCtx, appointment: AppointmentRecord): Promise<void>
 }
 
-export const TAX_RATE_BP = 700
+/** The default rate of the in-memory gateway, in thousandths of a percent (7%). */
+export const TAX_RATE_DBP = 7000
 export const FIRST_INVOICE_NO = 20611
 
 interface MemInvoice {
@@ -209,15 +214,15 @@ interface MemInvoice {
 
 const sum = (xs: readonly number[]): number => xs.reduce((a, b) => a + b, 0)
 
-/** In-memory InvoiceGateway for tests and local wiring: 7% tax half-up, gap-free numbering from 20611. */
+/** In-memory InvoiceGateway for tests and local wiring: 7% tax rounded half-up (the setting defaults), numbering from 20611. */
 export class InMemoryInvoiceGateway implements InvoiceGateway {
   private readonly byAppointment = new Map<string, MemInvoice>()
   private readonly counters = new Map<string, number>()
   readonly calls: { method: string; appointmentId: string }[] = []
-  readonly taxBp: number
+  readonly rate: TaxRate
 
-  constructor(o: { taxBp?: number } = {}) {
-    this.taxBp = o.taxBp ?? TAX_RATE_BP
+  constructor(o: { taxDbp?: number; taxRounding?: TaxRounding } = {}) {
+    this.rate = { dbp: o.taxDbp ?? TAX_RATE_DBP, rounding: o.taxRounding ?? 'half_up' }
   }
 
   private nextNo(locationId: string): number {
@@ -228,7 +233,7 @@ export class InMemoryInvoiceGateway implements InvoiceGateway {
 
   private summarize(inv: MemInvoice): InvoiceSummary {
     const subtotal = sum(inv.items.map((i) => i.priceCents))
-    const tax = taxCents(subtotal, this.taxBp)
+    const tax = salesTaxCents(subtotal, this.rate)
     const total = subtotal + tax + inv.tipCents
     const held = inv.paidCents - inv.refundedCents
     let status: InvoiceStatus

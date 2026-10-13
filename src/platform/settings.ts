@@ -6,6 +6,7 @@ import { AppError } from './errors.js'
 import * as audit from './audit.js'
 import * as realtime from './realtime.js'
 import type { JsonValue } from './schema.js'
+import { TAX_ROUNDINGS, type TaxRounding } from './money.js'
 
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:MM (24 hour)')
 const e164 = z.string().regex(/^\+[1-9]\d{6,14}$/, 'Use an E.164 number such as +12015550142')
@@ -69,7 +70,14 @@ const tintMatrix = z
   })
 
 export const settingDefs = {
-  'tax.rate_bp': { schema: z.number().int().min(0).max(10_000), default: 700 },
+  // Sales tax rate of new invoices in thousandths of a percent (ADR 0173): 7000 = 7%, 6625 = 6.625% (New Jersey). Each invoice keeps
+  // the rate (invoices.tax_dbp) and rounding it was made with. Edited in Settings -> Billing & integrations (PUT
+  // /settings/billing/sales-tax, a percentage with up to three decimals).
+  'tax.rate_dbp': { schema: z.number().int().min(0).max(100_000), default: 7000 },
+  // How new invoices round their tax (ADR 0173), written on each invoice as invoices.tax_rounding. half_up (the design's rule) by
+  // default, so every 7% invoice is made exactly as before; half_even (Square's rule, sandbox check SQR-18) is set at the rollout
+  // together with 6.625%, with PUT /settings/billing/sales-tax {rounding}.
+  'tax.rounding': { schema: z.enum(TAX_ROUNDINGS), default: 'half_up' as TaxRounding },
   'tax.label': { schema: z.string().trim().min(1).max(40), default: 'Tax' },
   currency: { schema: z.enum(['USD']), default: 'USD' as const },
   'federal_holidays.auto': { schema: z.boolean(), default: true },

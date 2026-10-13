@@ -54,7 +54,9 @@ export const InvoiceSummary = z.object({
   ]),
   refundPending: z.boolean(),
   awaitingCents: z.number().int().optional(),
-  taxBp: z.number().int().optional(),
+  taxBp: z.number().int().optional().describe('Deprecated (ADR 0173): the rate rounded to whole basis points. Use taxDbp.'),
+  taxDbp: z.number().int().optional().describe("The invoice's tax rate in thousandths of a percent: 7000 = 7%, 6625 = 6.625% (ADR 0173)"),
+  taxRounding: z.enum(['half_up', 'half_even']).optional().describe("How the invoice's tax is rounded (ADR 0173)"),
   items: z.array(
     z.object({
       name: z.string(),

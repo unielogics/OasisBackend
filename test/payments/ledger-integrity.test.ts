@@ -77,7 +77,7 @@ describe('ledger integrity check', () => {
   })
 
   it('compares every calc field and names the ones that differ', () => {
-    const base = calcInvoice({ itemPrices: [10_000], events: [], taxBp: 700, tipCents: 0, canceled: false })
+    const base = calcInvoice({ itemPrices: [10_000], events: [], taxDbp: 7000, taxRounding: 'half_up', tipCents: 0, canceled: false })
     expect(calcDifferences(base, base)).toEqual([])
     expect(calcDifferences({ ...base, tax: 699, status: 'paid' }, base)).toEqual([
       'tax 699 != 700',

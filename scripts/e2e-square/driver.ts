@@ -17,7 +17,12 @@
 //            reader" entry (R3), nothing to go on (the "to match" queue)
 //   s6       a tier price edit: a new Square plan variation, the existing member left on theirs
 //   s7       a card saved on #/k, a balance charged from the staff route, a declined nonce
-//   cleanup  subscriptions canceled, cards disabled, links and the run's Square customers deleted (plans stay, named q4-...)
+//   s8       (ADR 0172, the item library; needs SQUARE_ITEMS_SYNC_ENABLED=true in the stack) the sales tax set to 6.625% with
+//            Square's rounding and Oasis's own Square tax; the item sync makes the items; an Oasis price edit appears at Square in
+//            place (same variation); a guest basket (a package at a size and an add-on) priced by Square's CalculateOrder from the
+//            catalog lines with the tax auto-applied equals the Oasis invoice to the cent
+//   cleanup  subscriptions canceled, cards disabled, links and the run's Square customers deleted (plans stay, named q4-...); the
+//            item library objects the run made deleted (items, Oasis's categories and tax; the code itself never deletes)
 // The personal links are issued in this process with the backend's own issueClientLink (the texted link is stored masked), with a
 // PIN set for the client under the run's pepper (<dir>/pepper.txt), and opened through the real link API. Jobs run in the stack's
 // worker: this script queues them (pg-boss) instead of waiting for their cron. The sandbox token is read here from Secrets Manager
@@ -974,8 +979,115 @@ async function s7(): Promise<void> {
   st.s7 = { card: card?.id, invoice: v.invoiceId }
 }
 
+/** The Square item of a service, as the item sync linked it (sandbox), read back from Square. */
+async function squareItemOf(serviceName: string): Promise<any> {
+  const svc = await serviceRow(serviceName)
+  const link = await ctx.db
+    .selectFrom('square_catalog_links')
+    .select(['square_object_id', 'state'])
+    .where('kind', '=', 'item')
+    .where('service_id', '=', svc.id)
+    .where('environment', '=', 'sandbox')
+    .executeTakeFirst()
+  if (!link?.square_object_id) return null
+  return (await sq('GET', `/catalog/object/${link.square_object_id}`)).body?.object ?? null
+}
+
+const variationNamed = (item: any, name: string): any => (item?.item_data?.variations ?? []).find((v: any) => v.item_variation_data?.name === name)
+
+async function s8(): Promise<void> {
+  // Oasis at New Jersey's 6.625%, rounded like Square (ADR 0173 rollout), and Oasis's own Square tax (the sandbox's may differ)
+  const billing = must(await staff.get('/settings/billing'), 200, 'billing')
+  must(await staff.put('/settings/billing/sales-tax', { percent: '6.625', rounding: 'half_even', version: billing.salesTax.version }, { key: false }), 200, 'sales tax')
+  const items0 = must(await staff.get('/integrations/square/items'), 200, 'items view')
+  must(await staff.put('/integrations/square/items/tax', { mode: 'create', version: items0.version }, { key: false }), 200, 'items tax')
+  const rows = []
+  for (const [name, cells] of Object.entries(PRICES)) {
+    const s = await serviceRow(name)
+    rows.push({ serviceId: s.id, version: s.version, cells: Object.entries(cells).map(([cls, cents]) => ({ class: cls, cents })) })
+  }
+  must(await staff.put('/catalog/prices', { rows }), 200, 'PUT /catalog/prices')
+  const t = must(await staff.post('/integrations/square/test', {}, { key: false }), 200, 'test connection')
+  say(`test connection: ${t.checks.map((c: any) => `${c.key}:${c.ok ? 'ok' : 'no'}`).join(',')}; tax: ${t.checks.find((c: any) => c.key === 'tax')?.detail ?? '-'}`)
+  await runJob(ctx, 'square.items.sync')
+  const view = must(await staff.get('/integrations/square/items'), 200, 'items view')
+  say(`items: mode ${view.mode}, tax ${view.taxCheck?.status} (${view.taxCheck?.detail}), on Square ${view.counts.onSquare}, waiting ${view.counts.waiting}, failed ${view.counts.failed}${view.failures.length ? `: ${view.failures.map((f: any) => `${f.service}: ${f.error}`).join('; ')}` : ''}`)
+  const before = await squareItemOf('Express Hand Wash')
+  const v0 = variationNamed(before, 'Large SUV')
+  verdict(
+    'S8a',
+    !!v0 && v0.item_variation_data?.price_money?.amount === PRICES['Express Hand Wash']!.large_suv && view.counts.failed === 0,
+    `the item sync made Express Hand Wash at Square (${(before?.item_data?.variations ?? []).map((v: any) => `${v.item_variation_data?.name} ${v.item_variation_data?.price_money ? $(v.item_variation_data.price_money.amount) : 'variable'}`).join(', ')}), ${view.counts.onSquare} service(s) on Square`,
+  )
+  // an Oasis price edit: the same Square variation, the new price
+  const express = await serviceRow('Express Hand Wash')
+  must(await staff.put('/catalog/prices', { rows: [{ serviceId: express.id, version: express.version, cells: [{ class: 'large_suv', cents: 6500 }] }] }), 200, 'price edit')
+  await runJob(ctx, 'square.items.sync')
+  const after = await squareItemOf('Express Hand Wash')
+  const v1 = variationNamed(after, 'Large SUV')
+  verdict(
+    'S8b',
+    !!v0 && v1?.id === v0.id && v1?.item_variation_data?.price_money?.amount === 6500 && Number(v1?.version) > Number(v0?.version),
+    `an Oasis price edit ($60 to $65, Large SUV) appeared at Square in place: variation ${red(v1?.id)} (was ${red(v0?.id)}), version ${v0?.version} to ${v1?.version}`,
+  )
+  // a guest basket: Express Hand Wash at Large SUV and an add-on, against Square's own pricing of the same catalog lines
+  const guest = await customer('Gina Guest Items', '+12015550176')
+  const addon = await ctx.db.selectFrom('services').select(['id', 'name', 'price_cents']).where('kind', '=', 'addon').where('active', '=', true).where('price_cents', '>', 0).orderBy('sort').limit(1).executeTakeFirstOrThrow()
+  const visit = must(
+    await staff.post('/appointments', {
+      customer: { id: guest },
+      vehicle: { make: 'Test', model: 'large_suv', plate: 'ITEMS1' },
+      vehicleClass: 'large_suv',
+      serviceId: express.id,
+      addonIds: [addon.id],
+      walkIn: true,
+      source: 'walk_in',
+      override: { reason: 'Sandbox end-to-end run after hours' },
+    }),
+    201,
+    'book the guest basket',
+  )
+  const inv = await invoiceOf(visit.appointment.id)
+  const calc = await calcOf(inv.id)
+  const addonItem = await squareItemOf(addon.name)
+  const regular = variationNamed(addonItem, 'Regular')
+  const order = await sq('POST', '/orders/calculate', {
+    order: {
+      location_id: ctx.env.SQUARE_LOCATION_ID,
+      pricing_options: { auto_apply_taxes: true },
+      line_items: [
+        { quantity: '1', catalog_object_id: v1?.id },
+        { quantity: '1', catalog_object_id: regular?.id },
+      ],
+    },
+  })
+  const squareTotal = order.body?.order?.total_money?.amount
+  const squareTax = order.body?.order?.total_tax_money?.amount
+  verdict(
+    'S8c',
+    order.status === 200 && Number(calc.total) === squareTotal && Number(calc.tax) === squareTax && inv.tax_dbp === 6625 && inv.tax_rounding === 'half_even',
+    `a guest basket (Express Hand Wash at Large SUV ${$(6500)} + ${addon.name} ${$(addon.price_cents)}): Oasis invoice ${$(Number(calc.total))} (tax ${$(Number(calc.tax))} at ${inv.tax_dbp / 1000}% ${inv.tax_rounding}), Square CalculateOrder of the catalog lines ${order.status === 200 ? `${$(squareTotal)} (tax ${$(squareTax)})` : sqErr(order)}`,
+  )
+  saveState(ctx.dir, st)
+}
+
 async function cleanup(): Promise<void> {
   const out: string[] = []
+  // the item library objects the item sync made in the sandbox (ADR 0172): items first (their variations go with them), then
+  // Oasis's own categories and tax; adopted ones are the sandbox's own and stay
+  const made = await ctx.db
+    .selectFrom('square_catalog_links')
+    .select(['kind', 'square_object_id'])
+    .where('environment', '=', 'sandbox')
+    .where('adopted', '=', false)
+    .where('square_object_id', 'is not', null)
+    .execute()
+  for (const kind of ['item', 'category', 'tax'] as const) {
+    const ids = made.filter((l) => l.kind === kind).map((l) => l.square_object_id!)
+    let deleted = 0
+    for (const id of ids) if ((await sq('DELETE', `/catalog/object/${id}`)).status === 200) deleted++
+    if (ids.length) out.push(`item library ${{ item: 'items', category: 'categories', tax: 'taxes' }[kind]}: ${deleted} of ${ids.length} deleted`)
+  }
   // memberships billed by Square: canceled through the staff action (Square cancels at the period end)
   const mems = await ctx.db
     .selectFrom('memberships')
@@ -1035,7 +1147,7 @@ async function cleanup(): Promise<void> {
 
 async function main(): Promise<void> {
   await staff.login()
-  const steps: Record<string, () => Promise<void>> = { setup, s1, s2, s3, s4, s5, s6, s7, cleanup }
+  const steps: Record<string, () => Promise<void>> = { setup, s1, s2, s3, s4, s5, s6, s7, s8, cleanup }
   const fn = steps[step]
   if (!fn) throw new Error(`unknown step ${step}`)
   try {

@@ -4,7 +4,7 @@ import { IntegrationStatus } from '../../system/integrations.js'
 const iso = z.iso.datetime({ offset: true })
 
 export const SquareCheck = z.object({
-  key: z.enum(['token', 'location', 'events', 'webhook']),
+  key: z.enum(['token', 'location', 'events', 'webhook', 'tax']).describe('tax: the Square item library’s tax check (ADR 0172); it fails Test connection only while the item sync is on'),
   ok: z.boolean(),
   detail: z.string(),
 })

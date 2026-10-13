@@ -6,6 +6,9 @@
 //   PUT  /settings/billing/link-tipping                 set.billing   payments.link_tipping
 //   PUT  /settings/billing/renewal-policy               set.billing   memberships.billing_policy
 //   PUT  /settings/billing/price-change-notice          set.billing   memberships.price_change_notice_days
+//   PUT  /settings/billing/sales-tax                    set.billing   tax.rate_dbp (ADR 0173: a percentage with up to 3 decimals)
+//                                                                     and, when sent, tax.rounding (half_up default, half_even = Square's)
+// The panel also carries the Square item library in short (squareItems, ADR 0172; the block: GET /integrations/square/items).
 // Reused: GET /integrations/square + POST /integrations/square/test (status, Test connection), PUT /catalog/guest-fee (booking fee
 // amount and collect mode, set.services), PUT /settings/card-fees (fees.card_on_file), POST /integrations/square/catalog/sync
 // ("Sync to Square"). Each block carries its own version (body `version` or If-Match on its PUT: 428 without, 412 stale); a save is
@@ -14,8 +17,11 @@ import type { FastifyRequest } from 'fastify'
 import { access } from '../../../http/access.js'
 import type { AppInstance } from '../../../http/types.js'
 import { z } from '../../../http/zod.js'
+import { AppError } from '../../../platform/errors.js'
+import { parseTaxPercent, TAX_ROUNDINGS, taxPercentLabel, type TaxRounding } from '../../../platform/money.js'
 import { getSetting, updateSetting, type SettingKey } from '../../../platform/settings.js'
 import { etag, inTx, requestContext, requiredVersion, storedUserId } from '../../settings/http/runtime.js'
+import { loadItemsView } from '../../catalog/square/view.js'
 import { cardsOn } from '../charges.js'
 import { CARD_PURPOSES, CONSENT_CHECKED_BY_DEFAULT, CURRENT_CONSENT_VERSION, consentText } from '../consents.js'
 import { squareEnv } from '../runtime.js'
@@ -32,6 +38,7 @@ const Processing = z
     squareEnvironment: z.enum(['sandbox', 'production']).describe('SQUARE_ENVIRONMENT'),
     writesEnabled: z.boolean().describe('SQUARE_WRITES_ENABLED: off = observe-only (mirror and match, nothing created at Square)'),
     membershipsEnabled: z.boolean().describe('SQUARE_MEMBERSHIPS_ENABLED: tier prices synced to Square and the join page takes a card'),
+    itemsSyncEnabled: z.boolean().describe('SQUARE_ITEMS_SYNC_ENABLED: services and prices by size kept in step with Square’s item library (ADR 0172)'),
     posAppSwitch: z.boolean().describe('SQUARE_POS_API_ENABLED: "Open Square POS" from the dashboard'),
     posAutomatch: z.enum(['evidence', 'amount']).describe('SQUARE_POS_AUTOMATCH: counter payments recorded on strong evidence only, or also on an amount alone'),
     publicLinksEnabled: z.boolean().describe('PUBLIC_LINKS_ENABLED: the personal pay, card and membership pages'),
@@ -50,6 +57,24 @@ const PriceNotice = z.object({
   version: z.number().int(),
 })
 
+const SalesTax = z.object({
+  percent: z.string().describe('The rate new invoices are made with, as a percentage with up to three decimals: "7", "6.625"'),
+  rateDbp: z.number().int().describe('The same rate in thousandths of a percent (tax.rate_dbp): 7000 = 7%, 6625 = 6.625%'),
+  label: z.string().describe('How the tax line reads it: "7%", "6.625%"'),
+  rounding: z
+    .enum(TAX_ROUNDINGS)
+    .describe(
+      "tax.rounding: how new invoices round their tax, once on the subtotal: half_up (the default, the design's rule) or half_even (Square's rule, set at the rollout with 6.625%; ADR 0173). Each invoice keeps the rule it was made with",
+    ),
+  version: z.number().int().describe('The version of tax.rate_dbp: every save of this block writes the rate, so it covers the rounding too'),
+})
+
+/** The Sales tax block of Settings → Billing & integrations (ADR 0173). */
+export function salesTaxView(rate: { value: number; version: number }, rounding: TaxRounding): z.infer<typeof SalesTax> {
+  const label = taxPercentLabel(rate.value)
+  return { percent: label.slice(0, -1), rateDbp: rate.value, label, rounding, version: rate.version }
+}
+
 export const BillingSettingsView = z.object({
   square: SquareIntegrationView.describe('The same body as GET /integrations/square (Test connection: POST /integrations/square/test)'),
   processing: Processing,
@@ -66,6 +91,15 @@ export const BillingSettingsView = z.object({
     .describe('fees.card_on_file: PUT /settings/card-fees'),
   renewalPolicy: RenewalPolicy.describe('memberships.billing_policy: PUT /settings/billing/renewal-policy'),
   priceChangeNotice: PriceNotice.describe('memberships.price_change_notice_days: PUT /settings/billing/price-change-notice'),
+  salesTax: SalesTax.describe('tax.rate_dbp and tax.rounding: PUT /settings/billing/sales-tax (applies to invoices made from then on)'),
+  squareItems: z
+    .object({
+      mode: z.enum(['on', 'preview', 'off']),
+      tax: z.object({ status: z.enum(['ok', 'create', 'blocked', 'error']), detail: z.string() }).nullable().describe('The last tax check'),
+      counts: z.object({ onSquare: z.number().int(), waiting: z.number().int(), failed: z.number().int(), archived: z.number().int(), notSold: z.number().int() }),
+      lastSyncAt: z.iso.datetime({ offset: true }).nullable(),
+    })
+    .describe('The Square item library (ADR 0172) in short: GET /integrations/square/items has the whole block'),
   consent: z
     .object({
       version: z.string().describe('The card consent text version every new card is saved under'),
@@ -101,20 +135,23 @@ export function registerBillingSettingsRoutes(app: AppInstance): void {
         operationId: 'getBillingSettings',
         summary: 'Settings, Billing & integrations: everything the panel shows, in one read',
         description:
-          'The Square status row (as GET /integrations/square), the processor and its switches (read only, from the server environment), the booking fee (saved with PUT /catalog/guest-fee), link tipping, the no-show and late-cancel fees on a saved card (PUT /settings/card-fees), the renewal policy of memberships billed by Square, the "Move members" notice, and the card consent text in use. Each editable block carries its own `version`. Never contains a token or a key.',
+          'The Square status row (as GET /integrations/square), the processor and its switches (read only, from the server environment), the booking fee (saved with PUT /catalog/guest-fee), link tipping, the no-show and late-cancel fees on a saved card (PUT /settings/card-fees), the renewal policy of memberships billed by Square, the "Move members" notice, the sales tax rate of new invoices, and the card consent text in use. Each editable block carries its own `version`. Never contains a token or a key.',
         response: { 200: BillingSettingsView },
       },
     },
     async (req) => {
       const { locationId } = requestContext(req)
       const env = squareEnv()
-      const [square, fee, tipping, fees, policy, notice] = await Promise.all([
+      const [square, fee, tipping, fees, policy, notice, tax, rounding, items] = await Promise.all([
         squareIntegrationView(app, locationId),
         getSetting(app.db, locationId, 'booking.guest_fee'),
         getSetting(app.db, locationId, 'payments.link_tipping'),
         getSetting(app.db, locationId, 'fees.card_on_file'),
         getSetting(app.db, locationId, 'memberships.billing_policy'),
         getSetting(app.db, locationId, 'memberships.price_change_notice_days'),
+        getSetting(app.db, locationId, 'tax.rate_dbp'),
+        getSetting(app.db, locationId, 'tax.rounding'),
+        loadItemsView(app.db, locationId, env),
       ])
       return {
         square,
@@ -124,6 +161,7 @@ export function registerBillingSettingsRoutes(app: AppInstance): void {
           squareEnvironment: env.SQUARE_ENVIRONMENT,
           writesEnabled: env.SQUARE_WRITES_ENABLED,
           membershipsEnabled: env.SQUARE_MEMBERSHIPS_ENABLED,
+          itemsSyncEnabled: env.SQUARE_ITEMS_SYNC_ENABLED,
           posAppSwitch: env.SQUARE_POS_API_ENABLED,
           posAutomatch: env.SQUARE_POS_AUTOMATCH,
           publicLinksEnabled: app.env.PUBLIC_LINKS_ENABLED,
@@ -134,6 +172,13 @@ export function registerBillingSettingsRoutes(app: AppInstance): void {
         cardFees: { fees: fees.value, version: fees.version, active: fees.value.enabled && cardsOn(env) },
         renewalPolicy: { ...policy.value, version: policy.version },
         priceChangeNotice: { days: notice.value, version: notice.version },
+        salesTax: salesTaxView(tax, rounding.value),
+        squareItems: {
+          mode: items.mode,
+          tax: items.taxCheck ? { status: items.taxCheck.status, detail: items.taxCheck.detail } : null,
+          counts: items.counts,
+          lastSyncAt: items.lastSyncAt,
+        },
         consent: {
           version: CURRENT_CONSENT_VERSION,
           checkedByDefault: CONSENT_CHECKED_BY_DEFAULT,
@@ -209,6 +254,43 @@ export function registerBillingSettingsRoutes(app: AppInstance): void {
       const r = await save(req, 'memberships.price_change_notice_days', b.days, b.version)
       etag(reply, r.version)
       return { days: r.value, version: r.version }
+    },
+  )
+  app.put(
+    '/settings/billing/sales-tax',
+    {
+      config: { access: access.perm('set.billing') },
+      schema: {
+        tags: TAGS,
+        operationId: 'putBillingSalesTax',
+        summary: 'Save the sales tax rate (and, when sent, the rounding) of new invoices (ETag = version)',
+        description:
+          'tax.rate_dbp (ADR 0173; default 7%). `percent` is the rate as staff type it, with up to three decimals ("6.625" for New Jersey; a trailing % is accepted), 0 to 100; anything else is 422 `VALIDATION_FAILED` on `percent`. `rounding` (optional; tax.rounding, default `half_up`): `half_even` makes new invoices round their tax like Square (half to even, once on the subtotal), set at the rollout together with 6.625%; left out, the rounding stays as it is. Both apply to invoices made from now on: each invoice keeps the rate and the rounding it was made with. `version` (or If-Match, the version of tax.rate_dbp) required: 428 without, 412 when stale; the rate and the rounding are saved together or not at all. Audited `settings.update`; publishes `settings.changed {key: "tax.rate_dbp"}` (and `{key: "tax.rounding"}` when the rounding changes).',
+        body: z.object({ percent: z.string().max(12), rounding: z.enum(TAX_ROUNDINGS).optional(), version: Version.optional() }).strict(),
+        response: { 200: SalesTax },
+      },
+    },
+    async (req, reply) => {
+      const b = req.body as { percent: string; rounding?: TaxRounding; version?: number }
+      const dbp = parseTaxPercent(b.percent)
+      if (dbp === null)
+        throw new AppError('VALIDATION_FAILED', {
+          detail: 'Enter the tax rate as a percentage, such as 6.625',
+          errors: [{ path: 'percent', message: 'Use a percentage from 0 to 100 with up to three decimals, such as 6.625' }],
+        })
+      const c = requestContext(req)
+      const v = requiredVersion(req, b.version)
+      const out = await inTx(app.db, async (tx) => {
+        const updatedBy = await storedUserId(tx, c.userId)
+        // the rate is always written (its version guards the whole block); the rounding only when it is sent and differs
+        const rate = await updateSetting(tx, { locationId: c.locationId, key: 'tax.rate_dbp', value: dbp, expectedVersion: v, updatedBy, audit: c.audit })
+        let rounding = (await getSetting(tx, c.locationId, 'tax.rounding')).value
+        if (b.rounding !== undefined && b.rounding !== rounding)
+          rounding = (await updateSetting(tx, { locationId: c.locationId, key: 'tax.rounding', value: b.rounding, updatedBy, audit: c.audit })).value
+        return salesTaxView(rate, rounding)
+      })
+      etag(reply, out.version)
+      return out
     },
   )
 }

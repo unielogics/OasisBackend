@@ -21,7 +21,8 @@ interface DetailWithRaw extends Detail {
   id: string
   items: { id: string; name: string; priceCents: number }[]
   calc: Detail['calc'] & { pendingAmt: number; toOrigMax: number; refundable: number }
-  taxBp: number
+  taxDbp: number
+  taxRounding: 'half_up' | 'half_even'
 }
 
 async function open(selId: string): Promise<{ id: string; detail: DetailWithRaw }> {
@@ -103,7 +104,7 @@ describe('refund sheets and results', () => {
         sheet.mode === 'items'
           ? itemsRefundValue(
               (sheet.items as number[]).map((i) => detail.items[i]!.priceCents),
-              detail.taxBp,
+              { dbp: detail.taxDbp, rounding: detail.taxRounding },
               calc.refundable,
             )
           : sheet.mode === 'custom'

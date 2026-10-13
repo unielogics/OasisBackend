@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 import { ENV_KEYS, loadEnv } from '../../src/config/env.js'
 import { SECRET_KEYS } from '../../src/config/secrets-source.js'
-import { squareBaseUrl, squareLiveConfigured, squareLocationId, SIM_LOCATION_ID } from '../../src/integrations/square/config.js'
+import { squareBaseUrl, squareItemsOn, squareLiveConfigured, squareLocationId, SIM_LOCATION_ID } from '../../src/integrations/square/config.js'
 
 const base = { DATABASE_URL: 'postgres://oasis:x@127.0.0.1:5432/oasis' }
 const prod = {
@@ -32,6 +32,7 @@ describe('Square environment', () => {
       SQUARE_ENVIRONMENT: 'sandbox',
       SQUARE_WRITES_ENABLED: false,
       SQUARE_MEMBERSHIPS_ENABLED: false,
+      SQUARE_ITEMS_SYNC_ENABLED: false,
       SQUARE_POS_API_ENABLED: false,
       PAYMENT_PROCESSOR: 'squarespace',
       SQUARE_API_VERSION: '2026-09-16',
@@ -40,6 +41,11 @@ describe('Square environment', () => {
     })
     expect(e.SQUARE_ACCESS_TOKEN).toBeUndefined()
     expect(squareLiveConfigured(e)).toBe(false)
+    // the item library sync needs both switches (ADR 0172)
+    expect(squareItemsOn(e)).toBe(false)
+    expect(squareItemsOn(loadEnv({ ...base, SQUARE_ITEMS_SYNC_ENABLED: 'true' }))).toBe(false)
+    expect(squareItemsOn(loadEnv({ ...base, SQUARE_WRITES_ENABLED: 'true' }))).toBe(false)
+    expect(squareItemsOn(loadEnv({ ...base, SQUARE_WRITES_ENABLED: 'true', SQUARE_ITEMS_SYNC_ENABLED: 'true' }))).toBe(true)
     expect(squareLocationId(e)).toBe(SIM_LOCATION_ID)
     // empty template lines count as unset
     expect(loadEnv({ ...base, SQUARE_ACCESS_TOKEN: '', SQUARE_LOCATION_ID: '', SQUARE_API_BASE: '' }).SQUARE_LOCATION_ID).toBeUndefined()
@@ -100,6 +106,7 @@ describe('Square environment', () => {
       'SQUARE_MAX_ATTEMPTS',
       'SQUARE_WRITES_ENABLED',
       'SQUARE_MEMBERSHIPS_ENABLED',
+      'SQUARE_ITEMS_SYNC_ENABLED',
       'SQUARE_POS_API_ENABLED',
       'SQUARE_MATCH_DELAY_SECONDS',
       'SQUARE_POS_AUTOMATCH',

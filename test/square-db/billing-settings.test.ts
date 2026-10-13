@@ -40,6 +40,7 @@ describe('GET /settings/billing', () => {
       squareEnvironment: 'sandbox',
       writesEnabled: false,
       membershipsEnabled: false,
+      itemsSyncEnabled: false,
       posAppSwitch: false,
       posAutomatch: 'evidence',
       publicLinksEnabled: false,
@@ -51,6 +52,8 @@ describe('GET /settings/billing', () => {
     expect(p.cardFees).toEqual({ fees: { enabled: false, noShowCents: 0, lateCancelCents: 0 }, version: v, active: false })
     expect(p.renewalPolicy).toEqual({ graceDays: 7, cancelDays: 21, version: v })
     expect(p.priceChangeNotice).toEqual({ days: 30, version: v })
+    // the Square item library in short (ADR 0172): watch-only, nothing checked or synced yet
+    expect(p.squareItems).toEqual({ mode: 'preview', tax: null, counts: { onSquare: 0, waiting: expect.any(Number), failed: 0, archived: 0, notSold: expect.any(Number) }, lastSyncAt: null })
     expect(p.consent).toMatchObject({ version: CURRENT_CONSENT_VERSION, checkedByDefault: false, purposes: ['membership_billing', 'no_show_fee', 'late_cancel_fee', 'balance'] })
     expect(p.consent.text.length).toBeGreaterThan(20)
     // never a token or a key
@@ -116,5 +119,71 @@ describe('the writes', () => {
     expect(ok.json()).toEqual({ days: 45, version: v + 1 })
     expect((await panel()).priceChangeNotice).toEqual({ days: 45, version: v + 1 })
     expect(await changed('memberships.price_change_notice_days')).toHaveLength(1)
+  })
+})
+
+describe('the sales tax rate (ADR 0173)', () => {
+  it('reads 7% rounded half-up by default: new invoices are made exactly as today', async () => {
+    defaults()
+    expect((await panel()).salesTax).toEqual({ percent: '7', rateDbp: 7000, label: '7%', rounding: 'half_up', version: expect.any(Number) })
+  })
+
+  it('saves a percentage with up to three decimals (6.625 for New Jersey): version required, audited, settings.changed', async () => {
+    defaults()
+    const v = (await panel()).salesTax.version as number
+    expect((await put('sales-tax', { percent: '6.625' })).statusCode).toBe(428)
+    const ok = await put('sales-tax', { percent: '6.625', version: v })
+    expect(ok.statusCode, ok.body).toBe(200)
+    expect(ok.json()).toEqual({ percent: '6.625', rateDbp: 6625, label: '6.625%', rounding: 'half_up', version: v + 1 })
+    expect(ok.headers.etag).toBe(`"${v + 1}"`)
+    expect((await put('sales-tax', { percent: '7', version: v })).statusCode).toBe(412)
+    expect((await panel()).salesTax).toMatchObject({ percent: '6.625', rateDbp: 6625 })
+    expect(await changed('tax.rate_dbp')).toHaveLength(1)
+    expect((await audits('tax.rate_dbp')).map((a) => [a.before, a.after])).toEqual([[7000, 6625]])
+    const back = await put('sales-tax', { percent: '7.000%', version: v + 1 })
+    expect(back.json()).toMatchObject({ percent: '7', rateDbp: 7000, label: '7%' })
+    // the rounding was never sent, so it was never written
+    expect(await audits('tax.rounding')).toEqual([])
+  })
+
+  it("switches new invoices to Square's rounding only when asked (rounding: half_even), in the same save as the rate", async () => {
+    defaults()
+    const v = (await panel()).salesTax.version as number
+    const ok = await put('sales-tax', { percent: '6.625', rounding: 'half_even', version: v })
+    expect(ok.statusCode, ok.body).toBe(200)
+    expect(ok.json()).toEqual({ percent: '6.625', rateDbp: 6625, label: '6.625%', rounding: 'half_even', version: v + 1 })
+    expect((await panel()).salesTax).toMatchObject({ rounding: 'half_even', version: v + 1 })
+    expect((await audits('tax.rounding')).map((a) => [a.before, a.after])).toEqual([['half_up', 'half_even']])
+    expect(await changed('tax.rounding')).toHaveLength(1)
+    // a later save of the rate alone keeps the rounding; sending the same rounding again writes nothing
+    const again = await put('sales-tax', { percent: '6.625', rounding: 'half_even', version: v + 1 })
+    expect(again.json()).toMatchObject({ rounding: 'half_even', version: v + 2 })
+    expect((await put('sales-tax', { percent: '7', version: v + 2 })).json()).toMatchObject({ rateDbp: 7000, rounding: 'half_even' })
+    expect(await audits('tax.rounding')).toHaveLength(1)
+    // a stale save changes neither the rate nor the rounding
+    expect((await put('sales-tax', { percent: '5', rounding: 'half_up', version: v })).statusCode).toBe(412)
+    expect((await panel()).salesTax).toMatchObject({ rateDbp: 7000, rounding: 'half_even', version: v + 3 })
+    // the rounding is one of two words
+    const bad = await put('sales-tax', { percent: '7', rounding: 'bankers', version: v + 3 })
+    expect(bad.statusCode).toBe(422)
+    expect((await panel()).salesTax.version).toBe(v + 3)
+  })
+
+  it('refuses anything that is not 0 to 100 with up to three decimals, on the percent field, with a plain message', async () => {
+    defaults()
+    const v = (await panel()).salesTax.version as number
+    for (const percent of ['6.6255', '101', '-1', 'seven', '', '6,625']) {
+      const r = await put('sales-tax', { percent, version: v })
+      expect(r.statusCode, percent).toBe(422)
+      expect(r.json()).toMatchObject({ code: 'VALIDATION_FAILED', errors: [{ path: 'percent', message: expect.stringMatching(/up to three decimals/) }] })
+    }
+    expect((await put('sales-tax', { percent: 6.625, version: v })).statusCode).toBe(422)
+    expect((await panel()).salesTax.version).toBe(v)
+  })
+
+  it('needs set.billing', async () => {
+    defaults()
+    const reports = (await m.h.userWithPermissions(['pay.reports', 'set.services'], 'tax-reports@example.test')).session
+    expect((await put('sales-tax', { percent: '6.625', version: 1 }, {}, reports)).statusCode).toBe(403)
   })
 })

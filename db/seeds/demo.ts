@@ -383,7 +383,8 @@ interface Refs {
   tz: string
   today: string
   now: Date
-  taxBp: number
+  /** The location's rate (thousandths of a percent); demo invoices round half-up like the design's (ADR 0173). */
+  taxDbp: number
   byName: Map<string, CatalogService>
   bays: Map<number, string>
   employees: Map<string, { id: string; label: string }>
@@ -404,7 +405,7 @@ export async function seedDemo(ctx: SeedContext): Promise<void> {
     tz,
     today,
     now,
-    taxBp: (await getSetting(tx, location.id, 'tax.rate_bp')).value,
+    taxDbp: (await getSetting(tx, location.id, 'tax.rate_dbp')).value,
     byName: new Map([...catalog.packages, ...catalog.addons].map((s) => [s.name, s])),
     bays: new Map(
       (
@@ -478,7 +479,8 @@ async function insertInvoice(
       occurred_at: o.occurredAt,
       biz_date: toBizDate(o.occurredAt, r.tz),
       date_frozen_at: o.frozenAt,
-      tax_bp: r.taxBp,
+      tax_dbp: r.taxDbp,
+      tax_rounding: 'half_up',
       tip_cents: o.tipCents,
       canceled_at: null,
       canceled_by: null,
@@ -571,8 +573,8 @@ function staffActor(r: Refs, first: string, roles: string): LedgerRow['actor'] {
   return { name: e?.label ?? first, roles, employeeId: e?.id ?? null }
 }
 
-const totalOf = (items: number[], events: CalcEvent[], taxBp: number, tipCents: number): number =>
-  calcInvoice({ itemPrices: items, events, taxBp, tipCents, canceled: false }).total
+const totalOf = (items: number[], events: CalcEvent[], taxDbp: number, tipCents: number): number =>
+  calcInvoice({ itemPrices: items, events, taxDbp, taxRounding: 'half_up', tipCents, canceled: false }).total
 
 /** The texts the activity log's automatic lines stand for (the live templates, no footer: they were delivered long ago). */
 function textFor(line: string, first: string, time: string): { key: string; body: string } | null {
@@ -823,7 +825,7 @@ async function seedDesignDay(ctx: SeedContext, r: Refs, awaitingId: string | nul
     const total = totalOf(
       lines.map((l) => l.priceCents),
       calc,
-      r.taxBp,
+      r.taxDbp,
       money.tipCents,
     )
     let paid = 0
@@ -1272,7 +1274,8 @@ async function seedProceduralDays(ctx: SeedContext, r: Refs): Promise<number> {
       occurred_at: start,
       biz_date: j.date,
       date_frozen_at: j.past ? end : null,
-      tax_bp: r.taxBp,
+      tax_dbp: r.taxDbp,
+      tax_rounding: 'half_up',
       tip_cents: 0,
     })
     items.push({
@@ -1289,7 +1292,7 @@ async function seedProceduralDays(ctx: SeedContext, r: Refs): Promise<number> {
         invoiceId,
         customerId,
         type: 'pay',
-        cents: totalOf([pkg.priceCents], [], r.taxBp, 0),
+        cents: totalOf([pkg.priceCents], [], r.taxDbp, 0),
         method: PAST_METHODS[(j.g.index + j.g.customerIdx) % PAST_METHODS.length]!,
         at: new Date(end.getTime() + PAY_AFTER_DONE * 60_000),
         actor: staffActor(r, 'Sofia', 'Customer Support, Crew'),

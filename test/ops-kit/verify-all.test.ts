@@ -72,7 +72,9 @@ describe('verify:all', () => {
     expect(summary).toContain('| smsgate | 0 |')
     expect(r.json('aws').items.find((i) => i.id === 'AWS-06')!.status).toBe('PASS')
     expect(r.json('smsgate').items.find((i) => i.id === 'SG-B4')!.status).toBe('PASS')
-    expect(r.json('square').summary).toMatchObject({ fail: 0, pass: 13 })
+    // SQR-01 to SQR-20 against the simulator: all pass but SQR-10 (needs a public webhook URL); SQR-18 and the item library's
+    // SQR-15, 16, 17, 19 and 20 run against the simulator since wave K2e (ADR 0172)
+    expect(r.json('square').summary).toMatchObject({ fail: 0, pass: 19, skip: 1 })
   })
 
   it('--to is split by shape: a phone number for the tablet, an address for SES', async () => {

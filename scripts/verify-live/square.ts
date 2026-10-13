@@ -27,7 +27,9 @@ import { wire, wireEvent, type WireCard, type WireCustomer, type WireInvoice, ty
 import type { SquareApi } from '../../src/integrations/ports/square.js'
 import { balanceLines } from '../../src/modules/square/links.js'
 import { planRefundLegs } from '../../src/modules/square/refunds.js'
-import { taxCents } from '../../src/platform/money.js'
+import { parseTaxPercent, salesTaxCents } from '../../src/platform/money.js'
+import { sqrItems, sqr20 } from './square-items.js'
+import { sqr18 } from './square-tax.js'
 import { MissingConfig, Report, UsageError, cli, type ItemDef, type RunContext, type RunResult } from './lib.js'
 
 const DOC = 'docs/integrations/square.md section 7 (Sandbox verification)'
@@ -60,11 +62,42 @@ export const SQUARE_ITEMS: readonly ItemDef[] = [
     title: "Oasis's own membership subscription: a deliverable email, CreateSubscription with sb_ from today, the first invoice paid and its period; swap, pause and cancel scheduled at the next billing date and undone; an unpaid invoice canceled",
     source: `${DOC}, check 13 (wave Q3b)`,
   },
+  {
+    id: 'SQR-18',
+    title:
+      "Square's sales-tax rounding: CalculateOrder at 6.625% and 7% (half-cent subtotals, baskets, quantities, ORDER / LINE_ITEM / catalog taxes) equals Oasis's tax on every case",
+    source: 'docs/integrations/square.md section 15 and ADR 0173 (wave K1e)',
+  },
+  {
+    id: 'SQR-15',
+    title: "Oasis's own item library sync: items with a variation per size, categories and the tax made; the same key and body answer the same item and its id_mappings",
+    source: 'docs/integrations/square.md section 14 and ADR 0172 (wave K2e)',
+  },
+  {
+    id: 'SQR-16',
+    title: 'A price changed in place (same variation, new version); a size renamed and reordered; a size off hidden with its id, on again; archive and back on sale',
+    source: 'docs/integrations/square.md section 14 and ADR 0172 (wave K2e)',
+  },
+  {
+    id: 'SQR-17',
+    title: 'A variation staff added survives the read-modify-write; a stale version is VERSION_MISMATCH; a BatchUpsert with one bad batch (what happens to the good one)',
+    source: 'docs/integrations/square.md section 14 and ADR 0172 (wave K2e)',
+  },
+  {
+    id: 'SQR-19',
+    title: 'VARIABLE pricing for a range and a $0 price; CalculateOrder of those catalog lines with the tax auto-applied equals Oasis’s tax',
+    source: 'docs/integrations/square.md section 14 and ADR 0172 (wave K2e)',
+  },
+  {
+    id: 'SQR-20',
+    title: "(read-only, the production pre-flight) the shop's taxes against Oasis's rate (--rate, default 6.625) and the item count",
+    source: 'docs/integrations/square.md section 14 and ADR 0172 (wave K2e)',
+  },
 ]
 
 export const SQUARE_OPTIONS = {
-  flags: ['read-only', 'keep'],
-  options: ['secret', 'location', 'capture', 'webhook-url', 'wait'],
+  flags: ['read-only', 'keep', 'tax-only', 'items-only'],
+  options: ['secret', 'location', 'capture', 'webhook-url', 'wait', 'rate'],
 } as const
 
 /** The facts this run learned about the unknowns of the design ("check in the sandbox"), printed and kept in the report. */
@@ -277,6 +310,32 @@ async function verify(ctx: RunContext, cfg: Config): Promise<Report> {
   const locationId = location.id
   const tz = location.timezone ?? 'America/New_York'
 
+  // ---- SQR-18 tax rounding (CalculateOrder; the catalog objects it makes are removed by SQR-11) ------------------------------------
+  const taxOnly = args.flag('tax-only')
+  const itemsOnly = args.flag('items-only')
+  if (readOnly) report.skip('SQR-18', '--read-only: the catalog tax cases create objects')
+  else if (itemsOnly) report.skip('SQR-18', '--items-only')
+  else await step('SQR-18', () => sqr18({ api, client, report, run, ref, locationId, cleanup }, ctx.log))
+
+  // ---- SQR-20 (read-only pre-flight) and SQR-15/16/17/19: the item library (ADR 0172) -------------------------------------------
+  const ITEM_CHECKS = ['SQR-15', 'SQR-16', 'SQR-17', 'SQR-19']
+  if (taxOnly) for (const id of [...ITEM_CHECKS, 'SQR-20']) report.skip(id, '--tax-only')
+  else {
+    const rateText = args.value('rate') ?? '6.625'
+    const rateDbp = parseTaxPercent(rateText)
+    if (rateDbp === null) throw new UsageError(`--rate ${rateText}: a percentage with up to three decimals, such as 6.625`)
+    await step('SQR-20', () => sqr20({ api, report, locationId, rateDbp }))
+    if (readOnly) for (const id of ITEM_CHECKS) report.skip(id, '--read-only: the item checks create objects')
+    else await step('SQR-15', () => sqrItems({ api, report, run, ref, locationId, environment: cfg.environment, cleanup, now: ctx.now }))
+  }
+  if (taxOnly || itemsOnly) {
+    for (const id of ['SQR-02', 'SQR-03', 'SQR-04', 'SQR-05', 'SQR-06', 'SQR-07', 'SQR-08', 'SQR-09', 'SQR-10', 'SQR-12', 'SQR-13', 'SQR-14'])
+      report.skip(id, taxOnly ? '--tax-only' : '--items-only')
+    await runCleanup(report, cleanup, readOnly, keep, ref)
+    writeCapture(capture, captured, ctx)
+    return report
+  }
+
   // ---- SQR-02 events API and event types -------------------------------------------------------------------------------------
   await step('SQR-02', async () => {
     if (!readOnly) await api.events.enable()
@@ -457,15 +516,15 @@ async function verify(ctx: RunContext, cfg: Config): Promise<Report> {
 
     // ---- SQR-12 our link builder and refund legs ------------------------------------------------------------------------------------
     await step('SQR-12', async () => {
-      // an invoice nobody paid yet: two lines, 6.625% tax (half up) and a tip, as balanceLines builds them for prepareSquareLink
+      // an invoice nobody paid yet: two lines, 6.625% tax (half to even, ADR 0173) and a tip, as balanceLines builds them for prepareSquareLink
       const items = [
         { name: 'Signature Hand Wash · verify', priceCents: 4000 },
         { name: 'Rain repellent · verify', priceCents: 1500 },
       ]
-      const tax = taxCents(5500, 663)
+      const tax = salesTaxCents(5500, { dbp: 6625, rounding: 'half_even' })
       const tip = 300
       const balance = 5500 + tax + tip
-      const lines = balanceLines({ invoiceNo: 20640 }, items, { paid: 0, adj: 0, refunded: 0, pendingAmt: 0, tax, tip, balance, total: balance })
+      const lines = balanceLines({ invoiceNo: 20640, taxDbp: 6625 }, items, { paid: 0, adj: 0, refunded: 0, pendingAmt: 0, tax, tip, balance, total: balance })
       const { link } = await api.checkout.createLink(sqKey('pl', `${run}:oasis-link`), {
         order: { location_id: locationId, reference_id: ref, line_items: lines.map((l) => ({ name: l.name, quantity: '1', base_price_money: usd(l.cents) })) },
         payment_note: `${ref} INV-20640`,
@@ -566,24 +625,25 @@ async function verify(ctx: RunContext, cfg: Config): Promise<Report> {
     })
 
   // ---- SQR-11 cleanup -----------------------------------------------------------------------------------------------------------
-  if (!readOnly) {
-    if (keep) report.skip('SQR-11', `--keep: left ${cleanup.length} object(s) in place (reference ${ref})`)
-    else {
-      const left: string[] = []
-      for (const c of cleanup.reverse()) {
-        try {
-          await c.run()
-        } catch (e) {
-          left.push(`${c.what}: ${codeOf(e)}`)
-        }
-      }
-      if (left.length) report.note(`cleanup left: ${left.join('; ')}`)
-      report.pass('SQR-11', `${cleanup.length - left.length} of ${cleanup.length} cleaned${left.length ? `; ${left.length} kept by Square (see notes)` : ''}`)
-    }
-  }
+  await runCleanup(report, cleanup, readOnly, keep, ref)
   report.note(`findings: ${JSON.stringify(findings)}`)
   writeCapture(capture, captured, ctx)
   return report
+}
+
+async function runCleanup(report: Report, cleanup: Array<{ what: string; run: () => Promise<unknown> }>, readOnly: boolean, keep: boolean, ref: string): Promise<void> {
+  if (readOnly) return
+  if (keep) return report.skip('SQR-11', `--keep: left ${cleanup.length} object(s) in place (reference ${ref})`)
+  const left: string[] = []
+  for (const c of cleanup.reverse()) {
+    try {
+      await c.run()
+    } catch (e) {
+      left.push(`${c.what}: ${codeOf(e)}`)
+    }
+  }
+  if (left.length) report.note(`cleanup left: ${left.join('; ')}`)
+  report.pass('SQR-11', `${cleanup.length - left.length} of ${cleanup.length} cleaned${left.length ? `; ${left.length} kept by Square (see notes)` : ''}`)
 }
 
 async function subscriptions(
@@ -621,7 +681,7 @@ async function subscriptions(
         phases: [{ cadence: 'MONTHLY', ordinal: 0, pricing: { type: 'STATIC', price_money: usd(amount) } }],
       },
     })
-    const vars = await api.catalog.batchUpsert(sqKey('ct', `${run}:vars`), [variation(100, 1), variation(200, 2)])
+    const vars = await api.catalog.batchUpsert(sqKey('ct', `${run}:vars`), [[variation(100, 1), variation(200, 2)]])
     const var1 = vars.objects.find((x) => x.subscription_plan_variation_data?.name?.startsWith('Verify monthly 1'))?.id
     var2 = vars.objects.find((x) => x.subscription_plan_variation_data?.name?.startsWith('Verify monthly 2'))?.id
     if (!var1 || !var2) throw new Error('the batch upsert did not return both variations')
@@ -1057,6 +1117,9 @@ Exit code 0 = no FAIL, 1 = at least one FAIL, 2 = configuration missing or bad c
   --sim                 run against the built-in simulator over a loopback socket
   --read-only           only the reads (the only mode a production token may use)
   --keep                leave what the run created
+  --tax-only            only SQR-01 and SQR-18 (Square's tax rounding against Oasis's, ADR 0173) and the cleanup
+  --items-only          only SQR-01, the item library checks SQR-15, 16, 17, 19 and 20 (ADR 0172) and the cleanup
+  --rate PERCENT        Oasis's tax rate SQR-20 compares the shop's taxes with (default 6.625)
   --wait SECONDS        how long to wait for a refund, an invoice or an event (default 120)
   --capture DIR         save scrubbed copies of every answer (ids replaced, no emails, URL paths dropped)
   --webhook-url URL     also send TestWebhookSubscription to the subscription for that URL

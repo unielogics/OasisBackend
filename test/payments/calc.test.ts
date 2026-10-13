@@ -11,11 +11,15 @@ import {
   type CalcInput,
 } from '../../src/modules/payments/calc.js'
 import { money0 } from '../../src/modules/payments/format.js'
-import { divHalfUp, taxCents } from '../../src/platform/money.js'
+import { divHalfUp, salesTaxCents, type TaxRate } from '../../src/platform/money.js'
+
+const HALF_UP_7: TaxRate = { dbp: 7000, rounding: 'half_up' }
+const taxCents = (sub: number, bp: number): number => salesTaxCents(sub, { dbp: bp * 10, rounding: 'half_up' })
 
 const input = (o: Partial<CalcInput> & { itemPrices: number[] }): CalcInput => ({
   events: [],
-  taxBp: 700,
+  taxDbp: 7000,
+  taxRounding: 'half_up',
   tipCents: 0,
   canceled: false,
   ...o,
@@ -113,7 +117,7 @@ describe('calcInvoice: the design vectors (backend.md 10.1) in cents', () => {
   })
   it('percent discount: 10% of 15400 is 1540', () => {
     const c = calcInvoice(input({ itemPrices: [12900, 2500] }))
-    expect(adjustPreview(c, 700, { kind: 'discount', unit: '%', value: 1000 }).pre).toBe(1540)
+    expect(adjustPreview(c, HALF_UP_7, { kind: 'discount', unit: '%', value: 1000 }).pre).toBe(1540)
   })
   it('the status ladder gains canceled, canceled_kept and canceled_refunded', () => {
     expect(deriveStatus({ canceled: true, paid: 0, refunded: 0, balance: 0 })).toBe('canceled')
@@ -128,8 +132,8 @@ describe('calcInvoice: the design vectors (backend.md 10.1) in cents', () => {
     )
   })
   it('by-item refund value carries the invoice tax rate and is capped at refundable', () => {
-    expect(itemsRefundValue([12900], 700, 100000)).toBe(13803)
-    expect(itemsRefundValue([12900], 700, 5000)).toBe(5000)
+    expect(itemsRefundValue([12900], HALF_UP_7, 100000)).toBe(13803)
+    expect(itemsRefundValue([12900], HALF_UP_7, 5000)).toBe(5000)
   })
   it('void reverses a payment', () => {
     const c = calcInvoice(
@@ -173,7 +177,8 @@ describe('calcInvoice invariants (property tests)', () => {
   const arbInput = fc.record({
     itemPrices: fc.array(fc.integer({ min: 0, max: 100_000 }), { minLength: 1, maxLength: 6 }),
     events: fc.array(arbEvent, { maxLength: 12 }),
-    taxBp: fc.constantFrom(0, 500, 700, 825, 1000),
+    taxDbp: fc.constantFrom(0, 5000, 7000, 8250, 10_000, 6625, 6875),
+    taxRounding: fc.constantFrom('half_up' as const, 'half_even' as const),
     tipCents: fc.integer({ min: 0, max: 5000 }),
     canceled: fc.boolean(),
   })
@@ -192,14 +197,20 @@ describe('calcInvoice invariants (property tests)', () => {
     )
   })
 
-  it('tax is half-up on the adjusted subtotal and total = sub + tax + tip', () => {
+  it("tax is rounded once on the adjusted subtotal by the invoice's rule and total = sub + tax + tip", () => {
     fc.assert(
       fc.property(arbInput, (i) => {
         const c = calcInvoice(i)
         expect(c.sub).toBeGreaterThanOrEqual(0)
-        expect(c.tax).toBe(Math.floor((c.sub * i.taxBp * 2 + 10_000) / 20_000))
+        const exact = (c.sub * i.taxDbp) / 100_000
+        const floor = Math.floor(exact)
+        const frac = c.sub * i.taxDbp - floor * 100_000
+        const halfUp = frac * 2 >= 100_000 ? floor + 1 : floor
+        const halfEven = frac * 2 > 100_000 || (frac * 2 === 100_000 && floor % 2 === 1) ? floor + 1 : floor
+        expect(c.tax).toBe(i.taxRounding === 'half_up' ? halfUp : halfEven)
+        expect(Math.abs(halfUp - halfEven)).toBeLessThanOrEqual(1)
         expect(c.total).toBe(c.sub + c.tax + i.tipCents)
-        expect(c.net).toBe(netCents(c.items, c.adj, c.refunded, i.taxBp))
+        expect(c.net).toBe(netCents(c.items, c.adj, c.refunded, i.taxDbp))
       }),
       { numRuns: 400 },
     )

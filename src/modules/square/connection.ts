@@ -1,6 +1,8 @@
 // Test connection (POST /integrations/square/test, ADR 0171): ListLocations (the token works; our location is active, USD, takes
 // cards), EnableEvents (the catch-up needs it), and our webhook subscription for SQUARE_WEBHOOK_URL carries every event type Oasis
-// handles. The merchant id learned here is what the hook checks deliveries against.
+// handles. The merchant id learned here is what the hook checks deliveries against. The Square item library adds a `tax` check
+// (ADR 0172: Square's tax against Oasis's rate as exact decimals); it counts toward `ok` only while the item sync is on, since a
+// mismatch then pauses that sync.
 import type { Env } from '../../config/env.js'
 import type { SquareApi } from '../../integrations/ports/square.js'
 import { squareLocationId } from '../../integrations/square/config.js'
@@ -9,7 +11,7 @@ import { SQUARE_EVENT_TYPES } from '../../integrations/square/webhook.js'
 import { maskText } from '../../platform/logging.js'
 
 export interface ConnectionCheck {
-  key: 'token' | 'location' | 'events' | 'webhook'
+  key: 'token' | 'location' | 'events' | 'webhook' | 'tax'
   ok: boolean
   detail: string
 }
@@ -30,7 +32,14 @@ const why = (e: unknown): string =>
       ? maskText(e.message).slice(0, 200)
       : maskText(e instanceof Error ? e.message : String(e)).slice(0, 200)
 
-export async function testSquareConnection(api: SquareApi, env: Env): Promise<ConnectionResult> {
+export interface ConnectionExtras {
+  /** The item library's tax check (read-only), run after the others when the token works. */
+  tax?: () => Promise<ConnectionCheck>
+  /** The tax check counts toward `ok` (the item sync is on). */
+  taxBlocking?: boolean
+}
+
+export async function testSquareConnection(api: SquareApi, env: Env, extras: ConnectionExtras = {}): Promise<ConnectionResult> {
   const checks: ConnectionCheck[] = []
   const out: ConnectionResult = { ok: false, checks, merchantId: null, locationId: squareLocationId(env) ?? null, webhookSubscriptionId: null, eventsEnabled: false }
   let locations
@@ -86,6 +95,12 @@ export async function testSquareConnection(api: SquareApi, env: Env): Promise<Co
     } catch (e) {
       checks.push({ key: 'webhook', ok: false, detail: `ListWebhookSubscriptions: ${why(e)}` })
     }
-  out.ok = checks.every((c) => c.ok)
+  if (extras.tax)
+    try {
+      checks.push(await extras.tax())
+    } catch (e) {
+      checks.push({ key: 'tax', ok: false, detail: `Tax check: ${why(e)}` })
+    }
+  out.ok = checks.every((c) => c.ok || (c.key === 'tax' && !extras.taxBlocking))
   return out
 }
