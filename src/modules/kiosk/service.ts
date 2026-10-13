@@ -578,6 +578,9 @@ export class KioskService {
       }
     const hash = await this.d.hasher.hash(admin.locationId, code)
     const setAt = await transaction(this.d.db, async (tx) => {
+      // two code changes for one shop take turns: without this the second one, behind the first's row lock, would retire nothing
+      // and then collide with the first's new current code (kiosk_codes_current_uq). NO KEY UPDATE leaves FK inserts unblocked.
+      await tx.selectFrom('locations').select('id').where('id', '=', admin.locationId).forNoKeyUpdate().executeTakeFirstOrThrow()
       const now = this.d.clock.now()
       await tx
         .updateTable('kiosk_codes')
@@ -745,6 +748,15 @@ export class KioskService {
   /** POST /kiosk/lock-all. */
   async lockAll(admin: KioskAdmin): Promise<number> {
     return transaction(this.d.db, async (tx) => {
+      // take every device row of the shop, as an unlock does for its own: an unlock in progress finishes first and its new
+      // session is then ended here; an unlock that comes after waits and opens its session after Lock all
+      await tx
+        .selectFrom('kiosk_devices')
+        .select('id')
+        .where('location_id', '=', admin.locationId)
+        .orderBy('id')
+        .forUpdate()
+        .execute()
       const n = await revokeKioskSessions(tx, this.d.clock, { locationId: admin.locationId }, 'lock_all')
       await audit.record(tx, {
         locationId: admin.locationId,

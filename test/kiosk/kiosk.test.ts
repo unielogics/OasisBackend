@@ -4,6 +4,7 @@
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { hashToken } from '../../src/modules/auth/tokens.js'
+import { createKioskSession } from '../../src/modules/kiosk/sessions.js'
 import { ensureLocation } from '../../src/platform/locations.js'
 import { useHarness, KIOSK_CODE, type Harness, type KioskDevice, type KioskSession } from '../auth/harness.js'
 
@@ -446,6 +447,55 @@ describe('what ends a kiosk session', () => {
     const swapped = { cookie: `${other.cookie}; oasis_ksid=${kiosk.token}`, csrf: kiosk.csrf }
     expect((await h.kioskCall('GET', 'kiosk/me', swapped)).statusCode).toBe(401)
     expect((await h.kioskCall('GET', 'kiosk/me', { cookie: `oasis_ksid=${kiosk.token}`, csrf: kiosk.csrf })).statusCode).toBe(401)
+  })
+})
+
+describe('changes at the same moment', () => {
+  const h = useHarness()
+
+  it('several code changes at once all succeed, one after the other, and leave exactly one current code', async () => {
+    const { admin, kiosk } = await h.kioskSetup()
+    const codes = ['59308847', '61827394', '73946281', '82039475', '90384712', '39475862']
+    const res = await Promise.all(codes.map((code) => h.call('PUT', 'kiosk/code', { session: admin, body: { code } })))
+    expect(res.map((r) => r.statusCode)).toEqual(codes.map(() => 200))
+    const rows = await h.t.db.selectFrom('kiosk_codes').select(['retired_at']).where('location_id', '=', h.t.location.id).execute()
+    expect(rows).toHaveLength(codes.length + 1)
+    expect(rows.filter((r) => r.retired_at === null)).toHaveLength(1)
+    expect((await h.kioskCall('GET', 'kiosk/me', kiosk)).statusCode).toBe(401)
+  })
+
+  it('Lock all waits for an unlock in progress and ends the session it opens', async () => {
+    const { admin, device, kiosk } = await h.kioskSetup()
+    const code = await h.t.db
+      .selectFrom('kiosk_codes')
+      .select('id')
+      .where('location_id', '=', h.t.location.id)
+      .where('retired_at', 'is', null)
+      .executeTakeFirstOrThrow()
+    let lockAll: Promise<Awaited<ReturnType<Harness['call']>>> | undefined
+    // an unlock in progress: it holds the device row and opens its session, then commits after Lock all started
+    const opened = await h.t.db.transaction().execute(async (tx) => {
+      await tx.selectFrom('kiosk_devices').select('id').where('id', '=', device.id).forUpdate().executeTakeFirstOrThrow()
+      const s = await createKioskSession(tx, h.clock, {
+        deviceId: device.id,
+        locationId: h.t.location.id,
+        codeId: code.id,
+        expiresAt: new Date(LOCKS_AT),
+        lockRule: 'closing',
+      })
+      lockAll = h.call('POST', 'kiosk/lock-all', { session: admin })
+      await new Promise((r) => setTimeout(r, 400))
+      return s
+    })
+    const all = await lockAll!
+    expect(all.statusCode).toBe(200)
+    expect(all.json()).toEqual({ locked: 2 })
+    const rows = await h.t.db
+      .selectFrom('kiosk_sessions')
+      .select(['id', 'revoked_reason'])
+      .where('id', 'in', [opened.id, hashToken(kiosk.token)])
+      .execute()
+    expect(rows.map((r) => r.revoked_reason)).toEqual(['lock_all', 'lock_all'])
   })
 })
 

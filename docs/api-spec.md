@@ -2546,13 +2546,13 @@ and signs out a user session that came with the request (its cookie is cleared).
 |---|---|---|---|
 | GET | `/kiosk` | – | `{enabled, version, code: {set, setAt, setBy, ageDays}, thisDeviceId, devices: KioskDevice[], staff: [{id, name, status, listed}], recent: [{at, action, label, by, deviceName}]}` |
 | PUT | `/kiosk/settings` | `{enabled, version}` | `{enabled, version}`; `409 KIOSK_CODE_NOT_SET` to turn it on without a code; `412 VERSION_CONFLICT`; off revokes every kiosk session (`kiosk_off`) |
-| PUT | `/kiosk/code` | `{code}` or `{generate: true}` | `{setAt, code?}` (a generated code is shown once); `422 KIOSK_CODE_REJECTED` with the rule in `errors[0].message`: 8 digits, not starting with 0218, not one digit, no runs (with wrap), no repeating pattern of period 1 to 4 or doubled pairs, no date (YYYYMMDD / MMDDYYYY, 1900 to 2099), not a common code, not one of the last 3; every kiosk session ends (`code_changed`) |
+| PUT | `/kiosk/code` | `{code}` or `{generate: true}` | `{setAt, code?}` (a generated code is shown once); `422 KIOSK_CODE_REJECTED` with the rule in `errors[0].message`: 8 digits, not starting with 0218, not one digit, no runs (with wrap), no repeating pattern of period 1 to 4 or doubled pairs, no date (YYYYMMDD / MMDDYYYY, 1900 to 2099), not a common code, not one of the last 3; every kiosk session ends (`code_changed`); two changes at once take turns (the shop's row is locked), the last one wins |
 | POST | `/kiosk/devices` | `{name ≤ 40}` | `201 {device, signedOut}` + the device cookie; `409 KIOSK_DEVICE_EXISTS`; while kiosk mode is on the manager's own session ends and its cookie is cleared |
 | PATCH | `/kiosk/devices/:id` | `{name, version}` | `KioskDevice`; `412 VERSION_CONFLICT` |
 | DELETE | `/kiosk/devices/:id` | – | `204`; the cookie stops working for good, its session ends (`device_revoked`) |
 | POST | `/kiosk/devices/:id/lock` | – | `204` (`lock_device`) |
 | POST | `/kiosk/devices/:id/clear-lockout` | – | `KioskDevice` (the counter starts over) |
-| POST | `/kiosk/lock-all` | – | `{locked: n}` (`lock_all`) |
+| POST | `/kiosk/lock-all` | – | `{locked: n}` (`lock_all`); takes the shop's device rows first, so an unlock in progress finishes and its session is ended too |
 | PUT | `/kiosk/staff/:employeeId` | `{listed}` | `{id, name, status, listed}` ("Shows on the kiosk") |
 
 `KioskDevice = {id, name, state: unlocked|locked|locked_out|revoked, locksAt, lastSeenAt, lastIp, lastUa, failedAttempts, createdAt,
