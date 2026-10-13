@@ -104,6 +104,26 @@ registerProblems({
     title: 'Link not allowed',
     detail: 'Payment links must be HTTPS links on an allowed host ({hosts})',
   },
+  PAYMENT_LINK_KIOSK: {
+    status: 403,
+    title: 'Not on the kiosk',
+    detail: 'The kiosk texts a payment link for the balance only. Ask a manager to send a deposit or another amount.',
+  },
+  PAYMENT_LINK_KIOSK_URL: {
+    status: 422,
+    title: 'Link not allowed on the kiosk',
+    detail: 'The kiosk sends only the shop’s own checkout link. Ask a manager to send this one.',
+  },
+  PAY_TIP_BELOW_PAID: {
+    status: 409,
+    title: 'Tip already paid',
+    detail: 'The client already paid this tip. To give some back, refund it instead of lowering the tip.',
+  },
+  PAY_TIP_KIOSK_LIMIT: {
+    status: 422,
+    title: 'Tip too big for the kiosk',
+    detail: 'On the kiosk a tip can be at most {max}. Ask a manager for a bigger tip.',
+  },
   EXPORT_TOO_LARGE: {
     status: 422,
     title: 'Export too large',

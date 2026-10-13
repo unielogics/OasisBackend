@@ -17,7 +17,7 @@ import { adjustPreview, itemsRefundValue, type AdjustInput, type InvoiceCalc } f
 import { creditBalance, loadCreditLots, lockCustomerCredit, recordAllocations } from './credit.js'
 import { buildDetail, type InvoiceDetail, type LedgerEventDto } from './detail.js'
 import { limitText, money, processorName } from './format.js'
-import { linkHostAllowed, type PaymentsPorts } from './ports.js'
+import { linkHostAllowed, SQUARE_LINK_HOSTS, SQUARE_SANDBOX_LINK_HOSTS, type PaymentsPorts } from './ports.js'
 import {
   calcOf,
   cardLabel,
@@ -151,6 +151,24 @@ const capError = (dest: 'card' | 'cash', cap: number): AppError =>
   new AppError(dest === 'card' ? 'REFUND_EXCEEDS_CARD' : 'REFUND_EXCEEDS_ORIGINAL', {
     params: { max: money(cap) },
   })
+
+/** The largest tip an unlocked kiosk may set: half the bill before the tip, and never less than $20 (review K4 tax:M2). */
+export const KIOSK_TIP_FLOOR_CENTS = 2000
+export const kioskTipMax = (billCents: number): number => Math.max(KIOSK_TIP_FLOOR_CENTS, Math.ceil(billCents / 2))
+
+/**
+ * A link pasted at a kiosk: only on a host PAYMENT_LINK_HOSTS names exactly (`=shop.squarespace.com`), never a whole domain's
+ * subdomains, and never Square's own link hosts (any Square seller's links live there; Oasis makes its Square links itself).
+ */
+export function kioskLinkHostAllowed(url: string, entries: readonly string[]): boolean {
+  const square = new Set<string>([...SQUARE_LINK_HOSTS, ...SQUARE_SANDBOX_LINK_HOSTS])
+  const exact = entries.filter((e) => e.startsWith('=') && !square.has(e.toLowerCase()))
+  try {
+    return exact.length > 0 && linkHostAllowed(new URL(url).hostname, exact)
+  } catch {
+    return false
+  }
+}
 
 const forbid = (perm: string): AppError =>
   new AppError('FORBIDDEN', { meta: { required: [perm], mode: 'all' } })
@@ -382,6 +400,8 @@ export class PaymentsService {
     o: { kind: 'balance' | 'deposit'; amountCents?: number; url?: string },
     prepared?: PreparedSquareLink,
   ): Promise<PaymentLinkResult> {
+    // an unlocked kiosk texts the balance only: never a deposit or an amount typed at the tablet (review K4 tax:H4)
+    if (c.actor.kiosk && (o.kind !== 'balance' || o.amountCents !== undefined)) throw new AppError('PAYMENT_LINK_KIOSK')
     const env = squareEnv()
     const how = linkDelivery(env, o.kind)
     if (how === 'personal') return this.personalLink(tx, c, inv, calc)
@@ -389,6 +409,10 @@ export class PaymentsService {
     const url = o.url ?? inv.payment_link_url
     if (!url) throw new AppError('PAYMENT_LINK_REQUIRED')
     this.checkLinkUrl(url)
+    // a link pasted at an unlocked kiosk must be on an EXACT host of PAYMENT_LINK_HOSTS (`=shop.squarespace.com`): the default
+    // squarespace.com takes any store's subdomain, which anyone at the tablet could text a client from the shop's number (kiosk:F3)
+    if (c.actor.kiosk && o.url !== undefined && !kioskLinkHostAllowed(o.url, this.d.ports.linkHosts))
+      throw new AppError('PAYMENT_LINK_KIOSK_URL')
     const expected = o.amountCents ?? calc.balance
     if (expected <= 0) throw new AppError('PAY_AMOUNT_INVALID')
     const now = this.d.clock.now()
@@ -942,6 +966,14 @@ export class PaymentsService {
     if (inv.canceled_at)
       throw new AppError('INVOICE_CANCELED', { detail: 'A canceled invoice can’t take a tip' })
     const calc = await calcOf(tx, inv.id)
+    // never lowered below what the client already paid: that would leave the invoice overpaid with no refund (review K4 tax:M2)
+    if (tipCents < inv.tip_cents && calc.paid - calc.refunded > calc.total - calc.tip + tipCents)
+      throw new AppError('PAY_TIP_BELOW_PAID')
+    // an unlocked kiosk (anyone at the tablet) raises a tip only within a sane bound: it changes what the client owes (ADR 0180)
+    if (c.actor.kiosk && tipCents > inv.tip_cents) {
+      const max = kioskTipMax(calc.sub + calc.tax)
+      if (tipCents > max) throw new AppError('PAY_TIP_KIOSK_LIMIT', { params: { max: money(max) } })
+    }
     await tx.updateTable('invoices').set({ tip_cents: tipCents }).where('id', '=', inv.id).execute()
     const invoice = await this.finish(tx, c, inv, {
       action: 'payments.tip',

@@ -15,6 +15,8 @@ export interface PayActor {
   keyOwner?: string
   name: string
   viewAsRoleId: string | null
+  /** An unlocked kiosk (ADR 0180): honest-use attribution only, so a few money inputs are narrower (tips, payment links). */
+  kiosk?: boolean
   has(perm: string): boolean
   /** Cents; null = unlimited; 0 when the actor lacks the permission of that kind. */
   limit(kind: LimitKind): number | null
@@ -40,6 +42,7 @@ export function actorFromAuth(ctx: AuthContext): PayActor {
     keyOwner: isKioskContext(ctx) ? principalKey(ctx) : (ctx.realUserId ?? ctx.userId ?? 'anonymous'),
     name: ctx.actorName ?? 'Unknown',
     viewAsRoleId: ctx.viewAsRoleId ?? null,
+    kiosk: isKioskContext(ctx),
     has,
     limit(kind) {
       if (!has(permOf(kind))) return 0

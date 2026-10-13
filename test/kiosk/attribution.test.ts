@@ -330,11 +330,12 @@ const SCENARIOS: Record<string, Scenario> = {
     kind: 'payment_link',
     audit: 'payments.payment_link',
     activity: false,
-    prepare: async () => ({
-      method: 'POST',
-      url: `invoices/${(await visit('completed')).invoiceId}/payment-links`,
-      body: { kind: 'balance', url: 'https://oasis-auto-spa.squarespace.com/checkout/pay-123' },
-    }),
+    // the kiosk texts the invoice's own checkout link (a link pasted at the kiosk must be on an exact PAYMENT_LINK_HOSTS host)
+    prepare: async () => {
+      const v = await visit('completed')
+      await db().updateTable('invoices').set({ payment_link_url: 'https://oasis-auto-spa.squarespace.com/checkout/pay-123' }).where('id', '=', v.invoiceId).execute()
+      return { method: 'POST', url: `invoices/${v.invoiceId}/payment-links`, body: { kind: 'balance' } }
+    },
   },
   [`POST ${A}/invoices/:id/card-charges`]: {
     kind: 'payment',
