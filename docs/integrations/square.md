@@ -211,6 +211,25 @@ pnpm verify:square --read-only           # production: reads only (a production 
 Scrubbed answers of the 2026-10-12 run (ids replaced, no emails, URL paths dropped) are the fixtures in `test/fixtures/square/`; the
 wire schemas, the error mapping, the dispatcher and the simulator are tested against them.
 
+### 7a. Sandbox end to end on a disposable stack (`scripts/e2e-square/run.sh`)
+
+The plan's sandbox end to end (wave Q4): a fresh schema in the test database, one API and one worker of the checkout against the
+sandbox (writes, memberships, `PAYMENT_PROCESSOR=square`, personal links on with a pepper of the run, SMS and email simulated), then
+the scenarios of `scripts/e2e-square/driver.ts` and the cleanup; the stack is stopped and the schemas dropped at the end.
+
+```bash
+AWS_PROFILE=<profile> AWS_REGION=us-east-1 bash scripts/e2e-square/run.sh [--port 4710] [--schema e2e_square] [--keep]
+```
+
+It needs the network (not the test server). The token is read from `oasis/sandbox/square` by the launcher (`stack.ts`) and the driver
+only, handed to the two processes' environment, never written or logged (the launcher checks its logs for it when it stops). There
+is no public URL: the webhook URL and key are dummies of the run and the events come through the Events API catch-up, which the
+driver queues instead of waiting for its 10 minutes. Scenarios: a Large SUV visit of a Gold (Compact car) household member covered
+up to the Compact car price; a staff payment link paid in the sandbox through its order; a partial card refund through the API; a
+`#/m` join active with credits; counter payments matched by R1 and R3 or left to match; a tier price edit making a new variation
+while the member keeps theirs; a card saved on `#/k`, a balance charged by staff, a declined nonce. Square plans it makes are named
+`q4-Gold` and `q4-VIP` and stay in the sandbox (a plan variation a subscription used cannot be deleted).
+
 ## 8. Sandbox findings (2026-10-12)
 
 The design's "check in the sandbox" list, answered:
