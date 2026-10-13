@@ -16,7 +16,7 @@ import { adjustPreview, itemsRefundValue, type AdjustInput, type InvoiceCalc } f
 import { creditBalance, loadCreditLots, lockCustomerCredit, recordAllocations } from './credit.js'
 import { buildDetail, type InvoiceDetail, type LedgerEventDto } from './detail.js'
 import { limitText, money, processorName } from './format.js'
-import type { PaymentsPorts } from './ports.js'
+import { linkHostAllowed, type PaymentsPorts } from './ports.js'
 import {
   calcOf,
   cardLabel,
@@ -346,12 +346,11 @@ export class PaymentsService {
     try {
       u = new URL(url)
     } catch {
-      throw new AppError('PAYMENT_LINK_HOST', { params: { hosts: this.d.ports.linkHosts.join(', ') } })
+      throw new AppError('PAYMENT_LINK_HOST', { params: { hosts: this.d.ports.linkHosts.map((h) => h.replace(/^=/, '')).join(', ') } })
     }
     const host = u.hostname.toLowerCase()
-    const ok =
-      u.protocol === 'https:' && this.d.ports.linkHosts.some((h) => host === h || host.endsWith(`.${h}`))
-    if (!ok) throw new AppError('PAYMENT_LINK_HOST', { params: { hosts: this.d.ports.linkHosts.join(', ') } })
+    const ok = u.protocol === 'https:' && linkHostAllowed(host, this.d.ports.linkHosts)
+    if (!ok) throw new AppError('PAYMENT_LINK_HOST', { params: { hosts: this.d.ports.linkHosts.map((h) => h.replace(/^=/, '')).join(', ') } })
   }
 
   private async createLink(

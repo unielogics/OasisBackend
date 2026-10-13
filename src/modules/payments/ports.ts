@@ -89,7 +89,7 @@ export interface PaymentsPorts {
   messenger: PaymentMessenger
   cardHints: CardHintProvider
   unmatched: UnmatchedSource
-  /** Hosts a payment link URL may point at (exact match or subdomain). */
+  /** Hosts a payment link URL may point at (an entry and its subdomains; `=host` that host only: linkHostAllowed). */
   linkHosts: readonly string[]
 }
 
@@ -101,10 +101,36 @@ export const noUnmatched: UnmatchedSource = {
 }
 
 export const DEFAULT_LINK_HOSTS = ['squarespace.com'] as const
-/** Square's payment link hosts (ADR 0171): `url` on square.link, `long_url` on square.site checkout pages. */
-export const SQUARE_LINK_HOSTS = ['square.link', 'square.site'] as const
-/** The sandbox's (sandbox.square.link is a square.link subdomain; long URLs on connect.squareupsandbox.com): never in production. */
-export const SQUARE_SANDBOX_LINK_HOSTS = ['squareupsandbox.com'] as const
+/**
+ * Square's payment link hosts (ADR 0171), EXACT hosts (review Q4 SEC-3, SQ-SEM-4): `url` on square.link, `long_url` on Square's
+ * checkout.square.site. Never square.site as a whole: any Square Online seller hosts a store on a square.site subdomain; never
+ * square.link's subdomains: sandbox.square.link is the sandbox's.
+ */
+export const SQUARE_LINK_HOSTS = ['=square.link', '=checkout.square.site'] as const
+/** The sandbox's (`url` on sandbox.square.link, `long_url` on connect.squareupsandbox.com): never in production. */
+export const SQUARE_SANDBOX_LINK_HOSTS = ['=sandbox.square.link', 'squareupsandbox.com'] as const
+
+/** A host of the Square sandbox: refused in production whatever PAYMENT_LINK_HOSTS says. */
+const sandboxHost = (entry: string): boolean => {
+  const h = entry.replace(/^=/, '')
+  return h === 'sandbox.square.link' || h === 'squareupsandbox.com' || h.endsWith('.squareupsandbox.com')
+}
+
+/**
+ * Whether `host` is allowed by the list: an entry matches that host and its subdomains (PAYMENT_LINK_HOSTS as documented); an entry
+ * written `=host` matches that host only (Square's: review Q4 SEC-3).
+ */
+export function linkHostAllowed(host: string, entries: readonly string[]): boolean {
+  const h = host.toLowerCase().replace(/\.$/, '')
+  const matches = (raw: string): boolean => {
+    const e = raw.toLowerCase()
+    if (e.startsWith('=')) return h === e.slice(1)
+    return h === e || h.endsWith(`.${e}`)
+  }
+  // a sandbox host passes only by an entry naming the sandbox (never by square.link's subdomains): production lists none
+  if (sandboxHost(h)) return entries.some((e) => sandboxHost(e.toLowerCase()) && matches(e))
+  return entries.some(matches)
+}
 
 /** What the default (development and test) messenger queues; nothing leaves the process. */
 export const devOutbox = new InMemoryOutbox()
@@ -123,24 +149,23 @@ export const unwiredOutbox: PaymentOutbox = {
 }
 
 /**
- * The allow-listed payment link hosts: PAYMENT_LINK_HOSTS (comma separated) when set. Otherwise squarespace.com (until the Square
- * cutover, PAYMENT_PROCESSOR=square, retires it) plus Square's square.link and square.site, plus the Square sandbox's hosts outside
- * production (ADR 0171).
+ * The allow-listed payment link hosts: PAYMENT_LINK_HOSTS (comma separated) when set (the sandbox's hosts dropped in production).
+ * Otherwise squarespace.com (until the Square cutover, PAYMENT_PROCESSOR=square, retires it) plus Square's exact square.link and
+ * checkout.square.site, plus the Square sandbox's hosts outside production (ADR 0171; review Q4 SEC-3, SQ-SEM-4).
  */
 export function linkHostsFromEnv(
   raw: string | undefined,
   o: { processor?: 'squarespace' | 'square'; production?: boolean } = {},
 ): readonly string[] {
+  const production = o.production ?? process.env.NODE_ENV === 'production'
   const hosts = (raw ?? '')
     .split(',')
     .map((h) => h.trim().toLowerCase())
     .filter(Boolean)
+    // the sandbox never takes a real client's money (review Q4 SQ-SEM-4)
+    .filter((h) => !production || !sandboxHost(h))
   if (hosts.length) return hosts
-  return [
-    ...(o.processor === 'square' ? [] : DEFAULT_LINK_HOSTS),
-    ...SQUARE_LINK_HOSTS,
-    ...((o.production ?? process.env.NODE_ENV === 'production') ? [] : SQUARE_SANDBOX_LINK_HOSTS),
-  ]
+  return [...(o.processor === 'square' ? [] : DEFAULT_LINK_HOSTS), ...SQUARE_LINK_HOSTS, ...(production ? [] : SQUARE_SANDBOX_LINK_HOSTS)]
 }
 
 /**

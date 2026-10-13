@@ -65,6 +65,7 @@ import {
 } from '../bookings.js'
 import { listVehicleClasses, requireVehicleClass } from '../../catalog/vehicle-classes.js'
 import { coverageOf, lineClassLabel } from '../../payments/gateway.js'
+import { linkHostAllowed } from '../../payments/ports.js'
 import { activeMembership } from '../members.js'
 import { feeHow, requestDepositLink } from '../../square/deposits.js'
 import { CARD_PAGE_KINDS, cardSetupOf, pageCards, type CardSetup, type PageCard } from '../../square/card-page.js'
@@ -762,7 +763,7 @@ export interface PayStartResult {
   redirectUrl: string | null
 }
 
-/** True when `url` is https on one of the allowed hosts (exact or a subdomain), with no user, password or port. */
+/** True when `url` is https on one of the allowed hosts (linkHostAllowed: an entry or its subdomain, `=host` exactly), with no user, password or port. */
 export function payHostAllowed(url: string, hosts: readonly string[]): boolean {
   let u: URL
   try {
@@ -776,7 +777,7 @@ export function payHostAllowed(url: string, hosts: readonly string[]): boolean {
     u.username === '' &&
     u.password === '' &&
     u.port === '' &&
-    hosts.some((h) => host === h || host.endsWith(`.${h}`))
+    linkHostAllowed(host, hosts)
   )
 }
 

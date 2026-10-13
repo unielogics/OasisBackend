@@ -4,6 +4,7 @@
 // ledger keys make a second recording impossible.
 //
 //   R1  the invoice number in the note or reference id   record on that invoice, or confirm its awaiting entry of the same amount
+//       (a staff entry of ANOTHER amount waiting there: unmatched, a person decides; review Q4 M1)
 //   R2  a POS intent (the dashboard's app switch)          the same, on the intent's invoice
 //   R3  exactly one staff "Square reader" (awaiting card) entry of the same amount (tip excluded), narrowed by the client's
 //       identity when there are several                    confirm it (the tip is recorded on top)
@@ -77,6 +78,7 @@ const isCash = (p: SquarePaymentFacts): boolean => p.sourceType === 'CASH'
 
 function onInvoice(
   p: SquarePaymentFacts,
+  ctx: MatchContext,
   inv: { id: string; entries: readonly MatchEntry[]; cashEntries?: readonly MatchEntry[] },
   rule: 'R1' | 'R2',
   preferEventId?: string | null,
@@ -84,20 +86,25 @@ function onInvoice(
   if (isCash(p)) {
     const cash = (inv.cashEntries ?? []).filter((e) => e.amountCents === p.amountCents)
     if (cash.length >= 1) return { action: 'attach_cash', invoiceId: inv.id, eventId: cash[0]!.eventId, rule: 'cash_entry', confidence: 1 }
+    // a staff cash entry of another amount: this cash may be (part of) it; recorded as new money it could count twice
+    if ((inv.cashEntries ?? []).length > 0) return unmatched(p, ctx, 'a staff cash entry of another amount is on this invoice')
     return { action: 'record', invoiceId: inv.id, rule, confidence: 1 }
   }
   const same = inv.entries.filter((e) => e.amountCents === p.amountCents)
   const preferred = preferEventId ? same.find((e) => e.eventId === preferEventId) : undefined
   const entry = preferred ?? same[0]
   if (entry) return { action: 'confirm', invoiceId: inv.id, eventId: entry.eventId, rule, confidence: 1 }
+  // a staff card entry of another amount still waits on the invoice (a split tender, a partial reader payment): recorded as new money
+  // this payment would count twice while that entry still counts as paid; a person decides (review Q4 money:M1, as R4 refuses)
+  if (inv.entries.length > 0) return unmatched(p, ctx, 'a staff card entry of another amount is waiting on this invoice')
   return { action: 'record', invoiceId: inv.id, rule, confidence: 1 }
 }
 
 export function planSquarePayment(p: SquarePaymentFacts, ctx: MatchContext, o: MatchOptions): MatchDecision {
   // R2: the POS intent of the dashboard's app switch (checked first: its note also names the invoice, and the intent says which entry)
-  if (ctx.intent && !ctx.intent.canceled) return onInvoice(p, ctx.intent, 'R2', ctx.intent.entryId)
+  if (ctx.intent && !ctx.intent.canceled) return onInvoice(p, ctx, ctx.intent, 'R2', ctx.intent.entryId)
   // R1: the invoice number in the note or reference id (a canceled invoice is never paid this way: a person decides)
-  if (ctx.named && !ctx.named.canceled) return onInvoice(p, ctx.named, 'R1')
+  if (ctx.named && !ctx.named.canceled) return onInvoice(p, ctx, ctx.named, 'R1')
 
   if (isCash(p)) {
     const cash = ctx.cashEntries.filter((e) => e.amountCents === p.amountCents)

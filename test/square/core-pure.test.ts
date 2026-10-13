@@ -5,7 +5,8 @@ import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
 import { calcInvoice, type CalcEvent } from '../../src/modules/payments/calc.js'
 import { linkDelivery } from '../../src/modules/payments/commands.js'
-import { linkHostsFromEnv } from '../../src/modules/payments/ports.js'
+import { linkHostAllowed, linkHostsFromEnv } from '../../src/modules/payments/ports.js'
+import { payHostAllowed } from '../../src/modules/public/links/service.js'
 import { cardLabel } from '../../src/modules/payments/repository.js'
 import { classifySquarePayment, invoiceNoIn, posCodeIn, type ClassifyContext } from '../../src/modules/square/classify.js'
 import type { SquarePaymentFacts } from '../../src/modules/square/facts.js'
@@ -102,7 +103,13 @@ describe('counter matcher R1-R5 (design 2.4, plan decision 5)', () => {
   it('R1: the invoice number in the note records there, or confirms its staff entry of the same amount; a partial amount too', () => {
     const named = { ...inv({ id: 'A' }), entries: [entry({ eventId: 'E1', invoiceId: 'A' })], cashEntries: [] }
     expect(planSquarePayment(pay(), ctx({ named }), evidence)).toEqual({ action: 'confirm', invoiceId: 'A', eventId: 'E1', rule: 'R1', confidence: 1 })
-    expect(planSquarePayment(pay({ amountCents: 1000 }), ctx({ named }), evidence)).toEqual({ action: 'record', invoiceId: 'A', rule: 'R1', confidence: 1 })
+    expect(planSquarePayment(pay({ amountCents: 1000 }), ctx({ named: { ...named, entries: [] } }), evidence)).toEqual({ action: 'record', invoiceId: 'A', rule: 'R1', confidence: 1 })
+    // a staff entry of another amount waits there (a split tender, a partial reader payment): a person decides (review Q4 M1)
+    expect(planSquarePayment(pay({ amountCents: 1000 }), ctx({ named }), evidence)).toMatchObject({
+      action: 'unmatched',
+      reason: 'a staff card entry of another amount is waiting on this invoice',
+      candidates: [expect.objectContaining({ invoiceId: 'A' })],
+    })
     // a canceled invoice is never paid this way
     expect(planSquarePayment(pay(), ctx({ named: { ...named, canceled: true } }), evidence).action).toBe('unmatched')
   })
@@ -110,6 +117,9 @@ describe('counter matcher R1-R5 (design 2.4, plan decision 5)', () => {
   it('R2: the POS intent confirms the entry it wrote', () => {
     const intent = { ...inv({ id: 'B' }), entryId: 'E2', entries: [entry({ eventId: 'E9', invoiceId: 'B' }), entry({ eventId: 'E2', invoiceId: 'B' })] }
     expect(planSquarePayment(pay(), ctx({ intent }), evidence)).toEqual({ action: 'confirm', invoiceId: 'B', eventId: 'E2', rule: 'R2', confidence: 1 })
+    // one tender of a split payment (2000 of the 4280 the intent wrote): never new money beside the waiting entry (review Q4 M1)
+    expect(planSquarePayment(pay({ amountCents: 2000, totalCents: 2000 }), ctx({ intent }), evidence)).toMatchObject({ action: 'unmatched' })
+    expect(planSquarePayment(pay({ amountCents: 2000, totalCents: 2000 }), ctx({ intent: { ...intent, entries: [] } }), evidence)).toMatchObject({ action: 'record', rule: 'R2' })
   })
 
   it('R3: one staff card entry of the amount (tip excluded) is confirmed; several are narrowed by identity, else unmatched', () => {
@@ -166,6 +176,8 @@ describe('counter matcher R1-R5 (design 2.4, plan decision 5)', () => {
     const named = { ...inv({ id: 'A' }), entries: [], cashEntries: [entry({ eventId: 'K2', invoiceId: 'A' })] }
     expect(planSquarePayment(cash, ctx({ named }), evidence)).toMatchObject({ action: 'attach_cash', eventId: 'K2' })
     expect(planSquarePayment(cash, ctx({ named: { ...named, cashEntries: [] } }), evidence)).toMatchObject({ action: 'record', rule: 'R1' })
+    // a staff cash entry of another amount on the named invoice: a person decides (review Q4 M1)
+    expect(planSquarePayment({ ...cash, amountCents: 1000, totalCents: 1000 }, ctx({ named }), evidence)).toMatchObject({ action: 'unmatched' })
   })
 
   it('property: a decision names at most one invoice, and a recording or confirmation only on strong evidence', () => {
@@ -240,10 +252,33 @@ describe('payment links (design 3.1, 3.3)', () => {
   })
 
   it('payment link hosts: Squarespace until the cutover, Square always, the sandbox outside production; PAYMENT_LINK_HOSTS wins', () => {
-    expect(linkHostsFromEnv(undefined, { production: true })).toEqual(['squarespace.com', 'square.link', 'square.site'])
-    expect(linkHostsFromEnv(undefined, { processor: 'square', production: true })).toEqual(['square.link', 'square.site'])
-    expect(linkHostsFromEnv(undefined, { processor: 'square', production: false })).toEqual(['square.link', 'square.site', 'squareupsandbox.com'])
+    expect(linkHostsFromEnv(undefined, { production: true })).toEqual(['squarespace.com', '=square.link', '=checkout.square.site'])
+    expect(linkHostsFromEnv(undefined, { processor: 'square', production: true })).toEqual(['=square.link', '=checkout.square.site'])
+    expect(linkHostsFromEnv(undefined, { processor: 'square', production: false })).toEqual(['=square.link', '=checkout.square.site', '=sandbox.square.link', 'squareupsandbox.com'])
     expect(linkHostsFromEnv('pay.example.com', { processor: 'square' })).toEqual(['pay.example.com'])
+  })
+
+  it('Square hosts are exact: another seller’s square.site store and the sandbox are refused in production (review Q4 SEC-3, SQ-SEM-4)', () => {
+    const prod = linkHostsFromEnv(undefined, { processor: 'square', production: true })
+    const today = linkHostsFromEnv(undefined, { production: true })
+    for (const hosts of [prod, today]) {
+      expect(payHostAllowed('https://square.link/u/AbCdEf12', hosts)).toBe(true)
+      expect(payHostAllowed('https://checkout.square.site/merchant/M1/checkout/C1', hosts)).toBe(true)
+      expect(payHostAllowed('https://some-other-seller.square.site/product/gift-card/1', hosts)).toBe(false)
+      expect(payHostAllowed('https://square.site/x', hosts)).toBe(false)
+      expect(payHostAllowed('https://sandbox.square.link/u/AbCdEf12', hosts)).toBe(false)
+      expect(payHostAllowed('https://connect.squareupsandbox.com/v2/online-checkout/x', hosts)).toBe(false)
+    }
+    // Squarespace keeps matching its subdomains until the cutover (PAYMENT_LINK_HOSTS as documented)
+    expect(payHostAllowed('https://oasis.squarespace.com/checkout', today)).toBe(true)
+    // outside production the sandbox's links pass
+    const dev = linkHostsFromEnv(undefined, { processor: 'square', production: false })
+    expect(payHostAllowed('https://sandbox.square.link/u/AbCdEf12', dev)).toBe(true)
+    // PAYMENT_LINK_HOSTS never brings the sandbox into production
+    expect(linkHostsFromEnv('square.link,sandbox.square.link,squareupsandbox.com,=checkout.square.site', { production: true })).toEqual(['square.link', '=checkout.square.site'])
+    expect(linkHostAllowed('SANDBOX.square.link.', ['=sandbox.square.link'])).toBe(true)
+    // a plain square.link entry never lets the sandbox's subdomain through
+    expect(payHostAllowed('https://sandbox.square.link/u/AbCdEf12', linkHostsFromEnv('square.link', { production: true }))).toBe(false)
   })
 
   it('the booking answer reads card_hold (wave Q3a) as at the counter', () => {
