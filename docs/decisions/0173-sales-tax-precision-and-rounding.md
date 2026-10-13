@@ -87,8 +87,8 @@ The live dashboard must compute exactly what the server computes:
   35000 → 2450. Labels: 7000 → "7%", 6625 → "6.625%", 6250 → "6.25%", 1 → "0.001%".
 - Settings → Billing & integrations: a "Sales tax" row editing `percent` (text input, up to three decimals) with `PUT
   /settings/billing/sales-tax`, showing the server's 422 message on `percent`; a DV line in `design-patches/DEVIATIONS.md`. The row
-  may show the rounding read-only ("Rounded like Square" for `half_even`); the dashboard never sends `rounding` (the orchestrator
-  sets it at the rollout).
+  may show the rounding read-only ("Rounded like Square" for `half_even`). Since the K4 review (tax:H2) the dashboard's Save sends
+  `rounding: "half_even"` with the rate: a rate typed in Settings is always rounded like Square (the Square item sync waits for it).
 - Until this twin is deployed, the live dashboard computes previews and the label from the deprecated `taxBp` half-up: exact at 7%
   with `half_up`, wrong at 6.625% (reads 663 bp: "Tax (6.63%)", $50 previews 332 cents against the server's 331) and on `half_even`
   invoices. Hence rollout step 3 below.
@@ -101,11 +101,25 @@ The live dashboard must compute exactly what the server computes:
    **6.625% and `half_even` must not be set before this**: the older dashboard would label "Tax (6.63%)" and preview adjustments
    and by-item refunds 1 cent off the server (verifier finding F2).
 3. Square production: the shop's tax in Square must be 6.625% ADDITIVE at the location (Test connection's `tax` check, ADR 0172).
-4. The orchestrator sets both in one save: `PUT /settings/billing/sales-tax {percent: "6.625", rounding: "half_even", version}`,
-   then confirms with a test invoice: $100.00 → $6.62 (half-up would be $6.63), and $4 + $4 → $0.53.
+4. The orchestrator sets both in one save: `PUT /settings/billing/sales-tax {percent: "6.625", rounding: "half_even", version}`
+   (or the owner saves 6.625 in Settings → Billing & integrations, which sends the same), then confirms with a test invoice:
+   $100.00 → $6.62 (half-up would be $6.63), and $4 + $4 → $0.53. The same save moves the open invoices of visits not done yet
+   (not canceled, date not frozen at completion) to 6.625% and half to even (audited `payments.tax_rerated` each; one paid in full
+   up front at 7% keeps its rate, since moving it would leave it overpaid: check those by hand). Production had 0 invoices on
+   2026-10-13, so the first switch moves nothing; the rule matters for any later change of the rate.
 5. `pnpm verify:square --tax-only` against the sandbox whenever the Square-Version is bumped.
 
 ## Not changed
 
 - Squarespace sync and its matcher keep comparing Squarespace's own tax numbers as diagnostics.
 - The public booking and the assistant quote prices before tax; nothing there computes tax.
+
+## K4 review (2026-10-13)
+
+- **tax:M1** the rate was snapshotted at booking, so a visit booked before the switch for a date after it was charged 7% and never
+  matched Square's 6.625% basket: the switch now re-rates the open invoices in the same transaction (rollout step 4).
+- **tax:H1** a new invoice reads `tax.rate_dbp` and `tax.rounding` in one statement (`payments/tax-rate.ts currentTax`), never a
+  mix of an old rate and a new rounding.
+- **tax:H2** the Square item sync (ADR 0172) is blocked while `tax.rounding` is `half_up` (Test connection's `tax` check says so),
+  so it never creates Oasis's tax or runs on totals a cent off Square; the dashboard's Save sends `half_even` with the rate.
+- **tax:H3** a rate above 15% is refused unless `confirmHighRate: true` is sent (a typo such as 66.25).

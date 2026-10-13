@@ -10,7 +10,7 @@ import type { Executor, Tx } from '../../platform/db.js'
 import { AppError } from '../../platform/errors.js'
 import type { NewId } from '../../platform/ids.js'
 import * as realtime from '../../platform/realtime.js'
-import { getSetting } from '../../platform/settings.js'
+import { currentTax } from './tax-rate.js'
 import { legacyTaxBp, type TaxRounding } from '../../platform/money.js'
 import { toBizDate } from '../../platform/time.js'
 import { calcInvoice, type CalcEvent, type InvoiceCalc } from './calc.js'
@@ -384,8 +384,10 @@ export function createInvoiceGateway(d: GatewayDeps): PaymentsGateway {
         await touchInvoice(tx, existing.id, d.clock.now())
         return summaryOf(tx, a.appointmentId)
       }
-      const taxDbp = (await getSetting(tx, a.locationId, 'tax.rate_dbp')).value
-      const taxRounding = (await getSetting(tx, a.locationId, 'tax.rounding')).value
+      // the rate and the rounding in one statement: a change of both never lands between two reads (K4 review tax:H1)
+      const tax = await currentTax(tx, a.locationId)
+      const taxDbp = tax.dbp
+      const taxRounding = tax.rounding
       const invoiceNo = await nextInvoiceNo(tx, a.locationId)
       const id = d.newId()
       await tx

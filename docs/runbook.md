@@ -683,6 +683,15 @@ that release runs. To give it the history from before, run once on the server, f
 (the same environment as `pnpm migrate up` in the restore steps, section 4; it reads the audit log and the staff texts;
 it prints how many it added; running it again adds nothing). Activity from before has no kiosk (there was none) and shows "Signed in".
 
+## 12. Change the sales tax rate
+
+Settings → Billing & integrations → Sales tax (needs "Billing & integrations"). Type the rate as a percentage ("6.625" for New
+Jersey) and Save: new invoices use it, rounded like Square (half cents to the even cent), and the same save moves the invoices of
+visits that are booked but not done yet to the new rate (each one is in the audit log as `payments.tax_rerated`). A finished visit
+keeps the rate it was sold at. A visit paid in full up front at the old rate keeps its rate too (moving it would leave it overpaid):
+look at those in Payments and refund the difference by hand if needed. A rate above 15% is refused as a likely typo. The shop's tax
+in Square must be the same rate (Test connection's `tax` check; ADR 0172 and 0173).
+
 ## Appendix: where things are
 
 | Question | Answer |
@@ -696,3 +705,4 @@ it prints how many it added; running it again adds nothing). Activity from befor
 | Which website release is live? | `readlink /var/www/site/current; cat /var/www/site/current/REVISION; tail /var/log/oasis/site-deploys.list` |
 | Everything the tablet and API do | `docs/integrations/smsgate.md`, `docs/api-spec.md` sections 22 and 23 |
 | Kiosk mode (the shop tablet) | section 11; `docs/api-spec.md` section 31; ADR 0180 |
+| Sales tax | section 12; ADR 0173 |

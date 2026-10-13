@@ -22,6 +22,7 @@ import { parseTaxPercent, TAX_ROUNDINGS, taxPercentLabel, type TaxRounding } fro
 import { getSetting, updateSetting, type SettingKey } from '../../../platform/settings.js'
 import { etag, inTx, requestContext, requiredVersion, storedUserId } from '../../settings/http/runtime.js'
 import { loadItemsView } from '../../catalog/square/view.js'
+import { rerateOpenInvoices } from '../../payments/tax-rate.js'
 import { cardsOn } from '../charges.js'
 import { CARD_PURPOSES, CONSENT_CHECKED_BY_DEFAULT, CURRENT_CONSENT_VERSION, consentText } from '../consents.js'
 import { squareEnv } from '../runtime.js'
@@ -30,6 +31,8 @@ import { SquareIntegrationView } from './schemas.js'
 
 const TAGS = ['settings']
 const Version = z.number().int().min(0)
+/** Above this a sales tax rate needs `confirmHighRate` (15%; New Jersey's is 6.625%). */
+export const SALES_TAX_PLAUSIBLE_MAX_DBP = 15_000
 
 const Processing = z
   .object({
@@ -265,19 +268,31 @@ export function registerBillingSettingsRoutes(app: AppInstance): void {
         operationId: 'putBillingSalesTax',
         summary: 'Save the sales tax rate (and, when sent, the rounding) of new invoices (ETag = version)',
         description:
-          'tax.rate_dbp (ADR 0173; default 7%). `percent` is the rate as staff type it, with up to three decimals ("6.625" for New Jersey; a trailing % is accepted), 0 to 100; anything else is 422 `VALIDATION_FAILED` on `percent`. `rounding` (optional; tax.rounding, default `half_up`): `half_even` makes new invoices round their tax like Square (half to even, once on the subtotal), set at the rollout together with 6.625%; left out, the rounding stays as it is. Both apply to invoices made from now on: each invoice keeps the rate and the rounding it was made with. `version` (or If-Match, the version of tax.rate_dbp) required: 428 without, 412 when stale; the rate and the rounding are saved together or not at all. Audited `settings.update`; publishes `settings.changed {key: "tax.rate_dbp"}` (and `{key: "tax.rounding"}` when the rounding changes).',
-        body: z.object({ percent: z.string().max(12), rounding: z.enum(TAX_ROUNDINGS).optional(), version: Version.optional() }).strict(),
+          'tax.rate_dbp (ADR 0173; default 7%). `percent` is the rate as staff type it, with up to three decimals ("6.625" for New Jersey; a trailing % is accepted), 0 to 100; anything else is 422 `VALIDATION_FAILED` on `percent`. `rounding` (optional; tax.rounding, default `half_up`): `half_even` makes new invoices round their tax like Square (half to even, once on the subtotal), set at the rollout together with 6.625%; left out, the rounding stays as it is. Both apply to new invoices and, in the same transaction, to the open invoices of visits not done yet (not canceled, date not frozen at completion; audited `payments.tax_rerated` each, `invoice.updated`), so a visit booked before the change is charged the new rate; one that would end up overpaid (paid up front at the old rate) keeps its rate. A finished visit keeps the rate it was made with. A rate above 15% is refused (422 on `percent`) unless `confirmHighRate: true` is sent. `version` (or If-Match, the version of tax.rate_dbp) required: 428 without, 412 when stale; the rate and the rounding are saved together or not at all. Audited `settings.update`; publishes `settings.changed {key: "tax.rate_dbp"}` (and `{key: "tax.rounding"}` when the rounding changes).',
+        body: z
+          .object({
+            percent: z.string().max(12),
+            rounding: z.enum(TAX_ROUNDINGS).optional(),
+            confirmHighRate: z.literal(true).optional(),
+            version: Version.optional(),
+          })
+          .strict(),
         response: { 200: SalesTax },
       },
     },
     async (req, reply) => {
-      const b = req.body as { percent: string; rounding?: TaxRounding; version?: number }
+      const b = req.body as { percent: string; rounding?: TaxRounding; confirmHighRate?: true; version?: number }
       const dbp = parseTaxPercent(b.percent)
       if (dbp === null)
         throw new AppError('VALIDATION_FAILED', {
           detail: 'Enter the tax rate as a percentage, such as 6.625',
           errors: [{ path: 'percent', message: 'Use a percentage from 0 to 100 with up to three decimals, such as 6.625' }],
         })
+      // a typo such as 66.25 would charge every new invoice (and Oasis's own Square tax) 66.25% (K4 review tax:H3)
+      if (dbp > SALES_TAX_PLAUSIBLE_MAX_DBP && b.confirmHighRate !== true) {
+        const message = `${taxPercentLabel(dbp)} is very high for a sales tax. Check the rate: New Jersey’s is 6.625%.`
+        throw new AppError('VALIDATION_FAILED', { detail: message, errors: [{ path: 'percent', message }] })
+      }
       const c = requestContext(req)
       const v = requiredVersion(req, b.version)
       const out = await inTx(app.db, async (tx) => {
@@ -287,6 +302,8 @@ export function registerBillingSettingsRoutes(app: AppInstance): void {
         let rounding = (await getSetting(tx, c.locationId, 'tax.rounding')).value
         if (b.rounding !== undefined && b.rounding !== rounding)
           rounding = (await updateSetting(tx, { locationId: c.locationId, key: 'tax.rounding', value: b.rounding, updatedBy, audit: c.audit })).value
+        // the visits booked before the change and not done yet take the new rate too (K4 review tax:M1)
+        await rerateOpenInvoices(tx, { locationId: c.locationId, tax: { dbp: rate.value, rounding }, now: app.clock.now(), ctx: c.audit })
         return salesTaxView(rate, rounding)
       })
       etag(reply, out.version)
